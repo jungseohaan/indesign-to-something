@@ -273,13 +273,11 @@ public TeachingMaterial generate(
 # 기본: teaching_material.json 생성
 java -jar idml-to-something-1.0.9-cli.jar \
   --teach base_prompt.txt \
-  --convert input.idml teaching_material.json \
-  --resolved resolved.json
+  --convert input.idml teaching_material.json
 
 # PPTX 직접 생성 (M2)
 java -jar ... --teach base_prompt.txt \
-  --convert input.idml output.pptx \
-  --resolved resolved.json
+  --convert input.idml output.pptx
 
 # LLM 연결 테스트
 java -jar ... --test-llm

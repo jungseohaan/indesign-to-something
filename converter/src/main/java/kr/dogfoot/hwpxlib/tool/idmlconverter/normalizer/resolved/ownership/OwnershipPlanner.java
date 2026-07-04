@@ -1,7 +1,9 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
@@ -12,10 +14,12 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualLayeringRules;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.awt.image.BufferedImage;
@@ -48,6 +52,14 @@ public final class OwnershipPlanner {
     private final Map<String, Double> imageWhiteOpaqueScoreCache = new HashMap<>();
     private final Map<Integer, Boolean> resolvedInlineAnchorCache = new HashMap<>();
     private final Map<Integer, Boolean> idmlAnchoredPagePositionCache = new HashMap<>();
+    private List<RenderedGroup> allRenderedGroupsCache;
+    private Map<String, List<RenderedGroup>> renderedGroupsByPageIdCache;
+    private Map<Integer, List<RenderedGroup>> initialCompositeShellCarriersByPageCache;
+    private Map<Integer, List<RenderedGroup>> initialVisibleChildShellFragmentsByPageCache;
+    private Map<String, List<ResolvedTextFrame>> editableTextFramesByParentIdCache;
+    private Map<Integer, List<ResolvedTextFrame>> visibleEditableTextFramesByPageCache;
+    private final Map<String, Boolean> carrierVisibleMaterialOutsideInitialChildShellSlotsCache = new HashMap<>();
+    private final Map<Integer, ObjectPlan> plannerDeclaredInlineTextShellContracts = new LinkedHashMap<>();
 
     private static final double CONCEPT_LABEL_SHELL_MIN_AREA_RATIO = 0.30;
     private static final double CONCEPT_LABEL_SHELL_MAX_AREA_RATIO = 2.60;
@@ -63,93 +75,199 @@ public final class OwnershipPlanner {
         new OwnershipPlanner(ctx).run();
     }
 
-    /**
-     * Source ownership policy: Stage 2 이후 Stage 3 실행 전, child-of-group/inline-coverage 계열의 시각 억제를
-     * ObjectPlan으로 확정한다. 실행기는 plan을 최종 권위로만 해석한다.
-     */
-    public static void runVisualRefinement(ResolvedBuildContext ctx) {
-        if (ctx == null || ctx.resolvedData == null) return;
-        new OwnershipPlanner(ctx).runVisualRefinement();
-    }
-
     private void run() {
-        importPreplannedObjectPlans();
-        planRenderedItems();
-        planTextFrames();
-        resolveSiblingGroupTextShellOwners();
-        normalizeSiblingGroupTextShellOwners();
-        normalizeCrossPageTextShellOwnership();
-        resolveHwpxTextOwnedNonShellVisuals();
-        resolveInlineCompositeHwpxTextParents();
-        resolvePairedInlinePageObjectChannelOwners();
-        resolveInlineFloatingSameDom();
-        resolveFloatingChildrenOwnedByInlineParent();
-        resolveFloatingPageObjectsOwnedByInlineHwpxText();
-        resolveDuplicateRenderedChannels();
-        resolveFloatingInlineObjectPageObjectDuplicates();
-        resolveVisualBackdropClusterSources();
-        resolveTextShellSharedSources();
-        resolveCoveredParentGroups();
-        resolveParentGroupsWithMoreSpecificChildren();
-        resolveOverlappingImageExportDuplicates();
-        resolveLargeLayeredImageExportBackdrops();
-        resolveClippedDecorationParents();
-        resolveContainerMasksOverIntrudingLabelBackdrops();
-        resolveLayeredContainerFaces();
-        resolveParentTextShellDescendantVisuals();
-        resolveCrossPageParentTextShellDescendantVisuals();
-        resolveCompositeBakedChildVisuals();
-        resolveNestedTextShellSources();
-        resolveClusterOwnedTextFrameShells();
-        resolveGraphicOnlyAtomicRootDescendantVisuals();
-        normalizeCompositeParentChildSourceSlots();
-        resolveNonVisibleFloatingVisuals();
-        resolveDroppedRenderedTextOwnership();
-        resolveVisibleVisualHwpxTextSourceSlots();
-        resolveNonTextVisualEditableTextSources();
-        resolveMasterGraphicsWithHwpxTextFallbacks();
-        restoreInlineTextShellOwners();
-        restoreAtomicOwnershipRootTextHiddenShellOwners();
-        restoreDirectTextHiddenShellOwners();
-        planNativeParentTextShells();
-        planNativeSiblingTextShells();
-        dropCompositeTextShellParentsCoveredByDirectShellSlots();
-        dropCompositeTextShellParentsContainingDroppedContainerSources();
-        resolveParentTextShellDescendantVisuals();
-        resolveTextShellSourceDuplicates();
-        normalizeDistinctChildTextShellSourceSlots();
-        normalizeParentTextShellChildInlineSlots();
-        resolveDroppedRenderedTextOwnership();
-        restoreCompositeTextShellsWithExtraSourceMaterial();
-        resolveDuplicateTextShellTextOwners();
-        dropInlineGraphicOnlyTextShellWithoutTextlessCarrier();
-        dropPlansOwnedByInlineCompletePng();
-        normalizeTextShellEditableTextOwnership();
-        normalizeTextShellPlacementToResolvedAnchors();
-        resolveCompositeTextOwnershipClaimedByLeafShells();
-        normalizeTextFramePlacementToVisibleTextShell();
-        resolveDuplicateRenderedIdentityPlans();
-        normalizeVisibleDescendantContracts();
-        normalizeVisualSourcesExcludeOwnedTextFrames();
-        writePlans();
-        validate();
+        timed("importPreplannedObjectPlans", this::importPreplannedObjectPlans);
+        timed("planRenderedItems", this::planRenderedItems);
+        timed("planTextFrames", this::planTextFrames);
+        timed("resolveSiblingGroupTextShellOwners", this::resolveSiblingGroupTextShellOwners);
+        timed("resolveIndependentSiblingTextShellOwners", this::resolveIndependentSiblingTextShellOwners);
+        timed("normalizeSiblingGroupTextShellOwners", this::normalizeSiblingGroupTextShellOwners);
+        timed("normalizeCrossPageTextShellOwnership", this::normalizeCrossPageTextShellOwnership);
+        timed("resolveHwpxTextOwnedNonShellVisuals", this::resolveHwpxTextOwnedNonShellVisuals);
+        timed("resolveInlineCompositeHwpxTextParents", this::resolveInlineCompositeHwpxTextParents);
+        timed("resolvePairedInlinePageObjectChannelOwners", this::resolvePairedInlinePageObjectChannelOwners);
+        timed("resolveInlineFloatingSameDom", this::resolveInlineFloatingSameDom);
+        timed("resolveFloatingChildrenOwnedByInlineParent", this::resolveFloatingChildrenOwnedByInlineParent);
+        timed("resolveFloatingPageObjectsOwnedByInlineHwpxText", this::resolveFloatingPageObjectsOwnedByInlineHwpxText);
+        timed("resolveDuplicateRenderedChannels", this::resolveDuplicateRenderedChannels);
+        timed("resolveFloatingInlineObjectPageObjectDuplicates", this::resolveFloatingInlineObjectPageObjectDuplicates);
+        timed("resolveVisualBackdropClusterSources", this::resolveVisualBackdropClusterSources);
+        timed("resolveTextShellSharedSources", this::resolveTextShellSharedSources);
+        timed("resolveCoveredParentGroups", this::resolveCoveredParentGroups);
+        timed("resolveParentGroupsWithMoreSpecificChildren", this::resolveParentGroupsWithMoreSpecificChildren);
+        timed("resolveOverlappingImageExportDuplicates", this::resolveOverlappingImageExportDuplicates);
+        timed("resolveLargeLayeredImageExportBackdrops", this::resolveLargeLayeredImageExportBackdrops);
+        timed("resolveClippedDecorationParents", this::resolveClippedDecorationParents);
+        timed("resolveLayeredContainerFaces", this::resolveLayeredContainerFaces);
+        timed("resolveParentTextShellDescendantVisuals.1", this::resolveParentTextShellDescendantVisuals);
+        timed("resolveCompositeBakedChildVisuals.1", this::resolveCompositeBakedChildVisuals);
+        timed("resolveNestedTextShellSources", this::resolveNestedTextShellSources);
+        timed("resolveClusterOwnedTextFrameShells", this::resolveClusterOwnedTextFrameShells);
+        timed("resolveGraphicOnlyAtomicRootDescendantVisuals", this::resolveGraphicOnlyAtomicRootDescendantVisuals);
+        timed("normalizeCompositeParentChildSourceSlots", this::normalizeCompositeParentChildSourceSlots);
+        timed("resolveNonVisibleFloatingVisuals", this::resolveNonVisibleFloatingVisuals);
+        timed("resolveDroppedRenderedTextOwnership.1", this::resolveDroppedRenderedTextOwnership);
+        timed("resolveVisibleVisualHwpxTextSourceSlots", this::resolveVisibleVisualHwpxTextSourceSlots);
+        timed("resolveNonTextVisualEditableTextSources", this::resolveNonTextVisualEditableTextSources);
+        timed("declareInlineTextShellOwners", this::declareInlineTextShellOwners);
+        timed("declareAtomicOwnershipRootTextHiddenShellOwners", this::declareAtomicOwnershipRootTextHiddenShellOwners);
+        timed("declareDirectTextHiddenShellOwners", this::declareDirectTextHiddenShellOwners);
+        timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
+        timed("planNativeParentTextShells", this::planNativeParentTextShells);
+        timed("planNativeSiblingTextShells", this::planNativeSiblingTextShells);
+        timed("normalizeDuplicateSiblingLabelTextOwners", this::normalizeDuplicateSiblingLabelTextOwners);
+        timed("planUnownedVisualOnlyChildShellSlots", this::planUnownedVisualOnlyChildShellSlots);
+        timed("dropCompositeTextShellParentsCoveredByDirectShellSlots", this::dropCompositeTextShellParentsCoveredByDirectShellSlots);
+        timed("dropCompositeTextShellParentsContainingDroppedContainerSources", this::dropCompositeTextShellParentsContainingDroppedContainerSources);
+        timed("resolveParentTextShellDescendantVisuals.2", this::resolveParentTextShellDescendantVisuals);
+        timed("resolveTextShellSourceDuplicates", this::resolveTextShellSourceDuplicates);
+        timed("normalizeDistinctChildTextShellSourceSlots", this::normalizeDistinctChildTextShellSourceSlots);
+        timed("normalizeParentTextShellChildInlineSlots", this::normalizeParentTextShellChildInlineSlots);
+        timed("resolveDroppedRenderedTextOwnership.2", this::resolveDroppedRenderedTextOwnership);
+        timed("resolveDuplicateTextShellTextOwners", this::resolveDuplicateTextShellTextOwners);
+        timed("resolveCompositeCarrierTextFrameOwners", this::resolveCompositeCarrierTextFrameOwners);
+        timed("splitDirectLabelShellsFromCompositeCarriers", this::splitDirectLabelShellsFromCompositeCarriers);
+        timed("splitLabelChromeCompositeCarrierTextOwners", this::splitLabelChromeCompositeCarrierTextOwners);
+        timed("dropNativeTextShellsBakedIntoVisibleCompositeCarriers", this::dropNativeTextShellsBakedIntoVisibleCompositeCarriers);
+        timed("dropInlineGraphicOnlyTextShellWithoutTextlessCarrier", this::dropInlineGraphicOnlyTextShellWithoutTextlessCarrier);
+        timed("dropPlansOwnedByInlineCompletePng", this::dropPlansOwnedByInlineCompletePng);
+        timed("normalizeTextShellEditableTextOwnership", this::normalizeTextShellEditableTextOwnership);
+        timed("normalizeTextShellPlacementToResolvedAnchors.1", this::normalizeTextShellPlacementToResolvedAnchors);
+        timed("normalizeCompositeAssociatedInlineTextShellsToPage.1", this::normalizeCompositeAssociatedInlineTextShellsToPage);
+        timed("dropChildLabelShellVisualsBakedIntoFloatingCompositeParents.1", this::dropChildLabelShellVisualsBakedIntoFloatingCompositeParents);
+        timed("resolveCompositeTextOwnershipClaimedByLeafShells", this::resolveCompositeTextOwnershipClaimedByLeafShells);
+        timed("resolveDuplicateRenderedIdentityPlans", this::resolveDuplicateRenderedIdentityPlans);
+        timed("declareContentVisualChildrenClaimedByTextShellParents", this::declareContentVisualChildrenClaimedByTextShellParents);
+        timed("normalizeClippedImageContentOwners", this::normalizeClippedImageContentOwners);
+        timed("normalizeContentVisualSlotsExcludeVisibleTextShellSlots.1", this::normalizeContentVisualSlotsExcludeVisibleTextShellSlots);
+        timed("dropVisualChildrenBakedIntoTextShellParents", this::dropVisualChildrenBakedIntoTextShellParents);
+        timed("normalizeVisibleDescendantContracts", this::normalizeVisibleDescendantContracts);
+        timed("dropVisualOnlyCompositeShellCarriersCoveredByChildShellSlots.1", this::dropVisualOnlyCompositeShellCarriersCoveredByChildShellSlots);
+        timed("dropChildVisualFragmentsOwnedByCompositeShellCarriers.1", this::dropChildVisualFragmentsOwnedByCompositeShellCarriers);
+        timed("normalizeVisualSourcesExcludeOwnedTextFrames", this::normalizeVisualSourcesExcludeOwnedTextFrames);
+        timed("completeTextFrameShellStyleSources", this::completeTextFrameShellStyleSources);
+        timed("normalizeTextShellPlacementToResolvedAnchors.2", this::normalizeTextShellPlacementToResolvedAnchors);
+        timed("normalizeCompositeAssociatedInlineTextShellsToPage.2", this::normalizeCompositeAssociatedInlineTextShellsToPage);
+        timed("dropChildLabelShellVisualsBakedIntoFloatingCompositeParents.2", this::dropChildLabelShellVisualsBakedIntoFloatingCompositeParents);
+        timed("makePagePositionedStoryFlowInlineShellsVisualOnly", this::makePagePositionedStoryFlowInlineShellsVisualOnly);
+        timed("declareInlineSimpleButtonLabelShellOwners", this::declareInlineSimpleButtonLabelShellOwners);
+        timed("dropNonExecutableSimpleButtonTextOwners", this::dropNonExecutableSimpleButtonTextOwners);
+        timed("normalizeRenderedPngTextOwnershipToTextFrames", this::normalizeRenderedPngTextOwnershipToTextFrames);
+        timed("normalizeDroppedRenderedTextOwnershipToTextFrames", this::normalizeDroppedRenderedTextOwnershipToTextFrames);
+        timed("completeVisibleTextShellRelationsFromSourceIds", this::completeVisibleTextShellRelationsFromSourceIds);
+        timed("declareInlineTextShellTextOwnership", this::declareInlineTextShellTextOwnership);
+        timed("normalizeDuplicateHwpxTextOwners", this::normalizeDuplicateHwpxTextOwners);
+        timed("normalizeContentVisualSlotsExcludeVisibleTextShellSlots.2", this::normalizeContentVisualSlotsExcludeVisibleTextShellSlots);
+        timed("normalizeVisualOnlyTextShellsDoNotOwnTextSlots", this::normalizeVisualOnlyTextShellsDoNotOwnTextSlots);
+        timed("declareOrphanedPureDecorationVisuals", this::declareOrphanedPureDecorationVisuals);
+        timed("resolveCompositeBakedChildVisuals.2", this::resolveCompositeBakedChildVisuals);
+        timed("dropNonCanonicalRenderedGraphicFrameSlots", this::dropNonCanonicalRenderedGraphicFrameSlots);
+        timed("normalizeVisualSlotsExcludeTableStyleSources", this::normalizeVisualSlotsExcludeTableStyleSources);
+        timed("normalizeDuplicateVisibleSourceSlots", this::normalizeDuplicateVisibleSourceSlots);
+        timed("bindPaperInlineAnchorsToPageMaterialSlots", this::bindPaperInlineAnchorsToPageMaterialSlots);
+        timed("dropFloatingPageClonesOwnedByStoryFlowInlineSlots", this::dropFloatingPageClonesOwnedByStoryFlowInlineSlots);
+        timed("dropVisualOnlyCompositeShellCarriersCoveredByChildShellSlots.2", this::dropVisualOnlyCompositeShellCarriersCoveredByChildShellSlots);
+        timed("dropChildVisualFragmentsOwnedByCompositeShellCarriers.2", this::dropChildVisualFragmentsOwnedByCompositeShellCarriers);
+        timed("dropVisualOnlyChildShellsBakedIntoCompleteCompositeParents", this::dropVisualOnlyChildShellsBakedIntoCompleteCompositeParents);
+        timed("normalizeCompositeAssociatedInlineTextShellsToPage.3", this::normalizeCompositeAssociatedInlineTextShellsToPage);
+        timed("normalizeDirectInlineAnchoredTextShellsToStoryFlow", this::normalizeDirectInlineAnchoredTextShellsToStoryFlow);
+        timed("normalizeOwnedTextFrameCoordinatesToVisibleShellOwners", this::normalizeOwnedTextFrameCoordinatesToVisibleShellOwners);
+        timed("normalizeVisibleVisualSourcesToPlanPage", this::normalizeVisibleVisualSourcesToPlanPage);
+        timed("normalizeVisualSlotsExcludeTableStyleSources.final", this::normalizeVisualSlotsExcludeTableStyleSources);
+        timed("dropNativeSourceShapesOwnedByRenderedBundles", this::dropNativeSourceShapesOwnedByRenderedBundles);
+        timed("normalizePaperPageMaterialVisualPlans", this::normalizePaperPageMaterialVisualPlans);
+        timed("normalizeTextShellBoundsToConcreteVisualSources", this::normalizeTextShellBoundsToConcreteVisualSources);
+        timed("normalizeTextlessFragmentBoundsToRenderSource", this::normalizeTextlessFragmentBoundsToRenderSource);
+        timed("completeTextFrameShellStyleSources.final", this::completeTextFrameShellStyleSources);
+        timed("dropEditableTextFrameFallbackShellsOwnedByCompositeSlots", this::dropEditableTextFrameFallbackShellsOwnedByCompositeSlots);
+        timed("finalizeVisualDepthContracts", this::finalizeVisualDepthContracts);
+        timed("restorePlannerDeclaredInlineTextShellContracts", this::restorePlannerDeclaredInlineTextShellContracts);
+        timed("writePlans", this::writePlans);
+        timed("validate", this::validate);
+        ConversionTiming.metric("stage1.ownershipPlanner.plans", plans.size());
+        ConversionTiming.metric("stage1.ownershipPlanner.warnings", ctx.ownershipWarningLines.size());
         System.err.println("[OwnershipPlanner] observation plans=" + plans.size()
                 + " warnings=" + ctx.ownershipWarningLines.size());
+    }
+
+    private static void timed(String name, Runnable action) {
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage1.ownershipPlanner." + name)) {
+            action.run();
+        }
     }
 
     private void importPreplannedObjectPlans() {
         if (ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()) return;
         plans.addAll(ctx.ownershipPlans);
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            recordPlannerDeclaredInlineTextShellContract(plan);
+        }
         ctx.clearOwnershipPlansForRewrite();
     }
 
-    private void runVisualRefinement() {
-        ctx.dropVisualForDomIds(ctx.cellInlineEmbeddedDomIds,
-                "cell_inline_embedded_visual_owned_by_inline");
-        Set<Integer> childOfGroupDrops = computeChildOfGroupSuppression().nonProtected;
-        ctx.dropVisualForDomIds(childOfGroupDrops, "child_baked_into_renderable_parent_group");
-        ctx.dropVisualForDomIds(computeInlineCoverageSuppression(),
-                "visual_owned_by_inline_object_coverage");
+    private void recordPlannerDeclaredInlineTextShellContract(ObjectPlan plan) {
+        if (!isPlannerDeclaredInlineTextShellContract(plan)) return;
+        if (plan.renderId == null) return;
+        plannerDeclaredInlineTextShellContracts.put(plan.renderId, plan);
+    }
+
+    private boolean isPlannerDeclaredInlineTextShellContract(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!safe(plan.kind).startsWith("planner_declared_rendered:")) return false;
+        if (!"planner_declared_object_plan".equals(safe(plan.reason))) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (plan.renderId == null) return false;
+        return planHasExecutableRenderedShellSource(plan);
+    }
+
+    private boolean planHasExecutableRenderedShellSource(ObjectPlan plan) {
+        if (plan == null || safe(plan.file).isEmpty()) return false;
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        int[] exported = rendered != null ? rendered.exportSourceObjectIds() : null;
+        if (exported != null && exported.length > 0) return true;
+        return plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0;
+    }
+
+    private void restorePlannerDeclaredInlineTextShellContracts() {
+        if (plannerDeclaredInlineTextShellContracts.isEmpty()) return;
+        LinkedHashSet<Integer> restoredTextFrames = new LinkedHashSet<>();
+        int restored = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan current = plans.get(i);
+            if (current == null || current.renderId == null) continue;
+            ObjectPlan contract = plannerDeclaredInlineTextShellContracts.get(current.renderId);
+            if (contract == null) continue;
+            if (sameInlineTextShellContract(current, contract)) {
+                addAll(contract.ownedTextFrameIds, restoredTextFrames);
+                continue;
+            }
+            plans.set(i, contract);
+            addAll(contract.ownedTextFrameIds, restoredTextFrames);
+            restored++;
+        }
+        if (!restoredTextFrames.isEmpty()) {
+            alignOwnedTextFramePlans(toIntArray(restoredTextFrames), Placement.INLINE);
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.plannerDeclaredInlineTextShellContracts",
+                plannerDeclaredInlineTextShellContracts.size());
+        ConversionTiming.metric("stage1.ownershipPlanner.plannerDeclaredInlineTextShellContracts.restored",
+                restored);
+    }
+
+    private static boolean sameInlineTextShellContract(ObjectPlan current, ObjectPlan contract) {
+        if (current == null || contract == null) return false;
+        return current.textAction == contract.textAction
+                && current.visualAction == contract.visualAction
+                && current.materialization == contract.materialization
+                && current.placement == contract.placement
+                && effectiveCoordinateSpace(current) == effectiveCoordinateSpace(contract)
+                && sameIntSet(current.ownedTextFrameIds, contract.ownedTextFrameIds)
+                && sameIntSet(visualSourceIds(current), visualSourceIds(contract));
     }
 
     private boolean isPageObject(RenderedGroup rg) {
@@ -348,13 +466,8 @@ public final class OwnershipPlanner {
         if (editableLabelShellIds != null && editableLabelShellIds.contains(rg.id())) return true;
         if (isAtomicOwnershipRootTextHiddenShell(rg)) return true;
         if (!isEditableLabelShellCandidate(rg)) return false;
-        if (!isPageObject(rg) && !"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) {
-            return false;
-        }
-        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
         if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        return !Boolean.TRUE.equals(rg.containsText()) && !Boolean.TRUE.equals(rg.containsEditableText());
+        return true;
     }
 
     private static boolean isAtomicOwnershipRootTextHiddenShell(RenderedGroup rg) {
@@ -394,97 +507,6 @@ public final class OwnershipPlanner {
         return w >= 6.0 && w <= 95.0
                 && h >= 2.0 && h <= 18.0
                 && w / Math.max(h, 0.1) >= 1.6;
-    }
-
-    private boolean shouldPreserveSourceChild(RenderedGroup child) {
-        if (child == null) return false;
-        return "visual_label_text_hidden_shell".equals(child.reason())
-                || "editable_composite_text_hidden_shell".equals(child.reason())
-                || "concept_label_shell".equals(child.reason())
-                || "editable_textframe_visual_shell".equals(child.reason());
-    }
-
-    private static boolean canSuppressSourceChildren(RenderedGroup rg) {
-        if (rg == null || !"hwpx_tf".equals(rg.textOwner())) return false;
-        if (rg.sourceObjectIds() == null || rg.sourceObjectIds().length == 0) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        return reason.contains("text_hidden")
-                || reason.contains("visual_shell")
-                || reason.contains("image_group");
-    }
-
-    private boolean shouldSkipByChildPolicy(RenderedGroup rg) {
-        if (rg.childIds() == null || rg.childIds().length == 0) return false;
-
-        boolean allChildrenAreEditableTf = true;
-        boolean hasEditableTfChild = false;
-        boolean anyChildIsInlineObject = false;
-        for (int cid : rg.childIds()) {
-            if (ctx.resolvedData.isInlineObjectId(cid)) {
-                anyChildIsInlineObject = true;
-                allChildrenAreEditableTf = false;
-                continue;
-            }
-            if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
-                hasEditableTfChild = true;
-            } else {
-                allChildrenAreEditableTf = false;
-            }
-        }
-
-        if (anyChildIsInlineObject && !rg.hasEditableTextHiddenFromPng()) return true;
-        if (hasEditableTfChild && !rg.hasEditableTextHiddenFromPng()) return true;
-        return allChildrenAreEditableTf;
-    }
-
-    private boolean hasRenderablePng(RenderedGroup rg) {
-        if (rg == null || rg.file() == null) return false;
-        try {
-            File pngFile = new File(ctx.basePath, rg.file());
-            return pngFile.exists() && pngFile.length() > 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private Set<Integer> collectInlineObjectCoverage(List<RenderedGroup> floatingItems) {
-        Set<Integer> coveredIds = new HashSet<>();
-        if (floatingItems == null || floatingItems.isEmpty()) return coveredIds;
-
-        boolean changed;
-        do {
-            int before = coveredIds.size();
-            for (RenderedGroup rg : floatingItems) {
-                if (rg == null) continue;
-                boolean inlineObject = "inline_object".equals(rg.itemType())
-                        || "inline_object".equals(rg.type());
-                if (inlineObject && ctx.shouldDropVisualByOwnershipPlan(rg)) continue;
-                if ((inlineObject && hasPageVisibleInlineBounds(rg)) || coveredIds.contains(rg.id())) {
-                    addCoverageIds(rg, coveredIds);
-                }
-            }
-            changed = coveredIds.size() != before;
-        } while (changed);
-        return coveredIds;
-    }
-
-    private boolean hasPageVisibleInlineBounds(RenderedGroup rg) {
-        if (rg == null) return false;
-        double[] b = rg.bounds();
-        if (b == null || b.length < 4) return true;
-        int pageIdx = rg.pageIndex();
-        double pageWidth = pageWidthMm(pageIdx);
-        double pageHeight = pageHeightMm(pageIdx);
-        b = normalizeInlineSpreadBoundsToPage(rg, b);
-        return b[3] > 0.0 && b[1] < pageWidth
-                && b[2] > 0.0 && b[0] < pageHeight;
-    }
-
-    private double[] normalizeInlineSpreadBoundsToPage(RenderedGroup rg, double[] bounds) {
-        boolean inlineObject = rg != null
-                && ("inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type()));
-        return inlineObject ? normalizeSpreadBoundsToPage(rg.pageIndex(), bounds) : bounds;
     }
 
     private double[] normalizeSpreadBoundsToPage(int pageIdx, double[] bounds) {
@@ -578,6 +600,22 @@ public final class OwnershipPlanner {
         };
     }
 
+    private double[] clipPageRelativeBoundsToPage(int pageIdx, double[] bounds) {
+        if (bounds == null || bounds.length < 4) return bounds;
+        double[] page = pageBounds(pageIdx);
+        if (page == null || page.length < 4) return bounds;
+        double pageWidth = page[3] - page[1];
+        double pageHeight = page[2] - page[0];
+        if (pageWidth <= 0.0 || pageHeight <= 0.0) return bounds;
+
+        double top = Math.max(0.0, bounds[0]);
+        double left = Math.max(0.0, bounds[1]);
+        double bottom = Math.min(pageHeight, bounds[2]);
+        double right = Math.min(pageWidth, bounds[3]);
+        if (bottom <= top || right <= left) return bounds;
+        return new double[] { top, left, bottom, right };
+    }
+
     private double pageWidthMm(int pageIdx) {
         double[] b = pageBounds(pageIdx);
         if (b == null || b.length < 4) return 1e9;
@@ -592,22 +630,19 @@ public final class OwnershipPlanner {
 
     private double[] pageBounds(int pageIdx) {
         if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null) return null;
+        for (ResolvedPage page : ctx.resolvedData.pages()) {
+            if (page != null && page.index() == pageIdx) {
+                return page.bounds();
+            }
+        }
         if (pageIdx < 0 || pageIdx >= ctx.resolvedData.pages().size()) return null;
         return ctx.resolvedData.pages().get(pageIdx).bounds();
     }
 
     private double safeScaleFactor() {
-        return ctx != null && ctx.scaleFactor != 0.0 ? ctx.scaleFactor : 1.0;
-    }
-
-    private void addCoverageIds(RenderedGroup rg, Set<Integer> coveredIds) {
-        if (rg == null || coveredIds == null) return;
-        coveredIds.add(rg.id());
-        addAll(rg.sourceObjectIds(), coveredIds);
-        addAll(rg.childIds(), coveredIds);
-        addAll(rg.childImageIds(), coveredIds);
-        addAll(rg.visualOnlyChildIds(), coveredIds);
-        addAll(rg.tfInlineVisualIds(), coveredIds);
+        if (ctx != null && ctx.scaleFactor != 0.0) return ctx.scaleFactor;
+        if (data != null && data.scaleFactor() != 0.0) return data.scaleFactor();
+        return 1.0;
     }
 
     private void addAll(int[] ids, Set<Integer> target) {
@@ -615,62 +650,6 @@ public final class OwnershipPlanner {
         for (int id : ids) {
             target.add(id);
         }
-    }
-
-    private Set<Integer> computeChildOfGroup(
-            Set<Integer> editableLabelShellIds, Set<Integer> conceptDiagramLabelShellIds,
-            Map<Integer, Integer> idToPage, Map<Integer, RenderedGroup> idToRendered,
-            List<RenderedGroup> floatingItems) {
-        Set<Integer> childOfGroup = new HashSet<>();
-        for (RenderedGroup rg : floatingItems) {
-            if (!canSuppressChildren(rg, editableLabelShellIds, conceptDiagramLabelShellIds,
-                    idToPage, idToRendered)) {
-                continue;
-            }
-            int parentPage = rg.pageIndex();
-            boolean parentKeepsContainerShell = hasSubstantialVisualOutsideEditableLabelShell(
-                    rg, editableLabelShellIds, idToRendered);
-            boolean parentIsTextShellOnly =
-                    ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
-
-            if (rg.childIds() != null) {
-                for (int cid : rg.childIds()) {
-                    if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
-                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
-                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
-                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
-                    Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage)
-                        childOfGroup.add(cid);
-                }
-            }
-            if (rg.childImageIds() != null) {
-                for (int cid : rg.childImageIds()) {
-                    if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
-                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
-                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
-                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
-                    Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage)
-                        childOfGroup.add(cid);
-                }
-            }
-            if (rg.sourceObjectIds() != null && canSuppressSourceChildren(rg)) {
-                for (int cid : rg.sourceObjectIds()) {
-                    if (cid == rg.id()) continue;
-                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
-                    RenderedGroup child = idToRendered.get(cid);
-                    if (child == null) continue;
-                    if (shouldPreserveSourceChild(child)) continue;
-                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
-                    Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage) {
-                        childOfGroup.add(cid);
-                    }
-                }
-            }
-        }
-        return childOfGroup;
     }
 
     private static boolean hasSemanticText(ResolvedTextFrame tf) {
@@ -690,102 +669,16 @@ public final class OwnershipPlanner {
         return VisualLayeringRules.isCompletePngSimpleButtonLabel(ctx, rg);
     }
 
-    private static final class ChildOfGroupSuppression {
-        final Set<Integer> nonProtected;
-
-        ChildOfGroupSuppression(Set<Integer> nonProtected) {
-            this.nonProtected = nonProtected;
-        }
-    }
-
-    private ChildOfGroupSuppression computeChildOfGroupSuppression() {
-        Set<Integer> empty = new HashSet<>();
-        List<RenderedGroup> floatingItems = data.allRenderedFloatingItems();
-        if (floatingItems == null || floatingItems.isEmpty()) {
-            return new ChildOfGroupSuppression(empty);
-        }
-
-        Set<Integer> editableLabelShellIds = collectEditableLabelShells(floatingItems);
-        Set<Integer> conceptDiagramLabelShellIds = collectConceptDiagramLabelShells(floatingItems);
-        Map<Integer, Integer> idToPage = new HashMap<>();
-        Map<Integer, RenderedGroup> idToRendered = new HashMap<>();
-        for (RenderedGroup rg : floatingItems) {
-            if (rg == null) continue;
-            idToPage.put(rg.id(), rg.pageIndex());
-            idToRendered.putIfAbsent(rg.id(), rg);
-        }
-
-        Set<Integer> childOfGroup = computeChildOfGroup(
-                editableLabelShellIds, conceptDiagramLabelShellIds,
-                idToPage, idToRendered, floatingItems);
-        Set<Integer> nonProtected = new HashSet<>();
-        for (RenderedGroup rg : floatingItems) {
-            if (!childOfGroup.contains(rg.id())) continue;
-            boolean conceptDiagramLabelShell = conceptDiagramLabelShellIds.contains(rg.id());
-            boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(rg);
-            boolean editableLabelShell = shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
-            if (conceptDiagramLabelShell || conceptDiagramInlineShell || editableLabelShell) {
-                continue;
-            }
-            nonProtected.add(rg.id());
-        }
-        return new ChildOfGroupSuppression(nonProtected);
-    }
-
-    private boolean canSuppressChildren(
-            RenderedGroup rg, Set<Integer> editableLabelShellIds, Set<Integer> conceptDiagramLabelShellIds,
-            Map<Integer, Integer> idToPage, Map<Integer, RenderedGroup> idToRendered) {
-        if (rg == null) return false;
-        if (!VisualLayeringRules.isPageObject(rg)) return false;
-        if (ctx.hasOwnershipPlan(rg) && !ctx.hasVisibleVisualByOwnershipPlan(rg)) return false;
-        if (data.isInlineObjectId(rg.id())) return false;
-        if (!ctx.hasOwnershipPlan(rg) && ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) return false;
-        if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds, idToRendered)) return false;
-        if (!ctx.hasOwnershipPlan(rg) && rg.shouldSkipByOwnership()) return false;
-        if (!ctx.hasOwnershipPlan(rg) && shouldSkipByChildPolicy(rg)) return false;
-        if (idToPage != null && idToPage.getOrDefault(rg.id(), Integer.MAX_VALUE) < 0) return false;
-        if (rg.bounds() == null || rg.bounds().length < 4) return false;
-        if (!hasRenderablePng(rg)) return false;
-        int pageIdx = rg.pageIndex();
-        if (pageIdx < 0) return false;
-        return data.pages() == null || pageIdx < data.pages().size();
-    }
-
-    private Set<Integer> computeInlineCoverageSuppression() {
-        Set<Integer> covered = collectInlineObjectCoverage(data.allRenderedFloatingItems());
-        Set<Integer> editableLabelShellIds = collectEditableLabelShells(data.allRenderedFloatingItems());
-        Set<Integer> conceptDiagramLabelShellIds = collectConceptDiagramLabelShells(data.allRenderedFloatingItems());
-        Set<Integer> dropVisual = new HashSet<>();
-
-        for (RenderedGroup rg : data.allRenderedFloatingItems()) {
-            if (rg == null) continue;
-            if (!covered.contains(rg.id())) continue;
-            if (isCompletePngSimpleButtonLabel(ctx, rg)) continue;
-            if (isStandaloneGraphicOnlyInlineObject(rg)) continue;
-            if (isPageObject(rg) && isResolvedStoryInlineAnchor(rg)) continue;
-
-            boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(rg);
-            boolean protectedEditableLabelShell = conceptDiagramLabelShellIds.contains(rg.id())
-                    || conceptDiagramInlineShell
-                    || shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
-
-            boolean coverageSuppress = !protectedEditableLabelShell;
-            boolean inlineObjectSuppress = isPageObject(rg)
-                    && data.isInlineObjectId(rg.id())
-                    && !shouldKeepPairedInlinePageShell(rg);
-            if (coverageSuppress || inlineObjectSuppress) {
-                dropVisual.add(rg.id());
-            }
-        }
-        return dropVisual;
-    }
-
     private boolean isStandaloneGraphicOnlyInlineObject(RenderedGroup rg) {
         if (rg == null || data == null) return false;
         if (!data.isInlineObjectId(rg.id())) return false;
         if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (isInlineGraphicLineTextStyleMarker(rg)) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if (!"none".equals(rg.textOwner())) return false;
+        if (hasDescendantTextFrameExcluding(String.valueOf(rg.id()), new HashSet<>(), new HashSet<>())) {
+            return false;
+        }
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
             return false;
         }
@@ -805,26 +698,38 @@ public final class OwnershipPlanner {
     }
 
     private void resolvePairedInlinePageObjectChannelOwners() {
+        Map<String, List<Integer>> inlinePlanIndexesByPageDom = new HashMap<>();
+        for (int j = 0; j < plans.size(); j++) {
+            ObjectPlan inline = plans.get(j);
+            if (!isRenderedVisualPlan(inline)) continue;
+            if (!safe(inline.kind).contains("inline_object")) continue;
+            if (inline.domId < 0) continue;
+            inlinePlanIndexesByPageDom
+                    .computeIfAbsent(pageDomKey(inline.pageIndex, inline.domId), k -> new ArrayList<>())
+                    .add(j);
+        }
+        if (inlinePlanIndexesByPageDom.isEmpty()) return;
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan pageObject = plans.get(i);
             if (!isVisibleRenderedVisual(pageObject) && !isAtomicOwnershipRootTextHiddenShellPlan(pageObject)) continue;
             if (!safe(pageObject.kind).contains("page_object")) continue;
             if (pageObject.domId < 0) continue;
 
-            for (int j = 0; j < plans.size(); j++) {
+            List<Integer> inlineIndexes = inlinePlanIndexesByPageDom.get(pageDomKey(pageObject.pageIndex, pageObject.domId));
+            if (inlineIndexes == null || inlineIndexes.isEmpty()) continue;
+            for (int j : inlineIndexes) {
                 if (i == j) continue;
                 ObjectPlan inline = plans.get(j);
-                if (!isRenderedVisualPlan(inline)) continue;
-                if (!safe(inline.kind).contains("inline_object")) continue;
-                if (inline.pageIndex != pageObject.pageIndex) continue;
-                if (inline.domId != pageObject.domId) continue;
                 if (!pageObjectShouldOwnPairedInlineChannel(pageObject, inline)) continue;
 
                 ObjectPlan nextPageObject = pageObject;
                 if (isAtomicOwnershipRootTextHiddenShellPlan(pageObject)) {
                     nextPageObject = pageObject
                             .withVisualAction(VisualAction.PLACE_TEXT_SHELL, pageObject.reason)
-                            .withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                            .withVisualLayer(textShellVisualLayer(
+                                    pageObject,
+                                    pageObject.ownedTextFrameIds,
+                                    VisualLayer.CONTAINER_BACKDROP));
                     plans.set(i, nextPageObject);
                     alignOwnedTextFramePlans(nextPageObject.ownedTextFrameIds, nextPageObject.placement);
                 }
@@ -870,28 +775,150 @@ public final class OwnershipPlanner {
         CoordinateSpace coordinateSpace = placement == Placement.INLINE
                 ? CoordinateSpace.STORY_FLOW
                 : CoordinateSpace.PAGE;
+        Map<Integer, List<Integer>> textFramePlanIndexes = new HashMap<>();
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (plan == null || !"text_frame".equals(plan.kind)) continue;
-            if (!contains(textFrameIds, plan.domId)) continue;
+            textFramePlanIndexes
+                    .computeIfAbsent(plan.domId, k -> new ArrayList<>())
+                    .add(i);
+        }
+        for (int textFrameId : textFrameIds) {
+            List<Integer> indexes = textFramePlanIndexes.get(textFrameId);
+            if (indexes == null) continue;
+            for (int i : indexes) {
+                ObjectPlan plan = plans.get(i);
+                if (plan == null) continue;
             if (plan.placement == placement && plan.coordinateSpace == coordinateSpace) continue;
             plans.set(i, plan.withPlacementAndCoordinateSpace(placement, coordinateSpace));
+            }
         }
     }
 
+    private void normalizeOwnedTextFrameCoordinatesToVisibleShellOwners() {
+        Map<Integer, ObjectPlan> ownerByTextFrame = new LinkedHashMap<>();
+        Set<Integer> ambiguousTextFrames = new HashSet<>();
+        for (ObjectPlan plan : plans) {
+            if (!isVisibleTextShellOwningTextFrame(plan)) continue;
+            CoordinateSpace coordinateSpace = effectiveCoordinateSpace(plan);
+            if (plan.placement == null || coordinateSpace == null) continue;
+            for (int textFrameId : plan.ownedTextFrameIds) {
+                ObjectPlan existing = ownerByTextFrame.get(textFrameId);
+                if (existing == null) {
+                    ownerByTextFrame.put(textFrameId, plan);
+                    continue;
+                }
+                if (existing.placement != plan.placement
+                        || effectiveCoordinateSpace(existing) != coordinateSpace) {
+                    ambiguousTextFrames.add(textFrameId);
+                }
+            }
+        }
+        if (ownerByTextFrame.isEmpty()) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !"text_frame".equals(plan.kind)) continue;
+            if (ambiguousTextFrames.contains(plan.domId)) continue;
+            ObjectPlan owner = ownerByTextFrame.get(plan.domId);
+            if (owner == null) continue;
+            CoordinateSpace coordinateSpace = effectiveCoordinateSpace(owner);
+            if (plan.placement == owner.placement && plan.coordinateSpace == coordinateSpace) continue;
+            plans.set(i, plan.withPlacementAndCoordinateSpace(owner.placement, coordinateSpace));
+        }
+    }
+
+    private void finalizeOwnedTextFrameDepthContracts() {
+        Map<Integer, Integer> maxShellZByTextFrame = new LinkedHashMap<>();
+        for (ObjectPlan owner : plans) {
+            if (!isVisibleTextShellOwningTextFrame(owner)) continue;
+            if (isBackPlaneTextShell(owner)) continue;
+            for (int textFrameId : owner.ownedTextFrameIds) {
+                Integer existing = maxShellZByTextFrame.get(textFrameId);
+                if (existing == null || owner.zOrder > existing) {
+                    maxShellZByTextFrame.put(textFrameId, owner.zOrder);
+                }
+            }
+        }
+        if (maxShellZByTextFrame.isEmpty()) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !isTextFramePlanKind(plan.kind)) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            Integer shellZ = maxShellZByTextFrame.get(plan.domId);
+            if (shellZ == null) continue;
+            int requiredTextZ = shellZ + 1;
+            if (plan.zOrder >= requiredTextZ) continue;
+            plans.set(i, plan.withZOrder(requiredTextZ));
+        }
+    }
+
+    private static boolean isVisibleTextShellOwningTextFrame(ObjectPlan plan) {
+        return isVisibleTextShell(plan)
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0;
+    }
+
+    private static boolean isBackPlaneTextShell(ObjectPlan plan) {
+        return plan != null && (plan.visualLayer == VisualLayer.PAGE_BACKGROUND
+                || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP);
+    }
+
+    private static CoordinateSpace effectiveCoordinateSpace(ObjectPlan plan) {
+        if (plan == null) return null;
+        if (plan.coordinateSpace != null) return plan.coordinateSpace;
+        if (plan.placement == Placement.INLINE) return CoordinateSpace.STORY_FLOW;
+        if (plan.placement == Placement.FLOATING) return CoordinateSpace.PAGE;
+        return null;
+    }
+
+    private static String pageDomKey(int pageIndex, int domId) {
+        return pageIndex + ":" + domId;
+    }
+
     private void planRenderedItems() {
+        int before = plans.size();
+        int floatingItems = 0;
+        int graphicFrames = 0;
+        int imageFrames = 0;
+        int pdfFrames = 0;
         for (RenderedGroup rg : data.allRenderedFloatingItems()) {
+            floatingItems++;
+            if (hasPreplannedRenderedPlan(rg)) continue;
             addPlanForRendered(rg, "rendered_floating_item");
         }
         for (RenderedGroup rg : data.allRenderedGraphicFrames()) {
+            graphicFrames++;
+            if (hasPreplannedRenderedPlan(rg)) continue;
             addPlanForRendered(rg, "rendered_graphic_frame");
         }
         for (RenderedGroup rg : data.allRenderedImageFrames()) {
+            imageFrames++;
+            if (hasPreplannedRenderedPlan(rg)) continue;
             addPlanForRendered(rg, "rendered_image_frame");
         }
         for (RenderedGroup rg : data.allRenderedPdfFrames()) {
+            pdfFrames++;
+            if (hasPreplannedRenderedPlan(rg)) continue;
             addPlanForRendered(rg, "rendered_pdf_frame");
         }
+        ConversionTiming.metric("stage1.ownershipPlanner.planRenderedItems.floatingItems", floatingItems);
+        ConversionTiming.metric("stage1.ownershipPlanner.planRenderedItems.graphicFrames", graphicFrames);
+        ConversionTiming.metric("stage1.ownershipPlanner.planRenderedItems.imageFrames", imageFrames);
+        ConversionTiming.metric("stage1.ownershipPlanner.planRenderedItems.pdfFrames", pdfFrames);
+        ConversionTiming.metric("stage1.ownershipPlanner.planRenderedItems.createdPlans", plans.size() - before);
+    }
+
+    private boolean hasPreplannedRenderedPlan(RenderedGroup rg) {
+        if (rg == null) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.renderId == null) continue;
+            if (!safe(plan.kind).startsWith("planner_declared_rendered:")) continue;
+            if (plan.renderId != rg.id()) continue;
+            if (plan.pageIndex != rg.pageIndex()) continue;
+            if (!safe(plan.file).equals(safe(rg.file()))) continue;
+            return true;
+        }
+        return false;
     }
 
     private void resolveHwpxTextOwnedNonShellVisuals() {
@@ -955,9 +982,96 @@ public final class OwnershipPlanner {
             if (plan.placement != Placement.FLOATING) continue;
             if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
             if (ownedTextFramesAreOnPlanPage(plan)) continue;
+            if (hasVisualSourceOnPlanPage(plan) || hasExtractorPageLocalVisualSlot(plan)) {
+                RenderedGroup rendered = renderedGroupForPlan(plan);
+                VisualAction residualAction = crossPageResidualVisualAction(plan);
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withOwnedTextFrameIds(new int[0])
+                        .withSourceBundleKey(sourceBundleKeyOf(rendered, plan.sourceObjectIds, new int[0]))
+                        .withVisualLayer(crossPageResidualVisualLayer(plan))
+                        .withVisualAction(residualAction,
+                                "cross_page_text_shell_visual_fragment"));
+                continue;
+            }
             plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
                     "cross_page_text_shell_owned_text_not_on_plan_page"));
         }
+    }
+
+    private boolean hasExtractorPageLocalVisualSlot(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!isPageLocalTextFrameShellVisualFragment(plan)) return false;
+        if (plan.file == null || plan.file.isBlank()) return false;
+        if (plan.pageIndex < 0 || !planBoundsIntersectPlanPage(plan)) return false;
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length == 0) return false;
+        for (int sourceId : visualIds) {
+            if (!contains(plan.ownedTextFrameIds, sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasVisualSourceOnPlanPage(ObjectPlan plan) {
+        if (plan == null || data == null || plan.visualSourceObjectIds == null) return false;
+        for (int sourceId : plan.visualSourceObjectIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.sourceHidden()) continue;
+            boolean ownedTextFrameSource = contains(plan.ownedTextFrameIds, sourceId)
+                    && data.getTextFrame(String.valueOf(sourceId)) != null;
+            if (ownedTextFrameSource) {
+                if (isPageLocalTextFrameShellVisualFragment(plan)
+                        && sourceItemIntersectsPlanPage(item, plan)) {
+                    return true;
+                }
+                continue;
+            }
+            if (data.getTextFrame(String.valueOf(sourceId)) != null) {
+                if (isPageLocalTextFrameShellVisualFragment(plan)
+                        && sourceItemIntersectsPlanPage(item, plan)) {
+                    return true;
+                }
+                continue;
+            }
+            if (item.pageIndex() == plan.pageIndex || sourceItemIntersectsPlanPage(item, plan)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean planBoundsIntersectPlanPage(ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        return hasMainPageIntersectionInPageBoundsUnits(plan.pageIndex, plan.bounds);
+    }
+
+    private static VisualAction crossPageResidualVisualAction(ObjectPlan plan) {
+        if (isPageLocalTextFrameShellVisualFragment(plan)) {
+            return VisualAction.PLACE_TEXT_SHELL;
+        }
+        return VisualAction.PLACE_FLOATING_PNG;
+    }
+
+    private static boolean isPageLocalTextFrameShellVisualFragment(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization == Materialization.TEXTLESS_VISUAL_FRAGMENT) return true;
+        if (plan.renderSourceBounds != null && plan.renderSourceBounds.length >= 4) return true;
+        String reason = safe(plan.reason);
+        return "editable_textframe_visual_shell".equals(reason);
+    }
+
+    private static VisualLayer crossPageResidualVisualLayer(ObjectPlan plan) {
+        if (plan == null) return VisualLayer.CONTAINER_BACKDROP;
+        if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND
+                || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP) {
+            return plan.visualLayer;
+        }
+        if (isBackgroundLayerName(plan.sourceLayerName)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
+        return plan.visualLayer;
     }
 
     private boolean ownedTextFramesAreOnPlanPage(ObjectPlan plan) {
@@ -975,8 +1089,8 @@ public final class OwnershipPlanner {
         Placement placement = placementOf(rg);
         TextAction textAction = textActionOf(rg);
         VisualAction visualAction = visualActionOf(rg, placement, textAction);
-        VisualLayer visualLayer = visualLayerOf(rg, visualAction, textAction);
         int[] sourceIds = sourceIdsOrSelf(rg);
+        VisualLayer visualLayer = visualLayerOf(rg, sourceIds, visualAction, textAction);
         if (!isImageBackedContentShell(rg)
                 && hasIndependentContentVisualBesideOwnedText(rg)
                 && (visualAction == VisualAction.PLACE_FLOATING_PNG
@@ -992,8 +1106,50 @@ public final class OwnershipPlanner {
         }
         int[] ownedTextFrameIds = editableTextFrameIdsOf(rg);
         int[] visualSourceIds = visualSourceIdsForRendered(rg, sourceIds, ownedTextFrameIds, visualAction);
+        if (visualAction == VisualAction.PLACE_TEXT_SHELL
+                && !hasExecutableTextShellVisualMaterial(visualSourceIds)) {
+            textAction = TextAction.DROP_TEXT;
+            visualAction = VisualAction.DROP_VISUAL;
+            visualLayer = VisualLayer.CONTENT_VISUAL;
+            reason = "text_shell_without_visible_visual_source";
+            visualSourceIds = new int[0];
+        }
+        int[] concreteShellTextFrameIds = concreteVisualShellOwnedTextFrameIds(
+                rg, visualSourceIds, ownedTextFrameIds, visualAction, placement);
+        if (concreteShellTextFrameIds.length > 0
+                && concreteShellTextFrameIds.length < ownedTextFrameIds.length) {
+            ownedTextFrameIds = concreteShellTextFrameIds;
+        }
+        if (visualAction == VisualAction.PLACE_TEXT_SHELL
+                && ownedTextFrameIdsUseCalloutOverlayStyle(ownedTextFrameIds)
+                && !hasImageSource(rg)
+                && hasDrawableBackdropShapeSource(rg)) {
+            visualLayer = VisualLayer.LABEL_OVERLAY_BACKDROP;
+        }
+        if (shouldPlanRenderedChildShellFragmentAsNonExecutable(
+                rg, sourceIds, visualAction)
+                || shouldPlanAdjacentTextShellChromeAsNonExecutable(
+                rg, sourceIds, visualAction)) {
+            textAction = TextAction.DROP_TEXT;
+            visualAction = VisualAction.DROP_VISUAL;
+            visualLayer = VisualLayer.CONTENT_VISUAL;
+            reason = "visual_fragment_owned_by_composite_shell_carrier";
+        }
         String sourceBundleKey = sourceBundleKeyOf(rg, sourceIds, ownedTextFrameIds);
         int zOrder = zOrderOf(rg, visualAction, visualSourceIds);
+        CoordinateSpace coordinateSpace = placement == Placement.INLINE
+                ? CoordinateSpace.STORY_FLOW
+                : CoordinateSpace.PAGE;
+        double[] planBounds = renderedPlanBounds(rg, visualSourceIds, ownedTextFrameIds,
+                visualAction, placement);
+        if (coordinateSpace == CoordinateSpace.STORY_FLOW) {
+            planBounds = normalizeSpreadBoundsToPage(rg.pageIndex(), planBounds);
+        }
+        Materialization materialization = materializationOfRenderedFragment(
+                rg, visualAction, placement, visualLayer, planBounds, visualSourceIds);
+        double[] renderSourceBounds = materialization == Materialization.TEXTLESS_VISUAL_FRAGMENT
+                ? renderSourceBoundsOfRenderedFragment(rg)
+                : null;
         plans.add(new ObjectPlan(
                 rg.id(),
                 channel + ":" + safe(rg.type()) + ":" + safe(rg.itemType()),
@@ -1005,16 +1161,352 @@ public final class OwnershipPlanner {
                 rg.id(),
                 sourceIds,
                 visualSourceIds,
+                new int[0],
                 ownedTextFrameIds,
                 new int[0],
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                null,
                 zOrder,
                 reason,
                 rg.file(),
-                rg.bounds(),
+                planBounds,
+                renderSourceBounds,
                 sourceLayerId(rg, sourceIds),
                 sourceLayerName(rg, sourceIds),
                 sourceLayerIndex(rg, sourceIds)));
+    }
+
+    private double[] renderedPlanBounds(
+            RenderedGroup rg,
+            int[] visualSourceIds,
+            int[] ownedTextFrameIds,
+            VisualAction visualAction,
+            Placement placement) {
+        double[] fallback = rg != null ? rg.bounds() : null;
+        if (rg == null || data == null) return fallback;
+        if (placement != Placement.FLOATING) return fallback;
+        if (visualAction != VisualAction.PLACE_TEXT_SHELL) return fallback;
+        // Rendered shell PNG bounds are the visible slot contract declared by
+        // the extractor.  Recomputing bounds from child visual sources narrows
+        // composite shells and decouples the text channel from its native shell.
+        return fallback;
+    }
+
+    private int[] concreteVisualShellOwnedTextFrameIds(
+            RenderedGroup rg,
+            int[] visualSourceIds,
+            int[] ownedTextFrameIds,
+            VisualAction visualAction,
+            Placement placement) {
+        if (rg == null || data == null) return new int[0];
+        if (placement != Placement.FLOATING) return new int[0];
+        if (visualAction != VisualAction.PLACE_TEXT_SHELL) return new int[0];
+        if (!"slot_only_textless_shell".equals(safe(rg.reason()))) return new int[0];
+        // Slot-only rendered shells keep the source-declared text relationship.
+        // Narrowing owned TF ids to the visual export subtree loses the shell/text
+        // slot contract and later narrows the shell bounds as a side effect.
+        return new int[0];
+    }
+
+    private boolean sourceShellHasOwnedTextFrameDescendant(
+            ResolvedPageItem shell,
+            int[] ownedTextFrameIds) {
+        if (shell == null || shell.id() == null || ownedTextFrameIds == null || ownedTextFrameIds.length == 0) {
+            return false;
+        }
+        Set<String> descendants = data.buildDescendantSet(shell.id(), 16);
+        for (int tfId : ownedTextFrameIds) {
+            if (descendants.contains(String.valueOf(tfId))) {
+                return true;
+            }
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(tfId));
+            double[] shellBounds = normalizeSpreadBoundsToPage(
+                    tf != null && tf.pageIndex() >= 0 ? tf.pageIndex() : shell.pageIndex(),
+                    boundsOf(shell));
+            double[] textBounds = normalizeSpreadBoundsToPage(
+                    tf != null && tf.pageIndex() >= 0 ? tf.pageIndex() : shell.pageIndex(),
+                    boundsOf(tf));
+            if (tf != null && boundsContains(shellBounds, textBounds, 3.0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isPositiveBounds(double[] bounds) {
+        return bounds != null
+                && bounds.length >= 4
+                && bounds[2] > bounds[0]
+                && bounds[3] > bounds[1];
+    }
+
+    private static boolean isMeaningfullyNarrower(double[] candidate, double[] fallback) {
+        if (!isPositiveBounds(candidate) || !isPositiveBounds(fallback)) return false;
+        double candidateW = candidate[3] - candidate[1];
+        double candidateH = candidate[2] - candidate[0];
+        double fallbackW = fallback[3] - fallback[1];
+        double fallbackH = fallback[2] - fallback[0];
+        double dw = fallbackW - candidateW;
+        double dh = fallbackH - candidateH;
+        double fallbackArea = fallbackW * fallbackH;
+        double candidateArea = candidateW * candidateH;
+        return dw > 2.0
+                || dh > 2.0
+                || (fallbackArea > 0.0 && candidateArea / fallbackArea < 0.92);
+    }
+
+    private Materialization materializationOfRenderedFragment(
+            RenderedGroup rg,
+            VisualAction visualAction,
+            Placement placement,
+            VisualLayer visualLayer,
+            double[] planBounds,
+            int[] visualSourceIds) {
+        if (rg == null) {
+            return null;
+        }
+        if (placement != Placement.FLOATING) return null;
+        if (visualAction != VisualAction.PLACE_FLOATING_PNG
+                && visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return null;
+        }
+        if (planBounds == null || planBounds.length < 4) return null;
+        if (visualLayer != VisualLayer.PAGE_BACKGROUND
+                && visualLayer != VisualLayer.CONTAINER_BACKDROP
+                && visualLayer != VisualLayer.LABEL_BACKDROP
+                && visualLayer != VisualLayer.FOREGROUND_MASK) {
+            return null;
+        }
+        if (hasCrossPageVisualSourceIntersectingPlanPage(rg.pageIndex(), visualSourceIds)) {
+            return Materialization.TEXTLESS_VISUAL_FRAGMENT;
+        }
+        double[] source = renderSourceBoundsOfRenderedFragment(rg);
+        if (source == null || source.length < 4) return null;
+        boolean containsPlanBounds = source[0] <= planBounds[0] + 0.05
+                && source[1] <= planBounds[1] + 0.05
+                && source[2] >= planBounds[2] - 0.05
+                && source[3] >= planBounds[3] - 0.05;
+        if (!containsPlanBounds) return null;
+        return Materialization.TEXTLESS_VISUAL_FRAGMENT;
+    }
+
+    private boolean hasCrossPageVisualSourceIntersectingPlanPage(
+            int pageIndex,
+            int[] visualSourceIds) {
+        if (data == null || pageIndex < 0 || visualSourceIds == null || visualSourceIds.length == 0) {
+            return false;
+        }
+        double[] page = pageBounds(pageIndex);
+        if (page == null || page.length < 4) return false;
+        for (int sourceId : visualSourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.pageIndex() < 0 || item.pageIndex() == pageIndex) continue;
+            if (overlapArea(page, boundsOf(item)) > 0.0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private double[] renderSourceBoundsOfRenderedFragment(RenderedGroup rg) {
+        if (rg == null) return null;
+        double[] crop = rg.cropSourceBounds();
+        if (crop != null && crop.length >= 4 && isPositiveBounds(crop)) {
+            return crop;
+        }
+        return null;
+    }
+
+    private boolean shouldPlanRenderedChildShellFragmentAsNonExecutable(
+            RenderedGroup child,
+            int[] childSourceIds,
+            VisualAction childVisualAction) {
+        if (child == null || data == null) return false;
+        if (isDirectChildShellSlotRender(child)) return false;
+        if (childVisualAction != VisualAction.PLACE_FLOATING_PNG
+                && childVisualAction != VisualAction.PLACE_INLINE_PNG
+                && childVisualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (!isInitialVisibleChildShellFragment(child)) return false;
+        if (childSourceIds == null || childSourceIds.length == 0) return false;
+        for (RenderedGroup carrier : initialCompositeShellCarriersForPage(child.pageIndex())) {
+            if (!isInitialCompositeShellCarrierCandidate(carrier)) continue;
+            if (carrier.id() == child.id()) continue;
+            if (carrier.pageIndex() != child.pageIndex()) continue;
+            int[] carrierSourceIds = sourceIdsOrSelf(carrier);
+            if (carrierSourceIds.length <= childSourceIds.length) continue;
+            if (!containsAll(carrierSourceIds, childSourceIds)
+                    && !contains(carrierSourceIds, child.id())) {
+                continue;
+            }
+            if (carrier.bounds() != null && child.bounds() != null
+                    && !boundsContains(carrier.bounds(), child.bounds(), 4.0)
+                    && !boundsMostlyOverlap(carrier.bounds(), child.bounds(), 0.05)) {
+                continue;
+            }
+            if (carrierHasVisibleMaterialOutsideInitialChildShellSlots(carrier, carrierSourceIds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean shouldPlanAdjacentTextShellChromeAsNonExecutable(
+            RenderedGroup child,
+            int[] childSourceIds,
+            VisualAction childVisualAction) {
+        if (child == null || data == null) return false;
+        if (childVisualAction != VisualAction.PLACE_FLOATING_PNG
+                && childVisualAction != VisualAction.PLACE_INLINE_PNG) {
+            return false;
+        }
+        if (!isRenderedPageObject(child)) return false;
+        if (!"indesign_png".equals(child.visualOwner())) return false;
+        if (!"none".equals(child.textOwner())) return false;
+        if (Boolean.TRUE.equals(child.containsText())
+                || Boolean.TRUE.equals(child.containsEditableText())) {
+            return false;
+        }
+        if (childSourceIds == null || childSourceIds.length == 0) return false;
+        if (hasBackgroundRoleSourceLayer(child, childSourceIds)) return false;
+        if (!isAdjacentTextShellChromeReason(child.reason())) return false;
+
+        for (int adjacentPageIndex : adjacentPageIndexes(child.pageIndex())) {
+            for (RenderedGroup carrier : adjacentTextShellCarriersForPage(adjacentPageIndex)) {
+                if (!isAdjacentAtomicTextShellCarrier(carrier)) continue;
+                int[] carrierSourceIds = sourceIdsOrSelf(carrier);
+                if (!containsAll(carrierSourceIds, childSourceIds)
+                        && !contains(carrierSourceIds, child.id())) {
+                    continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isAdjacentTextShellChromeReason(String reason) {
+        String r = safe(reason);
+        return "graphic_ownership_root".equals(r)
+                || "decoration_group".equals(r)
+                || "pure_decoration_group".equals(r)
+                || "complex_graphic_text_hidden".equals(r);
+    }
+
+    private static int[] adjacentPageIndexes(int pageIndex) {
+        if (pageIndex < 0) return new int[0];
+        return new int[] { pageIndex - 1, pageIndex + 1 };
+    }
+
+    private static boolean isAdjacentAtomicTextShellCarrier(RenderedGroup carrier) {
+        if (carrier == null) return false;
+        if (!isRenderedPageObject(carrier)) return false;
+        if (!"indesign_png".equals(carrier.visualOwner())) return false;
+        if (!"hwpx_tf".equals(carrier.textOwner())) return false;
+        if (carrier.editableTextFrameIds() == null
+                || carrier.editableTextFrameIds().length == 0) {
+            return false;
+        }
+        String reason = safe(carrier.reason());
+        return reason.contains("atomic_ownership_root_text_hidden_shell")
+                || reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("composite_shell_carrier");
+    }
+
+    private boolean isInitialVisibleChildShellFragment(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!isRenderedPageObject(rg)) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!"none".equals(rg.textOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        if (rg.file() == null || rg.file().isEmpty()) return false;
+        if (hasDistinctChildShellSlotSignalReason(rg.reason())) return true;
+        if (!"complex_graphic_text_hidden".equals(safe(rg.reason()))) return false;
+        if (isImageBackedContentShell(rg) || hasPlacedContentSourceTree(rg)) return false;
+        return hasVisibleShellMaterialSource(rg);
+    }
+
+    private boolean hasVisibleShellMaterialSource(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        for (int sourceId : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (sourceItemHasVisibleShellMaterial(item)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isInitialCompositeShellCarrierCandidate(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!isRenderedPageObject(rg)) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (rg.file() == null || rg.file().isEmpty()) return false;
+        String reason = safe(rg.reason());
+        return reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("image_group_text_hidden")
+                || reason.contains("composite_shell_carrier");
+    }
+
+    private List<RenderedGroup> adjacentTextShellCarriersForPage(int pageIndex) {
+        if (pageIndex < 0) return java.util.Collections.emptyList();
+        List<RenderedGroup> out = new ArrayList<>();
+        for (RenderedGroup rg : allRenderedGroups()) {
+            if (rg == null || rg.pageIndex() != pageIndex) continue;
+            if (isAdjacentAtomicTextShellCarrier(rg)) {
+                out.add(rg);
+            }
+        }
+        return out;
+    }
+
+    private boolean carrierHasVisibleMaterialOutsideInitialChildShellSlots(
+            RenderedGroup carrier,
+            int[] carrierSourceIds) {
+        if (carrier == null || carrierSourceIds == null || data == null) return false;
+        String cacheKey = carrier.pageIndex() + ":" + carrier.id();
+        Boolean cached = carrierVisibleMaterialOutsideInitialChildShellSlotsCache.get(cacheKey);
+        if (cached != null) return cached;
+        LinkedHashSet<Integer> covered = new LinkedHashSet<>();
+        for (RenderedGroup child : initialVisibleChildShellFragmentsForPage(carrier.pageIndex())) {
+            if (!isInitialVisibleChildShellFragment(child)) continue;
+            if (child.id() == carrier.id()) continue;
+            if (child.pageIndex() != carrier.pageIndex()) continue;
+            int[] childSourceIds = sourceIdsOrSelf(child);
+            if (!containsAll(carrierSourceIds, childSourceIds)
+                    && !contains(carrierSourceIds, child.id())) {
+                continue;
+            }
+            if (carrier.bounds() != null && child.bounds() != null
+                    && !boundsContains(carrier.bounds(), child.bounds(), 4.0)
+                    && !boundsMostlyOverlap(carrier.bounds(), child.bounds(), 0.05)) {
+                continue;
+            }
+            addAll(childSourceIds, covered);
+            int[] childVisualSourceIds = visualSourceIdsForRendered(
+                    child,
+                    childSourceIds,
+                    editableTextFrameIdsOf(child),
+                    VisualAction.PLACE_FLOATING_PNG);
+            addAll(childVisualSourceIds, covered);
+        }
+        if (covered.isEmpty()) return false;
+        for (int sourceId : carrierSourceIds) {
+            if (sourceId == carrier.id()) continue;
+            if (covered.contains(sourceId)) continue;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (sourceItemHasVisibleShellMaterial(item)) {
+                carrierVisibleMaterialOutsideInitialChildShellSlotsCache.put(cacheKey, true);
+                return true;
+            }
+        }
+        carrierVisibleMaterialOutsideInitialChildShellSlotsCache.put(cacheKey, false);
+        return false;
     }
 
     private void planTextFrames() {
@@ -1045,6 +1537,9 @@ public final class OwnershipPlanner {
             int[] sourceIds = tableOnlyTextFrame
                     ? tableOnlySourceIds(domId, idmlStory)
                     : new int[] { domId };
+            int[] styleSourceIds = tableOnlyTextFrame
+                    ? tableOnlyStyleSourceIds(domId)
+                    : new int[0];
             plans.add(new ObjectPlan(
                     domId,
                     tableOnlyTextFrame ? "text_frame:table_only" : "text_frame",
@@ -1055,19 +1550,226 @@ public final class OwnershipPlanner {
                     placement,
                     null,
                     sourceIds,
-                    sourceIds,
+                    tableOnlyTextFrame ? new int[0] : sourceIds,
+                    styleSourceIds,
                     new int[] { domId },
                     new int[0],
                     "p" + tf.pageIndex() + ":tf:" + domId,
-                    tf.zOrder(),
+                    null,
+                    null,
+                    null,
+                    textFrameSourceZOrder(tf),
                     ownedByAnchoredTablePlan ? "owned_by_anchored_table_plan"
                             : (tableOnlyTextFrame ? "table_only_text_frame" : textFrameReason(tf, textAction)),
                     null,
-                    tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds(),
+                    textFramePlanBounds(tf, domId, tableOnlyTextFrame),
                     tf.layerId(),
                     tf.layerName(),
                     tf.layerIndex()));
         }
+    }
+
+    private double[] textFramePlanBounds(
+            ResolvedTextFrame tf,
+            int textFrameDomId,
+            boolean tableOnlyTextFrame) {
+        if (tableOnlyTextFrame && data != null && textFrameDomId >= 0) {
+            ResolvedPageItem sourceItem = data.getPageItem(String.valueOf(textFrameDomId));
+            double[] sourceBounds = boundsOf(sourceItem);
+            if (sourceBounds != null && sourceBounds.length >= 4) {
+                return sourceBounds;
+            }
+        }
+        return tf != null && tf.pageRelativeBounds() != null ? tf.pageRelativeBounds()
+                : (tf != null ? tf.geometricBounds() : null);
+    }
+
+    private void normalizeDuplicateSiblingLabelTextOwners() {
+        if (data == null) return;
+        Map<String, List<Integer>> bySiblingTextSlot = new LinkedHashMap<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null || !"text_frame".equals(plan.kind)) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(plan.domId));
+            String key = siblingTextSlotKey(tf);
+            if (key == null) continue;
+            bySiblingTextSlot.computeIfAbsent(key, k -> new ArrayList<>()).add(plan.domId);
+        }
+        if (bySiblingTextSlot.isEmpty()) return;
+
+        LinkedHashSet<Integer> duplicateTextFrameIds = new LinkedHashSet<>();
+        for (List<Integer> ids : bySiblingTextSlot.values()) {
+            if (ids == null || ids.size() < 2) continue;
+            int canonicalId = canonicalSiblingLabelTextOwner(ids);
+            if (canonicalId < 0) continue;
+            ResolvedTextFrame canonical = data.getTextFrame(String.valueOf(canonicalId));
+            if (!hasNativeFrameStyle(canonical)
+                    && !hasExtractedTextlessSiblingShellOwner(canonicalId)
+                    && !hasTextlessSiblingShellSourceOwner(canonicalId)) {
+                continue;
+            }
+            for (int id : ids) {
+                if (id == canonicalId) continue;
+                ResolvedTextFrame candidate = data.getTextFrame(String.valueOf(id));
+                if (isDuplicateSiblingLabelTextFrame(candidate, canonical)) {
+                    duplicateTextFrameIds.add(id);
+                }
+            }
+        }
+        if (duplicateTextFrameIds.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if ("text_frame".equals(plan.kind)
+                    && duplicateTextFrameIds.contains(plan.domId)
+                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "duplicate_sibling_label_text_owned_by_styled_frame"));
+                continue;
+            }
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && ownedTextFramesAllIn(plan, duplicateTextFrameIds)) {
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "duplicate_sibling_label_text_owned_by_styled_frame"));
+            }
+        }
+    }
+
+    private String siblingTextSlotKey(ResolvedTextFrame tf) {
+        if (tf == null || tf.id() == null) return null;
+        ResolvedPageItem item = data.getPageItem(tf.id());
+        if (item == null || item.parentId() == null || item.parentId().isBlank()) return null;
+        String text = normalizeResolvedVisibleText(visibleText(tf));
+        if (text.isEmpty()) return null;
+        double[] b = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+        if (b == null || b.length < 4 || area(b) <= 0.0) return null;
+        return tf.pageIndex() + ":" + item.parentId() + ":" + text;
+    }
+
+    private int canonicalSiblingLabelTextOwner(List<Integer> textFrameIds) {
+        int best = -1;
+        int bestScore = Integer.MIN_VALUE;
+        double bestArea = -1.0;
+        int bestZ = Integer.MIN_VALUE;
+        for (int id : textFrameIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(id));
+            if (tf == null) continue;
+            int score = hasNativeFrameStyle(tf) ? 1000 : 0;
+            if (hasExtractedTextlessSiblingShellOwner(id)
+                    || hasTextlessSiblingShellSourceOwner(id)) {
+                score += 5000;
+            }
+            if (tf.fillColor() != null && !isNoneColor(tf.fillColor())) score += 200;
+            if (tf.strokeColor() != null && !isNoneColor(tf.strokeColor())) score += 100;
+            if (tf.cornerRadius() > 0.0) score += 50;
+            double area = area(tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds());
+            int z = tf.zOrder();
+            if (score > bestScore
+                    || (score == bestScore && area > bestArea)
+                    || (score == bestScore && area == bestArea && z > bestZ)) {
+                best = id;
+                bestScore = score;
+                bestArea = area;
+                bestZ = z;
+            }
+        }
+        return best;
+    }
+
+    private boolean hasExtractedTextlessSiblingShellOwner(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) continue;
+            if (!contains(plan.ownedTextFrameIds, textFrameId)) continue;
+            if (contains(plan.styleSourceObjectIds, textFrameId)) continue;
+            if (plan.visualSourceObjectIds == null || plan.visualSourceObjectIds.length == 0) continue;
+            if (plan.visualSourceObjectIds.length == 1 && plan.visualSourceObjectIds[0] == textFrameId) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean hasTextlessSiblingShellSourceOwner(int textFrameId) {
+        if (data == null || textFrameId < 0) return false;
+        ResolvedPageItem textItem = data.getPageItem(String.valueOf(textFrameId));
+        if (textItem == null || textItem.parentId() == null || textItem.parentId().isBlank()) {
+            return false;
+        }
+        double[] textBounds = boundsOf(textItem);
+        double textArea = area(textBounds);
+        if (textBounds == null || textArea <= 0.0) return false;
+        for (ResolvedPageItem sibling : data.pageItems()) {
+            if (sibling == null || sibling.id() == null) continue;
+            if (sibling.id().equals(textItem.id())) continue;
+            if (!safe(textItem.parentId()).equals(safe(sibling.parentId()))) continue;
+            if ("TextFrame".equals(safe(sibling.type()))) continue;
+            if (!isNativeTextShellShape(sibling)) continue;
+            double[] shellBounds = boundsOf(sibling);
+            double shellArea = area(shellBounds);
+            if (shellBounds == null || shellArea <= 0.0) continue;
+            if (shellArea < textArea * 0.55 || shellArea > textArea * 3.0) continue;
+            if (boundsContainCenter(shellBounds, textBounds)
+                    || boundsMostlyOverlap(shellBounds, textBounds, 0.35)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean boundsContainCenter(double[] outer, double[] inner) {
+        if (outer == null || inner == null || outer.length < 4 || inner.length < 4) return false;
+        double cx = (inner[0] + inner[2]) / 2.0;
+        double cy = (inner[1] + inner[3]) / 2.0;
+        return cx >= Math.min(outer[0], outer[2])
+                && cx <= Math.max(outer[0], outer[2])
+                && cy >= Math.min(outer[1], outer[3])
+                && cy <= Math.max(outer[1], outer[3]);
+    }
+
+    private boolean isDuplicateSiblingLabelTextFrame(
+            ResolvedTextFrame candidate,
+            ResolvedTextFrame canonical) {
+        if (candidate == null || canonical == null) return false;
+        if (candidate.id() == null || candidate.id().equals(canonical.id())) return false;
+        if (candidate.pageIndex() != canonical.pageIndex()) return false;
+        ResolvedPageItem candidateItem = data.getPageItem(candidate.id());
+        ResolvedPageItem canonicalItem = data.getPageItem(canonical.id());
+        if (candidateItem == null || canonicalItem == null) return false;
+        if (!safe(candidateItem.parentId()).equals(safe(canonicalItem.parentId()))) return false;
+        String candidateText = normalizeResolvedVisibleText(visibleText(candidate));
+        String canonicalText = normalizeResolvedVisibleText(visibleText(canonical));
+        if (candidateText.isEmpty() || !candidateText.equals(canonicalText)) return false;
+        double[] cb = candidate.pageRelativeBounds() != null
+                ? candidate.pageRelativeBounds() : candidate.geometricBounds();
+        double[] kb = canonical.pageRelativeBounds() != null
+                ? canonical.pageRelativeBounds() : canonical.geometricBounds();
+        return boundsMostlyOverlap(cb, kb, 0.45) || boundsContains(kb, cb, 1.5);
+    }
+
+    private boolean hasNativeFrameStyle(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        if (tf.fillColor() != null && !isNoneColor(tf.fillColor())) return true;
+        if (tf.strokeColor() != null && !isNoneColor(tf.strokeColor())) return true;
+        if (tf.strokeWeight() > 0.0) return true;
+        return tf.cornerRadius() > 0.0;
+    }
+
+    private static boolean ownedTextFramesAllIn(ObjectPlan plan, Set<Integer> ids) {
+        if (plan == null || ids == null || ids.isEmpty()
+                || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+            return false;
+        }
+        for (int textFrameId : plan.ownedTextFrameIds) {
+            if (!ids.contains(textFrameId)) return false;
+        }
+        return true;
     }
 
     /**
@@ -1085,25 +1787,23 @@ public final class OwnershipPlanner {
             if (tfItem == null || tfItem.parentId() == null) continue;
             ResolvedPageItem parent = data.getPageItem(tfItem.parentId());
             if (!isNativeTextShellShape(parent)) continue;
-            double[] tfSourceBounds = tf.geometricBounds();
-            double[] shellSourceBounds = parent.geometricBounds();
-            if (tfSourceBounds == null || shellSourceBounds == null) continue;
-            if (overlapRatio(tfSourceBounds, shellSourceBounds) < 0.75) continue;
             double[] shellPlanBounds = pageRelativeBoundsOf(parent);
             if (shellPlanBounds == null) continue;
 
             int shellId = parseInt(parent.id(), -1);
             if (shellId < 0 || hasNativeParentTextShellPlan(shellId, tfId)) continue;
             if (hasExistingDirectExtractedTextShellPlanForSource(shellId)) continue;
+            if (hasExistingExtractedTextShellOwnerForSourceAndTextFrame(shellId, tfId)) continue;
             if (hasExistingVisibleNonShellExtractedVisualPlanForSource(shellId)) continue;
             if (hasExistingDroppedExtractedContainerPlanForSource(shellId)) continue;
+            if (isBakedIntoVisibleSlotOnlyParentShell(shellId, tfId)) continue;
             Placement placement = placementOfNativeSourceTextShell(tf, tfId, shellId);
             VisualLayer layer = nativeParentTextShellLayer(tf, parent);
             plans.add(new ObjectPlan(
                     shellId,
                     "native_parent_text_shell",
                     tf.pageIndex(),
-                    TextAction.OWNED_BY_HWPX_TEXT,
+                    TextAction.DROP_TEXT,
                     VisualAction.PLACE_TEXT_SHELL,
                     layer,
                     placement,
@@ -1117,7 +1817,7 @@ public final class OwnershipPlanner {
                     Materialization.NATIVE_SOURCE_SHAPE,
                     placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE,
                     null,
-                    Math.min(parent.zOrder(), tf.zOrder() - 1),
+                    parent.zOrder(),
                     "native_parent_text_shell",
                     null,
                     shellPlanBounds,
@@ -1142,6 +1842,9 @@ public final class OwnershipPlanner {
         if (textFrameStoryContainsInlineAnchor(tf)) {
             return VisualLayer.CONTAINER_BACKDROP;
         }
+        if (textFrameStoryUsesCalloutOverlayStyle(tf) && hasDrawableNativeShell(shell)) {
+            return VisualLayer.LABEL_OVERLAY_BACKDROP;
+        }
         return hasColoredNativeShell(shell)
                 ? VisualLayer.LABEL_BACKDROP
                 : VisualLayer.CONTAINER_BACKDROP;
@@ -1151,13 +1854,193 @@ public final class OwnershipPlanner {
         if (textFrameStoryContainsInlineAnchor(tf)) {
             return VisualLayer.CONTAINER_BACKDROP;
         }
+        if (textFrameStoryUsesCalloutOverlayStyle(tf) && hasDrawableNativeShell(shell)) {
+            return VisualLayer.LABEL_OVERLAY_BACKDROP;
+        }
         return hasColoredNativeShell(shell)
                 ? VisualLayer.LABEL_BACKDROP
                 : VisualLayer.CONTAINER_BACKDROP;
     }
 
+    /**
+     * Stage 1 source ownership: page/spread-level plain filled source shapes that
+     * materially cover a page are page-local BACKGROUND owners. They are not
+     * text shells, and later stages must execute this plan rather than trying to
+     * recover missing backgrounds from rendered PNG output.
+     */
+    private void planNativePageBackdropShapes() {
+        if (data == null || data.pageItems() == null || data.pages() == null) return;
+        for (ResolvedPageItem item : data.pageItems()) {
+            if (!isNativePageBackdropSource(item)) continue;
+            int sourceId = parseInt(item.id(), -1);
+            if (sourceId < 0) continue;
+            for (ResolvedPage page : nativePageBackdropTargetPages(item)) {
+                if (page == null || page.index() < 0) continue;
+                double[] pageLocalBounds = pageLocalBoundsOf(item, page.index(), true);
+                if (pageLocalBounds == null || pageLocalBounds.length < 4) continue;
+                if (!isMaterialPageBackdropOnPage(item, page.index(), pageLocalBounds)) continue;
+                if (hasAnyVisibleOrStyleOwnerForSourceOnPage(sourceId, page.index())) continue;
+
+                plans.add(new ObjectPlan(
+                        sourceId,
+                        "native_page_backdrop_shape",
+                        page.index(),
+                        TextAction.DROP_TEXT,
+                        VisualAction.PLACE_FLOATING_PNG,
+                        VisualLayer.PAGE_BACKGROUND,
+                        Placement.FLOATING,
+                        null,
+                        new int[] { sourceId },
+                        new int[] { sourceId },
+                        new int[] { sourceId },
+                        new int[0],
+                        new int[0],
+                        "p" + page.index() + ":native-page-backdrop:" + sourceId,
+                        Materialization.NATIVE_SOURCE_SHAPE,
+                        CoordinateSpace.PAGE,
+                        null,
+                        sourceDepthOrderOrItemZOrder(sourceId, item.zOrder()),
+                        "native_page_backdrop_shape",
+                        null,
+                        pageLocalBounds,
+                        item.layerId(),
+                        item.layerName(),
+                        item.layerIndex()));
+            }
+        }
+    }
+
+    private boolean isNativePageBackdropSource(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden()) return false;
+        if (item.isInline()) return false;
+        if (item.parentId() != null) return false;
+        if (!isNativeSourceShapeMaterializationAllowed(item)) return false;
+        if (!sourceItemHasVisibleShellMaterial(item)) return false;
+        if (hasTextFrameDescendant(item)) return false;
+        int sourceId = parseInt(item.id(), -1);
+        return sourceId < 0 || !hasPlacedContentSourceTree(sourceId);
+    }
+
+    private int sourceDepthOrderOrItemZOrder(int sourceId, int fallbackZOrder) {
+        int sourceDepth = maxPageItemSourceDepth(new int[] { sourceId });
+        return sourceDepth >= 0 ? sourceDepth : fallbackZOrder;
+    }
+
+    private List<ResolvedPage> nativePageBackdropTargetPages(ResolvedPageItem item) {
+        List<ResolvedPage> result = new ArrayList<>();
+        if (item == null || data == null || data.pages() == null) return result;
+        int basePageIndex = item.pageIndex();
+        if (basePageIndex < 0) return result;
+        addPageIfBackdropIntersects(item, basePageIndex, result);
+
+        // A spread-level page item may cross into the facing page. The facing
+        // page is chosen from the source page's spread-side bounds, not from
+        // both adjacent document pages; otherwise the next spread can inherit
+        // this background because page bounds repeat.
+        int facingPageIndex = facingPageIndexInSameSpread(basePageIndex);
+        if (facingPageIndex >= 0) {
+            addPageIfBackdropIntersects(item, facingPageIndex, result);
+        }
+        return result;
+    }
+
+    private int facingPageIndexInSameSpread(int pageIndex) {
+        ResolvedPage page = data != null ? data.getPage(pageIndex) : null;
+        if (page == null || page.bounds() == null || page.bounds().length < 4
+                || data.pages() == null || data.pages().isEmpty()) {
+            return -1;
+        }
+        double minLeft = Double.POSITIVE_INFINITY;
+        for (ResolvedPage candidate : data.pages()) {
+            double[] b = candidate != null ? candidate.bounds() : null;
+            if (b == null || b.length < 4) continue;
+            minLeft = Math.min(minLeft, b[1]);
+        }
+        if (!Double.isFinite(minLeft)) return -1;
+        double pageLeft = page.bounds()[1];
+        double pageWidth = Math.max(0.0, page.bounds()[3] - page.bounds()[1]);
+        double tolerance = Math.max(1.0, pageWidth * 0.05);
+        int facingIndex = pageLeft <= minLeft + tolerance
+                ? pageIndex + 1
+                : pageIndex - 1;
+        return data.getPage(facingIndex) != null ? facingIndex : -1;
+    }
+
+    private void addPageIfBackdropIntersects(
+            ResolvedPageItem item,
+            int pageIndex,
+            List<ResolvedPage> result) {
+        if (pageIndex < 0 || result == null) return;
+        ResolvedPage page = data != null ? data.getPage(pageIndex) : null;
+        if (page == null || page.bounds() == null || page.bounds().length < 4) return;
+        double[] itemBounds = item != null ? item.geometricBounds() : null;
+        if (overlapArea(page.bounds(), itemBounds) <= 0.0) return;
+        for (ResolvedPage existing : result) {
+            if (existing != null && existing.index() == page.index()) return;
+        }
+        result.add(page);
+    }
+
+    private boolean isMaterialPageBackdropOnPage(
+            ResolvedPageItem item,
+            int pageIndex,
+            double[] pageLocalBounds) {
+        double[] page = pageBounds(pageIndex);
+        if (item == null || page == null || page.length < 4
+                || pageLocalBounds == null || pageLocalBounds.length < 4) {
+            return false;
+        }
+        double pageArea = pageArea(pageIndex);
+        double overlap = area(pageLocalBounds);
+        if (pageArea <= 0.0 || overlap <= 0.0) return false;
+        if (overlap / pageArea >= 0.25) return true;
+
+        double pageWidth = Math.max(0.0, page[3] - page[1]);
+        double pageHeight = Math.max(0.0, page[2] - page[0]);
+        double width = Math.max(0.0, pageLocalBounds[3] - pageLocalBounds[1]);
+        double height = Math.max(0.0, pageLocalBounds[2] - pageLocalBounds[0]);
+        boolean spansPageWidth = pageWidth > 0.0 && width / pageWidth >= 0.90;
+        boolean spansPageHeight = pageHeight > 0.0 && height / pageHeight >= 0.90;
+        return (spansPageWidth || spansPageHeight) && overlap / pageArea >= 0.10;
+    }
+
+    private double[] pageLocalBoundsOf(ResolvedPageItem item, int pageIndex, boolean clipToPage) {
+        if (item == null) return null;
+        double[] b = item.geometricBounds();
+        double[] page = pageBounds(pageIndex);
+        if (b == null || b.length < 4 || page == null || page.length < 4) return null;
+        double top = b[0] - page[0];
+        double left = b[1] - page[1];
+        double bottom = b[2] - page[0];
+        double right = b[3] - page[1];
+        double[] result = new double[] { top, left, bottom, right };
+        return clipToPage ? clipPageRelativeBoundsToPage(pageIndex, result) : result;
+    }
+
+    private boolean hasAnyVisibleOrStyleOwnerForSourceOnPage(int sourceId, int pageIndex) {
+        if (sourceId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.pageIndex != pageIndex) continue;
+            if (plan.hasVisibleVisual() && contains(visualSourceIds(plan), sourceId)) {
+                return true;
+            }
+            if (contains(plan.styleSourceObjectIds, sourceId)) {
+                return true;
+            }
+            if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE
+                    && contains(visualSourceIds(plan), sourceId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean textFrameStoryContainsInlineAnchor(ResolvedTextFrame tf) {
         if (data == null || tf == null || tf.storyId() == null) return false;
+        if (ctx != null && ctx.textFlowDocument != null) {
+            TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(tf.storyId());
+            if (textFlowUnitContainsInlineSlot(unit)) return true;
+        }
         ResolvedStory story = data.getStory(tf.storyId());
         if (story == null || story.paragraphs() == null) return false;
         for (ResolvedParagraph paragraph : story.paragraphs()) {
@@ -1167,6 +2050,62 @@ public final class OwnershipPlanner {
             }
         }
         return false;
+    }
+
+    private boolean textFrameStoryUsesCalloutOverlayStyle(ResolvedTextFrame tf) {
+        if (data == null || tf == null || tf.storyId() == null) return false;
+        ResolvedStory story = data.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null) continue;
+            if (isCalloutOverlayStyleName(paragraph.styleName())) return true;
+        }
+        return false;
+    }
+
+    private boolean ownedTextUsesCalloutOverlayStyle(RenderedGroup rg) {
+        if (rg == null) return false;
+        int[] ids = editableTextFrameIdsOf(rg);
+        if (ids.length == 0) return false;
+        return ownedTextFrameIdsUseCalloutOverlayStyle(ids);
+    }
+
+    private boolean ownedTextFrameIdsUseCalloutOverlayStyle(int[] ids) {
+        if (ids == null || ids.length == 0) return false;
+        for (int id : ids) {
+            ResolvedTextFrame tf = data != null ? data.getTextFrame(String.valueOf(id)) : null;
+            if (textFrameStoryUsesCalloutOverlayStyle(tf)) return true;
+        }
+        return false;
+    }
+
+    private VisualLayer textShellVisualLayer(
+            ObjectPlan shell,
+            int[] ownedTextFrameIds,
+            VisualLayer fallback) {
+        if (ownedTextFrameIdsUseCalloutOverlayStyle(ownedTextFrameIds)) {
+            return VisualLayer.LABEL_OVERLAY_BACKDROP;
+        }
+        if (fallback != null) return fallback;
+        return hasColoredShapeShellSource(shell)
+                ? VisualLayer.LABEL_BACKDROP
+                : VisualLayer.CONTAINER_BACKDROP;
+    }
+
+    private VisualLayer textShellVisualLayerForOwnedTextFrames(int[] ids, VisualLayer fallback) {
+        if (ownedTextFrameIdsUseCalloutOverlayStyle(ids)) {
+            return VisualLayer.LABEL_OVERLAY_BACKDROP;
+        }
+        return fallback != null ? fallback : VisualLayer.LABEL_BACKDROP;
+    }
+
+    private static boolean isCalloutOverlayStyleName(String styleName) {
+        String s = safe(styleName).toLowerCase(java.util.Locale.ROOT);
+        if (s.isEmpty()) return false;
+        return s.contains("말풍선")
+                || s.contains("callout")
+                || s.contains("speech")
+                || s.contains("bubble");
     }
 
     private boolean hasExistingDirectExtractedTextShellPlanForSource(int shellId) {
@@ -1179,6 +2118,23 @@ public final class OwnershipPlanner {
             if (isAtomicOwnershipRootTextHiddenShellPlan(plan)) return true;
             if (isDirectInlineTextShellReason(plan.reason)) return true;
             if ("sibling_group_text_shell".equals(plan.reason)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasExistingExtractedTextShellOwnerForSourceAndTextFrame(int shellId, int tfId) {
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) continue;
+            if (!plan.hasVisibleVisual()) continue;
+            if (!contains(plan.sourceObjectIds, shellId)
+                    && !contains(plan.visualSourceObjectIds, shellId)
+                    && !contains(plan.styleSourceObjectIds, shellId)) {
+                continue;
+            }
+            if (!contains(plan.ownedTextFrameIds, tfId)) continue;
+            return true;
         }
         return false;
     }
@@ -1209,6 +2165,34 @@ public final class OwnershipPlanner {
         return false;
     }
 
+    private boolean isBakedIntoVisibleSlotOnlyParentShell(int shellId, int tfId) {
+        if (shellId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (!isVisibleRenderedVisual(plan)) continue;
+            if (!"slot_only_textless_shell".equals(safe(plan.reason))) continue;
+            RenderedGroup rg = renderedGroupForPlan(plan);
+            int[] parentSources = rg != null && rg.sourceObjectIds() != null
+                    ? rg.sourceObjectIds()
+                    : plan.sourceObjectIds;
+            if (!contains(parentSources, shellId)) continue;
+            if (rg != null && contains(rg.hiddenVisualSourceObjectIds(), shellId)) continue;
+            if (!slotOnlyParentClaimsSameTextShellSlot(plan, rg, parentSources, tfId)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean slotOnlyParentClaimsSameTextShellSlot(
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int[] parentSources,
+            int tfId) {
+        if (tfId < 0) return true;
+        if (contains(parentSources, tfId)) return true;
+        if (contains(plan.ownedTextFrameIds, tfId)) return true;
+        return rg != null && renderedGroupClaimsTextFrame(rg, String.valueOf(tfId));
+    }
+
     /**
      * Source ownership policy: a direct visual shell shape and a direct editable
      * TextFrame under the same source group form their own shell slot. A parent
@@ -1216,6 +2200,7 @@ public final class OwnershipPlanner {
      */
     private void planNativeSiblingTextShells() {
         if (data == null) return;
+        Map<String, List<ResolvedTextFrame>> textFramesByParentId = editableTextFramesByParentId();
         for (ResolvedPageItem shell : data.pageItems()) {
             if (!isNativeTextShellShape(shell)) continue;
             if (shell.parentId() == null) continue;
@@ -1228,16 +2213,18 @@ public final class OwnershipPlanner {
             double[] shellPlanBounds = pageRelativeBoundsOf(shell);
             if (shellSourceBounds == null || shellPlanBounds == null) continue;
 
-            for (ResolvedTextFrame tf : data.textFrames()) {
-                if (!isVisibleEditableTextFrameSource(tf)) continue;
+            List<ResolvedTextFrame> siblingTextFrames = textFramesByParentId.get(shell.parentId());
+            if (siblingTextFrames == null || siblingTextFrames.isEmpty()) continue;
+            for (ResolvedTextFrame tf : siblingTextFrames) {
                 int tfId = parseInt(tf.id(), -1);
                 if (tfId < 0) continue;
                 ResolvedPageItem tfItem = data.getPageItem(tf.id());
-                if (tfItem == null || tfItem.parentId() == null) continue;
-                if (!shell.parentId().equals(tfItem.parentId())) continue;
+                if (tfItem == null) continue;
                 if (!textFrameFitsShell(shellSourceBounds, tf.geometricBounds())) continue;
                 if (hasExistingDirectExtractedTextShellPlanForTextFrame(tfId)) continue;
                 if (hasNativeParentTextShellPlan(shellId, tfId)) continue;
+                if (hasExistingExtractedTextShellOwnerForSourceAndTextFrame(shellId, tfId)) continue;
+                if (isBakedIntoVisibleSlotOnlyParentShell(shellId, tfId)) continue;
                 if (wouldCreatePartialCompositeTextShellSplit(shellId, tfId)) continue;
                 Placement placement = placementOfNativeSourceTextShell(tf, tfId, shellId);
                 VisualLayer layer = nativeSiblingTextShellLayer(tf, shell);
@@ -1245,7 +2232,7 @@ public final class OwnershipPlanner {
                         shellId,
                         "native_sibling_text_shell",
                         tf.pageIndex(),
-                        TextAction.OWNED_BY_HWPX_TEXT,
+                        TextAction.DROP_TEXT,
                         VisualAction.PLACE_TEXT_SHELL,
                         layer,
                         placement,
@@ -1259,7 +2246,7 @@ public final class OwnershipPlanner {
                         Materialization.NATIVE_SOURCE_SHAPE,
                         placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE,
                         null,
-                        Math.min(shell.zOrder(), tf.zOrder() - 1),
+                        shell.zOrder(),
                         "native_sibling_text_shell",
                         null,
                         shellPlanBounds,
@@ -1268,6 +2255,195 @@ public final class OwnershipPlanner {
                         shell.layerIndex()));
             }
         }
+    }
+
+    private void planUnownedVisualOnlyChildShellSlots() {
+        if (data == null) return;
+        LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
+        for (ObjectPlan composite : plans) {
+            boolean incompleteExtractorCarrier = isExtractorDeclaredCompositeShellCarrier(composite);
+            if (!isDroppedCompositeWithPossibleUnownedShellSlots(composite)
+                    && !incompleteExtractorCarrier) {
+                continue;
+            }
+            int[] candidateSourceIds = incompleteExtractorCarrier
+                    ? hiddenVisualSourcesNotExportedBy(composite)
+                    : visualSourceIds(composite);
+            for (int sourceId : candidateSourceIds) {
+                if (sourceId < 0 || sourceId == composite.domId) continue;
+                if (hasAnyVisibleOrStyleOwnerForSourceExcept(sourceId, composite)) continue;
+                ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+                if (!isUnownedVisualOnlyChildShellSource(item, composite)) continue;
+                candidates.add(sourceId);
+            }
+        }
+        for (int sourceId : candidates) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null) continue;
+            double[] bounds = pageRelativeBoundsOf(item);
+            if (bounds == null) continue;
+            plans.add(new ObjectPlan(
+                    sourceId,
+                    "native_visual_only_child_shell",
+                    item.pageIndex(),
+                    TextAction.DROP_TEXT,
+                    VisualAction.PLACE_TEXT_SHELL,
+                    VisualLayer.CONTAINER_BACKDROP,
+                    Placement.FLOATING,
+                    null,
+                    new int[] { sourceId },
+                    new int[] { sourceId },
+                    new int[] { sourceId },
+                    new int[0],
+                    new int[0],
+                    "p" + item.pageIndex() + ":native-visual-shell:" + sourceId,
+                    Materialization.NATIVE_SOURCE_SHAPE,
+                    CoordinateSpace.PAGE,
+                    null,
+                    item.zOrder(),
+                    "unowned_visual_only_child_shell_slot",
+                    null,
+                    bounds,
+                    item.layerId(),
+                    item.layerName(),
+                    item.layerIndex()));
+        }
+    }
+
+    private int[] hiddenVisualSourcesNotExportedBy(ObjectPlan plan) {
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        if (rendered == null || rendered.hiddenVisualSourceObjectIds() == null) {
+            return new int[0];
+        }
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (int sourceId : rendered.hiddenVisualSourceObjectIds()) {
+            if (sourceId <= 0) continue;
+            if (contains(rendered.exportSourceObjectIds(), sourceId)) continue;
+            ids.add(sourceId);
+        }
+        return toIntArray(ids);
+    }
+
+    private boolean hasAnyVisibleOrStyleOwnerForSourceExcept(int sourceId, ObjectPlan excludedOwner) {
+        if (sourceId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan == excludedOwner) continue;
+            if (plan.hasVisibleVisual() && contains(visualSourceIds(plan), sourceId)) {
+                return true;
+            }
+            if (contains(plan.styleSourceObjectIds, sourceId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isDroppedCompositeWithPossibleUnownedShellSlots(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (visualSourceIds(plan).length == 0) return false;
+        String reason = safe(plan.reason);
+        return reason.contains("text_hidden")
+                || reason.contains("text_composite")
+                || reason.contains("composite");
+    }
+
+    private boolean isUnownedVisualOnlyChildShellSource(ResolvedPageItem item, ObjectPlan composite) {
+        if (item == null || composite == null) return false;
+        if (item.pageIndex() != composite.pageIndex) return false;
+        if (!isNativeSourceShapeMaterializationAllowed(item)) return false;
+        if (!sourceItemHasVisibleShellMaterial(item)) return false;
+        if (item.parentId() == null) return false;
+        int itemId = parseFlexibleId(item.id());
+        int parentId = parseFlexibleId(item.parentId());
+        if (parentId != composite.domId) return false;
+        if (!contains(composite.sourceObjectIds, itemId)
+                && !contains(visualSourceIds(composite), itemId)) {
+            return false;
+        }
+        if (!contains(composite.sourceObjectIds, parentId)
+                && !contains(visualSourceIds(composite), parentId)) {
+            return false;
+        }
+        if (!hasVisibleSiblingOwnerInSameComposite(item, composite)) return false;
+        return !hasTextFrameDescendant(item);
+    }
+
+    private boolean hasVisibleSiblingOwnerInSameComposite(ResolvedPageItem item, ObjectPlan composite) {
+        if (item == null || item.parentId() == null || composite == null) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.pageIndex != composite.pageIndex) continue;
+            boolean visibleShell = plan.hasVisibleVisual()
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL;
+            boolean tableStyle = plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
+            if (!visibleShell && !tableStyle) continue;
+            for (int sourceId : visualSourceIds(plan)) {
+                if (sourceId < 0 || sourceId == parseFlexibleId(item.id())) continue;
+                if (!contains(composite.sourceObjectIds, sourceId)
+                        && !contains(visualSourceIds(composite), sourceId)) {
+                    continue;
+                }
+                ResolvedPageItem source = data.getPageItem(String.valueOf(sourceId));
+                if (source != null && item.parentId().equals(source.parentId())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasAnyVisibleOrStyleOwnerForSource(int sourceId) {
+        if (sourceId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.hasVisibleVisual() && contains(visualSourceIds(plan), sourceId)) {
+                return true;
+            }
+            if (contains(plan.styleSourceObjectIds, sourceId)) {
+                return true;
+            }
+            if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE
+                    && contains(visualSourceIds(plan), sourceId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasTextFrameDescendant(ResolvedPageItem item) {
+        if (item == null || item.id() == null || data == null) return false;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (tf == null || tf.id() == null) continue;
+            ResolvedPageItem tfItem = data.getPageItem(tf.id());
+            if (tfItem == null) continue;
+            String parentId = tfItem.parentId();
+            Set<String> seen = new HashSet<>();
+            while (parentId != null && seen.add(parentId)) {
+                if (item.id().equals(parentId)) return true;
+                ResolvedPageItem parent = data.getPageItem(parentId);
+                parentId = parent != null ? parent.parentId() : null;
+            }
+        }
+        return false;
+    }
+
+    private Map<String, List<ResolvedTextFrame>> editableTextFramesByParentId() {
+        if (editableTextFramesByParentIdCache != null) return editableTextFramesByParentIdCache;
+        Map<String, List<ResolvedTextFrame>> result = new HashMap<>();
+        if (data == null) {
+            editableTextFramesByParentIdCache = result;
+            return editableTextFramesByParentIdCache;
+        }
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (tf == null || tf.id() == null) continue;
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            ResolvedPageItem tfItem = data.getPageItem(tf.id());
+            if (tfItem == null || tfItem.parentId() == null) continue;
+            result.computeIfAbsent(tfItem.parentId(), k -> new ArrayList<>()).add(tf);
+        }
+        editableTextFramesByParentIdCache = result;
+        return editableTextFramesByParentIdCache;
     }
 
     private boolean hasExistingDirectExtractedTextShellPlanForTextFrame(int tfId) {
@@ -1287,11 +2463,109 @@ public final class OwnershipPlanner {
             ResolvedTextFrame tf,
             int tfId,
             int shellId) {
+        ResolvedPageItem shell = data != null ? data.getPageItem(String.valueOf(shellId)) : null;
+        if ((tf != null && tf.isInline()) || (shell != null && shell.isInline())) {
+            return Placement.INLINE;
+        }
         if (nativeShellSourceBelongsToPagePositionedComposite(shellId, tfId)) {
+            return Placement.FLOATING;
+        }
+        if (!hasExecutableInlineAnchorForNativeSourceTextShell(tf, tfId, shellId)) {
             return Placement.FLOATING;
         }
         return placementOfTextFrame(tf, tfId,
                 TextAction.OWNED_BY_HWPX_TEXT, VisualAction.PLACE_TEXT_SHELL);
+    }
+
+    private boolean hasExecutableInlineAnchorForNativeSourceTextShell(
+            ResolvedTextFrame tf,
+            int tfId,
+            int shellId) {
+        if (tf == null || !tf.isInline()) return false;
+        return hasResolvedInlineAnchorForSourceId(shellId)
+                || hasResolvedInlineAnchorForSourceId(tfId);
+    }
+
+    private boolean hasResolvedInlineAnchorForSourceId(int sourceId) {
+        if (sourceId < 0 || data == null) return false;
+        if (ctx != null && ctx.textFlowDocument != null) {
+            TextFlowDocument.InlineSlotCarrier carrier = ctx.textFlowDocument.inlineSlotCarrier(sourceId);
+            if (carrier != null) {
+                return textFlowParagraphHasAnyVisibleText(carrier.paragraph);
+            }
+        }
+        for (ResolvedStory story : data.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                boolean hasVisibleText = paragraphHasVisibleText(paragraph);
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null || !run.isInlineAnchor()) continue;
+                    Integer anchoredObjectId = run.anchoredObjectId();
+                    if (anchoredObjectId != null && anchoredObjectId == sourceId && hasVisibleText) {
+                        return true;
+                    }
+                }
+            }
+        }
+        for (ResolvedTable table : data.tables()) {
+            if (table == null || table.cells() == null) continue;
+            for (ResolvedTable.Cell cell : table.cells()) {
+                if (cell == null || cell.inlineAnchorIds() == null) continue;
+                for (Integer anchoredObjectId : cell.inlineAnchorIds()) {
+                    if (anchoredObjectId != null && anchoredObjectId == sourceId && cell.hasTextRuns()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean textFlowUnitContainsInlineSlot(TextFlowDocument.TextFlowUnit unit) {
+        if (unit == null || unit.paragraphs == null) return false;
+        for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
+            if (paragraph == null || paragraph.atoms == null) continue;
+            for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+                if (atom instanceof TextFlowDocument.InlineSlotAtom) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean textFlowParagraphHasAnyVisibleText(TextFlowDocument.TextFlowParagraph paragraph) {
+        if (paragraph == null || paragraph.atoms == null) return false;
+        for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+            if (!(atom instanceof TextFlowDocument.TextAtom)) continue;
+            TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
+            if (!normalizeResolvedVisibleText(textAtom.text).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean paragraphHasVisibleText(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return false;
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.isInlineAnchor()) continue;
+            if (hasVisibleStoryText(run.text())) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasVisibleStoryText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\r' || c == '\n' || c == '\t'
+                    || c == '\u0007' || c == '\uFFFC' || c == '￼'
+                    || Character.isWhitespace(c)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
     private boolean nativeShellSourceBelongsToPagePositionedComposite(int shellId, int tfId) {
@@ -1356,6 +2630,7 @@ public final class OwnershipPlanner {
             ObjectPlan parent = plans.get(i);
             if (!isExtractedCompositeTextShellParent(parent)) continue;
             if (!ownedTextFramesCoveredByDistinctDirectShellSlots(parent)) continue;
+            if (compositeTextShellHasExtraMaterialOutsideDirectShellSlots(parent)) continue;
             plans.set(i, parent
                     .withTextAction(TextAction.DROP_TEXT)
                     .withVisualAction(VisualAction.DROP_VISUAL,
@@ -1390,6 +2665,524 @@ public final class OwnershipPlanner {
             if (containsAny(parent.sourceObjectIds, child.visualSourceObjectIds)) return true;
         }
         return false;
+    }
+
+    private boolean compositeTextShellHasExtraMaterialOutsideDirectShellSlots(ObjectPlan parent) {
+        if (parent == null || data == null) return false;
+        if (parent.visualSourceObjectIds == null || parent.visualSourceObjectIds.length == 0) return false;
+        int[] parentTextFrames = effectiveOwnedTextFrameIds(parent);
+
+        LinkedHashSet<Integer> coveredShellSources = new LinkedHashSet<>();
+        for (ObjectPlan child : plans) {
+            if (child == null || child == parent) continue;
+            if (child.pageIndex != parent.pageIndex) continue;
+            if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (child.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length == 0) continue;
+            if (!isDirectTextShellSlot(child)) continue;
+            if (!containsAll(parent.sourceObjectIds, child.sourceObjectIds)) continue;
+            if (!containsAny(parentTextFrames, child.ownedTextFrameIds)) continue;
+            addAll(child.sourceObjectIds, coveredShellSources);
+            for (int sourceId : visualSourceIds(child)) {
+                coveredShellSources.add(sourceId);
+            }
+        }
+        if (coveredShellSources.isEmpty()) return false;
+
+        for (int sourceId : visualSourceIds(parent)) {
+            if (coveredShellSources.contains(sourceId)) continue;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (sourceItemHasCompositeCarrierExtraMaterial(item)) return true;
+        }
+        return false;
+    }
+
+    private int[] effectiveOwnedTextFrameIds(ObjectPlan plan) {
+        if (plan == null) return new int[0];
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) {
+            return plan.ownedTextFrameIds;
+        }
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (plan.sourceObjectIds != null && data != null) {
+            for (int sourceId : plan.sourceObjectIds) {
+                if (data.getTextFrame(String.valueOf(sourceId)) != null) {
+                    ids.add(sourceId);
+                }
+            }
+        }
+        return toIntArray(ids);
+    }
+
+    private static boolean sourceItemHasCompositeCarrierExtraMaterial(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if ("TextFrame".equals(type)) return false;
+        if ("Group".equals(type)) {
+            return !isNoneColor(item.fillColorName())
+                    || (!isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01);
+        }
+        if ("Rectangle".equals(type) || "Oval".equals(type) || "Polygon".equals(type)) {
+            return !isNoneColor(item.fillColorName())
+                    || (!isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01);
+        }
+        if ("GraphicLine".equals(type)) {
+            return !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+        }
+        return true;
+    }
+
+    private void dropVisualOnlyCompositeShellCarriersCoveredByChildShellSlots() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan carrier = plans.get(i);
+            if (!isVisibleCompositeShellCarrier(carrier)) continue;
+            List<ObjectPlan> childShells = visibleChildShellSlotsForCompositeCarrier(carrier);
+            boolean coveredByDirectShellSlots = !childShells.isEmpty()
+                    && !compositeCarrierHasVisibleMaterialOutsideChildShellSlots(carrier, childShells);
+            boolean coveredByCanonicalSourceSlots =
+                    compositeCarrierVisibleSourcesCoveredByCanonicalPlans(carrier);
+            if (!coveredByDirectShellSlots && !coveredByCanonicalSourceSlots) continue;
+            plans.set(i, carrier
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "composite_shell_carrier_covered_by_child_shell_slots")
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private static boolean isVisualOnlyCompositeShellCarrier(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (visualSourceIds(plan).length == 0) return false;
+        String reason = safe(plan.reason);
+        return reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("image_group_text_hidden")
+                || reason.contains("composite_shell_carrier");
+    }
+
+    private static boolean isTextHiddenCompositeShellCarrier(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR
+                && plan.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) {
+            return false;
+        }
+        if (visualSourceIds(plan).length == 0) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        String reason = safe(plan.reason);
+        return reason.contains("slot_only_textless_shell")
+                || reason.contains("sibling_group_text_shell")
+                || reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("image_group_text_hidden")
+                || reason.contains("composite_shell_carrier");
+    }
+
+    private List<ObjectPlan> visibleChildShellSlotsForCompositeCarrier(ObjectPlan carrier) {
+        List<ObjectPlan> childShells = new ArrayList<>();
+        if (carrier == null) return childShells;
+        for (ObjectPlan child : plans) {
+            if (child == null || child == carrier) continue;
+            if (child.pageIndex != carrier.pageIndex) continue;
+            if (!isVisibleChildShellSlotForCompositeCarrier(carrier, child)) continue;
+            childShells.add(child);
+        }
+        return childShells;
+    }
+
+    private static boolean isVisibleChildShellSlotForCompositeCarrier(ObjectPlan carrier, ObjectPlan child) {
+        if (carrier == null || child == null) return false;
+        if (child.visualAction != VisualAction.PLACE_TEXT_SHELL
+                && child.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && child.visualAction != VisualAction.PLACE_INLINE_PNG) {
+            return false;
+        }
+        if (child.ownedTextFrameIds != null
+                && child.ownedTextFrameIds.length > 0
+                && child.textAction != TextAction.DROP_TEXT) {
+            return false;
+        }
+        if (child.materialization != Materialization.EXTRACTED_PNG_VECTOR
+                && child.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) {
+            return false;
+        }
+        if (visualSourceIds(child).length == 0) return false;
+        if (!hasDistinctChildShellSlotSignal(child)
+                && !isDeclaredVisualOnlyTextlessShellCarrier(child)) {
+            return false;
+        }
+        if (sourceCount(child) >= sourceCount(carrier)) return false;
+        if (!carrierDeclaredVisibleSlotContainsChild(carrier, child)) return false;
+        if (carrier.bounds != null && child.bounds != null
+                && !boundsContains(carrier.bounds, child.bounds, 4.0)
+                && !boundsMostlyOverlap(carrier.bounds, child.bounds, 0.05)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isDeclaredVisualOnlyTextlessShellCarrier(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR
+                && plan.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) {
+            return false;
+        }
+        if (visualSourceIds(plan).length == 0) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        String reason = safe(plan.reason);
+        return reason.contains("slot_only_textless_shell")
+                || reason.contains("sibling_group_text_shell")
+                || reason.contains("text_hidden");
+    }
+
+    private static boolean visualOnlyChildOwnsDistinctShellSlot(ObjectPlan parent, ObjectPlan child) {
+        if (isDirectBackgroundVisualMaterialSlot(child)) return true;
+        return isVisibleChildShellSlotForCompositeCarrier(parent, child);
+    }
+
+    private static boolean isDirectBackgroundVisualMaterialSlot(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+            return false;
+        }
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (plan.visualPolicyLayer() != PolicyLayer.BACKGROUND) return false;
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length != 1) return false;
+        if (plan.sourceObjectIds == null || plan.sourceObjectIds.length != 1) return false;
+        if (plan.sourceObjectIds[0] != visualIds[0]) return false;
+        String base = basename(plan.file);
+        return base.startsWith("shape_")
+                || base.startsWith("deco_")
+                || base.startsWith("graphic_");
+    }
+
+    private void dropChildVisualFragmentsOwnedByCompositeShellCarriers() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan carrier = plans.get(i);
+            if (!isVisibleCompositeShellCarrier(carrier)) continue;
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan child = plans.get(j);
+                if (!isCompositeCarrierOwnedChildVisualFragment(carrier, child)) continue;
+                plans.set(j, child
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "visual_fragment_owned_by_composite_shell_carrier")
+                        .withOwnedTextFrameIds(new int[0])
+                        .withDescendantVisualObjectIds(new int[0]));
+            }
+        }
+    }
+
+    private void dropVisualOnlyChildShellsBakedIntoCompleteCompositeParents() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan parent = plans.get(i);
+            if (!isCompleteCompositeVisualOwner(parent)) continue;
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan child = plans.get(j);
+                if (!isVisualOnlyChildTextShellBakedIntoCompleteComposite(parent, child)) continue;
+                plans.set(j, child
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "child_shell_visual_owned_by_complete_composite_parent")
+                        .withVisualSourceObjectIds(new int[0])
+                        .withDescendantVisualObjectIds(new int[0]));
+            }
+        }
+    }
+
+    private boolean isVisualOnlyChildTextShellBakedIntoCompleteComposite(
+            ObjectPlan parent,
+            ObjectPlan child) {
+        if (parent == null || child == null || parent == child) return false;
+        if (parent.domId == child.domId) return false;
+        if (parent.pageIndex != child.pageIndex) return false;
+        if (!isStrictChildPlan(parent, child)) return false;
+        if (!hasSourceParentRelation(parent, child)) return false;
+        if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (child.textAction != TextAction.DROP_TEXT) return false;
+        if (child.ownedTextFrameIds != null && child.ownedTextFrameIds.length > 0) return false;
+        if (hasDistinctChildShellSlotSignal(child)) return false;
+        if (parent.bounds != null && child.bounds != null
+                && !boundsContains(parent.bounds, child.bounds, 4.0)
+                && !boundsMostlyOverlap(parent.bounds, child.bounds, 0.20)) {
+            return false;
+        }
+        return compositeParentVisuallyOwnsChildSlot(parent, child);
+    }
+
+    private boolean isCompositeCarrierOwnedChildVisualFragment(ObjectPlan carrier, ObjectPlan child) {
+        if (carrier == null || child == null || carrier == child) return false;
+        if (carrier.pageIndex != child.pageIndex) return false;
+        if (!child.hasVisibleVisual()) return false;
+        if (isDirectChildShellSlotPlan(child)) return false;
+        if (ownsTextFrameShellStyleSource(child)) return false;
+        if (isCompositeCarrierOwnedChildTextlessShell(carrier, child)) return true;
+        if (child.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (child.ownedTextFrameIds != null
+                && child.ownedTextFrameIds.length > 0
+                && child.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+            return false;
+        }
+        if (visualSourceIds(child).length == 0) return false;
+        if (isImageBackedContentPlan(child)) return false;
+        boolean sourceDescendant = hasSourceDescendantRelation(carrier, child);
+        boolean declaredSlotContainsChild = carrierDeclaredVisibleSlotContainsChild(carrier, child);
+        boolean carrierOwnedDecorationFragment =
+                isCarrierOwnedDecorationFragment(carrier, child, sourceDescendant, declaredSlotContainsChild);
+        boolean carrierOwnedNonPlacedChildFragment =
+                isCarrierOwnedNonPlacedChildFragment(carrier, child, sourceDescendant, declaredSlotContainsChild);
+        if (effectiveVisualPolicyLayer(child) == PolicyLayer.CONTENT
+                && !carrierOwnedDecorationFragment
+                && !carrierOwnedNonPlacedChildFragment) {
+            return false;
+        }
+        if (visualOnlyChildOwnsDistinctShellSlot(carrier, child)) {
+            if (hasDifferentTextShellRole(carrier, child)) return false;
+            return compositeCarrierOwnsVisibleChildShellFragment(carrier, child);
+        }
+        return declaredSlotContainsChild;
+    }
+
+    private boolean isCompositeCarrierOwnedChildTextlessShell(ObjectPlan carrier, ObjectPlan child) {
+        if (carrier == null || child == null) return false;
+        if (!isVisibleCompositeShellCarrier(carrier)) return false;
+        if (!isVisibleCompositeShellCarrier(child)) return false;
+        if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (child.textAction != TextAction.DROP_TEXT) return false;
+        if (child.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) return false;
+        if (hasPlacedContentSourceTree(child) || hasPlacedContentSource(child)) return false;
+        if (!hasSourceDescendantRelation(carrier, child)) return false;
+        if (!carrierDeclaredVisibleSlotContainsChild(carrier, child)) return false;
+        if (child.ownedTextFrameIds != null
+                && child.ownedTextFrameIds.length > 0
+                && carrier.ownedTextFrameIds != null
+                && carrier.ownedTextFrameIds.length > 0
+                && !containsAll(carrier.ownedTextFrameIds, child.ownedTextFrameIds)) {
+            return false;
+        }
+        if (carrier.bounds != null && child.bounds != null
+                && !boundsContains(carrier.bounds, child.bounds, 4.0)
+                && !boundsMostlyOverlap(carrier.bounds, child.bounds, 0.05)) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isCarrierOwnedNonPlacedChildFragment(
+            ObjectPlan carrier,
+            ObjectPlan child,
+            boolean sourceDescendant,
+            boolean declaredSlotContainsChild) {
+        if (!sourceDescendant) return false;
+        if (!declaredSlotContainsChild) return false;
+        if (!isVisibleCompositeShellCarrier(carrier)) return false;
+        if (child.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
+        if (isDirectBackgroundVisualMaterialSlot(child)) return false;
+        if (hasPlacedContentSourceTree(child) || hasPlacedContentSource(child)) return false;
+        if (child.bounds != null && carrier.bounds != null
+                && !boundsContains(carrier.bounds, child.bounds, 4.0)
+                && !boundsMostlyOverlap(carrier.bounds, child.bounds, 0.05)) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isCarrierOwnedDecorationFragment(
+            ObjectPlan carrier,
+            ObjectPlan child,
+            boolean sourceDescendant,
+            boolean declaredSlotContainsChild) {
+        if (!sourceDescendant) return false;
+        if (!declaredSlotContainsChild) return false;
+        if (!isVisibleCompositeShellCarrier(carrier)) return false;
+        if (child.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
+        if (!safe(child.reason).contains("decoration")) return false;
+        if (isDirectBackgroundVisualMaterialSlot(child)) return false;
+        return true;
+    }
+
+    private static boolean carrierDeclaredVisibleSlotContainsChild(ObjectPlan carrier, ObjectPlan child) {
+        if (carrier == null || child == null) return false;
+        int[] carrierSources = carrier.sourceObjectIds != null ? carrier.sourceObjectIds : new int[0];
+        int[] carrierVisuals = visualSourceIds(carrier);
+        int[] childSources = child.sourceObjectIds != null ? child.sourceObjectIds : new int[0];
+        int[] childVisuals = visualSourceIds(child);
+        if (childSources.length > 0 && containsAll(carrierSources, childSources)) return true;
+        if (child.domId >= 0 && contains(carrierSources, child.domId)) return true;
+        if (childVisuals.length > 0 && containsAll(carrierVisuals, childVisuals)) return true;
+        if (childSources.length > 0 && containsAll(carrierVisuals, childSources)) return true;
+        return false;
+    }
+
+    private static boolean hasDifferentTextShellRole(ObjectPlan carrier, ObjectPlan child) {
+        ShellRole carrierRole = ShellRole.from(carrier);
+        ShellRole childRole = ShellRole.from(child);
+        return carrierRole != ShellRole.NONE
+                && childRole != ShellRole.NONE
+                && carrierRole != childRole;
+    }
+
+    private boolean compositeCarrierOwnsVisibleChildShellFragment(ObjectPlan carrier, ObjectPlan child) {
+        if (carrier == null || child == null) return false;
+        if (!carrierDeclaredVisibleSlotContainsChild(carrier, child)) return false;
+        List<ObjectPlan> childShells = visibleChildShellSlotsForCompositeCarrier(carrier);
+        if (childShells.isEmpty()) return false;
+        if (!containsPlanWithSameDomIdAndKind(childShells, child)) return false;
+        return compositeCarrierHasVisibleMaterialOutsideChildShellSlots(carrier, childShells);
+    }
+
+    private static boolean containsPlanWithSameDomIdAndKind(List<ObjectPlan> plans, ObjectPlan target) {
+        if (plans == null || target == null) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.domId == target.domId && safe(plan.kind).equals(safe(target.kind))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isVisibleCompositeShellCarrier(ObjectPlan plan) {
+        return isVisualOnlyCompositeShellCarrier(plan)
+                || isTextHiddenCompositeShellCarrier(plan);
+    }
+
+    private static boolean hasDistinctChildShellSlotSignal(ObjectPlan plan) {
+        if (plan == null) return false;
+        return hasDistinctChildShellSlotSignalReason(plan.reason);
+    }
+
+    private static boolean hasDistinctChildShellSlotSignalReason(String value) {
+        String reason = safe(value);
+        return "decoration_group".equals(reason)
+                || "pure_decoration_group".equals(reason)
+                || reason.contains("direct_label_shell_split_from_composite_carrier");
+    }
+
+    private boolean compositeCarrierHasVisibleMaterialOutsideChildShellSlots(
+            ObjectPlan carrier,
+            List<ObjectPlan> childShells) {
+        if (carrier == null || childShells == null || childShells.isEmpty() || data == null) {
+            return true;
+        }
+        LinkedHashSet<Integer> covered = new LinkedHashSet<>();
+        for (ObjectPlan child : childShells) {
+            covered.add(child.domId);
+            addAll(child.sourceObjectIds, covered);
+            addAll(visualSourceIds(child), covered);
+        }
+        for (int sourceId : visualSourceIds(carrier)) {
+            if (covered.contains(sourceId)) continue;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (sourceItemHasVisibleShellMaterial(item)) return true;
+        }
+        return false;
+    }
+
+    private boolean compositeCarrierVisibleSourcesCoveredByCanonicalPlans(ObjectPlan carrier) {
+        if (carrier == null || data == null) return false;
+        if (!isDeclaredVisualOnlyTextlessShellCarrier(carrier)) return false;
+        if (isExtractorDeclaredCompositeShellCarrier(carrier)) return false;
+        int[] visualSourceIds = visualSourceIds(carrier);
+        if (visualSourceIds.length == 0) return false;
+
+        boolean hasCoveredVisibleSource = false;
+        for (int sourceId : visualSourceIds) {
+            if (sourceId <= 0) continue;
+            if (sourceId == carrier.domId && !sourceIdHasOwnVisibleMaterial(sourceId)) {
+                continue;
+            }
+            if (sourceIdCoveredByCanonicalPlan(carrier, sourceId)) {
+                hasCoveredVisibleSource = true;
+                continue;
+            }
+            if (sourceIdHasOwnVisibleMaterial(sourceId)) {
+                return false;
+            }
+        }
+        return hasCoveredVisibleSource;
+    }
+
+    private boolean isExtractorDeclaredCompositeShellCarrier(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (!"slot_only_textless_shell".equals(safe(plan.reason))) return false;
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        if (rendered == null) return false;
+        if (!"indesign_png".equals(safe(rendered.visualOwner()))) return false;
+        if (!"hwpx_tf".equals(safe(rendered.textOwner()))) return false;
+        if (rendered.file() == null || rendered.file().isEmpty()) return false;
+        return rendered.exportSourceObjectIds() != null
+                && rendered.exportSourceObjectIds().length > 0
+                && rendered.sourceObjectIds() != null
+                && rendered.sourceObjectIds().length > rendered.exportSourceObjectIds().length;
+    }
+
+    private boolean sourceIdCoveredByCanonicalPlan(ObjectPlan carrier, int sourceId) {
+        if (carrier == null || sourceId <= 0) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == carrier) continue;
+            if (candidate.pageIndex != carrier.pageIndex
+                    && !candidateCanOwnSourceAcrossPageIndex(candidate, sourceId)) {
+                continue;
+            }
+            if (sourceCount(candidate) >= sourceCount(carrier)) continue;
+            if (candidate.hasVisibleVisual()
+                    && (contains(visualSourceIds(candidate), sourceId)
+                    || contains(candidate.sourceObjectIds, sourceId))) {
+                return true;
+            }
+            if (candidate.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && (contains(candidate.ownedTextFrameIds, sourceId)
+                    || contains(candidate.sourceObjectIds, sourceId))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean candidateCanOwnSourceAcrossPageIndex(ObjectPlan candidate, int sourceId) {
+        if (candidate == null || sourceId <= 0) return false;
+        if (!contains(candidate.sourceObjectIds, sourceId)
+                && !contains(visualSourceIds(candidate), sourceId)
+                && !contains(candidate.ownedTextFrameIds, sourceId)) {
+            return false;
+        }
+        return sourceIdIsInlineSource(sourceId);
+    }
+
+    private boolean sourceIdIsInlineSource(int sourceId) {
+        if (data == null || sourceId <= 0) return false;
+        if (data.isInlineObjectId(sourceId)) return true;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item != null && item.isInline()) return true;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+        return tf != null && tf.isInline();
+    }
+
+    private boolean sourceIdHasOwnVisibleMaterial(int sourceId) {
+        if (data == null || sourceId <= 0) return false;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+        if (tf != null) return !tf.sourceHidden();
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        return sourceItemHasVisibleShellMaterial(item);
+    }
+
+    private static boolean carrierVisuallyOwnsDirectShellSlot(ObjectPlan carrier, ObjectPlan child) {
+        int[] carrierVisualSources = visualSourceIds(carrier);
+        int[] childVisualSources = visualSourceIds(child);
+        if (carrierVisualSources.length == 0 || childVisualSources.length == 0) return false;
+        return containsAll(carrierVisualSources, childVisualSources);
     }
 
     private static boolean isExtractedCompositeTextShellParent(ObjectPlan plan) {
@@ -1452,12 +3245,20 @@ public final class OwnershipPlanner {
 
     private static boolean isNativeTextShellShape(ResolvedPageItem item) {
         if (item == null || item.sourceHidden()) return false;
-        String type = safe(item.type());
-        if (!"Rectangle".equals(type) && !"Polygon".equals(type) && !"Oval".equals(type)) return false;
+        if (!isNativeSourceShapeMaterializationAllowed(item)) return false;
         if (boundsOf(item) == null) return false;
         boolean hasFill = !isNoneColor(item.fillColorName());
         boolean hasStroke = !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
         return hasFill || hasStroke || item.cornerRadius() > 0;
+    }
+
+    private static boolean isNativeSourceShapeMaterializationAllowed(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        return "Rectangle".equals(type)
+                || "Oval".equals(type)
+                || "Polygon".equals(type)
+                || "GraphicLine".equals(type);
     }
 
     private static boolean hasColoredNativeShell(ResolvedPageItem item) {
@@ -1466,26 +3267,41 @@ public final class OwnershipPlanner {
                 && !isPaperColor(item.fillColorName());
     }
 
+    private static boolean hasDrawableNativeShell(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        if (!("Rectangle".equals(type) || "Polygon".equals(type) || "Oval".equals(type))) {
+            return false;
+        }
+        boolean hasFill = !isNoneColor(item.fillColorName());
+        boolean hasStroke = !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+        return hasFill || hasStroke || item.cornerRadius() > 0.01;
+    }
+
     private double[] pageRelativeBoundsOf(ResolvedPageItem item) {
         if (item == null) return null;
         double[] direct = item.pageRelativeBounds();
-        if (direct != null && direct.length >= 4) return direct;
+        if (direct != null && direct.length >= 4) {
+            return direct;
+        }
         double[] b = item.geometricBounds();
         if (b == null || b.length < 4) return null;
         int pageIndex = item.pageIndex();
-        if (data == null || pageIndex < 0 || pageIndex >= data.pages().size()) {
-            return b;
-        }
-        double[] page = data.pages().get(pageIndex).bounds();
+        double[] page = pageBounds(pageIndex);
         if (page == null || page.length < 4) {
             return b;
         }
-        double scale = data.scaleFactor() > 0 ? data.scaleFactor() : 1.0;
+        double scale = safeScaleFactor();
+        double pageWidth = page[3] - page[1];
+        double pageHeight = page[2] - page[0];
+        boolean pageBoundsLookScaled = scale > 1.001
+                && (pageWidth > 400.0 || pageHeight > 400.0);
+        double divisor = pageBoundsLookScaled ? scale : 1.0;
         return new double[] {
-                (b[0] - page[0]) / scale,
-                (b[1] - page[1]) / scale,
-                (b[2] - page[0]) / scale,
-                (b[3] - page[1]) / scale
+                (b[0] - page[0]) / divisor,
+                (b[1] - page[1]) / divisor,
+                (b[2] - page[0]) / divisor,
+                (b[3] - page[1]) / divisor
         };
     }
 
@@ -1501,20 +3317,194 @@ public final class OwnershipPlanner {
             if (!isSiblingGroupTextShellCandidate(shell)) continue;
             int[] ownedTextFrameIds = siblingEditableTextFrameIdsForShell(shell);
             if (ownedTextFrameIds.length == 0) continue;
-            VisualLayer shellLayer = visualLayerForSiblingGroupTextShell(shell);
+            VisualLayer shellLayer = textShellVisualLayer(shell, ownedTextFrameIds, null);
 
             plans.set(i, shell
                     .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
                     .withVisualAction(VisualAction.PLACE_TEXT_SHELL, "sibling_group_text_shell")
                     .withVisualLayer(shellLayer)
                     .withOwnedTextFrameIds(ownedTextFrameIds)
-                    .withSourceObjectIds(appendMissing(shell.sourceObjectIds, ownedTextFrameIds))
-                    .withZOrder(Math.min(shell.zOrder, minTextFrameZOrder(ownedTextFrameIds) - 1)));
+                    .withSourceObjectIds(appendMissing(shell.sourceObjectIds, ownedTextFrameIds)));
         }
     }
 
-    private VisualLayer visualLayerForSiblingGroupTextShell(ObjectPlan shell) {
-        return hasColoredShapeShellSource(shell) ? VisualLayer.LABEL_BACKDROP : VisualLayer.CONTAINER_BACKDROP;
+    private void normalizePaperPageMaterialVisualPlans() {
+        if (data == null) return;
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isPageMaterialVisualPlan(plan)) continue;
+            boolean nativeShape = isNativePageMaterialShapeVisualPlan(plan);
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withOwnedTextFrameIds(new int[0])
+                    .withVisualLayer(VisualLayer.PAGE_BACKGROUND)
+                    .withMaterialization(nativeShape
+                            ? Materialization.NATIVE_SOURCE_SHAPE
+                            : plan.materialization)
+                    .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
+                            nativeShape
+                                    ? "native_page_material_backdrop"
+                                    : "paper_page_material_backdrop"));
+            normalized++;
+        }
+        if (normalized > 0) {
+            ConversionTiming.metric("stage1.ownershipPlanner.normalizePaperPageMaterialVisualPlans.normalized", normalized);
+        }
+    }
+
+    private boolean isPageMaterialVisualPlan(ObjectPlan plan) {
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        int[] sourceIds = visualSourceIds(plan);
+        if (sourceIds.length == 0) return false;
+        boolean hasMaterialBackdrop = false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null) return false;
+            if (!isPlainFillOnlyPageMaterialItem(item)) return false;
+            double[] pageLocal = pageLocalBoundsOf(item, plan.pageIndex, true);
+            if (isMaterialPageBackdropOnPage(item, plan.pageIndex, pageLocal)) {
+                hasMaterialBackdrop = true;
+            }
+        }
+        return hasMaterialBackdrop;
+    }
+
+    private boolean isNativePageMaterialShapeVisualPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        int[] sourceIds = visualSourceIds(plan);
+        if (sourceIds.length == 0) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (!isPlainFillOnlyPageMaterialItem(item)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isPaperFillOnlyPageMaterialItem(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        if (!"Rectangle".equals(type) && !"Polygon".equals(type)) return false;
+        if (!isPaperColor(item.fillColorName())) return false;
+        String stroke = safe(item.strokeColorName());
+        return isNoneColor(stroke) || isPaperColor(stroke) || item.strokeWeight() <= 0.01;
+    }
+
+    private static boolean isPlainFillOnlyPageMaterialItem(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        if (!"Rectangle".equals(type) && !"Polygon".equals(type)) return false;
+        String fill = safe(item.fillColorName());
+        if (fill.isEmpty() || isNoneColor(fill)) return false;
+        String stroke = safe(item.strokeColorName());
+        return isNoneColor(stroke) || item.strokeWeight() <= 0.01;
+    }
+
+    private void resolveIndependentSiblingTextShellOwners() {
+        if (data == null) return;
+        int candidateShells = 0;
+        int imageBackedCandidateShells = 0;
+        int matchedShells = 0;
+        int matchedTextFrames = 0;
+        int textFrameCandidatesScanned = 0;
+        Set<Integer> ownedTextFrameIds = visibleTextShellOwnedTextFrameIds();
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan shell = plans.get(i);
+            boolean plainShell = isIndependentSiblingTextShellCandidate(shell);
+            boolean imageBackedCalloutShell = !plainShell
+                    && isIndependentImageBackedCalloutTextShellCandidate(shell);
+            if (!plainShell && !imageBackedCalloutShell) continue;
+            candidateShells++;
+            if (imageBackedCalloutShell) {
+                imageBackedCandidateShells++;
+            }
+            if (imageBackedCalloutShell && isPageSpanningBackdropVisualPlan(shell)) {
+                plans.set(i, pageSpanningBackdropVisualPlan(shell));
+                continue;
+            }
+            List<ResolvedTextFrame> pageTextFrames = visibleEditableTextFramesOnPage(shell.pageIndex);
+            textFrameCandidatesScanned += pageTextFrames.size();
+            int[] matchedTextFrameIds = imageBackedCalloutShell
+                    ? independentCalloutEditableTextFrameIdsForShellSet(shell, pageTextFrames, ownedTextFrameIds)
+                    : independentSiblingEditableTextFrameIdsForShell(shell, false, pageTextFrames, ownedTextFrameIds);
+            if (matchedTextFrameIds.length == 0) continue;
+            matchedShells++;
+            matchedTextFrames += matchedTextFrameIds.length;
+            for (int matchedTextFrameId : matchedTextFrameIds) {
+                ownedTextFrameIds.add(matchedTextFrameId);
+            }
+            VisualLayer layer = textShellVisualLayer(shell, matchedTextFrameIds, VisualLayer.LABEL_BACKDROP);
+            plans.set(i, shell
+                    .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            imageBackedCalloutShell
+                                    ? "independent_image_backed_callout_text_shell"
+                                    : "independent_sibling_text_shell")
+                    .withVisualLayer(layer)
+                    .withOwnedTextFrameIds(matchedTextFrameIds)
+                    .withSourceObjectIds(appendMissing(shell.sourceObjectIds, matchedTextFrameIds)));
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.resolveIndependentSiblingTextShellOwners.candidateShells", candidateShells);
+        ConversionTiming.metric("stage1.ownershipPlanner.resolveIndependentSiblingTextShellOwners.imageBackedCandidateShells", imageBackedCandidateShells);
+        ConversionTiming.metric("stage1.ownershipPlanner.resolveIndependentSiblingTextShellOwners.matchedShells", matchedShells);
+        ConversionTiming.metric("stage1.ownershipPlanner.resolveIndependentSiblingTextShellOwners.matchedTextFrames", matchedTextFrames);
+        ConversionTiming.metric("stage1.ownershipPlanner.resolveIndependentSiblingTextShellOwners.textFrameCandidatesScanned", textFrameCandidatesScanned);
+    }
+
+    private boolean isPageSpanningBackdropVisualPlan(ObjectPlan plan) {
+        if (plan == null || !isPageEdgeSpanningPlan(plan)) return false;
+        return pageSpanningBackdropSourceIds(plan).length > 0;
+    }
+
+    private ObjectPlan pageSpanningBackdropVisualPlan(ObjectPlan plan) {
+        int[] backdropSourceIds = pageSpanningBackdropSourceIds(plan);
+        if (backdropSourceIds.length == 0) {
+            backdropSourceIds = visualSourceIds(plan);
+        }
+        return plan
+                .withTextAction(TextAction.DROP_TEXT)
+                .withOwnedTextFrameIds(new int[0])
+                .withSourceObjectIds(backdropSourceIds)
+                .withVisualSourceObjectIds(backdropSourceIds)
+                .withSourceBundleKey(sourceBundleKeyOf(renderedGroupForPlan(plan), backdropSourceIds, new int[0]))
+                .withVisualLayer(VisualLayer.PAGE_BACKGROUND)
+                .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR)
+                .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
+                        "page_spanning_backdrop_visual");
+    }
+
+    private int[] pageSpanningBackdropSourceIds(ObjectPlan plan) {
+        if (plan == null || data == null) return new int[0];
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (int sourceId : visualSourceIds(plan)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null) continue;
+            double[] pageLocal = pageLocalBoundsOf(item, plan.pageIndex, true);
+            if (isMaterialPageBackdropOnPage(item, plan.pageIndex, pageLocal)) {
+                ids.add(sourceId);
+            }
+        }
+        return toIntArray(ids);
+    }
+
+    private static boolean isPageEdgeSpanningPlan(ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
+        double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
+        if (w < 180.0 || h < 90.0) return false;
+        boolean touchesPageEdge = plan.bounds[0] <= 1.0 || plan.bounds[1] <= 1.0;
+        boolean spansPageOrSpread = w >= 260.0 || h >= 180.0;
+        return touchesPageEdge && spansPageOrSpread;
+    }
+
+    private static boolean isLargeShellBounds(ObjectPlan shell) {
+        if (shell == null || shell.bounds == null || shell.bounds.length < 4) return false;
+        double h = Math.abs(shell.bounds[2] - shell.bounds[0]);
+        double w = Math.abs(shell.bounds[3] - shell.bounds[1]);
+        return w >= 120.0 || h >= 120.0 || (w * h) >= 6000.0;
     }
 
     private boolean hasColoredShapeShellSource(ObjectPlan shell) {
@@ -1573,17 +3563,18 @@ public final class OwnershipPlanner {
             ObjectPlan current = plans.get(currentIndex);
             ObjectPlan better = betterSiblingGroupTextShellOwner(current, plan);
             if (better == plan) {
-                plans.set(currentIndex, demoteSecondarySiblingTextShellVisual(current));
+                plans.set(currentIndex, declareSecondarySiblingTextShellAsVisualOnly(current));
                 ownerByTextFrames.put(key, i);
             } else {
-                plans.set(i, demoteSecondarySiblingTextShellVisual(plan));
+                plans.set(i, declareSecondarySiblingTextShellAsVisualOnly(plan));
             }
         }
     }
 
     private boolean isSiblingGroupTextShellOwner(ObjectPlan plan) {
         return plan != null
-                && "sibling_group_text_shell".equals(plan.reason)
+                && ("sibling_group_text_shell".equals(plan.reason)
+                || "independent_sibling_text_shell".equals(plan.reason))
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.ownedTextFrameIds != null
@@ -1664,7 +3655,7 @@ public final class OwnershipPlanner {
         return false;
     }
 
-    private ObjectPlan demoteSecondarySiblingTextShellVisual(ObjectPlan plan) {
+    private ObjectPlan declareSecondarySiblingTextShellAsVisualOnly(ObjectPlan plan) {
         int[] visualSources = visualSourceIds(plan);
         return plan
                 .withTextAction(TextAction.DROP_TEXT)
@@ -1707,17 +3698,285 @@ public final class OwnershipPlanner {
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
         LinkedHashSet<String> parentIds = visualSourceParentIds(shell);
         if (parentIds.isEmpty()) return new int[0];
-        for (ResolvedTextFrame tf : data.textFrames()) {
-            if (!isVisibleEditableTextFrameSource(tf)) continue;
-            ResolvedPageItem item = data.getPageItem(tf.id());
-            if (item == null || item.parentId() == null) continue;
-            if (!parentIds.contains(item.parentId())) continue;
-            if (data.isTextOwnedByIndesignPng(tf.id())) continue;
-            if (!textFrameFitsShell(shell.bounds, boundsOf(tf))) continue;
-            int id = parseInt(tf.id(), -1);
-            if (id >= 0) ids.add(id);
+        Map<String, List<ResolvedTextFrame>> textFramesByParentId = editableTextFramesByParentId();
+        for (String parentId : parentIds) {
+            List<ResolvedTextFrame> textFrames = textFramesByParentId.get(parentId);
+            if (textFrames == null || textFrames.isEmpty()) continue;
+            for (ResolvedTextFrame tf : textFrames) {
+                if (tf == null || tf.id() == null) continue;
+                if (data.isTextOwnedByIndesignPng(tf.id())) continue;
+                if (!textFrameFitsShell(shell.bounds, boundsOf(tf))) continue;
+                int id = parseInt(tf.id(), -1);
+                if (id >= 0) ids.add(id);
+            }
         }
         return toIntArray(ids);
+    }
+
+    private boolean isIndependentSiblingTextShellCandidate(ObjectPlan shell) {
+        if (shell == null || data == null) return false;
+        if (!isRenderedVisualPlan(shell)) return false;
+        if (!shell.hasVisibleVisual()) return false;
+        if (shell.placement != Placement.FLOATING) return false;
+        if (shell.ownedTextFrameIds != null && shell.ownedTextFrameIds.length > 0) return false;
+        if (shell.file == null || shell.file.isEmpty()) return false;
+        if (isLargeShellBounds(shell)) return false;
+        if (hasPlacedContentSourceTree(renderedGroupForPlan(shell))) return false;
+
+        RenderedGroup rg = renderedGroupForPlan(shell);
+        if (rg == null) return false;
+        if (isPageOrSpreadBackdropImage(rg)) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        if (rg.textOwner() != null && !"none".equals(rg.textOwner())) return false;
+        if (shell.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && shell.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (shell.textAction != TextAction.DROP_TEXT) return false;
+        if (!hasColoredShapeShellSource(shell)) return false;
+        return sourceTreeIsVisualOnlyShell(shell);
+    }
+
+    private boolean isIndependentImageBackedCalloutTextShellCandidate(ObjectPlan shell) {
+        if (shell == null || data == null) return false;
+        if (!isRenderedVisualPlan(shell)) return false;
+        if (!shell.hasVisibleVisual()) return false;
+        if (shell.placement != Placement.FLOATING) return false;
+        if (shell.ownedTextFrameIds != null && shell.ownedTextFrameIds.length > 0) return false;
+        if (shell.file == null || shell.file.isEmpty()) return false;
+        if (shell.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && shell.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (shell.textAction != TextAction.DROP_TEXT) return false;
+
+        RenderedGroup rg = renderedGroupForPlan(shell);
+        if (rg == null) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        if (rg.textOwner() != null && !"none".equals(rg.textOwner())) return false;
+        if (!hasPlacedContentSourceTree(rg)) return false;
+        if (!hasVisibleShellMaterialSource(rg)) return false;
+        return isImageBackedCalloutShellReason(rg.reason())
+                || sourceSiblingCalloutTextFrameFits(shell);
+    }
+
+    private static boolean isImageBackedCalloutShellReason(String reason) {
+        String r = safe(reason);
+        return "complex_graphic_text_hidden".equals(r)
+                || r.contains("image_group_text_hidden")
+                || r.contains("callout")
+                || r.contains("speech")
+                || r.contains("bubble")
+                || r.contains("말풍선");
+    }
+
+    private boolean sourceSiblingCalloutTextFrameFits(ObjectPlan shell) {
+        if (shell == null || shell.bounds == null || shell.bounds.length < 4) return false;
+        List<ResolvedTextFrame> pageTextFrames = visibleEditableTextFramesOnPage(shell.pageIndex);
+        if (pageTextFrames == null || pageTextFrames.isEmpty()) return false;
+        for (ResolvedTextFrame tf : pageTextFrames) {
+            if (!sameSourceLayer(shell, tf)) continue;
+            if (!textFrameStoryUsesCalloutOverlayStyle(tf)) continue;
+            if (textFrameFitsShell(shell.bounds, boundsOf(tf))) return true;
+        }
+        return false;
+    }
+
+    private boolean sourceTreeIsVisualOnlyShell(ObjectPlan shell) {
+        for (int sourceId : visualSourceIds(shell)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (!sourceTreeIsVisualOnlyShell(item, new HashSet<>())) return false;
+        }
+        return true;
+    }
+
+    private boolean sourceTreeIsVisualOnlyShell(ResolvedPageItem item, Set<String> visited) {
+        if (item == null || item.id() == null || !visited.add(item.id())) return true;
+        String type = safe(item.type());
+        if ("TextFrame".equals(type) || "Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) {
+            return false;
+        }
+        if ("Group".equals(type) || "page_object".equals(type)) {
+            int[] childIds = item.childIds();
+            if (childIds != null) {
+                for (int childId : childIds) {
+                    if (!sourceTreeIsVisualOnlyShell(
+                            data.getPageItem(String.valueOf(childId)), visited)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        return "Rectangle".equals(type)
+                || "Polygon".equals(type)
+                || "Oval".equals(type)
+                || "GraphicLine".equals(type);
+    }
+
+    private int[] independentSiblingEditableTextFrameIdsForShell(ObjectPlan shell) {
+        return independentSiblingEditableTextFrameIdsForShell(shell, false);
+    }
+
+    private int[] independentCalloutEditableTextFrameIdsForShell(ObjectPlan shell) {
+        return independentCalloutEditableTextFrameIdsForShellSet(shell);
+    }
+
+    private int[] independentSiblingEditableTextFrameIdsForShell(ObjectPlan shell, boolean requireCalloutStyle) {
+        return independentSiblingEditableTextFrameIdsForShell(
+                shell,
+                requireCalloutStyle,
+                visibleEditableTextFramesOnPage(shell != null ? shell.pageIndex : -1),
+                visibleTextShellOwnedTextFrameIds());
+    }
+
+    private int[] independentSiblingEditableTextFrameIdsForShell(ObjectPlan shell,
+                                                                 boolean requireCalloutStyle,
+                                                                 List<ResolvedTextFrame> pageTextFrames,
+                                                                 Set<Integer> ownedTextFrameIds) {
+        if (shell == null || shell.bounds == null || shell.bounds.length < 4) return new int[0];
+        ResolvedTextFrame best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        boolean ambiguous = false;
+        if (pageTextFrames == null || pageTextFrames.isEmpty()) return new int[0];
+        for (ResolvedTextFrame tf : pageTextFrames) {
+            if (!sameSourceLayer(shell, tf)) continue;
+            int id = parseFlexibleId(tf.id());
+            if (id < 0) continue;
+            if (ownedTextFrameIds != null && ownedTextFrameIds.contains(id)) continue;
+            double[] tb = boundsOf(tf);
+            if (!textFrameFitsShell(shell.bounds, tb)) continue;
+            if (requireCalloutStyle && !ownedTextFrameIdsUseCalloutOverlayStyle(new int[] { id })) {
+                continue;
+            }
+            double score = independentSiblingShellFitScore(shell.bounds, tb);
+            if (score > bestScore + 0.001) {
+                best = tf;
+                bestScore = score;
+                ambiguous = false;
+            } else if (Math.abs(score - bestScore) <= 0.001) {
+                ambiguous = true;
+            }
+        }
+        if (best == null || ambiguous) return new int[0];
+        int id = parseFlexibleId(best.id());
+        return id >= 0 ? new int[] { id } : new int[0];
+    }
+
+    private int[] independentCalloutEditableTextFrameIdsForShellSet(ObjectPlan shell) {
+        return independentCalloutEditableTextFrameIdsForShellSet(
+                shell,
+                visibleEditableTextFramesOnPage(shell != null ? shell.pageIndex : -1),
+                visibleTextShellOwnedTextFrameIds());
+    }
+
+    private int[] independentCalloutEditableTextFrameIdsForShellSet(ObjectPlan shell,
+                                                                    List<ResolvedTextFrame> pageTextFrames,
+                                                                    Set<Integer> ownedTextFrameIds) {
+        if (shell == null || shell.bounds == null || shell.bounds.length < 4) return new int[0];
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (pageTextFrames == null || pageTextFrames.isEmpty()) return new int[0];
+        for (ResolvedTextFrame tf : pageTextFrames) {
+            if (!sameSourceLayer(shell, tf)) continue;
+            int id = parseFlexibleId(tf.id());
+            if (id < 0) continue;
+            if (ownedTextFrameIds != null && ownedTextFrameIds.contains(id)) continue;
+            if (!ownedTextFrameIdsUseCalloutOverlayStyle(new int[] { id })) continue;
+            double[] tb = boundsOf(tf);
+            if (!textFrameFitsShell(shell.bounds, tb)) continue;
+            ids.add(id);
+        }
+        return toIntArray(ids);
+    }
+
+    private List<ResolvedTextFrame> visibleEditableTextFramesOnPage(int pageIndex) {
+        List<ResolvedTextFrame> frames = visibleEditableTextFramesByPage().get(pageIndex);
+        return frames != null ? frames : java.util.Collections.emptyList();
+    }
+
+    private Map<Integer, List<ResolvedTextFrame>> visibleEditableTextFramesByPage() {
+        if (visibleEditableTextFramesByPageCache != null) return visibleEditableTextFramesByPageCache;
+        Map<Integer, List<ResolvedTextFrame>> result = new HashMap<>();
+        if (data != null) {
+            for (ResolvedTextFrame tf : data.textFrames()) {
+                if (!isVisibleEditableTextFrameSource(tf)) continue;
+                result.computeIfAbsent(tf.pageIndex(), k -> new ArrayList<>()).add(tf);
+            }
+        }
+        visibleEditableTextFramesByPageCache = result;
+        return visibleEditableTextFramesByPageCache;
+    }
+
+    private Set<Integer> visibleTextShellOwnedTextFrameIds() {
+        Set<Integer> ids = new HashSet<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!plan.hasVisibleVisual()) continue;
+            if (plan.ownedTextFrameIds == null) continue;
+            for (int id : plan.ownedTextFrameIds) {
+                ids.add(id);
+            }
+        }
+        return ids;
+    }
+
+    private boolean sameSourceLayer(ObjectPlan shell, ResolvedTextFrame tf) {
+        if (shell == null || tf == null || tf.id() == null) return false;
+        ResolvedPageItem tfItem = data.getPageItem(tf.id());
+        if (tfItem == null) return false;
+        if (shell.sourceLayerId != null && !shell.sourceLayerId.isBlank()
+                && tfItem.layerId() != null && !tfItem.layerId().isBlank()) {
+            return shell.sourceLayerId.equals(tfItem.layerId());
+        }
+        return shell.sourceLayerIndex < 0
+                || tfItem.layerIndex() < 0
+                || shell.sourceLayerIndex == tfItem.layerIndex();
+    }
+
+    private boolean hasVisibleTextShellOwnerForTextFrame(ResolvedTextFrame tf, ObjectPlan except) {
+        if (tf == null || tf.id() == null) return false;
+        int id = parseFlexibleId(tf.id());
+        if (id < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan == except) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!plan.hasVisibleVisual()) continue;
+            if (contains(plan.ownedTextFrameIds, id)) return true;
+        }
+        return false;
+    }
+
+    private static double independentSiblingShellFitScore(double[] shellBounds, double[] textBounds) {
+        if (shellBounds == null || textBounds == null
+                || shellBounds.length < 4 || textBounds.length < 4) {
+            return Double.NEGATIVE_INFINITY;
+        }
+        double textArea = area(textBounds);
+        double shellArea = area(shellBounds);
+        if (textArea <= 0.0 || shellArea <= 0.0) return Double.NEGATIVE_INFINITY;
+        double overlap = overlapArea(shellBounds, textBounds) / textArea;
+        double areaRatio = shellArea / textArea;
+        double ratioScore = 1.0 / (1.0 + Math.abs(areaRatio - 1.20));
+        double centerScore = centerDistanceScore(shellBounds, textBounds);
+        return overlap * 1000.0 + ratioScore * 100.0 + centerScore * 20.0;
+    }
+
+    private static double centerDistanceScore(double[] a, double[] b) {
+        double acy = (a[0] + a[2]) / 2.0;
+        double acx = (a[1] + a[3]) / 2.0;
+        double bcy = (b[0] + b[2]) / 2.0;
+        double bcx = (b[1] + b[3]) / 2.0;
+        double ah = Math.max(1.0, Math.abs(a[2] - a[0]));
+        double aw = Math.max(1.0, Math.abs(a[3] - a[1]));
+        double dy = Math.abs(acy - bcy) / ah;
+        double dx = Math.abs(acx - bcx) / aw;
+        return 1.0 / (1.0 + dx + dy);
     }
 
     private LinkedHashSet<String> visualSourceParentIds(ObjectPlan shell) {
@@ -1786,7 +4045,9 @@ public final class OwnershipPlanner {
                 if (parsed >= 0) ids.add(parsed);
             }
         }
-        if (ids.isEmpty() && rg != null && "hwpx_tf".equals(rg.textOwner())) {
+        if (ids.isEmpty() && rg != null
+                && ("hwpx_tf".equals(rg.textOwner())
+                || hasTextlessShellWithInferredEditableTextSource(rg))) {
             for (int id : inferredEditableTextFrameSourceIds(rg)) {
                 ids.add(id);
             }
@@ -1795,14 +4056,38 @@ public final class OwnershipPlanner {
     }
 
     private int[] inferredEditableTextFrameSourceIds(RenderedGroup rg) {
-        if (rg == null || data == null || rg.sourceObjectIds() == null || rg.sourceObjectIds().length == 0) {
+        if (rg == null || data == null) {
             return new int[0];
         }
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
-        for (int sourceId : rg.sourceObjectIds()) {
+        LinkedHashSet<Integer> hiddenSourceIds = new LinkedHashSet<>();
+        if (rg.hiddenVisualSourceObjectIds() != null) {
+            for (int id : rg.hiddenVisualSourceObjectIds()) {
+                if (id >= 0) hiddenSourceIds.add(id);
+            }
+        }
+        LinkedHashSet<Integer> sourceRoots = new LinkedHashSet<>();
+        if (rg.id() >= 0) sourceRoots.add(rg.id());
+        if (rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                if (sourceId >= 0) sourceRoots.add(sourceId);
+            }
+        }
+        if (sourceRoots.isEmpty()) return new int[0];
+        for (int sourceId : sourceRoots) {
+            if (hiddenSourceIds.contains(sourceId)) continue;
             ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
-            if (!isVisibleEditableTextFrameSource(tf)) continue;
-            ids.add(sourceId);
+            if (isVisibleEditableTextFrameSource(tf)) {
+                ids.add(sourceId);
+            }
+            java.util.Set<String> descendants = data.buildDescendantSet(String.valueOf(sourceId), 16);
+            for (String descendantId : descendants) {
+                int parsed = parseFlexibleId(descendantId);
+                if (parsed >= 0 && hiddenSourceIds.contains(parsed)) continue;
+                ResolvedTextFrame childTf = data.getTextFrame(descendantId);
+                if (!isVisibleEditableTextFrameSource(childTf)) continue;
+                if (parsed >= 0) ids.add(parsed);
+            }
         }
         return toIntArray(ids);
     }
@@ -1831,22 +4116,32 @@ public final class OwnershipPlanner {
         return sb.toString();
     }
 
-    private static int[] visualSourceIdsForRendered(
+    private int[] visualSourceIdsForRendered(
             RenderedGroup rg,
             int[] sourceIds,
             int[] ownedTextFrameIds,
             VisualAction visualAction) {
         if (sourceIds == null || sourceIds.length == 0) return new int[0];
-        if (ownedTextFrameIds == null || ownedTextFrameIds.length == 0) return sourceIds;
         if (visualAction == VisualAction.DROP_VISUAL || visualAction == VisualAction.ABSORB_TEXT_STYLE
                 || visualAction == VisualAction.PLACE_TABLE_STYLE) {
             return sourceIds;
         }
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
-        for (int sourceId : sourceIds) {
-            if (!contains(ownedTextFrameIds, sourceId)) {
+        int[] executableSourceIds = renderedExportSourceIdsOrSourceIds(rg, sourceIds);
+        LinkedHashSet<Integer> hiddenVisualSources = new LinkedHashSet<>();
+        if (rg != null && rg.hiddenVisualSourceObjectIds() != null) {
+            for (int hiddenSourceId : rg.hiddenVisualSourceObjectIds()) {
+                hiddenVisualSources.add(hiddenSourceId);
+            }
+        }
+        for (int sourceId : executableSourceIds) {
+            if (!contains(ownedTextFrameIds, sourceId)
+                    && !hiddenVisualSources.contains(sourceId)) {
                 ids.add(sourceId);
             }
+        }
+        if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
+            ids.removeIf(this::isTableOnlySourceId);
         }
         if (visualAction == VisualAction.PLACE_TEXT_SHELL
                 && rg != null
@@ -1856,13 +4151,43 @@ public final class OwnershipPlanner {
                 ids.remove(nativeFillChildId);
             }
         }
-        return ids.isEmpty() ? sourceIds : toIntArray(ids);
+        if (ids.isEmpty() && !hiddenVisualSources.isEmpty()) {
+            return new int[0];
+        }
+        return ids.isEmpty() ? executableSourceIds : toIntArray(ids);
+    }
+
+    private boolean hasExecutableTextShellVisualMaterial(int[] visualSourceIds) {
+        if (data == null || visualSourceIds == null || visualSourceIds.length == 0) return false;
+        for (int sourceId : visualSourceIds) {
+            if (sourceIdHasVisibleTextFrameShellMaterial(sourceId)) return true;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (sourceItemHasVisibleShellMaterial(item)) return true;
+            if (hasPlacedContentSourceTree(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private int[] renderedExportSourceIdsOrSourceIds(RenderedGroup rg, int[] sourceIds) {
+        if (rg != null && rg.exportSourceObjectIds() != null && rg.exportSourceObjectIds().length > 0) {
+            return rg.exportSourceObjectIds();
+        }
+        return sourceIds;
+    }
+
+    private boolean isTableOnlySourceId(int sourceId) {
+        if (data == null) return false;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+        if (tf == null) return false;
+        IDMLStory story = loadStory(tf.storyId());
+        return TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, story);
     }
 
     private void normalizeVisualSourcesExcludeOwnedTextFrames() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (plan == null) continue;
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
             if (plan.visualSourceObjectIds == null || plan.visualSourceObjectIds.length == 0) continue;
             if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
             LinkedHashSet<Integer> ownedTextFrameIds = new LinkedHashSet<>();
@@ -1874,6 +4199,93 @@ public final class OwnershipPlanner {
             if (retained.length == 0 && plan.hasVisibleVisual()) continue;
             plans.set(i, plan.withVisualSourceObjectIds(retained));
         }
+    }
+
+    private void completeTextFrameShellStyleSources() {
+        if (data == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!plan.hasVisibleVisual()) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+
+            LinkedHashSet<Integer> completedSources = new LinkedHashSet<>();
+            addAll(visualSourceIds(plan), completedSources);
+            addAll(plan.styleSourceObjectIds, completedSources);
+
+            for (int textFrameId : plan.ownedTextFrameIds) {
+                if (!contains(plan.sourceObjectIds, textFrameId)) continue;
+                if (!sourceIdHasVisibleTextFrameShellMaterial(textFrameId)) continue;
+                completedSources.add(textFrameId);
+            }
+            if (completedSources.isEmpty()) continue;
+
+            int[] visualSources = toIntArray(completedSources);
+            if (Arrays.equals(visualSources, plan.visualSourceObjectIds)) continue;
+            plans.set(i, plan.withVisualSourceObjectIds(visualSources));
+        }
+    }
+
+    private void finalizeContainerOutlineDepthContracts() {
+        if (plans == null || plans.isEmpty() || data == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan outline = plans.get(i);
+            if (!isVisibleRenderedVisual(outline)) continue;
+            if (outline.visualLayer != VisualLayer.CONTAINER_OUTLINE) continue;
+            Set<String> parentIds = sourceParentIds(outline.sourceObjectIds);
+            if (parentIds.isEmpty()) continue;
+
+            int maxSiblingMaterializedZ = Integer.MIN_VALUE;
+            for (ObjectPlan sibling : plans) {
+                if (sibling == null || sibling == outline) continue;
+                if (sibling.pageIndex != outline.pageIndex) continue;
+                if (!sharesSourceParent(parentIds, sibling.sourceObjectIds)) continue;
+                if (!isMaterializedSiblingForOutlineOrder(sibling)) continue;
+                maxSiblingMaterializedZ = Math.max(maxSiblingMaterializedZ, sibling.zOrder);
+            }
+            if (maxSiblingMaterializedZ == Integer.MIN_VALUE) continue;
+            int raisedZ = maxSiblingMaterializedZ + 1;
+            if (outline.zOrder < raisedZ) {
+                plans.set(i, outline.withZOrder(raisedZ));
+            }
+        }
+    }
+
+    private boolean isMaterializedSiblingForOutlineOrder(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.materialization == Materialization.HWPX_TEXT) {
+            return true;
+        }
+        if (plan.visualLayer == VisualLayer.CONTAINER_BACKDROP
+                || plan.visualLayer == VisualLayer.TEXT_CARD_BACKDROP
+                || plan.visualLayer == VisualLayer.CONTAINER_FACE) {
+            return true;
+        }
+        return plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                || plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
+    }
+
+    private boolean sharesSourceParent(Set<String> parentIds, int[] sourceIds) {
+        if (parentIds == null || parentIds.isEmpty() || sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.parentId() == null || item.parentId().isEmpty()) continue;
+            if (parentIds.contains(item.parentId())) return true;
+        }
+        return false;
+    }
+
+    private Set<String> sourceParentIds(int[] sourceIds) {
+        HashSet<String> result = new HashSet<>();
+        if (sourceIds == null || data == null) return result;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.parentId() == null || item.parentId().isEmpty()) continue;
+            result.add(item.parentId());
+        }
+        return result;
     }
 
     private String sourceLayerId(RenderedGroup rg, int[] sourceIds) {
@@ -2009,9 +4421,9 @@ public final class OwnershipPlanner {
         Set<Integer> seen = new HashSet<>();
         int current = domId;
         while (current >= 0 && seen.add(current)) {
-            ResolvedStory story = carrierStoryForAnchor(current);
-            if (story != null) {
-                return new AnchorCarrier(current, story);
+            AnchorCarrier carrier = carrierForAnchor(current);
+            if (carrier != null) {
+                return carrier;
             }
             ResolvedPageItem item = data.getPageItem(String.valueOf(current));
             if (item == null || item.parentId() == null) break;
@@ -2021,7 +4433,21 @@ public final class OwnershipPlanner {
     }
 
     private ResolvedStory carrierStoryForAnchor(int anchoredObjectId) {
+        AnchorCarrier carrier = carrierForAnchor(anchoredObjectId);
+        return carrier != null ? carrier.story : null;
+    }
+
+    private AnchorCarrier carrierForAnchor(int anchoredObjectId) {
         if (data == null || anchoredObjectId < 0 || data.stories() == null) return null;
+        if (ctx != null && ctx.textFlowDocument != null) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocument.InlineSlotCarrier carrier =
+                    ctx.textFlowDocument.inlineSlotCarrier(anchoredObjectId);
+            if (carrier != null && carrier.unit != null) {
+                ResolvedStory story = data.getStory(carrier.unit.storyId);
+                ResolvedParagraph paragraph = carrier.paragraph != null ? carrier.paragraph.sourceParagraph : null;
+                return new AnchorCarrier(anchoredObjectId, story, paragraph, carrier.paragraph);
+            }
+        }
         for (ResolvedStory story : data.stories()) {
             if (story == null || story.paragraphs() == null) continue;
             for (ResolvedParagraph paragraph : story.paragraphs()) {
@@ -2030,7 +4456,7 @@ public final class OwnershipPlanner {
                     if (run == null || !run.isInlineAnchor()) continue;
                     Integer anchoredId = run.anchoredObjectId();
                     if (anchoredId != null && anchoredId == anchoredObjectId) {
-                        return story;
+                        return new AnchorCarrier(anchoredObjectId, story, paragraph);
                     }
                 }
             }
@@ -2081,10 +4507,22 @@ public final class OwnershipPlanner {
     private static final class AnchorCarrier {
         final int anchorId;
         final ResolvedStory story;
+        final ResolvedParagraph paragraph;
+        final TextFlowDocument.TextFlowParagraph textFlowParagraph;
 
-        AnchorCarrier(int anchorId, ResolvedStory story) {
+        AnchorCarrier(int anchorId, ResolvedStory story, ResolvedParagraph paragraph) {
+            this(anchorId, story, paragraph, null);
+        }
+
+        AnchorCarrier(
+                int anchorId,
+                ResolvedStory story,
+                ResolvedParagraph paragraph,
+                TextFlowDocument.TextFlowParagraph textFlowParagraph) {
             this.anchorId = anchorId;
             this.story = story;
+            this.paragraph = paragraph;
+            this.textFlowParagraph = textFlowParagraph;
         }
     }
 
@@ -2181,7 +4619,7 @@ public final class OwnershipPlanner {
         }
     }
 
-    private static int[] tableOnlySourceIds(int textFrameDomId, IDMLStory story) {
+    private int[] tableOnlySourceIds(int textFrameDomId, IDMLStory story) {
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
         ids.add(textFrameDomId);
         if (story != null && story.tables() != null) {
@@ -2194,6 +4632,174 @@ public final class OwnershipPlanner {
         int i = 0;
         for (Integer id : ids) out[i++] = id != null ? id : -1;
         return out;
+    }
+
+    private int[] tableOnlyStyleSourceIds(int textFrameDomId) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        addRenderedTableCarrierStyleSourceIds(textFrameDomId, ids);
+        addParentTableCarrierStyleSourceId(textFrameDomId, ids);
+        addSiblingTableCarrierStyleSourceIds(textFrameDomId, ids);
+        return toIntArray(ids);
+    }
+
+    private void addRenderedTableCarrierStyleSourceIds(int textFrameDomId, LinkedHashSet<Integer> ids) {
+        if (data == null || ids == null || textFrameDomId < 0) return;
+        for (RenderedGroup rg : data.allRenderedFloatingItems()) {
+            if (rg == null) continue;
+            if (!renderedGroupClaimsTextFrame(rg, String.valueOf(textFrameDomId))) continue;
+            if (!isTableOwnedCompositeRender(rg) && !isSlotOnlyTableCarrierShell(rg)) continue;
+            addTableStyleSourceIds(sourceIdsOrSelf(rg), textFrameDomId, ids);
+            addTableStyleSourceIds(rg.hiddenVisualSourceObjectIds(), textFrameDomId, ids);
+            addTableStyleSourceIds(rg.nativeFillChildIds(), textFrameDomId, ids);
+        }
+    }
+
+    private void addParentTableCarrierStyleSourceId(int textFrameDomId, LinkedHashSet<Integer> ids) {
+        if (data == null || ids == null || textFrameDomId < 0) return;
+        ResolvedPageItem ownerItem = data.getPageItem(String.valueOf(textFrameDomId));
+        if (ownerItem == null || ownerItem.parentId() == null) return;
+        ResolvedPageItem parent = data.getPageItem(ownerItem.parentId());
+        if (parent == null) return;
+        double[] ownerBounds = boundsOf(ownerItem);
+        if (ownerBounds == null || ownerBounds.length < 4) {
+            ResolvedTextFrame ownerTf = data.getTextFrame(String.valueOf(textFrameDomId));
+            ownerBounds = boundsOf(ownerTf);
+        }
+        collectTableCarrierStyleSourceItem(parent, textFrameDomId, ownerBounds, ids);
+    }
+
+    private void addSiblingTableCarrierStyleSourceIds(int textFrameDomId, LinkedHashSet<Integer> ids) {
+        if (data == null || ids == null || textFrameDomId < 0) return;
+        ResolvedTextFrame ownerTf = data.getTextFrame(String.valueOf(textFrameDomId));
+        ResolvedPageItem ownerItem = data.getPageItem(String.valueOf(textFrameDomId));
+        if (ownerItem == null || ownerItem.parentId() == null) return;
+        double[] ownerBounds = boundsOf(ownerItem);
+        if (ownerBounds == null || ownerBounds.length < 4) ownerBounds = boundsOf(ownerTf);
+        if (ownerBounds == null || ownerBounds.length < 4) return;
+        String parentId = ownerItem.parentId();
+        for (ResolvedPageItem item : data.pageItems()) {
+            if (item == null || item.id() == null) continue;
+            if (!parentId.equals(item.parentId())) continue;
+            collectTableCarrierStyleSourceItem(item, textFrameDomId, ownerBounds, ids);
+        }
+    }
+
+    private void collectTableCarrierStyleSourceItem(
+            ResolvedPageItem item,
+            int ownerTextFrameId,
+            double[] tableOwnerBounds,
+            LinkedHashSet<Integer> ids) {
+        if (item == null || ids == null) return;
+        int itemId = parseFlexibleId(item.id());
+        if (itemId < 0 || itemId == ownerTextFrameId) return;
+        if ("Group".equals(item.type())) {
+            if (item.childIds() == null) return;
+            for (int childId : item.childIds()) {
+                ResolvedPageItem child = data != null ? data.getPageItem(String.valueOf(childId)) : null;
+                collectTableCarrierStyleSourceItem(child, ownerTextFrameId, tableOwnerBounds, ids);
+            }
+            return;
+        }
+        if (isCandidateTableStyleSourceItem(item, ownerTextFrameId, tableOwnerBounds)) {
+            ids.add(itemId);
+        }
+    }
+
+    private void addTableStyleSourceIds(int[] sourceIds, int ownerTextFrameId, LinkedHashSet<Integer> ids) {
+        if (sourceIds == null || ids == null) return;
+        ResolvedTextFrame ownerTf = data != null ? data.getTextFrame(String.valueOf(ownerTextFrameId)) : null;
+        ResolvedPageItem ownerItem = data != null ? data.getPageItem(String.valueOf(ownerTextFrameId)) : null;
+        double[] ownerBounds = boundsOf(ownerItem);
+        if (ownerBounds == null || ownerBounds.length < 4) ownerBounds = boundsOf(ownerTf);
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data != null ? data.getPageItem(String.valueOf(sourceId)) : null;
+            if (isCandidateTableStyleSourceItem(item, ownerTextFrameId, ownerBounds)) {
+                ids.add(sourceId);
+            }
+        }
+    }
+
+    private boolean isCandidateTableStyleSourceItem(
+            ResolvedPageItem item,
+            int ownerTextFrameId,
+            double[] tableOwnerBounds) {
+        if (item == null || item.sourceHidden()) return false;
+        int itemId = parseFlexibleId(item.id());
+        if (itemId < 0 || itemId == ownerTextFrameId) return false;
+        if (data != null && data.getTextFrame(String.valueOf(itemId)) != null) return false;
+        if (item.isInline()) return false;
+        if (subtreeContainsOtherTableOnlyTextFrame(item, ownerTextFrameId)) return false;
+        if ("Group".equals(item.type())) return false;
+        if (hasSourceChildren(item)) return false;
+        double[] b = boundsOf(item);
+        if (tableOwnerBounds == null || b == null || b.length < 4) return false;
+        if (!boundsContains(tableOwnerBounds, b, 0.75)) {
+            return false;
+        }
+        return hasTableGridStyleMaterial(item);
+    }
+
+    private boolean subtreeContainsOtherTableOnlyTextFrame(ResolvedPageItem item, int ownerTextFrameId) {
+        if (item == null || item.childIds() == null) return false;
+        for (int childId : item.childIds()) {
+            if (childId == ownerTextFrameId) continue;
+            ResolvedTextFrame tf = data != null ? data.getTextFrame(String.valueOf(childId)) : null;
+            if (tf != null && TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, loadStory(tf.storyId()))) {
+                return true;
+            }
+            ResolvedPageItem child = data != null ? data.getPageItem(String.valueOf(childId)) : null;
+            if (child != null && subtreeContainsOtherTableOnlyTextFrame(child, ownerTextFrameId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasTableStyleMaterial(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        boolean shape = "Rectangle".equals(type)
+                || "Polygon".equals(type)
+                || "Oval".equals(type)
+                || "GraphicLine".equals(type);
+        if (!shape) return false;
+        boolean visibleFill = !isNoneColor(safe(item.fillColorName()));
+        boolean visibleStroke = item.strokeWeight() > 0 && !isNoneColor(safe(item.strokeColorName()));
+        return visibleFill || visibleStroke;
+    }
+
+    private static boolean hasTableGridStyleMaterial(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)) return false;
+        if (item.cornerRadius() > 0.01) return false;
+        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
+        if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
+        if (item.hasDropShadow()) return false;
+        if (item.gradientFeatherApplied()) return false;
+        return hasTableStyleMaterial(item);
+    }
+
+    private boolean hasSourceChildren(ResolvedPageItem item) {
+        if (item == null) return false;
+        if (item.childIds() != null && item.childIds().length > 0) return true;
+        if (data == null || item.id() == null) return false;
+        String id = item.id();
+        for (ResolvedPageItem other : data.pageItems()) {
+            if (other == null || other.parentId() == null) continue;
+            if (id.equals(other.parentId())) return true;
+        }
+        return false;
+    }
+
+    private static double[] expandBounds(double[] b, double tolerance) {
+        if (b == null || b.length < 4) return null;
+        return new double[] {
+                b[0] - tolerance,
+                b[1] - tolerance,
+                b[2] + tolerance,
+                b[3] + tolerance
+        };
     }
 
     private TextAction textActionOf(RenderedGroup rg) {
@@ -2230,7 +4836,19 @@ public final class OwnershipPlanner {
     }
 
     private VisualAction visualActionOf(RenderedGroup rg, Placement placement, TextAction textAction) {
+        if (isPureDecorationPageObject(rg)) {
+            return VisualAction.PLACE_FLOATING_PNG;
+        }
         if (data.isNonCanonicalAtomicObjectRender(rg)) {
+            return VisualAction.DROP_VISUAL;
+        }
+        if (isInlineGraphicLineTextStyleMarker(rg)) {
+            return VisualAction.DROP_VISUAL;
+        }
+        if (isStandaloneGraphicOnlyInlineObject(rg)) {
+            return VisualAction.PLACE_INLINE_PNG;
+        }
+        if (isInlineCompleteRenderOfTextBearingSourceGroup(rg, placement, textAction)) {
             return VisualAction.DROP_VISUAL;
         }
         if (isTableOwnedCompositeRender(rg)) {
@@ -2259,6 +4877,10 @@ public final class OwnershipPlanner {
         }
         if (isInlineCompleteGraphicWithHwpxTextSource(rg, placement, textAction)) {
             return VisualAction.DROP_VISUAL;
+        }
+        if (textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && hasTextlessShellWithInferredEditableTextSource(rg)) {
+            return VisualAction.PLACE_TEXT_SHELL;
         }
         if (isInlineGraphicWithEditableTextSourcesButNoTextlessShell(rg, placement)) {
             return VisualAction.DROP_VISUAL;
@@ -2328,15 +4950,67 @@ public final class OwnershipPlanner {
         return VisualAction.DROP_VISUAL;
     }
 
+    private boolean isPureDecorationPageObject(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!isRenderedPageObject(rg)) return false;
+        String reason = safe(rg.reason());
+        if (!"pure_decoration_group".equals(reason)
+                && !"decoration_group".equals(reason)) {
+            return false;
+        }
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!"none".equals(rg.textOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        return rg.file() != null && !rg.file().isEmpty();
+    }
+
+    private boolean isInlineCompleteRenderOfTextBearingSourceGroup(
+            RenderedGroup rg,
+            Placement placement,
+            TextAction textAction) {
+        if (rg == null || data == null) return false;
+        if (placement != Placement.INLINE) return false;
+        if (!data.isInlineObjectId(rg.id())) return false;
+        if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!"none".equals(rg.textOwner())) return false;
+        if (hasTextlessShellWithInferredEditableTextSource(rg)) return false;
+        if (textAction == TextAction.OWNED_BY_PNG) return false;
+        return hasDescendantTextFrameExcluding(String.valueOf(rg.id()), new HashSet<>(), new HashSet<>());
+    }
+
     private boolean isTableOwnedCompositeRender(RenderedGroup rg) {
         if (rg == null || data == null) return false;
         if (!isRenderedPageObject(rg)) return false;
+        if (isAtomicTextlessShellWithEditableText(rg)) return false;
+        if (isSourceDeclaredTextlessEditableShell(rg)) return false;
         String reason = safe(rg.reason());
         boolean compositeReason = reason.contains("text_hidden")
                 || reason.contains("text_composite")
                 || reason.contains("mixed_group")
-                || reason.contains("complex_graphic");
+                || reason.contains("complex_graphic")
+                || "slot_only_textless_shell".equals(reason);
         return compositeReason && hasTableOnlyCarrierSource(sourceIdsOrSelf(rg));
+    }
+
+    private boolean isSlotOnlyTableCarrierShell(RenderedGroup rg) {
+        return rg != null
+                && "slot_only_textless_shell".equals(safe(rg.reason()))
+                && hasTableOnlyCarrierSource(sourceIdsOrSelf(rg));
+    }
+
+    private boolean isAtomicTextlessShellWithEditableText(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!isAtomicOwnershipRootTextHiddenShellReason(rg.reason())) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!"hwpx_tf".equals(rg.textOwner())) return false;
+        if (rg.file() == null || rg.file().isEmpty()) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        return rg.hasEditableTextHiddenFromPng() || hasEditableTextFrameIds(rg);
     }
 
     private boolean hasTableOnlyCarrierSource(int[] sourceIds) {
@@ -2358,7 +5032,11 @@ public final class OwnershipPlanner {
                 || Boolean.TRUE.equals(rg.containsEditableText()));
     }
 
-    private VisualLayer visualLayerOf(RenderedGroup rg, VisualAction visualAction, TextAction textAction) {
+    private VisualLayer visualLayerOf(
+            RenderedGroup rg,
+            int[] sourceIds,
+            VisualAction visualAction,
+            TextAction textAction) {
         if (visualAction == VisualAction.DROP_VISUAL
                 || visualAction == VisualAction.ABSORB_TEXT_STYLE
                 || visualAction == VisualAction.PLACE_TABLE_STYLE) {
@@ -2367,13 +5045,33 @@ public final class OwnershipPlanner {
         if (rg.isPageBackground()) {
             return VisualLayer.PAGE_BACKGROUND;
         }
-        if (isPageOrSpreadBackdropImage(rg)) {
+        if (isSourceBackgroundLayer(rg, sourceIds)
+                && !(visualAction == VisualAction.PLACE_TEXT_SHELL
+                && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
+            return VisualLayer.PAGE_BACKGROUND;
+        }
+        if (isPageOrSpreadBackdropImage(rg)
+                && !(visualAction == VisualAction.PLACE_TEXT_SHELL
+                && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
+            return VisualLayer.PAGE_BACKGROUND;
+        }
+        if (isSourceDepthPageOrSpreadBackdropImage(rg, sourceIds)
+                && !(visualAction == VisualAction.PLACE_TEXT_SHELL
+                && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
             return VisualLayer.PAGE_BACKGROUND;
         }
         if (visualAction == VisualAction.PLACE_INLINE_PNG) {
             return VisualLayer.CONTENT_VISUAL;
         }
-        if (visualAction != VisualAction.PLACE_TEXT_SHELL && hasPlacedContentSource(rg)) {
+        if (visualAction != VisualAction.PLACE_TEXT_SHELL
+                && isEditableTextCarrierBackdrop(rg, textAction)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
+        if (visualAction != VisualAction.PLACE_TEXT_SHELL
+                && hasVisibleShellRootWithPlacedContentTree(rg)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
+        if (visualAction != VisualAction.PLACE_TEXT_SHELL && hasPlacedContentSourceTree(rg)) {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (visualAction != VisualAction.PLACE_TEXT_SHELL
@@ -2381,8 +5079,20 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
+            if (isGroupChromeLabelBackdrop(rg)) {
+                return VisualLayer.LABEL_OVERLAY_BACKDROP;
+            }
+            if ("editable_textframe_visual_shell".equals(safe(rg.reason()))) {
+                return VisualLayer.LABEL_BACKDROP;
+            }
+            if (isSourceDeclaredTextlessEditableShell(rg)) {
+                return VisualLayer.LABEL_BACKDROP;
+            }
             if (isTextCardBackdropVector(rg)) {
                 return VisualLayer.TEXT_CARD_BACKDROP;
+            }
+            if (isLabelChromeTextCarrierShell(rg)) {
+                return VisualLayer.LABEL_BACKDROP;
             }
             if (isMultiTextCarrierShell(rg)) {
                 return VisualLayer.CONTAINER_BACKDROP;
@@ -2390,11 +5100,14 @@ public final class OwnershipPlanner {
             if (isEditableLabelCardShell(rg)) {
                 return VisualLayer.LABEL_BACKDROP;
             }
-            if (hasColoredShapeShellSource(rg)) {
+            if (isCalloutOverlayTextShell(rg)) {
+                return VisualLayer.LABEL_OVERLAY_BACKDROP;
+            }
+            if (isDirectChildTextOwningShellSlot(rg)) {
                 return VisualLayer.LABEL_BACKDROP;
             }
-            if (isEditableVisualShellWithSeparateHwpxText(rg) && isLargeVisual(rg)) {
-                return VisualLayer.CONTAINER_BACKDROP;
+            if (hasColoredShapeShellSource(rg)) {
+                return VisualLayer.LABEL_BACKDROP;
             }
             if (isCalloutOrOutlineTextShell(rg)) {
                 return VisualLayer.CONTAINER_OUTLINE;
@@ -2430,7 +5143,9 @@ public final class OwnershipPlanner {
             return VisualLayer.TEXT_CARD_BACKDROP;
         }
         if (isGraphicOnlyCompanionOfTextShellCluster(rg)) {
-            return VisualLayer.LABEL_OVERLAY_BACKDROP;
+            return isBroadContainerCompanionOfTextShellCluster(rg)
+                    ? VisualLayer.CONTAINER_BACKDROP
+                    : VisualLayer.LABEL_OVERLAY_BACKDROP;
         }
         if (isOverlayMarkerDecoration(rg)) {
             return VisualLayer.LABEL_OVERLAY_BACKDROP;
@@ -2477,6 +5192,79 @@ public final class OwnershipPlanner {
         return VisualLayer.CONTENT_VISUAL;
     }
 
+    private boolean isSourceDeclaredTextlessEditableShell(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!"slot_only_textless_shell".equals(safe(rg.reason()))) return false;
+        if (!hasEditableTextOwnerSignal(rg)) return false;
+        return isExtractedTextlessVisual(rg);
+    }
+
+    private boolean isSourceBackgroundLayer(RenderedGroup rg, int[] sourceIds) {
+        String layerName = sourceLayerName(rg, sourceIds);
+        if (!isBackgroundLayerName(layerName)) return false;
+        if (rg != null && rg.type() != null && "inline_object".equals(rg.type())) return false;
+        return isPageSizedBackgroundVisual(rg);
+    }
+
+    private boolean hasBackgroundRoleSourceLayer(RenderedGroup rg, int[] sourceIds) {
+        String layerName = sourceLayerName(rg, sourceIds);
+        return isBackgroundLayerName(layerName);
+    }
+
+    private static boolean isBackgroundLayerName(String layerName) {
+        if (layerName == null) return false;
+        String normalized = layerName.trim().toLowerCase();
+        if (normalized.isEmpty()) return false;
+        return normalized.equals("배경")
+                || normalized.equals("바탕")
+                || normalized.equals("background")
+                || normalized.equals("bg")
+                || normalized.equals("backdrop")
+                || normalized.contains("바탕")
+                || normalized.contains("background")
+                || normalized.contains("backdrop");
+    }
+
+    private boolean isPageSizedBackgroundVisual(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (rg.isPageBackground()) return true;
+        if (isPageOrSpreadBackdropImage(rg)) return true;
+
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+
+        double visualArea = area(b);
+        double pageW = pageWidthMm(rg.pageIndex());
+        double pageH = pageHeightMm(rg.pageIndex());
+        double pageArea = pageW * pageH;
+        if (visualArea <= 0.0 || pageArea <= 0.0) return false;
+        double ratio = visualArea / pageArea;
+        if (ratio >= 0.18) return true;
+
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        boolean touchesPageEdge = b[0] <= 1.0
+                || b[1] <= 1.0
+                || b[2] >= pageH - 1.0
+                || b[3] >= pageW - 1.0;
+        boolean spansMajorAxis = w >= pageW * 0.72 || h >= pageH * 0.72;
+        boolean bleedsOutsidePage = b[0] < -1.0
+                || b[1] < -1.0
+                || b[2] > pageH + 1.0
+                || b[3] > pageW + 1.0;
+        return touchesPageEdge && spansMajorAxis && (ratio >= 0.035 || bleedsOutsidePage);
+    }
+
+    private boolean isEditableTextCarrierBackdrop(RenderedGroup rg, TextAction textAction) {
+        if (rg == null) return false;
+        if (textAction != TextAction.OWNED_BY_HWPX_TEXT
+                && !"hwpx_tf".equals(rg.textOwner())
+                && !hasEditableTextFrameIds(rg)) {
+            return false;
+        }
+        return isMultiTextCarrierShell(rg);
+    }
+
     private boolean isMultiTextCarrierShell(RenderedGroup rg) {
         if (rg == null) return false;
         String reason = safe(rg.reason());
@@ -2486,6 +5274,270 @@ public final class OwnershipPlanner {
         if (!carrierReason) return false;
         String[] editableIds = rg.editableTextFrameIds();
         return editableIds != null && editableIds.length > 1;
+    }
+
+    private boolean isLabelChromeTextCarrierShell(RenderedGroup rg) {
+        if (!isMultiTextCarrierShell(rg) || data == null) return false;
+        double[] carrier = rg.bounds();
+        if (carrier == null || carrier.length < 4) return false;
+        double[] textUnion = ownedTextFrameBoundsUnion(rg);
+        double[] carrierForChrome = textUnion != null ? textUnion : carrier;
+        double carrierArea = area(carrierForChrome);
+        double carrierW = Math.abs(carrierForChrome[3] - carrierForChrome[1]);
+        double carrierH = Math.abs(carrierForChrome[2] - carrierForChrome[0]);
+        if (carrierArea <= 0.0 || carrierW <= 0.0 || carrierH <= 0.0) return false;
+
+        double[] visualUnion = visualOnlyChromeBoundsUnion(rg, textUnion);
+        if (visualUnion == null) return false;
+        double visualArea = area(visualUnion);
+        if (visualArea <= 0.0) return false;
+        double visualW = Math.abs(visualUnion[3] - visualUnion[1]);
+        double visualH = Math.abs(visualUnion[2] - visualUnion[0]);
+
+        boolean smallLocalChrome = visualArea <= carrierArea * 0.25
+                && visualH <= Math.max(18.0, carrierH * 0.45)
+                && visualW <= Math.max(36.0, carrierW * 0.80);
+        if (!smallLocalChrome) return false;
+
+        if (textUnion == null) return true;
+        double topBand = Math.max(16.0, Math.abs(textUnion[2] - textUnion[0]) * 0.35);
+        return visualUnion[0] <= textUnion[0] + topBand
+                || visualUnion[2] <= textUnion[0] + topBand;
+    }
+
+    private boolean isGroupChromeLabelBackdrop(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"label_backdrop_group".equals(rg.reason())) return false;
+        LinkedHashSet<Integer> ownedTextFrameIds = editableTextFrameIds(rg);
+        if (ownedTextFrameIds.isEmpty()) return false;
+
+        double[] labelBounds = null;
+        for (int sourceId : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || "TextFrame".equals(safe(item.type()))) continue;
+            labelBounds = unionBounds(labelBounds, boundsOf(item));
+        }
+        if (labelBounds == null || area(labelBounds) <= 0.0) return false;
+
+        LinkedHashSet<String> commonGroupIds = new LinkedHashSet<>();
+        for (int sourceId : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.parentId() == null || item.parentId().isBlank()) continue;
+            String groupId = item.parentId();
+            if (isAncestorOfAnyTextFrame(groupId, ownedTextFrameIds)) {
+                commonGroupIds.add(groupId);
+            }
+        }
+
+        for (String groupId : commonGroupIds) {
+            if (hasSiblingContentCarrierInGroup(groupId, ownedTextFrameIds, labelBounds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private LinkedHashSet<Integer> editableTextFrameIds(RenderedGroup rg) {
+        LinkedHashSet<Integer> out = new LinkedHashSet<>();
+        if (rg == null || rg.editableTextFrameIds() == null) return out;
+        for (String id : rg.editableTextFrameIds()) {
+            int parsed = parseFlexibleId(id);
+            if (parsed >= 0) out.add(parsed);
+        }
+        return out;
+    }
+
+    private boolean isAncestorOfAnyTextFrame(String ancestorId, Set<Integer> textFrameIds) {
+        if (ancestorId == null || ancestorId.isBlank() || textFrameIds == null) return false;
+        for (int textFrameId : textFrameIds) {
+            if (isAncestorOf(ancestorId, String.valueOf(textFrameId))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isAncestorOf(String ancestorId, String childId) {
+        if (ancestorId == null || ancestorId.isBlank()
+                || childId == null || childId.isBlank()
+                || data == null) {
+            return false;
+        }
+        String current = childId;
+        HashSet<String> visited = new HashSet<>();
+        while (current != null && !current.isBlank() && visited.add(current)) {
+            ResolvedPageItem item = data.getPageItem(current);
+            if (item == null) return false;
+            String parentId = item.parentId();
+            if (ancestorId.equals(parentId)) return true;
+            current = parentId;
+        }
+        return false;
+    }
+
+    private boolean hasSiblingContentCarrierInGroup(
+            String groupId,
+            Set<Integer> ownedTextFrameIds,
+            double[] labelBounds) {
+        ResolvedPageItem group = data.getPageItem(groupId);
+        if (group == null || labelBounds == null || area(labelBounds) <= 0.0) return false;
+        int[] childIds = group.childIds();
+        if (childIds == null || childIds.length == 0) return false;
+        for (int childId : childIds) {
+            if (ownedTextFrameIds != null && ownedTextFrameIds.contains(childId)) continue;
+            ResolvedPageItem child = data.getPageItem(String.valueOf(childId));
+            if (!isContentCarrierSibling(child, labelBounds)) continue;
+            if (hasDescendantTextFrameExcluding(child.id(), ownedTextFrameIds, new HashSet<>())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isContentCarrierSibling(ResolvedPageItem item, double[] labelBounds) {
+        if (item == null || labelBounds == null) return false;
+        String type = safe(item.type());
+        if (!"Rectangle".equals(type) && !"Polygon".equals(type) && !"Oval".equals(type)) {
+            return false;
+        }
+        if (!hasVisibleChromePaint(item)) return false;
+        double[] b = boundsOf(item);
+        double labelArea = area(labelBounds);
+        double itemArea = area(b);
+        if (labelArea <= 0.0 || itemArea <= labelArea * 1.5) return false;
+        return b != null && b.length >= 4 && b[2] > labelBounds[2];
+    }
+
+    private boolean hasDescendantTextFrameExcluding(
+            String sourceId,
+            Set<Integer> excludedTextFrameIds,
+            Set<String> visited) {
+        if (sourceId == null || sourceId.isBlank() || !visited.add(sourceId)) return false;
+        ResolvedPageItem item = data.getPageItem(sourceId);
+        if (item == null) return false;
+        int parsed = parseFlexibleId(sourceId);
+        if ("TextFrame".equals(safe(item.type()))
+                && (excludedTextFrameIds == null || !excludedTextFrameIds.contains(parsed))) {
+            return true;
+        }
+        int[] childIds = item.childIds();
+        if (childIds != null) {
+            for (int childId : childIds) {
+                if (hasDescendantTextFrameExcluding(
+                        String.valueOf(childId), excludedTextFrameIds, visited)) {
+                    return true;
+                }
+            }
+        }
+        for (ResolvedPageItem candidate : data.pageItems()) {
+            if (candidate == null || candidate.parentId() == null) continue;
+            if (!candidate.parentId().equals(sourceId)) continue;
+            if (hasDescendantTextFrameExcluding(candidate.id(), excludedTextFrameIds, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private double[] visualOnlyChromeBoundsUnion(RenderedGroup rg, double[] ownedTextBounds) {
+        if (rg == null || data == null) return null;
+        int[] ids = rg.visualOnlyChildIds();
+        if (ids == null || ids.length == 0) ids = sourceIdsOrSelf(rg);
+        double[] union = null;
+        Set<String> visited = new HashSet<>();
+        for (int id : ids) {
+            union = collectVisualChromeBounds(union, String.valueOf(id), visited, ownedTextBounds);
+        }
+        return union;
+    }
+
+    private double[] collectVisualChromeBounds(double[] union, String id, Set<String> visited, double[] ownedTextBounds) {
+        if (id == null || data == null || visited == null || !visited.add(id)) return union;
+        ResolvedPageItem item = data.getPageItem(id);
+        if (item == null) return union;
+        String type = safe(item.type());
+        if ("TextFrame".equals(type)) return union;
+        if ("Group".equals(type) || "page_object".equals(type)) {
+            int[] childIds = item.childIds();
+            if (childIds != null) {
+                for (int childId : childIds) {
+                    union = collectVisualChromeBounds(union, String.valueOf(childId), visited, ownedTextBounds);
+                }
+            }
+            return union;
+        }
+        if (!hasVisibleChromePaint(item)) return union;
+        double[] b = boundsOf(item);
+        if (b == null || b.length < 4 || area(b) <= 0.0) return union;
+        if (isBroadOwnedTextCarrierPaint(b, ownedTextBounds)) return union;
+        return unionBounds(union, b);
+    }
+
+    private static boolean isBroadOwnedTextCarrierPaint(double[] paintBounds, double[] ownedTextBounds) {
+        if (paintBounds == null || ownedTextBounds == null
+                || paintBounds.length < 4 || ownedTextBounds.length < 4) {
+            return false;
+        }
+        double paintArea = area(paintBounds);
+        double textArea = area(ownedTextBounds);
+        if (paintArea <= 0.0 || textArea <= 0.0) return false;
+        if (paintArea < textArea * 0.35) return false;
+        return boundsContains(paintBounds, ownedTextBounds, 3.0)
+                || boundsContains(ownedTextBounds, paintBounds, 3.0)
+                || overlapRatio(paintBounds, ownedTextBounds) >= 0.85;
+    }
+
+    private static boolean hasVisibleChromePaint(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        if ("Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) return true;
+        String fill = safe(item.fillColorName());
+        if (!fill.isEmpty()
+                && !"None".equals(fill)
+                && !"[None]".equals(fill)
+                && !"Paper".equals(fill)
+                && !"White".equals(fill)
+                && isVisibleTint(item.fillTint())) {
+            return true;
+        }
+        String stroke = safe(item.strokeColorName());
+        return !stroke.isEmpty()
+                && !"None".equals(stroke)
+                && !"[None]".equals(stroke)
+                && item.strokeWeight() > 0.0
+                && isVisibleTint(item.strokeTint());
+    }
+
+    private static boolean isVisibleTint(double tint) {
+        return tint < 0.0 || tint > 0.0;
+    }
+
+    private double[] ownedTextFrameBoundsUnion(RenderedGroup rg) {
+        if (rg == null || data == null) return null;
+        String[] ids = rg.editableTextFrameIds();
+        if (ids == null || ids.length == 0) return null;
+        double[] union = null;
+        for (String id : ids) {
+            ResolvedTextFrame tf = data.getTextFrame(id);
+            if (tf == null) continue;
+            double[] b = tf.geometricBounds();
+            if (b == null || b.length < 4 || area(b) <= 0.0) continue;
+            union = unionBounds(union, b);
+        }
+        return union;
+    }
+
+    private static double[] unionBounds(double[] a, double[] b) {
+        if (b == null || b.length < 4) return a;
+        if (a == null || a.length < 4) {
+            return new double[] { b[0], b[1], b[2], b[3] };
+        }
+        return new double[] {
+                Math.min(a[0], b[0]),
+                Math.min(a[1], b[1]),
+                Math.max(a[2], b[2]),
+                Math.max(a[3], b[3])
+        };
     }
 
     private boolean isGraphicOnlyCompanionOfTextShellCluster(RenderedGroup rg) {
@@ -2522,6 +5574,15 @@ public final class OwnershipPlanner {
             }
         }
         return false;
+    }
+
+    private static boolean isBroadContainerCompanionOfTextShellCluster(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (isLargeVisual(rg)) return true;
+        String reason = safe(rg.reason());
+        return reason.contains("container")
+                || reason.contains("textframe_visual_shell")
+                || reason.contains("visual_shell");
     }
 
     private boolean sharesSourceAncestor(int[] ownerSources, int[] childSources) {
@@ -2721,7 +5782,32 @@ public final class OwnershipPlanner {
     private boolean isEditableVisualShellWithSeparateHwpxText(RenderedGroup rg) {
         if (rg == null) return false;
         if (!hasEditableTextOwnerSignal(rg)) return false;
+        if (hasTableOnlyTextFrameSource(rg)) return false;
         return isExtractedTextlessVisual(rg);
+    }
+
+    private boolean isDirectChildTextOwningShellSlot(RenderedGroup rg) {
+        if (!isDirectChildShellSlotRender(rg)) return false;
+        if (!hasEditableTextOwnerSignal(rg)) return false;
+        if (!isExtractedTextlessVisual(rg)) return false;
+        return !isMultiTextCarrierShell(rg);
+    }
+
+    private boolean hasTableOnlyTextFrameSource(RenderedGroup rg) {
+        return rg != null && hasTableOnlyTextFrameSource(rg.sourceObjectIds());
+    }
+
+    private boolean hasTableOnlyTextFrameSource(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+            if (tf == null) continue;
+            IDMLStory story = loadStory(tf.storyId());
+            if (TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, story)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isExtractedTextlessVisual(RenderedGroup rg) {
@@ -2747,6 +5833,7 @@ public final class OwnershipPlanner {
     private boolean isInlineGraphicWithEditableTextSourcesButNoTextlessShell(RenderedGroup rg, Placement placement) {
         if (rg == null || placement != Placement.INLINE) return false;
         if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (hasTextlessShellWithInferredEditableTextSource(rg)) return false;
         if (hasExplicitTextlessShellSignal(rg)) return false;
         return inferredEditableTextFrameSourceIds(rg).length > 0;
     }
@@ -2757,8 +5844,23 @@ public final class OwnershipPlanner {
         if (rg.file() == null || rg.file().isEmpty()) return false;
         if ("indesign_png".equals(rg.textOwner())) return false;
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        if (!hasExplicitTextlessShellSignal(rg)) return false;
+        if (!hasExplicitTextlessShellSignal(rg)
+                && !isInlineTextlessShellWithInferredEditableTextSourceCandidate(rg)) {
+            return false;
+        }
         return inferredEditableTextFrameSourceIds(rg).length > 0;
+    }
+
+    private boolean isInlineTextlessShellWithInferredEditableTextSourceCandidate(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!data.isInlineObjectId(rg.id())) return false;
+        if (!"inline_graphic_only".equals(safe(rg.reason()))) return false;
+        if (!"indesign_png".equals(safe(rg.visualOwner()))) return false;
+        if ("indesign_png".equals(safe(rg.textOwner()))) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        return hasVisibleShellMaterialSource(rg);
     }
 
     private static boolean hasExplicitTextlessShellSignal(RenderedGroup rg) {
@@ -3037,6 +6139,14 @@ public final class OwnershipPlanner {
         return calloutTail || outlineBox;
     }
 
+    private boolean isCalloutOverlayTextShell(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!ownedTextUsesCalloutOverlayStyle(rg)) return false;
+        if (hasImageSource(rg)) return false;
+        if (!hasDrawableBackdropShapeSource(rg)) return false;
+        return editableTextFrameIdsOf(rg).length > 0;
+    }
+
     private boolean hasImageSource(RenderedGroup rg) {
         if (rg == null || data == null || rg.sourceObjectIds() == null) return false;
         for (int id : rg.sourceObjectIds()) {
@@ -3047,7 +6157,18 @@ public final class OwnershipPlanner {
     }
 
     private Placement placementOf(RenderedGroup rg) {
+        if (isDirectChildShellSlotRender(rg) && hasEditableTextOwnerSignal(rg)) {
+            return Placement.FLOATING;
+        }
+        if (isRenderedPageObject(rg)
+                && hasDirectResolvedInlineAnchorSource(rg)
+                && !hasAnchoredPagePositionSource(rg)) {
+            return Placement.INLINE;
+        }
         if ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType())) {
+            if (hasAnchoredPagePositionSource(rg)) {
+                return Placement.FLOATING;
+            }
             if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(data, rg)) {
                 return Placement.FLOATING;
             }
@@ -3078,6 +6199,16 @@ public final class OwnershipPlanner {
             return Placement.FLOATING;
         }
         return Placement.FLOATING;
+    }
+
+    private boolean hasAnchoredPagePositionSource(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (hasIdmlAnchoredPagePosition(rg.id())) return true;
+        if (rg.sourceObjectIds() == null) return false;
+        for (int sourceId : rg.sourceObjectIds()) {
+            if (hasIdmlAnchoredPagePosition(sourceId)) return true;
+        }
+        return false;
     }
 
     private boolean isInlineLeafTextShellAtom(RenderedGroup rg) {
@@ -3143,6 +6274,7 @@ public final class OwnershipPlanner {
 
     private boolean isTextHiddenShellForInlineAnchor(RenderedGroup rg) {
         if (rg == null) return false;
+        if (hasAnchoredPagePositionSource(rg)) return false;
         if (!isDirectInlineTextShellReason(rg.reason())) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if (!"hwpx_tf".equals(rg.textOwner())) return false;
@@ -3172,6 +6304,55 @@ public final class OwnershipPlanner {
         return false;
     }
 
+    private boolean hasDirectResolvedInlineAnchorSource(RenderedGroup rg) {
+        return directResolvedInlineAnchorSourceId(rg) != null;
+    }
+
+    private Integer directResolvedInlineAnchorSourceId(RenderedGroup rg) {
+        if (rg == null || data == null) return null;
+        int declaredAnchorSourceId = rg.inlineAnchorSourceObjectId();
+        if (declaredAnchorSourceId > 0) {
+            if (hasResolvedInlineAnchor(declaredAnchorSourceId)
+                    && !hasIdmlAnchoredPagePosition(declaredAnchorSourceId)
+                    && rg.inlineSourceTreeClosed()) {
+                return declaredAnchorSourceId;
+            }
+        }
+        int[] sourceIds = sourceIdsOrSelf(rg);
+        if (sourceIds == null || sourceIds.length == 0) return null;
+        for (int sourceId : sourceIds) {
+            if (sourceId <= 0) continue;
+            if (!hasResolvedInlineAnchor(sourceId)) continue;
+            if (hasIdmlAnchoredPagePosition(sourceId)) continue;
+            if (!allSourcesBelongToInlineAnchorTree(sourceId, sourceIds)) continue;
+            int[] exportSourceIds = rg.exportSourceObjectIds();
+            if (exportSourceIds != null
+                    && exportSourceIds.length > 0
+                    && !allSourcesBelongToInlineAnchorTree(sourceId, exportSourceIds)) {
+                continue;
+            }
+            return sourceId;
+        }
+        return null;
+    }
+
+    private boolean allSourcesBelongToInlineAnchorTree(int anchorSourceId, int[] sourceIds) {
+        if (anchorSourceId <= 0 || sourceIds == null || sourceIds.length == 0) return false;
+        LinkedHashSet<String> allowed = new LinkedHashSet<>();
+        allowed.add(String.valueOf(anchorSourceId));
+        if (data != null) {
+            Set<String> descendants = data.buildDescendantSet(String.valueOf(anchorSourceId), 8);
+            if (descendants != null) allowed.addAll(descendants);
+        }
+        for (int sourceId : sourceIds) {
+            if (sourceId <= 0) continue;
+            if (!allowed.contains(String.valueOf(sourceId))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private boolean hasResolvedInlineAnchor(int domId) {
         if (data == null || domId < 0 || data.stories() == null) return false;
         Boolean cached = resolvedInlineAnchorCache.get(domId);
@@ -3182,6 +6363,12 @@ public final class OwnershipPlanner {
     }
 
     private boolean hasResolvedStoryInlineAnchor(int domId) {
+        if (ctx != null && ctx.textFlowDocument != null && ctx.textFlowDocument.hasInlineSlot(domId)) {
+            return true;
+        }
+        if (ctx != null && ctx.textFlowIndex != null && ctx.textFlowIndex.indexedInlineAnchorCount() > 0) {
+            return !ctx.textFlowIndex.inlineSlotsByAnchorId(domId).isEmpty();
+        }
         for (ResolvedStory story : data.stories()) {
             if (story == null || story.paragraphs() == null) continue;
             for (ResolvedParagraph paragraph : story.paragraphs()) {
@@ -3820,21 +7007,10 @@ public final class OwnershipPlanner {
                 if (a.pageIndex != b.pageIndex) continue;
                 if (!boundsMostlyOverlap(a.bounds, b.bounds, 0.78)) continue;
                 if (isLargeLayeredImageExportPair(a, b)) {
-                    ObjectPlan layerA = a.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
-                    ObjectPlan layerB = b.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
-                    plans.set(i, layerA);
-                    plans.set(j, layerB);
-                    a = layerA;
+                    a = markLayeredImageExportPairAsContainerBackdrops(i, j, a, b);
                     continue;
                 }
                 if (!isLikelyDuplicateImageExport(a, b)) {
-                    if (isLargeLayeredImageExportPair(a, b)) {
-                        ObjectPlan layerA = a.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
-                        ObjectPlan layerB = b.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
-                        plans.set(i, layerA);
-                        plans.set(j, layerB);
-                        a = layerA;
-                    }
                     continue;
                 }
                 if (isBackdropAndContentImagePair(a, b)) continue;
@@ -3859,32 +7035,21 @@ public final class OwnershipPlanner {
                 ObjectPlan b = plans.get(j);
                 if (!isImageExportVisual(b)) continue;
                 if (!isLargeLayeredImageExportPair(a, b)) continue;
-                ObjectPlan layerA = a.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
-                ObjectPlan layerB = b.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
-                plans.set(i, layerA);
-                plans.set(j, layerB);
-                a = layerA;
+                a = markLayeredImageExportPairAsContainerBackdrops(i, j, a, b);
             }
         }
     }
 
-    private void resolveMasterGraphicsWithHwpxTextFallbacks() {
-        for (int i = 0; i < plans.size(); i++) {
-            ObjectPlan complete = plans.get(i);
-            if (!isMasterGraphicCompleteRender(complete)) continue;
-            if (!containsVisibleHwpxMasterTextSourceOnPage(complete)) continue;
-
-            int fallbackIndex = findMasterGraphicFallbackIndex(complete);
-            if (fallbackIndex < 0) continue;
-
-            ObjectPlan fallback = plans.get(fallbackIndex);
-            plans.set(i, complete.withVisualAction(VisualAction.DROP_VISUAL,
-                    "master_graphic_text_owned_by_hwpx"));
-            plans.set(fallbackIndex, fallback
-                    .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
-                            "master_graphic_text_hidden_fallback")
-                    .withVisualLayer(complete.visualLayer));
-        }
+    private ObjectPlan markLayeredImageExportPairAsContainerBackdrops(
+            int aIndex,
+            int bIndex,
+            ObjectPlan a,
+            ObjectPlan b) {
+        ObjectPlan layerA = a.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+        ObjectPlan layerB = b.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+        plans.set(aIndex, layerA);
+        plans.set(bIndex, layerB);
+        return layerA;
     }
 
     private void resolveClippedDecorationParents() {
@@ -3948,35 +7113,46 @@ public final class OwnershipPlanner {
         return false;
     }
 
-    private void resolveContainerMasksOverIntrudingLabelBackdrops() {
-        List<ObjectPlan> labels = new ArrayList<>();
-        for (ObjectPlan plan : plans) {
-            if (!isVisibleRenderedVisual(plan)) continue;
-            if (plan.visualLayer == VisualLayer.LABEL_BACKDROP) {
-                labels.add(plan);
-            }
+    private boolean hasSourceDescendantRelation(ObjectPlan ancestor, ObjectPlan descendant) {
+        if (ancestor == null || descendant == null || data == null) return false;
+        LinkedHashSet<Integer> descendantIds = new LinkedHashSet<>();
+        descendantIds.add(descendant.domId);
+        addAll(descendant.sourceObjectIds, descendantIds);
+        addAll(visualSourceIds(descendant), descendantIds);
+        for (int sourceId : descendantIds) {
+            if (sourceDescendsFromPlan(sourceId, ancestor)) return true;
         }
-        if (labels.isEmpty()) return;
+        return false;
+    }
 
-        for (int i = 0; i < plans.size(); i++) {
-            ObjectPlan container = plans.get(i);
-            if (!isVisibleRenderedVisual(container)) continue;
-            if (container.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
-            if (container.visualLayer != VisualLayer.CONTAINER_BACKDROP) continue;
-            if (!isPaperLikeContainerFace(container)) continue;
-            for (ObjectPlan label : labels) {
-                if (label.pageIndex != container.pageIndex) continue;
-                if (!labelIntrudesIntoContainerFace(label.bounds, container.bounds)) continue;
-                plans.set(i, container.withVisualLayer(VisualLayer.CONTAINER_OUTLINE));
-                break;
+    private boolean sourceDescendsFromPlan(int sourceId, ObjectPlan ancestor) {
+        if (sourceId <= 0 || ancestor == null || data == null) return false;
+        LinkedHashSet<Integer> ancestorIds = new LinkedHashSet<>();
+        ancestorIds.add(ancestor.domId);
+        addAll(ancestor.sourceObjectIds, ancestorIds);
+        addAll(visualSourceIds(ancestor), ancestorIds);
+        Set<Integer> visited = new HashSet<>();
+        int current = sourceId;
+        for (int depth = 0; depth < 64; depth++) {
+            if (!visited.add(current)) return false;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(current));
+            if (item == null || item.parentId() == null || item.parentId().isBlank()) {
+                return false;
             }
+            int parentId = parseInt(item.parentId(), -1);
+            if (parentId <= 0) return false;
+            if (ancestorIds.contains(parentId)) return true;
+            current = parentId;
         }
+        return false;
     }
 
     private void resolveLayeredContainerFaces() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan face = plans.get(i);
             if (!isVisibleRenderedVisual(face)) continue;
+            if (isVectorShapeFramePlan(face)) continue;
+            if (isComplexGraphicFramePlan(face)) continue;
             if (face.placement != Placement.FLOATING) continue;
             if (!isPaperLikeContainerFace(face)) continue;
             if (isLineLikePlan(face)) continue;
@@ -3985,6 +7161,8 @@ public final class OwnershipPlanner {
                 if (i == j) continue;
                 ObjectPlan shadow = plans.get(j);
                 if (!isVisibleRenderedVisual(shadow)) continue;
+                if (isVectorShapeFramePlan(shadow)) continue;
+                if (isComplexGraphicFramePlan(shadow)) continue;
                 if (shadow.placement != Placement.FLOATING) continue;
                 if (shadow.pageIndex != face.pageIndex) continue;
                 if (!isColoredContainerShadow(shadow)) continue;
@@ -3998,7 +7176,6 @@ public final class OwnershipPlanner {
                     if (!textShellVisuallyOwnsDuplicate(textShellOwner, duplicate)) {
                         continue;
                     }
-                    plans.set(ownerIndex, textShellOwner.withZOrder(Math.min(face.zOrder, shadow.zOrder)));
                     plans.set(duplicateIndex, duplicate.withVisualAction(
                             VisualAction.DROP_VISUAL,
                             "text_owned_container_shell_duplicate_child"));
@@ -4011,8 +7188,7 @@ public final class OwnershipPlanner {
                     int duplicateIndex = originalOwner == face ? j : i;
                     ObjectPlan duplicate = originalOwner == face ? shadow : face;
                     ObjectPlan retained = originalOwner
-                            .withVisualLayer(VisualLayer.CONTAINER_BACKDROP)
-                            .withZOrder(Math.min(face.zOrder, shadow.zOrder));
+                            .withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
                     if (retained.visualAction == VisualAction.PLACE_TEXT_SHELL) {
                         VisualAction convertedVisual = retained.placement == Placement.INLINE
                                 ? VisualAction.PLACE_INLINE_PNG
@@ -4024,13 +7200,25 @@ public final class OwnershipPlanner {
                             VisualAction.DROP_VISUAL,
                             "container_face_shadow_duplicate_child"));
                 } else {
-                    int faceZ = Math.min(face.zOrder, shadow.zOrder) - 1;
-                    plans.set(i, face.withVisualLayer(VisualLayer.CONTAINER_FACE).withZOrder(faceZ));
+                    plans.set(i, face.withVisualLayer(VisualLayer.CONTAINER_FACE));
                     plans.set(j, shadow.withVisualLayer(VisualLayer.CONTAINER_FACE));
                 }
                 break;
             }
         }
+    }
+
+    private static boolean isVectorShapeFramePlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        return safe(plan.kind).contains("pass.vector_shape_frames")
+                || safe(plan.sourceBundleKey).contains("pass.vector_shape_frames");
+    }
+
+    private static boolean isComplexGraphicFramePlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        return safe(plan.kind).contains("pass.complex_graphic_frames")
+                || safe(plan.kind).contains("rendered_graphic_frame")
+                || safe(plan.file).contains("rendered_frames/graphic_");
     }
 
     private static boolean textShellVisuallyOwnsDuplicate(ObjectPlan owner, ObjectPlan duplicate) {
@@ -4075,7 +7263,7 @@ public final class OwnershipPlanner {
                 ObjectPlan child = plans.get(j);
                 if (!isVisibleRenderedVisual(child)) continue;
                 if (child.pageIndex != parent.pageIndex) continue;
-                if (isProtectedCompositeChildVisual(child)) continue;
+                if (isProtectedCompositeChildVisual(parent, child)) continue;
                 if (!isBakedIntoCompositeParent(parent, parentRender, child)) continue;
                 plans.set(j, child.withVisualAction(
                         VisualAction.DROP_VISUAL,
@@ -4096,12 +7284,55 @@ public final class OwnershipPlanner {
                 || reason.contains("group");
     }
 
-    private boolean isProtectedCompositeChildVisual(ObjectPlan child) {
+    private boolean isProtectedCompositeChildVisual(ObjectPlan parent, ObjectPlan child) {
         if (child == null) return true;
-        if (child.visualAction == VisualAction.PLACE_TEXT_SHELL) return true;
+        if (isDroppableBakedCompositeDecorationChild(parent, child)) return false;
+        if (child.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && !isDroppableBakedVisualOnlyTextShell(parent, child)) {
+            return true;
+        }
         if (isLabelBackdropGroupPlan(child)) return true;
         return child.visualLayer == VisualLayer.LABEL_BACKDROP
                 || child.visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP;
+    }
+
+    private static boolean isDroppableBakedCompositeDecorationChild(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (!isCompleteCompositeReason(parent.reason)) return false;
+        if (!child.hasVisibleVisual()) return false;
+        if (child.textAction != TextAction.DROP_TEXT) return false;
+        if (child.ownedTextFrameIds != null && child.ownedTextFrameIds.length > 0) return false;
+        PolicyLayer layer = child.visualPolicyLayer();
+        return layer == PolicyLayer.BACKGROUND || layer == PolicyLayer.DECORATION;
+    }
+
+    private boolean isDroppableBakedVisualOnlyTextShell(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (isDirectChildShellSlotPlan(child)) return false;
+        if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (child.textAction != TextAction.DROP_TEXT) return false;
+        if (child.ownedTextFrameIds != null && child.ownedTextFrameIds.length > 0) return false;
+        return isCompleteCompositeVisualOwner(parent)
+                && compositeParentVisuallyOwnsChildSlot(parent, child)
+                && !hasDistinctChildShellSlotSignal(child);
+    }
+
+    private static boolean isCompleteCompositeReason(String reason) {
+        String value = safe(reason);
+        return value.contains("mixed_group_text_hidden")
+                || value.contains("complex_graphic_text_hidden")
+                || value.contains("image_group_text_hidden")
+                || value.contains("composite")
+                || value.contains("group");
+    }
+
+    private static boolean compositeParentVisuallyOwnsChildSlot(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        int[] parentVisualSources = visualSourceIds(parent);
+        if (parentVisualSources.length == 0) return false;
+        return contains(parentVisualSources, child.domId)
+                || containsAny(parentVisualSources, child.sourceObjectIds)
+                || containsAny(parentVisualSources, visualSourceIds(child));
     }
 
     private boolean isBakedIntoCompositeParent(
@@ -4144,10 +7375,8 @@ public final class OwnershipPlanner {
         if (plan == null || plan.renderId == null) return null;
         RenderedGroup best = null;
         int bestScore = Integer.MIN_VALUE;
-        for (RenderedGroup rg : allRenderedGroups()) {
-            if (rg == null || rg.id() != plan.renderId.intValue() || rg.pageIndex() != plan.pageIndex) {
-                continue;
-            }
+        for (RenderedGroup rg : renderedGroupsForPageId(plan.pageIndex, plan.renderId.intValue())) {
+            if (rg == null) continue;
             int score = 0;
             if (plan.file != null && plan.file.equals(rg.file())) score += 16;
             if (plan.placement == placementOf(rg)) score += 8;
@@ -4268,85 +7497,6 @@ public final class OwnershipPlanner {
         }
     }
 
-    private void resolveCrossPageParentTextShellDescendantVisuals() {
-        for (int i = 0; i < plans.size(); i++) {
-            ObjectPlan parent = plans.get(i);
-            if (!isParentTextShellOwner(parent)) continue;
-            if (!isSpreadCrossingVisual(parent)) continue;
-            LinkedHashSet<Integer> descendants = new LinkedHashSet<>();
-            if (parent.descendantVisualObjectIds != null) {
-                for (int id : parent.descendantVisualObjectIds) {
-                    descendants.add(id);
-                }
-            }
-            for (int j = 0; j < plans.size(); j++) {
-                if (i == j) continue;
-                ObjectPlan child = plans.get(j);
-                if (!isVisibleRenderedVisual(child)) continue;
-                if (child.pageIndex == parent.pageIndex) continue;
-                if (Math.abs(child.pageIndex - parent.pageIndex) != 1) continue;
-                if (!parentTextShellMayOwnDescendantVisual(parent, child)) continue;
-                if (isImageBackedSourcePositionedInlineTextShell(parent, child)) continue;
-                if (inlineTextShellOwnsMoreSpecificText(child, parent)) continue;
-                if (isStandaloneGraphicOnlyInlineObjectPlan(child)) continue;
-                if (!crossPageTextShellMayOwnDescendantVisual(parent, child)) continue;
-                collectDescendantVisualIds(parent, child, descendants);
-                ObjectPlan dropped = child.withVisualAction(VisualAction.DROP_VISUAL,
-                        "owned_by_cross_page_parent_text_shell");
-                if (!"text_frame".equals(dropped.kind)) {
-                    dropped = dropped.withTextAction(TextAction.DROP_TEXT);
-                }
-                plans.set(j, dropped);
-            }
-            if (!descendants.isEmpty()) {
-                plans.set(i, parent.withDescendantVisualObjectIds(toIntArray(descendants)));
-            }
-        }
-    }
-
-    private boolean crossPageTextShellMayOwnDescendantVisual(ObjectPlan parent, ObjectPlan child) {
-        if (parent == null || child == null) return false;
-        if (!adjacentPageIntersection(parent, child.pageIndex)) return false;
-        if (isStrictChildPlan(parent, child)) return true;
-        if (containsAll(visualSourceIds(parent), visualSourceIds(child))) return true;
-        return containsAny(parent.sourceObjectIds, visualSourceIds(child));
-    }
-
-    private boolean isSpreadCrossingVisual(ObjectPlan plan) {
-        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
-        double pageWidth = pageWidthMm(plan.pageIndex);
-        double pageHeight = pageHeightMm(plan.pageIndex);
-        return plan.bounds[1] < -10.0
-                || plan.bounds[3] > pageWidth + 10.0
-                || plan.bounds[0] < -10.0
-                || plan.bounds[2] > pageHeight + 10.0;
-    }
-
-    private boolean adjacentPageIntersection(ObjectPlan plan, int adjacentPageIndex) {
-        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
-        double pageWidth = pageWidthMm(plan.pageIndex);
-        double pageHeight = pageHeightMm(plan.pageIndex);
-        double left = plan.bounds[1];
-        double top = plan.bounds[0];
-        double right = plan.bounds[3];
-        double bottom = plan.bounds[2];
-        if (adjacentPageIndex == plan.pageIndex - 1) {
-            left += pageWidth;
-            right += pageWidth;
-        } else if (adjacentPageIndex == plan.pageIndex + 1) {
-            left -= pageWidth;
-            right -= pageWidth;
-        } else {
-            return false;
-        }
-        double adjacentPageWidth = pageWidthMm(adjacentPageIndex);
-        double adjacentPageHeight = pageHeightMm(adjacentPageIndex);
-        if (adjacentPageWidth >= 1e8) adjacentPageWidth = pageWidth;
-        if (adjacentPageHeight >= 1e8) adjacentPageHeight = pageHeight;
-        return right > 0.0 && left < adjacentPageWidth
-                && bottom > 0.0 && top < adjacentPageHeight;
-    }
-
     private static boolean isParentTextShellOwner(ObjectPlan plan) {
         return plan != null
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
@@ -4360,6 +7510,7 @@ public final class OwnershipPlanner {
         if ("text_frame".equals(child.kind)) return false;
         if (parent.domId == child.domId) return false;
         if (isSameRenderPlan(parent, child)) return false;
+        if (isAncestorOrBroaderCompositeOfTextShell(parent, child)) return false;
         if (child.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && !ownedTextFramesCoveredBy(parent, child)) {
             return false;
@@ -4371,6 +7522,21 @@ public final class OwnershipPlanner {
         if (parent.bounds == null || child.bounds == null) return false;
         return boundsContains(parent.bounds, child.bounds, 4.0)
                 || boundsMostlyOverlap(parent.bounds, child.bounds, 0.70);
+    }
+
+    private static boolean isAncestorOrBroaderCompositeOfTextShell(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (parent.bounds == null || child.bounds == null) return false;
+        double parentArea = area(parent.bounds);
+        double childArea = area(child.bounds);
+        if (parentArea <= 0.0 || childArea <= 0.0) return false;
+
+        boolean childContainsParentSource = contains(child.sourceObjectIds, parent.domId)
+                || containsAll(child.sourceObjectIds, parent.sourceObjectIds);
+        boolean broaderThanParent = childArea > parentArea * 1.15
+                || boundsContains(child.bounds, parent.bounds, 4.0);
+        return childContainsParentSource && broaderThanParent;
     }
 
     private static boolean ownedTextFramesCoveredBy(ObjectPlan parent, ObjectPlan child) {
@@ -4443,7 +7609,7 @@ public final class OwnershipPlanner {
         }
     }
 
-    private void restoreAtomicOwnershipRootTextHiddenShellOwners() {
+    private void declareAtomicOwnershipRootTextHiddenShellOwners() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isAtomicOwnershipRootTextHiddenShellPlan(plan)) continue;
@@ -4453,7 +7619,10 @@ public final class OwnershipPlanner {
             plans.set(i, plan
                     .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
                     .withVisualAction(VisualAction.PLACE_TEXT_SHELL, plan.reason)
-                    .withVisualLayer(VisualLayer.CONTAINER_BACKDROP)
+                    .withVisualLayer(textShellVisualLayer(
+                            plan,
+                            plan.ownedTextFrameIds,
+                            VisualLayer.CONTAINER_BACKDROP))
                     .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR));
         }
     }
@@ -4481,14 +7650,15 @@ public final class OwnershipPlanner {
                 && visualSourceIds(plan).length > 0;
     }
 
-    private void restoreDirectTextHiddenShellOwners() {
+    private void declareDirectTextHiddenShellOwners() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isDirectTextHiddenShellPlan(plan)) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
             plans.set(i, plan
                     .withVisualAction(VisualAction.PLACE_TEXT_SHELL, plan.reason)
-                    .withVisualLayer(VisualLayer.LABEL_BACKDROP));
+                    .withVisualLayer(textShellVisualLayerForOwnedTextFrames(
+                            plan.ownedTextFrameIds, VisualLayer.LABEL_BACKDROP)));
         }
     }
 
@@ -4506,7 +7676,7 @@ public final class OwnershipPlanner {
         return true;
     }
 
-    private void restoreInlineTextShellOwners() {
+    private void declareInlineTextShellOwners() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isInlineTextShellPlan(plan)) continue;
@@ -4547,17 +7717,577 @@ public final class OwnershipPlanner {
         }
     }
 
-    private void normalizeTextFramePlacementToVisibleTextShell() {
+    private void dropNonExecutableSimpleButtonTextOwners() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
-            if (plan == null || !"text_frame".equals(plan.kind)) continue;
+            if (plan == null) continue;
+            if (!safe(plan.kind).startsWith("simple_button_label:")) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.visualAction != VisualAction.DROP_VISUAL) continue;
-            Placement shellPlacement = visibleTextShellPlacementForTextFrame(
-                    String.valueOf(plan.domId), plan.domId);
-            if (shellPlacement == null || shellPlacement == plan.placement) continue;
-            plans.set(i, plan.withPlacement(shellPlacement));
+            int[] textFrameIds = textFrameIdsForPlan(plan);
+            if (textFrameIds.length == 0) continue;
+            if (!allTextFramesHaveVisibleHwpxTextOwner(textFrameIds)) continue;
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "simple_button_text_slot_owned_by_visible_hwpx_text")
+                    .withOwnedTextFrameIds(new int[0]));
         }
+    }
+
+    private void normalizeRenderedPngTextOwnershipToTextFrames() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (!allOwnedTextFramesHaveSeparateHwpxTextOwner(plan)) continue;
+            plans.set(i, plan.withTextAction(TextAction.DROP_TEXT));
+        }
+    }
+
+    private void normalizeDroppedRenderedTextOwnershipToTextFrames() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (!isRenderedVisualPlan(plan)) continue;
+            if ("text_frame".equals(plan.kind)) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.visualAction != VisualAction.DROP_VISUAL) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (!allOwnedTextFramesHaveSeparateHwpxTextOwner(plan)) continue;
+            plans.set(i, plan.withTextAction(TextAction.DROP_TEXT));
+        }
+    }
+
+    private void completeVisibleTextShellRelationsFromSourceIds() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!plan.hasVisibleVisual()) continue;
+            if (plan.textAction == TextAction.DROP_TEXT && isVisualOnlyTextShellReason(plan.reason)) {
+                continue;
+            }
+
+            LinkedHashSet<Integer> restored = new LinkedHashSet<>();
+            if (plan.ownedTextFrameIds != null) {
+                for (int id : plan.ownedTextFrameIds) {
+                    if (hasDirectHwpxTextFrameOwner(id)) {
+                        restored.add(id);
+                    }
+                }
+            }
+            if (plan.sourceObjectIds != null && data != null) {
+                for (int sourceId : plan.sourceObjectIds) {
+                    if (data.getTextFrame(String.valueOf(sourceId)) == null) continue;
+                    if (!hasDirectHwpxTextFrameOwner(sourceId)) continue;
+                    restored.add(sourceId);
+                }
+            }
+            if (restored.isEmpty()) continue;
+            int[] restoredIds = toIntArray(restored);
+            if (sameIntSet(plan.ownedTextFrameIds, restoredIds)) continue;
+            plans.set(i, plan.withOwnedTextFrameIds(restoredIds));
+        }
+    }
+
+    private void declareInlineTextShellTextOwnership() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (!ownedTextFramePlansRemainHwpxText(plan.ownedTextFrameIds)) continue;
+            plans.set(i, plan.withTextAction(TextAction.OWNED_BY_HWPX_TEXT));
+        }
+    }
+
+    private void normalizeDuplicateHwpxTextOwners() {
+        LinkedHashMap<Integer, List<Integer>> ownersByTextFrame = new LinkedHashMap<>();
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            for (int textFrameId : textFrameIdsForPlan(plan)) {
+                ownersByTextFrame.computeIfAbsent(textFrameId, k -> new ArrayList<>()).add(i);
+            }
+        }
+
+        LinkedHashMap<Integer, LinkedHashSet<Integer>> textFramesToRemoveByPlan = new LinkedHashMap<>();
+        for (Map.Entry<Integer, List<Integer>> entry : ownersByTextFrame.entrySet()) {
+            List<Integer> ownerIndexes = entry.getValue();
+            if (ownerIndexes == null || ownerIndexes.size() <= 1) continue;
+            int keeper = bestHwpxTextOwner(ownerIndexes);
+            for (int ownerIndex : ownerIndexes) {
+                if (ownerIndex == keeper) continue;
+                textFramesToRemoveByPlan
+                        .computeIfAbsent(ownerIndex, k -> new LinkedHashSet<>())
+                        .add(entry.getKey());
+            }
+        }
+
+        for (Map.Entry<Integer, LinkedHashSet<Integer>> entry : textFramesToRemoveByPlan.entrySet()) {
+            int planIndex = entry.getKey();
+            if (planIndex < 0 || planIndex >= plans.size()) continue;
+            ObjectPlan plan = plans.get(planIndex);
+            if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            int[] retainedOwnedTextFrames = removeIds(plan.ownedTextFrameIds, entry.getValue());
+            boolean preserveShellTextRelation = preserveTextlessShellVisualAfterTextOwnerDedup(plan);
+            int[] preservedShellRelationTextFrames = retainedOwnedTextFrames;
+            if (preserveShellTextRelation) {
+                int[] concreteRelation = concreteVisualShellOwnedTextFrameIds(plan);
+                if (concreteRelation.length > 0) {
+                    preservedShellRelationTextFrames = concreteRelation;
+                } else if (preservedShellRelationTextFrames.length == 0) {
+                    preservedShellRelationTextFrames = plan.ownedTextFrameIds;
+                }
+            }
+            ObjectPlan replacement = preserveShellTextRelation
+                    ? plan.withOwnedTextFrameIds(preservedShellRelationTextFrames)
+                    : plan.withOwnedTextFrameIds(retainedOwnedTextFrames);
+            if (preserveShellTextRelation && preservedShellRelationTextFrames.length > 0) {
+                ObjectPlan relationScopedPlan = replacement.withOwnedTextFrameIds(preservedShellRelationTextFrames);
+                if (!hasExtractedTextlessShellVisual(relationScopedPlan)) {
+                    double[] concreteBounds = visualShellSourceBounds(relationScopedPlan);
+                    if (concreteBounds != null && concreteBounds.length >= 4) {
+                        relationScopedPlan = relationScopedPlan.withBounds(concreteBounds);
+                    }
+                }
+                replacement = relationScopedPlan;
+            }
+            if (retainedOwnedTextFrames.length == 0 && plan.domId >= 0
+                    && entry.getValue().contains(plan.domId)
+                    && "text_frame".equals(plan.kind)) {
+                replacement = replacement.withTextAction(TextAction.DROP_TEXT);
+            } else if (retainedOwnedTextFrames.length == 0 && !"text_frame".equals(plan.kind)) {
+                replacement = replacement.withTextAction(TextAction.DROP_TEXT);
+                if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) {
+                    if (preserveTextlessShellVisualAfterTextOwnerDedup(plan)) {
+                        // TEXT_SLOT and SHELL_SLOT are separate ownership channels.
+                        // When the direct TextFrame keeps editable text, keep the textless shell visual.
+                        replacement = replacement.withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                                plan.reason);
+                    } else {
+                        replacement = replacement.withVisualAction(VisualAction.DROP_VISUAL,
+                                "duplicate_hwpx_text_owner_removed");
+                    }
+                }
+            }
+            plans.set(planIndex, replacement);
+        }
+    }
+
+    private boolean preserveTextlessShellVisualAfterTextOwnerDedup(ObjectPlan plan) {
+        if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization == Materialization.NATIVE_SOURCE_SHAPE) return true;
+        if (hasExtractedTextlessShellVisual(plan)) return true;
+        String reason = safe(plan.reason);
+        return "sibling_group_text_shell".equals(reason)
+                || isDirectExtractedChildTextShellSlot(plan)
+                || isDirectInlineTextShellReason(reason);
+    }
+
+    private int[] concreteVisualShellOwnedTextFrameIds(ObjectPlan plan) {
+        if (plan == null || data == null) return new int[0];
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return new int[0];
+        if (hasExtractedTextlessShellVisual(plan)) return new int[0];
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length <= 1) return new int[0];
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length == 0) return new int[0];
+
+        LinkedHashSet<Integer> retained = new LinkedHashSet<>();
+        for (int sourceId : visualIds) {
+            if (sourceId < 0 || contains(plan.ownedTextFrameIds, sourceId)) continue;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.sourceHidden()) continue;
+            if ("TextFrame".equals(safe(item.type()))) continue;
+            if ("Group".equals(safe(item.type()))) continue;
+            for (int tfId : plan.ownedTextFrameIds) {
+                if (sourceShellHasOwnedTextFrameDescendant(item, new int[] { tfId })) {
+                    retained.add(tfId);
+                }
+            }
+        }
+        return toIntArray(retained);
+    }
+
+    private boolean hasExtractedTextlessShellVisual(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.file == null || plan.file.isEmpty()) return false;
+        if (plan.visualSourceObjectIds == null || plan.visualSourceObjectIds.length == 0) return false;
+        return plan.materialization == Materialization.TEXTLESS_VISUAL_FRAGMENT
+                || plan.materialization == Materialization.EXTRACTED_PNG_VECTOR
+                || plan.materialization == Materialization.COMPLETE_PNG;
+    }
+
+    private void normalizeTextShellBoundsToConcreteVisualSources() {
+        if (data == null) return;
+        int candidates = 0;
+        int concrete = 0;
+        int rootConcrete = 0;
+        int updated = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!shouldNormalizeTextShellBoundsToConcreteSource(plan)) continue;
+            candidates++;
+
+            double[] concreteBounds = concreteShellRootBounds(plan);
+            if (concreteBounds != null && concreteBounds.length >= 4 && isPositiveBounds(concreteBounds)) {
+                rootConcrete++;
+            } else {
+                concreteBounds = visualShellSourceBounds(plan);
+            }
+            if (concreteBounds == null || concreteBounds.length < 4) continue;
+            concrete++;
+            plans.set(i, plan.withBounds(concreteBounds));
+            updated++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.textShellBoundsToConcrete.candidates", candidates);
+        ConversionTiming.metric("stage1.ownershipPlanner.textShellBoundsToConcrete.concrete", concrete);
+        ConversionTiming.metric("stage1.ownershipPlanner.textShellBoundsToConcrete.rootConcrete", rootConcrete);
+        ConversionTiming.metric("stage1.ownershipPlanner.textShellBoundsToConcrete.updated", updated);
+    }
+
+    private void normalizeTextlessFragmentBoundsToRenderSource() {
+        int candidates = 0;
+        int updated = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!shouldPlaceTextlessFragmentOnRenderSourceBounds(plan)) continue;
+            candidates++;
+
+            double[] clipped = clipPageRelativeBoundsToPage(plan.pageIndex, plan.renderSourceBounds);
+            if (clipped == null || clipped.length < 4 || !isPositiveBounds(clipped)) continue;
+            if (sameBounds(plan.bounds, clipped, 0.05)) continue;
+            plans.set(i, plan.withBounds(clipped));
+            updated++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.textlessFragmentBoundsToRenderSource.candidates", candidates);
+        ConversionTiming.metric("stage1.ownershipPlanner.textlessFragmentBoundsToRenderSource.updated", updated);
+    }
+
+    private static boolean shouldPlaceTextlessFragmentOnRenderSourceBounds(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return false;
+        return plan.renderSourceBounds != null
+                && plan.renderSourceBounds.length >= 4
+                && isPositiveBounds(plan.renderSourceBounds);
+    }
+
+    private boolean shouldNormalizeTextShellBoundsToConcreteSource(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (hasExtractedTextlessShellVisual(plan)) return false;
+        String reason = safe(plan.reason);
+        return "sibling_group_text_shell".equals(reason)
+                || "story_flow_inline_shell_visual_only".equals(reason);
+    }
+
+    private double[] visualShellSourceBounds(ObjectPlan plan) {
+        if (plan == null || data == null) return null;
+        double[] rootBounds = concreteShellRootBounds(plan);
+        if (rootBounds != null && rootBounds.length >= 4 && isPositiveBounds(rootBounds)) {
+            return rootBounds;
+        }
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length == 0) return null;
+        double[] union = null;
+        for (int sourceId : visualIds) {
+            if (sourceId < 0 || contains(plan.ownedTextFrameIds, sourceId)) continue;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.sourceHidden()) continue;
+            if ("TextFrame".equals(safe(item.type()))) continue;
+            if ("Group".equals(safe(item.type()))) continue;
+            double[] b = pageRelativeBoundsOf(item);
+            if (b == null || b.length < 4 || !isPositiveBounds(b)) continue;
+            union = unionBounds(union, b);
+        }
+        return union;
+    }
+
+    private double[] concreteShellRootBounds(ObjectPlan plan) {
+        if (plan == null || data == null) return null;
+        if (!shouldPreferRootBoundsForConcreteTextShell(plan)) return null;
+        int rootId = plan.domId;
+        if (rootId < 0 && plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0) {
+            rootId = plan.sourceObjectIds[0];
+        }
+        if (rootId < 0) return null;
+        ResolvedPageItem root = data.getPageItem(String.valueOf(rootId));
+        if (!isConcreteTextShellRoot(root)) return null;
+        return pageRelativeBoundsOfConcreteShellRoot(root);
+    }
+
+    private double[] pageRelativeBoundsOfConcreteShellRoot(ResolvedPageItem item) {
+        if (item == null) return null;
+        double[] direct = item.pageRelativeBounds();
+        if (direct != null && direct.length >= 4) {
+            return direct;
+        }
+        double[] b = item.geometricBounds();
+        if (b == null || b.length < 4) return null;
+        int pageIndex = item.pageIndex();
+        double[] page = pageBounds(pageIndex);
+        if (page == null || page.length < 4) {
+            return b;
+        }
+        double scale = safeScaleFactor();
+        double pageWidth = page[3] - page[1];
+        double pageHeight = page[2] - page[0];
+        boolean pageBoundsLookScaled = scale > 1.001
+                && (pageWidth > 400.0 || pageHeight > 400.0);
+        boolean itemBoundsLookScaledAgainstUnscaledPage = scale > 1.001
+                && !pageBoundsLookScaled
+                && (b[0] > page[2] + 4.0
+                || b[1] > page[3] + 4.0
+                || b[2] > page[2] + 4.0
+                || b[3] > page[3] + 4.0);
+        if (pageBoundsLookScaled) {
+            return new double[] {
+                    (b[0] - page[0]) / scale,
+                    (b[1] - page[1]) / scale,
+                    (b[2] - page[0]) / scale,
+                    (b[3] - page[1]) / scale
+            };
+        }
+        if (itemBoundsLookScaledAgainstUnscaledPage) {
+            return new double[] {
+                    (b[0] - page[0] * scale) / scale,
+                    (b[1] - page[1] * scale) / scale,
+                    (b[2] - page[0] * scale) / scale,
+                    (b[3] - page[1] * scale) / scale
+            };
+        }
+        return new double[] {
+                b[0] - page[0],
+                b[1] - page[1],
+                b[2] - page[0],
+                b[3] - page[1]
+        };
+    }
+
+    private boolean shouldPreferRootBoundsForConcreteTextShell(ObjectPlan plan) {
+        if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        String reason = safe(plan.reason);
+        return "sibling_group_text_shell".equals(reason)
+                || "story_flow_inline_shell_visual_only".equals(reason)
+                || isDirectExtractedChildTextShellSlot(plan);
+    }
+
+    private static boolean isConcreteTextShellRoot(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden()) return false;
+        String type = safe(item.type());
+        return "Rectangle".equals(type)
+                || "Oval".equals(type)
+                || "Polygon".equals(type);
+    }
+
+    private int bestHwpxTextOwner(List<Integer> ownerIndexes) {
+        int best = ownerIndexes.get(0);
+        for (int index : ownerIndexes) {
+            if (compareHwpxTextOwner(plans.get(index), plans.get(best)) < 0) {
+                best = index;
+            }
+        }
+        return best;
+    }
+
+    private int compareHwpxTextOwner(ObjectPlan a, ObjectPlan b) {
+        int priority = Integer.compare(hwpxTextOwnerPriority(a), hwpxTextOwnerPriority(b));
+        if (priority != 0) return priority;
+        int sources = Integer.compare(visualSourceIds(a).length, visualSourceIds(b).length);
+        if (sources != 0) return sources;
+        double areaA = a != null && a.bounds != null ? area(a.bounds) : Double.MAX_VALUE;
+        double areaB = b != null && b.bounds != null ? area(b.bounds) : Double.MAX_VALUE;
+        int areaCompare = Double.compare(areaA, areaB);
+        if (areaCompare != 0) return areaCompare;
+        return Integer.compare(a != null ? a.zOrder : Integer.MAX_VALUE,
+                b != null ? b.zOrder : Integer.MAX_VALUE);
+    }
+
+    private int hwpxTextOwnerPriority(ObjectPlan plan) {
+        if (plan == null) return 100;
+        if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE) return 0;
+        if (isLocalAtomicLabelShellSlot(plan)) return 1;
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.placement == Placement.INLINE
+                && plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) return 1;
+        if ("text_frame".equals(plan.kind)) return 2;
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.materialization == Materialization.NATIVE_SOURCE_SHAPE) return 3;
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) return 3;
+        if (plan.visualAction == VisualAction.DROP_VISUAL) return 4;
+        return 5;
+    }
+
+    private boolean allOwnedTextFramesHaveSeparateHwpxTextOwner(ObjectPlan carrier) {
+        if (carrier == null || carrier.ownedTextFrameIds == null || carrier.ownedTextFrameIds.length == 0) {
+            return false;
+        }
+        for (int textFrameId : carrier.ownedTextFrameIds) {
+            if (!hasSeparateHwpxTextOwner(carrier, textFrameId)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean hasSeparateHwpxTextOwner(ObjectPlan carrier, int textFrameId) {
+        if (carrier == null || textFrameId < 0) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == carrier) continue;
+            if (candidate.pageIndex != carrier.pageIndex) continue;
+            if (candidate.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (!contains(candidate.ownedTextFrameIds, textFrameId)
+                    && candidate.domId != textFrameId) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private boolean allTextFramesHaveVisibleHwpxTextOwner(int[] textFrameIds) {
+        if (textFrameIds == null || textFrameIds.length == 0) return false;
+        for (int textFrameId : textFrameIds) {
+            if (!hasDirectHwpxTextFrameOwner(textFrameId)
+                    && !hasMaterializedTextShellOwner(textFrameId)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean hasDirectHwpxTextFrameOwner(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan owner : plans) {
+            if (owner == null) continue;
+            if (!"text_frame".equals(owner.kind)) continue;
+            if (owner.domId != textFrameId) continue;
+            if (owner.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private void declareInlineSimpleButtonLabelShellOwners() {
+        if (ctx == null) return;
+        LinkedHashSet<Integer> restoredAnchors = new LinkedHashSet<>();
+        LinkedHashSet<Integer> restoredSourceIds = new LinkedHashSet<>();
+        LinkedHashSet<Integer> restoredTextFrames = new LinkedHashSet<>();
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (!safe(plan.kind).startsWith("simple_button_label:")) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            SimpleButtonLabelPlan labelPlan = ctx.simpleButtonLabelPlan(plan.domId);
+            if (labelPlan == null || labelPlan.mode != SimpleButtonLabelPlan.Mode.TEXT_SHELL) continue;
+            if (labelPlan.labelTextFrameDomId < 0) continue;
+            double[] storyFlowBounds = normalizeSpreadBoundsToPage(plan.pageIndex, plan.bounds);
+            ObjectPlan restored = new ObjectPlan(
+                    plan.domId,
+                    plan.kind,
+                    plan.pageIndex,
+                    TextAction.OWNED_BY_HWPX_TEXT,
+                    VisualAction.PLACE_TEXT_SHELL,
+                    VisualLayer.LABEL_BACKDROP,
+                    Placement.INLINE,
+                    plan.renderId,
+                    plan.sourceObjectIds,
+                    plan.visualSourceObjectIds,
+                    plan.styleSourceObjectIds,
+                    new int[] { labelPlan.labelTextFrameDomId },
+                    new int[0],
+                    plan.sourceBundleKey,
+                    Materialization.EXTRACTED_PNG_VECTOR,
+                    CoordinateSpace.STORY_FLOW,
+                    plan.anchorOwner,
+                    plan.zOrder,
+                    "simple_button_label_inline_text_shell",
+                    plan.file,
+                    storyFlowBounds,
+                    plan.sourceLayerId,
+                    plan.sourceLayerName,
+                    plan.sourceLayerIndex);
+            plans.set(i, restored);
+            restoredAnchors.add(plan.domId);
+            for (int sourceId : plan.sourceObjectIds) {
+                restoredSourceIds.add(sourceId);
+            }
+            for (int sourceId : plan.visualSourceObjectIds) {
+                restoredSourceIds.add(sourceId);
+            }
+            restoredTextFrames.add(labelPlan.labelTextFrameDomId);
+        }
+        if (restoredAnchors.isEmpty()) return;
+        int[] anchorIds = toIntArray(restoredAnchors);
+        int[] sourceIds = toIntArray(restoredSourceIds);
+        int[] textFrameIds = toIntArray(restoredTextFrames);
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (safe(plan.kind).startsWith("simple_button_label:")) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!restoredAnchors.contains(plan.domId)
+                    && !containsAny(plan.sourceObjectIds, anchorIds)
+                    && !containsAny(plan.sourceObjectIds, sourceIds)
+                    && !containsAny(plan.visualSourceObjectIds, sourceIds)
+                    && !containsAny(plan.ownedTextFrameIds, textFrameIds)) {
+                continue;
+            }
+            if (!containsAny(plan.sourceObjectIds, textFrameIds)
+                    && !containsAny(plan.visualSourceObjectIds, sourceIds)
+                    && !containsAny(plan.ownedTextFrameIds, textFrameIds)) {
+                continue;
+            }
+            int[] retainedVisualSources = removeIds(visualSourceIds(plan), restoredSourceIds);
+            int[] retainedOwnedTextFrames = removeIds(plan.ownedTextFrameIds, restoredTextFrames);
+            int[] retainedDescendants = removeIds(plan.descendantVisualObjectIds, restoredSourceIds);
+            boolean directDuplicate = restoredAnchors.contains(plan.domId)
+                    || containsAll(sourceIds, plan.sourceObjectIds);
+            ObjectPlan replacement = plan
+                    .withVisualSourceObjectIds(retainedVisualSources)
+                    .withOwnedTextFrameIds(retainedOwnedTextFrames)
+                    .withDescendantVisualObjectIds(retainedDescendants);
+            if (directDuplicate
+                    || (retainedVisualSources.length == 0
+                    && retainedOwnedTextFrames.length == 0)) {
+                replacement = replacement
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "inline_simple_button_label_owns_shell_slot")
+                        .withOwnedTextFrameIds(new int[0])
+                        .withDescendantVisualObjectIds(new int[0]);
+            }
+            plans.set(i, replacement);
+        }
+    }
+
+    private boolean hasMaterializedTextShellOwner(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan owner : plans) {
+            if (owner == null) continue;
+            if (owner.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (owner.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (isCompositeCarrierTextShellReason(owner.reason)) continue;
+            if (owner.materialization == Materialization.NATIVE_SOURCE_SHAPE) continue;
+            if (isDirectTextShellSlot(owner)) continue;
+            if (!contains(owner.ownedTextFrameIds, textFrameId)) continue;
+            return true;
+        }
+        return false;
     }
 
     private void dropInlineGraphicOnlyTextShellWithoutTextlessCarrier() {
@@ -4662,10 +8392,13 @@ public final class OwnershipPlanner {
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.placement != Placement.FLOATING) continue;
             if (!isGroupInternalTextShell(plan)) continue;
+            if (isTableCellAnchoredExternalLabelShell(plan)) continue;
             if (!canNormalizeTextShellToInlineFromSource(plan)) continue;
-            if (!hasResolvedInlineAnchor(plan.domId)) continue;
+            boolean sourcePositionedInlineShell = isSourcePositionedInlineTextShell(plan);
+            if (!hasResolvedInlineAnchor(plan.domId) && !sourcePositionedInlineShell) continue;
             if (hasIdmlAnchoredPagePosition(plan.domId)) continue;
             if (!ownedTextFramesAreInlineSource(plan)) continue;
+            if (textShellUsesPagePositionCompositeAssociation(plan)) continue;
 
             ObjectPlan replacement = plan.withPlacementAndCoordinateSpace(
                     Placement.INLINE,
@@ -4686,12 +8419,41 @@ public final class OwnershipPlanner {
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.placement != Placement.INLINE) continue;
-            if (isResolvedStoryInlineAnchor(plan)) continue;
+            if (isTableCellAnchoredExternalLabelShell(plan)) {
+                ObjectPlan replacement = plan.withPlacementAndCoordinateSpace(
+                        Placement.FLOATING,
+                        CoordinateSpace.PAGE);
+                plans.set(i, replacement);
+                for (int textFrameId : textFrameIdsForPlanIncludingOwned(replacement)) {
+                    floatedTextFrames.add(textFrameId);
+                }
+                continue;
+            }
+            if (isDirectStoryFlowInlineTextShell(plan)) {
+                continue;
+            }
+            if (isSourcePositionedInlineTextShell(plan)
+                    && !hasIdmlAnchoredPagePosition(plan.domId)
+                    && !hasFloatingCompositeSourceParentCarrier(plan)) {
+                continue;
+            }
+            if (isResolvedStoryInlineAnchor(plan)
+                    && !inlineTextShellNeedsPageCarrier(plan)
+                    && !hasFloatingCompositeSourceParentCarrier(plan)) {
+                continue;
+            }
             if (!isGroupInternalTextShell(plan)) continue;
 
             ObjectPlan replacement = plan.withPlacementAndCoordinateSpace(
                     Placement.FLOATING,
                     CoordinateSpace.PAGE);
+            if (inlineTextShellCarrierOwnedByFloatingTextShell(plan)
+                    && plan.visualLayer == VisualLayer.CONTAINER_BACKDROP) {
+                replacement = replacement.withVisualLayer(textShellVisualLayer(
+                        plan,
+                        textFrameIdsForPlanIncludingOwned(plan),
+                        VisualLayer.LABEL_OVERLAY_BACKDROP));
+            }
             plans.set(i, replacement);
             for (int textFrameId : textFrameIdsForPlanIncludingOwned(replacement)) {
                 floatedTextFrames.add(textFrameId);
@@ -4702,21 +8464,396 @@ public final class OwnershipPlanner {
         }
     }
 
+    private boolean isDirectStoryFlowInlineTextShell(ObjectPlan plan) {
+        if (plan == null || plan.domId < 0) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (isTableCellAnchoredExternalLabelShell(plan)) return false;
+        return hasResolvedInlineAnchor(plan.domId)
+                && !hasIdmlAnchoredPagePosition(plan.domId)
+                && !textShellUsesPagePositionCompositeAssociation(plan);
+    }
+
     private boolean canNormalizeTextShellToInlineFromSource(ObjectPlan plan) {
         if (plan == null) return false;
+        if (isInlineLeafAtomicTextShellSlot(plan)) return true;
         String kind = safe(plan.kind);
         if (kind.contains("inline_object")) return true;
 
         String reason = safe(plan.reason);
         if (isCompositeCarrierTextShellReason(reason)) return false;
 
-        ResolvedPageItem item = data != null ? data.getPageItem(String.valueOf(plan.domId)) : null;
-        if (item != null && item.isInline()) return true;
-
         return "visual_label_text_hidden_shell".equals(reason)
                 || "atomic_ownership_root_text_hidden_shell".equals(reason)
+                || "simple_button_label_inline_text_shell".equals(reason)
                 || "inline_text_hidden".equals(reason)
                 || "editable_textframe_visual_shell".equals(reason);
+    }
+
+    private void dropChildLabelShellVisualsBakedIntoFloatingCompositeParents() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan child = plans.get(i);
+            if (child == null) continue;
+            if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (child.visualLayer != VisualLayer.LABEL_BACKDROP
+                    && child.visualLayer != VisualLayer.LABEL_OVERLAY_BACKDROP) {
+                continue;
+            }
+            if (isStoryFlowInlineShell(child)) continue;
+            if (!isSimpleChildLabelShellBakedIntoComposite(child)) continue;
+            if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length == 0) continue;
+            if (!hasFloatingCompositeParentCarrier(child)) continue;
+            if (!ownedTextFramePlansRemainHwpxText(child.ownedTextFrameIds)) continue;
+            if (isLocalAtomicLabelShellSlot(child)) {
+                removeLocalLabelShellSlotFromCompositeCarriers(child);
+                continue;
+            }
+            plans.set(i, child
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "label_shell_visual_owned_by_floating_composite_parent")
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private void makePagePositionedStoryFlowInlineShellsVisualOnly() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (!isStoryFlowInlineShell(plan)) continue;
+            if (isInlineLeafAtomicTextShellSlot(plan)) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (!ownedTextFramePlansRemainHwpxText(plan.ownedTextFrameIds)) continue;
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            "story_flow_inline_shell_visual_only")
+                    .withOwnedTextFrameIds(new int[0]));
+        }
+    }
+
+    private boolean isStoryFlowInlineShell(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (isTableCellAnchoredExternalLabelShell(plan)) return false;
+        if (plan.placement == Placement.INLINE) return true;
+        if (plan.coordinateSpace == CoordinateSpace.STORY_FLOW) return true;
+        if (plan.placement == Placement.FLOATING
+                && plan.coordinateSpace == CoordinateSpace.PAGE
+                && "planner_declared_object_plan".equals(safe(plan.reason))) {
+            return false;
+        }
+        if (plan.kind != null && plan.kind.contains(":inline_object")) return true;
+        if (data == null || plan.domId < 0) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(plan.domId));
+        return item != null && item.isInline();
+    }
+
+    private boolean isSimpleChildLabelShellBakedIntoComposite(ObjectPlan child) {
+        if (child == null) return false;
+        String reason = safe(child.reason);
+        if ("visual_label_text_hidden_shell".equals(reason)
+                || "atomic_ownership_root_text_hidden_shell".equals(reason)
+                || "inline_text_hidden".equals(reason)
+                || "editable_textframe_visual_shell".equals(reason)) {
+            return true;
+        }
+        // Mixed shells have their own visual-only children. They are a distinct
+        // SHELL_SLOT and must survive even when a larger composite carrier exists.
+        return false;
+    }
+
+    private boolean ownedTextFramePlansRemainHwpxText(int[] textFrameIds) {
+        if (textFrameIds == null || textFrameIds.length == 0) return false;
+        for (int textFrameId : textFrameIds) {
+            boolean found = false;
+            for (ObjectPlan plan : plans) {
+                if (plan == null || !"text_frame".equals(plan.kind)) continue;
+                if (plan.domId != textFrameId) continue;
+                if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+                if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+                found = true;
+                break;
+            }
+            if (!found) return false;
+        }
+        return true;
+    }
+
+    private boolean hasFloatingCompositeParentCarrier(ObjectPlan child) {
+        if (child == null || child.domId < 0 || child.bounds == null || child.bounds.length < 4) {
+            return false;
+        }
+        for (ObjectPlan parent : plans) {
+            if (parent == null || parent == child) continue;
+            if (parent.pageIndex != child.pageIndex) continue;
+            if (parent.placement != Placement.FLOATING) continue;
+            if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL
+                    && parent.visualAction != VisualAction.PLACE_FLOATING_PNG) {
+                continue;
+            }
+            if (parent.visualPolicyLayer() != PolicyLayer.BACKGROUND) continue;
+            if (!isCompositeCarrierTextShellReason(safe(parent.reason))) continue;
+            if (!boundsContains(parent.bounds, child.bounds, 4.0)
+                    && !boundsMostlyOverlap(parent.bounds, child.bounds, 0.45)) {
+                continue;
+            }
+            if (contains(parent.sourceObjectIds, child.domId)
+                    || containsAny(parent.sourceObjectIds, child.sourceObjectIds)
+                    || containsAny(visualSourceIds(parent), child.sourceObjectIds)
+                    || containsAny(parent.descendantVisualObjectIds, child.sourceObjectIds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasFloatingCompositeSourceParentCarrier(ObjectPlan child) {
+        if (hasFloatingCompositeParentCarrier(child)) return true;
+        if (child == null || child.domId < 0 || child.bounds == null || child.bounds.length < 4
+                || data == null) {
+            return false;
+        }
+        for (RenderedGroup rg : data.allRenderedFloatingItems()) {
+            if (rg == null) continue;
+            if (rg.pageIndex() != child.pageIndex) continue;
+            if (!isRenderedPageObject(rg)) continue;
+            if (!isCompositeCarrierTextShellReason(safe(rg.reason()))) continue;
+            if (rg.bounds() == null || rg.bounds().length < 4) continue;
+            if (!boundsContains(rg.bounds(), child.bounds, 4.0)
+                    && !boundsMostlyOverlap(rg.bounds(), child.bounds, 0.45)) {
+                continue;
+            }
+            if (contains(rg.sourceObjectIds(), child.domId)
+                    || containsAny(rg.sourceObjectIds(), child.sourceObjectIds)
+                    || containsAnyStringIds(rg.editableTextFrameIds(), child.ownedTextFrameIds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsAnyStringIds(String[] sourceIds, int[] targetIds) {
+        if (sourceIds == null || sourceIds.length == 0 || targetIds == null || targetIds.length == 0) {
+            return false;
+        }
+        for (String sourceId : sourceIds) {
+            int parsed = parseFlexibleId(sourceId);
+            if (parsed >= 0 && contains(targetIds, parsed)) return true;
+        }
+        return false;
+    }
+
+    private boolean isLocalAtomicLabelShellSlot(ObjectPlan child) {
+        if (child == null || data == null) return false;
+        if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (child.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length != 1) return false;
+        if (!isAtomicOwnershipRootTextHiddenShellReason(safe(child.reason))) return false;
+        if (child.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        ResolvedPageItem group = data.getPageItem(String.valueOf(child.domId));
+        if (group == null || !"Group".equals(safe(group.type()))) return false;
+        if (group.childIds() == null || group.childIds().length < 2) return false;
+
+        boolean hasOwnedTextChild = false;
+        boolean hasDirectVisualChild = false;
+        for (int childId : group.childIds()) {
+            if (contains(child.ownedTextFrameIds, childId)) {
+                hasOwnedTextChild = true;
+                continue;
+            }
+            ResolvedPageItem item = data.getPageItem(String.valueOf(childId));
+            if (item != null && isVisibleTextlessLabelMarkerSource(item)) {
+                hasDirectVisualChild = true;
+            }
+        }
+        return hasOwnedTextChild && hasDirectVisualChild;
+    }
+
+    private static boolean isVisibleTextlessLabelMarkerSource(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden() || !item.visible() || item.hiddenByParent()) return false;
+        String type = safe(item.type());
+        if ("TextFrame".equals(type) || "Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) {
+            return false;
+        }
+        return "Group".equals(type)
+                || "Rectangle".equals(type)
+                || "Oval".equals(type)
+                || "Polygon".equals(type)
+                || "GraphicLine".equals(type);
+    }
+
+    private void removeLocalLabelShellSlotFromCompositeCarriers(ObjectPlan labelShell) {
+        if (labelShell == null || labelShell.ownedTextFrameIds == null
+                || labelShell.ownedTextFrameIds.length == 0) {
+            return;
+        }
+        LinkedHashSet<Integer> slotSources = new LinkedHashSet<>();
+        addAll(labelShell.sourceObjectIds, slotSources);
+        addAll(visualSourceIds(labelShell), slotSources);
+        addAll(labelShell.ownedTextFrameIds, slotSources);
+
+        LinkedHashSet<Integer> slotTextFrames = new LinkedHashSet<>();
+        addAll(labelShell.ownedTextFrameIds, slotTextFrames);
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan carrier = plans.get(i);
+            if (carrier == null || carrier == labelShell) continue;
+            if (carrier.pageIndex != labelShell.pageIndex) continue;
+            if (!isCompositeCarrierWithLocalLabelSlot(carrier)) continue;
+            if (!containsAll(carrier.sourceObjectIds, labelShell.sourceObjectIds)) continue;
+            if (!containsAny(carrier.ownedTextFrameIds, labelShell.ownedTextFrameIds)
+                    && !containsAny(visualSourceIds(carrier), labelShell.sourceObjectIds)) {
+                continue;
+            }
+
+            int[] retainedSources = withoutSourcesAllowEmpty(carrier.sourceObjectIds, slotSources);
+            int[] retainedVisualSources = withoutSourcesAllowEmpty(visualSourceIds(carrier), slotSources);
+            int[] retainedOwnedTextFrames = withoutSourcesAllowEmpty(carrier.ownedTextFrameIds, slotTextFrames);
+            int[] retainedDescendants = withoutSourcesAllowEmpty(carrier.descendantVisualObjectIds, slotSources);
+            ObjectPlan replacement = carrier
+                    .withSourceObjectIds(retainedSources)
+                    .withVisualSourceObjectIds(retainedVisualSources)
+                    .withOwnedTextFrameIds(retainedOwnedTextFrames)
+                    .withDescendantVisualObjectIds(retainedDescendants);
+            if (retainedVisualSources.length == 0 && retainedOwnedTextFrames.length == 0) {
+                replacement = replacement.withVisualAction(VisualAction.DROP_VISUAL,
+                        "composite_carrier_split_into_local_label_shell_slots");
+            } else if (retainedOwnedTextFrames.length == 0
+                    && carrier.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+                replacement = replacement.withTextAction(TextAction.DROP_TEXT);
+            }
+            plans.set(i, replacement);
+        }
+    }
+
+    private boolean isCompositeCarrierWithLocalLabelSlot(ObjectPlan carrier) {
+        if (carrier == null) return false;
+        if (carrier.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (carrier.visualAction != VisualAction.PLACE_TEXT_SHELL
+                && carrier.visualAction != VisualAction.PLACE_FLOATING_PNG) {
+            return false;
+        }
+        String reason = safe(carrier.reason);
+        return reason.contains("image_group_text_hidden")
+                || reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("composite_shell_carrier");
+    }
+
+    private boolean isSourcePositionedInlineTextShell(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (isDirectChildShellSlotPlan(plan)) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (isTableCellAnchoredExternalLabelShell(plan)) return false;
+        if (!ownedTextFramesAreInlineSource(plan)) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        if (isInlineLeafAtomicTextShellSlot(plan)) return true;
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        if (rendered != null && hasExecutableInlineSourceObject(rendered)) return true;
+        if (data == null) return false;
+        if (plan.domId >= 0 && data.isInlineObjectId(plan.domId)) return true;
+        if (plan.domId >= 0) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(plan.domId));
+            if (item != null && item.isInline()) return true;
+        }
+        for (int sourceId : visualSourceIds(plan)) {
+            if (data.isInlineObjectId(sourceId)) return true;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null && item.isInline()) return true;
+        }
+        return false;
+    }
+
+    private boolean hasExecutableInlineSourceObject(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (isDirectChildShellSlotRender(rg)) return false;
+        if ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType())) {
+            return true;
+        }
+        if (data.isInlineObjectId(rg.id())) return true;
+        if (hasResolvedInlineAnchor(rg.id())) return true;
+        if (rg.sourceObjectIds() == null) return false;
+        for (int sourceId : rg.sourceObjectIds()) {
+            if (data.isInlineObjectId(sourceId)) return true;
+            if (hasResolvedInlineAnchor(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean isDirectChildShellSlotPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        return isDirectChildShellSlotRender(renderedGroupForPlan(plan));
+    }
+
+    private boolean isDirectChildShellSlotRender(RenderedGroup rg) {
+        if (rg == null) return false;
+        if ("direct_child_shell_slot".equals(safe(rg.slotRole()))) return true;
+        if ("direct_child_shell_slot".equals(safe(rg.compositeRole()))) return true;
+        String candidateId = safe(rg.candidateId());
+        return candidateId.contains(".direct_child_shell_slot")
+                || candidateId.endsWith("direct_child_shell_slot");
+    }
+
+    private boolean isTableCellAnchoredExternalLabelShell(ObjectPlan plan) {
+        if (plan == null || data == null || plan.domId < 0) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        ResolvedTable table = resolvedTableContainingInlineAnchor(plan.domId);
+        if (table == null) return false;
+        ResolvedTable.Cell cell = resolvedCellContainingInlineAnchor(table, plan.domId);
+        if (cell == null || !cell.hasTextRuns()) return false;
+        AnchorCarrier carrier = nearestAnchorCarrierForSource(plan.domId);
+        if (anchorCarrierParagraphHasVisibleText(carrier)
+                || idmlInlineAnchorParagraphHasVisibleText(plan.domId)) {
+            return false;
+        }
+        return sourceBoundsOutsideTable(plan.bounds, table.bounds());
+    }
+
+    private ResolvedTable resolvedTableContainingInlineAnchor(int domId) {
+        if (data == null || data.tables() == null) return null;
+        for (ResolvedTable table : data.tables()) {
+            if (resolvedCellContainingInlineAnchor(table, domId) != null) {
+                return table;
+            }
+        }
+        return null;
+    }
+
+    private static ResolvedTable.Cell resolvedCellContainingInlineAnchor(ResolvedTable table, int domId) {
+        if (table == null || table.cells() == null) return null;
+        for (ResolvedTable.Cell cell : table.cells()) {
+            if (cell == null || cell.inlineAnchorIds() == null) continue;
+            for (Integer id : cell.inlineAnchorIds()) {
+                if (id != null && id == domId) return cell;
+            }
+        }
+        return null;
+    }
+
+    private static boolean sourceBoundsOutsideTable(double[] sourceBounds, double[] tableBounds) {
+        if (!validPlacementBounds(sourceBounds) || !validPlacementBounds(tableBounds)) return false;
+        double tolerance = 0.5;
+        double sourceCenterX = (sourceBounds[1] + sourceBounds[3]) * 0.5;
+        double sourceCenterY = (sourceBounds[0] + sourceBounds[2]) * 0.5;
+        return sourceCenterX < tableBounds[1] - tolerance
+                || sourceCenterX > tableBounds[3] + tolerance
+                || sourceCenterY < tableBounds[0] - tolerance
+                || sourceCenterY > tableBounds[2] + tolerance;
+    }
+
+    private static boolean validPlacementBounds(double[] bounds) {
+        return bounds != null
+                && bounds.length >= 4
+                && bounds[2] > bounds[0]
+                && bounds[3] > bounds[1];
     }
 
     private static boolean isCompositeCarrierTextShellReason(String reason) {
@@ -4749,6 +8886,383 @@ public final class OwnershipPlanner {
                 || reason.contains("leaf_group");
     }
 
+    private boolean textShellUsesPagePositionCompositeAssociation(ObjectPlan plan) {
+        if (plan == null || plan.domId < 0) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        if (isInlineLeafAtomicTextShellSlot(plan)) return false;
+        if (!hasFloatingCompositeSourceParentCarrier(plan)
+                && !hasCompositeSourceParentCarrierByBundle(plan)) {
+            return false;
+        }
+        AnchorCarrier carrier = nearestAnchorCarrierForSource(plan.domId);
+        if (carrier == null) return true;
+        return anchorCarrierParagraphIsAnchorOnly(carrier);
+    }
+
+    private void normalizeCompositeAssociatedInlineTextShellsToPage() {
+        LinkedHashSet<Integer> floatedTextFrames = new LinkedHashSet<>();
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.placement != Placement.INLINE) continue;
+            if (!textShellUsesPagePositionCompositeAssociation(plan)) continue;
+            ObjectPlan replacement = plan.withPlacementAndCoordinateSpace(
+                    Placement.FLOATING,
+                    CoordinateSpace.PAGE);
+            plans.set(i, replacement);
+            for (int textFrameId : textFrameIdsForPlanIncludingOwned(replacement)) {
+                floatedTextFrames.add(textFrameId);
+            }
+        }
+        if (!floatedTextFrames.isEmpty()) {
+            alignOwnedTextFramePlans(toIntArray(floatedTextFrames), Placement.FLOATING);
+        }
+    }
+
+    private void normalizeDirectInlineAnchoredTextShellsToStoryFlow() {
+        LinkedHashSet<Integer> inlinedTextFrames = new LinkedHashSet<>();
+        int inlineLeafCandidates = 0;
+        int inlinedShells = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (isInlineLeafAtomicTextShellSlot(plan)) {
+                inlineLeafCandidates++;
+            }
+            if (!directInlineAnchoredTextShellMustFlowWithStory(plan)) continue;
+            if (plan.placement == Placement.INLINE
+                    && plan.coordinateSpace == CoordinateSpace.STORY_FLOW) {
+                for (int textFrameId : textFrameIdsForPlanIncludingOwned(plan)) {
+                    inlinedTextFrames.add(textFrameId);
+                }
+                continue;
+            }
+            ObjectPlan replacement = plan.withPlacementAndCoordinateSpace(
+                    Placement.INLINE,
+                    CoordinateSpace.STORY_FLOW);
+            plans.set(i, replacement);
+            inlinedShells++;
+            for (int textFrameId : textFrameIdsForPlanIncludingOwned(replacement)) {
+                inlinedTextFrames.add(textFrameId);
+            }
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.directInlineTextShell.leafCandidates",
+                inlineLeafCandidates);
+        ConversionTiming.metric("stage1.ownershipPlanner.directInlineTextShell.inlined",
+                inlinedShells);
+        if (!inlinedTextFrames.isEmpty()) {
+            alignOwnedTextFramePlans(toIntArray(inlinedTextFrames), Placement.INLINE);
+        }
+    }
+
+    private boolean directInlineAnchoredTextShellMustFlowWithStory(ObjectPlan plan) {
+        if (plan == null || plan.domId < 0) return false;
+        if (isDirectChildShellSlotPlan(plan)) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        if (isTableCellAnchoredExternalLabelShell(plan)) return false;
+        if (!ownedTextFramesAreInlineSource(plan)) return false;
+        if (isInlineLeafAtomicTextShellSlot(plan)) return true;
+        if (hasIdmlAnchoredPagePosition(plan.domId)) return false;
+        if (textShellUsesPagePositionCompositeAssociation(plan)) return false;
+        if (isSourcePositionedInlineTextShell(plan)) return true;
+
+        AnchorCarrier carrier = nearestAnchorCarrierForSource(plan.domId);
+        return anchorCarrierParagraphHasVisibleText(carrier)
+                || idmlInlineAnchorParagraphHasVisibleText(plan.domId);
+    }
+
+    private boolean isInlineLeafAtomicTextShellSlot(ObjectPlan plan) {
+        if (plan == null || data == null || plan.domId < 0) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length != 1) return false;
+        ResolvedPageItem group = data.getPageItem(String.valueOf(plan.domId));
+        if (group == null || !"Group".equals(group.type()) || !group.isInline()) return false;
+        int[] childIds = group.childIds();
+        if (childIds == null || childIds.length == 0) return false;
+        int textChildCount = 0;
+        int visualShellChildCount = 0;
+        for (int childId : childIds) {
+            ResolvedTextFrame childTf = data.getTextFrame(String.valueOf(childId));
+            if (childTf != null) {
+                if (childTf.sourceHidden()) continue;
+                if (!contains(plan.ownedTextFrameIds, childId)) return false;
+                textChildCount++;
+                continue;
+            }
+            ResolvedPageItem childItem = data.getPageItem(String.valueOf(childId));
+            if (childItem == null || childItem.sourceHidden()) continue;
+            if (!isInlineLeafTextShellVisualChild(childItem)) return false;
+            visualShellChildCount++;
+        }
+        return textChildCount == 1 && visualShellChildCount >= 1;
+    }
+
+    private static boolean isSimpleButtonLabelTextShellSlot(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.kind == null || !plan.kind.startsWith("simple_button_label:")) return false;
+        if (!"simple_button_label_inline_text_shell".equals(safe(plan.reason))) return false;
+        String base = basename(plan.file);
+        return base.startsWith("deco_")
+                || base.startsWith("tf_shell_")
+                || base.startsWith("label_backdrop_");
+    }
+
+    private static boolean isInlineLeafTextShellVisualChild(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if (!"Rectangle".equals(type) && !"Oval".equals(type) && !"Polygon".equals(type)) return false;
+        boolean hasFill = !isNoneColor(item.fillColorName());
+        boolean hasStroke = !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+        return hasFill || hasStroke || item.cornerRadius() > 0 || item.hasDropShadow();
+    }
+
+    private boolean hasCompositeSourceParentCarrierByBundle(ObjectPlan child) {
+        if (child == null || child.pageIndex < 0) return false;
+        for (ObjectPlan parent : plans) {
+            if (parent == null || parent == child) continue;
+            if (parent.pageIndex != child.pageIndex) continue;
+            if (!isCompositeCarrierTextShellReason(safe(parent.reason))) continue;
+            if (sourceCount(parent) <= sourceCount(child)) continue;
+            if (contains(parent.sourceObjectIds, child.domId)
+                    || containsAny(parent.sourceObjectIds, child.sourceObjectIds)
+                    || containsAny(parent.sourceObjectIds, child.ownedTextFrameIds)
+                    || containsAny(visualSourceIds(parent), child.sourceObjectIds)
+                    || containsAny(parent.descendantVisualObjectIds, child.sourceObjectIds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean anchorCarrierParagraphIsAnchorOnly(AnchorCarrier carrier) {
+        Boolean textFlowResult = anchorCarrierTextFlowParagraphIsAnchorOnly(carrier);
+        if (textFlowResult != null) return textFlowResult;
+        if (carrier == null || carrier.paragraph == null || carrier.paragraph.runs() == null) {
+            return false;
+        }
+        boolean sawCarrierAnchor = false;
+        for (ResolvedRun run : carrier.paragraph.runs()) {
+            if (run == null) continue;
+            if (run.isInlineAnchor()) {
+                Integer anchoredId = run.anchoredObjectId();
+                if (anchoredId != null && anchoredId == carrier.anchorId) {
+                    sawCarrierAnchor = true;
+                }
+                continue;
+            }
+            if (!normalizeResolvedVisibleText(run.text()).isEmpty()) {
+                return false;
+            }
+        }
+        return sawCarrierAnchor;
+    }
+
+    private static boolean anchorCarrierParagraphHasVisibleText(AnchorCarrier carrier) {
+        Boolean textFlowResult = anchorCarrierTextFlowParagraphHasVisibleText(carrier);
+        if (textFlowResult != null) return textFlowResult;
+        if (carrier == null || carrier.paragraph == null || carrier.paragraph.runs() == null) {
+            return false;
+        }
+        boolean sawCarrierAnchor = false;
+        for (ResolvedRun run : carrier.paragraph.runs()) {
+            if (run == null) continue;
+            if (run.isInlineAnchor()) {
+                Integer anchoredId = run.anchoredObjectId();
+                if (anchoredId != null && anchoredId == carrier.anchorId) {
+                    sawCarrierAnchor = true;
+                }
+                continue;
+            }
+            if (!normalizeResolvedVisibleText(run.text()).isEmpty()) {
+                return sawCarrierAnchor;
+            }
+        }
+        return false;
+    }
+
+    private static Boolean anchorCarrierTextFlowParagraphIsAnchorOnly(AnchorCarrier carrier) {
+        if (carrier == null || carrier.textFlowParagraph == null || carrier.textFlowParagraph.atoms == null) {
+            return null;
+        }
+        boolean sawCarrierAnchor = false;
+        for (TextFlowDocument.TextFlowAtom atom : carrier.textFlowParagraph.atoms) {
+            if (atom == null) continue;
+            if (atom instanceof TextFlowDocument.InlineSlotAtom) {
+                TextFlowDocument.InlineSlotAtom slot = (TextFlowDocument.InlineSlotAtom) atom;
+                if (slot.anchoredObjectId != null && slot.anchoredObjectId == carrier.anchorId) {
+                    sawCarrierAnchor = true;
+                    continue;
+                }
+                return false;
+            }
+            if (atom instanceof TextFlowDocument.TextAtom) {
+                TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
+                if (!normalizeResolvedVisibleText(textAtom.text).isEmpty()) {
+                    return false;
+                }
+            }
+        }
+        return sawCarrierAnchor;
+    }
+
+    private static Boolean anchorCarrierTextFlowParagraphHasVisibleText(AnchorCarrier carrier) {
+        if (carrier == null || carrier.textFlowParagraph == null || carrier.textFlowParagraph.atoms == null) {
+            return null;
+        }
+        boolean sawCarrierAnchor = false;
+        for (TextFlowDocument.TextFlowAtom atom : carrier.textFlowParagraph.atoms) {
+            if (atom == null) continue;
+            if (atom instanceof TextFlowDocument.InlineSlotAtom) {
+                TextFlowDocument.InlineSlotAtom slot = (TextFlowDocument.InlineSlotAtom) atom;
+                if (slot.anchoredObjectId != null && slot.anchoredObjectId == carrier.anchorId) {
+                    sawCarrierAnchor = true;
+                }
+                continue;
+            }
+            if (atom instanceof TextFlowDocument.TextAtom) {
+                TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
+                if (!normalizeResolvedVisibleText(textAtom.text).isEmpty()) {
+                    return sawCarrierAnchor;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean idmlInlineAnchorParagraphHasVisibleText(int domId) {
+        if (ctx == null || ctx.loadIDMLStory == null || data == null || data.textFrames() == null) {
+            return false;
+        }
+        HashSet<String> visitedStoryIds = new HashSet<>();
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (tf == null || tf.storyId() == null || tf.storyId().isEmpty()) continue;
+            if (!visitedStoryIds.add(tf.storyId())) continue;
+            IDMLStory story = loadStory(tf.storyId());
+            if (idmlStoryInlineAnchorParagraphHasVisibleText(story, domId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean idmlStoryInlineAnchorParagraphHasVisibleText(IDMLStory story, int domId) {
+        if (story == null) return false;
+        if (story.paragraphs() != null) {
+            for (IDMLParagraph paragraph : story.paragraphs()) {
+                if (idmlParagraphInlineAnchorHasVisibleText(paragraph, domId)) return true;
+            }
+        }
+        if (story.tables() == null) return false;
+        for (IDMLTable table : story.tables()) {
+            if (table == null || table.rows() == null) continue;
+            for (IDMLTableRow row : table.rows()) {
+                if (row == null || row.cells() == null) continue;
+                for (IDMLTableCell cell : row.cells()) {
+                    if (cell == null || cell.paragraphs() == null) continue;
+                    for (IDMLParagraph paragraph : cell.paragraphs()) {
+                        if (idmlParagraphInlineAnchorHasVisibleText(paragraph, domId)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean idmlParagraphInlineAnchorHasVisibleText(IDMLParagraph paragraph, int domId) {
+        if (paragraph == null || paragraph.characterRuns() == null) return false;
+        boolean sawAnchor = false;
+        for (IDMLCharacterRun run : paragraph.characterRuns()) {
+            if (run == null) continue;
+            if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) {
+                for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                    if (idmlInlineAnchorDomId(run, anchor) == domId) {
+                        sawAnchor = true;
+                        break;
+                    }
+                }
+            }
+            if (sawAnchor && !normalizeResolvedVisibleText(run.content()).isEmpty()) {
+                return true;
+            }
+        }
+        if (!sawAnchor) return false;
+        return !normalizeResolvedVisibleText(paragraph.getPlainText()).isEmpty();
+    }
+
+    private boolean inlineTextShellNeedsPageCarrier(ObjectPlan plan) {
+        if (plan == null || plan.domId < 0) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+
+        AnchorCarrier carrier = nearestAnchorCarrierForSource(plan.domId);
+        if (carrier == null || carrier.story == null) {
+            return true;
+        }
+        if (textShellUsesPagePositionCompositeAssociation(plan)) {
+            return true;
+        }
+        if (carrierStoryOwnedByFloatingTextShell(carrier.story)) {
+            return true;
+        }
+        return !hasVisibleResolvedStoryText(carrier.story);
+    }
+
+    private boolean inlineTextShellCarrierOwnedByFloatingTextShell(ObjectPlan plan) {
+        if (plan == null || plan.domId < 0) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+
+        AnchorCarrier carrier = nearestAnchorCarrierForSource(plan.domId);
+        return carrier != null
+                && carrier.story != null
+                && carrierStoryOwnedByFloatingTextShell(carrier.story);
+    }
+
+    private boolean carrierStoryOwnedByFloatingTextShell(ResolvedStory story) {
+        if (story == null || story.id() == null || data == null) return false;
+        for (ResolvedTextFrame tf : textFramesForStory(story.id())) {
+            if (tf == null || tf.id() == null) continue;
+            int tfId = parseFlexibleId(tf.id());
+            if (tfId < 0) continue;
+            for (ObjectPlan owner : plans) {
+                if (owner == null) continue;
+                if (owner.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+                if (owner.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+                if (owner.placement != Placement.FLOATING) continue;
+                if (contains(owner.ownedTextFrameIds, tfId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private AnchorCarrier nearestAnchorCarrierForSource(int domId) {
+        if (data == null || domId < 0) return null;
+        Set<Integer> seen = new HashSet<>();
+        int current = domId;
+        while (current >= 0 && seen.add(current)) {
+            AnchorCarrier carrier = carrierForAnchor(current);
+            if (carrier != null) {
+                return carrier;
+            }
+            ResolvedPageItem item = data.getPageItem(String.valueOf(current));
+            if (item == null || item.parentId() == null) break;
+            current = parseFlexibleId(item.parentId());
+        }
+        return null;
+    }
+
     private void resolveCompositeTextOwnershipClaimedByLeafShells() {
         LinkedHashSet<Integer> leafShellOwnedTextFrames = new LinkedHashSet<>();
         for (ObjectPlan plan : plans) {
@@ -4778,6 +9292,264 @@ public final class OwnershipPlanner {
         }
     }
 
+    private void splitDirectLabelShellsFromCompositeCarriers() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan labelShell = plans.get(i);
+            if (!isDroppedDirectLabelShellOwnedByCompositeCarrier(labelShell)) continue;
+            int textFrameId = singleTextFrameSourceId(labelShell);
+            if (textFrameId < 0) continue;
+            if (compositeCarrierForDirectLabelShell(labelShell, textFrameId) == null) continue;
+
+            ObjectPlan restored = labelShell
+                    .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            "direct_label_shell_split_from_composite_carrier")
+                    .withVisualLayer(textShellVisualLayer(
+                            labelShell,
+                            new int[] { textFrameId },
+                            VisualLayer.LABEL_OVERLAY_BACKDROP))
+                    .withOwnedTextFrameIds(new int[] { textFrameId })
+                    .withMaterialization(Materialization.NATIVE_SOURCE_SHAPE);
+            plans.set(i, restored);
+            declareDirectLabelTextFramePlan(textFrameId, restored);
+            removeDirectLabelShellOwnershipFromCompositeCarriers(restored, textFrameId);
+        }
+    }
+
+    private void splitLabelChromeCompositeCarrierTextOwners() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan carrier = plans.get(i);
+            if (!isLabelChromeCompositeCarrierTextOwner(carrier)) continue;
+            LinkedHashSet<Integer> restoredTextFrames = new LinkedHashSet<>();
+            for (int textFrameId : carrier.ownedTextFrameIds) {
+                if (textFrameId < 0) continue;
+                if (hasVisibleLeafShellTextOwner(textFrameId, carrier)) continue;
+                if (declareDirectLabelTextFramePlan(textFrameId, carrier,
+                        "label_chrome_carrier_direct_text_owner")) {
+                    restoredTextFrames.add(textFrameId);
+                }
+            }
+            if (restoredTextFrames.isEmpty()) continue;
+
+            int[] retainedOwnedTextFrames = removeIds(carrier.ownedTextFrameIds, restoredTextFrames);
+            ObjectPlan replacement = carrier.withOwnedTextFrameIds(retainedOwnedTextFrames);
+            if (retainedOwnedTextFrames.length == 0) {
+                replacement = replacement
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(carrier.visualAction,
+                                "label_chrome_carrier_visual_only");
+            }
+            plans.set(i, replacement);
+        }
+    }
+
+    private void dropNativeTextShellsBakedIntoVisibleCompositeCarriers() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan child = plans.get(i);
+            if (!isNativeTextShellVisualOnlyChild(child)) continue;
+            if (!hasOtherHwpxTextOwnerForAll(child.ownedTextFrameIds, child)) continue;
+            ObjectPlan carrier = visibleCompositeCarrierForNativeTextShell(child);
+            if (carrier == null) continue;
+
+            plans.set(i, child
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "native_text_shell_owned_by_composite_carrier")
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private boolean isNativeTextShellVisualOnlyChild(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!"native_parent_text_shell".equals(plan.kind)) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        return visualSourceIds(plan).length > 0;
+    }
+
+    private ObjectPlan visibleCompositeCarrierForNativeTextShell(ObjectPlan child) {
+        if (child == null) return null;
+        for (ObjectPlan carrier : plans) {
+            if (carrier == null || carrier == child) continue;
+            if (carrier.pageIndex != child.pageIndex) continue;
+            if (!isVisibleCompositeCarrierShell(carrier)) continue;
+            if (containsAll(carrier.sourceObjectIds, child.sourceObjectIds)) return carrier;
+            if (containsAll(visualSourceIds(carrier), visualSourceIds(child))) return carrier;
+        }
+        return null;
+    }
+
+    private boolean isVisibleCompositeCarrierShell(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (!safe(plan.kind).contains("page_object")) return false;
+        String reason = safe(plan.reason);
+        return reason.endsWith("_visual_only")
+                || "label_chrome_carrier_visual_only".equals(reason)
+                || "composite_carrier_visual_only".equals(reason)
+                || "text_composite_editable_text_hidden".equals(reason)
+                || "mixed_group_text_hidden".equals(reason)
+                || "complex_graphic_text_hidden".equals(reason)
+                || "composite_shell_carrier_with_extra_source_material".equals(reason)
+                || "editable_composite_text_hidden_shell".equals(reason);
+    }
+
+    private boolean hasOtherHwpxTextOwnerForAll(int[] textFrameIds, ObjectPlan excluded) {
+        if (textFrameIds == null || textFrameIds.length == 0) return false;
+        for (int textFrameId : textFrameIds) {
+            if (textFrameId < 0) return false;
+            if (!hasOtherHwpxTextOwner(textFrameId, excluded)) return false;
+        }
+        return true;
+    }
+
+    private boolean hasOtherHwpxTextOwner(int textFrameId, ObjectPlan excluded) {
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan == excluded) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.domId == textFrameId && "text_frame".equals(plan.kind)) return true;
+            if (contains(plan.ownedTextFrameIds, textFrameId)) return true;
+        }
+        return false;
+    }
+
+    private boolean isLabelChromeCompositeCarrierTextOwner(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.visualLayer != VisualLayer.LABEL_BACKDROP) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        return "mixed_group_text_hidden".equals(plan.reason)
+                || "composite_text_shell_with_extra_source_material".equals(plan.reason);
+    }
+
+    private boolean hasVisibleLeafShellTextOwner(int textFrameId, ObjectPlan carrier) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan owner : plans) {
+            if (owner == null || owner == carrier) continue;
+            if (owner.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (owner.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!contains(owner.ownedTextFrameIds, textFrameId)) continue;
+            if (owner.placement != carrier.placement) continue;
+            if (owner.visualLayer == VisualLayer.LABEL_BACKDROP
+                    || owner.visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
+                    || owner.materialization == Materialization.NATIVE_SOURCE_SHAPE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void declareDirectLabelTextFramePlan(int textFrameId, ObjectPlan shellPlan) {
+        declareDirectLabelTextFramePlan(textFrameId, shellPlan,
+                "direct_label_text_split_from_composite_carrier");
+    }
+
+    private boolean declareDirectLabelTextFramePlan(
+            int textFrameId,
+            ObjectPlan shellPlan,
+            String reason) {
+        if (textFrameId < 0 || shellPlan == null) return false;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan textPlan = plans.get(i);
+            if (textPlan == null) continue;
+            if (!"text_frame".equals(textPlan.kind)) continue;
+            if (textPlan.domId != textFrameId) continue;
+            ObjectPlan restored = textPlan
+                    .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            reason)
+                    .withOwnedTextFrameIds(new int[] { textFrameId })
+                    .withMaterialization(Materialization.HWPX_TEXT)
+                    .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE);
+            plans.set(i, restored);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isDroppedDirectLabelShellOwnedByCompositeCarrier(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!"native_parent_text_shell".equals(plan.kind)) return false;
+        if (!"text_shell_owned_by_composite_carrier".equals(plan.reason)) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) return false;
+        if (plan.visualLayer != VisualLayer.LABEL_BACKDROP) return false;
+        return singleTextFrameSourceId(plan) >= 0 && visualSourceIds(plan).length > 0;
+    }
+
+    private int singleTextFrameSourceId(ObjectPlan plan) {
+        if (plan == null || plan.sourceObjectIds == null || data == null) return -1;
+        int found = -1;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (data.getTextFrame(String.valueOf(sourceId)) == null) continue;
+            if (found >= 0 && found != sourceId) return -1;
+            found = sourceId;
+        }
+        return found;
+    }
+
+    private ObjectPlan compositeCarrierForDirectLabelShell(ObjectPlan labelShell, int textFrameId) {
+        if (labelShell == null || textFrameId < 0) return null;
+        for (ObjectPlan carrier : plans) {
+            if (carrier == null || carrier == labelShell) continue;
+            if (carrier.pageIndex != labelShell.pageIndex) continue;
+            if (!isExtractedCompositeTextShellParent(carrier)) continue;
+            if (!contains(carrier.ownedTextFrameIds, textFrameId)) continue;
+            if (!containsAll(carrier.sourceObjectIds, labelShell.sourceObjectIds)) continue;
+            return carrier;
+        }
+        return null;
+    }
+
+    private void removeDirectLabelShellOwnershipFromCompositeCarriers(
+            ObjectPlan labelShell,
+            int textFrameId) {
+        if (labelShell == null || textFrameId < 0) return;
+        LinkedHashSet<Integer> childSources = new LinkedHashSet<>();
+        addAll(labelShell.sourceObjectIds, childSources);
+        LinkedHashSet<Integer> childVisualSources = new LinkedHashSet<>();
+        for (int sourceId : visualSourceIds(labelShell)) {
+            childVisualSources.add(sourceId);
+        }
+        LinkedHashSet<Integer> childTextFrames = new LinkedHashSet<>();
+        childTextFrames.add(textFrameId);
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan carrier = plans.get(i);
+            if (carrier == null || carrier == labelShell) continue;
+            if (carrier.pageIndex != labelShell.pageIndex) continue;
+            if (!isExtractedCompositeTextShellParent(carrier)) continue;
+            if (!contains(carrier.ownedTextFrameIds, textFrameId)) continue;
+            if (!containsAll(carrier.sourceObjectIds, labelShell.sourceObjectIds)) continue;
+
+            int[] retainedSources = withoutSourcesAllowEmpty(carrier.sourceObjectIds, childSources);
+            int[] retainedVisualSources = withoutSourcesAllowEmpty(visualSourceIds(carrier), childVisualSources);
+            int[] retainedOwnedTextFrames = withoutSourcesAllowEmpty(carrier.ownedTextFrameIds, childTextFrames);
+            int[] retainedDescendants = withoutSourcesAllowEmpty(carrier.descendantVisualObjectIds, childSources);
+            ObjectPlan replacement = carrier
+                    .withSourceObjectIds(retainedSources)
+                    .withVisualSourceObjectIds(retainedVisualSources)
+                    .withOwnedTextFrameIds(retainedOwnedTextFrames)
+                    .withDescendantVisualObjectIds(retainedDescendants);
+            if (retainedOwnedTextFrames.length == 0) {
+                replacement = replacement
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "composite_carrier_split_into_direct_label_shells");
+            }
+            plans.set(i, replacement);
+        }
+    }
+
     private boolean isLeafOwnedTextShell(ObjectPlan plan) {
         if (plan == null) return false;
         if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
@@ -4787,6 +9559,7 @@ public final class OwnershipPlanner {
         return reason.contains("atomic_ownership_root_text_hidden_shell")
                 || reason.contains("leaf_group_text_hidden_shell")
                 || reason.contains("direct_text_hidden_shell")
+                || reason.contains("direct_label_shell_split_from_composite_carrier")
                 || isDirectInlineTextShellReason(reason);
     }
 
@@ -4824,6 +9597,7 @@ public final class OwnershipPlanner {
         if (plan.placement != Placement.INLINE) return false;
         if (!safe(plan.kind).contains("inline_object")) return false;
         if (!"inline_graphic_only".equals(plan.reason)) return false;
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
         if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL
                 && plan.visualAction != VisualAction.PLACE_INLINE_PNG
                 && plan.visualAction != VisualAction.DROP_VISUAL) {
@@ -4872,6 +9646,7 @@ public final class OwnershipPlanner {
                 if (inlineTextShellOwnsMoreSpecificText(child, owner)) continue;
                 if (!textShellOwnerCoversChild(owner, child)) continue;
                 if (childOwnsDistinctShellSlot(owner, child)) continue;
+                if (nativeSourceShellHasDirectTextOwner(child)) continue;
                 ObjectPlan dropped = child.withVisualAction(VisualAction.DROP_VISUAL,
                         "visual_source_owned_by_parent_text_shell");
                 if (!"text_frame".equals(dropped.kind)) {
@@ -4955,121 +9730,20 @@ public final class OwnershipPlanner {
         }
     }
 
-    private void restoreCompositeTextShellsWithExtraSourceMaterial() {
-        for (int i = 0; i < plans.size(); i++) {
-            ObjectPlan composite = plans.get(i);
-            if (!isDroppedCompositeTextShellWithExtraMaterial(composite)) continue;
-            List<ObjectPlan> inlineChildren = visibleInlineChildTextShellsCoveredByComposite(composite);
-            ObjectPlan child = visibleChildTextShellCoveredByComposite(composite);
-            if (child == null && inlineChildren.isEmpty()) continue;
-            if (child != null && isMultiTextCompositeWrapperOfSameTextShell(composite, child)) {
-                continue;
-            }
-
-            ObjectPlan splitComposite = removeInlineChildShellOwnership(composite, inlineChildren);
-            if (splitComposite.ownedTextFrameIds == null || splitComposite.ownedTextFrameIds.length == 0) {
-                continue;
-            }
-
-            VisualLayer layer = splitComposite.ownedTextFrameIds != null
-                    && splitComposite.ownedTextFrameIds.length > 1
-                    ? VisualLayer.CONTAINER_BACKDROP
-                    : hasColoredShapeShellSource(splitComposite)
-                    ? VisualLayer.LABEL_BACKDROP
-                    : VisualLayer.CONTAINER_BACKDROP;
-            ObjectPlan restored = splitComposite
-                    .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
-                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
-                            "composite_text_shell_with_extra_source_material")
-                    .withVisualLayer(layer)
-                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR)
-                    .withZOrder(Math.min(splitComposite.zOrder,
-                            minTextFrameZOrder(splitComposite.ownedTextFrameIds) - 1));
-            plans.set(i, restored);
-
-            for (int j = 0; j < plans.size(); j++) {
-                if (i == j) continue;
-                ObjectPlan candidate = plans.get(j);
-                if (!isVisibleTextShell(candidate)) continue;
-                if (candidate.pageIndex != restored.pageIndex) continue;
-                if (!containsAll(restored.ownedTextFrameIds, candidate.ownedTextFrameIds)) continue;
-                if (!containsAll(visualSourceIds(restored), visualSourceIds(candidate))) continue;
-                plans.set(j, candidate
-                        .withTextAction(TextAction.DROP_TEXT)
-                        .withVisualAction(VisualAction.DROP_VISUAL,
-                                "owned_by_composite_text_shell_with_extra_source_material")
-                        .withOwnedTextFrameIds(new int[0])
-                        .withDescendantVisualObjectIds(new int[0]));
-            }
-        }
-    }
-
-    private List<ObjectPlan> visibleInlineChildTextShellsCoveredByComposite(ObjectPlan composite) {
-        List<ObjectPlan> children = new ArrayList<>();
-        if (composite == null) return children;
-        for (ObjectPlan child : plans) {
-            if (!isVisibleTextShell(child)) continue;
-            if (child.placement != Placement.INLINE) continue;
-            if (child.pageIndex != composite.pageIndex) continue;
-            if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length == 0) continue;
-            if (!containsAny(composite.ownedTextFrameIds, child.ownedTextFrameIds)) continue;
-            if (!containsAll(visualSourceIds(composite), visualSourceIds(child))) continue;
-            if (!compositeTextShellHasExtraMaterialOutsideChild(composite, child)) continue;
-            children.add(child);
-        }
-        return children;
-    }
-
-    private ObjectPlan removeInlineChildShellOwnership(ObjectPlan composite, List<ObjectPlan> inlineChildren) {
-        if (composite == null || inlineChildren == null || inlineChildren.isEmpty()) return composite;
-        LinkedHashSet<Integer> childSources = new LinkedHashSet<>();
-        LinkedHashSet<Integer> childVisualSources = new LinkedHashSet<>();
-        LinkedHashSet<Integer> childTextFrames = new LinkedHashSet<>();
-        for (ObjectPlan child : inlineChildren) {
-            addAll(child.sourceObjectIds, childSources);
-            for (int sourceId : visualSourceIds(child)) {
-                childVisualSources.add(sourceId);
-            }
-            addAll(child.ownedTextFrameIds, childTextFrames);
-        }
-        int[] retainedSources = withoutSources(composite.sourceObjectIds, childSources);
-        int[] retainedVisualSources = withoutSources(visualSourceIds(composite), childVisualSources);
-        int[] retainedOwnedTextFrames = withoutSources(composite.ownedTextFrameIds, childTextFrames);
-        int[] retainedDescendants = withoutSources(composite.descendantVisualObjectIds, childSources);
-        return composite
-                .withSourceObjectIds(retainedSources)
-                .withVisualSourceObjectIds(retainedVisualSources)
-                .withOwnedTextFrameIds(retainedOwnedTextFrames)
-                .withDescendantVisualObjectIds(retainedDescendants);
-    }
-
-    private static boolean isMultiTextCompositeWrapperOfSameTextShell(ObjectPlan composite, ObjectPlan child) {
-        return composite != null
-                && child != null
-                && composite.ownedTextFrameIds != null
-                && composite.ownedTextFrameIds.length > 1
-                && sameIntSet(composite.ownedTextFrameIds, child.ownedTextFrameIds)
-                && containsAll(composite.sourceObjectIds, child.sourceObjectIds);
-    }
-
     private static boolean sameIntSet(int[] a, int[] b) {
         if (a == null || b == null) return a == b;
         return containsAll(a, b) && containsAll(b, a);
     }
 
-    private boolean isDroppedCompositeTextShellWithExtraMaterial(ObjectPlan plan) {
-        if (plan == null) return false;
-        if (plan.textAction != TextAction.DROP_TEXT) return false;
-        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
-        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
-        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
-        if (visualSourceIds(plan).length == 0) return false;
-        if (!safe(plan.kind).contains("page_object")) return false;
-        if (plan.file == null || plan.file.isEmpty()) return false;
-        String reason = safe(plan.reason);
-        return "owned_by_parent_text_shell".equals(reason)
-                || "visual_source_owned_by_parent_text_shell".equals(reason)
-                || "composite_parent_split_into_direct_shell_slots".equals(reason);
+    private static int[] mergeIds(int[] first, int[] second) {
+        LinkedHashSet<Integer> merged = new LinkedHashSet<>();
+        if (first != null) {
+            for (int id : first) merged.add(id);
+        }
+        if (second != null) {
+            for (int id : second) merged.add(id);
+        }
+        return toIntArray(merged);
     }
 
     private void resolveDuplicateTextShellTextOwners() {
@@ -5084,6 +9758,13 @@ public final class OwnershipPlanner {
                 int keep = chooseCanonicalTextShellOwnerIndex(i, j);
                 int drop = keep == i ? j : i;
                 ObjectPlan loser = plans.get(drop);
+                if (sameTextOwnerButDistinctShellSlot(a, b)) {
+                    plans.set(drop, loser.withTextAction(TextAction.DROP_TEXT));
+                    if (drop == i) {
+                        break;
+                    }
+                    continue;
+                }
                 plans.set(drop, loser
                         .withTextAction(TextAction.DROP_TEXT)
                         .withVisualAction(VisualAction.DROP_VISUAL,
@@ -5104,9 +9785,949 @@ public final class OwnershipPlanner {
                 && plan.ownedTextFrameIds.length > 0;
     }
 
+    private static boolean sameTextOwnerButDistinctShellSlot(ObjectPlan a, ObjectPlan b) {
+        if (a == null || b == null) return false;
+        if (a.visualAction != VisualAction.PLACE_TEXT_SHELL
+                || b.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        int[] aVisual = visualSourceIds(a);
+        int[] bVisual = visualSourceIds(b);
+        if (aVisual.length == 0 || bVisual.length == 0) return false;
+        return !containsAny(aVisual, bVisual);
+    }
+
+    private void resolveCompositeCarrierTextFrameOwners() {
+        List<ObjectPlan> carriers = new ArrayList<>();
+        List<Integer> carrierIndexes = new ArrayList<>();
+        LinkedHashSet<Integer> carrierOwnedTextFrames = new LinkedHashSet<>();
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isCompositeCarrierTextFrameOwner(plan)) continue;
+            carrierIndexes.add(i);
+            carriers.add(plan);
+            addAll(plan.ownedTextFrameIds, carrierOwnedTextFrames);
+        }
+        if (carriers.isEmpty() || carrierOwnedTextFrames.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (carriers.contains(plan)) continue;
+
+            if ("text_frame".equals(plan.kind) && carrierOwnedTextFrames.contains(plan.domId)) {
+                ObjectPlan carrier = compositeCarrierForTextFrame(plan.domId, carriers);
+                if (carrier != null) {
+                    plans.set(i, declareDirectTextFrameFromCompositeCarrier(plan, carrier));
+                }
+                continue;
+            }
+
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (!containsAnySet(plan.ownedTextFrameIds, carrierOwnedTextFrames)) continue;
+            if (!coveredByCompositeCarrier(plan, carriers)) continue;
+
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "text_shell_owned_by_composite_carrier")
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+
+        for (int index : carrierIndexes) {
+            if (index < 0 || index >= plans.size()) continue;
+            ObjectPlan carrier = plans.get(index);
+            if (carrier == null) continue;
+            plans.set(index, carrier
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            "composite_carrier_visual_only")
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private void normalizeVisualOnlyTextShellsDoNotOwnTextSlots() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.textAction != TextAction.DROP_TEXT) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!isVisualOnlyTextShellReason(plan.reason)) continue;
+            if ((plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)
+                    && (plan.descendantVisualObjectIds == null || plan.descendantVisualObjectIds.length == 0)) {
+                continue;
+            }
+            plans.set(i, plan
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private static boolean isVisualOnlyTextShellReason(String reason) {
+        if (reason == null || reason.isEmpty()) return false;
+        return reason.contains("visual_only")
+                || "story_flow_inline_shell_visual_only".equals(reason)
+                || "composite_carrier_visual_only".equals(reason)
+                || "cross_page_text_shell_visual_fragment".equals(reason);
+    }
+
+    private void declareOrphanedPureDecorationVisuals() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isDroppedPureDecorationVisual(plan)) continue;
+            if (hasVisibleVisualOwnerForSameDom(plan)) continue;
+            VisualAction action = plan.placement == Placement.INLINE
+                    ? VisualAction.PLACE_INLINE_PNG
+                    : VisualAction.PLACE_FLOATING_PNG;
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(action, plan.reason));
+        }
+    }
+
+    private void dropNonCanonicalRenderedGraphicFrameSlots() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !plan.hasVisibleVisual()) continue;
+            if (!safe(plan.kind).startsWith("rendered_graphic_frame:")) continue;
+            if (!hasCanonicalNonGraphicRenderedChannelForSameSlot(plan)) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
+                    "alternate_pass_candidate_owned_by_canonical_channel"));
+        }
+    }
+
+    private boolean hasCanonicalNonGraphicRenderedChannelForSameSlot(ObjectPlan graphicPlan) {
+        if (graphicPlan == null) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == graphicPlan) continue;
+            if (candidate.pageIndex != graphicPlan.pageIndex) continue;
+            if (!isCanonicalNonGraphicRenderedChannel(candidate)) continue;
+            if (sameRenderedSlot(candidate, graphicPlan)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isCanonicalNonGraphicRenderedChannel(ObjectPlan plan) {
+        if (plan == null) return false;
+        String kind = safe(plan.kind);
+        return kind.startsWith("rendered_floating_item:")
+                || kind.startsWith("rendered_image_frame:")
+                || kind.startsWith("rendered_pdf_frame:")
+                || (kind.startsWith("rendered_floating_item:") && plan.placement == Placement.INLINE);
+    }
+
+    private static boolean sameRenderedSlot(ObjectPlan a, ObjectPlan b) {
+        if (a == null || b == null) return false;
+        String ak = safe(a.sourceBundleKey);
+        String bk = safe(b.sourceBundleKey);
+        if (!ak.isEmpty() && ak.equals(bk)) return true;
+        int[] av = visualSourceIds(a);
+        int[] bv = visualSourceIds(b);
+        if (av.length > 0 && bv.length > 0 && containsAll(av, bv) && containsAll(bv, av)) return true;
+        return a.sourceObjectIds != null && b.sourceObjectIds != null
+                && a.sourceObjectIds.length > 0 && b.sourceObjectIds.length > 0
+                && containsAll(a.sourceObjectIds, b.sourceObjectIds)
+                && containsAll(b.sourceObjectIds, a.sourceObjectIds);
+    }
+
+    private void normalizeDuplicateVisibleSourceSlots() {
+        boolean changed;
+        int guard = 0;
+        do {
+            changed = false;
+            Map<String, List<Integer>> bySource = new LinkedHashMap<>();
+            for (int i = 0; i < plans.size(); i++) {
+                ObjectPlan plan = plans.get(i);
+                if (plan == null || !plan.hasVisibleVisual()) continue;
+                for (int sourceId : duplicateVisibleSourceIds(plan)) {
+                    String key = plan.pageIndex + ":" + sourceId;
+                    bySource.computeIfAbsent(key, k -> new ArrayList<>()).add(i);
+                }
+            }
+            for (Map.Entry<String, List<Integer>> e : bySource.entrySet()) {
+                List<Integer> indexes = e.getValue();
+                if (indexes.size() <= 1) continue;
+                int sourceId = parseDuplicateSourceKey(e.getKey());
+                int winner = chooseVisibleSourceOwner(sourceId, indexes);
+                for (int index : indexes) {
+                    if (index == winner) continue;
+                    ObjectPlan loser = plans.get(index);
+                    ObjectPlan next = removeVisibleSourceFromPlan(loser, sourceId,
+                            "duplicate_visible_source_slot_owned_by_canonical_plan");
+                    if (next != loser) {
+                        plans.set(index, next);
+                        changed = true;
+                    }
+                }
+            }
+            guard++;
+        } while (changed && guard < Math.max(1, plans.size()));
+    }
+
+    private void dropNativeSourceShapesOwnedByRenderedBundles() {
+        if (data == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan nativeShape = plans.get(i);
+            if (!isVisibleNativeSourceShapeFallback(nativeShape)) continue;
+            if (renderedBundleOwnerForNativeSourceShape(nativeShape) == null) continue;
+            plans.set(i, nativeShape
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "native_source_shape_owned_by_rendered_source_bundle")
+                    .withVisualSourceObjectIds(new int[0])
+                    .withStyleSourceObjectIds(new int[0])
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private static boolean isVisibleNativeSourceShapeFallback(ObjectPlan plan) {
+        return plan != null
+                && plan.hasVisibleVisual()
+                && plan.materialization == Materialization.NATIVE_SOURCE_SHAPE
+                && plan.textAction == TextAction.DROP_TEXT
+                && (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)
+                && (plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0);
+    }
+
+    private ObjectPlan renderedBundleOwnerForNativeSourceShape(ObjectPlan nativeShape) {
+        if (nativeShape == null) return null;
+        for (ObjectPlan owner : plans) {
+            if (!isRenderedBundleVisualOwner(owner, nativeShape)) continue;
+            if (renderedBundleContainsNativeSourceShape(owner, nativeShape)) return owner;
+        }
+        return null;
+    }
+
+    private static boolean isRenderedBundleVisualOwner(ObjectPlan owner, ObjectPlan nativeShape) {
+        if (!isVisibleRenderedVisual(owner)) return false;
+        if (owner == nativeShape) return false;
+        if (owner.pageIndex != nativeShape.pageIndex) return false;
+        if (owner.materialization == Materialization.NATIVE_SOURCE_SHAPE) return false;
+        if (owner.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && owner.visualAction != VisualAction.PLACE_INLINE_PNG
+                && owner.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (safe(owner.file).isEmpty()) return false;
+        return owner.sourceObjectIds != null
+                && nativeShape.sourceObjectIds != null
+                && owner.sourceObjectIds.length > nativeShape.sourceObjectIds.length;
+    }
+
+    private boolean renderedBundleContainsNativeSourceShape(ObjectPlan owner, ObjectPlan nativeShape) {
+        if (owner == null || nativeShape == null || data == null) return false;
+        RenderedGroup rendered = renderedGroupForPlan(owner);
+        int[] exportedSources = rendered != null ? rendered.exportSourceObjectIds() : null;
+        boolean hasExplicitExportSources = exportedSources != null && exportedSources.length > 0;
+        for (int sourceId : nativeShape.sourceObjectIds) {
+            if (!contains(owner.sourceObjectIds, sourceId)) continue;
+            if (hasExplicitExportSources && !contains(exportedSources, sourceId)) continue;
+            if (sourceId == owner.domId) continue;
+            if (isSourceDescendantOf(sourceId, owner.domId)) return true;
+        }
+        for (int sourceId : visualSourceIds(nativeShape)) {
+            if (!contains(owner.sourceObjectIds, sourceId)) continue;
+            if (hasExplicitExportSources && !contains(exportedSources, sourceId)) continue;
+            if (sourceId == owner.domId) continue;
+            if (isSourceDescendantOf(sourceId, owner.domId)) return true;
+        }
+        return false;
+    }
+
+    private boolean isSourceDescendantOf(int sourceId, int ancestorId) {
+        if (sourceId <= 0 || ancestorId <= 0 || sourceId == ancestorId || data == null) return false;
+        ResolvedPageItem source = data.getPageItem(String.valueOf(sourceId));
+        for (int depth = 0; depth < 64 && source != null; depth++) {
+            String parentId = source.parentId();
+            if (parentId == null || parentId.isEmpty()) return false;
+            int parent = parseInt(parentId, -1);
+            if (parent == ancestorId) return true;
+            if (parent <= 0 || parent == sourceId) return false;
+            source = data.getPageItem(parentId);
+        }
+        return false;
+    }
+
+    private void dropEditableTextFrameFallbackShellsOwnedByCompositeSlots() {
+        if (data == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan fallback = plans.get(i);
+            if (!isEditableTextFrameFallbackShell(fallback)) continue;
+            LinkedHashSet<Integer> shellStyleSources = visibleTextFrameShellStyleSources(fallback);
+            if (shellStyleSources.isEmpty()) continue;
+            if (!hasCompositeShellOwnerForAnySource(fallback, shellStyleSources)) continue;
+            plans.set(i, fallback
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "textframe_shell_style_source_owned_by_composite_shell_slot")
+                    .withVisualSourceObjectIds(new int[0])
+                    .withStyleSourceObjectIds(new int[0])
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private boolean isEditableTextFrameFallbackShell(ObjectPlan plan) {
+        return isVisibleRenderedVisual(plan)
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && "editable_textframe_visual_shell".equals(safe(plan.reason));
+    }
+
+    private LinkedHashSet<Integer> visibleTextFrameShellStyleSources(ObjectPlan plan) {
+        LinkedHashSet<Integer> result = new LinkedHashSet<>();
+        if (plan == null) return result;
+        collectVisibleTextFrameShellStyleSources(plan.visualSourceObjectIds, result);
+        collectVisibleTextFrameShellStyleSources(plan.styleSourceObjectIds, result);
+        collectVisibleTextFrameShellStyleSources(plan.sourceObjectIds, result);
+        return result;
+    }
+
+    private void collectVisibleTextFrameShellStyleSources(int[] sourceIds, LinkedHashSet<Integer> result) {
+        if (sourceIds == null || result == null) return;
+        for (int sourceId : sourceIds) {
+            if (sourceIdHasVisibleTextFrameShellMaterial(sourceId)) {
+                result.add(sourceId);
+            }
+        }
+    }
+
+    private boolean hasCompositeShellOwnerForAnySource(ObjectPlan fallback, Set<Integer> shellStyleSources) {
+        if (fallback == null || shellStyleSources == null || shellStyleSources.isEmpty()) return false;
+        for (ObjectPlan owner : plans) {
+            if (owner == null || owner == fallback) continue;
+            if (!isVisibleRenderedVisual(owner)) continue;
+            if (owner.pageIndex != fallback.pageIndex) continue;
+            if (owner.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if ("editable_textframe_visual_shell".equals(safe(owner.reason))) continue;
+            if (!planExecutesAnyTextFrameShellStyleSource(owner, shellStyleSources)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean planExecutesAnyTextFrameShellStyleSource(ObjectPlan plan, Set<Integer> sourceIds) {
+        if (plan == null || sourceIds == null || sourceIds.isEmpty()) return false;
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        if (rendered != null && rendered.exportSourceObjectIds() != null) {
+            for (int sourceId : rendered.exportSourceObjectIds()) {
+                if (sourceIds.contains(sourceId)) return true;
+            }
+        }
+        for (int sourceId : plan.visualSourceObjectIds) {
+            if (sourceIds.contains(sourceId)) return true;
+        }
+        for (int sourceId : plan.styleSourceObjectIds) {
+            if (sourceIds.contains(sourceId)) return true;
+        }
+        for (int sourceId : plan.sourceObjectIds) {
+            if (sourceIds.contains(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private void bindPaperInlineAnchorsToPageMaterialSlots() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan inline = plans.get(i);
+            if (!isCanonicalStoryFlowInlineVisualSlot(inline)) continue;
+            if (!isPaperOnlyVisualSource(inline)) continue;
+            ObjectPlan material = findPageMaterialForPaperInlineAnchor(inline);
+            if (material == null) continue;
+            plans.set(i, inline.withVisibleMaterialFrom(material,
+                    "paper_inline_anchor_uses_page_material_slot"));
+            dropConsumedPageMaterialPlan(material.domId,
+                    "page_material_slot_consumed_by_paper_inline_anchor");
+        }
+    }
+
+    private ObjectPlan findPageMaterialForPaperInlineAnchor(ObjectPlan inline) {
+        ObjectPlan best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (ObjectPlan candidate : plans) {
+            if (!isFloatingPageVisualOnlyCloneCandidate(candidate)) continue;
+            if (!samePaperInlineMaterialSlot(inline, candidate)) continue;
+            double score = boundsOverlapRatio(inline.bounds, candidate.bounds) * 1000.0
+                    + sameBoundsDeltaScore(inline.bounds, candidate.bounds);
+            if (best == null || score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    private void dropConsumedPageMaterialPlan(int domId, String reason) {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.domId != domId) continue;
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL, reason)
+                    .withVisualSourceObjectIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0])
+                    .withOwnedTextFrameIds(new int[0]));
+        }
+    }
+
+    private boolean samePaperInlineMaterialSlot(ObjectPlan inline, ObjectPlan material) {
+        if (inline == null || material == null) return false;
+        if (inline.pageIndex != material.pageIndex) return false;
+        if (!sameKnownSourceLayer(inline, material)) return false;
+        if (!sameBounds(inline.bounds, material.bounds, 0.35)) return false;
+        if (!hasVisibleNonPaperMaterial(material)) return false;
+        double inlineArea = area(inline.bounds);
+        double materialArea = area(material.bounds);
+        if (inlineArea <= 0.0 || materialArea <= 0.0) return false;
+        double areaRatio = Math.min(inlineArea, materialArea) / Math.max(inlineArea, materialArea);
+        return areaRatio >= 0.92 && boundsMostlyOverlap(inline.bounds, material.bounds, 0.95);
+    }
+
+    private double sameBoundsDeltaScore(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return 0.0;
+        return -Math.abs(a[0] - b[0])
+                - Math.abs(a[1] - b[1])
+                - Math.abs(a[2] - b[2])
+                - Math.abs(a[3] - b[3]);
+    }
+
+    private double boundsOverlapRatio(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return 0.0;
+        double top = Math.max(Math.min(a[0], a[2]), Math.min(b[0], b[2]));
+        double left = Math.max(Math.min(a[1], a[3]), Math.min(b[1], b[3]));
+        double bottom = Math.min(Math.max(a[0], a[2]), Math.max(b[0], b[2]));
+        double right = Math.min(Math.max(a[1], a[3]), Math.max(b[1], b[3]));
+        double overlap = Math.max(0.0, bottom - top) * Math.max(0.0, right - left);
+        double area = Math.min(area(a), area(b));
+        return area > 0.0 ? overlap / area : 0.0;
+    }
+
+    private void dropFloatingPageClonesOwnedByStoryFlowInlineSlots() {
+        List<ObjectPlan> inlineOwners = new ArrayList<>();
+        for (ObjectPlan plan : plans) {
+            if (isCanonicalStoryFlowInlineVisualSlot(plan)) {
+                inlineOwners.add(plan);
+            }
+        }
+        if (inlineOwners.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan floating = plans.get(i);
+            if (!isFloatingPageVisualOnlyCloneCandidate(floating)) continue;
+            for (ObjectPlan inline : inlineOwners) {
+                if (!sameInlineVisualSlotClone(inline, floating)) continue;
+                plans.set(i, floating
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "story_flow_inline_slot_owns_page_clone")
+                        .withVisualSourceObjectIds(new int[0])
+                        .withDescendantVisualObjectIds(new int[0])
+                        .withOwnedTextFrameIds(new int[0]));
+                break;
+            }
+        }
+    }
+
+    private boolean isCanonicalStoryFlowInlineVisualSlot(ObjectPlan plan) {
+        if (!isVisibleRenderedVisual(plan)) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (!isVisualOnlyPlan(plan)) return false;
+        if (!hasInlineSourceSignal(plan)) return false;
+        if (hasPlacedContentSourceTree(plan)) return false;
+        if (hasTextFrameSourceTree(plan)) return false;
+        return true;
+    }
+
+    private boolean isFloatingPageVisualOnlyCloneCandidate(ObjectPlan plan) {
+        if (!isVisibleRenderedVisual(plan)) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.coordinateSpace != CoordinateSpace.PAGE) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (!isVisualOnlyPlan(plan)) return false;
+        if (hasPlacedContentSourceTree(plan)) return false;
+        if (hasTextFrameSourceTree(plan)) return false;
+        String kind = safe(plan.kind);
+        return kind.startsWith("rendered_floating_item:")
+                || kind.startsWith("rendered_graphic_frame:");
+    }
+
+    private boolean sameInlineVisualSlotClone(ObjectPlan inline, ObjectPlan floating) {
+        if (inline == null || floating == null) return false;
+        if (inline.pageIndex != floating.pageIndex) return false;
+        if (!sameKnownSourceLayer(inline, floating)) return false;
+        if (!sameBounds(inline.bounds, floating.bounds, 0.35)) return false;
+        if (!sameVisualSourceStyleFingerprint(inline, floating)) return false;
+        double inlineArea = area(inline.bounds);
+        double floatingArea = area(floating.bounds);
+        if (inlineArea <= 0.0 || floatingArea <= 0.0) return false;
+        double areaRatio = Math.min(inlineArea, floatingArea) / Math.max(inlineArea, floatingArea);
+        return areaRatio >= 0.92 && boundsMostlyOverlap(inline.bounds, floating.bounds, 0.95);
+    }
+
+    private boolean sameVisualSourceStyleFingerprint(ObjectPlan a, ObjectPlan b) {
+        String af = visualSourceStyleFingerprint(a);
+        String bf = visualSourceStyleFingerprint(b);
+        return !af.isEmpty() && af.equals(bf);
+    }
+
+    private String visualSourceStyleFingerprint(ObjectPlan plan) {
+        if (plan == null || data == null) return "";
+        List<String> parts = new ArrayList<>();
+        LinkedHashSet<Integer> roots = new LinkedHashSet<>();
+        addAll(visualSourceIds(plan), roots);
+        if (roots.isEmpty()) addAll(plan.sourceObjectIds, roots);
+        for (int sourceId : roots) {
+            collectVisualSourceStyleFingerprint(sourceId, parts, 0);
+        }
+        if (parts.isEmpty()) return "";
+        parts.sort(String::compareTo);
+        return String.join(";", parts);
+    }
+
+    private void collectVisualSourceStyleFingerprint(int sourceId, List<String> parts, int depth) {
+        if (data == null || sourceId <= 0 || depth > 8) return;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item == null || item.sourceHidden()) return;
+        String type = safe(item.type());
+        if ("TextFrame".equals(type)) return;
+        if (item.childIds() != null && item.childIds().length > 0) {
+            for (int childId : item.childIds()) {
+                collectVisualSourceStyleFingerprint(childId, parts, depth + 1);
+            }
+            return;
+        }
+        if ("Group".equals(type)) return;
+        parts.add(type
+                + "|fill=" + safe(item.fillColorName())
+                + "@" + rounded(item.fillTint())
+                + "|stroke=" + safe(item.strokeColorName())
+                + "@" + rounded(item.strokeTint())
+                + "/" + rounded(item.strokeWeight())
+                + "|opacity=" + rounded(item.opacity())
+                + "|corner=" + rounded(item.cornerRadius()));
+    }
+
+    private boolean isPaperOnlyVisualSource(ObjectPlan plan) {
+        SourceMaterialStats stats = visualSourceMaterialStats(plan);
+        return stats.paperLike > 0 && stats.nonPaper == 0;
+    }
+
+    private boolean hasVisibleNonPaperMaterial(ObjectPlan plan) {
+        return visualSourceMaterialStats(plan).nonPaper > 0;
+    }
+
+    private SourceMaterialStats visualSourceMaterialStats(ObjectPlan plan) {
+        SourceMaterialStats stats = new SourceMaterialStats();
+        if (plan == null || data == null) return stats;
+        LinkedHashSet<Integer> roots = new LinkedHashSet<>();
+        addAll(visualSourceIds(plan), roots);
+        if (roots.isEmpty()) addAll(plan.sourceObjectIds, roots);
+        for (int sourceId : roots) {
+            collectSourceMaterialStats(sourceId, stats, 0);
+        }
+        return stats;
+    }
+
+    private void collectSourceMaterialStats(int sourceId, SourceMaterialStats stats, int depth) {
+        if (data == null || stats == null || sourceId <= 0 || depth > 8) return;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item == null || item.sourceHidden()) return;
+        String type = safe(item.type());
+        if ("TextFrame".equals(type)) return;
+        if (item.childIds() != null && item.childIds().length > 0) {
+            for (int childId : item.childIds()) {
+                collectSourceMaterialStats(childId, stats, depth + 1);
+            }
+            return;
+        }
+        if ("Group".equals(type)) return;
+        collectSourcePaint(item.fillColorName(), item.fillTint(), item.opacity(), true, stats);
+        collectSourcePaint(item.strokeColorName(), item.strokeTint(), item.opacity(),
+                item.strokeWeight() > 0.01, stats);
+    }
+
+    private void collectSourcePaint(
+            String colorName,
+            double tint,
+            double opacity,
+            boolean active,
+            SourceMaterialStats stats) {
+        if (!active || stats == null) return;
+        String color = safe(colorName);
+        if (color.isEmpty() || isNoneColor(color)) return;
+        if (isPaperColor(color)) {
+            stats.paperLike++;
+        } else if (opacity > 0.01) {
+            stats.nonPaper++;
+        }
+    }
+
+    private static final class SourceMaterialStats {
+        int paperLike;
+        int nonPaper;
+    }
+
+    private static String rounded(double value) {
+        return String.valueOf(Math.round(value * 100.0) / 100.0);
+    }
+
+    private static boolean isVisualOnlyPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.DROP_TEXT
+                && (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)
+                && (plan.descendantVisualObjectIds == null || plan.descendantVisualObjectIds.length == 0);
+    }
+
+    private boolean hasInlineSourceSignal(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (data.isInlineObjectId(plan.domId)) return true;
+        ResolvedPageItem self = data.getPageItem(String.valueOf(plan.domId));
+        if (self != null && self.isInline()) return true;
+        for (int sourceId : visualSourceIds(plan)) {
+            if (data.isInlineObjectId(sourceId)) return true;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null && item.isInline()) return true;
+        }
+        for (int sourceId : plan.sourceObjectIds) {
+            if (data.isInlineObjectId(sourceId)) return true;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null && item.isInline()) return true;
+        }
+        return false;
+    }
+
+    private boolean hasTextFrameSourceTree(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (hasTextFrameSourceTree(sourceId)) return true;
+        }
+        for (int sourceId : visualSourceIds(plan)) {
+            if (hasTextFrameSourceTree(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasTextFrameSourceTree(int sourceId) {
+        if (data == null || sourceId <= 0) return false;
+        if (data.getTextFrame(String.valueOf(sourceId)) != null) return true;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item != null && "TextFrame".equals(safe(item.type()))) return true;
+        for (String childId : data.buildDescendantSet(String.valueOf(sourceId), 8)) {
+            if (data.getTextFrame(childId) != null) return true;
+            ResolvedPageItem child = data.getPageItem(childId);
+            if (child != null && "TextFrame".equals(safe(child.type()))) return true;
+        }
+        return false;
+    }
+
+    private static boolean sameKnownSourceLayer(ObjectPlan a, ObjectPlan b) {
+        String aLayerId = safe(a.sourceLayerId);
+        String bLayerId = safe(b.sourceLayerId);
+        if (!aLayerId.isEmpty() && !bLayerId.isEmpty()) {
+            return aLayerId.equals(bLayerId);
+        }
+        if (a.sourceLayerIndex >= 0 && b.sourceLayerIndex >= 0) {
+            return a.sourceLayerIndex == b.sourceLayerIndex;
+        }
+        String aLayerName = safe(a.sourceLayerName);
+        String bLayerName = safe(b.sourceLayerName);
+        if (!aLayerName.isEmpty() && !bLayerName.isEmpty()) {
+            return aLayerName.equals(bLayerName);
+        }
+        return true;
+    }
+
+    private void normalizeVisualSlotsExcludeTableStyleSources() {
+        ensureTableStyleSourceObjectIds();
+        LinkedHashMap<Integer, LinkedHashSet<Integer>> tableStyleSourcesByPage = new LinkedHashMap<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            LinkedHashSet<Integer> ids = tableStyleSourcesByPage.computeIfAbsent(
+                    plan.pageIndex, k -> new LinkedHashSet<>());
+            addAll(plan.sourceObjectIds, ids);
+            addAll(plan.visualSourceObjectIds, ids);
+            addAll(plan.styleSourceObjectIds, ids);
+        }
+        if (tableStyleSourcesByPage.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !plan.hasVisibleVisual()) continue;
+            if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE) continue;
+            LinkedHashSet<Integer> tableSources = tableStyleSourcesByPage.get(plan.pageIndex);
+            if (tableSources == null || tableSources.isEmpty()) continue;
+            ObjectPlan next = plan;
+            for (int sourceId : tableSources) {
+                next = removeVisibleSourceFromPlan(next, sourceId,
+                        "visual_slot_absorbed_by_table_style");
+            }
+            if (next != plan) {
+                plans.set(i, next);
+            }
+        }
+    }
+
+    private void ensureTableStyleSourceObjectIds() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            int[] canonical = tableStyleSourceIdsForPlan(plan);
+            if (canonical.length == 0) continue;
+            int[] merged = mergeIds(plan.styleSourceObjectIds, canonical);
+            if (sameIntSet(plan.styleSourceObjectIds, merged)) continue;
+            plans.set(i, plan.withStyleSourceObjectIds(merged));
+        }
+    }
+
+    private int[] tableStyleSourceIdsForPlan(ObjectPlan plan) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (plan == null) return new int[0];
+        addAll(tableOnlyStyleSourceIds(plan.domId), ids);
+        addDirectTableStyleSiblingSourceIds(plan, ids);
+        return toIntArray(ids);
+    }
+
+    private void addDirectTableStyleSiblingSourceIds(ObjectPlan plan, LinkedHashSet<Integer> ids) {
+        if (data == null || plan == null || ids == null) return;
+        ResolvedPageItem ownerItem = data.getPageItem(String.valueOf(plan.domId));
+        if (ownerItem == null || ownerItem.parentId() == null) return;
+        ResolvedPageItem parent = data.getPageItem(ownerItem.parentId());
+        if (parent == null || parent.childIds() == null) return;
+        double[] ownerBounds = boundsOf(ownerItem);
+        if (ownerBounds == null || ownerBounds.length < 4) ownerBounds = plan.bounds;
+        for (int childId : parent.childIds()) {
+            collectDirectTableStyleSiblingSourceId(childId, plan.domId, ownerBounds, ids);
+        }
+    }
+
+    private void collectDirectTableStyleSiblingSourceId(
+            int sourceId,
+            int ownerTextFrameId,
+            double[] tableOwnerBounds,
+            LinkedHashSet<Integer> ids) {
+        if (sourceId < 0 || sourceId == ownerTextFrameId || data == null || ids == null) return;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item == null || item.sourceHidden() || item.isInline()) return;
+        if (data.getTextFrame(String.valueOf(sourceId)) != null) return;
+        if (subtreeContainsOtherTableOnlyTextFrame(item, ownerTextFrameId)) return;
+        if ("Group".equals(item.type())) {
+            if (item.childIds() == null) return;
+            for (int childId : item.childIds()) {
+                collectDirectTableStyleSiblingSourceId(childId, ownerTextFrameId, tableOwnerBounds, ids);
+            }
+            return;
+        }
+        if (isCandidateTableStyleSourceItem(item, ownerTextFrameId, tableOwnerBounds)) {
+            ids.add(sourceId);
+        }
+    }
+
+    private int chooseVisibleSourceOwner(int sourceId, List<Integer> indexes) {
+        int winner = -1;
+        int winnerScore = Integer.MIN_VALUE;
+        for (int index : indexes) {
+            ObjectPlan plan = index >= 0 && index < plans.size() ? plans.get(index) : null;
+            int score = visibleSourceOwnerScore(plan, sourceId);
+            if (winner < 0 || score > winnerScore) {
+                winner = index;
+                winnerScore = score;
+            }
+        }
+        return winner;
+    }
+
+    private static int visibleSourceOwnerScore(ObjectPlan plan, int sourceId) {
+        if (plan == null) return Integer.MIN_VALUE;
+        int score = 0;
+        if (isExtractedTextShellOwner(plan)) {
+            score += 1300;
+            if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) score += 120;
+            if (visualSourceIds(plan).length > 1) score += 80;
+        }
+        if (plan.materialization == Materialization.NATIVE_SOURCE_SHAPE) {
+            score -= 120;
+        }
+        if ("native_parent_text_shell".equals(safe(plan.kind))
+                && plan.domId == sourceId
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0) {
+            score += 800;
+        }
+        if (plan.domId == sourceId) score += 1000;
+        if (contains(plan.sourceObjectIds, sourceId)) score += 120;
+        if (contains(plan.visualSourceObjectIds, sourceId)) score += 80;
+        if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) score += 70;
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) score += 60;
+        if (plan.visualAction == VisualAction.PLACE_INLINE_PNG) score += 40;
+        if (plan.placement == Placement.INLINE) score += 30;
+        int visualCount = visualSourceIds(plan).length;
+        if (visualCount == 1) score += 25;
+        score -= Math.min(visualCount, 200);
+        String reason = safe(plan.reason);
+        if (reason.contains("image_group")) score -= 120;
+        if (reason.contains("decoration_group") && plan.domId != sourceId) score -= 60;
+        if (reason.contains("text_hidden") && plan.domId != sourceId) score -= 40;
+        return score;
+    }
+
+    private static boolean isExtractedTextShellOwner(ObjectPlan plan) {
+        return plan != null
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.materialization == Materialization.EXTRACTED_PNG_VECTOR;
+    }
+
+    private int[] duplicateVisibleSourceIds(ObjectPlan plan) {
+        if (plan == null) return new int[0];
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds != null) {
+            for (int sourceId : visualIds) ids.add(sourceId);
+        }
+        if (isExtractedTextShellOwner(plan)) {
+            RenderedGroup rendered = renderedGroupForPlan(plan);
+            if (rendered != null && rendered.exportSourceObjectIds() != null) {
+                for (int sourceId : rendered.exportSourceObjectIds()) ids.add(sourceId);
+            }
+        }
+        if (isExtractedTextShellOwner(plan) && plan.styleSourceObjectIds != null) {
+            for (int sourceId : plan.styleSourceObjectIds) ids.add(sourceId);
+        }
+        return toIntArray(ids);
+    }
+
+    private ObjectPlan removeVisibleSourceFromPlan(ObjectPlan plan, int sourceId, String reason) {
+        if (plan == null || !plan.hasVisibleVisual()) return plan;
+        int[] current = visualSourceIds(plan);
+        if (!contains(current, sourceId)) return plan;
+        int[] retained = withoutSource(current, sourceId);
+        ObjectPlan next = plan.withVisualSourceObjectIds(retained);
+        if (retained.length == 0) {
+            next = next.withVisualAction(VisualAction.DROP_VISUAL, reason);
+        }
+        return next;
+    }
+
+    private static int[] withoutSource(int[] values, int sourceId) {
+        if (values == null || values.length == 0) return new int[0];
+        LinkedHashSet<Integer> retained = new LinkedHashSet<>();
+        for (int value : values) {
+            if (value == sourceId) continue;
+            retained.add(value);
+        }
+        return toIntArray(retained);
+    }
+
+    private static int parseDuplicateSourceKey(String key) {
+        if (key == null) return -1;
+        int colon = key.indexOf(':');
+        String value = colon >= 0 ? key.substring(colon + 1) : key;
+        return parseInt(value, -1);
+    }
+
+    private boolean isDroppedPureDecorationVisual(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.file == null || plan.file.isEmpty()) return false;
+        if (visualSourceIds(plan).length == 0) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        String reason = safe(plan.reason);
+        return "pure_decoration_group".equals(reason)
+                || "decoration_group".equals(reason);
+    }
+
+    private boolean hasVisibleVisualOwnerForSameDom(ObjectPlan target) {
+        if (target == null) return false;
+        if (target.domId < 0) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == target) continue;
+            if (candidate.pageIndex != target.pageIndex) continue;
+            if (candidate.domId != target.domId) continue;
+            if (!candidate.hasVisibleVisual()) continue;
+            if (candidate.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && candidate.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && candidate.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private ObjectPlan compositeCarrierForTextFrame(int textFrameId, List<ObjectPlan> carriers) {
+        if (textFrameId < 0 || carriers == null) return null;
+        for (ObjectPlan carrier : carriers) {
+            if (carrier == null) continue;
+            if (contains(carrier.ownedTextFrameIds, textFrameId)) return carrier;
+        }
+        return null;
+    }
+
+    private ObjectPlan declareDirectTextFrameFromCompositeCarrier(ObjectPlan textPlan, ObjectPlan carrier) {
+        int textFrameId = textPlan != null ? textPlan.domId : -1;
+        return textPlan
+                .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
+                .withVisualAction(VisualAction.DROP_VISUAL,
+                        "text_frame_split_from_composite_carrier")
+                .withOwnedTextFrameIds(new int[] { textFrameId })
+                .withMaterialization(Materialization.HWPX_TEXT)
+                .withPlacementAndCoordinateSpace(
+                        carrier != null ? carrier.placement : textPlan.placement,
+                        carrier != null ? carrier.coordinateSpace : textPlan.coordinateSpace);
+    }
+
+    private boolean isCompositeCarrierTextFrameOwner(ObjectPlan plan) {
+        if (!isVisibleTextShellWithOwnedText(plan)) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (!"mixed_group_text_hidden".equals(plan.reason)) return false;
+        if (plan.ownedTextFrameIds.length < 2) return false;
+        if (compositeTextShellHasExtraMaterialOutsideDirectShellSlots(plan)) return true;
+        if (plan.bounds == null || plan.bounds.length < 4) return false;
+        double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
+        double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
+        return h >= 45.0 && w >= 90.0;
+    }
+
+    private static boolean coveredByCompositeCarrier(ObjectPlan plan, List<ObjectPlan> carriers) {
+        if (plan == null || carriers == null || carriers.isEmpty()) return false;
+        for (ObjectPlan carrier : carriers) {
+            if (carrier == null || carrier.pageIndex != plan.pageIndex) continue;
+            if (!containsAny(carrier.ownedTextFrameIds, plan.ownedTextFrameIds)) continue;
+            if (containsAll(visualSourceIds(carrier), visualSourceIds(plan))) return true;
+            if (containsAll(carrier.sourceObjectIds, plan.sourceObjectIds)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsAnySet(int[] values, Set<Integer> candidates) {
+        if (values == null || values.length == 0 || candidates == null || candidates.isEmpty()) {
+            return false;
+        }
+        for (int value : values) {
+            if (candidates.contains(value)) return true;
+        }
+        return false;
+    }
+
     private int chooseCanonicalTextShellOwnerIndex(int aIndex, int bIndex) {
         ObjectPlan a = plans.get(aIndex);
         ObjectPlan b = plans.get(bIndex);
+        boolean aNativeInlineAtom = isNativeInlineTextShellAtomPlan(a);
+        boolean bNativeInlineAtom = isNativeInlineTextShellAtomPlan(b);
+        if (aNativeInlineAtom != bNativeInlineAtom) {
+            return aNativeInlineAtom ? aIndex : bIndex;
+        }
         int sourceCompare = Integer.compare(sourceCount(a), sourceCount(b));
         if (sourceCompare != 0) return sourceCompare < 0 ? aIndex : bIndex;
         int visualCompare = Integer.compare(visualSourceIds(a).length, visualSourceIds(b).length);
@@ -5114,6 +10735,35 @@ public final class OwnershipPlanner {
         int areaCompare = Double.compare(area(a.bounds), area(b.bounds));
         if (areaCompare != 0) return areaCompare < 0 ? aIndex : bIndex;
         return aIndex;
+    }
+
+    private boolean isNativeInlineTextShellAtomPlan(ObjectPlan plan) {
+        if (plan == null || data == null || plan.domId < 0) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (isTableCellAnchoredExternalLabelShell(plan)) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        if (!hasResolvedInlineAnchor(plan.domId) && !data.isInlineObjectId(plan.domId)) return false;
+        if (!ownedTextFramesAreInlineSource(plan)) return false;
+
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        if (rendered != null
+                && "TEXTLESS_SHELL_WITH_TF".equals(safe(rendered.atomicObjectKind()))
+                && "inline_object".equals(safe(rendered.type()))) {
+            return true;
+        }
+
+        ResolvedPageItem root = data.getPageItem(String.valueOf(plan.domId));
+        if (root == null || !"Group".equals(safe(root.type())) || !root.isInline()) return false;
+        for (int textFrameId : plan.ownedTextFrameIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+            if (tf == null || tf.sourceHidden()) return false;
+            ResolvedPageItem tfItem = data.getPageItem(String.valueOf(textFrameId));
+            if (tfItem == null) return false;
+            if (!String.valueOf(plan.domId).equals(tfItem.parentId())) return false;
+        }
+        return true;
     }
 
     private ObjectPlan visibleChildTextShellCoveredByComposite(ObjectPlan composite) {
@@ -5151,7 +10801,11 @@ public final class OwnershipPlanner {
     private static boolean sourceItemHasVisibleShellMaterial(ResolvedPageItem item) {
         if (item == null || item.sourceHidden() || item.hiddenByParent() || !item.visible()) return false;
         String type = safe(item.type());
-        if ("Group".equals(type) || "TextFrame".equals(type)) return false;
+        if ("TextFrame".equals(type)) return false;
+        if ("Group".equals(type)) {
+            return !isNoneColor(item.fillColorName())
+                    || (!isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01);
+        }
         if ("Rectangle".equals(type) || "Oval".equals(type) || "Polygon".equals(type)) {
             return !isNoneColor(item.fillColorName())
                     || (!isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01);
@@ -5160,6 +10814,34 @@ public final class OwnershipPlanner {
             return !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
         }
         return true;
+    }
+
+    private boolean sourceIdHasVisibleTextFrameShellMaterial(int sourceId) {
+        if (data == null || sourceId <= 0) return false;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+        if (tf != null) {
+            if (tf.sourceHidden()) return false;
+            if (!isNoneColor(tf.fillColor())) return true;
+            return !isNoneColor(tf.strokeColor()) && tf.strokeWeight() > 0.01;
+        }
+
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item == null || item.sourceHidden() || item.hiddenByParent() || !item.visible()) return false;
+        if (!"TextFrame".equals(safe(item.type()))) return false;
+        if (!isNoneColor(item.fillColorName())) return true;
+        return !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+    }
+
+    private boolean ownsTextFrameShellStyleSource(ObjectPlan plan) {
+        if (plan == null) return false;
+        LinkedHashSet<Integer> sourceIds = new LinkedHashSet<>();
+        addAll(visualSourceIds(plan), sourceIds);
+        addAll(plan.styleSourceObjectIds, sourceIds);
+        if (sourceIds.isEmpty()) return false;
+        for (int sourceId : sourceIds) {
+            if (sourceIdHasVisibleTextFrameShellMaterial(sourceId)) return true;
+        }
+        return false;
     }
 
     private void normalizeVisibleDescendantContracts() {
@@ -5201,6 +10883,707 @@ public final class OwnershipPlanner {
         return false;
     }
 
+    private void dropVisualChildrenBakedIntoTextShellParents() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan child = plans.get(i);
+            if (!isVisibleRenderedVisual(child)) continue;
+            if (!isVisualOnlyChildCandidateForTextShellParent(child)) continue;
+            for (ObjectPlan parent : plans) {
+                if (!textShellParentBakesVisualChild(parent, child)) continue;
+                ObjectPlan dropped = child.withVisualAction(
+                        VisualAction.DROP_VISUAL,
+                        "owned_by_parent_text_shell");
+                if (!"text_frame".equals(dropped.kind)) {
+                    dropped = dropped.withTextAction(TextAction.DROP_TEXT);
+                }
+                plans.set(i, dropped);
+                break;
+            }
+        }
+    }
+
+    private boolean isVisualOnlyChildCandidateForTextShellParent(ObjectPlan child) {
+        if (child == null) return false;
+        if (child.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
+        if (child.ownedTextFrameIds != null && child.ownedTextFrameIds.length > 0) return false;
+        if (isImageBackedContentPlan(child)) return false;
+        int[] childVisualSources = visualSourceIds(child);
+        return childVisualSources.length > 0;
+    }
+
+    private static boolean textShellParentBakesVisualChild(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null || parent == child) return false;
+        if (isInlineStoryFlowVisual(child)) return false;
+        if (parent.pageIndex != child.pageIndex) return false;
+        if (parent.domId == child.domId) return false;
+        if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (parent.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (visualOnlyChildOwnsDistinctShellSlot(parent, child)) return false;
+        int[] childVisualSources = visualSourceIds(child);
+        if (childVisualSources.length == 0) return false;
+        if (!containsAll(visualSourceIds(parent), childVisualSources)) return false;
+        return sourceCount(parent) > sourceCount(child);
+    }
+
+    private void declareContentVisualChildrenClaimedByTextShellParents() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan child = plans.get(i);
+            if (!isDroppedContentVisualClaimedByTextShellParent(child)) continue;
+            ObjectPlan owner = preferredContentVisualDeclarationOwner(child);
+            if (owner == null) continue;
+            int ownerIndex = plans.indexOf(owner);
+            if (ownerIndex < 0) continue;
+
+            ObjectPlan declared = declareContentVisualPlan(owner);
+            plans.set(ownerIndex, declared);
+            trimTextShellParentsForContentChild(declared);
+            trimSiblingContentChannels(declared);
+        }
+        declareOrphanedBakedInlineContentVisualsClaimedByTextShellParents();
+        dropCompositeImageBackedVisualsOwnedByLeafChannels();
+    }
+
+    private void normalizeClippedImageContentOwners() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan rawImage = plans.get(i);
+            ClippedImageSource clipped = clippedImageSourceForRawVisiblePlan(rawImage);
+            if (clipped == null) continue;
+
+            ObjectPlan owner = preferredClippedImageOwner(rawImage, clipped);
+            if (owner == null || owner == rawImage) continue;
+            int ownerIndex = plans.indexOf(owner);
+            if (ownerIndex < 0) continue;
+
+            ObjectPlan declaredOwner = declareClippedImageOwnerPlan(owner);
+            plans.set(ownerIndex, declaredOwner);
+            dropContentDescendantPlansOwnedByClippedImageOwner(declaredOwner, clipped);
+            trimTextShellParentsForContentChild(declaredOwner);
+        }
+    }
+
+    private boolean isVisiblePngVisualPlan(ObjectPlan plan) {
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        return plan.visualAction == VisualAction.PLACE_FLOATING_PNG
+                || plan.visualAction == VisualAction.PLACE_INLINE_PNG;
+    }
+
+    private boolean hasOwnedTextFrame(ObjectPlan plan) {
+        return plan != null && plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0;
+    }
+
+    private boolean hasAnyTextFrameSource(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (hasTextFrameSource(plan.sourceObjectIds)) return true;
+        return hasTextFrameSource(visualSourceIds(plan));
+    }
+
+    private ClippedImageSource clippedImageSourceForRawVisiblePlan(ObjectPlan plan) {
+        if (plan == null || data == null) return null;
+        if (!isVisibleContentVisualPlan(plan)) return null;
+        if (!isImageBackedContentPlan(plan)) return null;
+        for (int sourceId : visualSourceIds(plan)) {
+            ClippedImageSource clipped = clippedImageSourceForRawImage(sourceId, plan);
+            if (clipped != null) return clipped;
+        }
+        for (int sourceId : plan.sourceObjectIds) {
+            ClippedImageSource clipped = clippedImageSourceForRawImage(sourceId, plan);
+            if (clipped != null) return clipped;
+        }
+        return null;
+    }
+
+    private ClippedImageSource clippedImageSourceForRawImage(int sourceId, ObjectPlan plan) {
+        ResolvedPageItem image = data.getPageItem(String.valueOf(sourceId));
+        if (image == null || !"Image".equals(safe(image.type()))) return null;
+        ResolvedPageItem clip = directImageClipParent(image);
+        if (clip == null) return null;
+        int clipId = parseFlexibleId(clip.id());
+        if (clipId < 0) return null;
+        if (contains(plan.sourceObjectIds, clipId) || contains(visualSourceIds(plan), clipId)) {
+            return null;
+        }
+        return new ClippedImageSource(sourceId, clipId);
+    }
+
+    private ResolvedPageItem directImageClipParent(ResolvedPageItem image) {
+        if (image == null || data == null || image.parentId() == null) return null;
+        ResolvedPageItem parent = data.getPageItem(image.parentId());
+        if (parent == null) return null;
+        String type = safe(parent.type());
+        if (!"Oval".equals(type) && !"Polygon".equals(type) && !"Rectangle".equals(type)) {
+            return null;
+        }
+        if ("Oval".equals(type) || "Polygon".equals(type) || parent.clipContent()) {
+            return parent;
+        }
+        return !boundsContains(boundsOf(parent), boundsOf(image), 0.25) ? parent : null;
+    }
+
+    private ObjectPlan preferredClippedImageOwner(ObjectPlan rawImage, ClippedImageSource clipped) {
+        ObjectPlan best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == rawImage) continue;
+            if (candidate.pageIndex != rawImage.pageIndex) continue;
+            if (!isRenderedClippedImageOwnerCandidate(candidate, clipped)) continue;
+            int score = clippedImageOwnerScore(candidate, rawImage, clipped);
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private boolean isRenderedClippedImageOwnerCandidate(ObjectPlan candidate, ClippedImageSource clipped) {
+        if (candidate == null || clipped == null) return false;
+        if (candidate.renderId == null) return false;
+        if (candidate.file == null || candidate.file.isBlank()) return false;
+        if (clippedImageOwnerTreeDistance(candidate, clipped) < 0) return false;
+        if (!contains(candidate.sourceObjectIds, clipped.imageId)
+                && !contains(visualSourceIds(candidate), clipped.imageId)) {
+            return false;
+        }
+        return contains(candidate.sourceObjectIds, clipped.clipParentId)
+                || contains(visualSourceIds(candidate), clipped.clipParentId);
+    }
+
+    private int clippedImageOwnerTreeDistance(ObjectPlan candidate, ClippedImageSource clipped) {
+        if (candidate == null || clipped == null || data == null) return -1;
+        int candidateId = candidate.domId >= 0
+                ? candidate.domId
+                : (candidate.renderId != null ? candidate.renderId.intValue() : -1);
+        if (candidateId < 0) return -1;
+        if (candidateId == clipped.clipParentId) return 0;
+
+        int distance = 1;
+        String current = String.valueOf(clipped.clipParentId);
+        HashSet<String> visited = new HashSet<>();
+        while (current != null && !current.isBlank() && visited.add(current)) {
+            ResolvedPageItem item = data.getPageItem(current);
+            if (item == null || item.parentId() == null || item.parentId().isBlank()) {
+                return -1;
+            }
+            int parentId = parseFlexibleId(item.parentId());
+            if (parentId < 0) return -1;
+            if (parentId == candidateId) return distance;
+            current = item.parentId();
+            distance++;
+        }
+        return -1;
+    }
+
+    private int clippedImageOwnerScore(ObjectPlan candidate, ObjectPlan rawImage, ClippedImageSource clipped) {
+        int score = 0;
+        String file = safe(candidate.file);
+        int slash = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
+        String basename = slash >= 0 ? file.substring(slash + 1) : file;
+        int treeDistance = clippedImageOwnerTreeDistance(candidate, clipped);
+        if (treeDistance >= 0) score += 5000 - treeDistance * 500;
+        score -= Math.max(0, candidate.sourceObjectIds.length) * 20;
+        if (basename.startsWith("img_")) score += 100;
+        if (safe(candidate.kind).contains("rendered_floating_item")) score += 50;
+        if (candidate.placement == rawImage.placement) score += 30;
+        if (candidate.hasVisibleVisual()) score += 20;
+        return score;
+    }
+
+    private ObjectPlan declareClippedImageOwnerPlan(ObjectPlan owner) {
+        int[] visualSources = visualSourceIds(owner);
+        if (visualSources.length == 0) {
+            visualSources = owner.sourceObjectIds;
+        }
+        VisualAction action = owner.placement == Placement.INLINE
+                ? VisualAction.PLACE_INLINE_PNG
+                : VisualAction.PLACE_FLOATING_PNG;
+        Materialization materialization = owner.placement == Placement.INLINE
+                ? Materialization.COMPLETE_PNG
+                : Materialization.EXTRACTED_PNG_VECTOR;
+        return owner
+                .withTextAction(TextAction.DROP_TEXT)
+                .withVisualAction(action, "clipped_image_content_owned_by_clip_bundle")
+                .withMaterialization(materialization)
+                .withOwnedTextFrameIds(new int[0])
+                .withDescendantVisualObjectIds(new int[0])
+                .withVisualSourceObjectIds(withoutTextFrameSources(visualSources));
+    }
+
+    private void dropContentDescendantPlansOwnedByClippedImageOwner(
+            ObjectPlan owner,
+            ClippedImageSource clipped) {
+        if (owner == null || owner.sourceObjectIds == null || owner.sourceObjectIds.length == 0) return;
+        LinkedHashSet<Integer> clipSlotSources = clippedImageSlotSources(clipped);
+        if (clipSlotSources.isEmpty()) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan candidate = plans.get(i);
+            if (candidate == null || candidate == owner) continue;
+            if (candidate.pageIndex != owner.pageIndex) continue;
+            if (!isVisibleContentVisualPlan(candidate)) continue;
+            if (!isImageBackedContentPlan(candidate)) continue;
+            if (!planContainsAnySource(candidate, clipSlotSources)) continue;
+            if (!containsAny(owner.sourceObjectIds, candidate.sourceObjectIds)
+                    && !containsAny(owner.sourceObjectIds, visualSourceIds(candidate))
+                    && !contains(owner.sourceObjectIds, candidate.domId)) {
+                continue;
+            }
+            if (candidate.sourceObjectIds.length >= owner.sourceObjectIds.length) continue;
+            plans.set(i, candidate
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "content_visual_owned_by_clipped_image_bundle")
+                    .withOwnedTextFrameIds(new int[0])
+                    .withVisualSourceObjectIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private LinkedHashSet<Integer> clippedImageSlotSources(ClippedImageSource clipped) {
+        LinkedHashSet<Integer> sources = new LinkedHashSet<>();
+        if (clipped == null) return sources;
+        if (clipped.clipParentId >= 0) sources.add(clipped.clipParentId);
+        if (clipped.imageId >= 0) sources.add(clipped.imageId);
+        return sources;
+    }
+
+    private static boolean planContainsAnySource(ObjectPlan plan, LinkedHashSet<Integer> sources) {
+        if (plan == null || sources == null || sources.isEmpty()) return false;
+        if (sources.contains(plan.domId)) return true;
+        if (plan.renderId != null && sources.contains(plan.renderId.intValue())) return true;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (sources.contains(sourceId)) return true;
+        }
+        for (int sourceId : visualSourceIds(plan)) {
+            if (sources.contains(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private static final class ClippedImageSource {
+        final int imageId;
+        final int clipParentId;
+
+        ClippedImageSource(int imageId, int clipParentId) {
+            this.imageId = imageId;
+            this.clipParentId = clipParentId;
+        }
+    }
+
+    private void declareOrphanedBakedInlineContentVisualsClaimedByTextShellParents() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan child = plans.get(i);
+            if (child == null) continue;
+            if (child.visualAction != VisualAction.DROP_VISUAL) continue;
+            if (child.placement != Placement.INLINE) continue;
+            if (!isInlineContentVisualOrphanedByPageCompositeCarrier(child)) continue;
+            ObjectPlan pageChild = child.withPlacementAndCoordinateSpace(
+                    Placement.FLOATING,
+                    CoordinateSpace.PAGE);
+            ObjectPlan declared = declareContentVisualPlan(pageChild);
+            plans.set(i, declared);
+            trimTextShellParentsForContentChild(declared);
+            trimSiblingContentChannels(declared);
+        }
+    }
+
+    private boolean isDroppedContentVisualClaimedByTextShellParent(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (plan.placement != Placement.FLOATING && plan.placement != Placement.INLINE) return false;
+        if (!isImageBackedContentPlan(plan)) return false;
+        if (hasMoreSpecificImageBackedContentPlan(plan)) return false;
+        return textShellParentClaimsContentVisual(plan);
+    }
+
+    private boolean textShellParentClaimsContentVisual(ObjectPlan child) {
+        if (child == null) return false;
+        for (ObjectPlan parent : plans) {
+            if (parent == null || parent == child) continue;
+            if (parent.pageIndex != child.pageIndex) continue;
+            if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (parent.visualPolicyLayer() != PolicyLayer.BACKGROUND) continue;
+            if (!containsAny(visualSourceIds(parent), child.sourceObjectIds)
+                    && !containsAny(parent.sourceObjectIds, child.sourceObjectIds)
+                    && !containsAny(parent.descendantVisualObjectIds, child.sourceObjectIds)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private ObjectPlan preferredContentVisualDeclarationOwner(ObjectPlan child) {
+        if (child == null) return null;
+        ObjectPlan clipOwner = preferredSpecificClipOwnerForDroppedContent(child);
+        if (clipOwner != null) return clipOwner;
+        if (child.placement == Placement.FLOATING
+                && safe(child.kind).contains("rendered_floating_item")) {
+            return child;
+        }
+        ObjectPlan floating = pairedFloatingContentVisualPlanFor(child);
+        if (floating != null) return floating;
+        if (child.placement == Placement.INLINE
+                && isInlineContentVisualOrphanedByPageCompositeCarrier(child)) {
+            return child.withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE);
+        }
+        if (child.placement == Placement.INLINE && hasIdmlAnchoredPagePosition(child.domId)) {
+            return null;
+        }
+        return child;
+    }
+
+    private ObjectPlan preferredSpecificClipOwnerForDroppedContent(ObjectPlan child) {
+        ClippedImageSource clipped = clippedImageSourceOwnedByPlan(child);
+        if (clipped == null) return null;
+        ObjectPlan best = null;
+        int bestScore = Integer.MIN_VALUE;
+        int childSources = sourceCount(child);
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == child) continue;
+            if (candidate.pageIndex != child.pageIndex) continue;
+            if (sourceCount(candidate) >= childSources) continue;
+            if (!isRenderedClippedImageOwnerCandidate(candidate, clipped)) continue;
+            int score = clippedImageOwnerScore(candidate, child, clipped);
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private ClippedImageSource clippedImageSourceOwnedByPlan(ObjectPlan plan) {
+        if (plan == null || data == null) return null;
+        for (int sourceId : visualSourceIds(plan)) {
+            ClippedImageSource clipped = clippedImageSourceOwnedByPlanSource(sourceId, plan);
+            if (clipped != null) return clipped;
+        }
+        for (int sourceId : plan.sourceObjectIds) {
+            ClippedImageSource clipped = clippedImageSourceOwnedByPlanSource(sourceId, plan);
+            if (clipped != null) return clipped;
+        }
+        return null;
+    }
+
+    private ClippedImageSource clippedImageSourceOwnedByPlanSource(int sourceId, ObjectPlan plan) {
+        ResolvedPageItem image = data.getPageItem(String.valueOf(sourceId));
+        if (image == null || !"Image".equals(safe(image.type()))) return null;
+        ResolvedPageItem clip = directImageClipParent(image);
+        if (clip == null) return null;
+        int clipId = parseFlexibleId(clip.id());
+        if (clipId < 0) return null;
+        if (!contains(plan.sourceObjectIds, clipId) && !contains(visualSourceIds(plan), clipId)) {
+            return null;
+        }
+        return new ClippedImageSource(sourceId, clipId);
+    }
+
+    private boolean isInlineContentVisualOrphanedByPageCompositeCarrier(ObjectPlan child) {
+        if (child == null || child.placement != Placement.INLINE) return false;
+        if (!isImageBackedContentPlan(child)) return false;
+        if (!"baked_into_composite_parent".equals(safe(child.reason))) return false;
+        if (hasMoreSpecificVisibleImageBackedContentOwner(child)) return false;
+        for (ObjectPlan parent : plans) {
+            if (parent == null || parent == child) continue;
+            if (parent.pageIndex != child.pageIndex) continue;
+            if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (parent.placement != Placement.FLOATING) continue;
+            if (parent.visualPolicyLayer() != PolicyLayer.BACKGROUND) continue;
+            if (!containsAny(visualSourceIds(parent), child.sourceObjectIds)
+                    && !containsAny(parent.sourceObjectIds, child.sourceObjectIds)
+                    && !containsAny(parent.descendantVisualObjectIds, child.sourceObjectIds)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private ObjectPlan pairedFloatingContentVisualPlanFor(ObjectPlan child) {
+        if (child == null || child.domId < 0) return null;
+        ObjectPlan best = null;
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan == child) continue;
+            if (plan.domId != child.domId) continue;
+            if (plan.pageIndex != child.pageIndex) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (!safe(plan.kind).contains("page_object")) continue;
+            if (!isImageBackedContentPlan(plan)) continue;
+            if (!containsAny(plan.sourceObjectIds, child.sourceObjectIds)) {
+                continue;
+            }
+            if (safe(plan.kind).contains("rendered_floating_item")) return plan;
+            best = plan;
+        }
+        return best;
+    }
+
+    private boolean hasMoreSpecificImageBackedContentPlan(ObjectPlan parent) {
+        if (parent == null || parent.sourceObjectIds == null || parent.sourceObjectIds.length == 0) {
+            return false;
+        }
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == parent) continue;
+            if (candidate.pageIndex != parent.pageIndex) continue;
+            if (!isImageBackedContentPlan(candidate)) continue;
+            if (candidate.domId == parent.domId) continue;
+            if (candidate.sourceObjectIds == null || candidate.sourceObjectIds.length == 0) continue;
+            if (candidate.sourceObjectIds.length >= parent.sourceObjectIds.length) continue;
+            if (!containsAny(parent.sourceObjectIds, candidate.sourceObjectIds)) continue;
+            if (!containsAny(visualSourceIds(parent), visualSourceIds(candidate))
+                    && !containsAny(parent.sourceObjectIds, visualSourceIds(candidate))) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void dropCompositeImageBackedVisualsOwnedByLeafChannels() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan parent = plans.get(i);
+            if (parent == null) continue;
+            if (!isImageBackedContentShellPlan(parent)) continue;
+            if (parent.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && parent.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            if (!hasMoreSpecificVisibleImageBackedContentOwner(parent)) continue;
+            plans.set(i, parent
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "content_visual_owned_by_leaf_channels")
+                    .withVisualSourceObjectIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private boolean hasMoreSpecificVisibleImageBackedContentOwner(ObjectPlan parent) {
+        if (parent == null || parent.sourceObjectIds == null || parent.sourceObjectIds.length == 0) {
+            return false;
+        }
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == parent) continue;
+            if (candidate.pageIndex != parent.pageIndex) continue;
+            if (!isImageBackedContentPlan(candidate)) continue;
+            if (candidate.domId == parent.domId) continue;
+            if (candidate.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && candidate.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            if (candidate.sourceObjectIds == null || candidate.sourceObjectIds.length == 0) continue;
+            if (candidate.sourceObjectIds.length >= parent.sourceObjectIds.length) continue;
+            if (!containsAny(parent.sourceObjectIds, candidate.sourceObjectIds)) continue;
+            if (!containsAny(visualSourceIds(parent), visualSourceIds(candidate))
+                    && !containsAny(parent.sourceObjectIds, visualSourceIds(candidate))) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private ObjectPlan declareContentVisualPlan(ObjectPlan plan) {
+        VisualAction visualAction = plan.placement == Placement.INLINE
+                ? VisualAction.PLACE_INLINE_PNG
+                : VisualAction.PLACE_FLOATING_PNG;
+        Materialization materialization = plan.placement == Placement.INLINE
+                ? Materialization.COMPLETE_PNG
+                : Materialization.EXTRACTED_PNG_VECTOR;
+        return plan
+                .withTextAction(TextAction.DROP_TEXT)
+                .withVisualAction(visualAction, "content_visual_child_split_from_text_shell_parent")
+                .withMaterialization(materialization)
+                .withOwnedTextFrameIds(new int[0])
+                .withVisualSourceObjectIds(withoutTextFrameSources(visualSourceIds(plan)));
+    }
+
+    private void normalizeContentVisualSlotsExcludeVisibleTextShellSlots() {
+        LinkedHashMap<Integer, LinkedHashSet<Integer>> shellVisualSourcesByPage = new LinkedHashMap<>();
+        for (ObjectPlan shell : plans) {
+            if (!isVisibleTextShell(shell)) continue;
+            LinkedHashSet<Integer> ids = shellVisualSourcesByPage.computeIfAbsent(
+                    shell.pageIndex, k -> new LinkedHashSet<>());
+            addAll(visualSourceIds(shell), ids);
+        }
+        if (shellVisualSourcesByPage.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isVisibleContentVisualPlan(plan)) continue;
+            LinkedHashSet<Integer> shellSources = shellVisualSourcesByPage.get(plan.pageIndex);
+            int[] retainedVisualSources = shellSources == null || shellSources.isEmpty()
+                    ? withoutTextFrameSources(visualSourceIds(plan))
+                    : withoutSourcesAllowEmpty(withoutTextFrameSources(visualSourceIds(plan)), shellSources);
+            if (retainedVisualSources.length == visualSourceIds(plan).length
+                    && (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)) {
+                continue;
+            }
+            ObjectPlan replacement = plan
+                    .withOwnedTextFrameIds(new int[0])
+                    .withVisualSourceObjectIds(retainedVisualSources);
+            if (retainedVisualSources.length == 0) {
+                replacement = replacement.withVisualAction(VisualAction.DROP_VISUAL,
+                        "visual_slot_owned_by_visible_text_shell");
+            }
+            plans.set(i, replacement);
+        }
+    }
+
+    private boolean isVisibleContentVisualPlan(ObjectPlan plan) {
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+            return false;
+        }
+        return plan.visualPolicyLayer() == PolicyLayer.CONTENT
+                || plan.visualLayer == VisualLayer.CONTENT_VISUAL;
+    }
+
+    private int[] withoutTextFrameSources(int[] values) {
+        if (values == null || values.length == 0 || data == null) return values;
+        LinkedHashSet<Integer> retained = new LinkedHashSet<>();
+        for (int value : values) {
+            if (data.getTextFrame(String.valueOf(value)) != null) continue;
+            retained.add(value);
+        }
+        return toIntArray(retained);
+    }
+
+    private void trimTextShellParentsForContentChild(ObjectPlan child) {
+        if (child == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan parent = plans.get(i);
+            if (parent == null || parent == child) continue;
+            if (parent.pageIndex != child.pageIndex) continue;
+            if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (parent.visualPolicyLayer() != PolicyLayer.BACKGROUND) continue;
+
+            LinkedHashSet<Integer> childSources = intSetOf(child.sourceObjectIds);
+            int[] retainedVisual = withoutSources(visualSourceIds(parent), childSources);
+            int[] retainedDescendants = withoutSources(parent.descendantVisualObjectIds, childSources);
+            if (retainedVisual.length == visualSourceIds(parent).length
+                    && retainedDescendants.length == parent.descendantVisualObjectIds.length) {
+                continue;
+            }
+            plans.set(i, parent
+                    .withVisualSourceObjectIds(retainedVisual)
+                    .withDescendantVisualObjectIds(retainedDescendants));
+        }
+    }
+
+    private static LinkedHashSet<Integer> intSetOf(int[] values) {
+        LinkedHashSet<Integer> out = new LinkedHashSet<>();
+        if (values == null) return out;
+        for (int value : values) {
+            out.add(value);
+        }
+        return out;
+    }
+
+    private void trimSiblingContentChannels(ObjectPlan owner) {
+        if (owner == null || owner.sourceObjectIds == null || owner.sourceObjectIds.length == 0) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan candidate = plans.get(i);
+            if (candidate == null || candidate == owner) continue;
+            if (candidate.pageIndex != owner.pageIndex) continue;
+            if (candidate.domId != owner.domId) continue;
+            if (!containsAny(candidate.sourceObjectIds, owner.sourceObjectIds)) continue;
+            if (candidate.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && candidate.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && candidate.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+                continue;
+            }
+            plans.set(i, candidate
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "content_visual_owned_by_paired_channel")
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+        }
+    }
+
+    private boolean hasPlacedContentSource(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (isPlacedContentItem(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasPlacedContentSourceTree(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (hasPlacedContentSourceTree(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasVisibleShellRootWithPlacedContentTree(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (!isTextlessCompositeShellContainerReason(plan.reason)) return false;
+        RenderedGroup rg = renderedGroupForPlan(plan);
+        if (hasVisibleShellRootWithPlacedContentTree(rg)) return true;
+        return hasVisibleShellRootWithPlacedContentTree(plan.domId);
+    }
+
+    private boolean hasVisibleShellRootWithPlacedContentTree(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!isTextlessCompositeShellContainerReason(rg.reason())) return false;
+        return hasVisibleShellRootWithPlacedContentTree(rg.id());
+    }
+
+    private static boolean isTextlessCompositeShellContainerReason(String reason) {
+        String value = safe(reason);
+        return value.contains("complex_graphic_text_hidden")
+                || value.contains("mixed_group_text_hidden")
+                || value.contains("image_group_text_hidden")
+                || value.contains("clip_carrying_textless_shell_owner")
+                || value.contains("composite_shell_carrier");
+    }
+
+    private boolean hasVisibleShellRootWithPlacedContentTree(int sourceId) {
+        if (sourceId <= 0 || data == null) return false;
+        ResolvedPageItem root = data.getPageItem(String.valueOf(sourceId));
+        if (!isVisibleShapeShellMaterial(root)) return false;
+        return hasPlacedContentDescendantSourceTree(sourceId);
+    }
+
+    private boolean hasPlacedContentDescendantSourceTree(int sourceId) {
+        if (sourceId <= 0 || data == null) return false;
+        for (String childId : data.buildDescendantSet(String.valueOf(sourceId), 8)) {
+            if (isPlacedContentItem(data.getPageItem(childId))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isVisibleShapeShellMaterial(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden() || item.hiddenByParent() || !item.visible()) {
+            return false;
+        }
+        String type = safe(item.type());
+        boolean shape = "Rectangle".equals(type)
+                || "Oval".equals(type)
+                || "Polygon".equals(type)
+                || "GraphicLine".equals(type);
+        if (!shape) return false;
+        return sourceItemHasVisibleShellMaterial(item);
+    }
+
+    private boolean isImageBackedContentPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        boolean hasPlacedContent = hasPlacedContentSource(plan);
+        if (!hasPlacedContent && !isImageBackedContentShellPlan(plan)) return false;
+        String file = safe(plan.file);
+        int slash = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
+        String basename = slash >= 0 ? file.substring(slash + 1) : file;
+        if (basename.startsWith("img_")) return true;
+        if (hasPlacedContent && basename.startsWith("inline_")) return true;
+        if (hasPlacedContent && basename.startsWith("deco_")) return true;
+        return false;
+    }
+
     private static boolean isVisibleTextShell(ObjectPlan plan) {
         return plan != null
                 && plan.hasVisibleVisual()
@@ -5222,13 +11605,21 @@ public final class OwnershipPlanner {
     private boolean parentTextShellMayOwnDescendantVisual(ObjectPlan parent, ObjectPlan child) {
         if (parent == null || child == null) return false;
         if (isImageBackedContentShellPlan(parent) || isImageBackedContentShellPlan(child)) return false;
+        if (visualOnlyChildOwnsDistinctShellSlot(parent, child)) return false;
         if (visualOnlyChildFullyClaimedByTextShellParent(parent, child)) return true;
-        if (effectiveVisualPolicyLayer(parent) != PolicyLayer.BACKGROUND) return true;
-        return effectiveVisualPolicyLayer(child) == PolicyLayer.BACKGROUND;
+        return false;
+    }
+
+    private static boolean isInlineStoryFlowVisual(ObjectPlan plan) {
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && safe(plan.kind).contains("inline_object");
     }
 
     private static boolean visualOnlyChildFullyClaimedByTextShellParent(ObjectPlan parent, ObjectPlan child) {
         if (parent == null || child == null) return false;
+        if (isInlineStoryFlowVisual(child)) return false;
         if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (parent.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (child.textAction != TextAction.DROP_TEXT) return false;
@@ -5242,17 +11633,33 @@ public final class OwnershipPlanner {
     private static boolean childOwnsDistinctShellSlot(ObjectPlan parent, ObjectPlan child) {
         if (parent == null || child == null) return false;
         if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
-        if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length == 0) return false;
+        boolean ownsText = child.ownedTextFrameIds != null && child.ownedTextFrameIds.length > 0;
+        boolean ownsVisualOnlyShell = isDirectVisualOnlyShellSlot(child);
+        if (!ownsText && !ownsVisualOnlyShell) return false;
         if (child.visualSourceObjectIds == null || child.visualSourceObjectIds.length == 0) return false;
-        if (!hasExplicitTextlessShellSignal(child)) return false;
+        if (child.materialization != Materialization.NATIVE_SOURCE_SHAPE
+                && !hasExplicitTextlessShellSignal(child)) return false;
         if (parent.ownedTextFrameIds != null
                 && parent.ownedTextFrameIds.length > 0
+                && ownsText
                 && !containsAll(parent.ownedTextFrameIds, child.ownedTextFrameIds)) {
             return false;
         }
         return parent.visualSourceObjectIds == null
                 || parent.visualSourceObjectIds.length == 0
                 || sourceCount(child) < sourceCount(parent);
+    }
+
+    private static boolean isDirectVisualOnlyShellSlot(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (visualSourceIds(plan).length == 0) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        PolicyLayer layer = plan.visualPolicyLayer();
+        return layer == PolicyLayer.DECORATION || layer == PolicyLayer.BACKGROUND;
     }
 
     private static PolicyLayer effectiveVisualPolicyLayer(ObjectPlan plan) {
@@ -5289,6 +11696,15 @@ public final class OwnershipPlanner {
                 || (owner.ownedTextFrameIds != null
                     && child.ownedTextFrameIds != null
                     && owner.ownedTextFrameIds.length > child.ownedTextFrameIds.length);
+    }
+
+    private boolean nativeSourceShellHasDirectTextOwner(ObjectPlan child) {
+        if (child == null || child.materialization != Materialization.NATIVE_SOURCE_SHAPE) return false;
+        if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length == 0) return false;
+        for (int textFrameId : child.ownedTextFrameIds) {
+            if (hasDirectHwpxTextFrameOwner(textFrameId)) return true;
+        }
+        return false;
     }
 
     private static boolean ownsSourcePositionedInlineTextShell(ObjectPlan owner, ObjectPlan child) {
@@ -5344,6 +11760,7 @@ public final class OwnershipPlanner {
             if (!isVisibleRenderedVisual(plan)) continue;
             if (plan.placement != Placement.FLOATING) continue;
             if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) continue;
+            if ("planner_declared_object_plan".equals(safe(plan.reason))) continue;
             RenderedGroup rg = renderedGroupForPlan(plan);
             double[] bounds = plan.bounds != null ? plan.bounds : (rg != null ? rg.bounds() : null);
             if (bounds == null || bounds.length < 4) continue;
@@ -5353,7 +11770,6 @@ public final class OwnershipPlanner {
                     && hasMainPageIntersectionInPageBoundsUnits(plan.pageIndex, pageBounds)) {
                 continue;
             }
-            if (canPlaceAdjacentOverflowCopy(plan, rg, pageBounds)) continue;
             plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
                     "no_visible_page_intersection"));
         }
@@ -5376,56 +11792,6 @@ public final class OwnershipPlanner {
         double pageHeight = pageHeightMm(pageIndex);
         return bounds[3] > 0.0 && bounds[1] < pageWidth
                 && bounds[2] > 0.0 && bounds[0] < pageHeight;
-    }
-
-    private boolean canPlaceAdjacentOverflowCopy(ObjectPlan plan, RenderedGroup rg, double[] bounds) {
-        if (plan == null || bounds == null || bounds.length < 4) return false;
-        if (rg == null || rg.file() == null || rg.file().isEmpty()) return false;
-        double fullW = bounds[3] - bounds[1];
-        double fullH = bounds[2] - bounds[0];
-        if (fullW <= 1.0 || fullH <= 1.0) return false;
-        if (shouldSkipOverflowCopy(plan, rg)) return false;
-
-        double pageWidth = pageWidthMm(plan.pageIndex);
-        int pageCount = data != null && data.pages() != null ? data.pages().size() : 0;
-        if (bounds[3] > pageWidth + 10.0 && plan.pageIndex + 1 < pageCount) {
-            if (hasAdjacentPageIntersection(plan.pageIndex + 1,
-                    bounds[1] - pageWidth,
-                    bounds[0],
-                    bounds[3] - pageWidth,
-                    bounds[2])) {
-                return true;
-            }
-        }
-        if (bounds[1] < -10.0 && plan.pageIndex - 1 >= 0) {
-            if (hasAdjacentPageIntersection(plan.pageIndex - 1,
-                    bounds[1] + pageWidth,
-                    bounds[0],
-                    bounds[3] + pageWidth,
-                    bounds[2])) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean shouldSkipOverflowCopy(ObjectPlan plan, RenderedGroup rg) {
-        if (plan == null || rg == null) return false;
-        if (!hasEditableTextOwnerSignal(rg)) return false;
-        return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL
-                && (data == null || !data.shouldUseCompletePngForSimpleButtonLabel(rg));
-    }
-
-    private boolean hasAdjacentPageIntersection(
-            int pageIndex, double left, double top, double right, double bottom) {
-        double pageWidth = pageWidthMm(pageIndex);
-        double pageHeight = pageHeightMm(pageIndex);
-        double visLeft = Math.max(0.0, left);
-        double visTop = Math.max(0.0, top);
-        double visRight = Math.min(right, pageWidth);
-        double visBottom = Math.min(bottom, pageHeight);
-        return visLeft < visRight && visTop < visBottom;
     }
 
     private void resolveDroppedRenderedTextOwnership() {
@@ -5452,7 +11818,6 @@ public final class OwnershipPlanner {
                 || reason.contains("mixed_group")
                 || reason.contains("text_owned_container_shell_duplicate_child")
                 || reason.contains("floating_child_owned_by_inline_parent")
-                || reason.contains("child_baked_into_renderable_parent_group")
                 || reason.contains("no_visible_page_intersection");
     }
 
@@ -5629,35 +11994,48 @@ public final class OwnershipPlanner {
     }
 
     private void warnTextShellZOrder() {
-        Map<Integer, ResolvedTextFrame> textFrameById = new HashMap<>();
-        for (ResolvedTextFrame tf : data.textFrames()) {
-            if (tf == null || tf.id() == null) continue;
-            int id = parseInt(tf.id(), -1);
-            if (id >= 0) textFrameById.put(id, tf);
+        Map<Integer, Integer> hwpxTextZByTextFrame = new LinkedHashMap<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            for (int textFrameId : textFrameIdsForPlan(plan)) {
+                Integer existing = hwpxTextZByTextFrame.get(textFrameId);
+                if (existing == null || plan.zOrder > existing) {
+                    hwpxTextZByTextFrame.put(textFrameId, plan.zOrder);
+                }
+            }
         }
         for (ObjectPlan plan : plans) {
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
-            for (int id : plan.sourceObjectIds) {
-                ResolvedTextFrame tf = textFrameById.get(id);
-                if (tf == null) continue;
-                if (plan.zOrder >= tf.zOrder()) {
+            if (isBackPlaneTextShell(plan)) continue;
+            for (int id : textFrameIdsForPlan(plan)) {
+                Integer textZ = hwpxTextZByTextFrame.get(id);
+                if (textZ == null) continue;
+                if (plan.zOrder >= textZ) {
                     warn("TEXT_SHELL_ZORDER_GE_TEXT",
                             "shell=" + plan.domId + " textFrame=" + id
-                                    + " shellZ=" + plan.zOrder + " textZ=" + tf.zOrder());
+                                    + " shellZ=" + plan.zOrder + " textZ=" + textZ);
                 }
             }
         }
     }
 
     private int[] textFrameIdsForPlan(ObjectPlan plan) {
-        List<Integer> ids = new ArrayList<>();
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (plan.ownedTextFrameIds != null) {
+            for (int ownedId : plan.ownedTextFrameIds) {
+                if (data.getTextFrame(String.valueOf(ownedId)) != null) {
+                    ids.add(ownedId);
+                }
+            }
+        }
         for (int sourceId : plan.sourceObjectIds) {
             if (data.getTextFrame(String.valueOf(sourceId)) != null) {
                 ids.add(sourceId);
             }
         }
         int[] out = new int[ids.size()];
-        for (int i = 0; i < ids.size(); i++) out[i] = ids.get(i);
+        int i = 0;
+        for (Integer id : ids) out[i++] = id;
         return out;
     }
 
@@ -5678,9 +12056,10 @@ public final class OwnershipPlanner {
         if (b == null || b.length < 4) return false;
         double w = Math.abs(b[3] - b[1]);
         double h = Math.abs(b[2] - b[0]);
-        if (w <= 0.0 || h <= 0.0) return false;
+        if (w <= 0.0) return false;
         boolean thinTextStyleStrip = h <= 3.0 && w >= 6.0 && w / Math.max(0.1, h) >= 4.0;
         if (!thinTextStyleStrip) return false;
+        if (!safe(rg.parentStoryId()).isEmpty()) return true;
 
         int id = rg.id();
         for (RenderedGroup owner : allRenderedGroups()) {
@@ -5693,6 +12072,24 @@ public final class OwnershipPlanner {
             if (hasHwpxOwnedTextFrame(owner)) return true;
         }
         return false;
+    }
+
+    private boolean isInlineGraphicLineTextStyleMarker(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!data.isInlineObjectId(rg.id())) return false;
+        if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        int[] sourceIds = sourceIdsOrSelf(rg);
+        if (sourceIds.length != 1) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceIds[0]));
+        if (item == null || !item.isInline()) return false;
+        if (!"GraphicLine".equals(safe(item.type()))) return false;
+        double[] b = boundsOf(item);
+        if (b == null || b.length < 4) b = rg.bounds();
+        if (b == null || b.length < 4) return true;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        return w > 0.0 && h <= 3.0;
     }
 
     private boolean containsHwpxOwnedTextFrameSource(ObjectPlan plan) {
@@ -5819,12 +12216,56 @@ public final class OwnershipPlanner {
     }
 
     private List<RenderedGroup> allRenderedGroups() {
+        if (allRenderedGroupsCache != null) return allRenderedGroupsCache;
         List<RenderedGroup> out = new ArrayList<>();
         out.addAll(data.allRenderedFloatingItems());
         out.addAll(data.allRenderedGraphicFrames());
         out.addAll(data.allRenderedImageFrames());
         out.addAll(data.allRenderedPdfFrames());
-        return out;
+        allRenderedGroupsCache = out;
+        return allRenderedGroupsCache;
+    }
+
+    private List<RenderedGroup> renderedGroupsForPageId(int pageIndex, int renderId) {
+        if (renderedGroupsByPageIdCache == null) {
+            renderedGroupsByPageIdCache = new HashMap<>();
+            for (RenderedGroup rg : allRenderedGroups()) {
+                if (rg == null) continue;
+                renderedGroupsByPageIdCache
+                        .computeIfAbsent(pageDomKey(rg.pageIndex(), rg.id()), k -> new ArrayList<>())
+                        .add(rg);
+            }
+        }
+        List<RenderedGroup> groups = renderedGroupsByPageIdCache.get(pageDomKey(pageIndex, renderId));
+        return groups != null ? groups : java.util.Collections.emptyList();
+    }
+
+    private List<RenderedGroup> initialCompositeShellCarriersForPage(int pageIndex) {
+        if (initialCompositeShellCarriersByPageCache == null) {
+            initialCompositeShellCarriersByPageCache = new HashMap<>();
+            for (RenderedGroup rg : allRenderedGroups()) {
+                if (!isInitialCompositeShellCarrierCandidate(rg)) continue;
+                initialCompositeShellCarriersByPageCache
+                        .computeIfAbsent(rg.pageIndex(), k -> new ArrayList<>())
+                        .add(rg);
+            }
+        }
+        List<RenderedGroup> groups = initialCompositeShellCarriersByPageCache.get(pageIndex);
+        return groups != null ? groups : java.util.Collections.emptyList();
+    }
+
+    private List<RenderedGroup> initialVisibleChildShellFragmentsForPage(int pageIndex) {
+        if (initialVisibleChildShellFragmentsByPageCache == null) {
+            initialVisibleChildShellFragmentsByPageCache = new HashMap<>();
+            for (RenderedGroup rg : allRenderedGroups()) {
+                if (!isInitialVisibleChildShellFragment(rg)) continue;
+                initialVisibleChildShellFragmentsByPageCache
+                        .computeIfAbsent(rg.pageIndex(), k -> new ArrayList<>())
+                        .add(rg);
+            }
+        }
+        List<RenderedGroup> groups = initialVisibleChildShellFragmentsByPageCache.get(pageIndex);
+        return groups != null ? groups : java.util.Collections.emptyList();
     }
 
     private static int[] sourceIdsOrSelf(RenderedGroup rg) {
@@ -5857,38 +12298,206 @@ public final class OwnershipPlanner {
     }
 
     private int zOrderOf(RenderedGroup rg, VisualAction visualAction, int[] sourceIds) {
-        if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
-            int textZ = minOwnedTextFrameZOrder(rg, sourceIds);
-            if (textZ != Integer.MAX_VALUE) {
-                return Math.max(0, textZ - 1);
-            }
-        }
-        if ((visualAction == VisualAction.PLACE_FLOATING_PNG
-                || visualAction == VisualAction.PLACE_INLINE_PNG)
-                && "hwpx_tf".equals(safe(rg.textOwner()))) {
-            int textZ = minOwnedTextFrameZOrder(rg, sourceIds);
-            if (textZ != Integer.MAX_VALUE) {
-                return Math.max(0, textZ - 1);
-            }
+        int sourceZ = maxPageItemZOrder(sourceIds);
+        if (sourceZ >= 0) {
+            return sourceZ;
         }
         return rg.zOrder();
     }
 
-    private int minOwnedTextFrameZOrder(RenderedGroup rg, int[] sourceIds) {
-        int min = Integer.MAX_VALUE;
-        if (rg.editableTextFrameIds() != null) {
-            for (String id : rg.editableTextFrameIds()) {
-                ResolvedTextFrame tf = data.getTextFrame(id);
-                if (tf != null) min = Math.min(min, tf.zOrder());
+    /**
+     * Final Stage 1 gate for visual depth.
+     *
+     * <p>Earlier planner passes may rewrite ownership slots while migrating
+     * legacy candidates into ObjectPlan records.  After this point, only
+     * write/validate may run.  Executors must therefore treat the resulting
+     * {@code visualLayer} and {@code zOrder} as the complete source-depth
+     * contract and must not promote, demote, or band objects again.</p>
+     */
+    private void finalizeVisualDepthContracts() {
+        if (data == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !plan.hasVisibleVisual()) continue;
+            if (isPlannerDeclaredInlineTextShellContract(plan)) continue;
+            int sourceZ = canonicalVisualSourceZOrder(plan);
+            VisualLayer layer = canonicalVisualPlane(plan, sourceZ);
+            ObjectPlan next = plan;
+            if (sourceZ >= 0 && sourceZ != plan.zOrder) {
+                next = next.withZOrder(sourceZ);
+            }
+            if (layer != null && layer != next.visualLayer) {
+                next = next.withVisualLayer(layer);
+            }
+            if (next != plan) {
+                plans.set(i, next);
             }
         }
-        if (sourceIds != null) {
-            for (int sourceId : sourceIds) {
-                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
-                if (tf != null) min = Math.min(min, tf.zOrder());
+        finalizeContainerOutlineDepthContracts();
+        finalizeOwnedTextFrameDepthContracts();
+    }
+
+    private int canonicalVisualSourceZOrder(ObjectPlan plan) {
+        int sourceZ = maxPageItemZOrder(visualSourceIds(plan));
+        if (sourceZ >= 0) return sourceZ;
+        sourceZ = maxPageItemZOrder(plan.sourceObjectIds);
+        return sourceZ >= 0 ? sourceZ : plan.zOrder;
+    }
+
+    private VisualLayer canonicalVisualPlane(ObjectPlan plan, int zOrder) {
+        if (plan == null) return null;
+        VisualLayer layer = canonicalPlacedContentVisualLayer(plan);
+        if (isTextCarrierBackdropShell(plan, layer, zOrder)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
+        if (layer != VisualLayer.CONTENT_VISUAL) return layer;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return layer;
+        if (plan.placement != Placement.FLOATING) return layer;
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        if (isBehindLocalHwpxTextBySourceDepth(rendered, plan.pageIndex, zOrder)) {
+            return VisualLayer.CONTENT_BACKDROP;
+        }
+        return layer;
+    }
+
+    private boolean isTextCarrierBackdropShell(
+            ObjectPlan plan,
+            VisualLayer layer,
+            int zOrder) {
+        if (plan == null || data == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.PAGE) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (layer != VisualLayer.LABEL_BACKDROP) return false;
+        double[] b = plan.bounds != null ? plan.bounds : null;
+        if (b == null) {
+            RenderedGroup rg = renderedGroupForPlan(plan);
+            b = rg != null ? rg.bounds() : null;
+        }
+        return isPageEdgeSpanningBounds(b)
+                || isBehindLocalHwpxTextBySourceDepth(b, plan.pageIndex, zOrder);
+    }
+
+    private VisualLayer canonicalPlacedContentVisualLayer(ObjectPlan plan) {
+        if (plan == null) return null;
+        VisualLayer layer = plan.visualLayer;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+            return layer;
+        }
+        if (!hasPlacedContentSourceTree(plan)) return layer;
+        if (hasVisibleShellRootWithPlacedContentTree(plan)) return layer;
+        if (isBackgroundLayerName(plan.sourceLayerName)) return layer;
+        if (layer == VisualLayer.PAGE_BACKGROUND
+                || layer == VisualLayer.CONTAINER_BACKDROP
+                || layer == VisualLayer.CONTENT_BACKDROP) {
+            return layer;
+        }
+        if (isSourceDepthPageOrSpreadBackdropImage(
+                renderedGroupForPlan(plan), plan.sourceObjectIds)) {
+            return layer;
+        }
+        return VisualLayer.CONTENT_VISUAL;
+    }
+
+    private boolean isBehindLocalHwpxTextBySourceDepth(RenderedGroup rg, int pageIndex, int zOrder) {
+        if (rg == null || data == null) return false;
+        return isBehindLocalHwpxTextBySourceDepth(rg.bounds(), pageIndex, zOrder);
+    }
+
+    private boolean isBehindLocalHwpxTextBySourceDepth(double[] rb, int pageIndex, int zOrder) {
+        if (rb == null || rb.length < 4 || area(rb) <= 0.0 || data == null) return false;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            if (tf.pageIndex() != pageIndex) continue;
+            int textZOrder = textFrameSourceZOrder(tf);
+            // Resolved source-depth order is the normalized IDML stacking
+            // contract: smaller values are behind, larger values are in front
+            // within the same stacking context.  When editable text is in
+            // front of a placed content visual, the visual must use a
+            // behind-text plane so HWPX text remains visible.  This is a
+            // Stage 1 source-depth decision, not a later occlusion repair.
+            if (textZOrder <= zOrder) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4 || area(tb) <= 0.0) continue;
+            if (overlapArea(rb, tb) <= 0.0) continue;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Placed images can be real CONTENT, but a page/spread-sized placed image
+     * whose source depth is behind local editable text is a source-owned
+     * backdrop. This is decided in Stage 1 from source bounds and z-depth so
+     * later HWPX placement does not need to promote/demote visuals.
+     */
+    private boolean isSourceDepthPageOrSpreadBackdropImage(RenderedGroup rg, int[] sourceIds) {
+        if (rg == null || data == null) return false;
+        if (!isImageOrPdfExportReason(rg.reason())) return false;
+        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
+        if ("inline_object".equals(safe(rg.type()))) return false;
+        if (renderedVisualContainsTextPixels(rg)) return false;
+        if (editableTextFrameIdsOf(rg).length > 0) return false;
+        if (!isPageEdgeSpanningRenderedVisual(rg)) return false;
+        int sourceZ = maxPageItemZOrder(sourceIds);
+        if (sourceZ < 0) sourceZ = rg.zOrder();
+        return isBehindLocalHwpxTextBySourceDepth(rg, rg.pageIndex(), sourceZ);
+    }
+
+    private static boolean isPageEdgeSpanningRenderedVisual(RenderedGroup rg) {
+        if (rg == null) return false;
+        return isPageEdgeSpanningBounds(rg.bounds());
+    }
+
+    private static boolean isPageEdgeSpanningBounds(double[] b) {
+        if (b == null || b.length < 4 || area(b) <= 0.0) return false;
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        if (w < 180.0 || h < 90.0) return false;
+        boolean touchesPageEdge = b[0] <= 1.0 || b[1] <= 1.0;
+        boolean spansPageOrSpread = w >= 180.0 || h >= 180.0;
+        return touchesPageEdge && spansPageOrSpread;
+    }
+
+    private int textFrameSourceZOrder(ResolvedTextFrame tf) {
+        if (tf == null || tf.id() == null) return -1;
+        int textId = parseFlexibleId(tf.id());
+        if (textId < 0) return tf.zOrder();
+        int sourceZ = maxPageItemZOrder(new int[] { textId });
+        return sourceZ >= 0 ? sourceZ : tf.zOrder();
+    }
+
+    private int maxPageItemZOrder(int[] sourceIds) {
+        int sourceDepth = maxPageItemSourceDepth(sourceIds);
+        if (sourceDepth >= 0) return sourceDepth;
+
+        int max = -1;
+        if (sourceIds == null || data == null) return max;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null) max = Math.max(max, item.zOrder());
+        }
+        return max;
+    }
+
+    private int maxPageItemSourceDepth(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return -1;
+        HashSet<Integer> sourceSet = new HashSet<>();
+        for (int sourceId : sourceIds) {
+            sourceSet.add(sourceId);
+        }
+        int max = -1;
+        List<ResolvedPageItem> pageItems = data.pageItems();
+        for (ResolvedPageItem item : pageItems) {
+            if (item == null || item.id() == null) continue;
+            int id = parseInt(item.id(), -1);
+            if (sourceSet.contains(id)) {
+                max = Math.max(max, item.zOrder());
             }
         }
-        return min;
+        return max;
     }
 
     private static boolean isLineLikeVisual(RenderedGroup rg) {
@@ -6173,18 +12782,40 @@ public final class OwnershipPlanner {
         if (rg == null || data == null) return false;
         for (int sourceId : sourceIdsOrSelf(rg)) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
-            if (item == null) continue;
-            String type = safe(item.type());
-            if ("Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) {
+            if (isPlacedContentItem(item)) {
                 return true;
             }
         }
         return false;
     }
 
+    private boolean hasPlacedContentSourceTree(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        for (int sourceId : sourceIdsOrSelf(rg)) {
+            if (hasPlacedContentSourceTree(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasPlacedContentSourceTree(int sourceId) {
+        if (data == null) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (isPlacedContentItem(item)) return true;
+        for (String childId : data.buildDescendantSet(String.valueOf(sourceId), 8)) {
+            if (isPlacedContentItem(data.getPageItem(childId))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isPlacedContentItem(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        return "Image".equals(type) || "PDF".equals(type) || "EPS".equals(type);
+    }
+
     private static boolean isPageOrSpreadBackdropImage(RenderedGroup rg) {
         if (rg == null) return false;
-        if (!"image_export".equals(safe(rg.reason()))) return false;
+        if (!isImageOrPdfExportReason(rg.reason())) return false;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
         double[] b = rg.bounds();
         if (b == null || b.length < 4) return false;
@@ -6195,6 +12826,11 @@ public final class OwnershipPlanner {
         boolean spansPageOrSpread = w >= 260.0 || h >= 180.0;
         boolean backgroundOrder = rg.zOrder() <= 1 || !rg.zOrderKnown();
         return touchesBleedOrPageEdge && spansPageOrSpread && backgroundOrder;
+    }
+
+    private static boolean isImageOrPdfExportReason(String reason) {
+        String r = safe(reason);
+        return "image_export".equals(r) || "pdf_export".equals(r);
     }
 
     private boolean isPaperMaskVisual(RenderedGroup rg) {
@@ -6430,8 +13066,7 @@ public final class OwnershipPlanner {
     }
 
     private double pageArea(int pageIndex) {
-        if (data == null || pageIndex < 0 || pageIndex >= data.pages().size()) return 0.0;
-        double[] b = data.pages().get(pageIndex).bounds();
+        double[] b = pageBounds(pageIndex);
         return area(b);
     }
 
@@ -6495,85 +13130,6 @@ public final class OwnershipPlanner {
         if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
         if (plan.placement == Placement.INLINE) return false;
         return plan.sourceObjectIds.length > 1;
-    }
-
-    private static boolean isMasterGraphicCompleteRender(ObjectPlan plan) {
-        return isMasterGraphicRender(plan)
-                && plan.hasVisibleVisual()
-                && !isFallbackRenderFile(plan.file);
-    }
-
-    private static boolean isMasterGraphicFallbackRender(ObjectPlan plan) {
-        return isMasterGraphicRender(plan) && isFallbackRenderFile(plan.file);
-    }
-
-    private static boolean isMasterGraphicRender(ObjectPlan plan) {
-        return plan != null
-                && plan.renderId != null
-                && !"text_frame".equals(plan.kind)
-                && "master_graphic".equals(plan.reason)
-                && plan.placement == Placement.FLOATING;
-    }
-
-    private static boolean isFallbackRenderFile(String file) {
-        return file != null && file.contains("_fallback_");
-    }
-
-    private boolean containsVisibleHwpxMasterTextSourceOnPage(ObjectPlan plan) {
-        if (plan == null || plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) return false;
-        for (ResolvedTextFrame tf : data.textFrames()) {
-            if (!isVisibleHwpxMasterTextFrameOnPage(tf, plan.pageIndex)) continue;
-            int sourceId = masterSourceDomId(tf);
-            if (sourceId >= 0 && contains(plan.sourceObjectIds, sourceId)) return true;
-        }
-        return false;
-    }
-
-    private boolean isVisibleHwpxMasterTextFrameOnPage(ResolvedTextFrame tf, int pageIndex) {
-        if (tf == null || !tf.isMasterInstance()) return false;
-        if (tf.pageIndex() != pageIndex) return false;
-        if (tf.sourceHidden()) return false;
-        if (tf.id() != null && data.isTextOwnedByIndesignPng(tf.id())) return false;
-        String text = tf.frameVisibleText();
-        return text != null && !text.isBlank();
-    }
-
-    private static int masterSourceDomId(ResolvedTextFrame tf) {
-        if (tf == null) return -1;
-        int fromField = parseInt(tf.masterSourceId(), -1);
-        if (fromField >= 0) return fromField;
-        String id = tf.id();
-        if (id == null) return -1;
-        int pi = id.indexOf("_pi");
-        int oc = id.indexOf("_oc");
-        int suffix = -1;
-        if (pi >= 0 && oc >= 0) suffix = Math.min(pi, oc);
-        else if (pi >= 0) suffix = pi;
-        else if (oc >= 0) suffix = oc;
-        return suffix > 0 ? parseInt(id.substring(0, suffix), -1) : parseInt(id, -1);
-    }
-
-    private int findMasterGraphicFallbackIndex(ObjectPlan complete) {
-        int best = -1;
-        double bestScore = Double.NEGATIVE_INFINITY;
-        for (int i = 0; i < plans.size(); i++) {
-            ObjectPlan fallback = plans.get(i);
-            if (!isMasterGraphicFallbackRender(fallback)) continue;
-            if (fallback.pageIndex != complete.pageIndex) continue;
-            if (fallback.domId == complete.domId) continue;
-            if (!sharesAnySource(complete, fallback)) continue;
-            if (!boundsContains(complete.bounds, fallback.bounds, 1.0)
-                    && !boundsMostlyOverlap(complete.bounds, fallback.bounds, 0.70)) {
-                continue;
-            }
-            if (!containsVisibleHwpxMasterTextSourceOnPage(fallback)) continue;
-            double score = overlapRatio(complete.bounds, fallback.bounds);
-            if (score > bestScore) {
-                bestScore = score;
-                best = i;
-            }
-        }
-        return best;
     }
 
     private static boolean isStrictChildPlan(ObjectPlan parent, ObjectPlan child) {
@@ -6681,17 +13237,29 @@ public final class OwnershipPlanner {
         }
     }
 
-    private static int[][] childPixelRects(ObjectPlan parent, List<ObjectPlan> children,
+    private int[][] childPixelRects(ObjectPlan parent, List<ObjectPlan> children,
                                            int imageW, int imageH,
                                            double parentTop, double parentLeft,
                                            double parentW, double parentH) {
         List<int[]> rects = new ArrayList<>();
         for (ObjectPlan child : children) {
             if (child == null || child.bounds == null || child.bounds.length < 4) continue;
-            double top = Math.max(parentTop, child.bounds[0]);
-            double left = Math.max(parentLeft, child.bounds[1]);
-            double bottom = Math.min(parentTop + parentH, child.bounds[2]);
-            double right = Math.min(parentLeft + parentW, child.bounds[3]);
+            // 자식이 선언한 bounds가 아니라 PNG에서 실제로 칠해진 알파 영역만 커버로 본다.
+            // (예: 스프레드 전체폭 bounds를 가졌지만 왼쪽 카드만 그리는 셸이 부모의 우측
+            //  카드 픽셀까지 "커버"한 것으로 오판해 부모 합성본을 잘못 드롭하는 것을 방지.)
+            double[] painted = childPaintedBoundsMm(child);
+            double childTop = child.bounds[0], childLeft = child.bounds[1];
+            double childBottom = child.bounds[2], childRight = child.bounds[3];
+            if (painted != null) {
+                childTop = Math.max(childTop, painted[0]);
+                childLeft = Math.max(childLeft, painted[1]);
+                childBottom = Math.min(childBottom, painted[2]);
+                childRight = Math.min(childRight, painted[3]);
+            }
+            double top = Math.max(parentTop, childTop);
+            double left = Math.max(parentLeft, childLeft);
+            double bottom = Math.min(parentTop + parentH, childBottom);
+            double right = Math.min(parentLeft + parentW, childRight);
             if (bottom <= top || right <= left) continue;
             int x0 = clamp((int) Math.floor((left - parentLeft) / parentW * imageW), 0, imageW);
             int x1 = clamp((int) Math.ceil((right - parentLeft) / parentW * imageW), 0, imageW);
@@ -6701,6 +13269,55 @@ public final class OwnershipPlanner {
             rects.add(new int[] { x0, y0, x1, y1 });
         }
         return rects.toArray(new int[0][]);
+    }
+
+    /**
+     * 자식 PNG에서 실제로 칠해진(불투명) 픽셀의 경계를 부모와 동일한 문서 좌표(mm)로 환산.
+     * 반환: [top, left, bottom, right] (mm), 계산 불가 시 null.
+     */
+    private double[] childPaintedBoundsMm(ObjectPlan child) {
+        if (child == null || child.file == null || child.file.isBlank()) return null;
+        if (child.bounds == null || child.bounds.length < 4) return null;
+        File imageFile = new File(child.file);
+        if (!imageFile.isAbsolute()) {
+            if (data == null || data.basePath() == null) return null;
+            imageFile = new File(data.basePath(), child.file);
+        }
+        if (!imageFile.exists()) return null;
+        try {
+            BufferedImage image = ImageIO.read(imageFile);
+            if (image == null) return null;
+            int w = image.getWidth(), h = image.getHeight();
+            if (w <= 0 || h <= 0) return null;
+            int minX = w, minY = h, maxX = -1, maxY = -1;
+            int step = Math.max(1, (int) Math.sqrt((w * (double) h) / 160_000.0));
+            for (int y = 0; y < h; y += step) {
+                for (int x = 0; x < w; x += step) {
+                    if (isNonWhiteVisiblePixel(image.getRGB(x, y))) {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+            if (maxX < 0 || maxY < 0) return null;
+            // step 샘플링 보정: 경계를 한 step 만큼 확장
+            minX = Math.max(0, minX - step);
+            minY = Math.max(0, minY - step);
+            maxX = Math.min(w - 1, maxX + step);
+            maxY = Math.min(h - 1, maxY + step);
+            double childTop = child.bounds[0], childLeft = child.bounds[1];
+            double childH = Math.max(0.0001, child.bounds[2] - childTop);
+            double childW = Math.max(0.0001, child.bounds[3] - childLeft);
+            double top = childTop + (minY / (double) h) * childH;
+            double bottom = childTop + ((maxY + 1) / (double) h) * childH;
+            double left = childLeft + (minX / (double) w) * childW;
+            double right = childLeft + ((maxX + 1) / (double) w) * childW;
+            return new double[] { top, left, bottom, right };
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private static boolean insideAnyRect(int x, int y, int[][] rects) {
@@ -6891,6 +13508,7 @@ public final class OwnershipPlanner {
 
     private boolean isPaperLikeContainerFace(ObjectPlan plan) {
         if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        if (hasPlacedContentSourceTree(plan)) return false;
         if (isLineLikePlan(plan)) return false;
         double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
         double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
@@ -6911,26 +13529,6 @@ public final class OwnershipPlanner {
         double min = Math.min(w, h);
         double max = Math.max(w, h);
         return min <= 3.5 && max >= 8.0;
-    }
-
-    private static boolean labelIntrudesIntoContainerFace(double[] label, double[] container) {
-        if (label == null || container == null || label.length < 4 || container.length < 4) return false;
-        double y1 = Math.max(label[0], container[0]);
-        double x1 = Math.max(label[1], container[1]);
-        double y2 = Math.min(label[2], container[2]);
-        double x2 = Math.min(label[3], container[3]);
-        if (y2 <= y1 || x2 <= x1) return false;
-        double labelH = Math.max(1.0, label[2] - label[0]);
-        double labelW = Math.max(1.0, label[3] - label[1]);
-        double overlapH = y2 - y1;
-        double overlapW = x2 - x1;
-        double labelCenterY = (label[0] + label[2]) / 2.0;
-        boolean crossesContainerTop = label[0] < container[0] && label[2] > container[0];
-        boolean centerNearContainerTop = labelCenterY <= container[0] + labelH * 0.25;
-        boolean substantialHorizontalOverlap = overlapW / labelW >= 0.45;
-        boolean shallowVerticalOverlap = overlapH / labelH >= 0.12 && overlapH / labelH <= 0.72;
-        return crossesContainerTop && centerNearContainerTop
-                && substantialHorizontalOverlap && shallowVerticalOverlap;
     }
 
     private static double area(double[] b) {
@@ -7127,12 +13725,76 @@ public final class OwnershipPlanner {
         return toIntArray(retained);
     }
 
+    private static int[] withoutSourcesAllowEmpty(int[] sourceIds, LinkedHashSet<Integer> removed) {
+        if (sourceIds == null || sourceIds.length == 0 || removed == null || removed.isEmpty()) {
+            return sourceIds != null ? sourceIds : new int[0];
+        }
+        List<Integer> retained = new ArrayList<>();
+        for (int sourceId : sourceIds) {
+            if (removed.contains(sourceId)) continue;
+            retained.add(sourceId);
+        }
+        return toIntArray(retained);
+    }
+
     private static int[] visualSourceIds(ObjectPlan plan) {
         if (plan == null) return new int[0];
         if (plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0) {
             return plan.visualSourceObjectIds;
         }
         return plan.sourceObjectIds != null ? plan.sourceObjectIds : new int[0];
+    }
+
+    private void normalizeVisibleVisualSourcesToPlanPage() {
+        if (data == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !plan.hasVisibleVisual()) continue;
+            if (plan.pageIndex < 0) continue;
+
+            int[] sourceIds = retainPlanPageSourceIds(plan.sourceObjectIds, plan);
+            int[] visualIds = retainPlanPageSourceIdsAllowEmpty(plan.visualSourceObjectIds, plan);
+            int[] descendantIds = retainPlanPageSourceIdsAllowEmpty(plan.descendantVisualObjectIds, plan);
+
+            if (Arrays.equals(sourceIds, plan.sourceObjectIds)
+                    && Arrays.equals(visualIds, plan.visualSourceObjectIds)
+                    && Arrays.equals(descendantIds, plan.descendantVisualObjectIds)) {
+                continue;
+            }
+            plans.set(i, plan
+                    .withSourceObjectIds(sourceIds)
+                    .withVisualSourceObjectIds(visualIds)
+                    .withDescendantVisualObjectIds(descendantIds));
+        }
+    }
+
+    private int[] retainPlanPageSourceIds(int[] ids, ObjectPlan plan) {
+        int[] retained = retainPlanPageSourceIdsAllowEmpty(ids, plan);
+        if (retained.length == 0 && ids != null && ids.length > 0) return ids;
+        return retained;
+    }
+
+    private int[] retainPlanPageSourceIdsAllowEmpty(int[] ids, ObjectPlan plan) {
+        if (ids == null || ids.length == 0 || data == null) {
+            return ids != null ? ids : new int[0];
+        }
+        int pageIndex = plan != null ? plan.pageIndex : -1;
+        LinkedHashSet<Integer> retained = new LinkedHashSet<>();
+        for (int id : ids) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null || item.pageIndex() < 0 || item.pageIndex() == pageIndex
+                    || sourceItemIntersectsPlanPage(item, plan)) {
+                retained.add(id);
+            }
+        }
+        return toIntArray(retained);
+    }
+
+    private boolean sourceItemIntersectsPlanPage(ResolvedPageItem item, ObjectPlan plan) {
+        if (item == null || plan == null || plan.pageIndex < 0) return false;
+        double[] b = boundsOf(item);
+        double[] page = pageBounds(plan.pageIndex);
+        return overlapArea(page, b) > 0.0;
     }
 
     private static int parseInt(String value, int fallback) {
@@ -7210,5 +13872,20 @@ public final class OwnershipPlanner {
 
     private static String safe(String value) {
         return value != null ? value : "";
+    }
+
+    private static boolean sameBounds(double[] a, double[] b, double tolerance) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        for (int i = 0; i < 4; i++) {
+            if (Math.abs(a[i] - b[i]) > tolerance) return false;
+        }
+        return true;
+    }
+
+    private static String appendReason(String reason, String suffix) {
+        if (suffix == null || suffix.isBlank()) return reason;
+        if (reason == null || reason.isBlank()) return suffix;
+        if (reason.contains(suffix)) return reason;
+        return reason + "|" + suffix;
     }
 }

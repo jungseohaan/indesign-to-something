@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.RunPropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextControlNormalizer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 
@@ -147,6 +148,18 @@ class RunBuilder {
                 tr.letterSpacing((short) Math.round(trackingVal / 10.0));
             }
         }
+        {
+            Double horizontalScaleVal = resolveIdmlHorizontalScale(ctx, cr, grepCharStyle, sc);
+            if (horizontalScaleVal != null) {
+                tr.horizontalScale((short) Math.round(horizontalScaleVal));
+            }
+        }
+        if (isMarkerOnlyText(text) && rr != null) {
+            // Marker-only glyphs such as glossary bullets are visual symbols,
+            // not editable prose. Preserve resolved marker scale so replacement
+            // HWPX fonts do not enlarge the symbol relative to the source.
+            applyMarkerScaleFromResolved(tr, rr);
+        }
         // baselineShift: InDesign에서 작은 글자 + 양수 baselineShift = 위첨자,
         // 작은 글자 + 음수 baselineShift = 아래첨자 패턴을 감지하여 sup/subscript로 변환
         // resolved 우선, IDML CR fallback
@@ -184,13 +197,9 @@ class RunBuilder {
                     tr.fontStyle(rr.fontStyle());
                 }
             }
-            // horizontalScale: IDML에 없으면 resolved에서 보강
-            // hs == vs인 비례 확대라도 fontSize를 키우면 baseline이 어긋나 보이므로
-            // ratio에만 반영한다. (예: `+` 글자만 115% 확대인 경우 위첨자처럼 보이는 현상 방지)
-            if (tr.horizontalScale() == null && rr.horizontalScale() != null
-                    && rr.horizontalScale() != 0 && rr.horizontalScale() != 100) {
-                tr.horizontalScale((short) rr.horizontalScale().doubleValue());
-            }
+            // horizontalScale is an IDML text style property. Resolved-only
+            // scale can include frame/group render scale and must not be
+            // injected into editable text runs.
             // underline / strikeThrough
             if (rr.underline() != null && rr.underline()) {
                 tr.underline(true);
@@ -416,6 +425,12 @@ class RunBuilder {
         return resolved != null ? resolved.fontSize() : null;
     }
 
+    static Double getStyleHorizontalScale(ResolvedBuildContext ctx, String styleRef) {
+        if (ctx.styleResolver == null) return null;
+        IDMLStyleDef resolved = ctx.styleResolver.getResolvedParagraphStyle(styleRef);
+        return resolved != null ? resolved.horizontalScale() : null;
+    }
+
     static String getStyleUnderlineColor(ResolvedBuildContext ctx, String styleRef) {
         if (ctx.styleResolver == null) return null;
         IDMLStyleDef resolved = ctx.styleResolver.getResolvedParagraphStyle(styleRef);
@@ -449,6 +464,53 @@ class RunBuilder {
             return blendWithWhite(hex, tint / 100.0);
         }
         return hex;
+    }
+
+    private static Double resolveIdmlHorizontalScale(ResolvedBuildContext ctx,
+                                                     IDMLCharacterRun cr,
+                                                     IDMLStyleDef grepCharStyle,
+                                                     StoryConverter.StyleContext sc) {
+        Double v = firstNonDefaultScale(cr != null ? cr.horizontalScale() : null);
+        if (v != null) return v;
+        v = firstNonDefaultScale(grepCharStyle != null ? grepCharStyle.horizontalScale() : null);
+        if (v != null) return v;
+        if (cr != null && cr.appliedCharacterStyle() != null && ctx.styleResolver != null) {
+            IDMLStyleDef charStyle = ctx.styleResolver.getResolvedCharacterStyle(cr.appliedCharacterStyle());
+            v = firstNonDefaultScale(charStyle != null ? charStyle.horizontalScale() : null);
+            if (v != null) return v;
+        }
+        return firstNonDefaultScale(sc != null ? sc.horizontalScale : null);
+    }
+
+    private static Double firstNonDefaultScale(Double v) {
+        if (v == null || v == 0 || v == 100.0) return null;
+        return v;
+    }
+
+    private static boolean isMarkerOnlyText(String text) {
+        if (text == null) return false;
+        String normalized = text
+                .replace("\t", "")
+                .replace("\u00A0", "")
+                .replace("\u2002", "")
+                .trim();
+        if (normalized.isEmpty()) return false;
+        for (int i = 0; i < normalized.length(); i++) {
+            if (StoryConverter.BULLET_CHARS.indexOf(normalized.charAt(i)) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void applyMarkerScaleFromResolved(ASTTextRun tr, ResolvedRun rr) {
+        if (tr == null || rr == null) return;
+        if (rr.horizontalScale() != null && rr.horizontalScale() != 0 && rr.horizontalScale() != 100) {
+            tr.horizontalScale((short) Math.round(rr.horizontalScale()));
+        }
+        if (rr.verticalScale() != null && rr.verticalScale() != 0 && rr.verticalScale() != 100) {
+            tr.verticalScale((short) Math.round(rr.verticalScale()));
+        }
     }
 
     private static String blendWithWhite(String hex, double fraction) {

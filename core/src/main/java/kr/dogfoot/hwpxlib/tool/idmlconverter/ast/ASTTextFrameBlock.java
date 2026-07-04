@@ -49,8 +49,6 @@ public class ASTTextFrameBlock extends ASTBlock {
     // StoryConverter가 inner story 런을 이 블록의 마지막 단락에 주입.
     private String innerFrameId;
     private double rotationAngle; // 프레임 회전 각도 (도 단위)
-    private long narrowedWidth;   // side-by-side 이미지로 축소된 폭 (0 = 미적용)
-    private long narrowedXOffset; // 왼쪽 side-by-side 이미지로 X 이동량 (0 = 미적용)
 
     // 래퍼 사각형 배경 (부모 Rectangle에서 전파된 fill — 테두리 효과용)
     private String wrapperFillColor;
@@ -75,25 +73,16 @@ public class ASTTextFrameBlock extends ASTBlock {
     // 인라인(treatAsChar=true)과 달리 원본의 page-level group stack 좌표를 보존한다.
     private boolean anchoredFlowWithText;
 
-    // composedLines 기반 분할: Story 내 문자 범위
-    private int composedCharStart = -1;
-    private int composedCharEnd = -1;
-
-    // 첫 N개 단락을 출력에서 제외 (예: 타이틀 오버레이 패턴 — 본문 TF의 첫 단락이
-    // 별도 타이틀 TF로 위에 덮여 있어 본문에서는 숨겨야 하는 경우).
-    private int skipParagraphs = 0;
-
-    // 특정 절대 단락 인덱스(스토리 기준)를 출력에서 제외.
-    // 본문 중간에 있는 타이틀이 별도 TF 로 덮인 케이스 (예: page 18 "Ava's Story: Keeping a Time Diary").
-    private java.util.Set<Integer> excludedParagraphIndices;
-
     // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
     private long[] pathPointsX; // null이면 사각형
     private long[] pathPointsY;
 
-    private boolean suppressParaLeftIndent; // ORC+inline 패턴: 단락 leftIndent 무시
     // 원본 InDesign 조판에서 각 composed line이 별도 문단인 경우 HWP 자동 줄감기 금지.
     private boolean noAutoLineWrap;
+    // 원본 composedLines의 실제 ink box가 carrier frame보다 작은 overlay TF.
+    // HWPX 1x1 table carrier는 이런 짧은 오버레이를 재흐름시켜 위치를 망가뜨릴 수 있으므로
+    // fixed drawText carrier로 materialize한다.
+    private boolean sourceComposedFixedText;
 
     private List<ASTParagraph> paragraphs;
 
@@ -202,20 +191,14 @@ public class ASTTextFrameBlock extends ASTBlock {
     public boolean anchoredFlowWithText() { return anchoredFlowWithText; }
     public void anchoredFlowWithText(boolean v) { this.anchoredFlowWithText = v; }
 
-    public boolean suppressParaLeftIndent() { return suppressParaLeftIndent; }
-    public void suppressParaLeftIndent(boolean v) { this.suppressParaLeftIndent = v; }
-
     public boolean noAutoLineWrap() { return noAutoLineWrap; }
     public void noAutoLineWrap(boolean v) { this.noAutoLineWrap = v; }
 
+    public boolean sourceComposedFixedText() { return sourceComposedFixedText; }
+    public void sourceComposedFixedText(boolean v) { this.sourceComposedFixedText = v; }
+
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }
-
-    public long narrowedWidth() { return narrowedWidth; }
-    public void narrowedWidth(long v) { this.narrowedWidth = v; }
-
-    public long narrowedXOffset() { return narrowedXOffset; }
-    public void narrowedXOffset(long v) { this.narrowedXOffset = v; }
 
     public boolean dropShadow() { return dropShadow; }
     public void dropShadow(boolean v) { this.dropShadow = v; }
@@ -223,28 +206,14 @@ public class ASTTextFrameBlock extends ASTBlock {
     public boolean textWrapSquare() { return textWrapSquare; }
     public void textWrapSquare(boolean v) { this.textWrapSquare = v; }
 
-    public int composedCharStart() { return composedCharStart; }
-    public void composedCharStart(int v) { this.composedCharStart = v; }
-    public int composedCharEnd() { return composedCharEnd; }
-    public void composedCharEnd(int v) { this.composedCharEnd = v; }
-
-    public int skipParagraphs() { return skipParagraphs; }
-    public void skipParagraphs(int v) { this.skipParagraphs = v; }
-
-    public java.util.Set<Integer> excludedParagraphIndices() { return excludedParagraphIndices; }
-    public void addExcludedParagraphIndex(int idx) {
-        if (excludedParagraphIndices == null) excludedParagraphIndices = new java.util.HashSet<>();
-        excludedParagraphIndices.add(idx);
-    }
-
-    /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
+    /** 실제 렌더링에 사용할 폭. Source ownership pipeline에서는 원본 carrier width를 그대로 쓴다. */
     public long effectiveWidth() {
-        return narrowedWidth > 0 ? narrowedWidth : width;
+        return width;
     }
 
-    /** 실제 렌더링에 사용할 X 좌표. narrowedXOffset이 있으면 오른쪽으로 이동. */
+    /** 실제 렌더링에 사용할 X 좌표. Source ownership pipeline에서는 원본 carrier x를 그대로 쓴다. */
     public long effectiveX() {
-        return x + narrowedXOffset;
+        return x;
     }
 
     public String wrapperFillColor() { return wrapperFillColor; }

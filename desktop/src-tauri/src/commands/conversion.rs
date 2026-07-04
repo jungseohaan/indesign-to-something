@@ -19,7 +19,6 @@ pub async fn convert_idml(
     let sleep = app.state::<crate::SleepPreventionHandle>();
     let _sleep_lease = sleep.acquire("convert_idml");
 
-    let input_path_ref = input_path.clone();
     let mut args = vec![
         "-jar".to_string(),
         jar_path,
@@ -43,11 +42,6 @@ pub async fn convert_idml(
     if options.layout_mode != "preserve" {
         args.push("--layout-mode".to_string());
         args.push(options.layout_mode.clone());
-    }
-
-    if let Some(resolved) = &options.resolved_json_path {
-        args.push("--resolved".to_string());
-        args.push(resolved.clone());
     }
 
     if let Some(links_dir) = &options.links_directory {
@@ -361,6 +355,9 @@ pub async fn generate_teaching(
     links_directory: Option<String>,
     html_template_path: Option<String>,
 ) -> Result<ConvertResult, String> {
+    // kept in the command contract for existing UI state; Java auto-detects resolved.json next to IDML.
+    let _resolved_json_path = resolved_json_path;
+
     let prompt_path = match prompt_path {
         Some(path) if !path.trim().is_empty() => path,
         _ => resolve_default_prompt_path(&app, Some(&jar_path))?,
@@ -389,11 +386,6 @@ pub async fn generate_teaching(
             args.push("--html-template".to_string());
             args.push(tmpl);
         }
-    }
-
-    if let Some(resolved) = resolved_json_path {
-        args.push("--resolved".to_string());
-        args.push(resolved);
     }
 
     if let Some(links) = links_directory {

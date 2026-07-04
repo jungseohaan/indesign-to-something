@@ -127,7 +127,11 @@ public class IDMLResourceParser {
             double left = firstDoubleAttr(elem, 4.0, "TextLeftInset", "LeftInset");
             double bottom = firstDoubleAttr(elem, 4.0, "TextBottomInset", "BottomInset");
             double right = firstDoubleAttr(elem, 4.0, "TextRightInset", "RightInset");
-            doc.putCellStyleInsets(self, top, left, bottom, right);
+            String firstBaselineOffset = getAttrOrNull(elem, "FirstBaselineOffset");
+            Double minimumFirstBaselineOffset = firstDoubleAttr(elem, "MinimumFirstBaselineOffset");
+            String verticalJustification = getAttrOrNull(elem, "VerticalJustification");
+            doc.putCellStyle(self, top, left, bottom, right,
+                    firstBaselineOffset, minimumFirstBaselineOffset, verticalJustification);
         }
 
         // ObjectStyle (stroke 색상/두께 + CornerRadius 파싱)

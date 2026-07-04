@@ -230,8 +230,6 @@ public final class VisualTextEmphasisAbsorber {
             RenderedGroup rg,
             double[] rbRaw) {
         if (rbRaw == null || rbRaw.length < 4) return false;
-        if (!BackgroundInjector.isPageObject(rg)) return false;
-        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
         ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
         if (plan == null || plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) return false;
 

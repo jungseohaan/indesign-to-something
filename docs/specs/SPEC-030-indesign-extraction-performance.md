@@ -21,7 +21,79 @@
 
 > **다음 단계**: 실측 — 진행률 로그에 phase 별 elapsed ms 를 기록해 가설 검증.
 
+## 최신 실측 기준선
+
+2026-06-29 기준,
+`22개정_중등국어(박)_3-1학기-3단원(096~135)1차수정_OK.indd`
+전체 추출 캐시(`fba9cb7e...`)의 `_phase_timing.log`에서 확인한 병목이다.
+
+| 단계 | 실측 시간 | 의미 |
+|---|---:|---|
+| `02_idml_export` | 약 16.7초 | InDesign IDML export |
+| `03_allPageItems` | 약 5.0초 | page item flatten |
+| `03c_preClassify` | 약 28.3초 | TextFrame 분류 캐시 작성 |
+| `04_pageRendering` | 약 26.5초 | 페이지 배경/inline 후보 전 준비 |
+| `06_imgFrames` 내부 개별 이미지 export/restore | 약 73.6초 | source 단위 PNG export, hide/export/restore 반복 |
+| `08_complexFrames` | 약 30.7초 | 복합 그래픽 PNG export |
+| `09b_masterGraphics` | 약 12.5초 | master graphics export |
+| `09c_editableTFVisualShells` | 약 6.5초 | editable TF shell export |
+| `10i_collectStories` | 약 30.0초 | story/textStyleRanges 직렬화 |
+| `10m_collectPageItems` | 약 10.3초 | resolved pageItems 직렬화 |
+| `13_done` 이후 PDF/후처리 대기 | 약 263.7초 | preview PDF/외부 후처리/앱 대기 포함 |
+
+검증 결과:
+
+- `extraction-results.json.validation.status = OK`
+- validation issue는 0건
+- 현재 병목은 correctness 실패가 아니라 export/restore 반복, story 수집, 후처리 대기이다.
+
+이 실측은 기존 "PDF/page rendering이 최대 병목" 가설을 보정한다. 현재 구조에서는
+개별 source export의 hide/restore 비용과 resolved story 직렬화가 커졌고, 마지막
+앱 대기 구간도 별도로 계측해야 한다.
+
 ## 개선 영역
+
+### Tier P — 정책 기반 후보 수 축소 (최우선 / 고효과)
+
+최근 계측에서는 단순 코드 최적화보다 ownership 정책 구조가 더 큰 병목으로
+확인되었다. 문제는 PNG export 자체만이 아니라, 같은 IDML source material을
+여러 pass가 중복 후보로 만들고, 이후 normalize/drop/deduplicate 단계가 이를
+정리한다는 점이다. 이 구조에서는 페이지 수가 늘수록 비용이
+`executable object 수`가 아니라 `pass 수 × page item 수 × 후보 정리 비용`에
+가깝게 증가한다.
+
+정책 방향은 `POLICY-source-ownership.md`의
+`Performance-Oriented Ownership Policy`를 따른다.
+
+핵심 변경:
+
+- Stage 0/1에서 source-cluster index와 source-slot registry를 먼저 만든다.
+- 후보 생성기는 registry에 있는 executable slot만 만든다.
+- 같은 source bundle/slot의 alternate render channel은 파일을 export하지 않고
+  diagnostics로만 기록한다.
+- parent/composite PNG는 child text/shell/content/table-style slot이 이미
+  빠진 export source set이 있을 때만 생성한다.
+- normalize 단계는 더 이상 후보를 수정하지 않고 validation만 한다.
+
+예상 효과:
+
+- 중복 PNG export 제거: 같은 shell/content가 page object, inline object,
+  decoration group, vector fallback 등으로 반복 export되는 비용 제거.
+- normalize 비용 제거: 후보 생성 후 source tree를 반복 스캔하며 slot을
+  좁히거나 drop하는 비용 제거.
+- 회귀 감소: "나중에 정리"가 없어지므로 layer, inline/floating, shell/text
+  소유권이 후속 단계에서 흔들리지 않는다.
+
+성공 기준:
+
+- PNG/vector export 수 <= visible visual ObjectPlan 수.
+- non-canonical candidate는 image file을 쓰지 않는다.
+- `NATIVE_SOURCE_SHAPE` materialization은 ObjectPlan/resolved source item으로
+  실행하며, `shape_*.png` 같은 보조 PNG를 export하지 않는다.
+- `normalizeExtractionCandidateOwnershipSlots`류 함수는 ObjectPlan
+  validation report만 생성하고, ownership field를 변경하지 않는다.
+- live InDesign recursive API (`allPageItems` 등)는 source index 작성 단계
+  밖의 candidate/page loop에서 호출하지 않는다.
 
 ### Tier A — 즉시 적용 가능 (저비용 / 고효과)
 
@@ -105,24 +177,190 @@
 
 ## 단계별 실행 플랜
 
-### Phase 1 (1~2 일): 측정 + 즉시 적용
-1. `extract_indd.jsx` 에 phase 별 elapsed ms 로깅 추가
-2. 기준 측정: 26페이지 / 256페이지 두 케이스
-3. Tier A.1 (DPI 옵션) 구현
-4. Tier A.2 (PDF skip 옵션) 구현
-5. 재측정 → 효과 검증
+### Phase 0 (완료/진행 중): 계측과 source-slot 기반 정리
 
-### Phase 2 (3~5 일): 페이지 범위 + 캐시
-6. Tier A.3 (페이지 범위 게이트) — 모든 for-loop 에 startPage/endPage 적용
-7. Tier B.2 (per-page 캐시) 설계 + 프로토타입
-8. 데스크탑 UI: 페이지 범위 / 빠른 모드 토글
+1. `extract_indd.jsx`에 phase 별 elapsed ms 로깅을 추가했다.
+2. `source_index.jsx`로 source tree query를 인덱스화했다.
+3. `source_slot_registry.jsx`와 planner diagnostics를 추가해 source bundle/slot 단위 중복을 추적한다.
+4. fast mode에서는 full diagnostics 파일 대신 `planner-diagnostics-summary.json`만 쓰도록 하여 대형 JSON 쓰기 비용을 줄였다.
+5. source-set 단위 PNG cache를 도입해 같은 export payload의 재-export를 줄였다.
 
-### Phase 3 (1주+): Tier B 풀구현
-9. Tier B.1 batch PNG export
-10. Tier B.3 resolved.json 슬림화
-11. Tier B.4 진행률 fine-grained
+남은 문제:
 
-### Phase 4 (옵션): Tier C 대규모 작업
+- hide/export/restore 루프가 아직 source 후보마다 반복된다.
+- `collectStories`는 여전히 전체 story/textStyleRanges를 무겁게 직렬화한다.
+- desktop 쪽 완료 대기/PDF/후처리 시간이 추출 시간처럼 보이는 구간이 있다.
+
+### Phase 1 (다음): 병목별 추가 개선
+
+0. **eager TextFrame pre-classify 제거**
+   - 이전: `_runRenderPhases`가 모든 `TextFrame`을 먼저 `classifyTextFrame()`으로
+     분류한 뒤, `_buildSourceIndexFromAllItems()`가 다시 같은 정보를
+     `classifyTextFrameCached()`로 소비했다.
+   - 변경: Stage 0 source index가 필요한 순간 cache를 채우도록 하고,
+     `03c_preClassify`는 lazy mode marker/stats만 남긴다.
+   - 정책 의미: source metadata의 진실은 source index이며, 별도 pre-pass가
+     ownership 결정을 선행하지 않는다.
+   - 검증: `3-1 박영민 3단원` page 31 단일 추출에서
+     `03c_preClassify`가 `167.497s`(전체 run 기준) 병목에서 `0.166s`로
+     축소되었고 validation issue는 0건이다.
+
+0.1. **page hash 중복 DOM 순회 제거**
+   - 이전: `buildPageData()`가 `computePageHash(page)`에서
+     `page.allPageItems`와 `page.textFrames`를 다시 순회한 뒤, 이미 수집한
+     `allItems`를 다시 순회해 `page_item_map`과 hash를 갱신했다.
+   - 변경: page hash와 item map은 Stage 0에서 이미 수집한 range-local
+     `allItems`만 사용한다. TextFrame 내용 샘플은 해당 item이 page map에
+     등록될 때 hash에 반영한다.
+   - 정책 의미: 입력 인덱스는 한 번 만든 source set을 재사용하며, page hash
+     생성을 위해 InDesign DOM을 다시 펼치지 않는다.
+   - 검증: `3-1 박영민 3단원` physical page 31 단일 추출에서
+     `03b_pageHashes_start → 03b_pageHashes_done`이 `90ms`,
+     `03c_preClassify`가 `5ms`, validation issue는 0건이다.
+   - 전체 검증: 같은 문서 전체 추출에서 validation issue는 0건이며,
+     `03b_pageHashes_start → 03b_pageHashes_done`은 `1.093s`,
+     `03c_preClassify`는 `1ms`이다.
+   - 효과: 이전 전체 계측에서 `03c_preClassify`로 보이던 `92.428s` 병목은
+     실제로 page hash 중복 순회였다. 수정 후 전체 추출 총 시간은
+     `423.053s → 255.626s`로 감소했다.
+
+0.2. **다음 병목 재정렬**
+   - page hash/pre-classify 병목 제거 후 상위 병목은 다음 순서로 바뀌었다.
+   - `10i_collectStories_done`: `33.587s`
+   - `02_idml_export`: `18.230s`
+   - `08_complexFrames`: `17.616s`
+   - `10m_collectPageItems_done`: `11.491s`
+   - `03g_writeExtractionPlan_done`: `9.301s`
+   - 다음 최적화는 `collectStories` slim mode와 diagnostics JSON 쓰기 비용
+     감소를 우선한다.
+
+0.3. **collectStories 문자 보정 스캔 축소**
+   - 이전: paragraph style에 `nestedGrepStyles` / `nestedStyles` /
+     `nestedLineStyles`가 존재하기만 하면 모든 textStyleRange를 문자 단위로
+     다시 스캔했다.
+   - 문제: 상당수 GREP 스타일은 자간/폭 조정처럼 현재 TextFlow run에
+     내보내지 않는 속성만 바꾼다. 또한 GREP 규칙이 있어도 현재 run text에
+     해당 표현식의 명시적 trigger 문자가 없는 경우가 많았다.
+   - 변경:
+     - character style이 export 대상 run 속성(`fillColor`, `pointSize`,
+       `fontFamily`, `fontStyle`)을 바꾸는 경우만 보정 후보로 본다.
+     - GREP 보정 후보라도 run text가 해당 표현식의 명시적 대상 문자를
+       포함하지 않으면 문자 단위 DOM 스캔을 생략한다.
+     - 보정이 필요 없는 문단은 `splitRunByStoryChars()` 호출 자체를 생략한다.
+   - 정책 의미: 텍스트 ownership이나 layer를 재판정하지 않고, Stage 0
+     source style metadata로 TextFlow run 속성 추출 비용만 줄인다.
+   - 검증: `3-1 박영민 3단원` 전체 추출에서 validation issue는 0건이고
+     결과 수는 730개로 유지되었다.
+   - 효과:
+     - `correctionParagraphs`: `635 → 301`
+     - `splitCalls`: `899 → 446`
+     - `splitMs`: `26.983s → 7.479s`
+     - `paragraphLoopMs`: `33.277s → 12.420s`
+     - 전체 추출 총 시간: `255.626s → 228.113s`
+   - 남은 병목:
+     - `02_idml_export`: `17.262s`
+     - `08_complexFrames`: `17.078s`
+     - `10i_collectStories_done`: `13.502s`
+     - `10m_collectPageItems_done`: `11.518s`
+     - plan/object/source-slot JSON 쓰기 구간: 약 `20s+`
+
+0.4. **full planner diagnostics 기본 비활성화**
+   - 이전: `perfMode=standard/high`에서도 `source-clusters.json`,
+     `planner-bundles.json`, `object-plans.json`, `source-slot-registry.json`을
+     기본 생성했다.
+   - 문제: 이 파일들은 Stage 1 정책 검수용 diagnostic artifact이며, 변환 실행
+     권한은 `extraction-results.json`과 `resolved.json`에 있다. 기본 추출에서
+     매번 대형 diagnostics를 쓰면 약 18~20초가 추가된다.
+   - 변경:
+     - 기본 `standard/high` 추출은 `planner-diagnostics-summary.json`만 쓴다.
+     - full diagnostics는 `--diagnostics`, `diagnostics`, `args[13]=1`,
+       `perfMode=diagnostics/debug`에서만 생성한다.
+     - `extraction-plan.json`은 desktop cache/inspection 경로가 참조하므로
+       계속 생성한다.
+   - 정책 의미: diagnostics는 ownership source of truth가 아니다. 기본 실행은
+     Stage 1 결정 결과만 실행하고, 자세한 감사 파일은 요청 시에만 남긴다.
+   - 검증: `3-1 박영민 3단원` 전체 추출에서 validation issue는 0건이고
+     결과 수는 730개로 유지되었다. 생성 파일은
+     `extraction-plan.json` + `planner-diagnostics-summary.json`만 남는다.
+   - 효과:
+     - 전체 추출 총 시간: `228.113s → 209.687s`
+     - 대형 diagnostic write 구간(`source-clusters`, `planner-bundles`,
+       `object-plans`, `source-slot-registry`) 제거
+   - 현재 상위 병목:
+     - `02_idml_export`: `17.706s`
+     - `08_complexFrames`: `17.623s`
+     - `10i_collectStories_done`: `13.708s`
+     - `10m_collectPageItems_done`: `10.967s`
+     - `03g_writeExtractionPlan_done`: `8.919s`
+
+0.5. **기본 extraction-plan 디스크 출력 slim화**
+   - 이전: 메모리에서 실행에 사용하는 full `ExtractionPlan`을 그대로
+     `extraction-plan.json`에 썼다.
+   - 변경:
+     - 실행 중 메모리 plan은 full field를 유지한다.
+     - 기본 디스크 출력은 정책 필수/권장 source item field와 candidate 실행
+       field 중심의 slim plan으로 기록한다.
+     - full plan dump는 diagnostics 모드에서만 남긴다.
+   - 정책 의미: extractor 실행은 이미 Stage 1 plan in-memory를 기준으로 끝났고,
+     디스크 plan은 cache/inspection artifact다. 따라서 기본 파일은 정책 필수
+     계약을 보존하되 불필요한 audit field는 생략한다.
+   - 검증: `3-1 박영민 3단원` 전체 추출에서 validation issue는 0건이고
+     결과 수는 730개로 유지되었다.
+   - 효과:
+     - `extraction-plan.json`: `4.8MB → 3.8MB`
+     - `03g_writeExtractionPlan_done`: `8.919s → 7.833s`
+     - 전체 추출 총 시간은 `209.687s → 209.282s`로 소폭 개선.
+   - 판단: 파일 크기와 cache artifact 비용은 줄었지만 총 시간에는 큰 영향이
+     없다. 다음 큰 병목은 `08_complexFrames`와 개별 PNG export batch화다.
+
+1. **hide/restore batch화**
+   - 현재: 이미지 후보마다 hide → export → restore 반복.
+   - 변경: 같은 page/source-set export 후보를 pass별로 묶고, hide/restore 대상 계산을 한 번만 한다.
+   - 금지: export 후 crop/drop/layer 재판정. batch는 실행 최적화일 뿐 ownership 변경이 아니다.
+   - 기대 효과: `06_imgFrames` 내부 70초대 구간을 30~50% 절감.
+
+2. **source-set PNG cache를 pass 공통 cache로 승격**
+   - 현재: 일부 source-set cache hit가 있으나 pass별 export path가 여전히 다르다.
+   - 변경: cache key를 `(document fingerprint, page fragment, exportSourceObjectIds, hiddenVisualSourceObjectIds, materialization, resolution)`으로 통일한다.
+   - 같은 payload는 page background, decoration, complex frame 어느 pass에서 요청해도 같은 PNG를 재사용한다.
+   - 기대 효과: 중복 shell/content가 많은 문서에서 개별 export 수 감소.
+
+3. **collectStories 슬림 모드**
+   - 현재: story 전체와 textStyleRanges를 광범위하게 직렬화한다.
+   - 변경: Java converter가 실제로 읽는 field만 `resolved.json`에 쓴다.
+   - TextFlow가 이미 paragraph/run/inline-slot을 별도 구조로 만들 수 있으므로, 원본 story dump는 fallback/debug 모드에서만 full로 남긴다.
+   - 기대 효과: `collectStories` 30초 구간과 JSON write/read 비용 절감.
+
+4. **desktop 완료 대기 구간 분리 계측**
+   - 현재: `.done` 작성 이후 앱 쪽 PDF/cache/store/preview 시간이 추출 시간처럼 합산되어 보인다.
+   - 변경: `indesign.rs`에서 `extract_done`, `crop_manifest`, `cache_store`, `preview_ready`, `command_done` 타임스탬프를 별도 기록한다.
+   - 기대 효과: 실제 ExtendScript 병목과 desktop 후처리 병목을 분리한다.
+
+5. **성능 회귀 검증 고정 세트**
+   - 국어 3-1 박영민 1단원, 3단원
+   - 고등문학 지도서 0총론, 1단원
+   - 중3 과학 1단원
+   - 각 케이스에서 export count, validation issue count, elapsed phase를 기록한다.
+
+### Phase 2 (유지): 즉시 옵션형 개선
+
+6. Tier A.1 (DPI 옵션) 유지 및 UI 노출 확인
+7. Tier A.2 (PDF skip 옵션)과 preview fallback 분리
+8. Tier A.3 (페이지 범위 게이트) — 모든 for-loop 에 startPage/endPage 적용
+9. Tier A.4 fully editable 모드에서 미사용 PNG 렌더 스킵
+
+### Phase 3 (3~5 일): 페이지 범위 + 캐시
+
+10. Tier B.2 (per-page 캐시) 설계 + 프로토타입
+11. 데스크탑 UI: 페이지 범위 / 빠른 모드 토글
+
+### Phase 4 (1주+): Tier B 풀구현
+
+12. Tier B.1 batch PNG export
+13. Tier B.3 resolved.json 슬림화
+14. Tier B.4 진행률 fine-grained
+
+### Phase 5 (옵션): Tier C 대규모 작업
 - 추후 필요 시
 
 ## 검증

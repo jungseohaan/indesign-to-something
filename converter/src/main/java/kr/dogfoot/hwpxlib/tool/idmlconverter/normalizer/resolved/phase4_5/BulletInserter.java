@@ -17,7 +17,7 @@ import java.util.List;
  * SPEC-013 Phase 4.5: BulletList 스타일 자동 불릿 삽입.
  *
  * <p>InDesign의 자동 불릿은 텍스트에 포함되지 않으므로 변환 시 명시적으로 추가한다.
- * 단락 스타일 이름에 \u2022 가 포함되면 그 단락의 첫 위치에 가운뎃점 런을 삽입.
+ * 단락 스타일 이름에 \u2022 가 포함되면 그 단락의 첫 위치에 원본 불릿 런을 삽입.
  * TextFrame block + 표 셀 단락 모두 처리.</p>
  */
 public final class BulletInserter {
@@ -74,7 +74,7 @@ public final class BulletInserter {
             }
         }
         ASTTextRun bulletRun = new ASTTextRun();
-        bulletRun.text("\u00B7 ");
+        bulletRun.text("\u2022 ");
         ASTTextRun bodyRun = null;
         int bodyMaxLen = 0;
         if (items != null) {

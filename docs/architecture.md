@@ -494,10 +494,9 @@ Headless InDesign Server가 아닌 **데스크탑 인스턴스 백그라운드 �
 ### 8.1 명령어
 
 ```bash
-# 기본 변환 (resolved.json 권장)
+# 기본 변환 (resolved.json은 input.idml 옆에서 자동 탐지)
 java -jar target/idml-to-something-1.0.9-cli.jar \
      --convert input.idml output.hwpx \
-     --resolved resolved.json \
      --links-directory /path/to/Links
 
 # 페이지 범위 지정

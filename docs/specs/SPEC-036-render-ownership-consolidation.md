@@ -16,7 +16,7 @@
 
 | 신호 종류 | 개수 | 예 |
 |---|---|---|
-| 공유 상태 Set | 6+1 | `phase6PlacedIds`, `deferredAnchoredFloatingIds`, `inlineCompleteSimpleButtonLabelIds`, `inlineEditableLabelShellIds`, `cellInlineEmbeddedDomIds`, `customAnchoredInlineIds`(死), `inlineObjectDomIds` |
+| 공유 상태 Set | 4+1 | `inlineCompleteSimpleButtonLabelIds`, `inlineEditableLabelShellIds`, `cellInlineEmbeddedDomIds`, `customAnchoredInlineIds`(死), `inlineObjectDomIds` |
 | ObjectPlan enum | 2 | `visualAction`, `placement` |
 | reason 문자열 | 다수 | `image_group_text_hidden`, `complex_graphic_text_hidden`, `editable_label_shell` … |
 | boolean 휴리스틱 | 58 | `shouldKeepPairedInlinePageShell`, `canSuppressChildren`, `shouldPreserveSourceChild` … |
@@ -95,35 +95,32 @@ Tier 0 불일치 클래스를 빈도순으로 하나씩:
   `inlineEditableLabelShellIds`, `conceptDiagramLabelShellIds` 등 **Phase 3 산출물에 의존**한다.
 - OwnershipPlanner는 Phase 0(Phase 3 이전)에 돌므로, 이 입력이 아직 없다.
 
-따라서 "단일 Planner 권위" 목표는 다음 중 하나의 **phase-ordering 결정**을 요구한다:
-- **(가)** OwnershipPlanner(또는 그 2차 패스)를 **Phase 3 이후**로 옮긴다 — text/inline 분류가 끝난 뒤 시각 ownership 확정.
-- **(나)** 계획을 2단계로 분리: Phase 0(구조적 plan) + Phase 3.5(텍스트 결과 반영 refine).
-- **(다)** 본 클래스는 Phase 6에 잔류시키되 응집 단위(`computeChildOfGroup`)로 격리하고, plan은
-  "post-text visual ownership"만 별도 표면화.
+따라서 이 시점의 "단일 Planner 권위" 해석은 잘못되었다. Stage 2/3 산출물에
+의존하는 suppress를 planner의 2차 패스로 옮기는 것은 정책화가 아니라 우회 코드
+이동이다. 현재 canonical 정책은 `POLICY-source-ownership.md`를 따른다.
 
-→ (가)/(나)는 아키텍처 변경이므로 **사용자 결정 필요**. 그 전까지 Tier 2는 *Phase-3 비의존* 클래스
-(master_graphic, complex_graphic 단독 등)부터 이전한다.
+정리된 결론:
+- Phase 3 이후 ownership refinement는 없다.
+- `childOfGroup`/inline coverage suppress는 후속 산출물 기반으로 plan을 바꾸면 안 된다.
+- 필요한 drop/keep은 Stage 1 source bundle slot decision으로 다시 모델링한다.
 
-#### ✅ (가) 채택·구현 (2026-06-14)
+#### 폐기: Stage 2.5 refinement / `dropVisualForDomIds()` (2026-06-22)
 
-사용자가 **(가)** 선택. ObjectPlan 소비자 조사 결과 Stage 2(Phase 2/3/4)도 plan을 소비하므로
-(placement/inline 결정), planner 전체 이동은 불가 → **2-패스로 실현**:
-- Phase 0 `planOwnership()`: Stage 2가 쓰는 텍스트/placement 결정 (유지)
-- **Stage 2.5 `refineVisualOwnership()`** (신규, `ResolvedToASTBuilder`): Stage 2 이후·Phase 6 이전.
-  Stage 2 산출물에 의존하는 시각 suppress 결정을 `ctx.dropVisualForDomIds()`로 plan(DROP_VISUAL) 확정.
-  Phase 6/7은 `VisualPlacementResolver.planRejection`으로 실행만.
+이 문서의 과거 Stage 2.5 설계는 폐기한다. `POLICY-source-ownership.md`가
+canonical 정책이며, resolved pipeline에는 post-text visual ownership refinement가
+존재하지 않는다.
 
-**이전 완료 클래스**:
-- `cellInlineEmbeddedDomIds`(셀 인라인 임베드 배지의 원본 floating PNG) — `SKIP_CELL_INLINE_EMBEDDED`
-  휴리스틱 삭제, plan DROP_VISUAL로 전환. **골든디프 0** 검증.
-- **`childOfGroup`(부모 PNG에 구워진 자식, 최대 클래스)** — `SKIP_CHILD_OF_GROUP` 체크 삭제.
-  `computeChildOfGroupSuppression()`이 비보호(`childOfGroup ∧ !protectedEditableLabelShell`)를
-  분리 → refinement가 DROP_VISUAL 확정, 전체는 phase6PlacedIds 선등록(보호 항목 Phase 7 parity).
-  **골든디프 0** 검증. 불일치 리포트 **132건 → 15건**(잔여는 SKIP_RENDERED_DISPOSED/SKIP_OUTSIDE_PAGE
-  등 실행 단계 skip으로 plan 충돌 아님).
+폐기 이유:
+- Stage 2 이후 `ObjectPlan`을 변경해 “Stage 1에서 한 번만 결정” 원칙을 위반한다.
+- DOM-id set 기반 suppress는 source bundle slot ownership이 아니며, source metadata가
+  아니라 실행 중간 산출물을 ownership 근거로 사용한다.
+- `cellInlineEmbeddedDomIds`, `childOfGroup`, inline coverage suppress를 planner로
+  옮긴 것은 정책화가 아니라 우회 코드 이동이었다.
 
-> childOfGroup 게이트 주의: `SKIP_CHILD_OF_GROUP`은 `!protectedEditableLabelShell`로 게이트되므로
-> 비보호 항목만 DROP_VISUAL 마킹해야 한다(보호 항목 마킹 시 회귀).
+대체 원칙:
+- 필요한 suppress/drop은 Stage 1에서 source bundle slot 단위로 결정한다.
+- Stage 2 이후 코드는 이미 결정된 `ObjectPlan`을 실행하거나 진단 로그만 남긴다.
+- missing/duplicate visual은 validator가 잡아야 하며, 후속 단계가 보정하지 않는다.
 
 ### Tier 3 — 잔여 정리
 
@@ -135,11 +132,13 @@ genuine-root reachability 분석(roots = `inject` + 외부 호출 util 8개)으�
 
 - **zOrder/layer 실제 로직 469 LOC 삭제** — `effectiveZOrder`/`inferredTextFrameVisualShellZOrder`/
   `semanticTextOverlapShellZOrder`/`titleLabelBackgroundZOrder`/`inferredTextLineBackdropZOrder`/
-  `textFrameBackdropScore` 등. 이미 `VisualZOrderPlanner`/`VisualOverlapZOrderPlanner`로 복제됨.
+  `textFrameBackdropScore` 등. 당시 `VisualZOrderPlanner` 등으로 옮겨졌고, 이후 Stage 3는
+  `ObjectPlan.zOrder`만 실행하도록 정리됨.
 - **suppression 클러스터 310 LOC 삭제** — `computeChildOfGroupSuppression`/`computeInlineCoverageSuppression`/
   `computeChildOfGroup`/`canSuppressChildren`/`shouldSkipByChildPolicy`/`collectInlineObjectCoverage` +
-  `ChildOfGroupSuppression`/`InlineCoverageSuppression` 클래스. 이미 `OwnershipPlanner`로 복제됨
-  (BI 버전은 `public`이라 단순 reachability가 root로 오인 → 실제 호출 0 확인 후 삭제).
+  `ChildOfGroupSuppression`/`InlineCoverageSuppression` 클래스. 이후 이 로직을
+  `OwnershipPlanner` 2차 패스로 복제한 설계도 폐기되었다. source-slot decision으로
+  재모델링되지 않은 suppress는 남기지 않는다.
 
 실행(execution) 로직 2개 클러스터는 Stage 3 helper로 **순수 이동**:
 - **텍스트강조 흡수 510 LOC** → `stage3/VisualTextEmphasisAbsorber` (ABSORB_TEXT_STYLE 실행).

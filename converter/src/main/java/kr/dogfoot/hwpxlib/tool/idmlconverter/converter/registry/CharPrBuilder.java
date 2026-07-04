@@ -76,14 +76,6 @@ public final class CharPrBuilder {
                 .symMarkAnd(SymMarkSort.NONE)
                 .borderFillIDRef("2");
 
-        // Bold/Italic 설정
-        if (bold) {
-            charPr.createBold();
-        }
-        if (italic) {
-            charPr.createItalic();
-        }
-
         // 위첨자/아래첨자
         if (superscript) {
             charPr.createSupscript();
@@ -98,6 +90,15 @@ public final class CharPrBuilder {
         String latinFontId = fontIds[1];
         charPr.createFontRef();
         charPr.fontRef().set(hangulFontId, latinFontId, hangulFontId, hangulFontId, hangulFontId, hangulFontId, hangulFontId);
+
+        boolean forceNormalStyle = fontRegistry.lastForceNormalStyle();
+        // 폰트 매핑에서 명시한 경우에만 source Bold/Italic을 mapped normal style로 흡수한다.
+        if (bold && !forceNormalStyle) {
+            charPr.createBold();
+        }
+        if (italic && !forceNormalStyle) {
+            charPr.createItalic();
+        }
 
         // scaleAdjust → height(글자 크기)에도 적용: 원본 폰트 em-box 크기 차이 보정
         int fontScaleAdjust = fontRegistry.lastScaleAdjust();

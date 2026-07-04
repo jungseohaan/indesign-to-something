@@ -4,8 +4,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextRunSegmenter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -59,9 +59,9 @@ public final class SimpleButtonLabelInlineFactory {
         obj.sourceId("u" + Integer.toHexString(plan.anchorDomId));
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.keepInline(true);
         obj.verticalJustification("CenterAlign");
         obj.nativeGraphicsAllowed(true);
-        obj.bundlePath("simple-button-label-raster");
         obj.shellShapeType(shell.type());
 
         String fillHex = ctx.resolvedData.resolveColorHex(shell.fillColorName());
@@ -83,31 +83,36 @@ public final class SimpleButtonLabelInlineFactory {
 
         ASTParagraph paragraph = new ASTParagraph();
         paragraph.alignment("CenterAlign");
+        if ("Oval".equals(shell.type())) {
+            paragraph.spaceBefore(0L);
+            paragraph.spaceAfter(0L);
+            paragraph.lineSpacingType("fixed");
+            paragraph.lineSpacing((int) CoordinateConverter.pointsToHwpunits(h));
+        }
         TextStyleApplicator.ExplicitStyle style = new TextStyleApplicator.ExplicitStyle();
         style.fontFamily = plan.labelFontFamily;
         style.fontStyle = plan.labelFontStyle;
         style.textColorHex = plan.labelTextColorHex;
-        style.fontSizePt = labelFontSizePt(plan, h);
+        style.fontSizePt = labelFontSizePt(plan, shell, h);
         style.tracking = plan.labelTracking;
         style.horizontalScale = plan.labelHorizontalScale;
-        for (ASTTextRun run : TextRunSegmenter.fromSyntheticText(plan.labelText, style, false)) {
+        for (ASTTextRun run : ResolvedTextFlowAstConverter.convertSyntheticText(plan.labelText, style, paragraph)) {
             paragraph.addItem(run);
         }
         obj.addParagraph(paragraph);
-        byte[] raster = renderSimpleLabelPng(plan, shell, fillHex, strokeHex, w, h, style.fontSizePt);
-        if (raster != null && raster.length > 0) {
-            obj.imageFormat("png");
-            obj.imageData(raster);
-        }
         return obj;
     }
 
-    private static double labelFontSizePt(SimpleButtonLabelPlan plan, double shellHeightPt) {
+    private static double labelFontSizePt(
+            SimpleButtonLabelPlan plan,
+            ResolvedPageItem shell,
+            double shellHeightPt) {
         double size = plan.labelFontSizePt != null && plan.labelFontSizePt > 0
                 ? plan.labelFontSizePt
                 : 0.0;
         if (shellHeightPt > 0) {
-            double max = shellHeightPt * 0.8;
+            double capRatio = shell != null && "Oval".equals(shell.type()) ? 0.68 : 0.8;
+            double max = shellHeightPt * capRatio;
             if (size <= 0 || size > max) size = max;
         }
         return size;

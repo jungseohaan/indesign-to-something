@@ -11,6 +11,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
 import javax.imageio.ImageIO;
@@ -29,36 +30,6 @@ public class HwpxImageBuilder {
 
     /** 이미지 크기가 0 이하일 때 사용하는 기본 크기 (HWPUNIT) */
     private static final long DEFAULT_IMAGE_DIMENSION = 1000;
-
-    private static boolean isPaperLikeRaster(byte[] imageData) {
-        if (imageData == null || imageData.length == 0) return false;
-        try {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(imageData));
-            if (img == null) return false;
-            int stepX = Math.max(1, img.getWidth() / 80);
-            int stepY = Math.max(1, img.getHeight() / 80);
-            int opaque = 0;
-            int paper = 0;
-            for (int y = 0; y < img.getHeight(); y += stepY) {
-                for (int x = 0; x < img.getWidth(); x += stepX) {
-                    int argb = img.getRGB(x, y);
-                    int a = (argb >>> 24) & 0xff;
-                    if (a < 220) continue;
-                    opaque++;
-                    int r = (argb >>> 16) & 0xff;
-                    int g = (argb >>> 8) & 0xff;
-                    int b = argb & 0xff;
-                    if (r >= 245 && g >= 245 && b >= 245) {
-                        paper++;
-                    }
-                }
-            }
-            img.flush();
-            return opaque > 0 && paper >= opaque * 0.95;
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
 
     /**
      * Picture 객체의 공통 geometry 속성을 초기화한다.
@@ -133,8 +104,10 @@ public class HwpxImageBuilder {
             twm = mapTextWrapMethod(wrapMode);
             tfs = mapTextFlowSide(obj.textWrapSide());
         } else {
-            // 인라인 (treatAsChar=1): BEHIND_TEXT로 설정하여 텍스트 흐름에 영향 없게
-            twm = TextWrapMethod.BEHIND_TEXT;
+            // 인라인(treatAsChar=1)은 텍스트 흐름 자체의 visible object다.
+            // BEHIND_TEXT로 내리면 셀 fill/background 뒤에 숨을 수 있으므로
+            // Stage 1이 PLACE_INLINE_PNG로 확정한 인라인 material은 전면 평면에 둔다.
+            twm = TextWrapMethod.IN_FRONT_OF_TEXT;
             tfs = TextFlowSide.BOTH_SIDES;
         }
 
@@ -693,23 +666,13 @@ public class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
 
-        // fromGroup=true → IN_FRONT_OF_TEXT (호출자가 명시적으로 지정)
-        // fromGroup=false → BEHIND_TEXT (배경 이미지)
-        // 단, 면적이 크고 z-order가 낮은 항목은 배경으로 판단 → BEHIND_TEXT
-        long figAreaHwp = (long) figure.width() * figure.height();
-        boolean isLargePaperLikeRaster = !figure.fromGroup()
-                && figAreaHwp > 500_000_000L
-                && isPaperLikeRaster(figure.imageData());
-        boolean isLargeBackground = (!figure.fromGroup() && figAreaHwp > 500_000_000L && figure.zOrder() <= 5)
-                || isLargePaperLikeRaster;
-        boolean forceBehindByLayer = isBehindTextVisualLayer(figure.visualLayer());
-        boolean forceInFrontByLayer = isInFrontVisualLayer(figure.visualLayer());
-        TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
-        if (forceBehindByLayer || isLargeBackground
-                || (!forceInFrontByLayer && !figure.fromGroup())) {
-            figWrap = TextWrapMethod.BEHIND_TEXT;
-        }
-        int outputZOrder = outputZOrderForVisualLayer(figure.visualLayer(), figure.zOrder(), isLargeBackground);
+        TextWrapMethod figWrap = isBehindTextVisualLayer(figure.visualLayer())
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT;
+        int outputZOrder = outputZOrderForVisualLayer(
+                figure.visualLayer(),
+                figure.zOrder(),
+                figure.sourceLayerIndex());
 
         // ShapeObject
         pic.idAnd(picId)
@@ -797,44 +760,28 @@ public class HwpxImageBuilder {
     }
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
-        return "PAGE_BACKGROUND".equals(visualLayer)
-                || "CONTAINER_BACKDROP".equals(visualLayer)
-                || "TEXT_CARD_BACKDROP".equals(visualLayer);
+        return VisualPlanePolicy.isBehindTextLayerName(visualLayer);
     }
 
     private static boolean isInFrontVisualLayer(String visualLayer) {
-        return "CONTAINER_FACE".equals(visualLayer)
-                || "LABEL_BACKDROP".equals(visualLayer)
-                || "LABEL_OVERLAY_BACKDROP".equals(visualLayer)
-                || "CONTENT_VISUAL".equals(visualLayer)
-                || "CONTAINER_OUTLINE".equals(visualLayer)
-                || "FOREGROUND_MASK".equals(visualLayer);
+        return VisualPlanePolicy.isInFrontLayerName(visualLayer);
     }
 
-    private static int outputZOrderForVisualLayer(String visualLayer, int originalZOrder, boolean isLargeBackground) {
-        if (isLargeBackground || "PAGE_BACKGROUND".equals(visualLayer)) {
-            return -10000;
+    private static int outputZOrderForVisualLayer(
+            String visualLayer,
+            int originalZOrder,
+            int sourceLayerIndex) {
+        // Stage 1 ObjectPlan.zOrder is the visual order contract. visualLayer
+        // chooses only the HWPX plane/wrap. Local label shells/connectors stay in
+        // the front plane and rely on the planned source-depth relation to sit
+        // below their owned text; moving them to BEHIND_TEXT hides them behind
+        // unrelated HWPX carriers.
+        int z = Math.max(0, originalZOrder);
+        if ("PAGE_BACKGROUND".equals(visualLayer) || "CONTAINER_BACKDROP".equals(visualLayer)) {
+            return z;
         }
-        int offset = Math.max(-499, Math.min(499, originalZOrder));
-        if ("CONTAINER_BACKDROP".equals(visualLayer)) {
-            return -2000 + offset;
-        }
-        if ("TEXT_CARD_BACKDROP".equals(visualLayer)) {
-            return -2500 + offset;
-        }
-        if ("CONTAINER_FACE".equals(visualLayer)) {
-            return -3000 + offset;
-        }
-        if ("LABEL_BACKDROP".equals(visualLayer)) {
-            return 19000 + offset;
-        }
-        if ("LABEL_OVERLAY_BACKDROP".equals(visualLayer)) {
-            return 19000 + offset;
-        }
-        if ("CONTENT_VISUAL".equals(visualLayer)
-                || "CONTAINER_OUTLINE".equals(visualLayer)
-                || "FOREGROUND_MASK".equals(visualLayer)) {
-            return originalZOrder;
+        if ("CONTENT_BACKDROP".equals(visualLayer)) {
+            return 10000 + z;
         }
         return originalZOrder;
     }
@@ -856,9 +803,9 @@ public class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
 
-        // ShapeObject — 페이지 배경: 다른 BEHIND_TEXT 객체와 섞이지 않도록 최하단 z-order
+        // ShapeObject — 페이지 배경: 보이는 BEHIND_TEXT 최하단 z-band.
         pic.idAnd(picId)
-                .zOrderAnd(-10000)
+                .zOrderAnd(0)
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)

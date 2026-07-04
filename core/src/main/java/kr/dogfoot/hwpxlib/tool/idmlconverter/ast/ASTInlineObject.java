@@ -79,6 +79,11 @@ public class ASTInlineObject extends ASTInlineItem {
     // inline_object 타입 (IDML AnchoredPosition=InlineOrAbove)은 항상 true
     private boolean keepInline = false;
 
+    // Stage 1 ownership plan execution hints. Inline writers must not discard
+    // source z/layer because inline shells can overlap page-positioned carriers.
+    private int plannedZOrder = Integer.MIN_VALUE;
+    private String plannedVisualLayer;
+
     // INLINE_TEXT_FRAME 배경 PNG 바이트 (설정된 경우 winBrush 대신 imgBrush로 배경 표시)
     private byte[] imageFillData;
     // true이면 전역 시각 정책과 무관하게 이 인라인 프레임의 원본 선/채움을 HWP 도형으로 보존.
@@ -232,6 +237,12 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public boolean keepInline() { return keepInline; }
     public void keepInline(boolean v) { this.keepInline = v; }
+
+    public int plannedZOrder() { return plannedZOrder; }
+    public void plannedZOrder(int v) { this.plannedZOrder = v; }
+
+    public String plannedVisualLayer() { return plannedVisualLayer; }
+    public void plannedVisualLayer(String v) { this.plannedVisualLayer = v; }
 
     public byte[] imageFillData() { return imageFillData; }
     public void imageFillData(byte[] v) { this.imageFillData = v; }

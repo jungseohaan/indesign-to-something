@@ -24,6 +24,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryFlo
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.GroupedFlowStackPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
@@ -278,15 +279,13 @@ public final class TableBuilder {
                 applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
-                completeVisibleTableOuterBorder(astTable);
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
                     report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                            ctx, placement.table, placement.pageIdx);
-                    completeVisibleTableOuterBorder(placement.table);
+                            ctx, tf, placement.table, placement.pageIdx);
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -374,15 +373,13 @@ public final class TableBuilder {
                 applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
-                completeVisibleTableOuterBorder(astTable);
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
                     report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                            ctx, placement.table, placement.pageIdx);
-                    completeVisibleTableOuterBorder(placement.table);
+                            ctx, tf, placement.table, placement.pageIdx);
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -508,10 +505,9 @@ public final class TableBuilder {
                 ctx != null ? ctx.styleResolver : null,
                 cellCtx == null ? null : ((table, idmlCell) -> StoryFlowAssembler.buildCellFlow(cellCtx, table, idmlCell)));
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
-        promoteNestedTextFrameParagraphsInCells(ctx, astTable);
+        inlineNestedTextFrameParagraphsInCells(ctx, astTable);
 
         ASTTable result = astTable;
-        completeVisibleTableOuterBorder(result);
         if (NumberedSideHeadTableNormalizer.normalizePlanned(ctx, result) && ctx != null && ctx.debugAst) {
             result.debugOrNew().note("side-head flow table normalized from Stage 1 plan");
         }
@@ -688,7 +684,6 @@ public final class TableBuilder {
         out.rowCount(rowCount);
         out.width(tableWidth(out));
         out.height(tableHeight(out));
-        completeVisibleTableOuterBorder(out);
         return out;
     }
 
@@ -798,7 +793,7 @@ public final class TableBuilder {
         return false;
     }
 
-    private static void absorbTextFrameOutlineIntoTable(
+    public static void absorbTextFrameOutlineIntoTable(
             ResolvedBuildContext ctx,
             ResolvedTextFrame tf,
             ASTTable table) {
@@ -856,21 +851,37 @@ public final class TableBuilder {
 
     private static void applyOuterBorder(ASTTable table, ASTTableCell.CellBorder border) {
         if (table.rows() == null || table.rows().isEmpty()) return;
-        int lastRow = Math.max(0, table.rowCount() - 1);
-        int lastCol = Math.max(0, table.colCount() - 1);
+        int physicalRowCount = table.rows().size();
+        int lastRow = Math.max(0, Math.max(table.rowCount(), physicalRowCount) - 1);
+        int physicalRowIndex = 0;
         for (ASTTableRow row : table.rows()) {
             if (row == null || row.cells() == null) continue;
+            int physicalColCount = row.cells().size();
+            int lastCol = Math.max(0, Math.max(table.colCount(), physicalColCount) - 1);
+            int physicalColIndex = 0;
             for (ASTTableCell cell : row.cells()) {
                 if (cell == null) continue;
                 int rowStart = cell.rowIndex();
                 int rowEnd = rowStart + Math.max(1, cell.rowSpan()) - 1;
                 int colStart = cell.columnIndex();
                 int colEnd = colStart + Math.max(1, cell.columnSpan()) - 1;
-                if (rowStart <= 0) cell.topBorder(preferExistingBorder(cell.topBorder(), border));
-                if (rowEnd >= lastRow) cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
-                if (colStart <= 0) cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
-                if (colEnd >= lastCol) cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
+                int physicalRowEnd = physicalRowIndex + Math.max(1, cell.rowSpan()) - 1;
+                int physicalColEnd = physicalColIndex + Math.max(1, cell.columnSpan()) - 1;
+                if (rowStart <= 0 || physicalRowIndex <= 0) {
+                    cell.topBorder(preferExistingBorder(cell.topBorder(), border));
+                }
+                if (rowEnd >= lastRow || physicalRowEnd >= physicalRowCount - 1) {
+                    cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
+                }
+                if (colStart <= 0 || physicalColIndex <= 0) {
+                    cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
+                }
+                if (colEnd >= lastCol || physicalColEnd >= physicalColCount - 1) {
+                    cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
+                }
+                physicalColIndex++;
             }
+            physicalRowIndex++;
         }
     }
 
@@ -1038,7 +1049,7 @@ public final class TableBuilder {
         return StoryFlowAssembler.hasAuthoritativeResolvedStructure(story);
     }
 
-    private static void promoteNestedTextFrameParagraphsInCells(ResolvedBuildContext ctx, ASTTable table) {
+    private static void inlineNestedTextFrameParagraphsInCells(ResolvedBuildContext ctx, ASTTable table) {
         if (table == null || table.rows() == null) return;
         for (ASTTableRow row : table.rows()) {
             if (row == null || row.cells() == null) continue;
@@ -1072,7 +1083,7 @@ public final class TableBuilder {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
-            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!ShellRole.isTextShell(plan)) continue;
             if (plan.domId == domId
                     || containsInt(plan.sourceObjectIds, domId)
                     || containsInt(plan.visualSourceObjectIds, domId)) {
@@ -1088,6 +1099,11 @@ public final class TableBuilder {
             if (value == target) return true;
         }
         return false;
+    }
+
+    private static void addAll(Set<Integer> target, int[] values) {
+        if (target == null || values == null) return;
+        for (int value : values) target.add(value);
     }
 
     private static Integer parseSourceObjectId(String sourceId) {
@@ -1148,7 +1164,7 @@ public final class TableBuilder {
         if (tf == null || tf.storyId() == null) return null;
         ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
         if (!hasAuthoritativeResolvedStructure(story)) return null;
-        List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story, false);
+        List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story);
         return paragraphs == null || paragraphs.isEmpty() ? null : paragraphs;
     }
 
@@ -1258,6 +1274,8 @@ public final class TableBuilder {
         cell.marginLeft(src.marginLeft());
         cell.marginRight(src.marginRight());
         cell.verticalAlign(src.verticalAlign());
+        cell.firstBaselineOffset(src.firstBaselineOffset());
+        cell.minimumFirstBaselineOffset(src.minimumFirstBaselineOffset());
         cell.width(src.width());
         cell.height(src.height());
         return cell;
@@ -1279,6 +1297,7 @@ public final class TableBuilder {
      */
     private static int absorbCellBackgroundPageObjects(
             ResolvedBuildContext ctx,
+            ResolvedTextFrame ownerTextFrame,
             ASTTable table,
             int pageIdx) {
         if (ctx == null || ctx.resolvedData == null || table == null) return 0;
@@ -1298,6 +1317,8 @@ public final class TableBuilder {
 
         long[] colLeft = buildColumnOffsets(table.columnWidths());
         long[] rowTop = buildRowOffsets(table.rows());
+        Set<Integer> tableStyleSourceIds = tableStyleSourceIdsForOwner(ctx, ownerTextFrame);
+        if (tableStyleSourceIds.isEmpty()) return 0;
 
         int absorbed = 0;
         Set<Integer> absorbedItemIds = new HashSet<>();
@@ -1311,6 +1332,7 @@ public final class TableBuilder {
             } catch (NumberFormatException ignored) {
                 continue;
             }
+            if (!tableStyleSourceIds.contains(itemId)) continue;
             if (ctx.resolvedData.isInlineObjectId(itemId)) continue;
             if (ctx.isRenderedDisposed(itemId, FrameDisposition.TEXT_BLOCK_PLACED)) continue;
             if (!isAbsorbableCellBackground(item)) continue;
@@ -1326,6 +1348,11 @@ public final class TableBuilder {
             List<ASTTableCell> matchedCells = findCoveredCells(
                     table, colLeft, rowTop, tableLeftPt, tableTopPt,
                     rectLeft, rectTop, rectRight, rectBottom);
+            if (matchedCells.isEmpty() && tableStyleSourceIds.contains(itemId)) {
+                matchedCells = findStyleBandCoveredCells(
+                        table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                        rectLeft, rectTop, rectRight, rectBottom);
+            }
             if (matchedCells.isEmpty()) {
                 ASTTableCell matched = findCoveredCell(
                         table, colLeft, rowTop, tableLeftPt, tableTopPt,
@@ -1347,6 +1374,25 @@ public final class TableBuilder {
         }
         suppressRenderedGroupsCoveredByAbsorbedCellBackgrounds(ctx, absorbedItemIds, pageItemById);
         return absorbed;
+    }
+
+    private static Set<Integer> tableStyleSourceIdsForOwner(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame ownerTextFrame) {
+        Set<Integer> ids = new HashSet<>();
+        if (ctx == null || ownerTextFrame == null || ctx.ownershipPlans == null) return ids;
+        int tfId = parseId(ownerTextFrame.id());
+        if (tfId < 0) return ids;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            if (plan.domId != tfId
+                    && !containsInt(plan.ownedTextFrameIds, tfId)
+                    && !containsInt(plan.sourceObjectIds, tfId)) {
+                continue;
+            }
+            addAll(ids, plan.styleSourceObjectIds);
+        }
+        return ids;
     }
 
     /**
@@ -1372,6 +1418,8 @@ public final class TableBuilder {
         double tableTopPt = CoordinateConverter.hwpunitsToPoints(table.y());
         long[] colLeft = buildColumnOffsets(table.columnWidths());
         long[] rowTop = buildRowOffsets(table.rows());
+        Set<Integer> tableStyleSourceIds = tableStyleSourceIdsForOwner(ctx, tf);
+        if (tableStyleSourceIds.isEmpty()) return 0;
 
         int absorbed = 0;
         Set<Integer> absorbedItemIds = new HashSet<>();
@@ -1382,6 +1430,7 @@ public final class TableBuilder {
             if (itemPageIdx != pageIdx && !sourceLinked) continue;
             int itemId = parseId(item.id());
             if (itemId < 0) continue;
+            if (!tableStyleSourceIds.contains(itemId)) continue;
 
             double[] b = pageRelativeBoundsInPoints(ctx, item);
             if (b == null || b.length < 4) continue;
@@ -1403,43 +1452,6 @@ public final class TableBuilder {
 
         suppressRenderedGroupsCoveredByAbsorbedCellBackgrounds(ctx, absorbedItemIds, pageItemById);
         return absorbed;
-    }
-
-    private static void completeVisibleTableOuterBorder(ASTTable table) {
-        ASTTableCell.CellBorder border = representativeVisibleBorder(table);
-        if (border == null || table == null || table.rows() == null || table.rows().isEmpty()) return;
-        int lastRow = Math.max(0, table.rowCount() - 1);
-        int lastCol = Math.max(0, table.colCount() - 1);
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null) continue;
-                int rowStart = cell.rowIndex();
-                int rowEnd = rowStart + Math.max(1, cell.rowSpan()) - 1;
-                int colStart = cell.columnIndex();
-                int colEnd = colStart + Math.max(1, cell.columnSpan()) - 1;
-                if (rowStart <= 0) cell.topBorder(preferExistingBorder(cell.topBorder(), border));
-                if (rowEnd >= lastRow) cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
-                if (colStart <= 0) cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
-                if (colEnd >= lastCol) cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
-            }
-        }
-    }
-
-    private static ASTTableCell.CellBorder representativeVisibleBorder(ASTTable table) {
-        if (table == null || table.rows() == null) return null;
-        ASTTableCell.CellBorder best = null;
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null) continue;
-                best = strongerBorder(best, cell.leftBorder());
-                best = strongerBorder(best, cell.rightBorder());
-                best = strongerBorder(best, cell.topBorder());
-                best = strongerBorder(best, cell.bottomBorder());
-            }
-        }
-        return best != null ? cloneBorder(best) : null;
     }
 
     private static ASTTableCell.CellBorder strongerBorder(
@@ -1537,6 +1549,12 @@ public final class TableBuilder {
             double bottom,
             ASTTableCell.CellBorder border,
             double tolerance) {
+        if (rectangleWrapsTable(table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                left, top, right, bottom, tolerance)) {
+            applyOuterBorder(table, border);
+            return true;
+        }
+
         int c0 = findGridEdgeIndex(colLeft, tableLeftPt, left, tolerance);
         int c1 = findGridEdgeIndex(colLeft, tableLeftPt, right, tolerance);
         int r0 = findGridEdgeIndex(rowTop, tableTopPt, top, tolerance);
@@ -1575,6 +1593,48 @@ public final class TableBuilder {
             }
         }
         return matched;
+    }
+
+    private static boolean rectangleWrapsTable(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double left,
+            double top,
+            double right,
+            double bottom,
+            double tolerance) {
+        if (table == null || colLeft == null || rowTop == null
+                || colLeft.length < 2 || rowTop.length < 2) {
+            return false;
+        }
+        double tableLeft = tableLeftPt;
+        double tableTop = tableTopPt;
+        double tableRight = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[colLeft.length - 1]);
+        double tableBottom = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[rowTop.length - 1]);
+        double tableWidth = Math.max(0, tableRight - tableLeft);
+        double tableHeight = Math.max(0, tableBottom - tableTop);
+        if (tableWidth <= 0 || tableHeight <= 0) return false;
+
+        boolean edgesNear =
+                Math.abs(left - tableLeft) <= tolerance
+                        && Math.abs(right - tableRight) <= tolerance
+                        && Math.abs(top - tableTop) <= tolerance
+                        && Math.abs(bottom - tableBottom) <= tolerance;
+        if (edgesNear) return true;
+
+        double ix = Math.max(0, Math.min(right, tableRight) - Math.max(left, tableLeft));
+        double iy = Math.max(0, Math.min(bottom, tableBottom) - Math.max(top, tableTop));
+        double tableCover = (ix * iy) / (tableWidth * tableHeight);
+        boolean spansWidth = ix / tableWidth >= 0.94
+                && left <= tableLeft + tolerance
+                && right >= tableRight - tolerance;
+        boolean spansHeight = iy / tableHeight >= 0.94
+                && top <= tableTop + tolerance
+                && bottom >= tableBottom - tolerance;
+        return tableCover >= 0.88 && spansWidth && spansHeight;
     }
 
     private static boolean applyLineBorderToTable(
@@ -1820,6 +1880,243 @@ public final class TableBuilder {
             }
         }
         return matches;
+    }
+
+    /**
+     * TABLE_STYLE_SLOT source rectangles sometimes describe a row/column band
+     * rather than a full-cell background.  When Stage 1 already attached the
+     * rectangle to the table style slot, preserve editability by projecting the
+     * band onto the intersecting HWPX cells instead of placing the source PNG.
+     */
+    private static List<ASTTableCell> findStyleBandCoveredCells(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double rectLeft,
+            double rectTop,
+            double rectRight,
+            double rectBottom) {
+        List<ASTTableCell> matches = new ArrayList<>();
+        double rectWidth = Math.max(0, rectRight - rectLeft);
+        double rectHeight = Math.max(0, rectBottom - rectTop);
+        double rectArea = rectWidth * rectHeight;
+        if (rectArea <= 0) return matches;
+
+        matches.addAll(findDominantRowOrColumnBandCells(
+                table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                rectLeft, rectTop, rectRight, rectBottom));
+        if (!matches.isEmpty()) return matches;
+
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int c0 = cell.columnIndex();
+                int c1 = Math.min(c0 + Math.max(1, cell.columnSpan()), colLeft.length - 1);
+                int r0 = cell.rowIndex();
+                int r1 = Math.min(r0 + Math.max(1, cell.rowSpan()), rowTop.length - 1);
+                if (c0 < 0 || c0 >= colLeft.length || r0 < 0 || r0 >= rowTop.length) continue;
+
+                double cellLeft = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c0]);
+                double cellRight = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c1]);
+                double cellTop = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r0]);
+                double cellBottom = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r1]);
+                if (styleBandCoversCell(
+                        rectLeft, rectTop, rectRight, rectBottom, rectArea,
+                        cellLeft, cellTop, cellRight, cellBottom)) {
+                    matches.add(cell);
+                }
+            }
+        }
+        return matches;
+    }
+
+    private static List<ASTTableCell> findDominantRowOrColumnBandCells(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double rectLeft,
+            double rectTop,
+            double rectRight,
+            double rectBottom) {
+        List<ASTTableCell> matches = new ArrayList<>();
+        if (table == null || colLeft == null || rowTop == null
+                || colLeft.length < 2 || rowTop.length < 2
+                || table.rows() == null) {
+            return matches;
+        }
+
+        double tableLeft = tableLeftPt;
+        double tableTop = tableTopPt;
+        double tableRight = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[colLeft.length - 1]);
+        double tableBottom = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[rowTop.length - 1]);
+        double tableWidth = Math.max(0, tableRight - tableLeft);
+        double tableHeight = Math.max(0, tableBottom - tableTop);
+        if (tableWidth <= 0 || tableHeight <= 0) return matches;
+
+        double xOverlap = Math.max(0, Math.min(rectRight, tableRight) - Math.max(rectLeft, tableLeft));
+        double yOverlap = Math.max(0, Math.min(rectBottom, tableBottom) - Math.max(rectTop, tableTop));
+        double tableWidthCoverage = xOverlap / tableWidth;
+        double tableHeightCoverage = yOverlap / tableHeight;
+
+        if (tableWidthCoverage >= 0.72) {
+            addRowBandCells(matches, table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                    rectLeft, rectTop, rectRight, rectBottom);
+        }
+        if (matches.isEmpty() && tableHeightCoverage >= 0.72) {
+            addColumnBandCells(matches, table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                    rectLeft, rectTop, rectRight, rectBottom);
+        }
+        return matches;
+    }
+
+    private static void addRowBandCells(
+            List<ASTTableCell> matches,
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double rectLeft,
+            double rectTop,
+            double rectRight,
+            double rectBottom) {
+        Set<Integer> coveredRows = new HashSet<>();
+        for (int r = 0; r < rowTop.length - 1; r++) {
+            double rowTopPt = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r]);
+            double rowBottomPt = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r + 1]);
+            double rowHeight = Math.max(0, rowBottomPt - rowTopPt);
+            double yOverlap = Math.max(0, Math.min(rectBottom, rowBottomPt) - Math.max(rectTop, rowTopPt));
+            if (rowHeight > 0 && yOverlap / rowHeight >= 0.48) {
+                coveredRows.add(r);
+            }
+        }
+        if (coveredRows.isEmpty()) return;
+
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int rowStart = cell.rowIndex();
+                int rowEnd = rowStart + Math.max(1, cell.rowSpan());
+                if (!intersectsAnyIndex(coveredRows, rowStart, rowEnd)) continue;
+                if (cellHorizontalCoverage(cell, colLeft, tableLeftPt, rectLeft, rectRight) >= 0.45) {
+                    matches.add(cell);
+                }
+            }
+        }
+    }
+
+    private static void addColumnBandCells(
+            List<ASTTableCell> matches,
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double rectLeft,
+            double rectTop,
+            double rectRight,
+            double rectBottom) {
+        Set<Integer> coveredCols = new HashSet<>();
+        for (int c = 0; c < colLeft.length - 1; c++) {
+            double colLeftPt = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c]);
+            double colRightPt = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c + 1]);
+            double colWidth = Math.max(0, colRightPt - colLeftPt);
+            double xOverlap = Math.max(0, Math.min(rectRight, colRightPt) - Math.max(rectLeft, colLeftPt));
+            if (colWidth > 0 && xOverlap / colWidth >= 0.48) {
+                coveredCols.add(c);
+            }
+        }
+        if (coveredCols.isEmpty()) return;
+
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int colStart = cell.columnIndex();
+                int colEnd = colStart + Math.max(1, cell.columnSpan());
+                if (!intersectsAnyIndex(coveredCols, colStart, colEnd)) continue;
+                if (cellVerticalCoverage(cell, rowTop, tableTopPt, rectTop, rectBottom) >= 0.45) {
+                    matches.add(cell);
+                }
+            }
+        }
+    }
+
+    private static boolean intersectsAnyIndex(Set<Integer> indexes, int startInclusive, int endExclusive) {
+        if (indexes == null || indexes.isEmpty()) return false;
+        for (int i = startInclusive; i < endExclusive; i++) {
+            if (indexes.contains(i)) return true;
+        }
+        return false;
+    }
+
+    private static double cellHorizontalCoverage(
+            ASTTableCell cell,
+            long[] colLeft,
+            double tableLeftPt,
+            double rectLeft,
+            double rectRight) {
+        int c0 = cell.columnIndex();
+        int c1 = Math.min(c0 + Math.max(1, cell.columnSpan()), colLeft.length - 1);
+        if (c0 < 0 || c0 >= colLeft.length || c1 <= c0) return 0;
+        double cellLeft = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c0]);
+        double cellRight = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c1]);
+        double width = Math.max(0, cellRight - cellLeft);
+        if (width <= 0) return 0;
+        return Math.max(0, Math.min(rectRight, cellRight) - Math.max(rectLeft, cellLeft)) / width;
+    }
+
+    private static double cellVerticalCoverage(
+            ASTTableCell cell,
+            long[] rowTop,
+            double tableTopPt,
+            double rectTop,
+            double rectBottom) {
+        int r0 = cell.rowIndex();
+        int r1 = Math.min(r0 + Math.max(1, cell.rowSpan()), rowTop.length - 1);
+        if (r0 < 0 || r0 >= rowTop.length || r1 <= r0) return 0;
+        double cellTop = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r0]);
+        double cellBottom = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r1]);
+        double height = Math.max(0, cellBottom - cellTop);
+        if (height <= 0) return 0;
+        return Math.max(0, Math.min(rectBottom, cellBottom) - Math.max(rectTop, cellTop)) / height;
+    }
+
+    private static boolean styleBandCoversCell(
+            double rectLeft, double rectTop, double rectRight, double rectBottom, double rectArea,
+            double cellLeft, double cellTop, double cellRight, double cellBottom) {
+        double ix = Math.max(0, Math.min(rectRight, cellRight) - Math.max(rectLeft, cellLeft));
+        double iy = Math.max(0, Math.min(rectBottom, cellBottom) - Math.max(rectTop, cellTop));
+        double cellWidth = Math.max(0, cellRight - cellLeft);
+        double cellHeight = Math.max(0, cellBottom - cellTop);
+        if (ix <= 0 || iy <= 0 || cellWidth <= 0 || cellHeight <= 0 || rectArea <= 0) return false;
+
+        double horizontalCoverage = ix / cellWidth;
+        double verticalCoverage = iy / cellHeight;
+        double rectInsideCell = (ix * iy) / rectArea;
+        double edgeTolerancePt = 4.0;
+        boolean touchesHorizontalEdge =
+                Math.abs(rectTop - cellTop) <= edgeTolerancePt
+                        || Math.abs(rectBottom - cellBottom) <= edgeTolerancePt;
+        boolean touchesVerticalEdge =
+                Math.abs(rectLeft - cellLeft) <= edgeTolerancePt
+                        || Math.abs(rectRight - cellRight) <= edgeTolerancePt;
+
+        boolean rowBand = horizontalCoverage >= 0.68
+                && verticalCoverage >= 0.25
+                && rectInsideCell >= 0.55
+                && touchesHorizontalEdge;
+        boolean columnBand = verticalCoverage >= 0.68
+                && horizontalCoverage >= 0.25
+                && rectInsideCell >= 0.55
+                && touchesVerticalEdge;
+        return rowBand || columnBand;
     }
 
     private static boolean mostlyCoversCell(
@@ -2243,10 +2540,7 @@ public final class TableBuilder {
             }
         }
         if (pngFile == null && !hasRenderedMetadata) {
-            File directFile = new File(ctx.basePath, "rendered_frames/table_" + domId + ".png");
-            if (directFile.exists()) {
-                pngFile = directFile;
-            }
+            return null;
         }
         if (pngFile == null) return null;
 

@@ -12,7 +12,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Table
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
@@ -389,10 +388,7 @@ public class ASTStoryConverter {
                 return;
             }
 
-            if (i > 0 && items.get(i - 1) instanceof ASTTextRun) {
-                String prev = ((ASTTextRun) items.get(i - 1)).text();
-                if ("\t".equals(prev)) return;
-            }
+            if (TextFlowTabPolicy.hasTabImmediatelyBefore(items, i)) return;
             if (!enableRightmostDotLeader(para, idmlPara, idmlDoc)) return;
 
             ASTTextRun tabRun = new ASTTextRun();
@@ -712,18 +708,29 @@ public class ASTStoryConverter {
         double h = sizePt[1];
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(h));
+        ResolvedTextFrame resolvedTf = findResolvedTextFrame(resolvedData, tf.selfId());
 
         // 테두리/채우기/모서리 속성 전달 (ASTPageProcessor.createTextFrameBlock과 동일 패턴)
-        if (tf.strokeColor() != null) {
-            obj.strokeColor(colorResolver.resolve(tf.strokeColor()));
+        String strokeColor = tf.strokeColor() != null ? tf.strokeColor()
+                : (resolvedTf != null ? resolvedTf.strokeColor() : null);
+        if (strokeColor != null) {
+            obj.strokeColor(colorResolver.resolve(strokeColor));
         }
-        obj.strokeWeight(tf.strokeWeight());
+        double strokeWeight = tf.strokeWeight() > 0 ? tf.strokeWeight()
+                : (resolvedTf != null ? resolvedTf.strokeWeight() : 0);
+        obj.strokeWeight(strokeWeight);
         obj.strokeTint(tf.strokeTint());
-        if (tf.fillColor() != null) {
-            obj.fillColor(colorResolver.resolve(tf.fillColor()));
+        String fillColor = tf.fillColor() != null ? tf.fillColor()
+                : (resolvedTf != null ? resolvedTf.fillColor() : null);
+        if (fillColor != null) {
+            obj.fillColor(colorResolver.resolve(fillColor));
         }
-        obj.fillTint(tf.fillTint());
-        obj.cornerRadius(tf.cornerRadius());
+        double fillTint = tf.fillTint() > 0 ? tf.fillTint()
+                : (resolvedTf != null ? resolvedTf.fillTint() : 0);
+        obj.fillTint(fillTint);
+        double cornerRadius = tf.cornerRadius() > 0 ? tf.cornerRadius()
+                : (resolvedTf != null ? resolvedTf.cornerRadius() : 0);
+        obj.cornerRadius(cornerRadius);
         obj.verticalJustification(tf.verticalJustification());
 
         // 내부 여백 전달
@@ -735,7 +742,6 @@ public class ASTStoryConverter {
             obj.textMarginRight(CoordinateConverter.pointsToHwpunits(inset[3]));
         }
 
-        ResolvedTextFrame resolvedTf = findResolvedTextFrame(resolvedData, tf.selfId());
         ResolvedStory resolvedStory = resolvedInlineStory(resolvedData, resolvedTf);
         if (shouldUseResolvedInlineStory(inlineStory, resolvedStory)) {
             for (ASTParagraph astPara : convertResolvedInlineStory(resolvedStory, colorResolver)) {
@@ -932,69 +938,12 @@ public class ASTStoryConverter {
 
     private static List<ASTParagraph> convertResolvedInlineStory(ResolvedStory story,
                                                                   ColorResolver colorResolver) {
-        List<ASTParagraph> paragraphs = new ArrayList<>();
-        for (ResolvedParagraph resolvedPara : story.paragraphs()) {
-            ASTParagraph para = new ASTParagraph();
-            if (resolvedPara.styleName() != null) {
-                para.paragraphStyleRef(resolvedPara.styleName());
-            }
-            if (resolvedPara.justification() != null) {
-                para.alignment(resolvedPara.justification());
-            }
-            Double fixedLeading = resolvedPara.fixedLeading();
-            if (fixedLeading != null && fixedLeading > 0) {
-                para.lineSpacingType("fixed");
-                para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
-            }
-            if (resolvedPara.spaceBefore() != null && resolvedPara.spaceBefore() > 0) {
-                para.spaceBefore(CoordinateConverter.pointsToHwpunits(resolvedPara.spaceBefore()));
-            }
-            if (resolvedPara.spaceAfter() != null && resolvedPara.spaceAfter() > 0) {
-                para.spaceAfter(CoordinateConverter.pointsToHwpunits(resolvedPara.spaceAfter()));
-            }
-            if (resolvedPara.leftIndent() != null && resolvedPara.leftIndent() != 0) {
-                para.leftMargin(CoordinateConverter.pointsToHwpunits(resolvedPara.leftIndent()));
-            }
-            if (resolvedPara.rightIndent() != null && resolvedPara.rightIndent() != 0) {
-                para.rightMargin(CoordinateConverter.pointsToHwpunits(resolvedPara.rightIndent()));
-            }
-            if (resolvedPara.firstLineIndent() != null && resolvedPara.firstLineIndent() != 0) {
-                para.firstLineIndent(CoordinateConverter.pointsToHwpunits(resolvedPara.firstLineIndent()));
-            }
-            if (resolvedPara.hasTabStops()) {
-                double leftPt = resolvedPara.leftIndent() != null ? resolvedPara.leftIndent() : 0;
-                for (ResolvedTabStop tabStop : resolvedPara.tabStops()) {
-                    if (tabStop.position() == null || tabStop.position() <= 0) continue;
-                    double posPt = tabStop.position() - leftPt;
-                    if (posPt < 0) posPt = 0;
-                    para.addTabStop(new ASTTabStop(
-                            CoordinateConverter.pointsToHwpunits(posPt),
-                            mapTabAlignment(tabStop.alignment()),
-                            tabStop.leader()));
-                }
-            }
-            addResolvedRuns(para, resolvedPara, colorResolver);
-            paragraphs.add(para);
-        }
-        return paragraphs;
-    }
-
-    private static void addResolvedRuns(ASTParagraph para,
-                                        ResolvedParagraph resolvedPara,
-                                        ColorResolver colorResolver) {
-        if (resolvedPara.runs() == null) return;
-        for (ResolvedRun resolvedRun : resolvedPara.runs()) {
-            TextRunSegmenter.Result result = TextRunSegmenter.fromResolvedRun(
-                    resolvedRun,
-                    colorResolver,
-                    para.hasTabStops(),
-                    false,
-                    true);
-            for (ASTTextRun run : result.runs()) {
-                para.addItem(run);
-            }
-            if (result.stopAfterRun()) break;
-        }
+        return ResolvedTextFlowAstConverter.convertStory(
+                story,
+                ResolvedTextFlowAstConverter.options()
+                        .colorResolver(colorResolver != null ? colorResolver::resolve : null)
+                        .copyTabStops(true)
+                        .truncateAtParagraphBreak(true));
     }
 
     /**

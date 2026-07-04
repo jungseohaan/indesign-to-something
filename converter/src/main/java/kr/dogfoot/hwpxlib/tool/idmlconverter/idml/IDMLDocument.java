@@ -15,7 +15,7 @@ public class IDMLDocument {
     private Map<String, String> colors;
     private Map<String, String[]> objectStyles; // selfRef → [strokeColor, strokeWeight, strokeTint]
     private Map<String, Double> objectStyleCornerRadii; // selfRef → cornerRadius (pt)
-    private Map<String, double[]> cellStyleInsets; // selfRef → [top, left, bottom, right] (pt)
+    private Map<String, CellStyleInfo> cellStyles; // selfRef → table cell style metadata
     private Map<String, double[]> dashedStrokeStyles; // selfRef → dashArray (e.g., [3, 2])
     private Set<String> hiddenLayerIds;
     private List<String> layerOrder;  // 레이어 ID 목록 (front-to-back, designmap.xml 순서)
@@ -35,7 +35,7 @@ public class IDMLDocument {
         this.colors = new LinkedHashMap<String, String>();
         this.objectStyles = new LinkedHashMap<String, String[]>();
         this.objectStyleCornerRadii = new LinkedHashMap<String, Double>();
-        this.cellStyleInsets = new LinkedHashMap<String, double[]>();
+        this.cellStyles = new LinkedHashMap<String, CellStyleInfo>();
         this.dashedStrokeStyles = new LinkedHashMap<String, double[]>();
         this.hiddenLayerIds = new HashSet<String>();
         this.layerOrder = new ArrayList<String>();
@@ -116,13 +116,49 @@ public class IDMLDocument {
         return v != null ? v : 0;
     }
 
-    /** CellStyle: selfRef → [top, left, bottom, right] text insets (pt) */
-    public void putCellStyleInsets(String selfRef, double top, double left, double bottom, double right) {
+    public static class CellStyleInfo {
+        private final double[] insets;
+        private final String firstBaselineOffset;
+        private final Double minimumFirstBaselineOffset;
+        private final String verticalJustification;
+
+        public CellStyleInfo(double top, double left, double bottom, double right,
+                             String firstBaselineOffset,
+                             Double minimumFirstBaselineOffset,
+                             String verticalJustification) {
+            this.insets = new double[]{top, left, bottom, right};
+            this.firstBaselineOffset = firstBaselineOffset;
+            this.minimumFirstBaselineOffset = minimumFirstBaselineOffset;
+            this.verticalJustification = verticalJustification;
+        }
+
+        public double[] insets() { return insets; }
+        public String firstBaselineOffset() { return firstBaselineOffset; }
+        public Double minimumFirstBaselineOffset() { return minimumFirstBaselineOffset; }
+        public String verticalJustification() { return verticalJustification; }
+    }
+
+    /** CellStyle: selfRef → table cell style metadata */
+    public void putCellStyle(String selfRef, double top, double left, double bottom, double right,
+                             String firstBaselineOffset,
+                             Double minimumFirstBaselineOffset,
+                             String verticalJustification) {
         if (selfRef == null || selfRef.isEmpty()) return;
-        cellStyleInsets.put(selfRef, new double[]{top, left, bottom, right});
+        cellStyles.put(selfRef, new CellStyleInfo(top, left, bottom, right,
+                firstBaselineOffset, minimumFirstBaselineOffset, verticalJustification));
+    }
+
+    public CellStyleInfo getCellStyle(String selfRef) {
+        return selfRef != null ? cellStyles.get(selfRef) : null;
+    }
+
+    /** Compatibility helper for older callers that only need [top,left,bottom,right]. */
+    public void putCellStyleInsets(String selfRef, double top, double left, double bottom, double right) {
+        putCellStyle(selfRef, top, left, bottom, right, null, null, null);
     }
     public double[] getCellStyleInsets(String selfRef) {
-        return selfRef != null ? cellStyleInsets.get(selfRef) : null;
+        CellStyleInfo style = getCellStyle(selfRef);
+        return style != null ? style.insets() : null;
     }
 
     /** DashedStrokeStyle: selfRef → dashArray */

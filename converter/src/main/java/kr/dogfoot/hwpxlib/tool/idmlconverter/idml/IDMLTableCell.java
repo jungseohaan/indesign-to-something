@@ -43,6 +43,8 @@ public class IDMLTableCell {
 
     // Vertical alignment: TopAlign, CenterAlign, BottomAlign, JustifyAlign
     private String verticalJustification;
+    private String firstBaselineOffset;
+    private double minimumFirstBaselineOffset;
 
     public IDMLTableCell() {
         this.paragraphs = new ArrayList<>();
@@ -54,6 +56,8 @@ public class IDMLTableCell {
         this.leftInset = 4;
         this.rightInset = 4;
         this.verticalJustification = "TopAlign";
+        this.firstBaselineOffset = null;
+        this.minimumFirstBaselineOffset = 0;
     }
 
     public static class CellBorder {
@@ -136,6 +140,12 @@ public class IDMLTableCell {
 
     public String verticalJustification() { return verticalJustification; }
     public void verticalJustification(String v) { this.verticalJustification = v; }
+
+    public String firstBaselineOffset() { return firstBaselineOffset; }
+    public void firstBaselineOffset(String v) { this.firstBaselineOffset = v; }
+
+    public double minimumFirstBaselineOffset() { return minimumFirstBaselineOffset; }
+    public void minimumFirstBaselineOffset(double v) { this.minimumFirstBaselineOffset = v; }
 
     /**
      * Check if this is a merged cell (spans more than 1 row or column).

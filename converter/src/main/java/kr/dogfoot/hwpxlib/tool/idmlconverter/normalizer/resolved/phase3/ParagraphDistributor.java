@@ -24,82 +24,8 @@ class ParagraphDistributor {
 
     private ParagraphDistributor() {}
 
-    /**
-     * composedLines 문자 범위 기반 단락 분배.
-     * 각 블록의 composedCharStart~composedCharEnd 범위에 해당하는 단락을 할당.
-     */
-    private static void distributeByComposedCharRange(ResolvedBuildContext ctx, List<ASTParagraph> paragraphs,
-                                                List<ASTTextFrameBlock> blocks) {
-        // 전체 단락 텍스트를 연속 문자열로 합침
-        StringBuilder sb = new StringBuilder();
-        List<int[]> paraRanges = new ArrayList<>();
-        for (ASTParagraph p : paragraphs) {
-            int s = sb.length();
-            String pt = ParagraphTextHelpers.getParaPlainText(p);
-            sb.append(pt != null ? pt : "");
-            paraRanges.add(new int[]{s, sb.length()});
-        }
-
-        // 범위 겹침 기반 분배 (단락이 블록 경계를 걸치면 분할)
-        for (ASTTextFrameBlock block : blocks) {
-            int blockStart = block.composedCharStart();
-            int blockEnd = block.composedCharEnd();
-            if (blockStart < 0) continue;
-
-            // YGapSplit 블록: composedCharStart/End가 paraIndex 범위를 의미
-            boolean isYGapBlock = block.sourceId() != null && block.sourceId().contains("_g");
-            if (isYGapBlock) {
-                for (int i = 0; i < paragraphs.size(); i++) {
-                    if (i >= blockStart && i <= blockEnd) {
-                        block.addParagraph(paragraphs.get(i));
-                    }
-                }
-                continue;
-            }
-
-            for (int i = 0; i < paragraphs.size(); i++) {
-                int paraStart = paraRanges.get(i)[0];
-                int paraEnd = paraRanges.get(i)[1];
-
-                if (paraEnd <= blockStart) continue; // 단락이 블록 이전
-                if (paraStart >= blockEnd) break;    // 단락이 블록 이후
-
-                if (paraStart >= blockStart && paraEnd <= blockEnd) {
-                    // 단락이 블록 안에 완전히 포함
-                    block.addParagraph(paragraphs.get(i));
-                } else if (paraStart < blockEnd && paraEnd > blockEnd) {
-                    // 단락이 블록 끝을 넘김 → 앞부분만
-                    int cutLen = blockEnd - paraStart;
-                    ASTParagraph trimmed = ParagraphTextHelpers.createSplitParagraph(paragraphs.get(i),
-                            ParagraphTextHelpers.getParaPlainText(paragraphs.get(i)) != null
-                                    ? ParagraphTextHelpers.getParaPlainText(paragraphs.get(i)).substring(0, Math.min(cutLen, ParagraphTextHelpers.getParaPlainText(paragraphs.get(i)).length()))
-                                    : "");
-                    if (trimmed != null) block.addParagraph(trimmed);
-                } else if (paraStart < blockStart && paraEnd > blockStart) {
-                    // 이전 블록에서 시작된 단락의 나머지
-                    int skipLen = blockStart - paraStart;
-                    String fullText = ParagraphTextHelpers.getParaPlainText(paragraphs.get(i));
-                    String contText = (fullText != null && skipLen < fullText.length())
-                            ? fullText.substring(skipLen) : "";
-                    ASTParagraph cont = ParagraphTextHelpers.createContinuationParagraph(paragraphs.get(i), skipLen, contText);
-                    if (cont != null) block.addParagraph(cont);
-                }
-            }
-        }
-    }
-
     static void distributeParagraphs(ResolvedBuildContext ctx, List<ASTParagraph> paragraphs,
                                        List<ASTTextFrameBlock> blocks, String storyId) {
-        // composedLines 분할 블록 감지: composedCharStart >= 0인 블록이 있으면
-        boolean hasComposedBlocks = false;
-        for (ASTTextFrameBlock b : blocks) {
-            if (b.composedCharStart() >= 0) { hasComposedBlocks = true; break; }
-        }
-        if (hasComposedBlocks) {
-            distributeByComposedCharRange(ctx, paragraphs, blocks);
-            return;
-        }
-
         // 단일 프레임: frameVisibleText와 Story 텍스트 길이 비교
         if (blocks.size() == 1) {
             ASTTextFrameBlock block = blocks.get(0);
@@ -115,13 +41,7 @@ class ParagraphDistributor {
                 // Story가 20자 이상인데 프레임에 보이는 텍스트가 0~1자 → 오버플로우/미표시 프레임
                 return;
             }
-            int skip1 = Math.max(0, block.skipParagraphs());
-            java.util.Set<Integer> excl1 = block.excludedParagraphIndices();
-            int idx1 = 0;
             for (ASTParagraph p : paragraphs) {
-                int curIdx = idx1++;
-                if (curIdx < skip1) continue;
-                if (excl1 != null && excl1.contains(curIdx)) continue;
                 block.addParagraph(p);
             }
             return;
@@ -221,10 +141,7 @@ class ParagraphDistributor {
                 }
                 int start = (rtf != null) ? Math.max(0, rtf.paragraphStart()) : 0;
                 int end = (rtf != null && rtf.paragraphEnd() >= 0) ? rtf.paragraphEnd() : paragraphs.size() - 1;
-                start += Math.max(0, block.skipParagraphs());
-                java.util.Set<Integer> excl2 = block.excludedParagraphIndices();
                 for (int i = start; i <= end && i < paragraphs.size(); i++) {
-                    if (excl2 != null && excl2.contains(i)) continue;
                     block.addParagraph(paragraphs.get(i));
                 }
                 continue;
@@ -258,14 +175,6 @@ class ParagraphDistributor {
                     if (continuation != null) {
                         block.addParagraph(continuation);
                     }
-                }
-            }
-            // 타이틀 오버레이로 첫 N 단락 숨기기
-            int sk = block.skipParagraphs();
-            if (sk > 0 && !block.paragraphs().isEmpty()) {
-                int rem = Math.min(sk, block.paragraphs().size());
-                for (int s = 0; s < rem; s++) {
-                    block.paragraphs().remove(0);
                 }
             }
         }

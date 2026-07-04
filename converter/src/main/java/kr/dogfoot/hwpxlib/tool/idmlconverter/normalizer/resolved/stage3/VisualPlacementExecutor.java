@@ -4,7 +4,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
@@ -23,24 +24,40 @@ public final class VisualPlacementExecutor {
             RenderedGroup rg,
             PreparedVisualImage image,
             VisualPlacementPlan plan) {
+        ObjectPlan ownershipPlan = ctx != null && rg != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        return place(ctx, section, rg, image, plan, ownershipPlan);
+    }
+
+    public static PlacementResult place(
+            ResolvedBuildContext ctx,
+            ASTSection section,
+            RenderedGroup rg,
+            PreparedVisualImage image,
+            VisualPlacementPlan plan,
+            ObjectPlan ownershipPlan) {
         if (ctx == null || section == null || rg == null || image == null || plan == null
                 || !plan.hasPositiveSize()) {
             return PlacementResult.notPlaced();
         }
 
-        if (ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL) {
+        ShellRole shellRole = ShellRole.from(ownershipPlan);
+        if (shellRole != ShellRole.NONE) {
             ASTFigure fig = buildFigure(rg, image, plan);
-            addTextShellBehindTextAbovePageBackground(section, fig);
+            addVisualByPlannedOrder(section, fig);
             ctx.markRenderedVisualHandled(rg.id());
-            ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
-                    "PLACE_TEXT_SHELL_FIGURE",
-                    "placed extracted InDesign textless shell as ASTFigure; editable text is owned by Stage2 HWPX TF");
+            ctx.recordRenderedDecision(rg, ownershipPlan, "Stage3.VisualBuilder.Phase6",
+                    "PLACE_" + shellRole.name(),
+                    "placed planned " + shellRole.name() + " as ASTFigure");
             return PlacementResult.textShellPlaced();
         }
 
         ASTFigure fig = buildFigure(rg, image, plan);
-        section.addBlockAtFront(fig);
-        ctx.recordRenderedDecision(rg, "Phase6", "PLACE", "placed as ASTFigure");
+        addVisualByPlannedOrder(section, fig);
+        String decision = ownershipPlan != null
+                && ownershipPlan.materialization == kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization.TEXTLESS_VISUAL_FRAGMENT
+                ? "PLACE_TEXTLESS_VISUAL_FRAGMENT"
+                : "PLACE";
+        ctx.recordRenderedDecision(rg, ownershipPlan, "Phase6", decision, "placed as ASTFigure");
         return PlacementResult.figurePlaced();
     }
 
@@ -62,39 +79,22 @@ public final class VisualPlacementExecutor {
         if (plan.visualLayer != null) {
             fig.visualLayer(plan.visualLayer);
         }
+        fig.sourceLayerIndex(plan.sourceLayerIndex);
         fig.fromGroup(plan.fromGroup);
         fig.sourceId("page_obj_" + rg.id());
         return fig;
     }
 
-    private static void addTextShellBehindTextAbovePageBackground(ASTSection section, ASTFigure fig) {
+    private static void addVisualByPlannedOrder(ASTSection section, ASTFigure fig) {
         int index = 0;
         while (index < section.blocks().size()) {
             ASTBlock block = section.blocks().get(index);
             if (!(block instanceof ASTFigure)) break;
             ASTFigure existing = (ASTFigure) block;
-            if (visualOrderRank(existing) > visualOrderRank(fig)) break;
-            if (visualOrderRank(existing) == visualOrderRank(fig)
-                    && existing.zOrder() > fig.zOrder()) {
-                break;
-            }
+            if (existing.zOrder() < fig.zOrder()) break;
             index++;
         }
         section.blocks().add(index, fig);
-    }
-
-    private static int visualOrderRank(ASTFigure fig) {
-        if (fig == null) return 2;
-        String layer = fig.visualLayer();
-        if ("PAGE_BACKGROUND".equals(layer)) return 0;
-        if (fig.zOrder() <= -5000) return 0;
-        if ("CONTAINER_BACKDROP".equals(layer)
-                || "TEXT_CARD_BACKDROP".equals(layer)
-                || "LABEL_BACKDROP".equals(layer)
-                || "LABEL_OVERLAY_BACKDROP".equals(layer)) {
-            return 1;
-        }
-        return 2;
     }
 
     public static final class PlacementResult {

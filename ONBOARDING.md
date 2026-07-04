@@ -83,10 +83,9 @@ Adobe InDesign(`.indd` / `.idml`) 문서를 한글(`.hwpx`)로 변환한다.
 mvn clean package -q -DskipTests
 # 결과: target/idml-to-something-1.0.9-cli.jar
 
-# CLI 변환 (항상 --resolved + --links-directory 권장)
+# CLI 변환 (resolved.json은 output.idml 옆에서 자동 탐지)
 /opt/homebrew/opt/openjdk/bin/java -jar target/idml-to-something-1.0.9-cli.jar \
   --convert output.idml out.hwpx \
-  --resolved resolved.json \
   --links-directory /path/to/Links
 
 # Desktop 개발 모드
@@ -117,7 +116,7 @@ cd desktop && npm run tauri dev
 
 - 커밋 메시지: **한글**, 기능 설명 중심
 - **SPEC 기반 개발 워크플로우** 선호 (`docs/specs/SPEC-NNN-*.md`)
-- CLI 테스트 시 **반드시 `--resolved` + `--links-directory`** 포함
+- CLI 테스트 시 `resolved.json`은 `output.idml` 옆에 두고, `--links-directory`만 명시
 - 한컴바탕 폰트 **절대 사용 금지**
 
 ## 9. 새 SPEC 시작 시

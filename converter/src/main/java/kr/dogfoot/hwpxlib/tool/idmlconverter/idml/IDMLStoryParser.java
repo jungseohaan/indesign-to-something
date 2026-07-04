@@ -235,14 +235,23 @@ public class IDMLStoryParser {
 
         // Cell insets/padding: direct Cell attributes override AppliedCellStyle,
         // then InDesign's default 4pt is used as the final fallback.
-        double[] styleInsets = doc != null ? doc.getCellStyleInsets(cell.appliedCellStyle()) : null;
+        IDMLDocument.CellStyleInfo styleInfo = doc != null ? doc.getCellStyle(cell.appliedCellStyle()) : null;
+        double[] styleInsets = styleInfo != null ? styleInfo.insets() : null;
         cell.topInset(parseCellInset(cellElem, "TextTopInset", styleInsets, 0, 4));
         cell.bottomInset(parseCellInset(cellElem, "TextBottomInset", styleInsets, 2, 4));
         cell.leftInset(parseCellInset(cellElem, "TextLeftInset", styleInsets, 1, 4));
         cell.rightInset(parseCellInset(cellElem, "TextRightInset", styleInsets, 3, 4));
 
         // Vertical justification
-        cell.verticalJustification(getAttrOrNull(cellElem, "VerticalJustification"));
+        cell.verticalJustification(firstStringAttr(cellElem, "VerticalJustification",
+                styleInfo != null ? styleInfo.verticalJustification() : null,
+                "TopAlign"));
+        cell.firstBaselineOffset(firstStringAttr(cellElem, "FirstBaselineOffset",
+                styleInfo != null ? styleInfo.firstBaselineOffset() : null,
+                null));
+        cell.minimumFirstBaselineOffset(firstDoubleAttr(cellElem, "MinimumFirstBaselineOffset",
+                styleInfo != null ? styleInfo.minimumFirstBaselineOffset() : null,
+                0));
 
         // Cell borders (각 변의 테두리 속성)
         cell.topBorder(parseCellBorder(cellElem, "TopEdge"));
@@ -302,6 +311,22 @@ public class IDMLStoryParser {
             return styleInsets[styleIndex];
         }
         return fallback;
+    }
+
+    private static String firstStringAttr(Element elem, String attrName, String inherited, String fallback) {
+        if (elem != null && elem.hasAttribute(attrName)) {
+            String v = getAttrOrNull(elem, attrName);
+            if (v != null && !v.isEmpty()) return v;
+        }
+        if (inherited != null && !inherited.isEmpty()) return inherited;
+        return fallback;
+    }
+
+    private static double firstDoubleAttr(Element elem, String attrName, Double inherited, double fallback) {
+        if (elem != null && elem.hasAttribute(attrName)) {
+            return parseDoubleAttrDef(elem, attrName, fallback);
+        }
+        return inherited != null ? inherited : fallback;
     }
 
     /**

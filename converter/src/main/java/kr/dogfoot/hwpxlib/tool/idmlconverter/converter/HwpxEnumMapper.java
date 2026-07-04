@@ -45,10 +45,24 @@ public final class HwpxEnumMapper {
      */
     public static VerticalAlign2 mapVerticalJustification(String vj) {
         if (vj == null) return VerticalAlign2.TOP;
-        switch (vj.toLowerCase()) {
-            case "centeralign": case "center": case "center_align": return VerticalAlign2.CENTER;
-            default: return VerticalAlign2.TOP;
+        switch (normalizeEnumToken(vj)) {
+            case "center":
+            case "centeralign":
+                return VerticalAlign2.CENTER;
+            case "bottom":
+            case "bottomalign":
+                return VerticalAlign2.BOTTOM;
+            default:
+                return VerticalAlign2.TOP;
         }
+    }
+
+    private static String normalizeEnumToken(String value) {
+        if (value == null) return "";
+        return value.toLowerCase()
+                .replace("_", "")
+                .replace("-", "")
+                .replace(" ", "");
     }
 
     /**

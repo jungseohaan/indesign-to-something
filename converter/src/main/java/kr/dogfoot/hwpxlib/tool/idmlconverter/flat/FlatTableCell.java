@@ -32,6 +32,8 @@ public class FlatTableCell {
     private long marginLeft;
     private long marginRight;
     private String verticalAlign = "TopAlign";
+    private String firstBaselineOffset;
+    private long minimumFirstBaselineOffset;
 
     public FlatTableCell() {
         this.componentIds = new ArrayList<>();
@@ -97,6 +99,12 @@ public class FlatTableCell {
 
     public String verticalAlign() { return verticalAlign; }
     public void verticalAlign(String v) { this.verticalAlign = v; }
+
+    public String firstBaselineOffset() { return firstBaselineOffset; }
+    public void firstBaselineOffset(String v) { this.firstBaselineOffset = v; }
+
+    public long minimumFirstBaselineOffset() { return minimumFirstBaselineOffset; }
+    public void minimumFirstBaselineOffset(long v) { this.minimumFirstBaselineOffset = v; }
 
     /**
      * 셀 테두리 정보.

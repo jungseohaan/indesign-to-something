@@ -54,10 +54,22 @@ final class SingleColumnTableConverter {
                                            long x, long y, long w, long h,
                                            java.util.List<ASTParagraph> paragraphs,
                                            boolean suppressBorder) {
+        convertSingleColumnTable(framePara, block, x, y, w, h, paragraphs, suppressBorder,
+                block.insetLeft(), block.insetRight(), block.insetTop(), block.insetBottom());
+    }
+
+    void convertSingleColumnTable(Para framePara, ASTTextFrameBlock block,
+                                           long x, long y, long w, long h,
+                                           java.util.List<ASTParagraph> paragraphs,
+                                           boolean suppressBorder,
+                                           long cellMarginLeft,
+                                           long cellMarginRight,
+                                           long cellMarginTop,
+                                           long cellMarginBottom) {
         // overflow 방지 높이 축소: resolved 기반 파이프라인에서는 geometricBounds가 정확하므로 비활성화
         // (레거시 파이프라인용 코드, 새 파이프라인에서는 필요 없음)
 
-        w = expandWidthForDotLeaderTabs(block, paragraphs, w);
+        w = expandWidthForDotLeaderTabs(block, paragraphs, w, cellMarginLeft, cellMarginRight);
 
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -127,7 +139,7 @@ final class SingleColumnTableConverter {
 
         // 인라인 텍스트 프레임 균등 분배: 연속 단락에 각각 1개씩 인라인 TextFrame이 있으면
         // 부모 컨테이너 폭 기준으로 균등 분배
-        ctx.currentContainerWidth = w - block.insetLeft() - block.insetRight();
+        ctx.currentContainerWidth = w - cellMarginLeft - cellMarginRight;
         HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(paragraphs, ctx.currentContainerWidth);
 
         // lineSpacing이 셀 높이를 초과하면 셀 높이로 제한.
@@ -149,10 +161,10 @@ final class SingleColumnTableConverter {
         String cellBfId = suppressBorder ? "1" : textBoxBuilder.createTextFrameBorderFill(block);
 
         // 테이블 속성
-        // This 1x1 table is a text-frame carrier, not a semantic table.
-        // Let page breaks happen inside the carrier so paragraphs after inline tables
-        // continue from the visible table row instead of reserving the whole cell.
-        table.pageBreakAnd(TablePageBreak.TABLE)
+        // This 1x1 table is a fixed-position text-frame carrier, not a semantic table.
+        // It must not participate in HWP table pagination: full-page background/shell
+        // carriers can otherwise reserve an extra page before the section break.
+        table.pageBreakAnd(TablePageBreak.NONE)
                 .repeatHeaderAnd(false)
                 .rowCntAnd((short) 1)
                 .colCntAnd((short) 1)
@@ -171,8 +183,8 @@ final class SingleColumnTableConverter {
         // 블록 위치 추적 (오버레이 좌표 계산용)
         ctx.blockPageX = x;
         ctx.blockPageY = y;
-        ctx.blockInsetLeft = block.insetLeft();
-        ctx.blockInsetTop = block.insetTop();
+        ctx.blockInsetLeft = cellMarginLeft;
+        ctx.blockInsetTop = cellMarginTop;
         ctx.cellContentYCursor = 0;
 
         Tr tr = table.addNewTr();
@@ -192,10 +204,10 @@ final class SingleColumnTableConverter {
         tc.createCellSz();
         tc.cellSz().widthAnd(w).heightAnd(h);
         tc.createCellMargin();
-        tc.cellMargin().leftAnd(block.insetLeft())
-                .rightAnd(block.insetRight())
-                .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
+        tc.cellMargin().leftAnd(cellMarginLeft)
+                .rightAnd(cellMarginRight)
+                .topAnd(cellMarginTop)
+                .bottomAnd(cellMarginBottom);
 
         tc.createSubList();
         SubList subList = tc.subList();
@@ -230,7 +242,9 @@ final class SingleColumnTableConverter {
 
     private long expandWidthForDotLeaderTabs(ASTTextFrameBlock block,
                                              java.util.List<ASTParagraph> paragraphs,
-                                             long width) {
+                                             long width,
+                                             long cellMarginLeft,
+                                             long cellMarginRight) {
         if (block == null || paragraphs == null || paragraphs.isEmpty()) return width;
         final long safetyPad = 500L; // 5pt: HWP tab leader/right edge clipping guard.
         long requiredInnerWidth = 0L;
@@ -247,7 +261,7 @@ final class SingleColumnTableConverter {
             }
         }
         if (requiredInnerWidth <= 0L) return width;
-        long requiredOuterWidth = block.insetLeft() + requiredInnerWidth + block.insetRight() + safetyPad;
+        long requiredOuterWidth = cellMarginLeft + requiredInnerWidth + cellMarginRight + safetyPad;
         return Math.max(width, requiredOuterWidth);
     }
 

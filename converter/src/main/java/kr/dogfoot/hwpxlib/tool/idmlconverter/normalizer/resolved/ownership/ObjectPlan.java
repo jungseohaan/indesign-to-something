@@ -25,6 +25,7 @@ public final class ObjectPlan {
     public final String reason;
     public final String file;
     public final double[] bounds;
+    public final double[] renderSourceBounds;
     public final String sourceLayerId;
     public final String sourceLayerName;
     public final int sourceLayerIndex;
@@ -93,7 +94,7 @@ public final class ObjectPlan {
         this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
                 renderId, sourceObjectIds, visualSourceObjectIds, null, ownedTextFrameIds,
                 descendantVisualObjectIds, sourceBundleKey, null, null, null, zOrder, reason,
-                file, bounds, sourceLayerId, sourceLayerName, sourceLayerIndex);
+                file, bounds, null, sourceLayerId, sourceLayerName, sourceLayerIndex);
     }
 
     public ObjectPlan(
@@ -118,6 +119,39 @@ public final class ObjectPlan {
             String reason,
             String file,
             double[] bounds,
+            String sourceLayerId,
+            String sourceLayerName,
+            int sourceLayerIndex) {
+        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
+                renderId, sourceObjectIds, visualSourceObjectIds, styleSourceObjectIds,
+                ownedTextFrameIds, descendantVisualObjectIds, sourceBundleKey,
+                materialization, coordinateSpace, anchorOwner, zOrder, reason, file,
+                bounds, null, sourceLayerId, sourceLayerName, sourceLayerIndex);
+    }
+
+    public ObjectPlan(
+            int domId,
+            String kind,
+            int pageIndex,
+            TextAction textAction,
+            VisualAction visualAction,
+            VisualLayer visualLayer,
+            Placement placement,
+            Integer renderId,
+            int[] sourceObjectIds,
+            int[] visualSourceObjectIds,
+            int[] styleSourceObjectIds,
+            int[] ownedTextFrameIds,
+            int[] descendantVisualObjectIds,
+            String sourceBundleKey,
+            Materialization materialization,
+            CoordinateSpace coordinateSpace,
+            String anchorOwner,
+            int zOrder,
+            String reason,
+            String file,
+            double[] bounds,
+            double[] renderSourceBounds,
             String sourceLayerId,
             String sourceLayerName,
             int sourceLayerIndex) {
@@ -154,6 +188,9 @@ public final class ObjectPlan {
         this.reason = reason;
         this.file = file;
         this.bounds = bounds != null ? Arrays.copyOf(bounds, bounds.length) : null;
+        this.renderSourceBounds = renderSourceBounds != null
+                ? Arrays.copyOf(renderSourceBounds, renderSourceBounds.length)
+                : null;
         this.sourceLayerId = sourceLayerId;
         this.sourceLayerName = sourceLayerName;
         this.sourceLayerIndex = sourceLayerIndex;
@@ -190,6 +227,10 @@ public final class ObjectPlan {
                 || textAction == TextAction.HIDDEN_SEMANTIC;
     }
 
+    public ShellRole shellRole() {
+        return ShellRole.from(this);
+    }
+
     public PolicyLayer visualPolicyLayer() {
         if (!hasVisibleVisual()) {
             return hasVisibleText() ? PolicyLayer.TEXT : PolicyLayer.CONTENT;
@@ -200,11 +241,15 @@ public final class ObjectPlan {
         }
         if (visualLayer == VisualLayer.TEXT_CARD_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_FACE
+                || visualLayer == VisualLayer.LABEL_CONNECTOR_BACKDROP
                 || visualLayer == VisualLayer.LABEL_BACKDROP
                 || visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || visualLayer == VisualLayer.FOREGROUND_MASK) {
             return PolicyLayer.DECORATION;
+        }
+        if (visualLayer == VisualLayer.CONTENT_BACKDROP) {
+            return PolicyLayer.CONTENT;
         }
         return PolicyLayer.CONTENT;
     }
@@ -232,6 +277,7 @@ public final class ObjectPlan {
                 newReason != null ? newReason : reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -260,6 +306,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -288,6 +335,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -316,6 +364,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -346,6 +395,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -374,6 +424,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -402,6 +453,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -430,6 +482,36 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withStyleSourceObjectIds(int[] newStyleSourceObjectIds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                newStyleSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -458,6 +540,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -486,6 +569,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -514,6 +598,7 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -542,6 +627,94 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds,
+                renderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withBounds(double[] newBounds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                newBounds,
+                renderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withRenderSourceBounds(double[] newRenderSourceBounds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                newRenderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withPageIndexAndBounds(int newPageIndex, double[] newBounds, String newReason) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                newPageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                newReason != null ? newReason : reason,
+                file,
+                newBounds != null ? newBounds : bounds,
+                renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -576,6 +749,45 @@ public final class ObjectPlan {
                 newReason != null ? newReason : reason,
                 newFile != null ? newFile : file,
                 newBounds != null ? newBounds : bounds,
+                renderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withVisibleMaterialFrom(ObjectPlan materialPlan, String newReason) {
+        if (materialPlan == null) return this;
+        int[] newVisualSourceObjectIds = materialPlan.visualSourceObjectIds != null
+                && materialPlan.visualSourceObjectIds.length > 0
+                ? materialPlan.visualSourceObjectIds
+                : materialPlan.sourceObjectIds;
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                newVisualSourceObjectIds,
+                styleSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialPlan.materialization != null
+                        ? materialPlan.materialization
+                        : materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                newReason != null ? newReason : reason,
+                materialPlan.file != null ? materialPlan.file : file,
+                bounds,
+                materialPlan.renderSourceBounds != null
+                        ? materialPlan.renderSourceBounds
+                        : renderSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
                 sourceLayerIndex);
@@ -614,6 +826,13 @@ public final class ObjectPlan {
                     .append(bounds[1]).append(',')
                     .append(bounds[2]).append(',')
                     .append(bounds[3]).append(']');
+        }
+        if (renderSourceBounds != null && renderSourceBounds.length >= 4) {
+            sb.append(",\"renderSourceBounds\":[")
+                    .append(renderSourceBounds[0]).append(',')
+                    .append(renderSourceBounds[1]).append(',')
+                    .append(renderSourceBounds[2]).append(',')
+                    .append(renderSourceBounds[3]).append(']');
         }
         sb.append('}');
         return sb.toString();

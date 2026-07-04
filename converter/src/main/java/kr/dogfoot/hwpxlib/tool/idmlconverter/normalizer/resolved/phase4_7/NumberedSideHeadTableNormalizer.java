@@ -19,7 +19,8 @@ import java.util.List;
  * Stage 1 {@code SideHeadFlowPlan}을 실행하는 bridge.
  *
  * <p>새 visible 객체를 만들지 않고, Stage 2/4가 이미 생성한 테이블 셀/문단/인라인 라벨을
- * 재배치한다. 페이지/문구 예외 없이 plan된 source table만 재구성한다.</p>
+ * 재배치한다. 페이지/문구 예외 없이 plan된 source table만 재구성한다.
+ * Unplanned structural candidates are diagnostics only.</p>
  */
 public final class NumberedSideHeadTableNormalizer {
 
@@ -35,18 +36,14 @@ public final class NumberedSideHeadTableNormalizer {
         for (ASTSection section : sections) {
             if (section == null || section.blocks() == null) continue;
             for (ASTBlock block : section.blocks()) {
-            if (!(block instanceof ASTTable)) continue;
+                if (!(block instanceof ASTTable)) continue;
                 ASTTable table = (ASTTable) block;
                 boolean planned = ctx != null && ctx.isSideHeadFlowTableSource(table.sourceId());
-                if (normalize(table)) {
-                    changed++;
-                    if (!planned && ctx != null && ctx.ownershipWarningLines != null) {
-                        ctx.ownershipWarningLines.add("{\"code\":\"SIDE_HEAD_FLOW_UNPLANNED_BRIDGE\","
-                                + "\"detail\":\"Stage4 bridge normalized structural side-head table"
-                                + " without Stage1 SideHeadFlowPlan; sourceId="
-                                + escape(table.sourceId()) + "\"}");
-                    }
+                if (!planned) {
+                    warnUnplannedCandidate(ctx, table);
+                    continue;
                 }
+                if (normalize(table)) changed++;
             }
         }
         if (changed > 0) {
@@ -63,24 +60,14 @@ public final class NumberedSideHeadTableNormalizer {
     }
 
     private static boolean normalize(ASTTable table) {
-        if (table == null || table.colCount() != 1 || table.rows() == null || table.rows().size() < 2) {
-            return false;
-        }
-        if (table.columnWidths() == null || table.columnWidths().size() != 1) return false;
-        ASTTableRow firstRow = table.rows().get(0);
-        ASTTableRow bodyRow = table.rows().get(1);
-        if (!singleCellRow(firstRow) || !singleCellRow(bodyRow)) return false;
-
-        ASTTableCell firstCell = firstRow.cells().get(0);
-        ASTTableCell bodyCell = bodyRow.cells().get(0);
-        if (firstCell.paragraphs() == null || firstCell.paragraphs().size() != 1) return false;
-        if (!hasSubstantiveParagraph(bodyCell)) return false;
-
-        SplitHead split = splitNumberAndHead(firstCell.paragraphs().get(0));
+        SplitHead split = splitPlan(table);
         if (split == null) return false;
 
+        ASTTableRow firstRow = table.rows().get(0);
+        ASTTableRow bodyRow = table.rows().get(1);
+        ASTTableCell firstCell = firstRow.cells().get(0);
+        ASTTableCell bodyCell = bodyRow.cells().get(0);
         long originalWidth = table.columnWidths().get(0);
-        if (originalWidth <= 0) return false;
         long sideWidth = sideColumnWidth(originalWidth, split.numberWidthHint);
         long rightWidth = originalWidth;
         long newWidth = sideWidth + rightWidth;
@@ -133,6 +120,37 @@ public final class NumberedSideHeadTableNormalizer {
             cell.width(newWidth);
         }
         return true;
+    }
+
+    private static SplitHead splitPlan(ASTTable table) {
+        if (table == null || table.colCount() != 1 || table.rows() == null || table.rows().size() < 2) {
+            return null;
+        }
+        if (table.columnWidths() == null || table.columnWidths().size() != 1) return null;
+        ASTTableRow firstRow = table.rows().get(0);
+        ASTTableRow bodyRow = table.rows().get(1);
+        if (!singleCellRow(firstRow) || !singleCellRow(bodyRow)) return null;
+
+        ASTTableCell firstCell = firstRow.cells().get(0);
+        ASTTableCell bodyCell = bodyRow.cells().get(0);
+        if (firstCell.paragraphs() == null || firstCell.paragraphs().size() != 1) return null;
+        if (!hasSubstantiveParagraph(bodyCell)) return null;
+
+        SplitHead split = splitNumberAndHead(firstCell.paragraphs().get(0));
+        if (split == null) return null;
+
+        long originalWidth = table.columnWidths().get(0);
+        if (originalWidth <= 0) return null;
+        return split;
+    }
+
+    private static void warnUnplannedCandidate(ResolvedBuildContext ctx, ASTTable table) {
+        if (ctx == null || ctx.ownershipWarningLines == null) return;
+        if (splitPlan(table) == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"SIDE_HEAD_FLOW_UNPLANNED_CANDIDATE\","
+                + "\"detail\":\"Stage4 side-head bridge found a structural candidate"
+                + " without Stage1 SideHeadFlowPlan; no mutation applied; sourceId="
+                + escape(table.sourceId()) + "\"}");
     }
 
     private static boolean singleCellRow(ASTTableRow row) {
@@ -241,6 +259,8 @@ public final class NumberedSideHeadTableNormalizer {
         out.marginLeft(src.marginLeft());
         out.marginRight(src.marginRight());
         out.verticalAlign(src.verticalAlign());
+        out.firstBaselineOffset(src.firstBaselineOffset());
+        out.minimumFirstBaselineOffset(src.minimumFirstBaselineOffset());
         out.reservedForNestedContent(src.reservedForNestedContent());
         return out;
     }

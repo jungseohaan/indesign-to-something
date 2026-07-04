@@ -75,7 +75,7 @@ final class DrawTextBoxComposer {
         // 통합 플로팅 배지: imageFill을 전역 native-graphics OFF와 무관하게 칠한다(텍스트는 검색
         // 가능 런 유지 → SPEC-025 위배 아님). 좁은 범위(forceImageFill 플래그)로 한정해 회귀 방지.
         spec.forceImageFill = block.forceImageFill();
-        spec.nativeGraphicsAllowed = block.nativeGraphicsAllowed();
+        spec.nativeGraphicsAllowed = block.nativeGraphicsAllowed() || block.forceNativeFill();
         spec.marginLeft = block.insetLeft();
         spec.marginRight = block.insetRight();
         spec.marginTop = block.insetTop();
@@ -98,7 +98,7 @@ final class DrawTextBoxComposer {
         spec.fillColor = obj.fillColor();
         spec.fillTint = obj.fillTint();
         spec.imageFillData = obj.imageFillData();
-        spec.nativeGraphicsAllowed = obj.nativeGraphicsAllowed();
+        spec.nativeGraphicsAllowed = obj.nativeGraphicsAllowed() || obj.cornerRadius() > 0;
         spec.forceImageFill = obj.forceImageFill();
         spec.marginLeft = obj.textMarginLeft();
         spec.marginRight = obj.textMarginRight();
@@ -133,12 +133,16 @@ final class DrawTextBoxComposer {
             imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(
                     rect, spec.imageFillData, spec.forceImageFill);
         }
+        boolean fillBrushSet = false;
         if (!imgBrushSet) {
-            textBoxBuilder.setupTextBoxFillBrush(
+            fillBrushSet = textBoxBuilder.setupTextBoxFillBrush(
                     rect,
                     spec.fillColor,
                     spec.fillTint,
                     spec.nativeGraphicsAllowed);
+        }
+        if (!imgBrushSet && !fillBrushSet) {
+            textBoxBuilder.setupTransparentTextBoxFillBrush(rect);
         }
     }
 
@@ -188,11 +192,25 @@ final class DrawTextBoxComposer {
             double cornerRadius,
             long cornerReferenceHeight,
             String shellShapeType) {
+        applyRectangleGeometry(
+                rect, width, height, cornerRadius, cornerReferenceHeight,
+                shellShapeType, false);
+    }
+
+    static void applyRectangleGeometry(
+            Rectangle rect,
+            long width,
+            long height,
+            double cornerRadius,
+            long cornerReferenceHeight,
+            String shellShapeType,
+            boolean forceNativeGraphics) {
         rect.ratioAnd(cornerRatioForShape(
                 shellShapeType,
                 cornerRadius,
                 width,
-                cornerReferenceHeight > 0 ? cornerReferenceHeight : height));
+                cornerReferenceHeight > 0 ? cornerReferenceHeight : height,
+                forceNativeGraphics));
         rect.createPt0();
         rect.pt0().set(0L, 0L);
         rect.createPt1();
@@ -216,12 +234,14 @@ final class DrawTextBoxComposer {
     private static short cornerRatioForShape(String shellShapeType,
                                              double cornerRadius,
                                              long width,
-                                             long referenceHeight) {
+                                             long referenceHeight,
+                                             boolean forceNativeGraphics) {
         if (shellShapeType != null
                 && shellShapeType.toLowerCase().contains("oval")
-                && HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()) {
+                && (HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled() || forceNativeGraphics)) {
             return 50;
         }
-        return HwpxTextBoxBuilder.computeCornerRatio(cornerRadius, width, referenceHeight);
+        return HwpxTextBoxBuilder.computeCornerRatio(
+                cornerRadius, width, referenceHeight, forceNativeGraphics);
     }
 }

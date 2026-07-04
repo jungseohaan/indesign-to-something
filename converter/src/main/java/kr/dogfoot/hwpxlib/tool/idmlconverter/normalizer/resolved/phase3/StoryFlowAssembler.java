@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -39,7 +40,7 @@ public final class StoryFlowAssembler {
             ResolvedBuildContext ctx,
             IDMLTable idmlTable,
             IDMLTableCell idmlCell) {
-        List<ASTParagraph> cellFlow = StoryLoader.astParagraphsForCell(ctx, idmlCell);
+        List<ASTParagraph> cellFlow = StoryLoader.astParagraphsForCell(ctx, idmlTable, idmlCell, null);
         if (cellFlow != null && !cellFlow.isEmpty()) {
             return cellFlow;
         }
@@ -127,14 +128,10 @@ public final class StoryFlowAssembler {
         ASTParagraph paragraph = new ASTParagraph();
         for (Integer anchorId : resolvedCell.inlineAnchorIds()) {
             if (anchorId == null || anchorId < 0) continue;
-            List<ASTInlineObject> fragments =
-                    InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, anchorId);
-            if (fragments != null && !fragments.isEmpty()) {
-                for (ASTInlineObject fragment : fragments) {
-                    if (fragment == null) continue;
-                    fragment.keepInline(true);
-                    paragraph.addItem(fragment);
-                }
+            List<ASTInlineItem> plannedItems =
+                    InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchorId, null, null);
+            if (plannedItems != null) {
+                appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
                 continue;
             }
             ASTInlineObject inline = InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchorId);
@@ -170,12 +167,10 @@ public final class StoryFlowAssembler {
                             paragraph.paragraphStyleRef(idmlParagraph.appliedParagraphStyle());
                         }
                     }
-                    List<ASTInlineObject> fragments =
-                            InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
-                    if (fragments != null && !fragments.isEmpty()) {
-                        for (ASTInlineObject fragment : fragments) {
-                            if (fragment != null) paragraph.addItem(fragment);
-                        }
+                    List<ASTInlineItem> plannedItems =
+                            InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, null, null);
+                    if (plannedItems != null) {
+                        appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
                         continue;
                     }
                     ASTInlineObject inlineShell =
@@ -186,6 +181,19 @@ public final class StoryFlowAssembler {
             if (paragraph != null && paragraph.items() != null && !paragraph.items().isEmpty()) {
                 paragraphs.add(paragraph);
             }
+        }
+    }
+
+    private static void appendInlineItemsKeepingObjectsInline(
+            ASTParagraph paragraph,
+            List<ASTInlineItem> items) {
+        if (paragraph == null || items == null) return;
+        for (ASTInlineItem item : items) {
+            if (item == null) continue;
+            if (item instanceof ASTInlineObject) {
+                ((ASTInlineObject) item).keepInline(true);
+            }
+            paragraph.addItem(item);
         }
     }
 
@@ -251,7 +259,7 @@ public final class StoryFlowAssembler {
                 story = ctx.resolvedData.getStory(storyRef);
             }
             if (!hasAuthoritativeResolvedStructure(story)) continue;
-            List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story, false);
+            List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story);
             if (paragraphs != null && !paragraphs.isEmpty()) return paragraphs;
         }
         return null;

@@ -8,6 +8,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 
 
 import javax.imageio.ImageIO;
@@ -483,6 +486,9 @@ public class ASTPageProcessor {
         if (resolvedData != null) {
             vectorShapes.removeIf(s -> {
                 if (s.selfId() == null) return false;
+                if (hasPlannerOwnedNativeShape(resolvedData, s.selfId())) {
+                    return true;
+                }
                 // renderedFloatingItems에 있는 도형 → ExtendScript PNG로 대체
                 if (resolvedData.hasRenderedFloatingItem(s.selfId())) {
                     return true;
@@ -527,6 +533,34 @@ public class ASTPageProcessor {
         vectorFigures.removeIf(fig -> !clipFigureToPage(fig, fullPageW, fullPageH));
 
         vectorFigures.forEach(section::addBlock);
+    }
+
+    private static boolean hasPlannerOwnedNativeShape(ResolvedData resolvedData, String sourceId) {
+        if (resolvedData == null || sourceId == null || resolvedData.ownershipPlans() == null) {
+            return false;
+        }
+        int id;
+        try {
+            id = Integer.parseInt(sourceId);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        for (ObjectPlan plan : resolvedData.ownershipPlans()) {
+            if (plan == null || plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) continue;
+            if (plan.visualAction == null || plan.visualAction == VisualAction.DROP_VISUAL) continue;
+            if (containsId(plan.sourceObjectIds, id) || containsId(plan.visualSourceObjectIds, id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsId(int[] values, int id) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == id) return true;
+        }
+        return false;
     }
 
     // ── 마스터 페이지 콘텐츠 ──────────────────────────────────────

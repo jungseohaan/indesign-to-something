@@ -13,6 +13,7 @@ public final class VisualPlacementPlan {
     public final long height;
     public final int zOrder;
     public final String visualLayer;
+    public final int sourceLayerIndex;
     public final boolean fromGroup;
 
     public VisualPlacementPlan(
@@ -22,6 +23,7 @@ public final class VisualPlacementPlan {
             long height,
             int zOrder,
             String visualLayer,
+            int sourceLayerIndex,
             boolean fromGroup) {
         this.x = x;
         this.y = y;
@@ -29,6 +31,7 @@ public final class VisualPlacementPlan {
         this.height = height;
         this.zOrder = zOrder;
         this.visualLayer = visualLayer;
+        this.sourceLayerIndex = sourceLayerIndex;
         this.fromGroup = fromGroup;
     }
 

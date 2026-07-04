@@ -56,6 +56,8 @@ pub async fn extract_indd(
                     idml_path: sibling_idml.to_string_lossy().to_string(),
                     resolved_json_path: Some(sibling_resolved.to_string_lossy().to_string()),
                     preview_pdf_path: None,
+                    extraction_plan_path: None,
+                    extraction_results_path: None,
                     temp_dir: indd_parent.to_string_lossy().to_string(),
                     extract_stats: None,
                 });
@@ -175,7 +177,7 @@ pub async fn extract_indd(
                 sm,
                 &pm_normalized,
                 sk,
-                false,
+                debug_range,
             )
             .await
             .map_err(|e| {

@@ -47,13 +47,13 @@ cd desktop && npm run tauri dev
 ### CLI
 
 ```bash
-# IDML + resolved.json → HWPX (권장)
+# IDML + resolved.json → HWPX
+# resolved.json은 input.idml 옆에서 자동 탐지된다.
 java -jar target/idml-to-something-1.0.9-cli.jar \
   --convert input.idml output.hwpx \
-  --resolved resolved.json \
   --links-directory /path/to/Links
 
-# IDML만으로 변환 (레거시)
+# resolved.json이 없으면 IDML만으로 변환 (레거시)
 java -jar target/idml-to-something-1.0.9-cli.jar \
   --convert input.idml output.hwpx
 ```

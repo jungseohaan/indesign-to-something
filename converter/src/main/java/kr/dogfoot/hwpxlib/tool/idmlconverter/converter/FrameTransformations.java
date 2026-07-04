@@ -55,7 +55,7 @@ final class FrameTransformations {
         TextWrapMethod wrapMethod = block.isBackgroundOnly()
                 ? TextWrapMethod.BEHIND_TEXT
                 : TextWrapMethod.IN_FRONT_OF_TEXT;
-        int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
+        int zOrder = block.isBackgroundOnly() ? 0 : textBoxBuilder.textCarrierZOrder(block);
 
         rect.idAnd(shapeId)
                 .zOrderAnd(zOrder)
@@ -74,7 +74,10 @@ final class FrameTransformations {
         rect.createOrgSz();
         rect.orgSz().set(w, h);
         rect.createCurSz();
-        rect.curSz().set(w, 0L);
+        // HWPX renderers can treat curSz height=0 as an actual zero-height
+        // drawText carrier, making the owned text invisible. Keep all size
+        // channels aligned with the source frame geometry.
+        rect.curSz().set(w, h);
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
         rect.createRotationInfo();
@@ -125,7 +128,7 @@ final class FrameTransformations {
         TextWrapMethod wrapMethod = block.isBackgroundOnly()
                 ? TextWrapMethod.BEHIND_TEXT
                 : TextWrapMethod.IN_FRONT_OF_TEXT;
-        int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
+        int zOrder = block.isBackgroundOnly() ? 0 : textBoxBuilder.textCarrierZOrder(block);
 
         rect.idAnd(shapeId)
                 .zOrderAnd(zOrder)
@@ -156,11 +159,12 @@ final class FrameTransformations {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        boolean textOnlyOverlay = block.plannedVisualTextOverlay();
+        boolean textOnlyOverlay = block.plannedVisualTextOverlay() && !block.forceNativeFill();
         // FillBrush (배경색) — 래퍼에 둥근 모서리가 있으면 셀 배경 투명 (래퍼 사각형이 배경 역할)
         String fillColor = textOnlyOverlay ? null : block.fillColor();
         double fillTint = block.fillTint();
-        if (!textOnlyOverlay && block.hasWrapperFill() && block.cornerRadius() > 0) {
+        if (!textOnlyOverlay && block.hasWrapperFill() && block.cornerRadius() > 0
+                && !block.forceNativeFill()) {
             // 둥근 모서리 래퍼: 셀 fill 생략 → 래퍼 Rectangle의 둥근 배경이 보임
             fillColor = null;
         } else if (!textOnlyOverlay && (fillColor == null || !fillColor.startsWith("#")) && block.hasWrapperFill()) {

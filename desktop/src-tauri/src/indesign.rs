@@ -47,6 +47,8 @@ pub struct InddExtractResult {
     pub idml_path: String,
     pub resolved_json_path: Option<String>,
     pub preview_pdf_path: Option<String>,
+    pub extraction_plan_path: Option<String>,
+    pub extraction_results_path: Option<String>,
     pub temp_dir: String,
     pub extract_stats: Option<serde_json::Value>,
 }
@@ -353,199 +355,234 @@ end using terms from"#,
     std::fs::write(&script_file, &applescript)
         .map_err(|e| format!("AppleScript 파일 쓰기 실패: {}", e))?;
     let kill = app.state::<crate::ProcessKillHandle>();
-    kill.reset();
-
-    let mut child = Command::new("osascript")
-        .arg(&script_file)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("osascript 실행 실패: {}", e))?;
-
-    if let Some(pid) = child.id() {
-        kill.register_pid(pid);
-    }
-
-    // .progress 파일 폴링
-    // - 절대 타임아웃: 3600초 (1시간)
-    // - 정체 타임아웃: 600초 동안 진행률 업데이트가 없으면 중단
     let progress_path = output_dir.join(".progress");
     let done_path = output_dir.join(".done");
-    let mut last_message = String::new();
-    let mut last_progress_step = String::new();
     let timeout_secs = 3600u64;
     // SPEC-030 B.4: phase별 stale 타임아웃 차등 적용
     // - open: 300s (대용량 파일은 열기만 수분 소요)
-    // - idml: 120s
+    // - idml: page-count scaled (InDesign emits no granular progress inside exportFile)
     // - pdf: 600s (48페이지 복잡한 파일 PDF 내보내기 3~4분 소요)
     // - rendered_frames/render_badge: 1800s (복잡 페이지에서 10분+ 가능)
     // - resolved_*: 300s
     // - 기타: 120s
     let stale_secs_default = 120u64;
-    let started = std::time::Instant::now();
-    let mut last_progress_at = std::time::Instant::now();
-    let mut last_heartbeat_at = std::time::Instant::now();
-    let mut current_phase_stale = stale_secs_default;
+    let mut retried_open_stall = false;
 
-    loop {
-        // 프로세스 완료 확인
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {} // 아직 실행 중
-            Err(_) => break,
+    // .progress 파일 폴링
+    // - 절대 타임아웃: 3600초 (1시간)
+    // - 정체 타임아웃: phase별 차등 적용
+    let output = 'attempt: loop {
+        kill.reset();
+
+        let mut child = Command::new("osascript")
+            .arg(&script_file)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("osascript 실행 실패: {}", e))?;
+
+        if let Some(pid) = child.id() {
+            kill.register_pid(pid);
         }
 
-        // 취소 확인
-        if kill.is_cancelled() {
-            let _ = child.kill().await;
-            kill.deregister_pid();
-            return Err("추출이 취소되었습니다.".to_string());
-        }
+        let started = std::time::Instant::now();
+        let mut last_message = String::new();
+        let mut last_progress_step = String::new();
+        let mut last_progress_at = std::time::Instant::now();
+        let mut last_heartbeat_at = std::time::Instant::now();
+        let mut current_phase_stale = stale_secs_default;
 
-        // 타임아웃 확인 (절대 또는 정체)
-        let elapsed = started.elapsed().as_secs();
-        let stale = last_progress_at.elapsed().as_secs();
-        if elapsed > timeout_secs || stale > current_phase_stale {
-            let diagnostics = if last_progress_step == "open" {
-                Some(collect_open_stall_diagnostics(&app_name, &progress_path, output_dir).await)
-            } else {
-                None
-            };
-            // osascript 프로세스 강제 종료
-            let _ = child.kill().await;
-            // InDesign 자체도 종료 (hung 상태 유지 방지 — 다음 추출 시 -2741 오류 예방)
-            let app_name_for_kill = app_name.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+        loop {
+            // 프로세스 완료 확인
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {} // 아직 실행 중
+                Err(_) => break,
+            }
+
+            // 취소 확인
+            if kill.is_cancelled() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                kill.deregister_pid();
+                return Err("추출이 취소되었습니다.".to_string());
+            }
+
+            // 타임아웃 확인 (절대 또는 정체)
+            let elapsed = started.elapsed().as_secs();
+            let stale = last_progress_at.elapsed().as_secs();
+            if elapsed > timeout_secs || stale > current_phase_stale {
+                let diagnostics = if last_progress_step == "open" {
+                    Some(
+                        collect_open_stall_diagnostics(&app_name, &progress_path, output_dir).await,
+                    )
+                } else {
+                    None
+                };
+                let is_open_stall = elapsed <= timeout_secs
+                    && stale > current_phase_stale
+                    && last_progress_step == "open";
+
+                // osascript 프로세스 강제 종료
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                kill.deregister_pid();
+                // InDesign 자체도 종료 (hung 상태 유지 방지 — 다음 추출 시 -2741 오류 예방)
                 let _ = tokio::process::Command::new("killall")
-                    .arg(&app_name_for_kill)
+                    .arg(&app_name)
                     .output()
                     .await;
-            });
-            let last_step = if last_message.is_empty() {
-                "시작 중".to_string()
-            } else {
-                last_message.clone()
-            };
-            let reason = if elapsed > timeout_secs {
-                format!("절대 타임아웃 {}초 초과", timeout_secs)
-            } else {
-                format!("진행률 정체 {}초 초과", current_phase_stale)
-            };
-            let mut message = format!(
-                "InDesign 추출 중단 ({}). 마지막 단계: {}",
-                reason, last_step
-            );
-            if let Some(diag) = diagnostics {
-                if !diag.trim().is_empty() {
-                    message.push_str("\n\n[open 단계 진단]\n");
-                    message.push_str(diag.trim());
+                tokio::time::sleep(Duration::from_secs(3)).await;
+
+                if is_open_stall && !retried_open_stall {
+                    retried_open_stall = true;
+                    if let Some(diag) = diagnostics.as_ref() {
+                        if !diag.trim().is_empty() {
+                            let _ = std::fs::write(output_dir.join("_open_stall_retry.log"), diag);
+                        }
+                    }
+                    emit_progress(
+                        app,
+                        "launching",
+                        "문서 열기 정체 감지: InDesign 재시작 후 재시도 중...",
+                    );
+                    ensure_indesign_running(&app_name, output_dir).await;
+                    let _ = std::fs::remove_file(&done_path);
+                    let _ = std::fs::remove_file(&progress_path);
+                    continue 'attempt;
+                }
+
+                let last_step = if last_message.is_empty() {
+                    "시작 중".to_string()
+                } else {
+                    last_message.clone()
+                };
+                let reason = if elapsed > timeout_secs {
+                    format!("절대 타임아웃 {}초 초과", timeout_secs)
+                } else {
+                    format!("진행률 정체 {}초 초과", current_phase_stale)
+                };
+                let mut message = format!(
+                    "InDesign 추출 중단 ({}). 마지막 단계: {}",
+                    reason, last_step
+                );
+                if retried_open_stall {
+                    message.push_str("\n\n[open 단계 재시도]\n문서 열기 정체 감지 후 InDesign 재시작 재시도 1회를 이미 수행했습니다.");
+                }
+                if let Some(diag) = diagnostics {
+                    if !diag.trim().is_empty() {
+                        message.push_str("\n\n[open 단계 진단]\n");
+                        message.push_str(diag.trim());
+                    }
+                }
+                return Err(message);
+            }
+
+            // .progress 파일에서 상세 진행률 읽기
+            if let Ok(content) = std::fs::read_to_string(&progress_path) {
+                if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
+                    let current = prog.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let total = prog.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let desc = prog.get("desc").and_then(|v| v.as_str()).unwrap_or("");
+                    last_progress_step = step.to_string();
+
+                    // SPEC-030 B.4: phase별 stale 타임아웃 갱신
+                    current_phase_stale = match step {
+                        "close_docs" => 60,
+                        // 테스트/진단용: open 단계 정체 시 링크/sample 정보를 빨리 노출한다.
+                        "open" => 250,
+                        "idml" => {
+                            let pages = if total > 0 { total as u64 } else { 1 };
+                            (pages * 15).clamp(300, 1800)
+                        }
+                        // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
+                        "pdf" => 600,
+                        "rendered_frames" | "render_badge" | "render_frame" => 1800,
+                        s if s.starts_with("resolved") => 300,
+                        _ => stale_secs_default,
+                    };
+
+                    let display = match step {
+                        "close_docs" => "이전 문서 정리 중...".to_string(),
+                        "open" => "문서 열기 중...".to_string(),
+                        "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
+                        "idml" => "IDML 내보내기 중...".to_string(),
+                        "resolved" if total > 0 => format!("resolved 수집 중... ({}페이지)", total),
+                        "resolved" => "resolved 수집 중...".to_string(),
+                        "resolved_styles" if total > 0 => {
+                            format!("스타일/색상 수집 중... ({}페이지)", total)
+                        }
+                        "resolved_styles" => "스타일/색상 수집 중...".to_string(),
+                        "resolved_stories" if current > 0 && total > 0 => {
+                            format!("스토리 수집 중... ({}/{})", current, total)
+                        }
+                        "resolved_stories" => "스토리 수집 중...".to_string(),
+                        "resolved_frames" => "텍스트프레임 수집 중...".to_string(),
+                        "resolved_items" => "페이지 아이템 수집 중...".to_string(),
+                        "rendered_frames" if current > 0 && total > 0 => {
+                            format!("배경/도형 렌더링 중... ({}/{})", current, total)
+                        }
+                        "rendered_frames" => "배경/도형 렌더링 중...".to_string(),
+                        "render_badge" if !desc.is_empty() && total > 0 => {
+                            format!("배지 렌더링 중... ({}/{}) {}", current, total, desc)
+                        }
+                        "render_badge" if total > 0 => {
+                            format!("배지 렌더링 중... ({}/{})", current, total)
+                        }
+                        "render_frame" if !desc.is_empty() && total > 0 => {
+                            format!("프레임 렌더링 중... ({}/{}) {}", current, total, desc)
+                        }
+                        "render_frame" if total > 0 => {
+                            format!("프레임 렌더링 중... ({}/{})", current, total)
+                        }
+                        "pdf" => "PDF 프리뷰 생성 중...".to_string(),
+                        _ => format!("추출 중... ({})", step),
+                    };
+
+                    if display != last_message {
+                        last_message = display.clone();
+                        last_progress_at = std::time::Instant::now();
+                        last_heartbeat_at = std::time::Instant::now();
+                        let phase = match step {
+                            "open" | "close_docs" => "launching",
+                            "pdf" => "checking",
+                            _ => "exporting",
+                        };
+                        emit_progress(app, phase, &display);
+                    } else if matches!(step, "pdf" | "idml" | "open" | "close_docs")
+                        && last_heartbeat_at.elapsed().as_secs() >= 10
+                    {
+                        let stale = last_progress_at.elapsed().as_secs();
+                        let heartbeat_msg = match step {
+                            "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
+                            "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
+                            "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
+                            "open" => format!("문서 열기 중... ({}초 경과)", stale),
+                            _ => display.clone(),
+                        };
+                        last_heartbeat_at = std::time::Instant::now();
+                        let phase = if step == "pdf" {
+                            "checking"
+                        } else {
+                            "exporting"
+                        };
+                        emit_progress(app, phase, &heartbeat_msg);
+                    }
                 }
             }
-            return Err(message);
+
+            sleep(Duration::from_millis(300)).await;
         }
 
-        // .progress 파일에서 상세 진행률 읽기
-        if let Ok(content) = std::fs::read_to_string(&progress_path) {
-            if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
-                let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
-                let current = prog.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
-                let total = prog.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
-                let desc = prog.get("desc").and_then(|v| v.as_str()).unwrap_or("");
-                last_progress_step = step.to_string();
+        kill.deregister_pid();
 
-                // SPEC-030 B.4: phase별 stale 타임아웃 갱신
-                current_phase_stale = match step {
-                    "close_docs" => 60,
-                    // 테스트/진단용: open 단계 정체 시 링크/sample 정보를 빨리 노출한다.
-                    "open" => 250,
-                    "idml" => 120,
-                    // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
-                    "pdf" => 600,
-                    "rendered_frames" | "render_badge" | "render_frame" => 1800,
-                    s if s.starts_with("resolved") => 300,
-                    _ => stale_secs_default,
-                };
-
-                let display = match step {
-                    "close_docs" => "이전 문서 정리 중...".to_string(),
-                    "open" => "문서 열기 중...".to_string(),
-                    "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
-                    "idml" => "IDML 내보내기 중...".to_string(),
-                    "resolved" if total > 0 => format!("resolved 수집 중... ({}페이지)", total),
-                    "resolved" => "resolved 수집 중...".to_string(),
-                    "resolved_styles" if total > 0 => {
-                        format!("스타일/색상 수집 중... ({}페이지)", total)
-                    }
-                    "resolved_styles" => "스타일/색상 수집 중...".to_string(),
-                    "resolved_stories" if current > 0 && total > 0 => {
-                        format!("스토리 수집 중... ({}/{})", current, total)
-                    }
-                    "resolved_stories" => "스토리 수집 중...".to_string(),
-                    "resolved_frames" => "텍스트프레임 수집 중...".to_string(),
-                    "resolved_items" => "페이지 아이템 수집 중...".to_string(),
-                    "rendered_frames" if current > 0 && total > 0 => {
-                        format!("배경/도형 렌더링 중... ({}/{})", current, total)
-                    }
-                    "rendered_frames" => "배경/도형 렌더링 중...".to_string(),
-                    "render_badge" if !desc.is_empty() && total > 0 => {
-                        format!("배지 렌더링 중... ({}/{}) {}", current, total, desc)
-                    }
-                    "render_badge" if total > 0 => {
-                        format!("배지 렌더링 중... ({}/{})", current, total)
-                    }
-                    "render_frame" if !desc.is_empty() && total > 0 => {
-                        format!("프레임 렌더링 중... ({}/{}) {}", current, total, desc)
-                    }
-                    "render_frame" if total > 0 => {
-                        format!("프레임 렌더링 중... ({}/{})", current, total)
-                    }
-                    "pdf" => "PDF 프리뷰 생성 중...".to_string(),
-                    _ => format!("추출 중... ({})", step),
-                };
-
-                if display != last_message {
-                    last_message = display.clone();
-                    last_progress_at = std::time::Instant::now();
-                    last_heartbeat_at = std::time::Instant::now();
-                    let phase = match step {
-                        "open" | "close_docs" => "launching",
-                        "pdf" => "checking",
-                        _ => "exporting",
-                    };
-                    emit_progress(app, phase, &display);
-                } else if matches!(step, "pdf" | "idml" | "open" | "close_docs")
-                    && last_heartbeat_at.elapsed().as_secs() >= 10
-                {
-                    let stale = last_progress_at.elapsed().as_secs();
-                    let heartbeat_msg = match step {
-                        "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
-                        "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
-                        "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
-                        "open" => format!("문서 열기 중... ({}초 경과)", stale),
-                        _ => display.clone(),
-                    };
-                    last_heartbeat_at = std::time::Instant::now();
-                    let phase = if step == "pdf" {
-                        "checking"
-                    } else {
-                        "exporting"
-                    };
-                    emit_progress(app, phase, &heartbeat_msg);
-                }
-            }
-        }
-
-        sleep(Duration::from_millis(300)).await;
-    }
-
-    kill.deregister_pid();
-
-    // osascript 결과 수집
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|e| format!("osascript 결과 수집 실패: {}", e))?;
+        // osascript 결과 수집
+        break child
+            .wait_with_output()
+            .await
+            .map_err(|e| format!("osascript 결과 수집 실패: {}", e))?;
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -554,7 +591,7 @@ end using terms from"#,
             emit_progress(app, "launching", "InDesign 재시작 대기 중...");
             ensure_indesign_running(&app_name, output_dir).await;
             emit_progress(app, "exporting", "IDML 추출 재시도 중...");
-            let mut child2 = Command::new("osascript")
+            let child2 = Command::new("osascript")
                 .arg(&script_file)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -619,6 +656,8 @@ end using terms from"#,
 
     let resolved_json_path = output_dir.join("resolved.json");
     let preview_pdf_path = output_dir.join("preview.pdf");
+    let extraction_plan_path = output_dir.join("extraction-plan.json");
+    let extraction_results_path = output_dir.join("extraction-results.json");
 
     // PDF 배경은 extract_indd.jsx에서 통합 생성 (editable 판별 통일)
     emit_progress(app, "done", "추출 완료");
@@ -640,6 +679,16 @@ end using terms from"#,
         },
         preview_pdf_path: if preview_pdf_path.exists() {
             Some(preview_pdf_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_plan_path: if extraction_plan_path.exists() {
+            Some(extraction_plan_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_results_path: if extraction_results_path.exists() {
+            Some(extraction_results_path.to_string_lossy().to_string())
         } else {
             None
         },
@@ -791,6 +840,8 @@ end using terms from"#,
     }
     let resolved_json_path = output_dir.join("resolved.json");
     let preview_pdf_path = output_dir.join("preview.pdf");
+    let extraction_plan_path = output_dir.join("extraction-plan.json");
+    let extraction_results_path = output_dir.join("extraction-results.json");
     emit_progress(app, "done", "부분 추출 완료");
     let extract_stats = std::fs::read_to_string(output_dir.join("_extract_stats.json"))
         .ok()
@@ -804,6 +855,16 @@ end using terms from"#,
         },
         preview_pdf_path: if preview_pdf_path.exists() {
             Some(preview_pdf_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_plan_path: if extraction_plan_path.exists() {
+            Some(extraction_plan_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_results_path: if extraction_results_path.exists() {
+            Some(extraction_results_path.to_string_lossy().to_string())
         } else {
             None
         },
@@ -1106,6 +1167,8 @@ pub async fn run_extraction_chunked(
         .and_then(|s| serde_json::from_str(&s).ok());
     let resolved_json_path = output_dir.join("resolved.json");
     let preview_pdf_path = output_dir.join("preview.pdf");
+    let extraction_plan_path = output_dir.join("extraction-plan.json");
+    let extraction_results_path = output_dir.join("extraction-results.json");
     let output_dir_str = output_dir.to_string_lossy().to_string();
     Ok(InddExtractResult {
         idml_path: output_dir.join("output.idml").to_string_lossy().to_string(),
@@ -1116,6 +1179,16 @@ pub async fn run_extraction_chunked(
         },
         preview_pdf_path: if preview_pdf_path.exists() {
             Some(preview_pdf_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_plan_path: if extraction_plan_path.exists() {
+            Some(extraction_plan_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_results_path: if extraction_results_path.exists() {
+            Some(extraction_results_path.to_string_lossy().to_string())
         } else {
             None
         },

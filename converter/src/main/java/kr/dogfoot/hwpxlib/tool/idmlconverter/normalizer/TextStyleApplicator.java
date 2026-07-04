@@ -169,6 +169,7 @@ public final class TextStyleApplicator {
                                           ResolvedStyleOptions options) {
         if (target == null || resolvedRun == null) return;
         ResolvedStyleOptions opts = options != null ? options : new ResolvedStyleOptions();
+        boolean absorbedProportionalScale = false;
         if (resolvedRun.charStyle() != null) {
             target.characterStyleRef(resolvedRun.charStyle());
         }
@@ -193,19 +194,13 @@ public final class TextStyleApplicator {
         if (resolvedRun.horizontalScale() != null
                 && resolvedRun.horizontalScale() != 0
                 && resolvedRun.horizontalScale() != 100) {
-            Double vs = resolvedRun.verticalScale();
-            if (opts.proportionalScaleAsFontSize
-                    && vs != null
-                    && Math.abs(resolvedRun.horizontalScale() - vs) < 1.0) {
-                if (target.fontSizeHwpunits() != null) {
-                    target.fontSizeHwpunits((int) Math.round(
-                            target.fontSizeHwpunits() * resolvedRun.horizontalScale() / 100.0));
-                }
-            } else {
-                target.horizontalScale((short) resolvedRun.horizontalScale().doubleValue());
-            }
+            // IDML keeps font size and character scale as separate properties.
+            // Do not convert proportional scale into font size; doing so turns
+            // authoring-time 장평 into an unintended point-size change.
+            target.horizontalScale((short) resolvedRun.horizontalScale().doubleValue());
         }
-        if (opts.applyVerticalScale
+        if (!absorbedProportionalScale
+                && opts.applyVerticalScale
                 && resolvedRun.verticalScale() != null
                 && resolvedRun.verticalScale() != 0
                 && resolvedRun.verticalScale() != 100) {
@@ -226,6 +221,16 @@ public final class TextStyleApplicator {
             if (p.contains("superscript")) target.superscript(true);
             if (p.contains("subscript")) target.subscript(true);
         }
+    }
+
+    public static boolean absorbProportionalScaleAsFontSize(
+            ASTTextRun target,
+            Double horizontalScale,
+            Double verticalScale) {
+        // Deprecated compatibility hook. Font size and character scale are
+        // distinct IDML/HWPX properties, so scale must not be materialized by
+        // mutating fontSize.
+        return false;
     }
 
     private static IDMLStyleDef resolvedCharacterStyle(

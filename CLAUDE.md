@@ -299,10 +299,9 @@ packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 ## CLI 변환 테스트 가이드
 
 ```bash
-# 풀 변환 (resolved.json + Links 권장)
+# 풀 변환 (resolved.json은 input.idml 옆에서 자동 탐지)
 java -jar target/idml-to-something-1.0.9-cli.jar \
      --convert input.idml output.hwpx \
-     --resolved resolved.json \
      --links-directory /path/to/Links
 
 # 진행률 JSON lines 출력

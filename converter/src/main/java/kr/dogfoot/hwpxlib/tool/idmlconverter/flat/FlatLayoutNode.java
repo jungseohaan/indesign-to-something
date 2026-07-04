@@ -63,8 +63,6 @@ public class FlatLayoutNode {
     private String storyId;
     private boolean distributed;
     private double rotationAngle;
-    private long narrowedWidth;
-    private long narrowedXOffset;
     private String wrapperFillColor;
     private double wrapperFillTint = -1;
     private boolean dropShadow;
@@ -146,7 +144,7 @@ public class FlatLayoutNode {
     }
 
     public long effectiveWidth() {
-        return narrowedWidth > 0 ? narrowedWidth : width;
+        return width;
     }
 
     // --- Common accessors ---
@@ -279,12 +277,6 @@ public class FlatLayoutNode {
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }
-
-    public long narrowedWidth() { return narrowedWidth; }
-    public void narrowedWidth(long v) { this.narrowedWidth = v; }
-
-    public long narrowedXOffset() { return narrowedXOffset; }
-    public void narrowedXOffset(long v) { this.narrowedXOffset = v; }
 
     public String wrapperFillColor() { return wrapperFillColor; }
     public void wrapperFillColor(String v) { this.wrapperFillColor = v; }

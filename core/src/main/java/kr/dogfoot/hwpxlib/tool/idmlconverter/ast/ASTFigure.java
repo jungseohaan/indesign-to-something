@@ -48,6 +48,9 @@ public class ASTFigure extends ASTBlock {
     // SPEC-035 visual layer role (PAGE_BACKGROUND, LABEL_BACKDROP, CONTAINER_OUTLINE, ...)
     private String visualLayer;
 
+    // Source InDesign layer index. Smaller index means a visually higher layer.
+    private int sourceLayerIndex = -1;
+
     // 소속 그룹 ID (compositing용)
     private String parentGroupId;
 
@@ -136,6 +139,9 @@ public class ASTFigure extends ASTBlock {
 
     public String visualLayer() { return visualLayer; }
     public void visualLayer(String v) { this.visualLayer = v; }
+
+    public int sourceLayerIndex() { return sourceLayerIndex; }
+    public void sourceLayerIndex(int v) { this.sourceLayerIndex = v; }
 
     public String parentGroupId() { return parentGroupId; }
     public void parentGroupId(String v) { this.parentGroupId = v; }

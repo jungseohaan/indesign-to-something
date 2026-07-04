@@ -86,9 +86,11 @@ final class TextBoxLayoutHelpers {
 
     static long[] computeColumnWidths(ASTTextFrameBlock block, int colCount) {
         long totalWidth = block.effectiveWidth();
+        long horizontalInset = Math.max(0L, block.insetLeft()) + Math.max(0L, block.insetRight());
         long gutter = block.columnGutter();
         long totalGutter = gutter * (colCount - 1);
-        long contentWidth = totalWidth - totalGutter;
+        long contentWidth = totalWidth - horizontalInset - totalGutter;
+        if (contentWidth <= 0) contentWidth = Math.max(1L, totalWidth - totalGutter);
         long baseWidth = contentWidth / colCount;
         long[] result = new long[colCount];
         java.util.Arrays.fill(result, baseWidth);

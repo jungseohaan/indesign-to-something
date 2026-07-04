@@ -49,11 +49,10 @@ def build():
 
 def convert(cfg, fx, out_hwpx):
     idml = os.path.join(ROOT, fx["idml"])
-    resolved = os.path.join(ROOT, fx["resolved"])
     links = fx["links"]
     jar = os.path.join(ROOT, cfg["jar"])
     cmd = [cfg["java"], "-jar", jar, "--convert", idml, out_hwpx,
-           "--resolved", resolved, "--links-directory", links]
+           "--links-directory", links]
     r = sh(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if r.returncode != 0:
         sys.stdout.write(r.stdout.decode("utf-8", "replace"))

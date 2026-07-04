@@ -151,8 +151,6 @@ public class ASTToFlatConverter {
         node.storyId(tfb.storyId());
         node.distributed(tfb.distributed());
         node.rotationAngle(tfb.rotationAngle());
-        node.narrowedWidth(tfb.narrowedWidth());
-        node.narrowedXOffset(tfb.narrowedXOffset());
 
         // Wrapper fill
         node.wrapperFillColor(tfb.wrapperFillColor());
@@ -254,6 +252,8 @@ public class ASTToFlatConverter {
         flatCell.marginLeft(astCell.marginLeft());
         flatCell.marginRight(astCell.marginRight());
         flatCell.verticalAlign(astCell.verticalAlign());
+        flatCell.firstBaselineOffset(astCell.firstBaselineOffset());
+        flatCell.minimumFirstBaselineOffset(astCell.minimumFirstBaselineOffset());
 
         // Convert cell paragraphs → FlatComponent
         for (ASTParagraph astPara : astCell.paragraphs()) {

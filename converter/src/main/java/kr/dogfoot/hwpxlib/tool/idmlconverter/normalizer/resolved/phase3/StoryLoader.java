@@ -9,17 +9,21 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTStoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextFlowTabPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 
@@ -29,6 +33,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import java.io.File;
 import java.util.ArrayList;
@@ -49,7 +54,7 @@ public class StoryLoader {
      * IDML의 단락 구조는 정확 (중복 없음, <Br/> 기반 분리).
      * 단락 속성(leading, indent)은 resolved에서 보강.
      */
-    static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId, boolean suppressLeftIndent) {
+    static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId) {
         if (ctx.idmlDir == null) return null;
         // storyId(DOM decimal) → IDML hex → Story_u{hex}.xml
         String sourceStoryId = sourceStoryId(storyId);
@@ -88,7 +93,9 @@ public class StoryLoader {
                 DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
                 DocumentBuilder db = dbf.newDocumentBuilder();
                 org.w3c.dom.Document xmlDoc = db.parse(storyFile);
-                idmlStory = IDMLStoryParser.parseStory(xmlDoc, hexId);
+                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDocument =
+                        ctx.idmlDocumentSupplier != null ? ctx.idmlDocumentSupplier.get() : null;
+                idmlStory = IDMLStoryParser.parseStory(xmlDoc, hexId, idmlDocument);
                 ConversionTiming.addCounter("phase3.storyLoader.xmlParseNanos", System.nanoTime() - parseStart);
                 ConversionTiming.addCounter("phase3.storyLoader.xmlParses", 1);
                 if (ctx.idmlStoryCache != null) {
@@ -134,7 +141,7 @@ public class StoryLoader {
             }
 
             // 단락 속성(정렬/줄간격/간격/들여쓰기/탭): 셀 안/밖 공용 루틴 사용
-            ParagraphPropertyResolver.apply(para, ip, resolvedParagraph, ctx, styleAlignCache, suppressLeftIndent);
+            ParagraphPropertyResolver.apply(para, ip, resolvedParagraph, ctx, styleAlignCache);
 
             // resolved 런 (스타일 상속 보강용)
             List<ResolvedRun> resolvedRuns = null;
@@ -423,6 +430,19 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
+                                    String nextPartText = (pi + 1 < parts.length) ? parts[pi + 1] : null;
+                                    List<ASTInlineItem> plannedItems =
+                                            InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId,
+                                                    partText, nextPartText);
+                                    if (plannedItems != null) {
+                                        for (ASTInlineItem item : plannedItems) para.addItem(item);
+                                        anchorIdx++;
+                                        continue;
+                                    }
+                                    if (InlineFrameHandler.hasOwnershipPlanForAnchorBundle(ctx, domId)) {
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     List<ASTInlineObject> plannedAnchorTextShellFragments =
                                             InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
                                     if (plannedAnchorTextShellFragments != null && !plannedAnchorTextShellFragments.isEmpty()) {
@@ -444,45 +464,18 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    // AnchoredPosition="Anchored" + TextWrapMode="None" Group:
-                                    // 사전 스캔에서 등록됨 → 인라인 삽입 건너뛰고 Phase 3 후처리가 floating ASTFigure 로 배치.
-                                    if (ctx.deferredAnchoredFloatingIds.contains(domId)) {
-                                        anchorIdx++;
-                                        continue;
-                                    }
                                     if (InlineFrameHandler.hasTextBlockPlacedDescendant(ctx, domId)
                                             || InlineFrameHandler.hasPlannedFloatingHwpxTextDescendant(ctx, domId)) {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(
-                                            ctx.resolvedData, domId)) {
-                                        ctx.deferredAnchoredFloatingIds.add(domId);
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(
-                                            ctx.resolvedData, domId)) {
-                                        if (!InlineFrameHandler.hasPlannedFloatingShellForSemanticInlineGroup(ctx, domId)
-                                                && !InlineFrameHandler.hasPlannedInlineChildTextOwnership(ctx, domId)
-                                                && !InlineFrameHandler.hasPlannedInlinePngForAnchor(ctx, domId)) {
-                                            ctx.deferredAnchoredFloatingIds.add(domId);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                    }
                                     // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
-                                    // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
                                     if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)
                                             && storyId != null
                                             && InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
-                                        if (hasInlineObjectPng(ctx, domId)) {
-                                            ctx.deferredAnchoredFloatingIds.add(domId);
-                                        }
                                         anchorIdx++;
                                         continue;
                                     }
-                                    String nextPartText = (pi + 1 < parts.length) ? parts[pi + 1] : null;
                                     // SPEC-025: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
                                     // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
                                     java.util.List<ASTInlineObject> boxList =
@@ -508,6 +501,10 @@ public class StoryLoader {
                                                 InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
                                         if (plannedAnchorTextShell2 != null) {
                                             para.addItem(plannedAnchorTextShell2);
+                                            anchorIdx++;
+                                            continue;
+                                        }
+                                        if (InlineFrameHandler.hasDirectDropOnlyInlinePlanForAnchor(ctx, domId)) {
                                             anchorIdx++;
                                             continue;
                                         }
@@ -654,7 +651,7 @@ public class StoryLoader {
 
     public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,
                                                           kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
-        return astParagraphsForCell(ctx, idmlCell, null);
+        return astParagraphsForCell(ctx, null, idmlCell, null);
     }
 
     /**
@@ -664,6 +661,13 @@ public class StoryLoader {
      * 이로써 셀 단락의 FFFC 인라인 앵커가 표준과 동일하게 ASTInlineObject(배지/라벨/inline drawText)로 임베드된다.
      */
     public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,
+                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+                                                          String cellStoryId) {
+        return astParagraphsForCell(ctx, null, idmlCell, cellStoryId);
+    }
+
+    public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,
+                                                          IDMLTable idmlTable,
                                                           kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
                                                           String cellStoryId) {
         List<ASTParagraph> result = new ArrayList<>();
@@ -677,6 +681,15 @@ public class StoryLoader {
                 && !hasDirectVisibleCellText(idmlCell)) {
             return result;
         }
+        ResolvedTable.Cell resolvedCell = findResolvedCell(ctx, idmlTable, idmlCell);
+        if ((idmlCell.paragraphs() == null || idmlCell.paragraphs().isEmpty())
+                && resolvedCell != null) {
+            List<ASTParagraph> resolvedCellParagraphs =
+                    astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
+            if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
+                return resolvedCellParagraphs;
+            }
+        }
         int paraIndex = 0;
         for (IDMLParagraph ip : idmlCell.paragraphs()) {
             if (ip == null) { paraIndex++; continue; }
@@ -684,10 +697,58 @@ public class StoryLoader {
             if (ip.appliedParagraphStyle() != null) {
                 para.paragraphStyleRef(ip.appliedParagraphStyle());
             }
-            ParagraphPropertyResolver.apply(para, ip, null, ctx, null, false);
+            ParagraphPropertyResolver.apply(para, ip, null, ctx, null);
             StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
             sc.hasTabStops = para.hasTabStops();
             buildParagraphContent(ctx, ip, null, null, cellStoryId, paraIndex, sc, para);
+            result.add(para);
+            paraIndex++;
+        }
+        applyResolvedCellInlineGraphicRescueAnchors(ctx, resolvedCell, result);
+        for (ASTParagraph para : result) {
+            recordCellInlineEmbeddedIds(ctx, para);
+        }
+        return result;
+    }
+
+    /**
+     * resolved.json의 table cell paragraphs는 IDML Story XML에서 빠지는 inline_anchor를
+     * 보존한다. 셀 안 inline 여부도 Stage 1 ObjectPlan이 이미 결정했으므로, 여기서는
+     * resolved run 순서를 AST로 실행만 한다.
+     */
+    private static List<ASTParagraph> astParagraphsFromResolvedCell(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        List<ASTParagraph> result = new ArrayList<>();
+        ResolvedTable.Cell resolvedCell = findResolvedCell(ctx, idmlTable, idmlCell);
+        if (resolvedCell == null
+                || resolvedCell.paragraphs() == null
+                || resolvedCell.paragraphs().isEmpty()
+                || !resolvedCellHasInlineAnchors(resolvedCell)) {
+            return result;
+        }
+
+        int paraIndex = 0;
+        for (ResolvedParagraph resolvedParagraph : resolvedCell.paragraphs()) {
+            if (resolvedParagraph == null) { paraIndex++; continue; }
+            IDMLParagraph idmlParagraph = (idmlCell.paragraphs() != null
+                    && paraIndex < idmlCell.paragraphs().size())
+                    ? idmlCell.paragraphs().get(paraIndex)
+                    : null;
+            ASTParagraph para = new ASTParagraph();
+            if (idmlParagraph != null) {
+                if (idmlParagraph.appliedParagraphStyle() != null) {
+                    para.paragraphStyleRef(idmlParagraph.appliedParagraphStyle());
+                }
+                ParagraphPropertyResolver.apply(para, idmlParagraph, resolvedParagraph, ctx, null);
+            } else {
+                applyResolvedParagraphPropertiesOnly(para, resolvedParagraph);
+            }
+            appendResolvedRunsInOrder(ctx, resolvedParagraph, para);
+            RunPostProcessor.splitOverlineRuns(para);
+            RunPostProcessor.convertItalicRunsToEquations(para);
+            RunBuilder.resetBulletParagraphColors(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
             result.add(para);
             paraIndex++;
@@ -695,9 +756,319 @@ public class StoryLoader {
         return result;
     }
 
+    private static ResolvedTable.Cell findResolvedCell(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null) return null;
+        ResolvedTable resolvedTable = idmlTable != null
+                ? ctx.resolvedData.getTableByIdOrSourceId(idmlTable.selfId())
+                : null;
+        if (resolvedTable == null && idmlCell.selfId() != null) {
+            resolvedTable = ctx.resolvedData.getTableByIdOrSourceId(idmlCell.selfId());
+        }
+        if (resolvedTable == null) return null;
+        return resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex());
+    }
+
+    private static boolean resolvedCellHasInlineAnchors(ResolvedTable.Cell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        for (ResolvedParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run != null && run.isInlineAnchor()) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void appendResolvedRunsInOrder(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph resolvedParagraph,
+            ASTParagraph para) {
+        if (ctx == null || resolvedParagraph == null || resolvedParagraph.runs() == null || para == null) return;
+        ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
+                .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
+                .truncateAtParagraphBreak(true);
+        List<ResolvedRun> runs = resolvedParagraph.runs();
+        for (int i = 0; i < runs.size(); i++) {
+            ResolvedRun run = runs.get(i);
+            if (run == null) continue;
+            if (run.isInlineAnchor()) {
+                Integer anchoredId = run.anchoredObjectId();
+                if (anchoredId == null || anchoredId <= 0) continue;
+                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
+                    continue;
+                }
+                String previousText = nearestResolvedText(runs, i - 1, -1);
+                String nextText = nearestResolvedText(runs, i + 1, 1);
+                List<ASTInlineItem> plannedItems =
+                        InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
+                if (plannedItems != null) {
+                    appendInlineItemsKeepingObjectsInline(para, plannedItems);
+                    continue;
+                }
+                ASTInlineObject inline = InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
+                if (inline == null) inline = InlineFrameHandler.loadInlineObject(ctx, anchoredId);
+                if (inline == null) continue;
+                inline.keepInline(true);
+                para.addItem(inline);
+                continue;
+            }
+
+            String text = run.text();
+            if (text == null) continue;
+            for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(text, run, para, options)) {
+                para.addItem(textRun);
+            }
+            if (text.indexOf('\r') >= 0) break;
+        }
+    }
+
+    private static boolean isResolvedCellInlineGraphicRescueAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredId) {
+        if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.domId != anchoredId) continue;
+            if (plan.placement != Placement.INLINE) return false;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) return false;
+            if (plan.reason == null || !"inline_graphic_only".equals(plan.reason)) return false;
+            return plan.sourceObjectIds != null && plan.sourceObjectIds.length == 1;
+        }
+        return false;
+    }
+
+    private static void applyResolvedCellInlineGraphicRescueAnchors(
+            ResolvedBuildContext ctx,
+            ResolvedTable.Cell resolvedCell,
+            List<ASTParagraph> paragraphs) {
+        if (ctx == null || resolvedCell == null || resolvedCell.paragraphs() == null
+                || paragraphs == null || paragraphs.isEmpty()) {
+            return;
+        }
+
+        List<ResolvedParagraph> resolvedParagraphs = resolvedCell.paragraphs();
+        for (int paraIndex = 0; paraIndex < resolvedParagraphs.size(); paraIndex++) {
+            ResolvedParagraph resolvedParagraph = resolvedParagraphs.get(paraIndex);
+            if (resolvedParagraph == null || resolvedParagraph.runs() == null) continue;
+            List<ResolvedRun> runs = resolvedParagraph.runs();
+            for (int i = 0; i < runs.size(); i++) {
+                ResolvedRun run = runs.get(i);
+                if (run == null || !run.isInlineAnchor()) continue;
+                Integer anchoredId = run.anchoredObjectId();
+                if (anchoredId == null || anchoredId <= 0) continue;
+                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)
+                        && !isResolvedCellInlineGraphicPrefixMarkerAnchor(ctx, anchoredId)) {
+                    continue;
+                }
+                int targetIndex = isResolvedCellInlineGraphicPrefixMarkerAnchor(ctx, anchoredId)
+                        ? nearestParagraphIndexByInlineVisualY(ctx, resolvedCell, anchoredId, paraIndex, paragraphs.size())
+                        : paraIndex;
+                if (targetIndex < 0 || targetIndex >= paragraphs.size()) continue;
+
+                ASTParagraph target = paragraphs.get(targetIndex);
+                if (paragraphAlreadyContainsInlineObject(target, anchoredId)) continue;
+                String previousText = nearestResolvedText(runs, i - 1, -1);
+                String nextText = nearestResolvedText(runs, i + 1, 1);
+                List<ASTInlineItem> plannedItems =
+                        InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
+                if (plannedItems == null || plannedItems.isEmpty()) continue;
+                for (ASTInlineItem item : plannedItems) {
+                    if (item instanceof ASTInlineObject) {
+                        ((ASTInlineObject) item).keepInline(true);
+                    }
+                }
+                int insertAt = leadingWhitespaceItemCount(target);
+                target.items().addAll(insertAt, plannedItems);
+            }
+        }
+    }
+
+    private static boolean isResolvedCellInlineGraphicPrefixMarkerAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredId) {
+        ObjectPlan plan = inlineGraphicPlanFor(ctx, anchoredId);
+        if (plan == null) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        String reason = plan.reason != null ? plan.reason : "";
+        return "inline_graphic_only".equals(reason)
+                || "paper_inline_anchor_uses_page_material_slot".equals(reason);
+    }
+
+    private static ObjectPlan inlineGraphicPlanFor(ResolvedBuildContext ctx, int anchoredId) {
+        if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.domId != anchoredId) continue;
+            if (plan.placement != Placement.INLINE) return null;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) return null;
+            return plan;
+        }
+        return null;
+    }
+
+    private static int nearestParagraphIndexByInlineVisualY(
+            ResolvedBuildContext ctx,
+            ResolvedTable.Cell resolvedCell,
+            int anchoredId,
+            int fallbackIndex,
+            int paragraphCount) {
+        ObjectPlan targetPlan = inlineGraphicPlanFor(ctx, anchoredId);
+        if (targetPlan == null || targetPlan.bounds == null || targetPlan.bounds.length < 4) {
+            return clampParagraphIndex(fallbackIndex, paragraphCount);
+        }
+        double targetCenterY = (targetPlan.bounds[0] + targetPlan.bounds[2]) / 2.0;
+        double bestDistance = Double.MAX_VALUE;
+        int bestIndex = -1;
+        List<ResolvedParagraph> resolvedParagraphs = resolvedCell != null ? resolvedCell.paragraphs() : null;
+        if (resolvedParagraphs != null) {
+            for (int p = 0; p < resolvedParagraphs.size() && p < paragraphCount; p++) {
+                Double paraY = representativeInlineVisualCenterY(ctx, resolvedParagraphs.get(p), anchoredId);
+                if (paraY == null) continue;
+                double distance = Math.abs(paraY - targetCenterY);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestIndex = p;
+                }
+            }
+        }
+        if (bestIndex >= 0) return bestIndex;
+        return clampParagraphIndex(fallbackIndex, paragraphCount);
+    }
+
+    private static int clampParagraphIndex(int index, int paragraphCount) {
+        if (paragraphCount <= 0) return -1;
+        if (index < 0) return 0;
+        if (index >= paragraphCount) return paragraphCount - 1;
+        return index;
+    }
+
+    private static Double representativeInlineVisualCenterY(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph paragraph,
+            int excludeAnchoredId) {
+        if (paragraph == null || paragraph.runs() == null) return null;
+        double sum = 0.0;
+        int count = 0;
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
+            int anchoredId = run.anchoredObjectId();
+            if (anchoredId == excludeAnchoredId) continue;
+            ObjectPlan plan = inlinePlanWithBoundsFor(ctx, anchoredId);
+            if (plan == null) continue;
+            sum += (plan.bounds[0] + plan.bounds[2]) / 2.0;
+            count++;
+        }
+        return count > 0 ? sum / count : null;
+    }
+
+    private static ObjectPlan inlinePlanWithBoundsFor(ResolvedBuildContext ctx, int anchoredId) {
+        if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.domId != anchoredId) continue;
+            if (plan.placement != Placement.INLINE) return null;
+            if (plan.bounds == null || plan.bounds.length < 4) return null;
+            return plan;
+        }
+        return null;
+    }
+
+    private static boolean paragraphAlreadyContainsInlineObject(ASTParagraph para, int domId) {
+        if (para == null || para.items() == null || domId <= 0) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            Integer existing = sourceIdToDomId(((ASTInlineObject) item).sourceId());
+            if (existing != null && existing == domId) return true;
+        }
+        return false;
+    }
+
+    private static int leadingWhitespaceItemCount(ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().isEmpty()) return 0;
+        int count = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) break;
+            String text = ((ASTTextRun) item).text();
+            if (text == null || !text.trim().isEmpty()) break;
+            count++;
+        }
+        return count;
+    }
+
+    private static String nearestResolvedText(List<ResolvedRun> runs, int start, int step) {
+        if (runs == null || step == 0) return null;
+        for (int i = start; i >= 0 && i < runs.size(); i += step) {
+            ResolvedRun run = runs.get(i);
+            if (run == null || run.isInlineAnchor()) continue;
+            String text = run.text();
+            if (text == null || text.isEmpty()) continue;
+            int crIdx = text.indexOf('\r');
+            if (crIdx >= 0) text = text.substring(0, crIdx);
+            if (!text.isEmpty()) return text;
+        }
+        return null;
+    }
+
+    private static void appendInlineItemsKeepingObjectsInline(
+            ASTParagraph paragraph,
+            List<ASTInlineItem> items) {
+        if (paragraph == null || items == null) return;
+        for (ASTInlineItem item : items) {
+            if (item == null) continue;
+            if (item instanceof ASTInlineObject) {
+                ((ASTInlineObject) item).keepInline(true);
+            }
+            paragraph.addItem(item);
+        }
+    }
+
+    private static void applyResolvedParagraphPropertiesOnly(
+            ASTParagraph para,
+            ResolvedParagraph resolvedParagraph) {
+        if (para == null || resolvedParagraph == null) return;
+        if (resolvedParagraph.styleName() != null) {
+            para.paragraphStyleRef(resolvedParagraph.styleName());
+        }
+        if (resolvedParagraph.justification() != null) {
+            para.alignment(resolvedParagraph.justification());
+        }
+        Double fixedLeading = resolvedParagraph.fixedLeading();
+        if (fixedLeading != null && fixedLeading > 0) {
+            para.lineSpacingType("fixed");
+            para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
+        }
+        if (resolvedParagraph.spaceBefore() != null && resolvedParagraph.spaceBefore() > 0) {
+            para.spaceBefore(CoordinateConverter.pointsToHwpunits(resolvedParagraph.spaceBefore()));
+        }
+        if (resolvedParagraph.spaceAfter() != null && resolvedParagraph.spaceAfter() > 0) {
+            para.spaceAfter(CoordinateConverter.pointsToHwpunits(resolvedParagraph.spaceAfter()));
+        }
+        if (resolvedParagraph.leftIndent() != null && resolvedParagraph.leftIndent() != 0) {
+            para.leftMargin(CoordinateConverter.pointsToHwpunits(resolvedParagraph.leftIndent()));
+        }
+        if (resolvedParagraph.rightIndent() != null && resolvedParagraph.rightIndent() != 0) {
+            para.rightMargin(CoordinateConverter.pointsToHwpunits(resolvedParagraph.rightIndent()));
+        }
+        if (resolvedParagraph.firstLineIndent() != null && resolvedParagraph.firstLineIndent() != 0) {
+            para.firstLineIndent(CoordinateConverter.pointsToHwpunits(resolvedParagraph.firstLineIndent()));
+        }
+        if (resolvedParagraph.hasTabStops()) {
+            double leftPt = resolvedParagraph.leftIndent() != null ? resolvedParagraph.leftIndent() : 0;
+            for (ResolvedTabStop tabStop : resolvedParagraph.tabStops()) {
+                if (tabStop == null || tabStop.position() == null || tabStop.position() <= 0) continue;
+                double posPt = tabStop.position() - leftPt;
+                if (posPt < 0) posPt = 0;
+                para.addTabStop(new ASTTabStop(
+                        CoordinateConverter.pointsToHwpunits(posPt),
+                        ASTStoryConverter.mapTabAlignment(tabStop.alignment()),
+                        tabStop.leader()));
+            }
+        }
+    }
+
     /**
      * 셀 단락에 임베드된 inline 객체의 sourceId(=DOM id)를 ctx.cellInlineEmbeddedDomIds에 기록한다.
-     * Phase 6/7c가 같은 id의 page_object 플로팅 배지 PNG를 중복 배치(인라인 텍스트 가림)하지 않도록.
+     * 같은 source bundle의 inline/floating visible 중복을 검증/실행 단계에서 차단하기 위한 실행 기록이다.
      */
     private static void recordCellInlineEmbeddedIds(ResolvedBuildContext ctx, ASTParagraph para) {
         if (ctx == null || para == null || para.items() == null) return;
@@ -739,6 +1110,7 @@ public class StoryLoader {
                     RunBuilder.getStyleTracking(ctx, styleRef),
                     RunBuilder.getStyleFontFamily(ctx, styleRef),
                     RunBuilder.getStyleFontSize(ctx, styleRef),
+                    RunBuilder.getStyleHorizontalScale(ctx, styleRef),
                     RunBuilder.getStyleUnderlineColor(ctx, styleRef));
             ctx.paragraphStyleContextCache.put(key, cached);
         }
@@ -747,6 +1119,7 @@ public class StoryLoader {
                 cached.tracking,
                 cached.fontFamily,
                 cached.fontSize,
+                cached.horizontalScale,
                 cached.underlineColor);
     }
 
@@ -774,10 +1147,7 @@ public class StoryLoader {
                 String text = ((ASTTextRun) item).text();
                 if (text == null || text.trim().isEmpty()) continue;
                 if (isPageNumberText(text)) {
-                    if (i > 0 && items.get(i - 1) instanceof ASTTextRun) {
-                        String prev = ((ASTTextRun) items.get(i - 1)).text();
-                        if ("\t".equals(prev)) return;
-                    }
+                    if (TextFlowTabPolicy.hasTabImmediatelyBefore(items, i)) return;
                     if (!enableRightmostDotLeader(ctx, paragraph, para)) return;
 
                     ASTTextRun tabRun = new ASTTextRun();
@@ -793,10 +1163,7 @@ public class StoryLoader {
             ASTInlineObject obj = (ASTInlineObject) item;
             if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return;
             if (!isPageNumberInlineObject(obj)) return;
-            if (i > 0 && items.get(i - 1) instanceof ASTTextRun) {
-                String prev = ((ASTTextRun) items.get(i - 1)).text();
-                if ("\t".equals(prev)) return;
-            }
+            if (TextFlowTabPolicy.hasTabImmediatelyBefore(items, i)) return;
             if (!enableRightmostDotLeader(ctx, paragraph, para)) return;
 
             ASTTextRun tabRun = new ASTTextRun();
@@ -838,6 +1205,7 @@ public class StoryLoader {
         if ((precedingText == null || precedingText.trim().isEmpty()) && !hasVisibleText(astPara)) return;
         if (!hasDecorativeParagraphRule(ctx, paragraph)) return;
         if (!isInlinePageNumberFrame(ctx, run, inlineHexId)) return;
+        if (TextFlowTabPolicy.paragraphEndsWithTab(astPara)) return;
         if (!enableRightmostDotLeader(ctx, paragraph, astPara)) return;
 
         ASTTextRun tabRun = new ASTTextRun();
@@ -1073,10 +1441,6 @@ public class StoryLoader {
         return DoviraSubunitMarkerPolicy.isDoviraSubunitStyleName(leaf);
     }
 
-    private static boolean hasInlineObjectPng(ResolvedBuildContext ctx, int objectId) {
-        return ctx != null && ctx.hasInlineObjectPng(objectId);
-    }
-
     private static boolean isInlinePageNumberFrame(ResolvedBuildContext ctx, IDMLCharacterRun run, String inlineHexId) {
         IDMLTextFrame inlineFrame = findInlineFrame(run, inlineHexId);
         if (inlineFrame != null && inlineFrame.appliedObjectStyle() != null
@@ -1282,7 +1646,7 @@ public class StoryLoader {
     private static boolean hasInlineTextShellPlan(ResolvedBuildContext ctx, int domId) {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null) continue;
-            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL || plan.placement != Placement.INLINE) {
+            if (!ShellRole.isTextShell(plan) || plan.placement != Placement.INLINE) {
                 continue;
             }
             if (plan.domId == domId || containsDomId(plan.sourceObjectIds, domId)) {

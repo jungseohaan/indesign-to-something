@@ -69,8 +69,7 @@ final class LineSpacingResolver {
         for (ASTInlineItem item : astPara.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
-                // INLINE_TEXT_FRAME 타입은 줄간격 확장에서 제외 (테이블 셀 내 인라인 프레임)
-                if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) continue;
+                if (!InlineFlowPolicy.participatesInLineSpacing(obj)) continue;
                 if (obj.height() > max) {
                     max = obj.height();
                 }

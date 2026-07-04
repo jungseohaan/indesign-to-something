@@ -82,8 +82,11 @@ public class ResolvedDataReader {
                 data.addStory(parseStory(storyObj));
                 // tables within story
                 if (storyObj.has("tables")) {
+                    String ownerStoryId = getString(storyObj, "id");
                     for (JsonElement te : storyObj.getAsJsonArray("tables")) {
-                        data.addTable(parseTable(te.getAsJsonObject()));
+                        ResolvedTable table = parseTable(te.getAsJsonObject());
+                        if (table != null) table.storyId(ownerStoryId);
+                        if (table != null) data.addTable(table);
                     }
                 }
             }
@@ -330,16 +333,17 @@ public class ResolvedDataReader {
         if (o.has("paragraphs") && o.get("paragraphs").isJsonArray()) {
             for (JsonElement pe : o.getAsJsonArray("paragraphs")) {
                 JsonObject po = pe.getAsJsonObject();
-                if (!po.has("runs") || !po.get("runs").isJsonArray()) continue;
-                for (JsonElement re : po.getAsJsonArray("runs")) {
-                    JsonObject ro = re.getAsJsonObject();
-                    String type = getString(ro, "type");
-                    if ("inline_anchor".equals(type)
-                            && ro.has("anchoredObjectId")
-                            && !ro.get("anchoredObjectId").isJsonNull()) {
-                        cell.addInlineAnchorId(ro.get("anchoredObjectId").getAsInt());
+                ResolvedParagraph paragraph = parseParagraph(po);
+                cell.addParagraph(paragraph);
+                if (paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null) continue;
+                    if (run.isInlineAnchor()
+                            && run.anchoredObjectId() != null
+                            && run.anchoredObjectId() > 0) {
+                        cell.addInlineAnchorId(run.anchoredObjectId());
                     }
-                    String text = getString(ro, "text");
+                    String text = run.text();
                     if (text != null && !text.trim().isEmpty()) {
                         cell.hasTextRuns(true);
                     }
@@ -423,6 +427,7 @@ public class ResolvedDataReader {
         run.strikeThru(getBoxedBool(o, "strikeThru"));
         // IDML-Free: inline_anchor
         run.type(getString(o, "type"));
+        run.storyAnchorPlacement(getString(o, "storyAnchorPlacement"));
         if (o.has("anchoredObjectId") && !o.get("anchoredObjectId").isJsonNull()) {
             run.anchoredObjectId(o.get("anchoredObjectId").getAsInt());
         }
@@ -531,6 +536,8 @@ public class ResolvedDataReader {
         // IDML-Free 파이프라인 보강 필드
         item.zOrder(getInt(o, "zOrder", 0));
         item.isInline(getBool(o, "isInline", false));
+        item.anchoredPosition(getString(o, "anchoredPosition"));
+        item.storyAnchorPlacement(getString(o, "storyAnchorPlacement"));
         item.clipContent(getBool(o, "clipContent", false));
         if (o.has("childIds") && !o.get("childIds").isJsonNull()) {
             item.childIds(parseIntArray(o.getAsJsonArray("childIds")));
@@ -575,6 +582,11 @@ public class ResolvedDataReader {
             itemType = group.type();
         }
         group.itemType(itemType);
+        group.planPassId(getString(o, "planPassId"));
+        group.candidateId(getString(o, "candidateId"));
+        group.compositeRole(getString(o, "compositeRole"));
+        group.slotRole(getString(o, "slotRole"));
+        group.placementRole(getString(o, "placementRole"));
         group.imageFormat(getString(o, "imageFormat"));
         group.whiteStroke(getBool(o, "whiteStroke", false));
         // badge_group: PNG 내보내기 전 TF 텍스트를 숨겼는지 여부
@@ -589,6 +601,8 @@ public class ResolvedDataReader {
         group.overlapPolicy(getString(o, "overlapPolicy"));
         group.reason(getString(o, "reason"));
         group.parentStoryId(getString(o, "parentStoryId"));
+        group.inlineAnchorSourceObjectId(getInt(o, "inlineAnchorSourceObjectId", 0));
+        group.inlineSourceTreeClosed(getBool(o, "inlineSourceTreeClosed", false));
         group.layerId(getString(o, "layerId"));
         group.layerName(getString(o, "layerName"));
         group.layerIndex(getInt(o, "layerIndex", -1));
@@ -600,6 +614,12 @@ public class ResolvedDataReader {
         }
         if (o.has("tfInlineVisualIds") && !o.get("tfInlineVisualIds").isJsonNull()) {
             group.tfInlineVisualIds(parseIntArray(o.getAsJsonArray("tfInlineVisualIds")));
+        }
+        if (o.has("exportSourceObjectIds") && !o.get("exportSourceObjectIds").isJsonNull()) {
+            group.exportSourceObjectIds(parseIntArray(o.getAsJsonArray("exportSourceObjectIds")));
+        }
+        if (o.has("hiddenVisualSourceObjectIds") && !o.get("hiddenVisualSourceObjectIds").isJsonNull()) {
+            group.hiddenVisualSourceObjectIds(parseIntArray(o.getAsJsonArray("hiddenVisualSourceObjectIds")));
         }
         if (o.has("nativeFillChildIds") && !o.get("nativeFillChildIds").isJsonNull()) {
             group.nativeFillChildIds(parseIntArray(o.getAsJsonArray("nativeFillChildIds")));

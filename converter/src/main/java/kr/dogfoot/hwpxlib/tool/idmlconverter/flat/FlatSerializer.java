@@ -401,9 +401,6 @@ public class FlatSerializer {
         if (node.rotationAngle() != 0.0) {
             first = writeDoubleField(sb, "rotationAngle", node.rotationAngle(), first);
         }
-        if (node.narrowedWidth() != 0) {
-            first = writeLongField(sb, "narrowedWidth", node.narrowedWidth(), first);
-        }
         first = writeStringField(sb, "wrapperFillColor", node.wrapperFillColor(), first);
         if (node.wrapperFillTint() != -1.0) {
             first = writeDoubleField(sb, "wrapperFillTint", node.wrapperFillTint(), first);
@@ -602,6 +599,10 @@ public class FlatSerializer {
 
         if (!"TopAlign".equals(cell.verticalAlign())) {
             first = writeStringField(sb, "verticalAlign", cell.verticalAlign(), first);
+        }
+        first = writeStringField(sb, "firstBaselineOffset", cell.firstBaselineOffset(), first);
+        if (cell.minimumFirstBaselineOffset() != 0) {
+            first = writeLongField(sb, "minimumFirstBaselineOffset", cell.minimumFirstBaselineOffset(), first);
         }
 
         sb.append('}');

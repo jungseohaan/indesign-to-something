@@ -43,6 +43,7 @@ public final class SimpleButtonLabelPlanner {
             RenderedGroup visualRender = completeRender != null ? completeRender : textlessShellRender;
             LabelStyle labelStyle = labelStyle(ctx, labelTf, labelText);
             int[] sources = sourceIds(anchor, labelTf, shell);
+            int[] visualSources = visualSourceIds(anchor, shell);
             SimpleButtonLabelPlan plan = new SimpleButtonLabelPlan(
                     parseInt(anchor.id()),
                     parseInt(labelTf.id()),
@@ -79,7 +80,7 @@ public final class SimpleButtonLabelPlanner {
                     Placement.INLINE,
                     visualRender != null ? visualRender.id() : null,
                     sources,
-                    sources,
+                    visualSources,
                     ownedTextFrameIds,
                     new int[0],
                     "simple_button_label:" + plan.anchorDomId,
@@ -92,8 +93,7 @@ public final class SimpleButtonLabelPlanner {
                     null,
                     null,
                     -1);
-            ctx.replaceRenderedOwnershipPlan(objectPlan);
-            ctx.trimSourceObjectIdsClaimedBy(objectPlan);
+            ctx.addOwnershipPlan(objectPlan);
         }
     }
 
@@ -274,6 +274,16 @@ public final class SimpleButtonLabelPlanner {
         add(ids, anchor != null ? anchor.id() : null);
         add(ids, shell != null ? shell.id() : null);
         add(ids, labelTf != null ? labelTf.id() : null);
+        List<Integer> list = new ArrayList<>(ids);
+        int[] result = new int[list.size()];
+        for (int i = 0; i < list.size(); i++) result[i] = list.get(i);
+        return result;
+    }
+
+    private static int[] visualSourceIds(ResolvedPageItem anchor, ResolvedPageItem shell) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        add(ids, anchor != null ? anchor.id() : null);
+        add(ids, shell != null ? shell.id() : null);
         List<Integer> list = new ArrayList<>(ids);
         int[] result = new int[list.size()];
         for (int i = 0; i < list.size(); i++) result[i] = list.get(i);

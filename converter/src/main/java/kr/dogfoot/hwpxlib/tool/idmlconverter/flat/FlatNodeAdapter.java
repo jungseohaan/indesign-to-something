@@ -59,8 +59,6 @@ public class FlatNodeAdapter {
         tfb.storyId(node.storyId());
         tfb.distributed(node.distributed());
         tfb.rotationAngle(node.rotationAngle());
-        tfb.narrowedWidth(node.narrowedWidth());
-        tfb.narrowedXOffset(node.narrowedXOffset());
 
         // Wrapper fill
         tfb.wrapperFillColor(node.wrapperFillColor());
@@ -218,6 +216,8 @@ public class FlatNodeAdapter {
         astCell.marginLeft(flatCell.marginLeft());
         astCell.marginRight(flatCell.marginRight());
         astCell.verticalAlign(flatCell.verticalAlign());
+        astCell.firstBaselineOffset(flatCell.firstBaselineOffset());
+        astCell.minimumFirstBaselineOffset(flatCell.minimumFirstBaselineOffset());
 
         // Convert cell paragraphs from componentIds
         List<ASTParagraph> paragraphs = toParagraphs(flatCell.componentIds());

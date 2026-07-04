@@ -274,6 +274,8 @@ export interface InddExtractResult {
   idml_path: string;
   resolved_json_path: string | null;
   preview_pdf_path: string | null;
+  extraction_plan_path: string | null;
+  extraction_results_path: string | null;
   temp_dir: string;
   extract_stats: ExtractStats | null;
 }

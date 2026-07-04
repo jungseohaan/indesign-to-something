@@ -234,8 +234,21 @@ public class ASTRunConverter {
                                               ColorResolver colorResolver,
                                               ASTImageLoader imageLoader,
                                               ResolvedData resolvedData) {
-        // AnchoredPosition="Anchored" + TextWrapMode="None" Group → 인라인 삽입 건너뜀.
-        // (Phase 3 후처리가 BEHIND_TEXT floating ASTFigure 로 배치 — 텍스트 겹침)
+        int domId = domIdFromInlineGraphic(ig);
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
+                inlineBridgeContext(resolvedData);
+        if (domId > 0
+                && kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                .hasDirectDropOnlyInlinePlanForAnchor(tmpCtx, domId)) {
+            ASTInlineObject spacer = createLayoutOnlyInlineSpacer(ig);
+            if (spacer != null) {
+                para.addItem(spacer);
+            }
+            return;
+        }
+
+        // AnchoredPosition="Anchored" + TextWrapMode="None" Group → legacy ASTRun path에서는 인라인 삽입 건너뜀.
+        // visible 배치는 resolved ObjectPlan 실행 경로에서만 결정한다.
         if ("Anchored".equals(ig.anchoredPosition()) && "None".equals(ig.textWrapMode())) {
             return;
         }
@@ -248,11 +261,6 @@ public class ASTRunConverter {
                 if (isDoviraSubunitMarkerObject(boxDomId, resolvedData)) {
                     return;
                 }
-                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
-                        new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
-                tmpCtx.resolvedData = resolvedData;
-                tmpCtx.basePath = resolvedData.basePath();
-                tmpCtx.scaleFactor = resolvedData.scaleFactor();
                 tmpCtx.conceptDiagramTextFrameIds.addAll(
                         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePlacer
                                 .collectConceptDiagramTextFrameIds(tmpCtx, resolvedData.textFrames()));
@@ -299,10 +307,6 @@ public class ASTRunConverter {
             }
         }
         // DOM id 파싱 (이하 badge_group / inline_object 판별에 공통 사용)
-        int domId = -1;
-        if (ig.selfId() != null) {
-            try { domId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
-        }
         if (resolvedData != null && domId > 0 && isDoviraSubunitMarkerObject(domId, resolvedData)) {
             return;
         }
@@ -313,6 +317,9 @@ public class ASTRunConverter {
                 if (rg.id() == domId
                         && ("inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type()))
                         && rg.file() != null) {
+                    if (shouldDropRenderedInlineByOwnershipPlan(tmpCtx, rg)) {
+                        return;
+                    }
                     if (isDoviraSubunitMarkerRender(rg, resolvedData)) {
                         return;
                     }
@@ -442,6 +449,68 @@ public class ASTRunConverter {
                 ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg, resolvedData);
             }
         }
+    }
+
+    private static boolean shouldDropRenderedInlineByOwnershipPlan(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg) {
+        if (rg == null) return false;
+        if (rg.shouldSkipByOwnership()) return true;
+        if (ctx == null || ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()) {
+            return false;
+        }
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan =
+                ctx.findOwnershipPlanForRendered(rg);
+        return plan != null
+                && plan.visualAction == kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction.DROP_VISUAL;
+    }
+
+    private static int domIdFromInlineGraphic(IDMLCharacterRun.InlineGraphic ig) {
+        if (ig == null || ig.selfId() == null) return -1;
+        try {
+            String id = ig.selfId().startsWith("u") || ig.selfId().startsWith("U")
+                    ? ig.selfId().substring(1)
+                    : ig.selfId();
+            return Integer.parseInt(id, 16);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static ASTInlineObject createLayoutOnlyInlineSpacer(IDMLCharacterRun.InlineGraphic ig) {
+        if (ig == null) return null;
+        double w = ig.widthPoints();
+        double h = ig.heightPoints();
+        if ((w <= 0 || h <= 0) && ig.geometricBounds() != null && ig.geometricBounds().length >= 4) {
+            double[] gb = ig.geometricBounds();
+            if (w <= 0) w = Math.abs(gb[3] - gb[1]);
+            if (h <= 0) h = Math.abs(gb[2] - gb[0]);
+        }
+        if (w <= 0 && h <= 0) return null;
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
+        obj.sourceId(ig.selfId());
+        obj.width(CoordinateConverter.pointsToHwpunits(Math.max(0.1, w)));
+        obj.height(CoordinateConverter.pointsToHwpunits(Math.max(0.1, h)));
+        obj.anchoredPosition(ig.anchoredPosition());
+        obj.textWrapMode(ig.textWrapMode());
+        obj.keepInline(true);
+        return obj;
+    }
+
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext inlineBridgeContext(
+            ResolvedData resolvedData) {
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
+        if (resolvedData != null) {
+            tmpCtx.resolvedData = resolvedData;
+            tmpCtx.basePath = resolvedData.basePath();
+            tmpCtx.scaleFactor = resolvedData.scaleFactor();
+            if (resolvedData.ownershipPlans() != null) {
+                tmpCtx.ownershipPlans.addAll(resolvedData.ownershipPlans());
+            }
+        }
+        return tmpCtx;
     }
 
     /**

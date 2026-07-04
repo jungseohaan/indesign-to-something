@@ -218,11 +218,6 @@ public class ConverterCLI {
                         options = options.layoutMode(args[++i]);
                     }
                     break;
-                case "--resolved":
-                    if (i + 1 < args.length) {
-                        options = options.resolvedJsonPath(args[++i]);
-                    }
-                    break;
                 case "--font-map":
                     if (i + 1 < args.length) {
                         options = options.fontMapPath(args[++i]);

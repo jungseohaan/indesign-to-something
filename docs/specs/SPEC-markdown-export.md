@@ -512,7 +512,6 @@ mvn clean package -q -DskipTests
 
 java -jar target/idml-to-something-1.0.9-cli.jar \
   --convert output.idml out.md \
-  --resolved resolved.json \
   --links-directory /path/to/Links
 ```
 

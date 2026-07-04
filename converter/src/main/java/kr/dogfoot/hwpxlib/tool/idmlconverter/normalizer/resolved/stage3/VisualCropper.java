@@ -1,7 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -127,7 +126,7 @@ public final class VisualCropper {
     }
 
     public static PageCropPlan pageCropPlan(
-            RenderedGroup rg,
+            boolean masterEdgeStrip,
             BufferedImage img,
             int pageIdx,
             boolean hasCropSourceBounds,
@@ -148,7 +147,7 @@ public final class VisualCropper {
             double pageWidthMm,
             double pageHeightMm) {
         boolean pageAnchoredStripCrop = !hasCropSourceBounds && shouldAnchorStripCropToPage(
-                rg, rawLeft, rawRight, rawTop, rawBottom, pageWidthMm, pageHeightMm);
+                masterEdgeStrip, rawLeft, rawRight, rawTop, rawBottom, pageWidthMm, pageHeightMm);
         int[] stripRun = pageAnchoredStripCrop ? edgeAlphaRun(img, pageIdx) : null;
         if (stripRun != null) {
             int pxX = stripRun[0];
@@ -172,14 +171,14 @@ public final class VisualCropper {
                 ? (int) Math.round((visRight - visLeft) / fullW * img.getWidth())
                 : (int) Math.round((visRight - cropRefLeft) / cropRefW * img.getWidth()) - pxX;
         int pxH = (int) Math.round((visBottom - cropRefTop) / cropRefH * img.getHeight()) - pxY;
-        if (hasCropSourceBounds && isMasterEdgeStrip(rg, pageWidthMm)
+        if (hasCropSourceBounds && masterEdgeStrip
                 && cropRefLeft < -0.5 && Math.abs(visLeft) < 0.5
                 && visRight > rawRight + 0.1) {
             int desiredPxW = (int) Math.round((visRight - visLeft) / cropRefW * img.getWidth());
             desiredPxW = Math.max(1, Math.min(img.getWidth(), desiredPxW));
             pxX = Math.max(0, img.getWidth() - desiredPxW);
             pxW = img.getWidth() - pxX;
-        } else if (hasCropSourceBounds && isMasterEdgeStrip(rg, pageWidthMm)
+        } else if (hasCropSourceBounds && masterEdgeStrip
                 && cropRefRight > pageWidthMm + 0.5 && Math.abs(visRight - pageWidthMm) < 0.5
                 && visLeft < rawLeft - 0.1) {
             int desiredPxW = (int) Math.round((visRight - visLeft) / cropRefW * img.getWidth());
@@ -307,33 +306,20 @@ public final class VisualCropper {
         return areaRatio > 0.01 && areaRatio < 0.98;
     }
 
-    private static boolean shouldAnchorStripCropToPage(RenderedGroup rg,
+    private static boolean shouldAnchorStripCropToPage(boolean masterEdgeStrip,
                                                        double rawLeft,
                                                        double rawRight,
                                                        double rawTop,
                                                        double rawBottom,
                                                        double pageWidth,
                                                        double pageHeight) {
-        if (rg == null) return false;
+        if (!masterEdgeStrip) return false;
         if (pageWidth >= 1e8) return false;
         if (rawLeft >= -0.5 || rawRight <= pageWidth + 0.5) return false;
         double fullH = rawBottom - rawTop;
         double maxStripHeight = pageHeight < 1e8 ? Math.min(40.0, pageHeight * 0.15) : 40.0;
         if (fullH > maxStripHeight) return false;
-        String file = rg.file();
-        String reason = rg.reason();
-        return (file != null && (file.contains("master_") || file.contains("haseera_")))
-                || "master_graphic".equals(reason)
-                || "haseera_graphic".equals(reason);
-    }
-
-    private static boolean isMasterEdgeStrip(RenderedGroup rg, double pageWidth) {
-        if (rg == null || pageWidth >= 1e8) return false;
-        String file = rg.file();
-        String reason = rg.reason();
-        return (file != null && (file.contains("master_") || file.contains("haseera_")))
-                || "master_graphic".equals(reason)
-                || "haseera_graphic".equals(reason);
+        return true;
     }
 
     private static boolean isPaperLikeRgb(int r, int g, int b) {

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 /**
@@ -43,6 +44,7 @@ public class ResolvedData {
     private final Set<String> atomicIndesignPngTextOwnerFrameIds = new HashSet<>();
     private Map<String, AtomicMarkerBundle> atomicMarkerBundleByLabelFrameId;
     private Set<String> editableTextFrameIds;  // 배경에서 숨겨진 TextFrame DOM ID
+    private List<ObjectPlan> ownershipPlans = new ArrayList<>();
     private String basePath;  // resolved.json 부모 디렉토리 경로
     private final Map<String, String> paragraphStyleJustMap = new HashMap<>();  // styleName → justification (top-level paragraphStyles)
 
@@ -66,6 +68,10 @@ public class ResolvedData {
 
     public Set<String> editableTextFrameIds() { return editableTextFrameIds; }
     public void editableTextFrameIds(Set<String> v) { this.editableTextFrameIds = v; }
+    public List<ObjectPlan> ownershipPlans() { return ownershipPlans; }
+    public void ownershipPlans(List<ObjectPlan> plans) {
+        ownershipPlans = plans != null ? new ArrayList<>(plans) : new ArrayList<>();
+    }
     public boolean isEditableTextFrame(String domId) {
         return editableTextFrameIds != null && editableTextFrameIds.contains(domId);
     }
@@ -250,6 +256,10 @@ public class ResolvedData {
         return tableMap.get(tableId);
     }
 
+    public List<ResolvedTable> tables() {
+        return new ArrayList<>(tableMap.values());
+    }
+
     public ResolvedTable getTableByIdOrSourceId(String tableId) {
         if (tableId == null) return null;
         ResolvedTable direct = tableMap.get(tableId);
@@ -317,25 +327,25 @@ public class ResolvedData {
      * IDML Table의 실제 page placement bounds를 조회한다.
      *
      * 우선순위:
-     * 1. table-only owner TextFrame bounds가 있으면 그것을 사용한다.
-     * 2. 없으면 resolved table bounds를 사용한다.
+     * 1. resolved table bounds가 있으면 table content의 source placement로 사용한다.
+     * 2. 없으면 table-only owner TextFrame content box를 fallback으로 사용한다.
      *
      * IDML Table은 Story XML 안에만 있고 page 좌표를 직접 갖지 않는 경우가 많다.
-     * 이때 table content의 좌표 소유자는 Table 자체가 아니라 그것을 담는 TextFrame이다.
-     * resolved table bounds는 paragraph/story 기반으로 추정된 보조값일 수 있으므로,
-     * marker-only/table-only TextFrame이 명확하면 그 frame이 placement owner다.
+     * 그러나 resolved table bounds가 존재하면 extractor가 계산한 table content의
+     * page-local placement이므로 owner TextFrame보다 우선한다. owner content box는
+     * table bounds가 없는 wrapper/table-only frame의 보조 placement로만 사용한다.
      *
      * @return [top, left, bottom, right] page-relative, resolved 좌표 단위(mm), 없으면 null
      */
     public double[] getTablePlacementBounds(String idmlTableId) {
+        double[] tableBounds = getTableBounds(idmlTableId);
+        if (validBounds(tableBounds)) return tableBounds;
+
         ResolvedTextFrame owner = getTableOwnerTextFrame(idmlTableId);
         if (owner != null && isMarkerOnlyTextFrame(owner)) {
             double[] ownerBounds = tableOwnerPlacementBounds(owner);
             if (validBounds(ownerBounds)) return ownerBounds;
         }
-
-        double[] tableBounds = getTableBounds(idmlTableId);
-        if (validBounds(tableBounds)) return tableBounds;
         return null;
     }
 
@@ -359,15 +369,28 @@ public class ResolvedData {
         if (owner == null) return null;
         double[] pageRelative = owner.pageRelativeBounds();
         if (validBounds(pageRelative) && !isImplausiblyOffPageTableBounds(owner, pageRelative)) {
-            return pageRelative;
+            return tableOwnerContentBounds(owner, pageRelative);
         }
         double[] geometric = owner.geometricBounds();
         if (validBounds(geometric) && looksLikePageLocalTableGeometry(owner, geometric)) {
-            return pointBoundsToResolvedUnits(geometric);
+            return tableOwnerContentBounds(owner, pointBoundsToResolvedUnits(geometric));
         }
         double[] converted = textFrameGeometricBoundsToPageRelativeResolvedUnits(owner);
-        if (validBounds(converted)) return converted;
-        return validBounds(pageRelative) ? pageRelative : null;
+        if (validBounds(converted)) return tableOwnerContentBounds(owner, converted);
+        return validBounds(pageRelative) ? tableOwnerContentBounds(owner, pageRelative) : null;
+    }
+
+    private double[] tableOwnerContentBounds(ResolvedTextFrame owner, double[] frameBounds) {
+        if (!validBounds(frameBounds)) return frameBounds;
+        double[] out = frameBounds.clone();
+        double[] inset = owner != null ? owner.insetSpacing() : null;
+        if (inset == null || inset.length < 4) return out;
+        out[0] += Math.max(0, inset[0]);
+        out[1] += Math.max(0, inset[1]);
+        out[2] -= Math.max(0, inset[2]);
+        out[3] -= Math.max(0, inset[3]);
+        if (!validBounds(out)) return frameBounds;
+        return out;
     }
 
     private boolean isImplausiblyOffPageTableBounds(ResolvedTextFrame owner, double[] bounds) {
@@ -455,7 +478,12 @@ public class ResolvedData {
     }
 
     private String idmlTableOwnerStoryDomId(String idmlTableId) {
-        if (idmlTableId == null || idmlTableId.length() < 2 || idmlTableId.charAt(0) != 'u') return null;
+        if (idmlTableId == null) return null;
+        ResolvedTable table = getTableByIdOrSourceId(idmlTableId);
+        if (table != null && table.storyId() != null && !table.storyId().isEmpty()) {
+            return table.storyId();
+        }
+        if (idmlTableId.length() < 2 || idmlTableId.charAt(0) != 'u') return null;
         int iIdx = idmlTableId.indexOf('i');
         if (iIdx <= 1) return null;
         String storyHex = idmlTableId.substring(1, iIdx);
@@ -649,9 +677,6 @@ public class ResolvedData {
         if (isExactRenderedItemDuplicate(item)) {
             return;
         }
-        if (isMasterInlineTitleFallbackDuplicate(item)) {
-            return;
-        }
         if (isLiveTitleDecorationDuplicate(item)) {
             return;
         }
@@ -804,102 +829,6 @@ public class ResolvedData {
             return true;
         }
         return false;
-    }
-
-    private boolean isMasterInlineTitleFallbackDuplicate(RenderedGroup item) {
-        if (!isMasterFallbackGraphic(item)) return false;
-        if (!isSmallGraphic(item.bounds(), 24.0, 18.0)) return false;
-        if (!overlapsMasterTitleInlineAnchor(item)) return false;
-        for (RenderedGroup existing : renderedFloatingItems) {
-            if (!isNonFallbackMasterGraphic(existing)) continue;
-            if (existing.pageIndex() != item.pageIndex()) continue;
-            if (!containsBounds(existing.bounds(), item.bounds(), 0.75)) continue;
-            if (!containsAllSourceObjectIds(existing.sourceObjectIds(), item.sourceObjectIds())) continue;
-            return true;
-        }
-        return false;
-    }
-
-    private static boolean isMasterFallbackGraphic(RenderedGroup item) {
-        if (item == null || !"master_graphic".equals(item.reason())) return false;
-        String file = item.file();
-        return file != null && file.contains("_fallback_");
-    }
-
-    private static boolean isNonFallbackMasterGraphic(RenderedGroup item) {
-        if (item == null || !"master_graphic".equals(item.reason())) return false;
-        String file = item.file();
-        return file == null || !file.contains("_fallback_");
-    }
-
-    private boolean overlapsMasterTitleInlineAnchor(RenderedGroup item) {
-        double[] ib = item != null ? item.bounds() : null;
-        if (ib == null || ib.length < 4) return false;
-        for (ResolvedTextFrame tf : textFrames) {
-            if (tf == null || tf.pageIndex() != item.pageIndex()) continue;
-            if (!tf.isMasterInstance()) continue;
-            String text = tf.frameVisibleText();
-            if (text == null || text.indexOf('\uFFFC') < 0) continue;
-            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
-            if (!overlaps(ib, tb, 0.5)) continue;
-            if (!looksLikeMasterInlineTitleMarker(ib, tb)) continue;
-            ResolvedStory story = tf.storyId() != null ? storyMap.get(tf.storyId()) : null;
-            if (isMasterTitleStory(story)) return true;
-        }
-        return false;
-    }
-
-    private static boolean isMasterTitleStory(ResolvedStory story) {
-        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) {
-            return false;
-        }
-        ResolvedParagraph first = story.paragraphs().get(0);
-        String style = first != null ? first.styleName() : null;
-        if (style == null) return false;
-        return style.contains("단원명")
-                || style.contains("단원제목")
-                || style.contains("소단원");
-    }
-
-    private static boolean looksLikeMasterInlineTitleMarker(double[] itemBounds, double[] titleBounds) {
-        if (itemBounds == null || titleBounds == null
-                || itemBounds.length < 4 || titleBounds.length < 4) {
-            return false;
-        }
-        double itemW = itemBounds[3] - itemBounds[1];
-        double itemH = itemBounds[2] - itemBounds[0];
-        double titleW = titleBounds[3] - titleBounds[1];
-        double titleH = titleBounds[2] - titleBounds[0];
-        if (itemW <= 0 || itemH <= 0 || titleW <= 0 || titleH <= 0) return false;
-        return itemW <= Math.max(16.0, titleW * 0.30)
-                && itemH <= Math.max(12.0, titleH * 1.60)
-                && itemBounds[0] >= titleBounds[0] - titleH * 0.40
-                && itemBounds[2] <= titleBounds[2] + titleH * 0.40;
-    }
-
-    private static boolean isSmallGraphic(double[] bounds, double maxWidth, double maxHeight) {
-        if (bounds == null || bounds.length < 4) return false;
-        double w = bounds[3] - bounds[1];
-        double h = bounds[2] - bounds[0];
-        return w > 0 && h > 0 && w <= maxWidth && h <= maxHeight;
-    }
-
-    private static boolean containsBounds(double[] outer, double[] inner, double tolerancePt) {
-        if (outer == null || inner == null || outer.length < 4 || inner.length < 4) return false;
-        return outer[0] <= inner[0] + tolerancePt
-                && outer[1] <= inner[1] + tolerancePt
-                && outer[2] >= inner[2] - tolerancePt
-                && outer[3] >= inner[3] - tolerancePt;
-    }
-
-    private static boolean containsAllSourceObjectIds(int[] superset, int[] subset) {
-        if (superset == null || subset == null || superset.length == 0 || subset.length == 0) return false;
-        Set<Integer> values = new HashSet<>();
-        for (int id : superset) values.add(id);
-        for (int id : subset) {
-            if (!values.contains(id)) return false;
-        }
-        return true;
     }
 
     private static boolean safeEquals(String a, String b) {
@@ -1271,7 +1200,7 @@ public class ResolvedData {
         if (!"inline_object".equals(item.type()) && !"inline_object".equals(item.itemType())) return false;
         if (!"inline_graphic_only".equals(item.reason())) return false;
         String file = item.file();
-        return file != null && file.contains("inline_");
+        return file != null && !file.isEmpty();
     }
 
     private String[] simpleButtonLabelTextFrameIds(RenderedGroup item) {

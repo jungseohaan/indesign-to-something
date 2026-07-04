@@ -9,8 +9,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
  * SPEC-013 shared: ASTParagraph 텍스트 추출 + 부분 분할 유틸.
  *
  * <p>{@code ResolvedToASTBuilder}의 {@code getParaPlainText / createSplitParagraph /
- * createContinuationParagraph}에서 stateless static helper로 발췌.
- * 동작은 동일하며 builder와 phase5/WrapPhase5가 공유한다.</p>
+ * createContinuationParagraph}에서 stateless static helper로 발췌.</p>
  */
 public final class ParagraphTextHelpers {
 
@@ -22,7 +21,6 @@ public final class ParagraphTextHelpers {
      * <p>형식:
      * <ul>
      *   <li>{@code "u" + hex(domId)} → decimal domId (정상 케이스)</li>
-     *   <li>{@code "u" + hex(domId) + "_g\d+"} → decimal domId (wrap-split 그룹은 같은 origin TF 공유)</li>
      *   <li>{@code "u" + originalDomId + "_pi" + pageIdx} → 그대로 (SPEC-025 master instance clone; 별도 entry)</li>
      *   <li>{@code "u" + raw} → raw (NumberFormatException fallback)</li>
      * </ul>

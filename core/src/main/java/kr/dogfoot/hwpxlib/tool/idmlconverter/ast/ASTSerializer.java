@@ -380,6 +380,10 @@ public class ASTSerializer {
         first = writeLongField(sb, "height", cell.height(), first);
         first = writeStringField(sb, "fillColor", cell.fillColor(), first);
         first = writeStringField(sb, "verticalAlign", cell.verticalAlign(), first);
+        first = writeStringField(sb, "firstBaselineOffset", cell.firstBaselineOffset(), first);
+        if (cell.minimumFirstBaselineOffset() != 0) {
+            first = writeLongField(sb, "minimumFirstBaselineOffset", cell.minimumFirstBaselineOffset(), first);
+        }
 
         // margins
         if (cell.marginTop() != 0) first = writeLongField(sb, "marginTop", cell.marginTop(), first);
@@ -493,6 +497,9 @@ public class ASTSerializer {
         if (fig.flipVertical()) first = writeBooleanField(sb, "flipVertical", true, first);
         first = writeStringField(sb, "bundlePath", fig.bundlePath(), first);
         first = writeStringField(sb, "visualLayer", fig.visualLayer(), first);
+        if (fig.sourceLayerIndex() >= 0) {
+            first = writeIntField(sb, "sourceLayerIndex", fig.sourceLayerIndex(), first);
+        }
 
         sb.append('}');
     }

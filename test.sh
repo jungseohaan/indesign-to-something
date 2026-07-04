@@ -41,6 +41,7 @@ CASES_FILE="$SCRIPT_DIR/test-data/cases.json"
 JAR="$SCRIPT_DIR/converter/target/idml-to-something-1.0.9-cli.jar"
 JAVA="/opt/homebrew/opt/openjdk/bin/java"
 JSX="$SCRIPT_DIR/scripts/extract_indd.jsx"
+CONFIG="$SCRIPT_DIR/conversion-config.json"
 
 if [ ! -f "$CASES_FILE" ]; then
     echo "Error: $CASES_FILE not found"
@@ -251,7 +252,7 @@ run_extraction() {
 tell application \"$app_name\"
     activate
     with timeout of 600 seconds
-        do script (read POSIX file \"$JSX\") language javascript with arguments {\"$INDD_PATH\", \"$EXTRACT_DIR\", \"$START_PAGE\", \"$END_PAGE\", \"0\"}
+        do script (read POSIX file \"$JSX\") language javascript with arguments {\"$INDD_PATH\", \"$EXTRACT_DIR\", \"$START_PAGE\", \"$END_PAGE\", \"0\", \"0\", \"$CONFIG\", \"standard\", \"0\", \"\", \"full\", \"\", \"0\", \"$JSX\"}
     end timeout
 end tell
 " 2>&1
@@ -354,7 +355,7 @@ if [ "$ACTION" = "pdf" ]; then
 tell application \"$local_app_name\"
     activate
     with timeout of 600 seconds
-        do script (read POSIX file \"$JSX\") language javascript with arguments {\"$INDD_PATH\", \"$EXTRACT_DIR\", \"$START_PAGE\", \"$END_PAGE\", \"0\", \"1\"}
+        do script (read POSIX file \"$JSX\") language javascript with arguments {\"$INDD_PATH\", \"$EXTRACT_DIR\", \"$START_PAGE\", \"$END_PAGE\", \"0\", \"1\", \"$CONFIG\", \"standard\", \"0\", \"\", \"full\", \"\", \"0\", \"$JSX\"}
     end timeout
 end tell
 " 2>&1
@@ -400,12 +401,6 @@ if [ $? -ne 0 ]; then
 fi
 echo "Build OK"
 
-# resolved 옵션
-RESOLVED_OPT=""
-if [ -n "$RESOLVED" ] && [ -f "$RESOLVED" ]; then
-    RESOLVED_OPT="--resolved $RESOLVED"
-fi
-
 # 페이지 옵션
 PAGE_OPT=""
 if [ "$START_PAGE" -gt 0 ] 2>/dev/null; then
@@ -422,7 +417,7 @@ fi
 # ── 변환 ──
 if [ "$ACTION" = "convert" ] || [ "$ACTION" = "both" ]; then
     echo "--- Converting ---"
-    $JAVA -jar "$JAR" --convert "$IDML" "$HWPX" $RESOLVED_OPT $PAGE_OPT $LINKS_OPT --include-images --margin-guide
+    $JAVA -jar "$JAR" --convert "$IDML" "$HWPX" $PAGE_OPT $LINKS_OPT --include-images --margin-guide
     echo ""
 
     # PDF 프리뷰 + HWPX 열기
@@ -440,8 +435,8 @@ fi
 # ── 진단 ──
 if [ "$ACTION" = "diagnose" ] || [ "$ACTION" = "both" ]; then
     echo "--- Diagnosing ---"
-    if [ -n "$RESOLVED_OPT" ]; then
-        $JAVA -jar "$JAR" --diagnose "$IDML" $RESOLVED_OPT $PAGE_OPT 2>/dev/null
+    if [ -n "$RESOLVED" ] && [ -f "$RESOLVED" ]; then
+        $JAVA -jar "$JAR" --diagnose "$IDML" --resolved "$RESOLVED" $PAGE_OPT 2>/dev/null
     else
         echo "Warning: No resolved.json — diagnose shows IDML only"
         $JAVA -jar "$JAR" --diagnose "$IDML" $PAGE_OPT 2>/dev/null

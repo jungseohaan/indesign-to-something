@@ -2,6 +2,9 @@
 
 이 저장소에서 IDML -> HWPX 변환 로직을 수정할 때는 페이지별 예외를 만들지 않는다.
 문제가 생기면 먼저 source object ownership 정책으로 일반화한다.
+IDML/resolved 메타데이터와 `POLICY-source-ownership.md`만 ownership의 진실로 삼는다.
+사용자 요청이 페이지/문구/좌표/색/증상 조건을 추가하게 만들면 바로 구현하지 말고,
+먼저 source metadata와 ObjectPlan 모델을 확인해 회귀 가능성을 설명한다.
 
 ## 최우선 목표
 
@@ -15,6 +18,7 @@
 - inline/floating 여부는 후속 단계에서 뒤집지 않는다.
 - 정책은 `FramePlacer`, `InlineFrameHandler`, `BackgroundInjector`, `RenderableFramePlacer`에 흩어지지 않는다.
 - 페이지 번호, 문구, 특정 좌표 기반 예외는 추가하지 않는다.
+- 색상, 픽셀, occlusion, 보이는 증상만으로 ownership을 결정하지 않는다.
 
 ## 기준 문서
 

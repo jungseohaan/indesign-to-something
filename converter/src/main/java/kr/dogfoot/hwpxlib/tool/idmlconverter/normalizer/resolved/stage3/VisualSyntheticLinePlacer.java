@@ -5,6 +5,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.VisualSourcePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
@@ -35,11 +40,18 @@ public final class VisualSyntheticLinePlacer {
         Set<Integer> syntheticDone = new HashSet<>();
 
         for (RenderedGroup rg : floatingItems) {
-            if (!isPageObject(rg)) continue;
+            ObjectPlan parentPlan = ctx.findOwnershipPlanForRendered(rg);
+            if (parentPlan == null || parentPlan.placement != Placement.FLOATING) continue;
+            if (!isFloatingSyntheticVisualPlan(parentPlan)) {
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.SyntheticLine",
+                        "SKIP_SYNTHETIC_LINE_PARENT_NOT_PLANNED",
+                        "synthetic GraphicLine generation is plan-only");
+                continue;
+            }
             if (rg.childIds() == null || rg.childIds().length == 0) continue;
-            if (rg.file() == null) continue;
+            if (parentPlan.file == null || parentPlan.file.isEmpty()) continue;
 
-            File pngFile = new File(ctx.basePath, rg.file());
+            File pngFile = new File(ctx.basePath, parentPlan.file);
             if (!pngFile.exists() || pngFile.length() > 1000) continue;
 
             int[] dims = VisualPngHeader.readDimensions(pngFile);
@@ -60,6 +72,13 @@ public final class VisualSyntheticLinePlacer {
                 if (syntheticDone.contains(cid)) continue;
                 ResolvedPageItem pi = ctx.resolvedData.getPageItem(String.valueOf(cid));
                 if (pi == null || !"GraphicLine".equals(pi.type())) continue;
+                ObjectPlan childPlan = ctx.findOwnershipPlanForDomId(cid);
+                if (!isFloatingSyntheticVisualPlan(childPlan)) {
+                    ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.SyntheticLine",
+                            "SKIP_SYNTHETIC_LINE_CHILD_NOT_PLANNED",
+                            "GraphicLine child " + cid + " is not owned by a visible floating ObjectPlan");
+                    continue;
+                }
                 if (pi.strokeWeight() <= 0 || pi.strokeColorName() == null) continue;
                 if (pi.opacity() <= 0) continue;
 
@@ -110,7 +129,10 @@ public final class VisualSyntheticLinePlacer {
                 fig.imageFormat("png");
                 fig.pixelWidth(100);
                 fig.pixelHeight(4);
-                fig.zOrder(1);
+                fig.zOrder(childPlan.zOrder);
+                if (childPlan.visualLayer != null) {
+                    fig.visualLayer(childPlan.visualLayer.name());
+                }
                 fig.fromGroup(true);
                 fig.sourceId("synth_line_" + cid);
                 sections.get(pageIdx).addBlockAtFront(fig);
@@ -122,6 +144,14 @@ public final class VisualSyntheticLinePlacer {
                         + "pt hwpW=" + w + " hwpH=" + h + " stroke=" + pi.strokeColorName());
             }
         }
+    }
+
+    private static boolean isFloatingSyntheticVisualPlan(ObjectPlan plan) {
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.materialization == Materialization.NATIVE_SOURCE_SHAPE) return false;
+        return plan.visualAction == VisualAction.PLACE_FLOATING_PNG
+                || ShellRole.isTextShell(plan);
     }
 
     private static byte[] generateSolidLinePng(ResolvedPageItem pi, ResolvedBuildContext ctx) {
@@ -151,15 +181,5 @@ public final class VisualSyntheticLinePlacer {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private static boolean isPageObject(RenderedGroup rg) {
-        String t = rg.itemType();
-        if ("page_object".equals(t)) return true;
-        if (t != null) return false;
-        String f = rg.file();
-        return f != null && (f.contains("img_") || f.contains("deco_")
-                || f.contains("shape_") || f.contains("graphic_") || f.contains("master_")
-                || f.contains("haseera_"));
     }
 }

@@ -44,7 +44,11 @@ public final class VisualTfInlineCompositor {
         if (!hasTfInlineVisuals(rg)) return false;
         ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
         if (plan == null || !plan.hasVisibleVisual()) return false;
-        return plan.textAction != TextAction.OWNED_BY_HWPX_TEXT;
+        if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return false;
+        for (int id : rg.tfInlineVisualIds()) {
+            if (isEligibleInlineVisualForParentComposite(ctx, rg, id)) return true;
+        }
+        return false;
     }
 
     public static double[] boundsWithTfInlineVisuals(
@@ -52,6 +56,7 @@ public final class VisualTfInlineCompositor {
         if (!hasTfInlineVisuals(rg) || fallback == null || fallback.length < 4) return fallback;
         double[] union = new double[] { fallback[0], fallback[1], fallback[2], fallback[3] };
         for (int id : rg.tfInlineVisualIds()) {
+            if (!isEligibleInlineVisualForParentComposite(ctx, rg, id)) continue;
             RenderedGroup child = findRenderedGroup(ctx, id);
             if (child == null || child.bounds() == null || child.bounds().length < 4) continue;
             double[] b = child.bounds();
@@ -93,6 +98,7 @@ public final class VisualTfInlineCompositor {
         drawAtBounds(canvas, base, parentBounds, union);
 
         for (int id : parent.tfInlineVisualIds()) {
+            if (!isEligibleInlineVisualForParentComposite(ctx, parent, id)) continue;
             RenderedGroup child = findRenderedGroup(ctx, id);
             if (child == null || child.file() == null || child.bounds() == null
                     || child.bounds().length < 4) {
@@ -109,6 +115,35 @@ public final class VisualTfInlineCompositor {
             }
         }
         return canvas;
+    }
+
+    private static boolean isEligibleInlineVisualForParentComposite(ResolvedBuildContext ctx, RenderedGroup parent, int id) {
+        if (ctx == null || ctx.ownershipPlans == null) return false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || !plan.hasVisibleVisual()) continue;
+            if (isParentPlan(plan, parent)) continue;
+            if (plan.renderId != null && plan.renderId == id) return false;
+            if (plan.domId == id) return false;
+            if (contains(plan.sourceObjectIds, id) || contains(plan.visualSourceObjectIds, id)) {
+                return false;
+            }
+        }
+        return findRenderedGroup(ctx, id) != null;
+    }
+
+    private static boolean isParentPlan(ObjectPlan plan, RenderedGroup parent) {
+        if (plan == null || parent == null) return false;
+        if (plan.pageIndex != parent.pageIndex()) return false;
+        if (plan.renderId != null && plan.renderId == parent.id()) return true;
+        return plan.domId == parent.id();
+    }
+
+    private static boolean contains(int[] values, int target) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == target) return true;
+        }
+        return false;
     }
 
     private static void drawAtBounds(

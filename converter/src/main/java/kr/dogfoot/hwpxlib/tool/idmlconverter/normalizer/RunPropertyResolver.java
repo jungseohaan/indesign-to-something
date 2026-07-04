@@ -143,18 +143,26 @@ public final class RunPropertyResolver {
     /**
      * SPEC-016: 매칭 신뢰도를 고려한 fontSize 해석.
      *
-     * <p>HIGH/MEDIUM: resolved 우선. LOW: IDML CR 우선.
+     * <p>fontSize는 IDML effective style 크기를 원본 진실로 본다. CharacterRun에
+     * 명시 크기가 없더라도 ParagraphStyle 크기가 있으면 resolved fontSize로
+     * 덮지 않는다. resolved fontSize는 IDML 쪽에서 크기를 전혀 확인할 수 없는
+     * 경우의 폴백으로만 사용한다.
      */
     public static Integer resolveFontSizeHwpunitsWithConfidence(
             ResolvedRun rr,
             IDMLCharacterRun cr,
             Double paragraphStyleFontSize,
             MatchConfidence confidence) {
-        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
-                && rr != null && rr.fontSize() != null && rr.fontSize() > 0) {
+        if (cr != null && cr.fontSize() != null && cr.fontSize() > 0) {
+            return (int) CoordinateConverter.pointsToHwpunits(cr.fontSize());
+        }
+        if (paragraphStyleFontSize != null && paragraphStyleFontSize > 0) {
+            return (int) CoordinateConverter.pointsToHwpunits(paragraphStyleFontSize);
+        }
+        if (rr != null && rr.fontSize() != null && rr.fontSize() > 0) {
             return (int) CoordinateConverter.pointsToHwpunits(rr.fontSize());
         }
-        return resolveFontSizeHwpunits(rr, cr, paragraphStyleFontSize);
+        return null;
     }
 
     /**

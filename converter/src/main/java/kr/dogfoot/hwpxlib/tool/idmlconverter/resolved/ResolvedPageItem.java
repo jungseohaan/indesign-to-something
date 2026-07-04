@@ -63,6 +63,8 @@ public class ResolvedPageItem {
     // IDML-Free 파이프라인 보강
     private int zOrder;
     private boolean isInline;
+    private String anchoredPosition;
+    private String storyAnchorPlacement;
     private int[] childIds;          // Group 자식 ID
     private boolean clipContent;     // Group 클리핑
     private double[] pageRelativeBounds; // [top, left, bottom, right] page-relative
@@ -184,6 +186,12 @@ public class ResolvedPageItem {
 
     public boolean isInline() { return isInline; }
     public void isInline(boolean v) { this.isInline = v; }
+
+    public String anchoredPosition() { return anchoredPosition; }
+    public void anchoredPosition(String v) { this.anchoredPosition = v; }
+
+    public String storyAnchorPlacement() { return storyAnchorPlacement; }
+    public void storyAnchorPlacement(String v) { this.storyAnchorPlacement = v; }
 
     public int[] childIds() { return childIds; }
     public void childIds(int[] v) { this.childIds = v; }

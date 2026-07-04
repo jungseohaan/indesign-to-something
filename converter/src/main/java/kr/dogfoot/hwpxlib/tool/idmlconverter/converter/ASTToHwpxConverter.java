@@ -16,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 
 import java.util.*;
 
@@ -289,7 +290,7 @@ public class ASTToHwpxConverter {
         List<ASTTextFrameBlock> floatingBlocks = new ArrayList<>();
         List<ASTTextFrameBlock> backgroundBlocks = new ArrayList<>();
         for (ASTTextFrameBlock block : textFrameBlocks) {
-            if (block.isBackgroundOnly()) {
+            if (block.isBackgroundOnly() && !isInFrontPlannedTextFrameVisual(block)) {
                 backgroundBlocks.add(block);
             } else {
                 floatingBlocks.add(block);
@@ -303,8 +304,9 @@ public class ASTToHwpxConverter {
         // 1) BEHIND_TEXT FIGURE: Stage 1 visualLayer가 behind plane으로 정한 그림을 먼저 배치
         //
         // HWPX에서는 같은 BEHIND_TEXT 평면 안에서 XML 출력 순서가 겹침 결과에 영향을 준다.
-        // Stage 1의 z-band 순서대로 낮은 배경부터 쓰고, label shell처럼 높은 장식은 나중에
-        // 써서 BACKGROUND < DECORATION < TEXT 순서를 보존한다.
+        // Stage 1 zOrder is the source stacking contract, and larger values are
+        // visually in front. Emit back-to-front so XML order cannot invert
+        // same-plane source depth.
         List<ASTFigure> behindFigures = new ArrayList<>();
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
@@ -403,9 +405,7 @@ public class ASTToHwpxConverter {
     private static boolean isBehindTextPlaneFigure(ASTFigure fig) {
         if (fig == null) return false;
         String layer = fig.visualLayer();
-        if ("PAGE_BACKGROUND".equals(layer)) return true;
-        if ("CONTAINER_BACKDROP".equals(layer)
-                || "TEXT_CARD_BACKDROP".equals(layer)) {
+        if (VisualPlanePolicy.isBehindTextLayerName(layer)) {
             return true;
         }
         if (isTextShellVisualLayer(layer)) return false;
@@ -415,11 +415,18 @@ public class ASTToHwpxConverter {
 
     private static boolean isTextShellVisualLayer(String layer) {
         return "CONTAINER_BACKDROP".equals(layer)
+                || "CONTENT_BACKDROP".equals(layer)
                 || "TEXT_CARD_BACKDROP".equals(layer)
+                || "LABEL_CONNECTOR_BACKDROP".equals(layer)
                 || "LABEL_BACKDROP".equals(layer)
                 || "LABEL_OVERLAY_BACKDROP".equals(layer)
                 || "CONTAINER_OUTLINE".equals(layer)
                 || "FOREGROUND_MASK".equals(layer);
+    }
+
+    private static boolean isInFrontPlannedTextFrameVisual(ASTTextFrameBlock block) {
+        if (block == null) return false;
+        return VisualPlanePolicy.isInFrontLayerName(block.plannedShellVisualLayer());
     }
 
     private static long figureArea(ASTFigure fig) {

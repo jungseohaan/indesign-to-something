@@ -80,7 +80,7 @@ final class InlineItemDispatcher {
         } else if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
             if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
                 paragraphBuilder.imageBuilder.addInlineImageWithOverlays(para, obj, paragraphBuilder.textBoxBuilder, paragraphBuilder);
-            } else if (!hasMeaningfulFollowingContent && isNonFlowHorizontalLine(obj)) {
+            } else if (isNonFlowHorizontalLine(obj)) {
                 paragraphBuilder.imageBuilder.addPageLevelInlineImage(para, obj);
             } else {
                 paragraphBuilder.imageBuilder.addInlineImage(para, obj);

@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "description": "Source ownership regression pages. These cases must stay policy/invariant based; do not add page/text/coordinate exceptions to production code.",
+  "cases": [
+    {
+      "id": "park31-u1-p006",
+      "case": "park31-u1",
+      "page": 6,
+      "title": "unit opener background and inline markers",
+      "tags": ["background", "inline", "table-position"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    },
+    {
+      "id": "park31-u1-p007",
+      "case": "park31-u1",
+      "page": 7,
+      "title": "green spread background and icon table",
+      "tags": ["background", "z-depth", "table"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    },
+    {
+      "id": "park31-u1-p008",
+      "case": "park31-u1",
+      "page": 8,
+      "title": "yellow page background and 01 composite",
+      "tags": ["background", "composite", "z-depth"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    },
+    {
+      "id": "park31-u1-p014",
+      "case": "park31-u1",
+      "page": 14,
+      "title": "speech bubble/student z-depth and textless bounding boxes",
+      "tags": ["z-depth", "textless", "label-backdrop"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    },
+    {
+      "id": "park31-u1-p015",
+      "case": "park31-u1",
+      "page": 15,
+      "title": "table-like shells, native lines, duplicate fallback removal",
+      "tags": ["table", "shell", "native-line", "duplicate"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    },
+    {
+      "id": "park31-u1-p022",
+      "case": "park31-u1",
+      "page": 22,
+      "title": "activity closing shell and inline 보기/check spacing",
+      "tags": ["shell", "inline"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    },
+    {
+      "id": "lit-guide-u2-p174",
+      "case": "lit-guide-u2",
+      "page": 174,
+      "title": "구절 풀이 shell z-depth",
+      "tags": ["shell", "z-depth"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    },
+    {
+      "id": "lit-guide-u1-p049",
+      "case": "lit-guide-u1",
+      "page": 49,
+      "title": "table shell/table style duplicate ownership",
+      "tags": ["table", "duplicate", "style-slot"],
+      "expect": {
+        "blockingFailures": 0
+      }
+    }
+  ]
+}

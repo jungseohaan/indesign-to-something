@@ -19,6 +19,11 @@ public class RenderedGroup {
     private int zOrder;          // ExtendScript 할당 z-order (renderedFloatingItems)
     private boolean zOrderKnown; // true: IDML z-order normalizer가 실제 원본 순서를 확인함
     private String itemType;     // "vector" | "group" | "text_decoration" | "image" | "other"
+    private String planPassId;   // ExtractionPlan pass that produced this render
+    private String candidateId;  // ExtractionPlan candidate id
+    private String compositeRole;
+    private String slotRole;
+    private String placementRole;
     private boolean textHiddenBeforeExport; // true: PNG 내보내기 전 TF 텍스트를 숨겼음 → PNG는 텍스트 없음
     private String imageFormat;   // "jpg", "jpeg", "png" 등 (소스 파일 직접 복사 시 설정)
     private String visualOwner;   // "indesign_png" | "hwpx_shape" | ...
@@ -29,6 +34,8 @@ public class RenderedGroup {
     private String[] editableTextFrameIds;
     private int[] visualOnlyChildIds;
     private int[] tfInlineVisualIds;
+    private int[] exportSourceObjectIds;
+    private int[] hiddenVisualSourceObjectIds;
     // PNG가 굽지 않고 풀어준(네이티브 fill로 렌더해야 할) 대형 솔리드 배경 사각형 DOM ID.
     private int[] nativeFillChildIds;
     private int[] sourceObjectIds;
@@ -39,6 +46,8 @@ public class RenderedGroup {
     private String overlapPolicy;
     private String reason;
     private String parentStoryId;
+    private int inlineAnchorSourceObjectId;
+    private boolean inlineSourceTreeClosed;
     private String layerId;       // primary InDesign layer id copied from source/render target
     private String layerName;     // primary InDesign layer name
     private int layerIndex = -1;  // primary InDesign document layer index
@@ -82,6 +91,21 @@ public class RenderedGroup {
     public String itemType() { return itemType; }
     public void itemType(String v) { this.itemType = v; }
 
+    public String planPassId() { return planPassId; }
+    public void planPassId(String v) { this.planPassId = v; }
+
+    public String candidateId() { return candidateId; }
+    public void candidateId(String v) { this.candidateId = v; }
+
+    public String compositeRole() { return compositeRole; }
+    public void compositeRole(String v) { this.compositeRole = v; }
+
+    public String slotRole() { return slotRole; }
+    public void slotRole(String v) { this.slotRole = v; }
+
+    public String placementRole() { return placementRole; }
+    public void placementRole(String v) { this.placementRole = v; }
+
     private String pdfFile;      // PDF 배경 파일 상대 경로 (page_background 타입)
     private int pdfPageIndex;    // PDF 파일 내 페이지 인덱스 (0-based)
 
@@ -121,6 +145,12 @@ public class RenderedGroup {
     public int[] tfInlineVisualIds() { return tfInlineVisualIds; }
     public void tfInlineVisualIds(int[] v) { this.tfInlineVisualIds = v; }
 
+    public int[] exportSourceObjectIds() { return exportSourceObjectIds; }
+    public void exportSourceObjectIds(int[] v) { this.exportSourceObjectIds = v; }
+
+    public int[] hiddenVisualSourceObjectIds() { return hiddenVisualSourceObjectIds; }
+    public void hiddenVisualSourceObjectIds(int[] v) { this.hiddenVisualSourceObjectIds = v; }
+
     public int[] nativeFillChildIds() { return nativeFillChildIds; }
     public void nativeFillChildIds(int[] v) { this.nativeFillChildIds = v; }
 
@@ -147,6 +177,12 @@ public class RenderedGroup {
 
     public String parentStoryId() { return parentStoryId; }
     public void parentStoryId(String v) { this.parentStoryId = v; }
+
+    public int inlineAnchorSourceObjectId() { return inlineAnchorSourceObjectId; }
+    public void inlineAnchorSourceObjectId(int v) { this.inlineAnchorSourceObjectId = v; }
+
+    public boolean inlineSourceTreeClosed() { return inlineSourceTreeClosed; }
+    public void inlineSourceTreeClosed(boolean v) { this.inlineSourceTreeClosed = v; }
 
     public String layerId() { return layerId; }
     public void layerId(String v) { this.layerId = v; }

@@ -1,0 +1,678 @@
+/*
+ * ObjectPlan-shaped diagnostics for extract_indd.jsx.
+ *
+ * This module does not execute ownership. It maps planner-declared bundles to
+ * the policy ObjectPlan contract and validates that contract. The legacy
+ * execution candidate adapter lives in execution_candidates.jsx while executors
+ * are still being migrated.
+ */
+
+function _buildObjectPlanDiagnostics(sourceItems, candidates) {
+    var plannerBundles = _buildPlannerBundles(sourceItems, candidates);
+    return _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles);
+}
+
+function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles) {
+    var bundles = plannerBundles && plannerBundles.bundles ? plannerBundles.bundles : [];
+    var objectPlans = [];
+    var summary = {
+        planCount: 0,
+        executablePlanCount: 0,
+        readyExactClusterCount: 0,
+        migrationStatusCounts: {},
+        textActionCounts: {},
+        visualActionCounts: {},
+        materializationCounts: {},
+        placementCounts: {},
+        coordinateSpaceCounts: {},
+        visualLayerCounts: {},
+        plansWithVisualSources: 0,
+        plansWithStyleSources: 0,
+        plansWithOwnedTextFrames: 0,
+        importReadyPlanCount: 0,
+        issueCount: 0,
+        contractStatusCounts: {},
+        issueCodeCounts: {},
+        migrationBlockerCounts: {}
+    };
+
+    for (var i = 0; i < bundles.length; i++) {
+        var plan = _objectPlanFromPlannerBundle(bundles[i], i);
+        objectPlans.push(plan);
+        summary.planCount++;
+        if (plan.executable) summary.executablePlanCount++;
+        if (plan.migrationStatus === "READY_EXACT_CLUSTER") summary.readyExactClusterCount++;
+        _incrementObjectPlanSummary(summary.migrationStatusCounts, plan.migrationStatus);
+        _incrementObjectPlanSummary(summary.textActionCounts, plan.textAction);
+        _incrementObjectPlanSummary(summary.visualActionCounts, plan.visualAction);
+        _incrementObjectPlanSummary(summary.materializationCounts, plan.materialization);
+        _incrementObjectPlanSummary(summary.placementCounts, plan.placement);
+        _incrementObjectPlanSummary(summary.coordinateSpaceCounts, plan.coordinateSpace);
+        _incrementObjectPlanSummary(summary.visualLayerCounts, plan.visualLayer);
+        if (plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0) summary.plansWithVisualSources++;
+        if (plan.styleSourceObjectIds && plan.styleSourceObjectIds.length > 0) summary.plansWithStyleSources++;
+        if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) summary.plansWithOwnedTextFrames++;
+        _incrementObjectPlanSummary(summary.migrationBlockerCounts, plan.migrationBlocker || "NONE");
+    }
+    var validation = _validateObjectPlanDiagnostics(objectPlans);
+    summary.issueCount = validation.issues.length;
+    summary.importReadyPlanCount = validation.importReadyPlanCount;
+    summary.contractStatusCounts = validation.contractStatusCounts;
+    summary.issueCodeCounts = validation.issueCodeCounts;
+
+    return {
+        schemaVersion: 1,
+        policy: "POLICY-source-ownership",
+        mode: "object-plan-diagnostics",
+        summary: summary,
+        validation: validation,
+        objectPlans: objectPlans
+    };
+}
+
+function _objectPlanFromPlannerBundle(bundle, index) {
+    bundle = bundle || {};
+    var textAction = _objectPlanTextAction(bundle);
+    var visualAction = _objectPlanVisualAction(bundle);
+    var placement = _objectPlanPlacement(bundle);
+    var coordinateSpace = _objectPlanCoordinateSpace(bundle, placement);
+    var materialization = _objectPlanMaterialization(bundle, visualAction);
+    var migrationStatus = _objectPlanMigrationStatus(bundle);
+    var migrationBlocker = _objectPlanMigrationBlocker(bundle, migrationStatus);
+
+    return {
+        objectPlanId: _objectPlanId(bundle, index),
+        bundleId: bundle.bundleId || null,
+        candidateId: bundle.candidateId || null,
+        passId: bundle.passId || null,
+        pageIndex: bundle.pageIndex,
+        kind: bundle.unit || null,
+        mode: bundle.mode || null,
+        candidatePurpose: bundle.candidatePurpose || null,
+        compositeRole: bundle.compositeRole || null,
+        slotRole: bundle.slotRole || null,
+        layoutOnlyInlineSlot: bundle.layoutOnlyInlineSlot === true,
+        sourceInlineFlow: bundle.sourceInlineFlow === true,
+        inlineCompositeLayoutDescendant: bundle.inlineCompositeLayoutDescendant === true,
+        connectorDecorationVisual: bundle.connectorDecorationVisual === true,
+        primarySourceObjectId: bundle.primarySourceObjectId !== undefined
+                ? bundle.primarySourceObjectId
+                : null,
+        ownedByNativeShellSourceObjectIds: _sortedNumericIds(
+                bundle.ownedByNativeShellSourceObjectIds || []),
+        sourceObjectIds: _sortedNumericIds(bundle.sourceObjectIds || []),
+        sourceRootObjectIds: _sortedNumericIds(bundle.sourceRootObjectIds || []),
+        clusterSourceObjectIds: _sortedNumericIds(bundle.clusterSourceObjectIds || []),
+        clusterKindCounts: bundle.clusterKindCounts || {},
+        omittedClusterSourceObjectIds: _sortedNumericIds(bundle.omittedClusterSourceObjectIds || []),
+        omittedClusterKindCounts: bundle.omittedClusterKindCounts || {},
+        clusterHasEditableText: bundle.clusterHasEditableText === true,
+        clusterHasTextFrame: bundle.clusterHasTextFrame === true,
+        clusterHasPlacedContent: bundle.clusterHasPlacedContent === true,
+        clusterHasVisualSource: bundle.clusterHasVisualSource === true,
+        visualSourceObjectIds: _sortedNumericIds(bundle.visualSourceObjectIds || []),
+        styleSourceObjectIds: _sortedNumericIds(bundle.styleSourceObjectIds || []),
+        ownedTextFrameIds: _sortedNumericIds(bundle.ownedTextFrameIds || []),
+        exportSourceObjectIds: _sortedNumericIds(bundle.exportSourceObjectIds || []),
+        hiddenVisualSourceObjectIds: _sortedNumericIds(bundle.hiddenVisualSourceObjectIds || []),
+        materialization: materialization,
+        textAction: textAction,
+        visualAction: visualAction,
+        placement: placement,
+        coordinateSpace: coordinateSpace,
+        visualLayer: _objectPlanVisualLayer(bundle),
+        zOrder: bundle.zOrder !== undefined ? bundle.zOrder : null,
+        reason: _objectPlanReason(bundle, migrationStatus),
+        bounds: bundle.bounds || null,
+        ownershipSlot: bundle.ownershipSlot || null,
+        policyLayer: bundle.policyLayer || null,
+        clusterRelation: bundle.clusterRelation || null,
+        migrationStatus: migrationStatus,
+        migrationBlocker: migrationBlocker.code,
+        migrationBlockerDetail: migrationBlocker.detail,
+        executable: bundle.executable === true,
+        required: bundle.required === true
+    };
+}
+
+function _objectPlanId(bundle, index) {
+    var id = bundle && bundle.bundleId ? String(bundle.bundleId) : ("bundle.index." + index);
+    return "objectPlan." + id.replace(/[^A-Za-z0-9_.-]/g, "_");
+}
+
+function _objectPlanTextAction(bundle) {
+    if (bundle && bundle.ownershipSlot === "SHELL_SLOT"
+            && _objectPlanVisualAction(bundle) === "DROP_VISUAL") {
+        return "DROP_TEXT";
+    }
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) {
+        return "OWNED_BY_HWPX_TEXT";
+    }
+    if (!bundle || bundle.executable !== true) return "DROP_TEXT";
+    if (bundle.ownershipSlot === "SHELL_SLOT") return "DROP_TEXT";
+    return "DROP_TEXT";
+}
+
+function _objectPlanVisualAction(bundle) {
+    if (!bundle || bundle.executable !== true) return "DROP_VISUAL";
+    if (bundle.layoutOnlyInlineSlot === true) return "DROP_VISUAL";
+    if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
+    if (bundle.ownershipSlot === "SHELL_SLOT") return "PLACE_TEXT_SHELL";
+    if (_objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle)) return "DROP_VISUAL";
+    if (bundle.passId === "pass.inline_objects") {
+        return _objectPlanPlacement(bundle) === "INLINE" ? "PLACE_INLINE_PNG" : "PLACE_FLOATING_PNG";
+    }
+    if (bundle.ownershipSlot === "CONTENT_VISUAL_SLOT") {
+        return bundle.passId === "pass.inline_objects" && _objectPlanPlacement(bundle) === "INLINE"
+                ? "PLACE_INLINE_PNG"
+                : "PLACE_FLOATING_PNG";
+    }
+    return "DROP_VISUAL";
+}
+
+function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (bundle.visualSourceObjectIds && bundle.visualSourceObjectIds.length > 0) return false;
+    if (bundle.styleSourceObjectIds && bundle.styleSourceObjectIds.length > 0) return false;
+    if (bundle.exportSourceObjectIds && bundle.exportSourceObjectIds.length > 0) return false;
+    return true;
+}
+
+function _objectPlanPlacement(bundle) {
+    if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
+    if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
+    if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";
+    if (bundle && bundle.passId === "pass.inline_objects") {
+        var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
+        if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
+            return "FLOATING";
+        }
+        return "INLINE";
+    }
+    return "FLOATING";
+}
+
+function _objectPlanBundleIsInlineFlowShell(bundle) {
+    if (!bundle || bundle.sourceInlineFlow !== true) return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    return bundle.slotRole === "direct_child_shell_slot"
+            || bundle.compositeRole === "direct_child_shell_slot";
+}
+
+function _objectPlanBundleIsInlineTextOwningShell(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    return bundle.slotRole === "direct_child_shell_slot"
+            || bundle.compositeRole === "direct_child_shell_slot";
+}
+
+function _objectPlanBundleIsInlineCompositeLayoutDescendantShell(bundle) {
+    if (!bundle || bundle.inlineCompositeLayoutDescendant !== true) return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    return bundle.slotRole === "direct_child_shell_slot"
+            || bundle.compositeRole === "direct_child_shell_slot"
+            || bundle.compositeRole === "native_parent_text_shell_slot";
+}
+
+function _objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle) {
+    if (!bundle || bundle.inlineCompositeLayoutDescendant !== true) return false;
+    if (bundle.ownershipSlot === "SHELL_SLOT") {
+        return _objectPlanBundleIsInlineCompositeLayoutDescendantShell(bundle);
+    }
+    return bundle.ownershipSlot === "CONTENT_VISUAL_SLOT"
+            && bundle.visualSourceObjectIds
+            && bundle.visualSourceObjectIds.length > 0;
+}
+
+function _objectPlanCoordinateSpace(bundle, placement) {
+    if (placement === "INLINE") return "STORY_FLOW";
+    return "PAGE";
+}
+
+function _objectPlanMaterialization(bundle, visualAction) {
+    if (!bundle) return "EXTRACTED_PNG_VECTOR";
+    if (visualAction === "PLACE_TABLE_STYLE") return "HWPX_TABLE_STYLE";
+    if (visualAction === "ABSORB_TEXT_STYLE") return "HWPX_TEXT";
+    if (visualAction === "DROP_VISUAL") return "HWPX_TEXT";
+    return bundle.materialization || "EXTRACTED_PNG_VECTOR";
+}
+
+function _objectPlanVisualLayer(bundle) {
+    if (!bundle || !bundle.policyLayer) return "CONTENT_VISUAL";
+    if (bundle.policyLayer === "BACKGROUND") return "PAGE_BACKGROUND";
+    if (bundle.policyLayer === "DECORATION") {
+        if (bundle.connectorDecorationVisual === true) {
+            return "LABEL_CONNECTOR_BACKDROP";
+        }
+        if (bundle.compositeRole === "native_parent_text_shell_slot") {
+            return "LABEL_OVERLAY_BACKDROP";
+        }
+        if (bundle.passId === "pass.vector_shape_frames"
+                && bundle.ownershipSlot === "SHELL_SLOT"
+                && bundle.materialization === "NATIVE_SOURCE_SHAPE") {
+            return "CONTAINER_OUTLINE";
+        }
+        return "LABEL_BACKDROP";
+    }
+    return "CONTENT_VISUAL";
+}
+
+function _objectPlanMigrationStatus(bundle) {
+    if (!bundle) return "NEEDS_BUNDLE_SOURCE_POLICY";
+    if (bundle.layoutOnlyInlineSlot === true) return "READY_LAYOUT_ONLY_INLINE_SLOT";
+    if (bundle.clusterRelation === "EXACT_SOURCE_CLUSTER") return "READY_EXACT_CLUSTER";
+    if (_objectPlanHasInlineTextlessSiblingDecorationContract(bundle)) return "READY_TEXTLESS_CONNECTOR_FRAGMENT";
+    if (_objectPlanHasExplicitSlotOnlyContract(bundle)) return "READY_SLOT_ONLY_CLUSTER_FRAGMENT";
+    if (_objectPlanHasClosedPlacedContentFrameContract(bundle)) return "READY_CLOSED_PLACED_CONTENT_FRAME";
+    if (bundle.clusterRelation === "PAGE_OR_SYNTHETIC_BUNDLE") return "NEEDS_SYNTHETIC_SOURCE_MODEL";
+    if (bundle.clusterRelation === "NO_CLUSTER_REFERENCE") return "NEEDS_SYNTHETIC_SOURCE_MODEL";
+    if (bundle.clusterRelation === "BUNDLE_NARROWER_THAN_CLUSTER") return "NEEDS_VISIBLE_SLOT_EXPLICITNESS";
+    if (bundle.clusterRelation === "BUNDLE_BROADER_THAN_CLUSTER") return "NEEDS_COMPOSITE_BUNDLE_POLICY";
+    return "NEEDS_BUNDLE_SOURCE_POLICY";
+}
+
+function _objectPlanReason(bundle, migrationStatus) {
+    var parts = ["diagnostic_from_planner_bundle", migrationStatus || "UNKNOWN"];
+    if (bundle && bundle.passId) parts.push(bundle.passId);
+    if (bundle && bundle.ownershipSlot) parts.push(bundle.ownershipSlot);
+    if (bundle && bundle.clusterRelation) parts.push(bundle.clusterRelation);
+    return parts.join(":");
+}
+
+function _objectPlanMigrationBlocker(bundle, migrationStatus) {
+    if (_objectPlanMigrationStatusIsImportReady(migrationStatus)) {
+        return _objectPlanMigrationBlockerResult("NONE", bundle, {
+            note: migrationStatus === "READY_SLOT_ONLY_CLUSTER_FRAGMENT"
+                    ? "sourceObjectIds keep broad ancestry while exportSourceObjectIds and hiddenVisualSourceObjectIds declare the slot-only visual contract"
+                    : (migrationStatus === "READY_CLOSED_PLACED_CONTENT_FRAME"
+                            ? "visualSourceObjectIds include the placed content descendant source tree for the frame"
+                            : "sourceObjectIds match the recursive source cluster")
+        });
+    }
+    if (!bundle) {
+        return _objectPlanMigrationBlockerResult("MISSING_PLANNER_BUNDLE", bundle, {});
+    }
+    if (migrationStatus === "NEEDS_SYNTHETIC_SOURCE_MODEL") {
+        if (bundle.passId === "pass.page_backgrounds") {
+            return _objectPlanMigrationBlockerResult("SYNTHETIC_PAGE_BACKGROUND_NEEDS_SOURCE_MODEL", bundle, {
+                nextPolicyQuestion: "Stage 1 must point each page background render at the source bundle/page fragment that owns the visible background slot."
+            });
+        }
+        return _objectPlanMigrationBlockerResult("NO_CLUSTER_REFERENCE_NEEDS_SOURCE_MODEL", bundle, {
+            nextPolicyQuestion: "Stage 1 must declare the source root for this candidate before it can be imported."
+        });
+    }
+    if (migrationStatus === "NEEDS_VISIBLE_SLOT_EXPLICITNESS") {
+        if (bundle.hiddenVisualSourceObjectIds && bundle.hiddenVisualSourceObjectIds.length > 0) {
+            return _objectPlanMigrationBlockerResult("SLOT_ONLY_HIDDEN_CHILDREN_NEEDS_OBJECTPLAN", bundle, {
+                nextPolicyQuestion: "Stage 1 must keep ancestry broad, but write the hidden child ids as an explicit slot-only export contract."
+            });
+        }
+        if (_objectPlanNarrowerVectorCompetesWithPlacedContent(bundle)) {
+            return _objectPlanMigrationBlockerResult("NATIVE_SHAPE_WITH_PLACED_CONTENT_NEEDS_CONTENT_OWNER_POLICY", bundle, {
+                nextPolicyQuestion: "Stage 1 must choose the placed-content owner for this source cluster or declare a closed native-shape owner; a partial vector source is not import-ready."
+            });
+        }
+        if (_objectPlanNarrowerShellOmitsEditableText(bundle)) {
+            return _objectPlanMigrationBlockerResult("TEXT_OWNING_SHELL_FRAGMENT_NEEDS_TEXT_SLOT_SPLIT", bundle, {
+                nextPolicyQuestion: "Stage 1 must keep shell visuals and editable TextFrame owners in one source bundle with explicit visual/text slot fields."
+            });
+        }
+        if (_objectPlanNarrowerDecorationFragment(bundle)) {
+            return _objectPlanMigrationBlockerResult("DECORATION_FRAGMENT_NEEDS_CLOSED_SHELL_CONTRACT", bundle, {
+                nextPolicyQuestion: "Stage 1 must declare whether this decoration fragment is a closed textless shell owner or a slot-only fragment with explicit omitted descendants."
+            });
+        }
+        return _objectPlanMigrationBlockerResult("BUNDLE_NARROWER_THAN_CLUSTER_NEEDS_SLOT_POLICY", bundle, {
+            nextPolicyQuestion: "Stage 1 must explain which descendant slot this narrower visible source set owns."
+        });
+    }
+    if (migrationStatus === "NEEDS_COMPOSITE_BUNDLE_POLICY") {
+        if (bundle.passId === "pass.master_page_graphics") {
+            return _objectPlanMigrationBlockerResult("COMPOSITE_MASTER_BUNDLE_NEEDS_PAGE_APPLIED_POLICY", bundle, {
+                nextPolicyQuestion: "Stage 1 must declare the applied master source bundle and the page-local visible fragment as separate identities."
+            });
+        }
+        return _objectPlanMigrationBlockerResult("COMPOSITE_BUNDLE_NEEDS_EXPLICIT_SLOT_SPLIT", bundle, {
+            nextPolicyQuestion: "Stage 1 must split a broad composite into explicit visible slots or declare it as one closed composite owner."
+        });
+    }
+    return _objectPlanMigrationBlockerResult("DIVERGENT_BUNDLE_NEEDS_SOURCE_BUNDLE_POLICY", bundle, {
+        nextPolicyQuestion: "Stage 1 must reconcile a candidate source set that neither contains nor is contained by the recursive source cluster."
+    });
+}
+
+function _objectPlanHasExplicitSlotOnlyContract(bundle) {
+    if (!bundle) return false;
+    if (bundle.clusterRelation !== "BUNDLE_NARROWER_THAN_CLUSTER") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT" && bundle.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (bundle.mode !== "SLOT_ONLY"
+            && !(bundle.ownershipSlot === "SHELL_SLOT" && bundle.slotRole === "shell_slot_only")) return false;
+    if (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0) return false;
+    if (!bundle.hiddenVisualSourceObjectIds || bundle.hiddenVisualSourceObjectIds.length === 0) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    if (!_sourceSetContainsAll(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    if (!_sourceSetContainsAll(bundle.exportSourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    if (_sourceSetsIntersect(bundle.visualSourceObjectIds || [], bundle.hiddenVisualSourceObjectIds || [])) return false;
+    return true;
+}
+
+function _objectPlanHasInlineTextlessSiblingDecorationContract(bundle) {
+    if (!bundle) return false;
+    if (bundle.clusterRelation !== "BUNDLE_NARROWER_THAN_CLUSTER") return false;
+    if (bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.slotRole !== "inline_textless_sibling_decoration_slot"
+            && bundle.compositeRole !== "inline_textless_sibling_decoration_slot") return false;
+    if (bundle.connectorDecorationVisual !== true) return false;
+    if (bundle.clusterHasEditableText === true || bundle.clusterHasTextFrame === true) return false;
+    if (bundle.clusterHasPlacedContent === true) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    if (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0) return false;
+    if (!_sourceSetContainsAll(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    if (!_sourceSetContainsAll(bundle.exportSourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    return true;
+}
+
+function _objectPlanNarrowerVectorCompetesWithPlacedContent(bundle) {
+    if (!bundle) return false;
+    return bundle.passId === "pass.vector_shape_frames"
+            && bundle.ownershipSlot === "CONTENT_VISUAL_SLOT"
+            && bundle.clusterHasPlacedContent === true;
+}
+
+function _objectPlanNarrowerShellOmitsEditableText(bundle) {
+    if (!bundle) return false;
+    return bundle.ownershipSlot === "SHELL_SLOT"
+            && bundle.clusterHasEditableText === true
+            && bundle.ownedTextFrameIds
+            && bundle.ownedTextFrameIds.length === 0;
+}
+
+function _objectPlanNarrowerDecorationFragment(bundle) {
+    if (!bundle) return false;
+    return bundle.passId === "pass.decoration_groups"
+            && bundle.ownershipSlot === "SHELL_SLOT"
+            && bundle.clusterRelation === "BUNDLE_NARROWER_THAN_CLUSTER";
+}
+
+function _objectPlanHasClosedPlacedContentFrameContract(bundle) {
+    if (!bundle) return false;
+    if (bundle.clusterRelation !== "BUNDLE_NARROWER_THAN_CLUSTER") return false;
+    if (bundle.passId !== "pass.image_placed_frames") return false;
+    if (bundle.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return false;
+    if (!bundle.clusterSourceObjectIds || bundle.clusterSourceObjectIds.length === 0) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    return _sourceSetKey(bundle.clusterSourceObjectIds) === _sourceSetKey(bundle.visualSourceObjectIds);
+}
+
+function _objectPlanMigrationStatusIsImportReady(status) {
+    return status === "READY_EXACT_CLUSTER"
+            || status === "READY_SLOT_ONLY_CLUSTER_FRAGMENT"
+            || status === "READY_CLOSED_PLACED_CONTENT_FRAME"
+            || status === "READY_TEXTLESS_CONNECTOR_FRAGMENT"
+            || status === "READY_LAYOUT_ONLY_INLINE_SLOT";
+}
+
+function _objectPlanMigrationBlockerResult(code, bundle, extraDetail) {
+    var detail = {
+        passId: bundle && bundle.passId ? bundle.passId : null,
+        ownershipSlot: bundle && bundle.ownershipSlot ? bundle.ownershipSlot : null,
+        clusterRelation: bundle && bundle.clusterRelation ? bundle.clusterRelation : null,
+        primarySourceObjectId: bundle && bundle.primarySourceObjectId !== undefined ? bundle.primarySourceObjectId : null,
+        sourceObjectCount: bundle && bundle.sourceObjectIds ? bundle.sourceObjectIds.length : 0,
+        visualSourceObjectCount: bundle && bundle.visualSourceObjectIds ? bundle.visualSourceObjectIds.length : 0,
+        styleSourceObjectCount: bundle && bundle.styleSourceObjectIds ? bundle.styleSourceObjectIds.length : 0,
+        ownedTextFrameCount: bundle && bundle.ownedTextFrameIds ? bundle.ownedTextFrameIds.length : 0,
+        exportSourceObjectCount: bundle && bundle.exportSourceObjectIds ? bundle.exportSourceObjectIds.length : 0,
+        hiddenVisualSourceObjectCount: bundle && bundle.hiddenVisualSourceObjectIds ? bundle.hiddenVisualSourceObjectIds.length : 0,
+        omittedClusterSourceObjectCount: bundle && bundle.omittedClusterSourceObjectIds ? bundle.omittedClusterSourceObjectIds.length : 0,
+        clusterKindCounts: bundle && bundle.clusterKindCounts ? bundle.clusterKindCounts : {},
+        omittedClusterKindCounts: bundle && bundle.omittedClusterKindCounts ? bundle.omittedClusterKindCounts : {},
+        clusterHasEditableText: bundle && bundle.clusterHasEditableText === true,
+        clusterHasTextFrame: bundle && bundle.clusterHasTextFrame === true,
+        clusterHasPlacedContent: bundle && bundle.clusterHasPlacedContent === true,
+        clusterHasVisualSource: bundle && bundle.clusterHasVisualSource === true
+    };
+    for (var key in extraDetail) {
+        if (extraDetail.hasOwnProperty(key)) detail[key] = extraDetail[key];
+    }
+    return {
+        code: code || "UNKNOWN_MIGRATION_BLOCKER",
+        detail: detail
+    };
+}
+
+function _validateObjectPlanDiagnostics(objectPlans) {
+    var plans = objectPlans || [];
+    var issues = [];
+    var issueCodeCounts = {};
+    var issuePlanIds = {};
+    var visibleSlotOwners = {};
+    var textOwners = {};
+    var placementBySlot = {};
+    var importReadyPlanCount = 0;
+    var contractStatusCounts = {};
+
+    for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        if (!plan) continue;
+        _validateObjectPlanRequiredFields(plan, issues, issueCodeCounts, issuePlanIds);
+        _validateObjectPlanTextVisualSeparation(plan, issues, issueCodeCounts, issuePlanIds);
+        _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, issuePlanIds);
+
+        if (_objectPlanHasVisibleVisual(plan)) {
+            var slotKey = _objectPlanVisibleSlotKey(plan);
+            if (slotKey) {
+                if (!visibleSlotOwners[slotKey]) visibleSlotOwners[slotKey] = [];
+                visibleSlotOwners[slotKey].push(plan);
+                if (!placementBySlot[slotKey]) placementBySlot[slotKey] = {};
+                placementBySlot[slotKey][plan.placement || "UNKNOWN"] = true;
+            }
+        }
+        if (plan.textAction === "OWNED_BY_HWPX_TEXT" && plan.ownedTextFrameIds) {
+            for (var t = 0; t < plan.ownedTextFrameIds.length; t++) {
+                var textId = String(plan.ownedTextFrameIds[t]);
+                if (!textOwners[textId]) textOwners[textId] = [];
+                textOwners[textId].push(plan);
+            }
+        }
+    }
+
+    for (var key in visibleSlotOwners) {
+        if (!visibleSlotOwners.hasOwnProperty(key)) continue;
+        if (visibleSlotOwners[key].length > 1) {
+            _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                    "duplicate_visible_source_slot", visibleSlotOwners[key],
+                    { slotKey: key });
+        }
+        if (_objectPlanMapKeyCount(placementBySlot[key]) > 1) {
+            _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                    "inline_floating_visible_slot_conflict", visibleSlotOwners[key],
+                    { slotKey: key });
+        }
+    }
+
+    for (var textKey in textOwners) {
+        if (!textOwners.hasOwnProperty(textKey)) continue;
+        if (textOwners[textKey].length > 1) {
+            _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                    "duplicate_hwpx_text_owner", textOwners[textKey],
+                    { textFrameId: textKey });
+        }
+    }
+
+    for (var p = 0; p < plans.length; p++) {
+        var objectPlan = plans[p];
+        if (!objectPlan) continue;
+        var status = issuePlanIds[objectPlan.objectPlanId]
+                ? "NEEDS_POLICY_OR_METADATA"
+                : (_objectPlanMigrationStatusIsImportReady(objectPlan.migrationStatus)
+                        ? "READY_FOR_STAGE1_IMPORT"
+                        : "NEEDS_MIGRATION_POLICY");
+        objectPlan.contractStatus = status;
+        if (status === "READY_FOR_STAGE1_IMPORT") importReadyPlanCount++;
+        _incrementObjectPlanSummary(contractStatusCounts, status);
+    }
+
+    return {
+        issueCount: issues.length,
+        importReadyPlanCount: importReadyPlanCount,
+        contractStatusCounts: contractStatusCounts,
+        issueCodeCounts: issueCodeCounts,
+        issues: issues
+    };
+}
+
+function _validateObjectPlanRequiredFields(plan, issues, issueCodeCounts, issuePlanIds) {
+    var missing = [];
+    if (!plan.textAction) missing.push("textAction");
+    if (!plan.visualAction) missing.push("visualAction");
+    if (!plan.placement) missing.push("placement");
+    if (!plan.visualLayer) missing.push("visualLayer");
+    if (!plan.materialization) missing.push("materialization");
+    if (!plan.coordinateSpace) missing.push("coordinateSpace");
+    if (plan.zOrder === null || plan.zOrder === undefined) missing.push("zOrder");
+    if (missing.length > 0) {
+        _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                "missing_required_object_plan_fields", [plan],
+                { missingFields: missing });
+    }
+    if (_objectPlanHasVisibleVisual(plan)
+            && plan.visualAction !== "PLACE_TABLE_STYLE"
+            && !_objectPlanHasVisibleSourceEvidence(plan)
+            && plan.passId !== "pass.page_backgrounds") {
+        _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                "visible_visual_without_visual_sources", [plan], {});
+    }
+}
+
+function _objectPlanHasVisibleSourceEvidence(plan) {
+    if (!plan) return false;
+    if (plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0) return true;
+    if (plan.visualAction === "PLACE_TEXT_SHELL"
+            && plan.styleSourceObjectIds
+            && plan.styleSourceObjectIds.length > 0) {
+        return true;
+    }
+    return false;
+}
+
+function _validateObjectPlanTextVisualSeparation(plan, issues, issueCodeCounts, issuePlanIds) {
+    if (!plan.visualSourceObjectIds || !plan.ownedTextFrameIds) return;
+    var owned = _sourceIdSet(plan.ownedTextFrameIds);
+    var overlap = [];
+    for (var i = 0; i < plan.visualSourceObjectIds.length; i++) {
+        var id = plan.visualSourceObjectIds[i];
+        if (owned[String(id)]) overlap.push(id);
+    }
+    if (overlap.length > 0 && _objectPlanAllowsTextFrameShellSourceOverlap(plan, overlap)) {
+        return;
+    }
+    if (overlap.length > 0) {
+        _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                "visual_sources_include_owned_text_frames", [plan],
+                { overlappingIds: overlap });
+    }
+}
+
+function _objectPlanAllowsTextFrameShellSourceOverlap(plan, overlap) {
+    if (!plan || !overlap || overlap.length === 0) return false;
+    if (plan.ownershipSlot !== "SHELL_SLOT") return false;
+    if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+    if (plan.materialization !== "EXTRACTED_PNG_VECTOR") return false;
+    if (plan.passId !== "pass.editable_textframe_visual_shells") return false;
+    if (!plan.styleSourceObjectIds || plan.styleSourceObjectIds.length === 0) return false;
+    var styleIds = _sourceIdSet(plan.styleSourceObjectIds);
+    for (var i = 0; i < overlap.length; i++) {
+        if (!styleIds[String(overlap[i])]) return false;
+    }
+    return true;
+}
+
+function _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, issuePlanIds) {
+    if (plan.placement === "INLINE" && plan.coordinateSpace !== "STORY_FLOW") {
+        _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                "inline_coordinate_space_mismatch", [plan],
+                { expected: "STORY_FLOW", actual: plan.coordinateSpace });
+    }
+    if (plan.placement === "FLOATING" && plan.coordinateSpace !== "PAGE") {
+        _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                "floating_coordinate_space_mismatch", [plan],
+                { expected: "PAGE", actual: plan.coordinateSpace });
+    }
+}
+
+function _objectPlanHasVisibleVisual(plan) {
+    return plan && (plan.visualAction === "PLACE_INLINE_PNG"
+            || plan.visualAction === "PLACE_FLOATING_PNG"
+            || plan.visualAction === "PLACE_TEXT_SHELL"
+            || plan.visualAction === "PLACE_TABLE_STYLE");
+}
+
+function _objectPlanVisibleSlotKey(plan) {
+    if (!plan) return "";
+    var slot = plan.ownershipSlot || _objectPlanSlotFromActions(plan);
+    var ids = plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0
+            ? plan.visualSourceObjectIds
+            : (plan.styleSourceObjectIds && plan.styleSourceObjectIds.length > 0
+                    ? plan.styleSourceObjectIds
+                    : plan.sourceObjectIds);
+    var sourceKey = _sourceSetKey(ids || []);
+    if (!sourceKey) sourceKey = "synthetic:" + (plan.bundleId || plan.objectPlanId || "unknown");
+    return String(plan.pageIndex) + "|" + slot + "|" + sourceKey;
+}
+
+function _objectPlanSlotFromActions(plan) {
+    if (!plan) return "UNKNOWN_SLOT";
+    if (plan.visualAction === "PLACE_TEXT_SHELL") return "SHELL_SLOT";
+    if (plan.visualAction === "PLACE_TABLE_STYLE") return "TABLE_STYLE_SLOT";
+    if (plan.textAction === "OWNED_BY_PNG") return "TEXT_SLOT";
+    return "CONTENT_VISUAL_SLOT";
+}
+
+function _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds, code, plans, detail) {
+    _incrementObjectPlanSummary(issueCodeCounts, code);
+    var refs = [];
+    for (var i = 0; plans && i < plans.length; i++) {
+        var plan = plans[i];
+        if (!plan) continue;
+        refs.push({
+            objectPlanId: plan.objectPlanId || null,
+            bundleId: plan.bundleId || null,
+            candidateId: plan.candidateId || null,
+            pageIndex: plan.pageIndex,
+            passId: plan.passId || null,
+            textAction: plan.textAction || null,
+            visualAction: plan.visualAction || null,
+            placement: plan.placement || null,
+            ownershipSlot: plan.ownershipSlot || null,
+            sourceObjectIds: plan.sourceObjectIds || [],
+            visualSourceObjectIds: plan.visualSourceObjectIds || [],
+            styleSourceObjectIds: plan.styleSourceObjectIds || [],
+            ownedTextFrameIds: plan.ownedTextFrameIds || []
+        });
+        if (plan.objectPlanId) issuePlanIds[plan.objectPlanId] = true;
+    }
+    issues.push({
+        code: code,
+        detail: detail || {},
+        plans: refs
+    });
+}
+
+function _objectPlanMapKeyCount(map) {
+    var count = 0;
+    for (var key in map) {
+        if (map.hasOwnProperty(key)) count++;
+    }
+    return count;
+}
+
+function _incrementObjectPlanSummary(map, key) {
+    key = key || "UNKNOWN";
+    if (!map[key]) map[key] = 0;
+    map[key]++;
+}

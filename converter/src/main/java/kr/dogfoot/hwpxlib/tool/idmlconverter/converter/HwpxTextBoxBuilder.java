@@ -15,6 +15,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 
 /**
  * ASTTextFrameBlock / ASTInlineObject(INLINE_TEXT_FRAME) → HWPX 글상자(Rectangle+DrawText)
@@ -45,7 +46,7 @@ public class HwpxTextBoxBuilder {
     }
 
     static LineWrapMethod textFrameLineWrap(ASTTextFrameBlock block) {
-        return block != null && block.noAutoLineWrap()
+        return block != null && block.noAutoLineWrap() && isSingleLineNoWrapCandidate(block)
                 ? LineWrapMethod.SQUEEZE
                 : LineWrapMethod.BREAK;
     }
@@ -54,6 +55,27 @@ public class HwpxTextBoxBuilder {
         return obj != null && obj.noAutoLineWrap()
                 ? LineWrapMethod.SQUEEZE
                 : LineWrapMethod.BREAK;
+    }
+
+    private static boolean isSingleLineNoWrapCandidate(ASTTextFrameBlock block) {
+        if (block == null) return false;
+        String sourceText = block.frameVisibleText();
+        if (sourceText != null) {
+            if (sourceText.indexOf('\n') >= 0 || sourceText.indexOf('\r') >= 0) return false;
+            if (sourceText.indexOf('\u0016') >= 0) return false;
+        }
+        if (block.paragraphs() != null && block.paragraphs().size() > 1) return false;
+        if (block.paragraphs() != null) {
+            for (ASTParagraph paragraph : block.paragraphs()) {
+                if (paragraph == null || paragraph.items() == null) continue;
+                for (ASTInlineItem item : paragraph.items()) {
+                    if (item != null && item.itemType() == ASTInlineItem.ItemType.BREAK) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     /** addPageLevelOverlay delegate — 외부 호출자(ASTToHwpxConverter, FlatToHwpxConverter) 호환 유지. */
@@ -143,7 +165,9 @@ public class HwpxTextBoxBuilder {
                 w,
                 textBoxMinH,
                 block.cornerRadius(),
-                block.height());
+                block.height(),
+                null,
+                block.nativeGraphicsAllowed() || block.forceImageFill() || block.cornerRadius() > 0);
 
         // ShapePosition — 글자처럼 취급 (인라인)
         rect.createPos();
@@ -212,17 +236,29 @@ public class HwpxTextBoxBuilder {
      * 글상자 배경색 설정.
      * fillTint는 색상 농도(흰색 블렌딩)로 처리하고, alpha=0(불투명)으로 설정.
      */
-    void setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint) {
-        setupTextBoxFillBrush(rect, fillColor, fillTint, false);
+    boolean setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint) {
+        return setupTextBoxFillBrush(rect, fillColor, fillTint, false);
     }
 
-    void setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint, boolean forceNativeGraphics) {
-        if (!nativeTextBoxGraphicsEnabled() && !forceNativeGraphics) return;
+    boolean setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint, boolean forceNativeGraphics) {
+        if (!nativeTextBoxGraphicsEnabled() && !forceNativeGraphics) return false;
         if (fillColor != null && fillColor.startsWith("#")) {
             String tinted = blendColorWithWhite(fillColor, fillTint / 100.0);
             rect.createFillBrush();
             VisualShellApplicator.applyWinBrushFill(rect.fillBrush(), tinted, "#000000");
+            return true;
         }
+        return false;
+    }
+
+    void setupTransparentTextBoxFillBrush(Rectangle rect) {
+        if (rect == null) return;
+        rect.createFillBrush();
+        rect.fillBrush().createWinBrush();
+        rect.fillBrush().winBrush()
+                .faceColorAnd("none")
+                .hatchColorAnd("#000000")
+                .alphaAnd(0f);
     }
 
     /**
@@ -283,6 +319,15 @@ public class HwpxTextBoxBuilder {
         if (w <= 0 || h <= 0) {
             return;
         }
+        // Stage 1 PLACE_TEXT_SHELL / NATIVE_SOURCE_SHAPE can be a pure shell slot
+        // with no text paragraphs. It is still a visible source-owned object and
+        // must be materialized as a native rectangle instead of being discarded.
+        if ((block.paragraphs() == null || block.paragraphs().isEmpty())
+                && block.forceNativeFill()) {
+            addWrapperRoundedRect(framePara, block, w, h);
+            return;
+        }
+
         // Phase 4가 ASTTable로 처리한 table-story TF — paragraphs 없음, 래퍼 1×1 생성 불필요
         if (block.paragraphs() == null || block.paragraphs().isEmpty()) {
             return;
@@ -302,8 +347,17 @@ public class HwpxTextBoxBuilder {
             return;
         }
 
-        // 라운드 코너 + 유효 fill/stroke가 있는 단일 컬럼 블록은 Rectangle(DrawTextBox)로 변환
         int colCount = Math.max(block.columnCount(), 1);
+        if (colCount <= 1 && block.sourceComposedFixedText() && !containsInlineTable(block.paragraphs())) {
+            frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
+            return;
+        }
+        if (colCount <= 1 && shouldUseFloatingDrawTextBox(block)) {
+            frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
+            return;
+        }
+
+        // 라운드 코너 + 유효 fill/stroke가 있는 단일 컬럼 블록은 Rectangle(DrawTextBox)로 변환
         if (colCount <= 1 && block.cornerRadius() > 0) {
             boolean hasFill = nativeTextBoxGraphicsEnabled()
                     && block.fillColor() != null && block.fillColor().startsWith("#");
@@ -317,7 +371,7 @@ public class HwpxTextBoxBuilder {
         }
 
         if (colCount <= 1) {
-            boolean textOnlyOverlay = block.plannedVisualTextOverlay();
+            boolean textOnlyOverlay = block.plannedVisualTextOverlay() && !block.forceNativeFill();
             // 래퍼 fill 또는 프레임 자체 fill이 있으면 배경 사각형 추가.
             // 전역 native-textbox-graphics OFF여도 block이 명시적으로 네이티브 그래픽 허용(사이드박스
             // 대형 배경 흡수 등)이면 fill을 칠한다.
@@ -338,10 +392,6 @@ public class HwpxTextBoxBuilder {
                     || block.cornerRadius() > 0);
             if (hasNativeShellMaterial) {
                 hasWrapper = true;
-            }
-            if (!hasWrapper && shouldUseFloatingDrawTextBox(block)) {
-                frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
-                return;
             }
             // 둥근 모서리 래퍼: Table 대신 Rectangle+DrawText 단일 객체 사용
             // (Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버림)
@@ -367,8 +417,8 @@ public class HwpxTextBoxBuilder {
                     ctx.tableBuilderRef.convertTable(framePara, _singleInnerTable);
                 } else {
                     // Native source shell은 TEXT_SLOT의 carrier fill로 흡수하지 않는다.
-                    // carrier fill은 HWPX 테이블/DrawText 내부 객체가 되어 LABEL_BACKDROP보다 위에
-                    // 칠해질 수 있다. Shell slot은 별도 behind-text rect로 materialize하고,
+                    // carrier fill은 HWPX 테이블/DrawText 내부 객체가 되어 planned shell/text
+                    // z-order를 우회할 수 있다. Shell slot은 별도 visual owner로 materialize하고,
                     // carrier table은 투명하게 두어 Stage 1의 BACKGROUND < DECORATION < TEXT 층을 보존한다.
                     boolean useCellNativeFill = false;
                     boolean wrapper = hasWrapper && !useCellNativeFill;
@@ -387,7 +437,7 @@ public class HwpxTextBoxBuilder {
                     TextBoxLayoutHelpers.distributeParagraphs(block.paragraphs(), colCount);
 
             // 다단 프레임에 테두리/라운드코너가 있으면 전체를 감싸는 배경 사각형 추가
-            boolean textOnlyOverlay = block.plannedVisualTextOverlay();
+            boolean textOnlyOverlay = block.plannedVisualTextOverlay() && !block.forceNativeFill();
             boolean hasFrameBorder = !textOnlyOverlay
                     && nativeTextBoxGraphicsEnabled()
                     && block.strokeColor() != null
@@ -400,11 +450,12 @@ public class HwpxTextBoxBuilder {
                 addMultiColumnFrameBorder(framePara, block, w, h);
             }
 
-            long xCursor = block.effectiveX();
+            long xCursor = block.effectiveX() + Math.max(0L, block.insetLeft());
             long gutter = block.columnGutter();
             for (int c = 0; c < colCount; c++) {
                 singleColumnTableConverter.convertSingleColumnTable(framePara, block, xCursor, block.y(),
-                        colWidths[c], h, distributed.get(c), hasFrameStyle || textOnlyOverlay);
+                        colWidths[c], h, distributed.get(c), hasFrameStyle || textOnlyOverlay,
+                        0L, 0L, block.insetTop(), block.insetBottom());
                 xCursor += colWidths[c] + gutter;
             }
         }
@@ -415,7 +466,21 @@ public class HwpxTextBoxBuilder {
         // drawText is intentionally a last-resort representation.  Plain editable
         // InDesign text frames must flow through the table/text path so paragraph
         // boundaries, run colors, tabs, and inline tables stay editable.
-        return false;
+        // Stage 1 may still choose a drawText carrier for a visual label overlay:
+        // HWPX floating tables can ignore the intended z relationship with nearby
+        // floating table content, so label text that sits on a shell must not be
+        // materialized as another 1x1 table.
+        return (plannedLabelBackdrop(block) || plannedExternalTextShell(block))
+                && !containsInlineTable(block.paragraphs());
+    }
+
+    private boolean plannedExternalTextShell(ASTTextFrameBlock block) {
+        if (block == null) return false;
+        if (block.forceNativeFill() || block.plannedVisualTextOverlay()) return false;
+        String layer = block.plannedShellVisualLayer();
+        return "LABEL_BACKDROP".equals(layer)
+                || "TEXT_CARD_BACKDROP".equals(layer)
+                || "LABEL_OVERLAY_BACKDROP".equals(layer);
     }
 
     private boolean containsInlineTable(java.util.List<ASTParagraph> paragraphs) {
@@ -539,8 +604,10 @@ public class HwpxTextBoxBuilder {
             strokeWeightPt = block.strokeWeight();
         }
         boolean hasBg = bgColor != null && bgColor.startsWith("#");
-        // 배경도 스트로크도 라운드 코너도 없으면 건너뜀
-        if (!hasBg && strokeColor == null && block.cornerRadius() <= 0) return;
+        // IDML corner radius is not visible by itself. Preserve fill=None as
+        // transparent; otherwise ordinary text carriers become opaque white
+        // rectangles and cover neighboring label shells.
+        if (!hasBg && strokeColor == null) return;
 
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -548,7 +615,7 @@ public class HwpxTextBoxBuilder {
         Rectangle rect = anchorRun.addNewRectangle();
         String shapeId = HwpxUtil.nextShapeId();
 
-        TextWrapMethod wrapMethod = plannedLabelBackdrop(block)
+        TextWrapMethod wrapMethod = plannedInFrontShellCarrier(block)
                 ? TextWrapMethod.IN_FRONT_OF_TEXT
                 : (isPlannedShellCarrier(block)
                 ? TextWrapMethod.BEHIND_TEXT
@@ -585,11 +652,9 @@ public class HwpxTextBoxBuilder {
         boolean _force = block.forceNativeFill();
         setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", block.strokeTint(), _force);
 
-        // 배경 fill (래퍼 fill 또는 프레임 fill)
+        // 배경 fill (래퍼 fill 또는 프레임 fill). No fill means transparent.
         if (hasBg) {
             setupTextBoxFillBrush(rect, bgColor, bgTint, _force);
-        } else {
-            setupTextBoxFillBrush(rect, "#FFFFFF", 100, _force);
         }
 
         // 라운드 코너
@@ -630,12 +695,7 @@ public class HwpxTextBoxBuilder {
         if (block.forceNativeFill() || block.plannedVisualTextOverlay()) {
             return plannedShellZOrder(block.plannedShellVisualLayer(), block.zOrder());
         }
-        int sourceZ = block.zOrder();
-        int offset = Math.max(-499, Math.min(499, sourceZ));
-        // Non-overlay wrappers remain local low backdrops. Ownership-planned
-        // shell slots use the block z-order path above so their native shell
-        // rises together with its editable text.
-        return -3000 + offset;
+        return block.zOrder();
     }
 
     int textCarrierZOrder(ASTTextFrameBlock block) {
@@ -652,31 +712,26 @@ public class HwpxTextBoxBuilder {
     private boolean plannedLabelBackdrop(ASTTextFrameBlock block) {
         return block != null
                 && (block.forceNativeFill() || block.plannedVisualTextOverlay())
-                && "LABEL_BACKDROP".equals(block.plannedShellVisualLayer());
+                && ("LABEL_BACKDROP".equals(block.plannedShellVisualLayer())
+                || "LABEL_OVERLAY_BACKDROP".equals(block.plannedShellVisualLayer()));
+    }
+
+    private boolean plannedOverlayBackdrop(ASTTextFrameBlock block) {
+        return block != null
+                && (block.forceNativeFill() || block.plannedVisualTextOverlay())
+                && "LABEL_OVERLAY_BACKDROP".equals(block.plannedShellVisualLayer());
+    }
+
+    private boolean plannedInFrontShellCarrier(ASTTextFrameBlock block) {
+        if (block == null || !(block.forceNativeFill() || block.plannedVisualTextOverlay())) return false;
+        return VisualPlanePolicy.isInFrontLayerName(block.plannedShellVisualLayer());
     }
 
     private int plannedShellZOrder(String visualLayer, int sourceZOrder) {
-        int offset = Math.max(-499, Math.min(499, sourceZOrder));
-        if ("CONTAINER_BACKDROP".equals(visualLayer)) {
-            return -2000 + offset;
-        }
-        if ("TEXT_CARD_BACKDROP".equals(visualLayer)) {
-            return -2500 + offset;
-        }
-        if ("LABEL_BACKDROP".equals(visualLayer)) {
-            return 30000 + offset;
-        }
-        if ("LABEL_OVERLAY_BACKDROP".equals(visualLayer)) {
-            return 15000 + offset;
-        }
-        return -3000 + offset;
+        return sourceZOrder;
     }
 
     private int plannedTextZOrder(String visualLayer, int sourceZOrder) {
-        int offset = Math.max(-499, Math.min(499, sourceZOrder));
-        if ("LABEL_BACKDROP".equals(visualLayer)) {
-            return 31000 + offset;
-        }
         return sourceZOrder;
     }
 
@@ -741,7 +796,9 @@ public class HwpxTextBoxBuilder {
                 w,
                 h,
                 block.cornerRadius(),
-                h);
+                h,
+                null,
+                block.nativeGraphicsAllowed() || block.forceImageFill() || block.cornerRadius() > 0);
 
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
@@ -932,6 +989,14 @@ public class HwpxTextBoxBuilder {
             String tinted = blendColorWithWhite(fill, block.fillTint() / 100.0);
             bf.createFillBrush();
             VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), tinted, "#FF000000");
+        } else {
+            // TEXT_SLOT carrier tables must not create an implicit visual box.
+            // Some HWPX renderers treat a BorderFill without fillBrush as a
+            // default cell face.  Source-visible fill is owned by SHELL_SLOT or
+            // TABLE_STYLE_SLOT; otherwise the carrier surface is explicitly
+            // transparent.
+            bf.createFillBrush();
+            VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), "none", "#FF000000");
         }
 
         return bfId;
@@ -1105,7 +1170,12 @@ public class HwpxTextBoxBuilder {
      * 가로세로 비율이 1.5:1 이상일 때 ratio를 제한하여 라운드 사각형 유지.
      */
     static short computeCornerRatio(double cornerRadiusPts, long widthHwp, long heightHwp) {
-        if (!nativeTextBoxGraphicsEnabled()) return 0;
+        return computeCornerRatio(cornerRadiusPts, widthHwp, heightHwp, false);
+    }
+
+    static short computeCornerRatio(double cornerRadiusPts, long widthHwp, long heightHwp,
+                                    boolean forceNativeGraphics) {
+        if (!nativeTextBoxGraphicsEnabled() && !forceNativeGraphics) return 0;
         if (cornerRadiusPts <= 0) return 0;
         long minSide = Math.min(widthHwp, heightHwp);
         long maxSide = Math.max(widthHwp, heightHwp);

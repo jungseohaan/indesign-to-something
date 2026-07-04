@@ -28,6 +28,26 @@
       "spacing": 0,
       "ratio": 0.8
     },
+    "210 키위바나나OTF": {
+      "ko": "함초롬돋움",
+      "en": "함초롬돋움",
+      "spacing": 0,
+      "forceNormalStyle": true
+    },
+    "DX경필고딕 Std": {
+      "ko": "함초롬돋움",
+      "en": "함초롬돋움",
+      "spacing": 0,
+      "scaleAdjust": -9,
+      "forceNormalStyle": true
+    },
+    "DX경필고딕B": {
+      "ko": "함초롬돋움",
+      "en": "함초롬돋움",
+      "spacing": 0,
+      "scaleAdjust": -9,
+      "forceNormalStyle": true
+    },
     "Sandoll 고딕Neo1": {
       "ko": "한컴돋움",
       "en": "Arial",
@@ -125,7 +145,7 @@
       "ko": "한컴돋움",
       "en": "한컴돋움",
       "spacing": 0,
-      "ratio": 0.94
+      "ratio": 0.82
     },
     "210 생활반장OTF": {
       "ko": "함초롬돋움",

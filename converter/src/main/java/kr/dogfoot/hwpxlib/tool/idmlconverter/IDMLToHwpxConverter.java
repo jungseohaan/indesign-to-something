@@ -15,8 +15,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * IDML -> HWPX 변환 메인 파사드.
@@ -71,6 +73,7 @@ public class IDMLToHwpxConverter {
     public static ConvertResult convert(String idmlPath, String hwpxPath,
                                          ConvertOptions options,
                                          ProgressReporter reporter) throws ConvertException {
+        options = withAutoDetectedResolvedJson(idmlPath, options);
         ConversionTiming timing = ConversionTiming.start(idmlPath, hwpxPath, options.resolvedJsonPath());
         boolean success = false;
         IDMLDocument idmlDoc = null;
@@ -141,6 +144,7 @@ public class IDMLToHwpxConverter {
                     runLegacyPostProcessing(astDoc, resolvedData, options, earlyWarnings, reporter);
                 }
             }
+            applyPageRange(astDoc, options);
             recordAstSummary(astDoc);
 
             // 정규화 완료 summary
@@ -280,6 +284,67 @@ public class IDMLToHwpxConverter {
                         + resolvedData.allRenderedImageFrames().size()
                         + resolvedData.allRenderedPdfFrames().size());
         ConversionTiming.metric("resolved.fontMetrics", resolvedData.fontMetrics().size());
+    }
+
+    /**
+     * CLI --start-page/--end-page는 우선 문서의 표시 pageNumber를 뜻한다.
+     *
+     * <p>교재는 표시 페이지가 6, 42처럼 시작하는 경우가 많고, 사용자가 말하는
+     * page 9도 표시 번호를 의미한다. 표시 pageNumber가 매칭되지 않는 경우에만
+     * legacy 디버깅 호환을 위해 1-based section ordinal로 폴백한다.</p>
+     */
+    private static void applyPageRange(ASTDocument astDoc, ConvertOptions options) {
+        if (astDoc == null || options == null) return;
+        int start = options.startPage();
+        int end = options.endPage();
+        if (start <= 0 && end <= 0) return;
+
+        List<ASTSection> sections = astDoc.sections();
+        int total = sections.size();
+        int from = start > 0 ? start : 1;
+        int to = end > 0 ? end : Integer.MAX_VALUE;
+
+        List<ASTSection> selected = new ArrayList<>();
+        for (ASTSection section : sections) {
+            int pageNumber = section.pageNumber();
+            if (pageNumber >= from && pageNumber <= to) {
+                selected.add(section);
+            }
+        }
+
+        boolean usedDisplayPageNumber = !selected.isEmpty();
+        int ordinalFrom = from;
+        int ordinalTo = end > 0 ? end : total;
+        if (!usedDisplayPageNumber) {
+            if (ordinalFrom < 1) ordinalFrom = 1;
+            if (ordinalTo > total) ordinalTo = total;
+            if (ordinalFrom > ordinalTo || ordinalFrom > total) {
+                throw new IllegalArgumentException("Invalid page range: " + start + "-" + end
+                        + " for " + total + " page(s)");
+            }
+            selected.addAll(sections.subList(ordinalFrom - 1, ordinalTo));
+        }
+
+        Set<Integer> selectedPageNumbers = new HashSet<>();
+        for (ASTSection section : selected) {
+            selectedPageNumbers.add(section.pageNumber());
+        }
+
+        sections.clear();
+        sections.addAll(selected);
+
+        astDoc.backgrounds().removeIf(bg -> !selectedPageNumbers.contains(bg.pageNumber()));
+        ConversionTiming.metric("pageRange.start", usedDisplayPageNumber ? from : ordinalFrom);
+        ConversionTiming.metric("pageRange.end", usedDisplayPageNumber ? (to == Integer.MAX_VALUE ? -1 : to) : ordinalTo);
+        ConversionTiming.metric("pageRange.selectedSections", selected.size());
+        if (usedDisplayPageNumber) {
+            System.err.println("[PageRange] selected display pageNumbers " + from + "-"
+                    + (to == Integer.MAX_VALUE ? "end" : to)
+                    + " -> sections=" + selected.size() + " of " + total);
+        } else {
+            System.err.println("[PageRange] selected sections " + ordinalFrom + "-" + ordinalTo
+                    + " of " + total + " (display pageNumbers=" + selectedPageNumbers + ")");
+        }
     }
 
     private static void recordAstSummary(ASTDocument astDoc) {
@@ -426,6 +491,7 @@ public class IDMLToHwpxConverter {
      */
     public static ASTDocument buildAst(String idmlPath, ConvertOptions options,
                                         ProgressReporter reporter) throws ConvertException {
+        options = withAutoDetectedResolvedJson(idmlPath, options);
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
         try {
             String sourceFileName = new File(idmlPath).getName();
@@ -1261,6 +1327,30 @@ public class IDMLToHwpxConverter {
             resolvedFile = resolvedFile.getAbsoluteFile();
         }
         return resolvedFile.getParent();
+    }
+
+    private static ConvertOptions withAutoDetectedResolvedJson(String idmlPath, ConvertOptions options) {
+        ConvertOptions effective = options != null ? options : ConvertOptions.defaults();
+        if (effective.resolvedJsonPath() != null && !effective.resolvedJsonPath().isBlank()) {
+            return effective;
+        }
+        if (idmlPath == null || idmlPath.isBlank()) {
+            return effective;
+        }
+
+        File idmlFile = new File(idmlPath);
+        File parent = idmlFile.getAbsoluteFile().getParentFile();
+        if (parent == null) {
+            return effective;
+        }
+
+        File resolved = new File(parent, "resolved.json");
+        if (resolved.isFile()) {
+            System.err.println("[Resolved] auto-detected: " + resolved.getAbsolutePath());
+            return effective.resolvedJsonPath(resolved.getAbsolutePath());
+        }
+        System.err.println("[Resolved] resolved.json not found next to IDML: " + resolved.getAbsolutePath());
+        return effective;
     }
 
     // SPEC-030 B.1: _crop_manifest.json이 있으면 배치 PNG에서 개별 배지 PNG를 크롭한다.

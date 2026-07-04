@@ -11,6 +11,7 @@ public class ResolvedTable {
     public static class Cell {
         private int row;
         private int col;
+        private final List<ResolvedParagraph> paragraphs = new ArrayList<>();
         private final List<Integer> inlineAnchorIds = new ArrayList<>();
         private boolean hasTextRuns;
 
@@ -20,6 +21,9 @@ public class ResolvedTable {
         public int col() { return col; }
         public void col(int v) { this.col = v; }
 
+        public List<ResolvedParagraph> paragraphs() { return paragraphs; }
+        public void addParagraph(ResolvedParagraph v) { if (v != null) paragraphs.add(v); }
+
         public List<Integer> inlineAnchorIds() { return inlineAnchorIds; }
         public void addInlineAnchorId(int v) { inlineAnchorIds.add(v); }
 
@@ -28,6 +32,7 @@ public class ResolvedTable {
     }
 
     private String id;
+    private String storyId;
     private int rowCount;
     private int columnCount;
     private double[] columnWidths;  // pts
@@ -37,6 +42,9 @@ public class ResolvedTable {
 
     public String id() { return id; }
     public void id(String v) { this.id = v; }
+
+    public String storyId() { return storyId; }
+    public void storyId(String v) { this.storyId = v; }
 
     public int rowCount() { return rowCount; }
     public void rowCount(int v) { this.rowCount = v; }

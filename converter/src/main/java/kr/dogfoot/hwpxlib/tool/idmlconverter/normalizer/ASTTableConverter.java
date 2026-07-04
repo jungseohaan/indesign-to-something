@@ -44,7 +44,7 @@ public class ASTTableConverter {
         // 테이블 위치: resolved.json의 테이블 bounds 우선, 없으면 TextFrame 좌표 폴백
         double[] resolvedTableBounds = null;
         if (resolvedData != null) {
-            resolvedTableBounds = resolvedData.getTablePlacementBounds(idmlTable.selfId());
+            resolvedTableBounds = tableAnchorBounds(resolvedData, idmlTable.selfId());
         }
         if (resolvedTableBounds != null) {
             // resolved placement bounds는 page-relative (mm 단위 → scale 적용 필요)
@@ -130,6 +130,9 @@ public class ASTTableConverter {
         applyPlacementBounds(table, resolvedTableBounds,
                 resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
         table.fixedOuterBounds(hasPlacementBounds);
+        if (hasPlacementBounds) {
+            lockFixedOuterBoundsRows(table);
+        }
         if (!hasPlacementBounds) {
             ensureRowsFitVisibleCellContent(table);
         }
@@ -159,6 +162,9 @@ public class ASTTableConverter {
             cell.fillColor(resolved);
         }
         cell.verticalAlign(idmlCell.verticalJustification());
+        cell.firstBaselineOffset(idmlCell.firstBaselineOffset());
+        cell.minimumFirstBaselineOffset(CoordinateConverter.pointsToHwpunits(
+                idmlCell.minimumFirstBaselineOffset()));
 
         // 셀 여백
         cell.marginTop(CoordinateConverter.pointsToHwpunits(idmlCell.topInset()));
@@ -334,11 +340,14 @@ public class ASTTableConverter {
         clearHorizontalInsetsForEmptyColumns(table);
         ASTTableSpacerMerger.merge(table);
         double[] placementBounds = resolvedData != null
-                ? resolvedData.getTablePlacementBounds(idmlTable.selfId()) : null;
+                ? tableAnchorBounds(resolvedData, idmlTable.selfId()) : null;
         boolean hasPlacementBounds = hasValidBounds(placementBounds);
         applyPlacementBounds(table, placementBounds,
                 resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
         table.fixedOuterBounds(hasPlacementBounds);
+        if (hasPlacementBounds) {
+            lockFixedOuterBoundsRows(table);
+        }
         if (!hasPlacementBounds) {
             ensureRowsFitVisibleCellContent(table);
         }
@@ -352,6 +361,23 @@ public class ASTTableConverter {
             return false;
         }
         return bounds[3] > bounds[1] && bounds[2] > bounds[0];
+    }
+
+    private static double[] tableAnchorBounds(ResolvedData resolvedData, String tableId) {
+        if (resolvedData == null || tableId == null) return null;
+        double[] placement = resolvedData.getTablePlacementBounds(tableId);
+        if (hasValidBounds(placement)) return placement;
+        return resolvedData.getTableBounds(tableId);
+    }
+
+    private static void lockFixedOuterBoundsRows(ASTTable table) {
+        if (table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row != null) {
+                row.autoGrow(false);
+            }
+        }
+        recalcCellSizes(table);
     }
 
     private static void ensureRowsFitVisibleCellContent(ASTTable table) {
@@ -467,7 +493,16 @@ public class ASTTableConverter {
         table.x(x);
         table.y(y);
         if (targetWidth > 0) scaleColumnsToWidth(table, targetWidth);
-        if (targetHeight > 0) scaleRowsToHeight(table, targetHeight);
+        /*
+         * Placement bounds describe where the IDML table is anchored on the page.
+         * They must not become a second source for row geometry: IDML rowHeights
+         * already carry the table's internal layout. Scaling rows to an owner
+         * TextFrame's outer bounds creates artificial vertical gaps, especially
+         * for icon-row + label-row tables.
+         */
+        if (targetHeight > 0 && table.height() <= 0) {
+            table.height(targetHeight);
+        }
         recalcCellSizes(table);
     }
 
@@ -552,7 +587,7 @@ public class ASTTableConverter {
     private static void normalizeInheritedTableBorders(ASTTable table) {
         if (table == null || table.rows() == null) return;
         double fallbackWeight = dominantVisibleBorderWeight(table);
-        if (fallbackWeight <= 0) fallbackWeight = 0.25;
+        if (fallbackWeight <= 0) return;
         for (ASTTableRow row : table.rows()) {
             if (row == null || row.cells() == null) continue;
             for (ASTTableCell cell : row.cells()) {
@@ -680,6 +715,9 @@ public class ASTTableConverter {
             cell.fillColor(resolveTableColor(resolvedData, idmlCell.fillColor(), idmlCell.fillTint()));
         }
         cell.verticalAlign(idmlCell.verticalJustification());
+        cell.firstBaselineOffset(idmlCell.firstBaselineOffset());
+        cell.minimumFirstBaselineOffset(CoordinateConverter.pointsToHwpunits(
+                idmlCell.minimumFirstBaselineOffset()));
 
         // 셀 여백
         cell.marginTop(CoordinateConverter.pointsToHwpunits(idmlCell.topInset()));
@@ -741,7 +779,7 @@ public class ASTTableConverter {
                 if (domId == null) continue;
                 RenderedGroup shell = findTextHiddenShellForEditableTextFrame(resolvedData, domId);
                 if (shell == null) continue;
-                applyExtractedShellAsInlineFrameFill(obj, shell, resolvedData);
+                applyExtractedShellAsInlineFrameFill(obj, shell, resolvedData, domId);
                 removeStandaloneShellImage(para, shell.id());
             }
         }
@@ -775,7 +813,7 @@ public class ASTTableConverter {
     }
 
     private static void applyExtractedShellAsInlineFrameFill(
-            ASTInlineObject obj, RenderedGroup shell, ResolvedData resolvedData) {
+            ASTInlineObject obj, RenderedGroup shell, ResolvedData resolvedData, String textFrameDomId) {
         byte[] shellPng = readRenderedPng(shell, resolvedData);
         if (shellPng == null) return;
         obj.imageFillData(shellPng);
@@ -785,6 +823,11 @@ public class ASTTableConverter {
         obj.strokeColor(null);
         obj.strokeWeight(0);
         obj.keepInline(true);
+        ResolvedTextFrame tf = resolvedData != null ? resolvedData.getTextFrame(textFrameDomId) : null;
+        if (tf != null && tf.cornerRadius() > 0) {
+            obj.cornerRadius(tf.cornerRadius());
+            obj.nativeGraphicsAllowed(true);
+        }
     }
 
     private static byte[] readRenderedPng(RenderedGroup rg, ResolvedData resolvedData) {
@@ -926,58 +969,12 @@ public class ASTTableConverter {
     }
 
     private static List<ASTParagraph> convertResolvedStoryForCell(ResolvedStory story, ResolvedData resolvedData) {
-        List<ASTParagraph> paragraphs = new ArrayList<>();
-        if (story == null || story.paragraphs() == null) return paragraphs;
-        for (ResolvedParagraph rp : story.paragraphs()) {
-            if (rp == null) continue;
-            ASTParagraph para = new ASTParagraph();
-            if (rp.styleName() != null) para.paragraphStyleRef(rp.styleName());
-            if (rp.justification() != null) para.alignment(rp.justification());
-            Double fixedLeading = rp.fixedLeading();
-            if (fixedLeading != null && fixedLeading > 0) {
-                para.lineSpacingType("fixed");
-                para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
-            }
-            if (rp.spaceBefore() != null && rp.spaceBefore() > 0) {
-                para.spaceBefore(CoordinateConverter.pointsToHwpunits(rp.spaceBefore()));
-            }
-            if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
-                para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
-            }
-            if (rp.leftIndent() != null && rp.leftIndent() != 0) {
-                para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
-            }
-            if (rp.rightIndent() != null && rp.rightIndent() != 0) {
-                para.rightMargin(CoordinateConverter.pointsToHwpunits(rp.rightIndent()));
-            }
-            if (rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
-                para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
-            }
-            if (rp.runs() != null) {
-                for (ResolvedRun run : rp.runs()) {
-                    if (run == null || run.isInlineAnchor() || run.text() == null) continue;
-                    String text = run.text();
-                    boolean stopAfterRun = false;
-                    int crIdx = text.indexOf('\r');
-                    if (crIdx >= 0) {
-                        text = text.substring(0, crIdx);
-                        stopAfterRun = true;
-                    }
-                    for (ASTTextRun astRun : TextRunSegmenter.fromResolvedText(
-                            text,
-                            run,
-                            color -> resolvedData.resolveColorHex(color),
-                            para.hasTabStops(),
-                            false,
-                            null)) {
-                        para.addItem(astRun);
-                    }
-                    if (stopAfterRun) break;
-                }
-            }
-            paragraphs.add(para);
-        }
-        return paragraphs;
+        return ResolvedTextFlowAstConverter.convertStory(
+                story,
+                ResolvedTextFlowAstConverter.options()
+                        .colorResolver(color -> resolvedData != null ? resolvedData.resolveColorHex(color) : color)
+                        .copyTabStops(false)
+                        .truncateAtParagraphBreak(true));
     }
 
     private static boolean hasRicherResolvedStructure(ResolvedStory story) {
@@ -1043,12 +1040,12 @@ public class ASTTableConverter {
                                           String paragraphStyleRef,
                                           ResolvedData resolvedData,
                                           StylePropertyResolver styleResolver) {
-        for (ASTTextRun textRun : TextRunSegmenter.fromIdmlRun(
+        for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertIdmlRun(
                 run,
                 paragraphStyleRef,
                 styleResolver,
                 resolvedData,
-                astPara.hasTabStops(),
+                astPara,
                 false)) {
             astPara.addItem(textRun);
         }

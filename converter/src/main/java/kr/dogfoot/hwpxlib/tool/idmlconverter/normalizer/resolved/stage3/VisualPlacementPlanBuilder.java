@@ -4,13 +4,16 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
- * Stage 3 visual placement planner.
+ * Stage 3 visual placement adapter.
  *
- * <p>This class decides geometry, z-order, and HWPX plane for already-owned
- * visible visual output. Execution code must only materialize this plan.</p>
+ * <p>Ownership, z-order, and HWPX plane are already decided by Stage 1
+ * {@link ObjectPlan}. This class only converts planned page-local geometry to
+ * HWPX units and copies the planned visual-layer/z-order fields into an
+ * executable placement record.</p>
  */
 public final class VisualPlacementPlanBuilder {
     private VisualPlacementPlanBuilder() {
@@ -25,11 +28,24 @@ public final class VisualPlacementPlanBuilder {
             double visTop,
             double visRight,
             double visBottom) {
+        ObjectPlan ownershipPlan = ctx != null && rg != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        return build(ctx, section, rg, prepared, ownershipPlan, visLeft, visTop, visRight, visBottom);
+    }
+
+    public static VisualPlacementPlan build(
+            ResolvedBuildContext ctx,
+            ASTSection section,
+            RenderedGroup rg,
+            PreparedVisualImage prepared,
+            ObjectPlan ownershipPlan,
+            double visLeft,
+            double visTop,
+            double visRight,
+            double visBottom) {
         if (ctx == null || section == null || rg == null || prepared == null) {
             return null;
         }
 
-        ObjectPlan ownershipPlan = ctx.findOwnershipPlanForRendered(rg);
         if (ownershipPlan == null || !ownershipPlan.hasVisibleVisual()) {
             return null;
         }
@@ -46,10 +62,11 @@ public final class VisualPlacementPlanBuilder {
             return null;
         }
 
-        Boolean planInFrontLayer = ctx.inFrontLayerByOwnershipPlan(rg);
-        boolean fromGroup = Boolean.TRUE.equals(planInFrontLayer);
-        String visualLayer = ctx.visualLayerByOwnershipPlan(rg);
+        boolean fromGroup = VisualPlanePolicy.isInFrontLayer(ownershipPlan.visualLayer);
+        String visualLayer = ownershipPlan.visualLayer != null ? ownershipPlan.visualLayer.name() : null;
+        int zOrder = ownershipPlan.zOrder;
+        int sourceLayerIndex = ownershipPlan.sourceLayerIndex;
 
-        return new VisualPlacementPlan(x, y, w, h, ownershipPlan.zOrder, visualLayer, fromGroup);
+        return new VisualPlacementPlan(x, y, w, h, zOrder, visualLayer, sourceLayerIndex, fromGroup);
     }
 }

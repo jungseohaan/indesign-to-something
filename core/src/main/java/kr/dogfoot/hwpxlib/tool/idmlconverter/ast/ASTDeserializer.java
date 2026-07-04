@@ -256,6 +256,8 @@ public class ASTDeserializer {
         cell.height(getLong(o, "height"));
         cell.fillColor(getString(o, "fillColor"));
         cell.verticalAlign(getString(o, "verticalAlign"));
+        cell.firstBaselineOffset(getString(o, "firstBaselineOffset"));
+        cell.minimumFirstBaselineOffset(getLong(o, "minimumFirstBaselineOffset"));
         cell.marginTop(getLong(o, "marginTop"));
         cell.marginBottom(getLong(o, "marginBottom"));
         cell.marginLeft(getLong(o, "marginLeft"));
@@ -314,6 +316,9 @@ public class ASTDeserializer {
         fig.flipVertical(getBool(o, "flipVertical"));
         fig.bundlePath(getString(o, "bundlePath"));
         fig.visualLayer(getString(o, "visualLayer"));
+        if (o.has("sourceLayerIndex") && !o.get("sourceLayerIndex").isJsonNull()) {
+            fig.sourceLayerIndex(getInt(o, "sourceLayerIndex"));
+        }
         return fig;
     }
 

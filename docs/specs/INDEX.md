@@ -23,6 +23,10 @@
 | **[SPEC-markdown](SPEC-markdown-export.md)** | AST → Markdown 내보내기 | **신규(2026-06-04)**. 계층 구조 파악 목적. 글/이미지 블럭 Y순 배치 + 단락 스타일 이름 주석 보존 |
 | **[SPEC-034](SPEC-034-llm-semantic-extraction.md)** | LLM 기반 시멘틱 구조 추출 | **신규(2026-06-04)**. GROQ/Anthropic API로 SemanticNode 분류 보강 + 계층형 JSON 출력. M1~M3 단계 |
 | **[SPEC-035](SPEC-035-indesign-render-ownership.md)** | InDesign 렌더 Ownership 기반 중복 방지 | **신규(2026-06-05)**. 텍스트 포함 PNG 기본 배치 금지, source id 기반 ownership gating, composedLines 줄 보존 |
+| **[SPEC-037](SPEC-037-issue-debug-cycle-acceleration.md)** | 정책-코드-검증 이슈 처리 사이클 가속화 | **신규(2026-06-30)**. 단일 page issue loop, source/ObjectPlan trace, regression invariant, perf summary 자동화 |
+| **[SPEC-038](SPEC-038-extract-indd-modularization-map.md)** | extract_indd.jsx 분리 맵 | **신규(2026-07-01)**. 함수/라인 단위 이관 순서와 legacy 제거 목록 |
+| [POLICY-source-ownership](POLICY-source-ownership.md) | Source ownership canonical index | 상세 규칙은 `docs/policy/` 모듈로 분리. Stage 1/ObjectPlan ownership 기준 |
+| [POLICY-extraction-planning](POLICY-extraction-planning.md) | 추출 계획 파이프라인 정책 | 추출 전 `ExtractionPlan`, 추출 후 `ExtractionResult`, Java ownership과 역할 분리 |
 | ~~[SPEC-036](SPEC-036-render-ownership-consolidation.md)~~ | Render Ownership 실행 일원화 | **Done(2026-06-17)** → Done 섹션 이동. BackgroundInjector 3,182 → **994 LOC**, audit 중복위험 0건, 골든디프 0 |
 
 ## Pending (제안/검토 대기)

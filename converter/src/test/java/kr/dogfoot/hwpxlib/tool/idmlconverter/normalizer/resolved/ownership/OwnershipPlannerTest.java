@@ -1,5 +1,11 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
@@ -8,6 +14,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import org.junit.Assert;
 import org.junit.Test;
@@ -1275,6 +1282,93 @@ public class OwnershipPlannerTest {
     }
 
     @Test
+    public void koreanBatangLayerPageSizedImageIsPageBackground() {
+        ResolvedData data = new ResolvedData();
+        data.addPage(page(0, new double[] { 0, 0, 280, 220 }));
+        ResolvedPageItem source = pageItem(
+                136984,
+                "Rectangle",
+                new double[] { -3.0, -3.0, 283.0, 443.0 },
+                null,
+                null,
+                0.0);
+        source.layerName("바탕");
+        source.zOrder(0);
+        data.addPageItem(source);
+
+        RenderedGroup background = rendered(
+                136984,
+                "page_object",
+                "page_object",
+                "pdf_export",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 136984 });
+        background.containsEditableText(Boolean.FALSE);
+        background.containsText(Boolean.FALSE);
+        background.bounds(new double[] { 0.0, 0.0, 280.0, 220.0 });
+        background.zOrder(0);
+        background.zOrderKnown(true);
+        data.addRenderedFloatingItem(background);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 136984, "pdf_export");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(VisualAction.PLACE_FLOATING_PNG, plan.visualAction);
+        Assert.assertEquals(VisualLayer.PAGE_BACKGROUND, plan.visualLayer);
+        Assert.assertEquals(0, plan.zOrder);
+        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(background));
+    }
+
+    @Test
+    public void sourceZBeforeTextPlacesContentVisualBehindTextPlane() {
+        ResolvedData data = new ResolvedData();
+        data.addPage(page(0, new double[] { 0, 0, 280, 220 }));
+
+        ResolvedTextFrame title = textFrame(2001, "대단원 개관");
+        title.zOrder(5);
+        data.addTextFrame(title);
+
+        ResolvedPageItem source = pageItem(
+                2000,
+                "Image",
+                new double[] { 0.0, 0.0, 280.0, 220.0 },
+                null,
+                null,
+                0.0);
+        source.layerName("레이어 1");
+        source.zOrder(0);
+        data.addPageItem(source);
+
+        RenderedGroup visual = rendered(
+                2000,
+                "page_object",
+                "page_object",
+                "pdf_export",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 2000 });
+        visual.containsEditableText(Boolean.FALSE);
+        visual.containsText(Boolean.FALSE);
+        visual.bounds(new double[] { 0.0, 0.0, 280.0, 220.0 });
+        visual.zOrder(29);
+        visual.zOrderKnown(true);
+        data.addRenderedFloatingItem(visual);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 2000, "pdf_export");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(0, plan.zOrder);
+        Assert.assertEquals(VisualLayer.CONTENT_BACKDROP, plan.visualLayer);
+        Assert.assertEquals(PolicyLayer.CONTENT, plan.visualPolicyLayer());
+        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(visual));
+    }
+
+    @Test
     public void largeFilledVectorBoxIsContainerBackdropBehindContentPlane() {
         ResolvedData data = new ResolvedData();
         data.addPageItem(pageItem(
@@ -1378,9 +1472,223 @@ public class OwnershipPlannerTest {
         Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(card));
     }
 
+    @Test
+    public void nativeParentTextShellKeepsShellRelationButDirectTextFrameOwnsText() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(921, "사물에 사연이 쌓여 가서 추억이 사물보다 더 거대하게 부풀어");
+        tf.isInline(true);
+        tf.geometricBounds(new double[] { 50.0, 74.0, 72.0, 197.0 });
+        tf.pageRelativeBounds(new double[] { 50.0, 74.0, 72.0, 197.0 });
+        data.addTextFrame(tf);
+
+        ResolvedPageItem shell = pageItem(
+                920,
+                "Rectangle",
+                new double[] { 50.0, 74.0, 72.0, 197.0 },
+                "Paper",
+                null,
+                0.0);
+        shell.isInline(true);
+        data.addPageItem(shell);
+        ResolvedPageItem tfItem = pageItem(
+                921,
+                "TextFrame",
+                new double[] { 50.0, 74.0, 72.0, 197.0 },
+                null,
+                null,
+                0.0);
+        tfItem.parentId("920");
+        tfItem.isInline(true);
+        data.addPageItem(tfItem);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan textPlan = findPlanByKind(ctx, 921, "text_frame");
+        ObjectPlan shellPlan = findPlanByKind(ctx, 920, "native_parent_text_shell");
+
+        Assert.assertNotNull(textPlan);
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
+        Assert.assertEquals(VisualAction.DROP_VISUAL, textPlan.visualAction);
+        Assert.assertEquals(TextAction.DROP_TEXT, shellPlan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
+        Assert.assertArrayEquals(new int[] { 921 }, shellPlan.ownedTextFrameIds);
+        Assert.assertArrayEquals(new int[] { 920 }, shellPlan.visualSourceObjectIds);
+    }
+
+    @Test
+    public void slotOnlyTextlessShellUsesConcreteVisualSourceBoundsInsteadOfBroadGroupBounds() {
+        ResolvedData data = new ResolvedData();
+        data.addPage(page(0, new double[] { 0.0, 0.0, 280.0, 220.0 }));
+        data.addPage(page(1, new double[] { 0.0, 220.0, 280.0, 440.0 }));
+
+        ResolvedTextFrame tf = textFrame(329606, "독자는 작가가 심어 놓은");
+        tf.pageIndex(1);
+        tf.pageRelativeBounds(new double[] { 233.0, 162.0, 250.0, 196.0 });
+        tf.geometricBounds(new double[] { 233.0, 382.0, 250.0, 416.0 });
+        data.addTextFrame(tf);
+
+        ResolvedTextFrame otherTf = textFrame(273534, "다른 글상자");
+        otherTf.pageIndex(1);
+        otherTf.pageRelativeBounds(new double[] { 222.0, 63.0, 226.0, 140.0 });
+        otherTf.geometricBounds(new double[] { 222.0, 283.0, 226.0, 360.0 });
+        data.addTextFrame(otherTf);
+
+        ResolvedPageItem group = pageItem(
+                349341,
+                "Group",
+                new double[] { 221.0, 283.0, 255.0, 423.0 },
+                null,
+                null,
+                0.0);
+        group.pageIndex(1);
+        group.childIds(new int[] { 273534, 329605, 329606 });
+        data.addPageItem(group);
+
+        ResolvedPageItem shell = pageItem(
+                329605,
+                "Rectangle",
+                new double[] { 228.0, 375.0, 255.0, 423.0 },
+                null,
+                null,
+                0.0);
+        shell.pageIndex(1);
+        shell.parentId("349341");
+        shell.childIds(new int[] { 329606 });
+        data.addPageItem(shell);
+
+        ResolvedPageItem tfItem = pageItem(
+                329606,
+                "TextFrame",
+                new double[] { 233.0, 382.0, 250.0, 416.0 },
+                null,
+                null,
+                0.0);
+        tfItem.pageIndex(1);
+        tfItem.parentId("329605");
+        data.addPageItem(tfItem);
+
+        ResolvedPageItem otherTfItem = pageItem(
+                273534,
+                "TextFrame",
+                new double[] { 222.0, 283.0, 226.0, 360.0 },
+                null,
+                null,
+                0.0);
+        otherTfItem.pageIndex(1);
+        otherTfItem.parentId("349341");
+        data.addPageItem(otherTfItem);
+
+        RenderedGroup rendered = rendered(
+                349341,
+                "page_object",
+                "page_object",
+                "slot_only_textless_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "329606", "273534" },
+                new int[] { 273534, 329605, 329606, 349341 });
+        rendered.pageIndex(1);
+        rendered.bounds(new double[] { 221.0, 63.0, 255.0, 203.0 });
+        rendered.containsText(Boolean.FALSE);
+        rendered.containsEditableText(Boolean.FALSE);
+        data.addRenderedFloatingItem(rendered);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 349341, "slot_only_textless_shell");
+
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals("reason=" + shellPlan.reason,
+                VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
+        Assert.assertArrayEquals(java.util.Arrays.toString(shellPlan.bounds),
+                new double[] { 228.0, 155.0, 255.0, 203.0 },
+                shellPlan.bounds,
+                0.0001);
+        Assert.assertArrayEquals(new int[] { 329606 },
+                shellPlan.ownedTextFrameIds);
+    }
+
+    @Test
+    public void tableOnlyCarrierParentShapeBecomesTableStyleSlotNotShellVisual() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(501, "\u0016");
+        tf.storyId("501");
+        tf.geometricBounds(new double[] { 155.0, 63.0, 189.0, 203.0 });
+        tf.pageRelativeBounds(new double[] { 155.0, 63.0, 189.0, 203.0 });
+        data.addTextFrame(tf);
+
+        ResolvedPageItem parent = pageItem(
+                500,
+                "Rectangle",
+                new double[] { 155.0, 63.0, 189.0, 203.0 },
+                "#표색_인디핑크미색",
+                "Black",
+                0.25);
+        parent.childIds(new int[] { 501 });
+        data.addPageItem(parent);
+
+        ResolvedPageItem tfItem = pageItem(
+                501,
+                "TextFrame",
+                new double[] { 155.0, 63.0, 189.0, 203.0 },
+                null,
+                null,
+                0.0);
+        tfItem.parentId("500");
+        data.addPageItem(tfItem);
+
+        RenderedGroup shell = rendered(
+                500,
+                "page_object",
+                "page_object",
+                "decoration_group",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "501" },
+                new int[] { 500, 501 });
+        shell.bounds(new double[] { 155.0, 63.0, 189.0, 203.0 });
+        data.addRenderedFloatingItem(shell);
+
+        ResolvedBuildContext ctx = plan(data, storyWithSingleCellTable("u1f5i1", "cell text"));
+        ObjectPlan tablePlan = findPlanByKind(ctx, 501, "text_frame:table_only");
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 500, "decoration_group");
+
+        Assert.assertNotNull(tablePlan);
+        Assert.assertEquals(VisualAction.PLACE_TABLE_STYLE, tablePlan.visualAction);
+        Assert.assertArrayEquals(new int[] { 500 }, tablePlan.styleSourceObjectIds);
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(VisualAction.DROP_VISUAL, shellPlan.visualAction);
+    }
+
+    @Test
+    public void shiftedResolvedTableBoundsDoNotOverrideTableOnlyOwnerBounds() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(501, "\u0016");
+        tf.storyId("501");
+        tf.pageRelativeBounds(new double[] { 155.0, 63.0, 189.0, 203.0 });
+        data.addTextFrame(tf);
+
+        ResolvedTable table = new ResolvedTable();
+        table.id("u1f5i1");
+        table.bounds(new double[] { 149.0, 67.5, 183.0, 207.5 });
+        data.addTable(table);
+
+        Assert.assertArrayEquals(
+                new double[] { 155.0, 63.0, 189.0, 203.0 },
+                data.getTablePlacementBounds("u1f5i1"),
+                0.0001);
+    }
+
     private static ResolvedBuildContext plan(ResolvedData data) {
         ResolvedBuildContext ctx = new ResolvedBuildContext();
         ctx.resolvedData = data;
+        OwnershipPlanner.runObservation(ctx);
+        return ctx;
+    }
+
+    private static ResolvedBuildContext plan(ResolvedData data, IDMLStory story) {
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = data;
+        ctx.loadIDMLStory = storyId -> story;
         OwnershipPlanner.runObservation(ctx);
         return ctx;
     }
@@ -1506,5 +1814,31 @@ public class OwnershipPlannerTest {
         rg.file("rendered_frames/test_" + id + ".png");
         rg.bounds(new double[] { 10, 10, 20, 40 });
         return rg;
+    }
+
+    private static IDMLStory storyWithSingleCellTable(String tableId, String text) {
+        IDMLStory story = new IDMLStory();
+        IDMLTable table = new IDMLTable();
+        table.selfId(tableId);
+        table.rowCount(1);
+        table.columnCount(1);
+        table.addColumnWidth(100.0);
+
+        IDMLTableRow row = new IDMLTableRow();
+        row.rowIndex(0);
+        row.rowHeight(20.0);
+
+        IDMLTableCell cell = new IDMLTableCell();
+        cell.rowIndex(0);
+        cell.columnIndex(0);
+        IDMLParagraph paragraph = new IDMLParagraph();
+        IDMLCharacterRun run = new IDMLCharacterRun();
+        run.content(text);
+        paragraph.addCharacterRun(run);
+        cell.addParagraph(paragraph);
+        row.addCell(cell);
+        table.addRow(row);
+        story.addTable(table);
+        return story;
     }
 }

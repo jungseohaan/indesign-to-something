@@ -5,25 +5,42 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase0.InfraSetup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.MasterHashiraPlacer;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.MasterPageNumberPlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.PageLayoutBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_5.BulletInserter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase5.WrapPhase5;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanValidator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SideHeadFlowPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDiagnostics;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDiagnosticsBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDiagnosticsWriter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocumentBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowIndex;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -147,17 +164,23 @@ public class ResolvedToASTBuilder {
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare")) {
             sections = prepareInput(doc);
         }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage1.textFlowIndex")) {
+            prepareTextFlowIndex();
+        }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage1.ownershipPlanner")) {
             planOwnership();
+        }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textFlowDiagnostics")) {
+            writeTextFlowDiagnostics();
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder")) {
             buildTextContent(sections);
         }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.masterHashiraPlaceholderResolver")) {
+            MasterHashiraPlacer.resolveTextVariablePlaceholders(this.ctx, sections);
+        }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess")) {
             postprocessLayout(sections);
-        }
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2_5.visualOwnershipRefine")) {
-            OwnershipPlanner.runVisualRefinement(this.ctx);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder")) {
             placeVisuals(sections);
@@ -217,16 +240,6 @@ public class ResolvedToASTBuilder {
             doc.addSection(sec);
         }
 
-        // Phase 1.5: 마스터 페이지 쪽 번호 배치
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare.masterPageNumberPlacer")) {
-            MasterPageNumberPlacer.place(this.ctx, sections);
-        }
-
-        // Phase 1.6: 마스터 페이지 하시라(러닝 헤더) 배치
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare.masterHashiraPlacer")) {
-            MasterHashiraPlacer.place(this.ctx, sections);
-        }
-
         return sections;
     }
 
@@ -237,10 +250,337 @@ public class ResolvedToASTBuilder {
      * warning만 기록해 현재 정책 충돌을 눈으로 추적할 수 있게 한다.</p>
      */
     private void planOwnership() {
+        importPlannerDeclaredObjectPlans();
         AnchoredTablePlanner.plan(this.ctx);
         SideHeadFlowPlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
         OwnershipPlanner.runObservation(this.ctx);
+        if (this.resolvedData != null) {
+            this.resolvedData.ownershipPlans(this.ctx.ownershipPlans);
+        }
+    }
+
+    private void importPlannerDeclaredObjectPlans() {
+        if (basePath == null || basePath.isEmpty() || ctx == null) return;
+        Path objectPlans = Path.of(basePath, "object-plans.json");
+        if (!Files.isRegularFile(objectPlans)) return;
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage1.ownershipPlanner.importObjectPlans")) {
+            JsonObject root = JsonParser.parseString(Files.readString(objectPlans, StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+            JsonArray plans = root.has("objectPlans") && root.get("objectPlans").isJsonArray()
+                    ? root.getAsJsonArray("objectPlans")
+                    : null;
+            if (plans == null) return;
+            Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
+            Map<String, RenderedGroup> renderedByPageAndId = renderedGroupsByPageAndId();
+            int imported = 0;
+            for (JsonElement element : plans) {
+                if (element == null || !element.isJsonObject()) continue;
+                JsonObject planJson = element.getAsJsonObject();
+                ObjectPlan plan = layoutOnlyInlineSlotPlanFromJson(planJson);
+                if (plan == null) {
+                    plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId, renderedByPageAndId);
+                }
+                if (plan == null) {
+                    plan = nativeVectorShapePlanFromJson(planJson);
+                }
+                if (plan == null) continue;
+                ctx.addOwnershipPlan(plan);
+                imported++;
+            }
+            if (imported > 0) {
+                System.err.println("[ResolvedToASTBuilder] imported planner-declared object plans=" + imported);
+            }
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] object-plans import skipped: "
+                    + e.getMessage());
+        }
+    }
+
+    private Map<String, RenderedGroup> renderedGroupsByCandidateId() {
+        Map<String, RenderedGroup> out = new HashMap<>();
+        if (resolvedData == null) return out;
+        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedFloatingItems());
+        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedGraphicFrames());
+        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedImageFrames());
+        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedPdfFrames());
+        return out;
+    }
+
+    private Map<String, RenderedGroup> renderedGroupsByPageAndId() {
+        Map<String, RenderedGroup> out = new HashMap<>();
+        if (resolvedData == null) return out;
+        indexRenderedGroupsByPageAndId(out, resolvedData.allRenderedFloatingItems());
+        indexRenderedGroupsByPageAndId(out, resolvedData.allRenderedGraphicFrames());
+        indexRenderedGroupsByPageAndId(out, resolvedData.allRenderedImageFrames());
+        indexRenderedGroupsByPageAndId(out, resolvedData.allRenderedPdfFrames());
+        return out;
+    }
+
+    private static void indexRenderedGroupsByCandidateId(
+            Map<String, RenderedGroup> out,
+            Collection<RenderedGroup> renderedGroups) {
+        if (out == null || renderedGroups == null) return;
+        for (RenderedGroup rg : renderedGroups) {
+            if (rg == null || rg.candidateId() == null || rg.candidateId().isEmpty()) continue;
+            out.putIfAbsent(rg.candidateId(), rg);
+        }
+    }
+
+    private static void indexRenderedGroupsByPageAndId(
+            Map<String, RenderedGroup> out,
+            Collection<RenderedGroup> renderedGroups) {
+        if (out == null || renderedGroups == null) return;
+        for (RenderedGroup rg : renderedGroups) {
+            if (rg == null) continue;
+            out.putIfAbsent(renderedPageIdKey(rg.pageIndex(), rg.id()), rg);
+        }
+    }
+
+    private static ObjectPlan renderedObjectPlanFromJson(
+            JsonObject o,
+            Map<String, RenderedGroup> renderedByCandidateId,
+            Map<String, RenderedGroup> renderedByPageAndId) {
+        if (o == null) return null;
+        if (!"READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))
+                && !isPlannerDeclaredTextShellImport(o)) {
+            return null;
+        }
+        String candidateId = jsonString(o, "candidateId");
+        RenderedGroup rg = candidateId != null && !candidateId.isEmpty() && renderedByCandidateId != null
+                ? renderedByCandidateId.get(candidateId)
+                : null;
+        if (rg == null && renderedByPageAndId != null) {
+            int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+            int primarySourceId = jsonInt(o, "primarySourceObjectId",
+                    jsonInt(o, "domId", sourceIds.length > 0 ? sourceIds[0] : -1));
+            int pageIndex = jsonInt(o, "pageIndex", -1);
+            rg = renderedByPageAndId.get(renderedPageIdKey(pageIndex, primarySourceId));
+        }
+        if (rg == null || rg.file() == null || rg.file().isEmpty()) return null;
+        VisualAction visualAction = enumValue(VisualAction.class,
+                jsonString(o, "visualAction"), VisualAction.DROP_VISUAL);
+        if (visualAction == VisualAction.DROP_VISUAL
+                || visualAction == VisualAction.ABSORB_TEXT_STYLE
+                || visualAction == VisualAction.PLACE_TABLE_STYLE) {
+            return null;
+        }
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) {
+            sourceIds = rg.sourceObjectIds() != null ? rg.sourceObjectIds() : new int[0];
+        }
+        if (sourceIds.length == 0) return null;
+        int[] visualSourceIds = jsonIntArray(o, "visualSourceObjectIds");
+        if (visualSourceIds.length == 0) visualSourceIds = sourceIds;
+        Placement placement = enumValue(Placement.class, jsonString(o, "placement"), Placement.FLOATING);
+        Materialization materialization = enumValue(Materialization.class,
+                jsonString(o, "materialization"), Materialization.EXTRACTED_PNG_VECTOR);
+        double[] renderSourceBounds = rg.cropSourceBounds();
+        return new ObjectPlan(
+                rg.id(),
+                "planner_declared_rendered:" + jsonString(o, "passId") + ":" + jsonString(o, "kind"),
+                rg.pageIndex(),
+                enumValue(TextAction.class, jsonString(o, "textAction"), TextAction.DROP_TEXT),
+                visualAction,
+                enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.CONTENT_VISUAL),
+                placement,
+                rg.id(),
+                sourceIds,
+                visualSourceIds,
+                jsonIntArray(o, "styleSourceObjectIds"),
+                jsonIntArray(o, "ownedTextFrameIds"),
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                materialization,
+                enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"),
+                        placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE),
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", rg.zOrder()),
+                "planner_declared_object_plan",
+                rg.file(),
+                rg.bounds(),
+                renderSourceBounds,
+                rg.layerId(),
+                rg.layerName(),
+                rg.layerIndex());
+    }
+
+    private static String renderedPageIdKey(int pageIndex, int id) {
+        return pageIndex + ":" + id;
+    }
+
+    private static boolean isPlannerDeclaredTextShellImport(JsonObject o) {
+        if (o == null) return false;
+        if (!"PLACE_TEXT_SHELL".equals(jsonString(o, "visualAction"))) return false;
+        String placement = jsonString(o, "placement");
+        if (!"INLINE".equals(placement) && !"FLOATING".equals(placement)) return false;
+        String coordinateSpace = jsonString(o, "coordinateSpace");
+        if (!"STORY_FLOW".equals(coordinateSpace) && !"PAGE".equals(coordinateSpace)) return false;
+        if (jsonIntArray(o, "ownedTextFrameIds").length == 0) return false;
+        return jsonIntArray(o, "visualSourceObjectIds").length > 0
+                || jsonIntArray(o, "exportSourceObjectIds").length > 0;
+    }
+
+    private static ObjectPlan layoutOnlyInlineSlotPlanFromJson(JsonObject o) {
+        if (o == null || !jsonBoolean(o, "layoutOnlyInlineSlot", false)) return null;
+        if (!"INLINE".equals(jsonString(o, "placement"))) return null;
+        if (!"DROP_VISUAL".equals(jsonString(o, "visualAction"))) return null;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) return null;
+        int domId = jsonInt(o, "primarySourceObjectId", sourceIds[0]);
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0 || pageIndex < 0) return null;
+        int[] visualSourceIds = jsonIntArray(o, "visualSourceObjectIds");
+        if (visualSourceIds.length == 0) visualSourceIds = sourceIds;
+        return new ObjectPlan(
+                domId,
+                "layout_only_inline_slot:" + jsonString(o, "kind"),
+                pageIndex,
+                enumValue(TextAction.class, jsonString(o, "textAction"), TextAction.DROP_TEXT),
+                VisualAction.DROP_VISUAL,
+                enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.CONTENT_VISUAL),
+                Placement.INLINE,
+                null,
+                sourceIds,
+                visualSourceIds,
+                jsonIntArray(o, "styleSourceObjectIds"),
+                jsonIntArray(o, "ownedTextFrameIds"),
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                Materialization.HWPX_TEXT,
+                CoordinateSpace.STORY_FLOW,
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                "planner_declared_layout_only_inline_slot",
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1));
+    }
+
+    private static ObjectPlan nativeVectorShapePlanFromJson(JsonObject o) {
+        if (o == null) return null;
+        if (!"pass.vector_shape_frames".equals(jsonString(o, "passId"))) return null;
+        if (!"NATIVE_SOURCE_SHAPE".equals(jsonString(o, "materialization"))) return null;
+        String visualActionName = jsonString(o, "visualAction");
+        if (!"PLACE_TEXT_SHELL".equals(visualActionName)
+                && !"PLACE_FLOATING_PNG".equals(visualActionName)
+                && !"PLACE_INLINE_PNG".equals(visualActionName)) {
+            return null;
+        }
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) return null;
+        int domId = jsonInt(o, "domId", -1);
+        if (domId < 0) {
+            domId = jsonInt(o, "primarySourceObjectId", sourceIds[0]);
+        }
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0 || pageIndex < 0) return null;
+        int[] visualSourceIds = jsonIntArray(o, "visualSourceObjectIds");
+        if (visualSourceIds.length == 0) visualSourceIds = sourceIds;
+        VisualAction visualAction = enumValue(VisualAction.class, visualActionName, VisualAction.PLACE_TEXT_SHELL);
+        VisualLayer visualLayer = enumValue(
+                VisualLayer.class,
+                jsonString(o, "visualLayer"),
+                visualAction == VisualAction.PLACE_TEXT_SHELL
+                        ? VisualLayer.LABEL_BACKDROP
+                        : VisualLayer.CONTENT_VISUAL);
+        return new ObjectPlan(
+                domId,
+                "native_source_shape:" + jsonString(o, "kind"),
+                pageIndex,
+                enumValue(TextAction.class, jsonString(o, "textAction"), TextAction.DROP_TEXT),
+                visualAction,
+                visualLayer,
+                enumValue(Placement.class, jsonString(o, "placement"), Placement.FLOATING),
+                null,
+                sourceIds,
+                visualSourceIds,
+                jsonIntArray(o, "styleSourceObjectIds"),
+                jsonIntArray(o, "ownedTextFrameIds"),
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                Materialization.NATIVE_SOURCE_SHAPE,
+                enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"), CoordinateSpace.PAGE),
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                "planner_native_source_shape",
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1));
+    }
+
+    private static String jsonString(JsonObject o, String key) {
+        if (o == null || key == null || !o.has(key) || o.get(key).isJsonNull()) return null;
+        return o.get(key).getAsString();
+    }
+
+    private static int jsonInt(JsonObject o, String key, int fallback) {
+        if (o == null || key == null || !o.has(key) || o.get(key).isJsonNull()) return fallback;
+        try {
+            return o.get(key).getAsInt();
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private static boolean jsonBoolean(JsonObject o, String key, boolean fallback) {
+        if (o == null || key == null || !o.has(key) || o.get(key).isJsonNull()) return fallback;
+        try {
+            return o.get(key).getAsBoolean();
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private static int[] jsonIntArray(JsonObject o, String key) {
+        if (o == null || key == null || !o.has(key) || !o.get(key).isJsonArray()) return new int[0];
+        JsonArray arr = o.getAsJsonArray(key);
+        int[] out = new int[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            out[i] = arr.get(i).isJsonNull() ? 0 : arr.get(i).getAsInt();
+        }
+        return out;
+    }
+
+    private static double[] jsonDoubleArray(JsonObject o, String key) {
+        if (o == null || key == null || !o.has(key) || !o.get(key).isJsonArray()) return null;
+        JsonArray arr = o.getAsJsonArray(key);
+        double[] out = new double[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            out[i] = arr.get(i).isJsonNull() ? 0.0 : arr.get(i).getAsDouble();
+        }
+        return out;
+    }
+
+    private static <E extends Enum<E>> E enumValue(Class<E> type, String name, E fallback) {
+        if (name == null || name.isEmpty()) return fallback;
+        try {
+            return Enum.valueOf(type, name);
+        } catch (IllegalArgumentException e) {
+            return fallback;
+        }
+    }
+
+    private void writeTextFlowDiagnostics() {
+        refreshTextFlowSnapshot();
+        TextFlowDiagnosticsWriter.write(this.ctx, this.ctx.textFlowDiagnostics);
+    }
+
+    private void prepareTextFlowIndex() {
+        refreshTextFlowSnapshot();
+    }
+
+    private void refreshTextFlowSnapshot() {
+        TextFlowDiagnostics diagnostics = TextFlowDiagnosticsBuilder.build(this.ctx);
+        this.ctx.textFlowDiagnostics = diagnostics;
+        this.ctx.textFlowIndex = TextFlowIndex.from(diagnostics);
+        this.ctx.textFlowDocument = TextFlowDocumentBuilder.build(diagnostics, this.ctx.textFlowIndex);
     }
 
     /**
@@ -294,15 +634,6 @@ public class ResolvedToASTBuilder {
         }
         tagPhase(sections, "Stage4.LayoutPostprocess.insertBullets");
 
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.singleLineExpander")) {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.SingleLineExpander.run(this.ctx, sections);
-        }
-        tagPhase(sections, "Stage4.LayoutPostprocess.singleLineExpand");
-
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.wrapPhase5")) {
-            WrapPhase5.splitByWrapIndent(this.ctx, sections);
-        }
-        tagPhase(sections, "Stage4.LayoutPostprocess.splitByWrapIndent");
     }
 
     /**
@@ -416,10 +747,11 @@ public class ResolvedToASTBuilder {
         if (!storyFile.exists()) return null;
 
         try {
+            ensureIdmlDocument();
             javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
             factory.setNamespaceAware(true);
             org.w3c.dom.Document xmlDoc = factory.newDocumentBuilder().parse(storyFile);
-            IDMLStory story = IDMLStoryParser.parseStory(xmlDoc, "u" + hexId);
+            IDMLStory story = IDMLStoryParser.parseStory(xmlDoc, "u" + hexId, idmlDocument);
             idmlStoryCache.put(storyId, story);
             if (!sourceStoryId.equals(storyId)) idmlStoryCache.put(sourceStoryId, story);
             idmlStoryCache.put("u" + hexId, story);

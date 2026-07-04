@@ -62,6 +62,7 @@ public class FontMapper {
                         me.spacing = val.has("spacing") ? val.get("spacing").getAsInt() : 0;
                         me.scaleAdjust = val.has("scaleAdjust") ? val.get("scaleAdjust").getAsInt() : 0;
                         me.ratio = val.has("ratio") ? val.get("ratio").getAsDouble() : 1.0;
+                        me.forceNormalStyle = val.has("forceNormalStyle") && val.get("forceNormalStyle").getAsBoolean();
                         externalMappings.put(entry.getKey(), me);
                     }
                 }
@@ -187,7 +188,7 @@ public class FontMapper {
         // [1] 외부 JSON 명시적 매핑: exact font mappings의 단일 소스
         MappingEntry ext = externalMappings.get(idmlFontFamily);
         if (ext != null) {
-            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, ext.ratio);
+            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, ext.ratio, ext.forceNormalStyle);
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
         // [2] 카테고리/키워드 폴백 (이름 기반)
@@ -576,6 +577,8 @@ public class FontMapper {
         public final int scaleAdjust;
         /** 장평 비율: 원본 폰트 대비 HWPX 폰트의 폭 비율. 1.0 미만이면 글자 폭 축소 필요 (예: 0.82 → 82%) */
         public final double ratio;
+        /** true이면 원본 Bold/Italic style을 HWPX CharPr에 반영하지 않는다. */
+        public final boolean forceNormalStyle;
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent) {
             this(koFont, enFont, spacingAdjustPercent, 0, 1.0);
@@ -586,11 +589,16 @@ public class FontMapper {
         }
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double ratio) {
+            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, ratio, false);
+        }
+
+        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double ratio, boolean forceNormalStyle) {
             this.koFont = koFont;
             this.enFont = enFont;
             this.spacingAdjustPercent = spacingAdjustPercent;
             this.scaleAdjust = scaleAdjust;
             this.ratio = ratio;
+            this.forceNormalStyle = forceNormalStyle;
         }
     }
 
@@ -600,6 +608,7 @@ public class FontMapper {
         int spacing;
         int scaleAdjust;
         double ratio;
+        boolean forceNormalStyle;
     }
 
     static class HwpxMetric {

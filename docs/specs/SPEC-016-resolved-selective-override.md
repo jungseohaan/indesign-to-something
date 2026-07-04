@@ -65,8 +65,8 @@ while (!remaining.isEmpty() && rIdx < resolvedRuns.size()) {
 
 #### 적용 규칙
 
-- **HIGH**: fontFamily, fontSize, textColor, letterSpacing 모두 resolved 오버라이드
-- **MEDIUM**: fontSize, textColor만 오버라이드 (fontFamily/letterSpacing은 IDML CR)
+- **HIGH**: fontFamily, textColor는 resolved 오버라이드 가능. fontSize는 IDML effective size가 없을 때만 resolved 폴백
+- **MEDIUM**: textColor는 resolved 오버라이드 가능. fontSize는 IDML effective size가 없을 때만 resolved 폴백
 - **LOW**: 오버라이드 없음 (기존 IDML CR 우선 유지)
 
 #### API
@@ -114,8 +114,11 @@ IDML CR의 `appliedCharacterStyle`과 resolved 런의 `charStyle`이 다르면 *
 2. `splitIdmlRunByResolvedRuns` 내부에 세그먼트 정보 구조체 도입
 3. 매칭 조건별로 confidence 할당
 4. `createRunFromIDML`에 confidence 파라미터 추가
-5. confidence가 HIGH일 때만 fontSize/fontFamily/textColor를 resolved로 덮어씀
-6. `RunPropertyResolver`에 `resolveWithOverride()` 변형 메서드 추가
+5. confidence가 HIGH일 때 fontFamily/textColor를 resolved로 덮어쓸 수 있음
+6. fontSize는 CharacterRun 또는 ParagraphStyle에서 effective size가 확인되면 항상 IDML 값을 유지하고, IDML 쪽 크기 정보가 없을 때만 resolved를 폴백으로 사용
+7. `horizontalScale`/`verticalScale`은 fontSize를 대체하지 않는다. resolved 런에서 두 scale 값이 같더라도 이를 proportional font-size로 흡수하지 않는다.
+8. IDML Story/CharacterRun 경로의 글자 비율은 IDML CharacterRun/CharacterStyle/GREP/ParagraphStyle에 명시된 값만 HWPX ratio로 전달한다. IDML에 없는 resolved-only scale은 frame/group render scale일 수 있으므로 editable text run에 주입하지 않는다.
+9. `RunPropertyResolver`에 `resolveWithOverride()` 변형 메서드 추가
 
 ### Phase 2: "예쁜" 케이스 검증
 
@@ -195,8 +198,8 @@ IDML CR의 `appliedCharacterStyle`과 resolved 런의 `charStyle`이 다르면 *
   - 분할 실패 / 루프 탈출 후 남은 텍스트 → LOW
   - findDefaultResolvedRun 폴백 → LOW 강등
 - `RunPropertyResolver`에 `resolveXxxWithConfidence` 변형 3종 추가
-  - HIGH: fontFamily + fontSize + textColor resolved 오버라이드
-  - MEDIUM: fontSize + textColor (fontFamily는 IDML CR)
+  - HIGH: fontFamily + textColor resolved 오버라이드, fontSize는 IDML effective size 우선
+  - MEDIUM: textColor resolved 오버라이드, fontSize는 IDML effective size 우선
   - LOW: 모두 IDML CR 우선 (기존 동작)
 - `createRunFromIDML`에 confidence 파라미터 추가, 기본값(LOW)은 래퍼 메서드로 호환
 

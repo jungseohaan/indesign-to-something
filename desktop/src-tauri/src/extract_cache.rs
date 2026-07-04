@@ -199,6 +199,8 @@ pub fn lookup(cache_key: &str) -> Option<InddExtractResult> {
         return None;
     }
     let preview = dir.join("preview.pdf");
+    let extraction_plan = dir.join("extraction-plan.json");
+    let extraction_results = dir.join("extraction-results.json");
     let extract_stats = std::fs::read_to_string(dir.join("_extract_stats.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok());
@@ -207,6 +209,16 @@ pub fn lookup(cache_key: &str) -> Option<InddExtractResult> {
         resolved_json_path: Some(resolved.to_string_lossy().to_string()),
         preview_pdf_path: if preview.exists() {
             Some(preview.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_plan_path: if extraction_plan.exists() {
+            Some(extraction_plan.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_results_path: if extraction_results.exists() {
+            Some(extraction_results.to_string_lossy().to_string())
         } else {
             None
         },
@@ -256,6 +268,8 @@ pub fn store(
     let idml = target.join("output.idml");
     let resolved = target.join("resolved.json");
     let preview = target.join("preview.pdf");
+    let extraction_plan = target.join("extraction-plan.json");
+    let extraction_results = target.join("extraction-results.json");
 
     let extract_stats = std::fs::read_to_string(target.join("_extract_stats.json"))
         .ok()
@@ -269,6 +283,16 @@ pub fn store(
         },
         preview_pdf_path: if preview.exists() {
             Some(preview.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_plan_path: if extraction_plan.exists() {
+            Some(extraction_plan.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        extraction_results_path: if extraction_results.exists() {
+            Some(extraction_results.to_string_lossy().to_string())
         } else {
             None
         },

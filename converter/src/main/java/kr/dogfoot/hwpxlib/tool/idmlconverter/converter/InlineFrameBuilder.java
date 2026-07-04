@@ -15,8 +15,10 @@ import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
 /**
  * 인라인 텍스트 프레임 변환 (W4 Step C).
- * ASTInlineObject(INLINE_TEXT_FRAME) → hp:rect + hp:drawText (treatAsChar="1").
- * HwpxTextBoxBuilder에서 분리됨.
+ *
+ * <p>Stage 1이 text shell을 추출 PNG로 결정한 경우에는 Rectangle+drawText의
+ * imageFill로 native shell을 실행할 수 있다.  금지되는 것은 drawText 자체가
+ * 아니라 executor가 shell을 Java style/fallback shape로 새로 그리는 것이다.</p>
  */
 final class InlineFrameBuilder {
     private static final long INLINE_TEXT_FRAME_TRAILING_GAP = CoordinateConverter.pointsToHwpunits(2.0);
@@ -48,7 +50,7 @@ final class InlineFrameBuilder {
     // ── 인라인 텍스트 프레임 (글상자, treatAsChar=true) ──
 
     /**
-     * 인라인 텍스트 프레임 / 그룹 → hp:rect + hp:drawText (글상자, treatAsChar="1")
+     * 인라인 텍스트 프레임 / 그룹 → native shell imageFill drawText 또는 1x1 inline table.
      */
     void addInlineTextFrame(Para para, ASTInlineObject obj) {
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
@@ -85,15 +87,8 @@ final class InlineFrameBuilder {
         long h = obj.height() > 0 ? obj.height() : ConverterConstants.MIN_TEXT_BOX_HEIGHT;
 
         // IDML 속성 기반 래핑 모드 결정 (크기 기반 폴백은 이미지에만 적용, 텍스트프레임은 인라인 유지)
-        boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
-        boolean isAboveLine = obj.anchoredPosition() != null
-                && obj.anchoredPosition().startsWith("AboveLine");
         String wrapMode = obj.textWrapMode();
-        boolean hasExplicitWrap = wrapMode != null && !"None".equals(wrapMode);
-        // anchoredPosition이 있는 경우에만 어울림 적용
-        // anchoredPosition 없는 순수 인라인 TextFrame은 treatAsChar=true로 유지 (나란히 배치)
-        boolean useWrapping = isAboveLine
-                || (isAnchored && hasExplicitWrap);
+        boolean useWrapping = InlineFlowPolicy.usesNonFlowWrapping(obj);
 
         TextWrapMethod twm;
         TextFlowSide tfs;
@@ -127,7 +122,7 @@ final class InlineFrameBuilder {
         String tableId = HwpxUtil.nextShapeId();
 
         table.idAnd(tableId)
-                .zOrderAnd(0)
+                .zOrderAnd(inlineObjectZOrder(obj))
                 .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(twm)
                 .textFlowAnd(tfs)
@@ -162,7 +157,7 @@ final class InlineFrameBuilder {
                     .horzOffset(0L);
         } else {
             table.pos().treatAsCharAnd(true)
-                    .affectLSpacingAnd(false)
+                    .affectLSpacingAnd(InlineFlowPolicy.participatesInLineSpacing(obj))
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(false)
                     .holdAnchorAndSOAnd(false)
@@ -226,7 +221,14 @@ final class InlineFrameBuilder {
         if (obj != null && obj.imageFillData() != null && obj.imageFillData().length > 0) {
             return true;
         }
-        return InlineItemDispatcher.hasDrawableShell(obj);
+        return false;
+    }
+
+    private int inlineObjectZOrder(ASTInlineObject obj) {
+        if (obj == null || obj.plannedZOrder() == Integer.MIN_VALUE) {
+            return 0;
+        }
+        return obj.plannedZOrder();
     }
 
     private void addInlineExtractedShellTextFrame(Para para, ASTInlineObject obj, long w, long h,
@@ -236,7 +238,7 @@ final class InlineFrameBuilder {
 
         Rectangle rect = run.addNewRectangle();
         rect.idAnd(HwpxUtil.nextShapeId())
-                .zOrderAnd(0)
+                .zOrderAnd(inlineObjectZOrder(obj))
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(twm)
                 .textFlowAnd(tfs)
@@ -267,7 +269,8 @@ final class InlineFrameBuilder {
                 h,
                 obj.cornerRadius(),
                 h,
-                obj.shellShapeType());
+                obj.shellShapeType(),
+                obj.nativeGraphicsAllowed() || obj.forceImageFill() || obj.cornerRadius() > 0);
 
         rect.createPos();
         if (useWrapping) {
@@ -284,7 +287,7 @@ final class InlineFrameBuilder {
                     .horzOffset(0L);
         } else {
             rect.pos().treatAsCharAnd(true)
-                .affectLSpacingAnd(false)
+                .affectLSpacingAnd(InlineFlowPolicy.participatesInLineSpacing(obj))
                 .flowWithTextAnd(true)
                 .allowOverlapAnd(false)
                 .holdAnchorAndSOAnd(false)

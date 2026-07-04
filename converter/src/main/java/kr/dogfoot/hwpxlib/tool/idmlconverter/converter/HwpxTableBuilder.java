@@ -355,6 +355,8 @@ public class HwpxTableBuilder {
         copy.marginLeft(source.marginLeft());
         copy.marginRight(source.marginRight());
         copy.verticalAlign(source.verticalAlign());
+        copy.firstBaselineOffset(source.firstBaselineOffset());
+        copy.minimumFirstBaselineOffset(source.minimumFirstBaselineOffset());
         for (ASTParagraph paragraph : source.paragraphs()) {
             copy.addParagraph(paragraph);
         }
@@ -444,11 +446,20 @@ public class HwpxTableBuilder {
                 long preservedHeight = astCell.height() > 0 ? astCell.height() : 0L;
                 tc.cellSz().widthAnd(astCell.width()).heightAnd(preservedHeight);
 
+                long cellTopMargin = astCell.marginTop();
+                if (usesEmboxFirstBaseline(astCell)) {
+                    cellTopMargin = transferTopInsetToFirstParagraph(astCell);
+                }
+
                 // 셀 여백 — 원본/AST margin 값을 그대로 사용한다.
+                // 다만 IDML FirstBaselineOffset=EmboxHeight 셀은 첫 baseline이
+                // inset + embox 기준으로 잡힌다. HWPX cellMargin.top만으로는 이
+                // source baseline 모델이 안정적으로 보존되지 않으므로, 위에서
+                // source top inset을 첫 단락 spacing으로 옮기고 cell top margin은 0으로 둔다.
                 tc.createCellMargin();
                 tc.cellMargin().leftAnd(astCell.marginLeft())
                         .rightAnd(astCell.marginRight())
-                        .topAnd(astCell.marginTop())
+                        .topAnd(cellTopMargin)
                         .bottomAnd(astCell.marginBottom());
 
                 // 셀 내부 SubList
@@ -486,6 +497,23 @@ public class HwpxTableBuilder {
         ctx.blockInsetLeft = savedBlockInsetLeft;
         ctx.blockInsetTop = savedBlockInsetTop;
         ctx.cellContentYCursor = savedCellContentYCursor;
+    }
+
+    private static boolean usesEmboxFirstBaseline(ASTTableCell cell) {
+        if (cell == null || cell.firstBaselineOffset() == null) return false;
+        return "EmboxHeight".equalsIgnoreCase(cell.firstBaselineOffset());
+    }
+
+    private static long transferTopInsetToFirstParagraph(ASTTableCell cell) {
+        long topInset = cell != null ? Math.max(0, cell.marginTop()) : 0;
+        if (topInset <= 0 || cell.paragraphs() == null || cell.paragraphs().isEmpty()) {
+            return topInset;
+        }
+        ASTParagraph first = cell.paragraphs().get(0);
+        if (first == null) return topInset;
+        long existing = first.spaceBefore() != null ? Math.max(0, first.spaceBefore()) : 0;
+        first.spaceBefore(existing + topInset);
+        return 0;
     }
 
     private static java.util.List<ASTTableRow> physicalRows(ASTTable table) {

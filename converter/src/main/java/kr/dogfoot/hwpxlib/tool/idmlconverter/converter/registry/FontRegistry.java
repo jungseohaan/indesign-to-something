@@ -174,6 +174,13 @@ public class FontRegistry {
     }
 
     /**
+     * 마지막 resolveFontIdPair() 호출 결과가 원본 Bold/Italic style을 normal로 흡수해야 하는지 반환한다.
+     */
+    public boolean lastForceNormalStyle() {
+        return lastMappingResult != null && lastMappingResult.forceNormalStyle;
+    }
+
+    /**
      * 폰트 이름이 등록되어 있으면 ID 반환, 없으면 등록 후 반환.
      */
     private String ensureRegistered(String fontName) {

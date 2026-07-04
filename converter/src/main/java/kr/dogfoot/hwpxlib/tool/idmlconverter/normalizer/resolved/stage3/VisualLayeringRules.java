@@ -1,6 +1,8 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
@@ -14,6 +16,10 @@ public final class VisualLayeringRules {
         return ctx != null
                 && ctx.resolvedData != null
                 && ctx.resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg);
+    }
+
+    public static boolean isInFrontLayer(VisualLayer layer) {
+        return VisualPlanePolicy.isInFrontLayer(layer);
     }
 
     public static boolean isBadgeShellGraphicBehind(RenderedGroup rg) {
@@ -63,11 +69,9 @@ public final class VisualLayeringRules {
     public static boolean isPageObject(RenderedGroup rg) {
         if (rg == null) return false;
         String t = rg.itemType();
-        if ("page_object".equals(t)) return true;
-        if (t != null) return false;
-        String f = rg.file();
-        return f != null && (f.contains("img_") || f.contains("deco_")
-                || f.contains("shape_") || f.contains("graphic_") || f.contains("master_")
-                || f.contains("haseera_"));
+        if (t == null || t.isEmpty()) {
+            t = rg.type();
+        }
+        return "page_object".equals(t);
     }
 }

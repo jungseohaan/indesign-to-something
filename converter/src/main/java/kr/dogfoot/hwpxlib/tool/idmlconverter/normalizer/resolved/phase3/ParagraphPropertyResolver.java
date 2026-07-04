@@ -24,11 +24,10 @@ public final class ParagraphPropertyResolver {
      * IDML/resolved 단락 속성을 ASTParagraph에 적용한다.
      *
      * @param styleAlignCache cleanStyleName→alignment 캐시(성능용, nullable)
-     * @param suppressLeftIndent baseStyle.leftMargin 폴백을 명시적 0으로 차단할지
      */
     public static void apply(ASTParagraph para, IDMLParagraph ip,
                              ResolvedParagraph resolvedParagraph, ResolvedBuildContext ctx,
-                             Map<String, String> styleAlignCache, boolean suppressLeftIndent) {
+                             Map<String, String> styleAlignCache) {
         // 정렬 우선순위: IDML 단락(스토리) → IDML 스타일 → resolved 단락 → resolved top-level paragraphStyles
         // IDML ParagraphStyleRange의 Justification이 스타일 정의와 다를 경우 로컬 오버라이드이므로 최우선 적용
         String idmlStyleName = ip.appliedParagraphStyle();
@@ -83,8 +82,6 @@ public final class ParagraphPropertyResolver {
             if (neutralHangingIndent) {
                 para.leftMargin(0L);
                 para.firstLineIndent(0L);
-            } else if (suppressLeftIndent) {
-                para.leftMargin(0L); // 스타일 폴백 차단: baseStyle.leftMargin() 우선순위를 명시적 0으로 덮어씀
             } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
                 para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
             }
@@ -121,6 +118,64 @@ public final class ParagraphPropertyResolver {
                         ? idmlStyle.substring(idmlStyle.lastIndexOf('/') + 1) : idmlStyle;
                 String styleJust = StoryConverter.resolveStyleAlignment(styleName, ctx.astDocument);
                 if (styleJust != null) para.alignment(styleJust);
+            }
+        }
+    }
+
+    /** Applies resolved-only paragraph properties for planner-declared TextFlow materialization. */
+    public static void applyResolved(ASTParagraph para, ResolvedParagraph rp, ResolvedBuildContext ctx) {
+        if (para == null || rp == null) return;
+        if (rp.styleName() != null) {
+            para.paragraphStyleRef(rp.styleName());
+        }
+        if (rp.justification() != null) {
+            para.alignment(rp.justification());
+        } else if (rp.styleName() != null && ctx != null) {
+            String styleJust = StoryConverter.resolveStyleAlignment(rp.styleName(), ctx.astDocument);
+            if (styleJust != null) {
+                para.alignment(styleJust);
+            } else if (ctx.resolvedData != null
+                    && ctx.resolvedData.getParagraphStyleJustification(rp.styleName()) != null) {
+                para.alignment(ctx.resolvedData.getParagraphStyleJustification(rp.styleName()));
+            }
+        }
+        Double fixedLeading = rp.fixedLeading();
+        if (fixedLeading != null && fixedLeading > 0) {
+            para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
+            para.lineSpacingType("fixed");
+        }
+        if (rp.spaceBefore() != null && rp.spaceBefore() > 0) {
+            para.spaceBefore(CoordinateConverter.pointsToHwpunits(rp.spaceBefore()));
+        }
+        if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
+            para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
+        }
+        boolean preserveHangingTab = StoryLoader.shouldPreserveNeutralHangingIndentForTab(rp);
+        boolean neutralHangingIndent = StoryLoader.isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent());
+        if (neutralHangingIndent) {
+            para.leftMargin(0L);
+            para.firstLineIndent(0L);
+        } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
+            para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
+        }
+        if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
+            para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
+        }
+        if (rp.hasTabStops()) {
+            double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0);
+            for (ResolvedTabStop rts : rp.tabStops()) {
+                if (rts.position() == null || rts.position() <= 0) continue;
+                double posPt = preserveHangingTab ? rts.position() : rts.position() - leftPt;
+                if (posPt < 0) posPt = 0;
+                String align = "left";
+                if (rts.alignment() != null) {
+                    String a = rts.alignment().toLowerCase(Locale.ROOT);
+                    if (a.contains("center")) align = "center";
+                    else if (a.contains("right")) align = "right";
+                    else if (a.contains("decimal")) align = "decimal";
+                }
+                para.addTabStop(new ASTTabStop(
+                        CoordinateConverter.pointsToHwpunits(posPt), align, rts.leader()));
             }
         }
     }
