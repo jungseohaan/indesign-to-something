@@ -29,6 +29,75 @@ function _validateExtractionResults(plan, extractionResults) {
     };
 }
 
+function _validateObjectPlanGate(objectPlanDiagnostics) {
+    var issues = [];
+    if (!objectPlanDiagnostics) {
+        issues.push({
+            code: "missing_object_plan_diagnostics",
+            severity: "ERROR"
+        });
+    } else if (!objectPlanDiagnostics.validation) {
+        issues.push({
+            code: "missing_object_plan_validation",
+            severity: "ERROR"
+        });
+    } else if (objectPlanDiagnostics.validation.issueCount > 0) {
+        var validationIssues = objectPlanDiagnostics.validation.issues || [];
+        for (var i = 0; i < validationIssues.length; i++) {
+            var issue = validationIssues[i] || {};
+            issues.push({
+                code: issue.code || "object_plan_validation_issue",
+                severity: issue.severity || "ERROR",
+                detail: issue.detail || {},
+                plans: issue.plans || []
+            });
+        }
+    }
+
+    return {
+        schemaVersion: 1,
+        policy: "POLICY-source-ownership",
+        mode: "object-plan-validation-gate",
+        status: issues.length ? "FAIL" : "OK",
+        issueCount: issues.length,
+        issueCodeCounts: _objectPlanGateIssueCodeCounts(issues),
+        issues: issues
+    };
+}
+
+function _assertObjectPlanGate(ctx, objectPlanDiagnostics) {
+    var gate = _validateObjectPlanGate(objectPlanDiagnostics);
+    if (ctx && ctx.outputDir) {
+        writeJson(ctx.outputDir + "/object-plan-validation-gate.json", gate);
+    }
+    if (gate.status !== "OK") {
+        throw new Error("ObjectPlan validation failed: "
+                + gate.issueCount
+                + " issue(s): "
+                + _objectPlanGateIssueCodesForMessage(gate.issueCodeCounts));
+    }
+    return gate;
+}
+
+function _objectPlanGateIssueCodeCounts(issues) {
+    var counts = {};
+    for (var i = 0; issues && i < issues.length; i++) {
+        var key = issues[i] && issues[i].code ? issues[i].code : "UNKNOWN";
+        if (!counts[key]) counts[key] = 0;
+        counts[key]++;
+    }
+    return counts;
+}
+
+function _objectPlanGateIssueCodesForMessage(counts) {
+    var parts = [];
+    for (var key in counts) {
+        if (!counts.hasOwnProperty(key)) continue;
+        parts.push(key + "=" + counts[key]);
+    }
+    return parts.length > 0 ? parts.join(", ") : "UNKNOWN";
+}
+
 function _validateExecutionCandidateContract(plan, issues) {
     var summary = plan ? plan.executionCandidateContractSummary : null;
     if (!summary) {

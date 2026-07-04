@@ -49,6 +49,13 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03j_buildObjectPlans_done");
     writeJson(ctx.outputDir + "/object-plans.json", objectPlanDiagnostics);
     _marker(ctx.outputDir, "03l_writeObjectPlans_done");
+    var objectPlanValidationGate = _assertObjectPlanGate(ctx, objectPlanDiagnostics);
+    ctx.extractionPlan.objectPlanValidationGateSummary = {
+        status: objectPlanValidationGate.status,
+        issueCount: objectPlanValidationGate.issueCount,
+        issueCodeCounts: objectPlanValidationGate.issueCodeCounts
+    };
+    _marker(ctx.outputDir, "03l2_objectPlanValidationGate_done");
     writeJson(ctx.outputDir + "/exact-shell-slot-duplicates.json",
             planDiagnostics.exactShellSlotDuplicateDiagnostics
                     || {
@@ -111,6 +118,7 @@ function _runRenderPhases(doc, ctx, allItems) {
             sourceClusterQuerySummary: ctx.extractionPlan.sourceClusterQuerySummary,
             plannerBundleSummary: ctx.extractionPlan.plannerBundleSummary,
             objectPlanSummary: ctx.extractionPlan.objectPlanSummary,
+            objectPlanValidationGateSummary: ctx.extractionPlan.objectPlanValidationGateSummary,
             preObjectPlanTextlessShellSuppressionSummary:
                     ctx.extractionPlan.preObjectPlanTextlessShellSuppressionSummary,
             sourceSlotCanonicalizationSummary: ctx.extractionPlan.sourceSlotCanonicalizationSummary,

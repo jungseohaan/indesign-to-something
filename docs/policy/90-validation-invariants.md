@@ -5,6 +5,10 @@
 
 ## 11. Invariants
 
+- Stage 4 ObjectPlan validation is a fatal pre-render gate. If
+  `object-plans.json.validation.issueCount > 0`, extraction must write
+  diagnostics and stop before PNG/vector render execution or HWPX conversion.
+  Later stages may not treat ObjectPlan issues as advisory warnings.
 - One source bundle slot has one visible owner.
 - One TextFrame cannot be both `OWNED_BY_PNG` and `OWNED_BY_HWPX_TEXT`.
 - The same source bundle slot cannot be emitted both inline and floating.
