@@ -50,11 +50,18 @@ consolidated here.
 
 ## 1.1 Refactoring Direction
 
-The extractor and converter must move toward a source-cluster-first pipeline.
+The extractor and converter must move toward a closed source-coverage pipeline.
+Stage 1 does not begin from rendered candidates or from visually missing
+objects. It begins by registering every IDML/resolved `SourceObject` in the page
+range, assigning a coverage status to each one, grouping related source objects
+into `SourceBundle`s, splitting each bundle into ownership slots, assigning one
+owner to every slot, and creating `RenderUnit`s only for the slots that need
+extracted PNG/vector material.
+
 InDesign source trees are recursive, so conversion first normalizes source
-objects into atomic source clusters, then decides text, shell, content, and
-table-style ownership, and only then places those atoms into page, inline,
-table-cell, master, or spread-fragment contexts.
+objects into closed source coverage and source bundles, then decides text,
+shell, content, and table-style ownership, and only then places those atoms into
+page, inline, table-cell, master, or spread-fragment contexts.
 
 Placement context must not define the identity of a source cluster. A
 `TEXT_OWNING_SHELL` is the same ownership class whether it is page-floating,
@@ -77,6 +84,12 @@ as descendant source ids, page-local source ids, and editable TextFrame
 membership. These queries are planner inputs only. They must not become a
 second ownership decision path, and they must not reinterpret placement after
 ObjectPlan creation.
+
+During migration, a Java legacy bridge may report missing or mutated ownership
+plans, but those reports are defects in Stage 0/Stage 1 source coverage,
+bundle construction, slot decomposition, slot ownership, RenderUnit creation, or
+ObjectPlan serialization. They are not work queues for reason-by-reason recovery
+inside Java.
 
 While the legacy candidate planner remains active, cluster query diagnostics
 may compare cluster-derived source sets with legacy candidate source sets. A

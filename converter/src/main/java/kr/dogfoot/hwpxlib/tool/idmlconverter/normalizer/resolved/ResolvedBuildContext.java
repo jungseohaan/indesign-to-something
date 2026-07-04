@@ -358,6 +358,15 @@ public final class ResolvedBuildContext {
     /** source ownership policy OwnershipPlanner 관찰 모드: invariant warning JSONL 라인. */
     public java.util.List<String> ownershipWarningLines = new java.util.ArrayList<>();
 
+    /** Java legacy ownership bridge가 새로 추가한 ObjectPlan JSONL 라인. */
+    public java.util.List<String> legacyBridgeAddedPlanLines = new java.util.ArrayList<>();
+
+    /** Java legacy ownership bridge가 import된 ObjectPlan을 수정한 before/after JSONL 라인. */
+    public java.util.List<String> legacyBridgeMutatedPlanLines = new java.util.ArrayList<>();
+
+    /** Java legacy ownership bridge 추가/수정 plan 분류 요약 JSONL 라인. */
+    public java.util.List<String> legacyBridgeSummaryLines = new java.util.ArrayList<>();
+
     /**
      * Stage 2 TextFlow snapshot.
      *

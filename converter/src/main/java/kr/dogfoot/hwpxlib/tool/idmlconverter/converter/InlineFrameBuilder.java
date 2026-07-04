@@ -165,7 +165,7 @@ final class InlineFrameBuilder {
                     .holdAnchorAndSOAnd(false)
                     .vertRelToAnd(VertRelTo.PARA)
                     .horzRelToAnd(HorzRelTo.PARA)
-                    .vertAlignAnd(VertAlign.CENTER)
+                    .vertAlignAnd(inlineShellVertAlign(obj))
                     .horzAlignAnd(HorzAlign.LEFT)
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
@@ -225,7 +225,10 @@ final class InlineFrameBuilder {
             if (overlay == null || overlay.paragraphs() == null || overlay.paragraphs().isEmpty()) continue;
             HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
             d.overlay = overlay;
-            if (overlay.resolvedPageX() >= 0 && overlay.resolvedPageY() >= 0) {
+            if (ctx.insideTableCell) {
+                d.pageX = ctx.blockPageX + ctx.blockInsetLeft + overlay.overlayX();
+                d.pageY = ctx.blockPageY + ctx.blockInsetTop + ctx.cellContentYCursor + overlay.overlayY();
+            } else if (overlay.resolvedPageX() >= 0 && overlay.resolvedPageY() >= 0) {
                 d.pageX = overlay.resolvedPageX();
                 d.pageY = overlay.resolvedPageY();
             } else {
@@ -312,7 +315,7 @@ final class InlineFrameBuilder {
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PARA)
                 .horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.CENTER)
+                .vertAlignAnd(inlineShellVertAlign(obj))
                 .horzAlignAnd(HorzAlign.LEFT)
                 .vertOffsetAnd(0L)
                 .horzOffset(0L);
@@ -324,6 +327,13 @@ final class InlineFrameBuilder {
         } else {
             rect.outMargin().leftAnd(0L).rightAnd(INLINE_TEXT_FRAME_TRAILING_GAP).topAnd(0L).bottomAnd(0L);
         }
+    }
+
+    private VertAlign inlineShellVertAlign(ASTInlineObject obj) {
+        if (obj != null && obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
+            return VertAlign.TOP;
+        }
+        return VertAlign.CENTER;
     }
 
     private void applyShapeComponentGeometry(

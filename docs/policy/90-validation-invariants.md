@@ -9,6 +9,19 @@
   `object-plans.json.validation.issueCount > 0`, extraction must write
   diagnostics and stop before PNG/vector render execution or HWPX conversion.
   Later stages may not treat ObjectPlan issues as advisory warnings.
+- Every IDML/resolved `SourceObject` in the selected page range has exactly one
+  coverage status before ownership planning completes. `UNRESOLVED` coverage is
+  a blocking Stage 1 failure.
+- Every visible/style/text source object is reachable from exactly one
+  `SourceBundle` + `OwnershipSlot` + `SlotOwner` path. Objects that are
+  ancestry only must be marked `PROVENANCE_ONLY`; objects that are intentionally
+  dropped must be marked `DROPPED_INTENTIONAL`.
+- Every extracted PNG/vector result must correspond to a prior Stage 1
+  `RenderUnit`. A rendered file without a prior RenderUnit is not ownership
+  evidence and must fail validation.
+- Java legacy bridge code must not add or mutate ownership plans. A non-zero
+  bridge-added or bridge-mutated ownership count is a Stage 0/Stage 1 planning
+  defect, not a successful recovery.
 - One source bundle slot has one visible owner.
 - One TextFrame cannot be both `OWNED_BY_PNG` and `OWNED_BY_HWPX_TEXT`.
 - The same source bundle slot cannot be emitted both inline and floating.

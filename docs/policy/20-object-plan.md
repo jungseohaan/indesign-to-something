@@ -207,16 +207,24 @@ document-specific symptom.
 
 Stage 1 decides in this order:
 
-1. Drop hidden source trees.
-2. Resolve source bundle roots and closed membership.
-3. Assign table/cell structure and table style slots from IDML table metadata.
-4. Assign editable text from source story/thread/table membership.
-5. Assign complete visual bundles declared by extractor/source metadata.
-6. Assign textless shell material for editable text owners.
-7. Assign content visual material.
-8. Resolve placement from original anchor/page ownership.
-9. Resolve visual layer from original layer/z and the four policy layers.
-10. Validate slot uniqueness and source coverage.
+1. Register every IDML/resolved source object in the selected page range.
+2. Assign a coverage status to every source object:
+   `VISIBLE_OWNED`, `TEXT_OWNED`, `STYLE_OWNED`, `HIDDEN_BY_OWNER`,
+   `DROPPED_INTENTIONAL`, `PROVENANCE_ONLY`, or `UNRESOLVED`.
+3. Build `SourceBundle`s from source tree, story/thread, table/cell,
+   inline/anchor, page/spread, and applied-master relationships.
+4. Split every bundle into explicit ownership slots:
+   `TEXT_SLOT`, `SHELL_SLOT`, `TABLE_STYLE_SLOT`, and
+   `CONTENT_VISUAL_SLOT`.
+5. Assign exactly one `SlotOwner` to every visible/style/text slot.
+6. Create `RenderUnit`s for slots whose owner requires extracted PNG/vector
+   material.
+7. Derive `ObjectPlan`s from bundle, slot, owner, and RenderUnit records.
+8. Resolve placement from original anchor/page/table/master context.
+9. Resolve visual layer from source role, source layer/z, and the four policy
+   layers.
+10. Validate source coverage, slot uniqueness, RenderUnit/ObjectPlan closure,
+    and executor readiness.
 
 No later stage may create a new owner to compensate for a missing decision.
 

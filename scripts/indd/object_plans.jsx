@@ -9,10 +9,10 @@
 
 function _buildObjectPlanDiagnostics(sourceItems, candidates) {
     var plannerBundles = _buildPlannerBundles(sourceItems, candidates);
-    return _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles);
+    return _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems);
 }
 
-function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles) {
+function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems) {
     var bundles = plannerBundles && plannerBundles.bundles ? plannerBundles.bundles : [];
     var objectPlans = [];
     var summary = {
@@ -54,10 +54,17 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles) {
         if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) summary.plansWithOwnedTextFrames++;
         _incrementObjectPlanSummary(summary.migrationBlockerCounts, plan.migrationBlocker || "NONE");
     }
+    _appendEditableTextFrameObjectPlans(objectPlans, sourceItems);
+    _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems);
+    _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems);
+    _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems);
+    _appendTextFrameCleanupObjectPlans(objectPlans, sourceItems);
     var textOwnershipResolution = _resolveObjectPlanDuplicateTextOwners(objectPlans);
+    var depthFinalization = _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems);
     var validation = _validateObjectPlanDiagnostics(objectPlans);
     summary = _summarizeObjectPlans(objectPlans, validation);
     summary.textOwnershipResolution = textOwnershipResolution.summary;
+    summary.visualDepthFinalization = depthFinalization.summary;
 
     return {
         schemaVersion: 1,
@@ -66,6 +73,405 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles) {
         summary: summary,
         validation: validation,
         objectPlans: objectPlans
+    };
+}
+
+function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
+    var sourceById = _objectPlanSourceInfoById(sourceItems);
+    var editableTextFrames = _objectPlanEditableTextFrames(sourceItems);
+    var zOrderUpdates = 0;
+    var layerUpdates = 0;
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!_objectPlanHasVisibleVisual(plan)) continue;
+        var sourceZ = _objectPlanCanonicalVisualSourceZOrder(plan, sourceById);
+        if (sourceZ >= 0 && plan.zOrder !== sourceZ) {
+            plan.zOrder = sourceZ;
+            zOrderUpdates++;
+        }
+        var layer = _objectPlanCanonicalVisualLayer(plan, editableTextFrames, sourceZ);
+        if (layer && plan.visualLayer !== layer) {
+            plan.visualLayer = layer;
+            plan.policyLayer = _objectPlanPolicyLayerForVisualLayer(layer);
+            layerUpdates++;
+        }
+    }
+    return {
+        summary: {
+            zOrderUpdates: zOrderUpdates,
+            layerUpdates: layerUpdates
+        }
+    };
+}
+
+function _objectPlanSourceInfoById(sourceItems) {
+    var out = {};
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        out[String(src.id)] = src;
+    }
+    return out;
+}
+
+function _objectPlanEditableTextFrames(sourceItems) {
+    var out = [];
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || String(src.kind || "") !== "TextFrame") continue;
+        if (src.textFrameClass !== "editable") continue;
+        if (src.hasText !== true) continue;
+        if (!src.bounds || src.bounds.length < 4) continue;
+        out.push(src);
+    }
+    return out;
+}
+
+function _objectPlanCanonicalVisualSourceZOrder(plan, sourceById) {
+    var sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.visualSourceObjectIds : null, sourceById);
+    if (sourceZ >= 0) return sourceZ;
+    sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.sourceObjectIds : null, sourceById);
+    return sourceZ >= 0 ? sourceZ : (plan && plan.zOrder !== null && plan.zOrder !== undefined ? plan.zOrder : -1);
+}
+
+function _objectPlanMaxSourceZOrder(ids, sourceById) {
+    var max = -1;
+    for (var i = 0; ids && i < ids.length; i++) {
+        var src = sourceById ? sourceById[String(ids[i])] : null;
+        if (!src || src.zOrder === null || src.zOrder === undefined) continue;
+        var z = Number(src.zOrder);
+        if (!isNaN(z) && z > max) max = z;
+    }
+    return max;
+}
+
+function _objectPlanCanonicalVisualLayer(plan, editableTextFrames, zOrder) {
+    if (!plan) return null;
+    if (plan.visualAction === "PLACE_TEXT_SHELL"
+            && plan.placement === "FLOATING"
+            && plan.coordinateSpace === "PAGE"
+            && (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0)
+            && plan.visualLayer === "LABEL_BACKDROP"
+            && (_objectPlanIsPageEdgeSpanningBounds(plan.bounds)
+                    || _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFrames))) {
+        return "CONTAINER_BACKDROP";
+    }
+    if (plan.visualAction === "PLACE_FLOATING_PNG"
+            && plan.placement === "FLOATING"
+            && plan.visualLayer === "CONTENT_VISUAL"
+            && _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFrames)) {
+        return "CONTENT_BACKDROP";
+    }
+    return plan.visualLayer;
+}
+
+function _objectPlanIsBehindLocalText(bounds, pageIndex, zOrder, editableTextFrames) {
+    if (!bounds || bounds.length < 4 || _objectPlanArea(bounds) <= 0) return false;
+    if (zOrder === null || zOrder === undefined || zOrder < 0) return false;
+    for (var i = 0; editableTextFrames && i < editableTextFrames.length; i++) {
+        var tf = editableTextFrames[i];
+        if (!tf || tf.pageIndex !== pageIndex) continue;
+        if (tf.zOrder === null || tf.zOrder === undefined) continue;
+        if (Number(tf.zOrder) <= Number(zOrder)) continue;
+        if (_objectPlanOverlapArea(bounds, tf.bounds) > 0) return true;
+    }
+    return false;
+}
+
+function _objectPlanIsPageEdgeSpanningBounds(bounds) {
+    if (!bounds || bounds.length < 4 || _objectPlanArea(bounds) <= 0) return false;
+    var h = Math.abs(bounds[2] - bounds[0]);
+    var w = Math.abs(bounds[3] - bounds[1]);
+    if (w < 180 || h < 90) return false;
+    return (bounds[0] <= 1 || bounds[1] <= 1) && (w >= 180 || h >= 180);
+}
+
+function _objectPlanArea(bounds) {
+    if (!bounds || bounds.length < 4) return 0;
+    return Math.abs(bounds[2] - bounds[0]) * Math.abs(bounds[3] - bounds[1]);
+}
+
+function _objectPlanOverlapArea(a, b) {
+    if (!a || !b || a.length < 4 || b.length < 4) return 0;
+    var top = Math.max(a[0], b[0]);
+    var left = Math.max(a[1], b[1]);
+    var bottom = Math.min(a[2], b[2]);
+    var right = Math.min(a[3], b[3]);
+    if (bottom <= top || right <= left) return 0;
+    return (bottom - top) * (right - left);
+}
+
+function _objectPlanPolicyLayerForVisualLayer(visualLayer) {
+    if (visualLayer === "PAGE_BACKGROUND" || visualLayer === "CONTAINER_BACKDROP") {
+        return "BACKGROUND";
+    }
+    if (visualLayer === "LABEL_BACKDROP"
+            || visualLayer === "LABEL_OVERLAY_BACKDROP"
+            || visualLayer === "LABEL_CONNECTOR_BACKDROP"
+            || visualLayer === "CONTAINER_OUTLINE"
+            || visualLayer === "FOREGROUND_MASK") {
+        return "DECORATION";
+    }
+    return "CONTENT";
+}
+
+function _appendEditableTextFrameObjectPlans(objectPlans, sourceItems) {
+    if (!objectPlans || !sourceItems) return;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || String(src.kind || "") !== "TextFrame") continue;
+        if (src.textFrameClass !== "editable") continue;
+        if (src.hasText !== true) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        objectPlans.push(_textFrameObjectPlan(src, id, pageIndex, zOrder,
+                "pass.editable_text_frames", "editable_text_frame"));
+    }
+}
+
+function _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems) {
+    if (!objectPlans || !sourceItems) return;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || String(src.kind || "") !== "TextFrame") continue;
+        if (src.textFrameClass === "editable") continue;
+        if (!_objectPlanSourceHasVisibleTextContent(src)) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        objectPlans.push(_textFrameObjectPlan(src, id, pageIndex, zOrder,
+                "pass.visible_text_frames", "visible_text_frame"));
+    }
+}
+
+function _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems) {
+    if (!objectPlans || !sourceItems) return;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || String(src.kind || "") !== "TextFrame") continue;
+        if (src.textFrameClass !== "editable") continue;
+        if (src.hasText === true) continue;
+        if (Number(src.textLength || 0) !== 0) continue;
+        if (src.hasTablesInStory === true) continue;
+        if (src.visible === false) continue;
+        if (src.hiddenLayer === true || src.nonprinting === true) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        if (src.storyAnchorPlacement === "INLINE"
+                && _objectPlansHaveVisibleShellForFrame(objectPlans, id)) {
+            objectPlans.push(_textFrameCleanupObjectPlan(src, id, pageIndex, zOrder,
+                    "empty_text_frame_visual_shell"));
+            continue;
+        }
+        if (_objectPlansHaveTextDecisionForFrame(objectPlans, id)) continue;
+        objectPlans.push(_textFrameObjectPlan(src, id, pageIndex, zOrder,
+                "pass.empty_editable_text_frames", "editable_text_frame"));
+    }
+}
+
+function _appendTextFrameCleanupObjectPlans(objectPlans, sourceItems) {
+    if (!objectPlans || !sourceItems) return;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || String(src.kind || "") !== "TextFrame") continue;
+        if (src.hiddenLayer !== true && src.nonprinting !== true) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        var reason = src.hiddenLayer === true ? "hidden_layer" : "nonprinting";
+        objectPlans.push(_textFrameCleanupObjectPlan(src, id, pageIndex, zOrder, reason));
+    }
+}
+
+function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
+    if (!objectPlans || !sourceItems) return;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || String(src.kind || "") !== "TextFrame") continue;
+        if (src.hasTablesInStory !== true) continue;
+        if (src.storyHasVisibleTableCellText !== true) continue;
+        if (src.markerOnlyContents !== true) continue;
+        if (src.visible === false) continue;
+        if (src.hiddenLayer === true || src.nonprinting === true) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        if (_objectPlansHaveTableStyleDecisionForFrame(objectPlans, id)) continue;
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        objectPlans.push(_tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder));
+    }
+}
+
+function _objectPlansHaveTextDecisionForFrame(objectPlans, textFrameId) {
+    var key = String(textFrameId);
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan) continue;
+        if (String(plan.primarySourceObjectId) === key) return true;
+        for (var t = 0; plan.ownedTextFrameIds && t < plan.ownedTextFrameIds.length; t++) {
+            if (String(plan.ownedTextFrameIds[t]) === key) return true;
+        }
+    }
+    return false;
+}
+
+function _objectPlansHaveTableStyleDecisionForFrame(objectPlans, textFrameId) {
+    var key = String(textFrameId);
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan || plan.visualAction !== "PLACE_TABLE_STYLE") continue;
+        if (String(plan.primarySourceObjectId) === key) return true;
+        for (var t = 0; plan.ownedTextFrameIds && t < plan.ownedTextFrameIds.length; t++) {
+            if (String(plan.ownedTextFrameIds[t]) === key) return true;
+        }
+    }
+    return false;
+}
+
+function _objectPlansHaveVisibleShellForFrame(objectPlans, textFrameId) {
+    var key = String(textFrameId);
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan || plan.visualAction !== "PLACE_TEXT_SHELL") continue;
+        if (String(plan.primarySourceObjectId) === key) return true;
+        for (var s = 0; plan.sourceObjectIds && s < plan.sourceObjectIds.length; s++) {
+            if (String(plan.sourceObjectIds[s]) === key) return true;
+        }
+    }
+    return false;
+}
+
+function _objectPlanSourceHasVisibleTextContent(src) {
+    if (!src || src.hasText !== true) return false;
+    if (src.visible === false) return false;
+    if (src.hiddenLayer === true) return false;
+    if (src.nonprinting === true) return false;
+    if (src.markerOnlyContents === true) return false;
+    return true;
+}
+
+function _textFrameCleanupObjectPlan(src, id, pageIndex, zOrder, reason) {
+    var plan = _textFrameObjectPlan(src, id, pageIndex, zOrder,
+            "pass.textframe_cleanup", reason);
+    plan.textAction = "DROP_TEXT";
+    plan.visualAction = "DROP_VISUAL";
+    plan.candidatePurpose = reason;
+    plan.reason = reason;
+    plan.migrationStatus = "READY_TEXT_CLEANUP";
+    return plan;
+}
+
+function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder) {
+    var tableIds = _sortedNumericIds(src.tableSourceObjectIds || []);
+    var sourceIds = _sortedNumericIds([id].concat(tableIds));
+    return {
+        objectPlanId: "objectPlan.table_only_text_frame." + String(id),
+        bundleId: "textFrame.tableOnly." + String(id),
+        candidateId: null,
+        passId: "pass.table_only_text_frames",
+        pageIndex: pageIndex,
+        kind: "TextFrame",
+        mode: "TEXT_ONLY",
+        candidatePurpose: "table_only_text_frame",
+        compositeRole: null,
+        slotRole: "TABLE_STYLE_SLOT",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
+        inlineCompositeLayoutDescendant: false,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: id,
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: sourceIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: { TextFrame: 1, Table: tableIds.length },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: true,
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: false,
+        visualSourceObjectIds: [],
+        styleSourceObjectIds: [],
+        ownedTextFrameIds: [id],
+        exportSourceObjectIds: [],
+        hiddenVisualSourceObjectIds: [],
+        materialization: "HWPX_TABLE_STYLE",
+        textAction: "OWNED_BY_HWPX_TEXT",
+        visualAction: "PLACE_TABLE_STYLE",
+        placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
+        coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
+        visualLayer: "CONTENT_VISUAL",
+        zOrder: zOrder,
+        reason: "table_only_text_frame",
+        bounds: src.bounds || null,
+        ownershipSlot: "TABLE_STYLE_SLOT",
+        policyLayer: "TEXT",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_TABLE_STYLE",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        executable: true,
+        required: true
+    };
+}
+
+function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
+    return {
+        objectPlanId: "objectPlan." + String(passId).replace(/^pass\./, "") + "." + String(id),
+        bundleId: "textFrame." + String(id),
+        candidateId: null,
+        passId: passId,
+        pageIndex: pageIndex,
+        kind: "TextFrame",
+        mode: "TEXT_ONLY",
+        candidatePurpose: reason,
+        compositeRole: null,
+        slotRole: "TEXT_SLOT",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
+        inlineCompositeLayoutDescendant: false,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: id,
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: [id],
+        sourceRootObjectIds: [id],
+        clusterSourceObjectIds: [id],
+        clusterKindCounts: { TextFrame: 1 },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: src.textFrameClass === "editable",
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: false,
+        visualSourceObjectIds: [],
+        styleSourceObjectIds: [],
+        ownedTextFrameIds: [id],
+        exportSourceObjectIds: [],
+        hiddenVisualSourceObjectIds: [],
+        materialization: "HWPX_TEXT",
+        textAction: "OWNED_BY_HWPX_TEXT",
+        visualAction: "DROP_VISUAL",
+        placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
+        coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
+        visualLayer: "CONTENT_VISUAL",
+        zOrder: zOrder,
+        reason: reason,
+        bounds: src.bounds || null,
+        ownershipSlot: "TEXT_SLOT",
+        policyLayer: "TEXT",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_TEXT_ONLY",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        executable: true,
+        required: true
     };
 }
 
@@ -220,7 +626,7 @@ function _objectPlanTextOwnerPriority(plan) {
 }
 
 function _objectPlanFromPlannerBundle(bundle, index) {
-    bundle = bundle || {};
+    bundle = _normalizeObjectPlanBundle(bundle || {});
     var textAction = _objectPlanTextAction(bundle);
     var visualAction = _objectPlanVisualAction(bundle);
     var placement = _objectPlanPlacement(bundle);
@@ -282,6 +688,58 @@ function _objectPlanFromPlannerBundle(bundle, index) {
         executable: bundle.executable === true,
         required: bundle.required === true
     };
+}
+
+function _normalizeObjectPlanBundle(bundle) {
+    if (_objectPlanBundleIsClosedPlacedContentCarrier(bundle)) {
+        return _closedPlacedContentCarrierBundle(bundle);
+    }
+    return bundle || {};
+}
+
+function _objectPlanBundleIsClosedPlacedContentCarrier(bundle) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.image_placed_frames") return false;
+    if (bundle.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (bundle.clusterRelation !== "BUNDLE_NARROWER_THAN_CLUSTER") return false;
+    if (bundle.clusterHasPlacedContent !== true) return false;
+    if (bundle.clusterHasTextFrame === true || bundle.clusterHasEditableText === true) return false;
+    if (!bundle.clusterSourceObjectIds || bundle.clusterSourceObjectIds.length === 0) return false;
+    if (!bundle.sourceObjectIds || bundle.sourceObjectIds.length === 0) return false;
+    if (!_sourceSetContainsAll(bundle.clusterSourceObjectIds || [], bundle.sourceObjectIds || [])) return false;
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return false;
+    if (!_objectPlanOmittedClusterSourcesArePlacedMedia(bundle)) return false;
+    return true;
+}
+
+function _objectPlanOmittedClusterSourcesArePlacedMedia(bundle) {
+    if (!bundle || !bundle.omittedClusterKindCounts) return false;
+    var omittedCount = 0;
+    for (var key in bundle.omittedClusterKindCounts) {
+        if (!bundle.omittedClusterKindCounts.hasOwnProperty(key)) continue;
+        var count = Number(bundle.omittedClusterKindCounts[key] || 0);
+        if (count <= 0) continue;
+        omittedCount += count;
+        if (key !== "Image" && key !== "PDF") return false;
+    }
+    return omittedCount > 0;
+}
+
+function _closedPlacedContentCarrierBundle(bundle) {
+    var closed = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) closed[key] = bundle[key];
+    }
+    var clusterIds = _sortedNumericIds(bundle.clusterSourceObjectIds || []);
+    closed.sourceObjectIds = clusterIds;
+    closed.visualSourceObjectIds = clusterIds.slice(0);
+    closed.exportSourceObjectIds = clusterIds.slice(0);
+    closed.sourceRootObjectIds = _sortedNumericIds(bundle.sourceRootObjectIds || bundle.sourceObjectIds || []);
+    closed.omittedClusterSourceObjectIds = [];
+    closed.omittedClusterKindCounts = {};
+    closed.clusterRelation = "EXACT_SOURCE_CLUSTER";
+    closed.closedPlacedContentCarrier = true;
+    return closed;
 }
 
 function _objectPlanId(bundle, index) {

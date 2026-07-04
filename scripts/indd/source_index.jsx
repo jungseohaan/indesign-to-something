@@ -230,6 +230,55 @@ function _plainTextOfTextFrameForOwnership(item) {
     return String(text || "").replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC]/g, "");
 }
 
+function _storyTableSourceObjectIds(story) {
+    var ids = [];
+    try {
+        if (!story || !story.tables) return ids;
+        var tables = story.tables.everyItem().getElements();
+        for (var i = 0; tables && i < tables.length; i++) {
+            try {
+                if (tables[i] && tables[i].id !== undefined && tables[i].id !== null) {
+                    ids.push(Number(tables[i].id));
+                }
+            } catch (eTableId) {}
+        }
+    } catch (eEveryTable) {
+        try {
+            for (var t = 0; story && story.tables && t < story.tables.length; t++) {
+                try {
+                    if (story.tables[t] && story.tables[t].id !== undefined
+                            && story.tables[t].id !== null) {
+                        ids.push(Number(story.tables[t].id));
+                    }
+                } catch (eTableIndexId) {}
+            }
+        } catch (eTableLoop) {}
+    }
+    return ids;
+}
+
+function _storyHasVisibleTableCellText(story) {
+    try {
+        if (!story || !story.tables) return false;
+        var tables = story.tables.everyItem().getElements();
+        for (var ti = 0; tables && ti < tables.length; ti++) {
+            var cells = null;
+            try { cells = tables[ti].cells.everyItem().getElements(); } catch (eCells) {}
+            for (var ci = 0; cells && ci < cells.length; ci++) {
+                var text = "";
+                try { text = String(cells[ci].texts[0].contents || ""); } catch (eText0) {}
+                if (!text) {
+                    try { text = String(cells[ci].contents || ""); } catch (eCellContents) {}
+                }
+                if (text.replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC\uFEFF]/g, "").length > 0) {
+                    return true;
+                }
+            }
+        }
+    } catch (eTableCellText) {}
+    return false;
+}
+
 function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var sourceItems = [];
     var sourceInfoById = {};
@@ -292,6 +341,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var markerOnlyContents = null;
         var storyId = null;
         var tableCountInStory = null;
+        var tableSourceObjectIds = [];
+        var storyHasVisibleTableCellText = null;
         var parentStory = null;
         try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
         if (parentStory) {
@@ -316,8 +367,13 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         tableCountInStory = Number(parentStory.tables.count() || 0);
                     }
                 }
+                tableSourceObjectIds = _storyTableSourceObjectIds(parentStory);
+                storyHasVisibleTableCellText = _storyHasVisibleTableCellText(parentStory);
             } catch (eStoryMeta) {
                 tableCountInStory = tableCountInStory === null ? 0 : tableCountInStory;
+                storyHasVisibleTableCellText = storyHasVisibleTableCellText === null
+                        ? false
+                        : storyHasVisibleTableCellText;
             }
         }
 
@@ -333,6 +389,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             layerName: _itemLayerName(item),
             visible: _itemVisible(item),
             hiddenLayer: false,
+            nonprinting: false,
             textFrameClass: textFrameClass,
             textLength: textLength,
             hasText: textLength !== null ? textLength > 0 : null,
@@ -340,6 +397,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             storyId: storyId,
             tableCountInStory: tableCountInStory,
             hasTablesInStory: tableCountInStory !== null ? tableCountInStory > 0 : null,
+            tableSourceObjectIds: tableSourceObjectIds,
+            storyHasVisibleTableCellText: storyHasVisibleTableCellText,
             hasChildren: false,
             hasPlacedVisual: false,
             hasCandidateVectorPaint: null,
@@ -358,6 +417,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         };
 
         try { info.hiddenLayer = isOnHiddenLayer(item); } catch (eHidden) {}
+        try { info.nonprinting = !!item.nonprinting; } catch (eNonprinting) {}
         if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
             try { info.hasPlacedVisual = _hasPlacedVisual(item); } catch (ePlaced) {}
         }
@@ -391,7 +451,15 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     for (var i = 0; allItems && i < allItems.length; i++) {
         try { readItemInfo(allItems[i]); } catch (eReadInfo) {}
     }
-    normalizeSourceItemZOrder(sourceItems);
+    normalizeSourceItemZOrder(sourceItems, ctx);
+    stats.sourceZOrderSummary = ctx && ctx.sourceZOrderSummary
+            ? ctx.sourceZOrderSummary
+            : {
+                sourceItemCount: sourceItems.length,
+                idmlZOrderAvailable: false,
+                idmlZOrderAppliedCount: 0,
+                idmlZOrderMissingCount: sourceItems.length
+            };
 
     for (var si = 0; si < sourceItems.length; si++) {
         var src = sourceItems[si];
@@ -694,31 +762,35 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     };
 }
 
-function normalizeSourceItemZOrder(sourceItems) {
+function normalizeSourceItemZOrder(sourceItems, ctx) {
     if (!sourceItems || sourceItems.length === 0) return;
-    var byPage = {};
+    var idmlZOrderById = ctx && ctx.idmlZOrderBySourceObjectId
+            ? ctx.idmlZOrderBySourceObjectId
+            : null;
+    var applied = 0;
+    var missing = 0;
     for (var i = 0; i < sourceItems.length; i++) {
         var item = sourceItems[i];
         if (!item) continue;
         item.rawZOrder = item.zOrder;
-        var key = String(item.pageIndex);
-        if (!byPage[key]) byPage[key] = [];
-        byPage[key].push(item);
-    }
-    for (var pageKey in byPage) {
-        if (!byPage.hasOwnProperty(pageKey)) continue;
-        var pageItems = byPage[pageKey];
-        pageItems.sort(function(a, b) {
-            return Number(a.rawZOrder || 0) - Number(b.rawZOrder || 0);
-        });
-        var last = pageItems.length - 1;
-        for (var pi = 0; pi < pageItems.length; pi++) {
-            // InDesign exposes allPageItems in front-to-back source order for
-            // the page/spread plane used here.  ObjectPlan.zOrder is the
-            // normalized execution contract: smaller is behind, larger is in
-            // front.  Keep rawZOrder/sourceOrder for diagnostics only.
-            pageItems[pi].zOrder = last - pi;
+        var idmlZ = idmlZOrderById ? idmlZOrderById[String(item.id)] : null;
+        if (idmlZ !== null && idmlZ !== undefined) {
+            item.zOrder = Number(idmlZ);
+            item.zOrderSource = "idml_spread";
+            applied++;
+        } else {
+            item.zOrder = Number(item.rawZOrder || 0);
+            item.zOrderSource = "dom_allPageItems";
+            if (idmlZOrderById) missing++;
         }
+    }
+    if (ctx) {
+        ctx.sourceZOrderSummary = {
+            sourceItemCount: sourceItems.length,
+            idmlZOrderAvailable: !!idmlZOrderById,
+            idmlZOrderAppliedCount: applied,
+            idmlZOrderMissingCount: missing
+        };
     }
 }
 

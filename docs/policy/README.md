@@ -9,6 +9,7 @@ That file links to these modules and makes them canonical by reference.
 ## Modules
 
 - [00-overview.md](00-overview.md): core principles, refactoring direction, performance policy
+- [05-source-coverage-planning.md](05-source-coverage-planning.md): complete source traversal, SourceObject coverage, bundle/slot/owner/render-unit model
 - [10-source-bundle.md](10-source-bundle.md): source bundles, slots, materialization, text-shell roles
 - [20-object-plan.md](20-object-plan.md): ObjectPlan contract and Stage 1 decision order
 - [30-placement-inline-policy.md](30-placement-inline-policy.md): page/story placement and inline ownership

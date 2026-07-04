@@ -15,38 +15,43 @@ policy; their usable rules have been consolidated here.
    - core principles
    - refactoring direction
    - performance-oriented ownership policy
-2. [Source Bundles And Slots](../policy/10-source-bundle.md)
+2. [Source Coverage Planning](../policy/05-source-coverage-planning.md)
+   - complete IDML source traversal
+   - SourceObject coverage status
+   - SourceBundle / OwnershipSlot / SlotOwner / RenderUnit model
+   - ObjectPlan handoff without Java bridge recovery
+3. [Source Bundles And Slots](../policy/10-source-bundle.md)
    - source bundle identity
    - slot ownership
    - materialization rules
    - `PLACE_TEXT_SHELL` roles
-3. [ObjectPlan Contract And Decision Order](../policy/20-object-plan.md)
+4. [ObjectPlan Contract And Decision Order](../policy/20-object-plan.md)
    - required ObjectPlan fields
    - action/materialization contract
    - Stage 1 decision order
-4. [Placement And Inline Ownership](../policy/30-placement-inline-policy.md)
+5. [Placement And Inline Ownership](../policy/30-placement-inline-policy.md)
    - page vs story-flow placement
    - inline/floating source ownership
    - clipping and page-local fragment placement
-5. [Text](../policy/40-text-policy.md)
+6. [Text](../policy/40-text-policy.md)
    - HWPX text ownership
    - TextFrame merge/layout constraints
-6. [Textless Shells](../policy/50-textless-shell-policy.md)
+7. [Textless Shells](../policy/50-textless-shell-policy.md)
    - native/extracted shell ownership
    - direct child/sibling shell slots
    - text-owning shell execution requirements
-7. [Table Style](../policy/60-table-policy.md)
+8. [Table Style](../policy/60-table-policy.md)
    - table/cell style ownership
    - table-like carrier rules
    - table placement and row geometry
-8. [Layers And Z-Depth](../policy/70-layer-zdepth.md)
+9. [Layers And Z-Depth](../policy/70-layer-zdepth.md)
    - four policy layers
    - IDML source depth
    - HWPX plane mapping
-9. [Executor Rules](../policy/80-executor-rules.md)
+10. [Executor Rules](../policy/80-executor-rules.md)
    - allowed executor behavior
    - forbidden fallback execution paths
-10. [Validation, Forbidden Patterns, Cleanup](../policy/90-validation-invariants.md)
+11. [Validation, Forbidden Patterns, Cleanup](../policy/90-validation-invariants.md)
     - invariants
     - forbidden patterns
     - cleanup direction
@@ -57,6 +62,7 @@ When a page issue is reported, use this lookup first:
 
 | Symptom | First Policy Module |
 |---|---|
+| missing object with no clear source owner | [Source Coverage Planning](../policy/05-source-coverage-planning.md) |
 | duplicate/missing source slot | [Source Bundles And Slots](../policy/10-source-bundle.md) |
 | wrong ObjectPlan/action/materialization | [ObjectPlan Contract And Decision Order](../policy/20-object-plan.md) |
 | inline vs floating mismatch | [Placement And Inline Ownership](../policy/30-placement-inline-policy.md) |

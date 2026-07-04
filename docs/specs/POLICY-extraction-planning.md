@@ -8,11 +8,25 @@
 This policy governs the InDesign ExtendScript extraction layer. It complements
 `POLICY-source-ownership.md`.
 
+## 0. Target Model
+
+The final V2 target is not a candidate-recovery pipeline. Extraction planning is
+the materialization part of the closed source-coverage model:
+
+`SourceObject -> SourceBundle -> OwnershipSlot -> SlotOwner -> RenderUnit -> ObjectPlan`
+
+During migration, `ExtractionPlan.candidates` may remain as export instructions.
+They are transitional records. The final extractor executes confirmed
+`RenderUnit`s, and each exported result must correspond to one prior RenderUnit.
+If the extractor emits a PNG/vector result that has no RenderUnit, Stage 1 is
+incomplete and validation must fail.
+
 ## 1. Core Principle
 
 Extraction is not ownership.
 
-- `ExtractionPlan` decides which source material candidates to export.
+- `ExtractionPlan` currently decides which source material candidates to export.
+  In the V2 target, those candidates are replaced by confirmed `RenderUnit`s.
 - The extractor executes `ExtractionPlan` and records facts.
 - Java `OwnershipPlanner` decides final `TEXT_SLOT`, `SHELL_SLOT`,
   `TABLE_STYLE_SLOT`, and `CONTENT_VISUAL_SLOT` owners.

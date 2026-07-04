@@ -60,6 +60,7 @@ public final class OwnershipPlanner {
     private Map<Integer, List<ResolvedTextFrame>> visibleEditableTextFramesByPageCache;
     private final Map<String, Boolean> carrierVisibleMaterialOutsideInitialChildShellSlotsCache = new HashMap<>();
     private final Map<Integer, ObjectPlan> plannerDeclaredInlineTextShellContracts = new LinkedHashMap<>();
+    private int importedPreplannedObjectPlanCount;
 
     private static final double CONCEPT_LABEL_SHELL_MIN_AREA_RATIO = 0.30;
     private static final double CONCEPT_LABEL_SHELL_MAX_AREA_RATIO = 2.60;
@@ -77,6 +78,39 @@ public final class OwnershipPlanner {
 
     private void run() {
         timed("importPreplannedObjectPlans", this::importPreplannedObjectPlans);
+        int legacyBridgePlanStart = plans.size();
+        int legacyBridgeWarningStart = ctx.ownershipWarningLines.size();
+        List<String> preBridgePlanJsons = snapshotPlanJsons();
+        boolean legacyBridgeSkipped = shouldSkipLegacyOwnershipBridge();
+        if (!legacyBridgeSkipped) {
+            runLegacyOwnershipMutationBridge();
+        }
+        int legacyBridgePlanDelta = plans.size() - legacyBridgePlanStart;
+        int legacyBridgeWarningDelta = ctx.ownershipWarningLines.size() - legacyBridgeWarningStart;
+        recordLegacyBridgeMetrics(legacyBridgePlanStart, legacyBridgeWarningStart, legacyBridgeSkipped);
+        recordLegacyBridgeDiagnostics(legacyBridgePlanStart, preBridgePlanJsons, legacyBridgeSkipped);
+        writeAndValidatePlans();
+        ConversionTiming.metric("stage1.ownershipPlanner.importedPreplannedPlans",
+                importedPreplannedObjectPlanCount);
+        ConversionTiming.metric("stage1.ownershipPlanner.plans", plans.size());
+        ConversionTiming.metric("stage1.ownershipPlanner.warnings", ctx.ownershipWarningLines.size());
+        System.err.println("[OwnershipPlanner] observation plans=" + plans.size()
+                + " warnings=" + ctx.ownershipWarningLines.size()
+                + " importedPreplanned=" + importedPreplannedObjectPlanCount
+                + " legacyBridgePlanDelta=" + legacyBridgePlanDelta
+                + " legacyBridgeWarningDelta=" + legacyBridgeWarningDelta
+                + " legacyBridgeSkipped=" + legacyBridgeSkipped);
+    }
+
+    /**
+     * Migration bridge for Java-side ownership mutations.
+     *
+     * <p>The extractor's ObjectPlan is already imported before this method.
+     * Each step below is a candidate for migration into extraction Stage 1 or
+     * Stage 4 validation. Stage 2/3 executors should eventually consume the
+     * imported ObjectPlan directly and this bridge should disappear.</p>
+     */
+    private void runLegacyOwnershipMutationBridge() {
         timed("planRenderedItems", this::planRenderedItems);
         timed("planTextFrames", this::planTextFrames);
         timed("resolveSiblingGroupTextShellOwners", this::resolveSiblingGroupTextShellOwners);
@@ -184,12 +218,143 @@ public final class OwnershipPlanner {
         timed("restorePlannerDeclaredInlineTextShellContracts", this::restorePlannerDeclaredInlineTextShellContracts);
         timed("completeRenderedExtractionSourceContracts", this::completeRenderedExtractionSourceContracts);
         timed("completeSourceTreeDiagnostics", this::completeSourceTreeDiagnostics);
+    }
+
+    private void writeAndValidatePlans() {
         timed("writePlans", this::writePlans);
         timed("validate", this::validate);
-        ConversionTiming.metric("stage1.ownershipPlanner.plans", plans.size());
-        ConversionTiming.metric("stage1.ownershipPlanner.warnings", ctx.ownershipWarningLines.size());
-        System.err.println("[OwnershipPlanner] observation plans=" + plans.size()
-                + " warnings=" + ctx.ownershipWarningLines.size());
+    }
+
+    private void recordLegacyBridgeMetrics(int planStart, int warningStart, boolean skipped) {
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.skipped", skipped ? 1 : 0);
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.startPlans", planStart);
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.postBridgePlans", plans.size());
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.planDelta", plans.size() - planStart);
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.startWarnings", warningStart);
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.postBridgeWarnings",
+                ctx.ownershipWarningLines.size());
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.warningDelta",
+                ctx.ownershipWarningLines.size() - warningStart);
+    }
+
+    private List<String> snapshotPlanJsons() {
+        List<String> snapshot = new ArrayList<>(plans.size());
+        for (ObjectPlan plan : plans) {
+            snapshot.add(plan != null ? plan.toJson() : "null");
+        }
+        return snapshot;
+    }
+
+    private void recordLegacyBridgeDiagnostics(
+            int planStart,
+            List<String> preBridgePlanJsons,
+            boolean skipped) {
+        ctx.legacyBridgeAddedPlanLines.clear();
+        ctx.legacyBridgeMutatedPlanLines.clear();
+        ctx.legacyBridgeSummaryLines.clear();
+        Map<String, Integer> addedByCategory = new LinkedHashMap<>();
+        Map<String, Integer> mutatedByCategory = new LinkedHashMap<>();
+        int mutated = 0;
+        int comparable = Math.min(planStart, Math.min(preBridgePlanJsons.size(), plans.size()));
+        for (int i = 0; i < comparable; i++) {
+            ObjectPlan plan = plans.get(i);
+            String before = preBridgePlanJsons.get(i);
+            String after = plan != null ? plan.toJson() : "null";
+            if (before.equals(after)) continue;
+            mutated++;
+            String category = legacyBridgePlanCategory(plan);
+            increment(mutatedByCategory, category);
+            ctx.legacyBridgeMutatedPlanLines.add("{\"index\":" + i
+                    + ",\"category\":\"" + ObjectPlan.escape(category) + "\""
+                    + ",\"before\":" + before
+                    + ",\"after\":" + after
+                    + "}");
+        }
+        for (int i = planStart; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            String category = legacyBridgePlanCategory(plan);
+            increment(addedByCategory, category);
+            ctx.legacyBridgeAddedPlanLines.add("{\"index\":" + i
+                    + ",\"category\":\"" + ObjectPlan.escape(category) + "\""
+                    + ",\"plan\":" + plan.toJson()
+                    + "}");
+        }
+        ctx.legacyBridgeSummaryLines.add("{\"skipped\":" + skipped
+                + ",\"startPlans\":" + planStart
+                + ",\"postBridgePlans\":" + plans.size()
+                + ",\"addedPlans\":" + Math.max(0, plans.size() - planStart)
+                + ",\"mutatedPreplannedPlans\":" + mutated
+                + ",\"addedByCategory\":" + countMapJson(addedByCategory)
+                + ",\"mutatedByCategory\":" + countMapJson(mutatedByCategory)
+                + "}");
+        ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.mutatedPreplannedPlans", mutated);
+    }
+
+    private static String legacyBridgePlanCategory(ObjectPlan plan) {
+        if (plan == null) return "NULL";
+        if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE
+                || plan.materialization == Materialization.HWPX_TABLE_STYLE
+                || (plan.styleSourceObjectIds != null && plan.styleSourceObjectIds.length > 0)) {
+            return "TABLE_STYLE";
+        }
+        if (plan.materialization == Materialization.HWPX_TEXT
+                || plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                || plan.visualAction == VisualAction.ABSORB_TEXT_STYLE) {
+            return "HWPX_TEXT";
+        }
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                || (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0)) {
+            return "TEXT_SHELL";
+        }
+        if (plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                || plan.visualAction == VisualAction.PLACE_FLOATING_PNG) {
+            if (plan.materialization == Materialization.COMPLETE_PNG
+                    || plan.textAction == TextAction.OWNED_BY_PNG) {
+                return "COMPLETE_PNG";
+            }
+            if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND
+                    || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP) {
+                return "BACKGROUND";
+            }
+            if (plan.visualLayer == VisualLayer.CONTENT_VISUAL
+                    || plan.visualLayer == VisualLayer.CONTENT_BACKDROP) {
+                return "CONTENT_VISUAL";
+            }
+            return "DECORATION";
+        }
+        if (plan.visualAction == VisualAction.DROP_VISUAL || plan.textAction == TextAction.DROP_TEXT) {
+            return "DROP_OR_CLEANUP";
+        }
+        return "OTHER";
+    }
+
+    private static void increment(Map<String, Integer> counts, String key) {
+        counts.put(key, counts.getOrDefault(key, 0) + 1);
+    }
+
+    private static String countMapJson(Map<String, Integer> counts) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        boolean first = true;
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append('"').append(ObjectPlan.escape(entry.getKey())).append('"')
+                    .append(':')
+                    .append(entry.getValue());
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
+    private static boolean shouldSkipLegacyOwnershipBridge() {
+        String property = System.getProperty("idml.ownership.skipLegacyBridge");
+        if (property != null) {
+            return Boolean.parseBoolean(property);
+        }
+        String env = System.getenv("IDML_SKIP_LEGACY_OWNERSHIP_BRIDGE");
+        return env != null && Boolean.parseBoolean(env);
     }
 
     private static void timed(String name, Runnable action) {
@@ -199,8 +364,10 @@ public final class OwnershipPlanner {
     }
 
     private void importPreplannedObjectPlans() {
+        importedPreplannedObjectPlanCount = 0;
         if (ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()) return;
         plans.addAll(ctx.ownershipPlans);
+        importedPreplannedObjectPlanCount = ctx.ownershipPlans.size();
         for (ObjectPlan plan : ctx.ownershipPlans) {
             recordPlannerDeclaredInlineTextShellContract(plan);
         }
@@ -1535,6 +1702,24 @@ public final class OwnershipPlanner {
             VisualAction visualAction = tableOnlyTextFrame && !ownedByAnchoredTablePlan
                     ? VisualAction.PLACE_TABLE_STYLE
                     : VisualAction.DROP_VISUAL;
+            if (tableOnlyTextFrame
+                    && !ownedByAnchoredTablePlan
+                    && hasTableStyleDecisionForTextFrame(domId)) {
+                continue;
+            }
+            if (!tableOnlyTextFrame && hasDropTextDecisionForTextFrame(domId)) {
+                continue;
+            }
+            if (!tableOnlyTextFrame
+                    && textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && hasHwpxTextOwnerForTextFrame(domId)) {
+                continue;
+            }
+            if (!tableOnlyTextFrame
+                    && textAction == TextAction.DROP_TEXT
+                    && hasTextDecisionForTextFrame(domId)) {
+                continue;
+            }
             Placement placement = placementOfTextFrame(tf, domId, textAction, visualAction);
             int[] sourceIds = tableOnlyTextFrame
                     ? tableOnlySourceIds(domId, idmlStory)
@@ -1569,6 +1754,52 @@ public final class OwnershipPlanner {
                     tf.layerName(),
                     tf.layerIndex()));
         }
+    }
+
+    private boolean hasHwpxTextOwnerForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (contains(plan.ownedTextFrameIds, textFrameId) || plan.domId == textFrameId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasDropTextDecisionForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.textAction != TextAction.DROP_TEXT) continue;
+            if (contains(plan.ownedTextFrameIds, textFrameId) || plan.domId == textFrameId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasTextDecisionForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (contains(plan.ownedTextFrameIds, textFrameId) || plan.domId == textFrameId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasTableStyleDecisionForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            if (contains(plan.ownedTextFrameIds, textFrameId) || plan.domId == textFrameId) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private double[] textFramePlanBounds(

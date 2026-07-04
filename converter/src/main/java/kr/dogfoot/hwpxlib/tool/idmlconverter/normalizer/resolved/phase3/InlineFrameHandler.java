@@ -1481,6 +1481,7 @@ public class InlineFrameHandler {
         overlay.verticalJustification(childTf.verticalJustification() != null
                 ? childTf.verticalJustification()
                 : "CenterAlign");
+        applyInlineShellOverlayTextInsets(childTf, overlay);
 
         long relX = CoordinateConverter.pointsToHwpunits((tb[1] - shellBounds[1]) * scale);
         long relY = CoordinateConverter.pointsToHwpunits((tb[0] - shellBounds[0]) * scale);
@@ -1496,6 +1497,18 @@ public class InlineFrameHandler {
 
         buildBadgeParagraph(ctx, childTf, overlay);
         return overlay.paragraphs() == null || overlay.paragraphs().isEmpty() ? null : overlay;
+    }
+
+    private static void applyInlineShellOverlayTextInsets(
+            ResolvedTextFrame childTf,
+            ASTInlineObject overlay) {
+        if (childTf == null || overlay == null) return;
+        double[] inset = childTf.insetSpacing();
+        if (inset == null || inset.length < 4) return;
+        overlay.textMarginTop(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[0])));
+        overlay.textMarginLeft(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[1])));
+        overlay.textMarginBottom(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[2])));
+        overlay.textMarginRight(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[3])));
     }
 
     private static boolean extractedShellImageOwnsGeometry(ObjectPlan plan) {

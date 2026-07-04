@@ -244,10 +244,12 @@ public class ResolvedToASTBuilder {
     }
 
     /**
-     * Stage 1: source ownership policy OwnershipPlanner 관찰 모드.
+     * Stage 1: source ownership policy ObjectPlan bridge.
      *
-     * <p>아직 legacy Phase 실행 결과를 바꾸지 않는다. ObjectPlan과 invariant
-     * warning만 기록해 현재 정책 충돌을 눈으로 추적할 수 있게 한다.</p>
+     * <p>추출기가 선언한 ObjectPlan을 먼저 import한 뒤, 아직 Java로 남아 있는
+     * legacy ownership bridge가 text/table 실행에 필요한 보조 plan을 보강한다.
+     * 장기 목표는 이 보강 로직을 Stage 1 추출 ObjectPlan으로 이동하고 Java
+     * OwnershipPlanner를 validate/write-only 단계로 줄이는 것이다.</p>
      */
     private void planOwnership() {
         importPlannerDeclaredObjectPlans();
@@ -278,6 +280,12 @@ public class ResolvedToASTBuilder {
                 if (element == null || !element.isJsonObject()) continue;
                 JsonObject planJson = element.getAsJsonObject();
                 ObjectPlan plan = layoutOnlyInlineSlotPlanFromJson(planJson);
+                if (plan == null) {
+                    plan = textOnlyObjectPlanFromJson(planJson);
+                }
+                if (plan == null) {
+                    plan = tableStyleObjectPlanFromJson(planJson);
+                }
                 if (plan == null) {
                     plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId, renderedByPageAndId);
                 }
@@ -335,6 +343,101 @@ public class ResolvedToASTBuilder {
             if (rg == null) continue;
             out.putIfAbsent(renderedPageIdKey(rg.pageIndex(), rg.id()), rg);
         }
+    }
+
+    private static ObjectPlan textOnlyObjectPlanFromJson(JsonObject o) {
+        if (o == null) return null;
+        String passId = jsonString(o, "passId");
+        if (!"pass.editable_text_frames".equals(passId)
+                && !"pass.visible_text_frames".equals(passId)
+                && !"pass.empty_editable_text_frames".equals(passId)
+                && !"pass.textframe_cleanup".equals(passId)) {
+            return null;
+        }
+        String textAction = jsonString(o, "textAction");
+        if ("pass.textframe_cleanup".equals(passId)) {
+            if (!"DROP_TEXT".equals(textAction)) return null;
+        } else if (!"OWNED_BY_HWPX_TEXT".equals(textAction)) {
+            return null;
+        }
+        if (!"DROP_VISUAL".equals(jsonString(o, "visualAction"))) return null;
+        if (!"HWPX_TEXT".equals(jsonString(o, "materialization"))) return null;
+        int[] ownedTextFrameIds = jsonIntArray(o, "ownedTextFrameIds");
+        if (ownedTextFrameIds.length == 0) return null;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) sourceIds = ownedTextFrameIds;
+        int domId = jsonInt(o, "primarySourceObjectId", ownedTextFrameIds[0]);
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0) return null;
+        return new ObjectPlan(
+                domId,
+                "planner_declared_text_frame:" + jsonString(o, "kind"),
+                pageIndex,
+                enumValue(TextAction.class, textAction, TextAction.DROP_TEXT),
+                VisualAction.DROP_VISUAL,
+                enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.CONTENT_VISUAL),
+                enumValue(Placement.class, jsonString(o, "placement"), Placement.FLOATING),
+                null,
+                sourceIds,
+                jsonIntArray(o, "visualSourceObjectIds"),
+                jsonIntArray(o, "styleSourceObjectIds"),
+                ownedTextFrameIds,
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                Materialization.HWPX_TEXT,
+                enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"), CoordinateSpace.PAGE),
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                "planner_declared_text_frame",
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1));
+    }
+
+    private static ObjectPlan tableStyleObjectPlanFromJson(JsonObject o) {
+        if (o == null) return null;
+        if (!"pass.table_only_text_frames".equals(jsonString(o, "passId"))) return null;
+        if (!"OWNED_BY_HWPX_TEXT".equals(jsonString(o, "textAction"))) return null;
+        if (!"PLACE_TABLE_STYLE".equals(jsonString(o, "visualAction"))) return null;
+        if (!"HWPX_TABLE_STYLE".equals(jsonString(o, "materialization"))) return null;
+        int[] ownedTextFrameIds = jsonIntArray(o, "ownedTextFrameIds");
+        if (ownedTextFrameIds.length == 0) return null;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) sourceIds = ownedTextFrameIds;
+        int domId = jsonInt(o, "primarySourceObjectId", ownedTextFrameIds[0]);
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0) return null;
+        Placement placement = enumValue(Placement.class, jsonString(o, "placement"), Placement.FLOATING);
+        return new ObjectPlan(
+                domId,
+                "planner_declared_table_style:" + jsonString(o, "kind"),
+                pageIndex,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.PLACE_TABLE_STYLE,
+                enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.CONTENT_VISUAL),
+                placement,
+                null,
+                sourceIds,
+                jsonIntArray(o, "visualSourceObjectIds"),
+                jsonIntArray(o, "styleSourceObjectIds"),
+                ownedTextFrameIds,
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                Materialization.HWPX_TABLE_STYLE,
+                enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"),
+                        placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE),
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                "planner_declared_table_style",
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1));
     }
 
     private static ObjectPlan renderedObjectPlanFromJson(
@@ -669,6 +772,15 @@ public class ResolvedToASTBuilder {
         ctx.rebuildOwnershipPlanLinesFromPlans();
         writeJsonLines("ownership-plan.jsonl", ctx.ownershipPlanLines, "ownership plan");
         writeJsonLines("ownership-warnings.jsonl", ctx.ownershipWarningLines, "ownership warnings");
+        writeJsonLines("ownership-legacy-bridge-added.jsonl",
+                ctx.legacyBridgeAddedPlanLines,
+                "ownership legacy bridge added plans");
+        writeJsonLines("ownership-legacy-bridge-mutated.jsonl",
+                ctx.legacyBridgeMutatedPlanLines,
+                "ownership legacy bridge mutated plans");
+        writeJsonLines("ownership-legacy-bridge-summary.jsonl",
+                ctx.legacyBridgeSummaryLines,
+                "ownership legacy bridge summary");
         writeOwnershipTraceLog();
     }
 

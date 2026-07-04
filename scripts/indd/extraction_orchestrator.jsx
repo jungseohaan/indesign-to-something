@@ -12,6 +12,90 @@
 // =============================================================================
 
 // 렌더링 페이즈 2.12~3: 배경 PNG → 배지 → 이미지 → 데코 → 그래픽 → 벡터 → 마스터 → resolved.json 기록
+function _posixShellQuote(value) {
+    var s = String(value || "");
+    return "'" + s.replace(/'/g, "'\"'\"'") + "'";
+}
+
+function _appleScriptStringLiteral(value) {
+    var s = String(value || "");
+    return "\"" + s.replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"";
+}
+
+function _repoRootFromConfigPath(configPath) {
+    try {
+        if (configPath) {
+            var f = File(String(configPath));
+            if (f && f.exists && f.parent) return f.parent.fsName;
+        }
+    } catch (eConfigRoot) {}
+    try {
+        if (typeof $ !== "undefined" && $.fileName) {
+            var scriptFile = File($.fileName);
+            if (scriptFile && scriptFile.parent && scriptFile.parent.parent) {
+                return scriptFile.parent.parent.fsName;
+            }
+        }
+    } catch (eScriptRoot) {}
+    return null;
+}
+
+function _loadIdmlZOrderMap(ctx) {
+    if (!ctx || ctx.chunkMode) return null;
+    var idmlPath = ctx.outputDir + "/output.idml";
+    var mapPath = ctx.outputDir + "/idml-zorder-map.json";
+    var logPath = ctx.outputDir + "/_idml_zorder_map.log";
+    var summary = {
+        status: "skipped",
+        reason: null,
+        mapPath: mapPath,
+        count: 0
+    };
+    try {
+        var repoRoot = _repoRootFromConfigPath(ctx.configPath);
+        if (!repoRoot) {
+            summary.reason = "missing_repo_root";
+            writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
+            return null;
+        }
+        var jarPath = repoRoot + "/converter/target/idml-to-something-1.0.9-cli.jar";
+        if (!File(jarPath).exists) {
+            summary.reason = "converter_jar_missing";
+            summary.jarPath = jarPath;
+            writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
+            return null;
+        }
+        var javaProbe = "if [ -x /opt/homebrew/opt/openjdk/bin/java ]; then printf %s /opt/homebrew/opt/openjdk/bin/java; "
+                + "elif command -v java >/dev/null 2>&1; then command -v java; else printf %s java; fi";
+        var command = "JAVA_BIN=$(" + javaProbe + "); "
+                + "\"$JAVA_BIN\" -jar " + _posixShellQuote(jarPath)
+                + " --idml-zorder-map " + _posixShellQuote(idmlPath)
+                + " " + _posixShellQuote(mapPath)
+                + " > " + _posixShellQuote(logPath) + " 2>&1";
+        app.doScript("do shell script " + _appleScriptStringLiteral(command),
+                ScriptLanguage.APPLESCRIPT_LANGUAGE);
+        var doc = readJson(mapPath);
+        var map = doc && doc.zOrderBySourceObjectId ? doc.zOrderBySourceObjectId : null;
+        if (!map) {
+            summary.status = "failed";
+            summary.reason = "map_file_missing_or_invalid";
+            writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
+            return null;
+        }
+        ctx.idmlZOrderBySourceObjectId = map;
+        summary.status = "ok";
+        summary.reason = null;
+        summary.count = doc.count || 0;
+        writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
+        return map;
+    } catch (eZOrderMap) {
+        summary.status = "failed";
+        summary.reason = String(eZOrderMap);
+        try { writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary); } catch (eWriteSummary) {}
+    }
+    return null;
+}
+
 function _runRenderPhases(doc, ctx, allItems) {
     // 03c. allItems 전체 분류 캐시 — classifyTextFrame의 중복 DOM 호출 제거
     _ctfCache = {};
@@ -45,7 +129,8 @@ function _runRenderPhases(doc, ctx, allItems) {
             || _buildPlannerBundles(ctx.extractionPlan.sourceItems, ctx.extractionPlan.candidates);
     _marker(ctx.outputDir, "03i_buildPlannerBundles_done");
     var objectPlanDiagnostics = planDiagnostics.objectPlanDiagnostics
-            || _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics);
+            || _buildObjectPlanDiagnosticsFromPlannerBundles(
+                    plannerBundleDiagnostics, ctx.extractionPlan.sourceItems);
     _marker(ctx.outputDir, "03j_buildObjectPlans_done");
     writeJson(ctx.outputDir + "/object-plans.json", objectPlanDiagnostics);
     _marker(ctx.outputDir, "03l_writeObjectPlans_done");
@@ -447,6 +532,8 @@ function main(args) {
             if (!ctx.chunkMode) {
                 writeProgress(ctx.outputDir, "idml", 0, ctx.pageCount);
                 doc.exportFile(ExportFormat.INDESIGN_MARKUP, File(ctx.outputDir + "/output.idml"));
+                _marker(ctx.outputDir, "02b_idml_zorder_map");
+                _loadIdmlZOrderMap(ctx);
             }
 
             // 2.5. allPageItems 수집 — 청크 범위(startPage..endPage)와

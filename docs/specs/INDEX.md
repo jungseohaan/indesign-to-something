@@ -12,7 +12,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | Doc | Status | Use |
 |---|---|---|
 | [POLICY-source-ownership](POLICY-source-ownership.md) | Canonical | Stage 1/ObjectPlan ownership contract and V2 stage boundaries |
-| [docs/policy/](../policy/README.md) | Canonical modules | Detailed source bundle, slot, text, shell, table, layer, executor, validation rules |
+| [docs/policy/](../policy/README.md) | Canonical modules | Complete source coverage, bundle, slot, owner, render unit, text, shell, table, layer, executor, validation rules |
 | [POLICY-extraction-planning](POLICY-extraction-planning.md) | Canonical for extraction | InDesign extraction planning, extraction facts, and Java ownership handoff |
 | [SPEC-037](SPEC-037-issue-debug-cycle-acceleration.md) | Active support | Faster page issue loop, ObjectPlan tracing, regression audit workflow |
 | [SPEC-038](SPEC-038-extract-indd-modularization-map.md) | Active support | `extract_indd.jsx` modularization map and removal of legacy extraction paths |

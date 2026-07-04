@@ -983,7 +983,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13_plan_clusterQueries");
     var plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, candidates);
     _marker(ctx.outputDir, "03d14_plan_plannerBundles");
-    var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics);
+    var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
     _marker(ctx.outputDir, "03d15_plan_objectPlans");
     var executionCandidates = _buildExecutionCandidatesFromObjectPlans(candidates, objectPlanDiagnostics);
     _marker(ctx.outputDir, "03d16_plan_buildExecutionCandidates");
@@ -1002,7 +1002,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             || multiTextParentSuppressionDiagnostics.suppressedCount > 0) {
         plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, executionCandidates);
         _marker(ctx.outputDir, "03d16c_plan_rebuildPlannerBundlesAfterSubsumed");
-        objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics);
+        objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
         _marker(ctx.outputDir, "03d16d_plan_rebuildObjectPlansAfterSubsumed");
         executionCandidates = _buildExecutionCandidatesFromObjectPlans(executionCandidates, objectPlanDiagnostics);
         _marker(ctx.outputDir, "03d16e_plan_rebuildExecutionCandidatesAfterSubsumed");

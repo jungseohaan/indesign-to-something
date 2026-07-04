@@ -127,6 +127,19 @@ function writeJson(path, obj) {
     f.close();
 }
 
+function readJson(path) {
+    var f = File(path);
+    if (!f.exists) return null;
+    f.encoding = "UTF-8";
+    if (!f.open("r")) return null;
+    var text = f.read();
+    f.close();
+    if (JSON && typeof JSON.parse === "function") {
+        return JSON.parse(text);
+    }
+    return eval("(" + text + ")");
+}
+
 function writeResolvedJson(path, obj, outputDir) {
     var f = File(path);
     f.encoding = "UTF-8";
