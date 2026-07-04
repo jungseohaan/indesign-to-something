@@ -583,6 +583,8 @@ public class ResolvedDataReader {
         }
         group.itemType(itemType);
         group.exportUnitId(getString(o, "exportUnitId"));
+        group.renderUnitId(getString(o, "renderUnitId"));
+        group.renderUnitSlotIdentityKey(getString(o, "renderUnitSlotIdentityKey"));
         group.planPassId(getString(o, "planPassId"));
         group.candidateId(getString(o, "candidateId"));
         group.compositeRole(getString(o, "compositeRole"));

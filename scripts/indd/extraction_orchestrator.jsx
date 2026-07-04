@@ -141,6 +141,17 @@ function _runRenderPhases(doc, ctx, allItems) {
         issueCodeCounts: objectPlanValidationGate.issueCodeCounts
     };
     _marker(ctx.outputDir, "03l2_objectPlanValidationGate_done");
+    var sourceOwnershipStageGate = _assertSourceOwnershipStageGate(
+            ctx,
+            planDiagnostics.sourceCoverageDiagnostics,
+            planDiagnostics.sourceOwnershipModelDiagnostics,
+            objectPlanDiagnostics);
+    ctx.extractionPlan.sourceOwnershipStageGateSummary = {
+        status: sourceOwnershipStageGate.status,
+        issueCount: sourceOwnershipStageGate.issueCount,
+        issueCodeCounts: sourceOwnershipStageGate.issueCodeCounts
+    };
+    _marker(ctx.outputDir, "03l3_sourceOwnershipStageGate_done");
     writeJson(ctx.outputDir + "/exact-shell-slot-duplicates.json",
             planDiagnostics.exactShellSlotDuplicateDiagnostics
                     || {
@@ -203,7 +214,10 @@ function _runRenderPhases(doc, ctx, allItems) {
             sourceClusterQuerySummary: ctx.extractionPlan.sourceClusterQuerySummary,
             plannerBundleSummary: ctx.extractionPlan.plannerBundleSummary,
             objectPlanSummary: ctx.extractionPlan.objectPlanSummary,
+            sourceCoverageSummary: ctx.extractionPlan.sourceCoverageSummary,
+            sourceOwnershipModelSummary: ctx.extractionPlan.sourceOwnershipModelSummary,
             objectPlanValidationGateSummary: ctx.extractionPlan.objectPlanValidationGateSummary,
+            sourceOwnershipStageGateSummary: ctx.extractionPlan.sourceOwnershipStageGateSummary,
             preObjectPlanTextlessShellSuppressionSummary:
                     ctx.extractionPlan.preObjectPlanTextlessShellSuppressionSummary,
             sourceSlotCanonicalizationSummary: ctx.extractionPlan.sourceSlotCanonicalizationSummary,

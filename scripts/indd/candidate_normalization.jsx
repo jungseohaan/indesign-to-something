@@ -117,6 +117,129 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         return _sortedNumericIds(ids);
     }
 
+    function isClosedTextlessGroupVisualSlot(candidate) {
+        if (!candidate || candidate.passId !== "pass.decoration_groups") return false;
+        if (candidate.candidatePurpose !== "SHELL_CANDIDATE") return false;
+        if (candidate.compositeRole !== "textless_group_visual_slot"
+                && candidate.slotRole !== "textless_group_visual_slot") return false;
+        if (candidate.primarySourceObjectId === null || candidate.primarySourceObjectId === undefined) return false;
+        if (candidate.textOwner && candidate.textOwner !== "hwpx_tf") return false;
+        return true;
+    }
+
+    function sourceIsTextlessGroupVisibleMaterial(sourceId) {
+        var src = sourceInfoById[String(sourceId)];
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (sourceHasInlineAnchorAncestor(sourceId)) return false;
+        var kind = String(src.kind || "");
+        if (kind === "TextFrame") return false;
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+        if (kind === "Group") return true;
+        return src.hasPlacedVisual === true
+                || src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true;
+    }
+
+    function sourceIsDescendantOfRootByParentChain(sourceId, rootId, rootPageIndex) {
+        if (sourceId === null || sourceId === undefined || rootId === null || rootId === undefined) return false;
+        var src = sourceInfoById[String(sourceId)];
+        if (!src) return false;
+        if (rootPageIndex !== null && rootPageIndex !== undefined
+                && src.pageIndex !== null && src.pageIndex !== undefined
+                && String(src.pageIndex) !== String(rootPageIndex)) {
+            return false;
+        }
+        var guard = 0;
+        while (src && guard < 256) {
+            if (String(src.id) === String(rootId)) return true;
+            if (src.parentId === null || src.parentId === undefined) return false;
+            src = sourceInfoById[String(src.parentId)];
+            guard++;
+        }
+        return false;
+    }
+
+    function closedTextlessGroupSourceClosure(rootId, rootPageIndex) {
+        var ids = sourceIdsInCompleteSubtree(rootId);
+        var seen = _sourceIdSet(ids || []);
+        for (var key in sourceInfoById) {
+            if (!sourceInfoById.hasOwnProperty(key)) continue;
+            var src = sourceInfoById[key];
+            if (!src || src.id === null || src.id === undefined) continue;
+            if (seen[String(src.id)]) continue;
+            if (!sourceIsDescendantOfRootByParentChain(src.id, rootId, rootPageIndex)) continue;
+            _pushUniqueId(ids, seen, src.id);
+        }
+        return _sortedNumericIds(ids || []);
+    }
+
+    function completeClosedTextlessGroupVisualSlot(candidate) {
+        if (!isClosedTextlessGroupVisualSlot(candidate)) return false;
+        var rootId = candidate.primarySourceObjectId;
+        var fullSourceIds = closedTextlessGroupSourceClosure(rootId, candidate.pageIndex);
+        if (!fullSourceIds || fullSourceIds.length === 0) return false;
+
+        var editableIds = _sourceIdsUnion(
+                candidate.editableTextFrameIds || [],
+                candidate.hiddenTextFrameIds || []);
+        editableIds = _sourceIdsUnion(
+                editableIds,
+                editableTextIdsInSourceSet(fullSourceIds, candidate.pageIndex));
+        if (!editableIds || editableIds.length === 0) return false;
+
+        var visualIds = [];
+        var visualSeen = {};
+        for (var i = 0; i < fullSourceIds.length; i++) {
+            if (sourceIsTextlessGroupVisibleMaterial(fullSourceIds[i])) {
+                _pushUniqueId(visualIds, visualSeen, fullSourceIds[i]);
+            }
+        }
+        visualIds = _sortedNumericIds(visualIds);
+        if (!visualIds || visualIds.length === 0) return false;
+
+        var exportIds = candidate.exportTargetObjectId !== null
+                && candidate.exportTargetObjectId !== undefined
+                ? [candidate.exportTargetObjectId]
+                : (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0
+                        ? candidate.exportSourceObjectIds
+                        : [rootId]);
+
+        var beforeSource = _sourceSetKey(candidate.sourceObjectIds || []);
+        var beforeVisual = _sourceSetKey(candidate.visualSourceObjectIds || []);
+        var beforeExport = _sourceSetKey(candidate.exportSourceObjectIds || []);
+        var beforeHidden = _sourceSetKey(candidate.hiddenVisualSourceObjectIds || []);
+        var beforeEditable = _sourceSetKey(candidate.editableTextFrameIds || []);
+        var beforeHiddenText = _sourceSetKey(candidate.hiddenTextFrameIds || []);
+
+        candidate.sourceObjectIds = _sourceIdsUnion(candidate.sourceObjectIds || [], fullSourceIds);
+        candidate.visualSourceObjectIds = _sourceIdsUnion(candidate.visualSourceObjectIds || [], visualIds);
+        candidate.exportSourceObjectIds = _sortedNumericIds(exportIds);
+        candidate.exportTargetObjectId = rootId;
+        candidate.hiddenVisualSourceObjectIds = _sortedNumericIds(editableIds);
+        candidate.editableTextFrameIds = _sortedNumericIds(editableIds);
+        candidate.hiddenTextFrameIds = _sourceIdsUnion(candidate.hiddenTextFrameIds || [], editableIds);
+        candidate.ownedTextFrameIds = _sourceIdsUnion(candidate.ownedTextFrameIds || [], editableIds);
+        candidate.requiresTextHidden = true;
+        candidate.textOwner = "hwpx_tf";
+        candidate.containsEditableText = false;
+        candidate.completePngTextAllowed = false;
+        candidate.materialization = candidate.materialization || "EXTRACTED_PNG_VECTOR";
+        candidate.textAction = candidate.textAction || "OWNED_BY_HWPX_TEXT";
+        candidate.visualAction = candidate.visualAction || "PLACE_TEXT_SHELL";
+        candidate.ownershipSlot = candidate.ownershipSlot || "SHELL_SLOT";
+
+        var changed = beforeSource !== _sourceSetKey(candidate.sourceObjectIds || [])
+                || beforeVisual !== _sourceSetKey(candidate.visualSourceObjectIds || [])
+                || beforeExport !== _sourceSetKey(candidate.exportSourceObjectIds || [])
+                || beforeHidden !== _sourceSetKey(candidate.hiddenVisualSourceObjectIds || [])
+                || beforeEditable !== _sourceSetKey(candidate.editableTextFrameIds || [])
+                || beforeHiddenText !== _sourceSetKey(candidate.hiddenTextFrameIds || []);
+        if (changed) refreshCandidateIdentity(candidate);
+        return changed;
+    }
+
     function applyClosedTextOwningShellContract(candidate) {
         if (!_isExtractionShellCandidate(candidate)) return false;
         if (candidate.compositeRole === "source_declared_closed_text_shell") return false;
@@ -2832,6 +2955,23 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                 declaredClosed, declaredClosed.hiddenVisualSourceObjectIds);
         completeExportSourceProvenance(declaredClosed);
         refreshCandidateIdentity(declaredClosed);
+    }
+    var completedClosedTextlessGroupSlots = false;
+    for (var textlessGroupIdx = 0; textlessGroupIdx < normalized.length; textlessGroupIdx++) {
+        if (completeClosedTextlessGroupVisualSlot(normalized[textlessGroupIdx])) {
+            completedClosedTextlessGroupSlots = true;
+        }
+    }
+    if (completedClosedTextlessGroupSlots) {
+        normalizedByKey = {};
+        normalizedExactShellOwnerIndexByKey = {};
+        for (var rebuiltIdx = 0; rebuiltIdx < normalized.length; rebuiltIdx++) {
+            if (!normalized[rebuiltIdx]) continue;
+            normalizedByKey[normalized[rebuiltIdx].passId + "|" + normalized[rebuiltIdx].pageIndex + "|"
+                    + _sourceSetKey(normalized[rebuiltIdx].sourceObjectIds)] = true;
+            var rebuiltExactKey = exactShellSlotKeyForCandidate(normalized[rebuiltIdx]);
+            if (rebuiltExactKey) normalizedExactShellOwnerIndexByKey[rebuiltExactKey] = rebuiltIdx;
+        }
     }
     var exactValidated = assertNoExactShellSlotDuplicates(normalized);
     _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS = legacyNormalizationFilterDiagnostics;

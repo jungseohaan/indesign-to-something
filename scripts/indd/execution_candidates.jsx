@@ -127,7 +127,9 @@ function _executionCandidateContractFields() {
         "requiresTextHidden",
         "textOwner",
         "reason",
-        "objectPlanId"
+        "objectPlanId",
+        "renderUnitId",
+        "renderUnitSlotIdentityKey"
     ];
 }
 

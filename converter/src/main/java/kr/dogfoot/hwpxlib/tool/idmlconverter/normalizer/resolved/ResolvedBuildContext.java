@@ -388,6 +388,7 @@ public final class ResolvedBuildContext {
     public java.util.List<ObjectPlan> ownershipPlans = new java.util.ArrayList<>();
     private final java.util.Map<String, ObjectPlan> ownershipPlanRenderedCache = new java.util.HashMap<>();
     private java.util.Map<String, ObjectPlan> ownershipPlanByRenderFileKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByRenderUnitKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByRenderKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByCandidateKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
@@ -759,6 +760,12 @@ public final class ResolvedBuildContext {
             return ownershipPlanRenderedCache.get(cacheKey);
         }
         ensureOwnershipPlanIndexes();
+        ObjectPlan renderUnitPlan = renderedOnly(ownershipPlanByRenderUnitKey.get(
+                renderUnitKey(rg.renderUnitId())));
+        if (renderUnitPlan != null) {
+            ownershipPlanRenderedCache.put(cacheKey, renderUnitPlan);
+            return renderUnitPlan;
+        }
         Placement placement = placementOf(rg);
         ObjectPlan plan = findRenderedPlanForPlacement(rg, placement);
         Placement alternatePlacement = placement == Placement.INLINE ? Placement.FLOATING : Placement.INLINE;
@@ -814,13 +821,24 @@ public final class ResolvedBuildContext {
     private void ensureOwnershipPlanIndexes() {
         if (!ownershipPlanIndexDirty && ownershipPlanByRenderFileKey != null) return;
         ownershipPlanByRenderFileKey = new java.util.HashMap<>();
+        ownershipPlanByRenderUnitKey = new java.util.HashMap<>();
         ownershipPlanByRenderKey = new java.util.HashMap<>();
         ownershipPlanByCandidateKey = new java.util.HashMap<>();
         ownershipPlanByDomKey = new java.util.HashMap<>();
         ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
         ownershipPlanByFileKey = new java.util.HashMap<>();
+        java.util.Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null) continue;
+            RenderedGroup rendered = plan.candidateId != null
+                    ? renderedByCandidateId.get(plan.candidateId)
+                    : null;
+            if (rendered != null && rendered.renderUnitId() != null
+                    && !rendered.renderUnitId().isEmpty()) {
+                putPreferred(ownershipPlanByRenderUnitKey,
+                        renderUnitKey(rendered.renderUnitId()),
+                        plan);
+            }
             if (plan.renderId != null) {
                 putPreferred(ownershipPlanByRenderFileKey,
                         renderFileKey(plan.pageIndex, plan.placement, plan.renderId, plan.file),
@@ -946,6 +964,24 @@ public final class ResolvedBuildContext {
     private static String candidateKey(int pageIndex, Placement placement, String candidateId) {
         if (candidateId == null || candidateId.isEmpty()) return null;
         return pageIndex + "|" + placement + "|" + candidateId;
+    }
+
+    private java.util.Map<String, RenderedGroup> renderedGroupsByCandidateId() {
+        java.util.Map<String, RenderedGroup> out = new java.util.HashMap<>();
+        java.util.List<RenderedGroup> groups = resolvedData != null
+                ? resolvedData.allRenderedFloatingItems()
+                : null;
+        if (groups == null) return out;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.candidateId() == null || rg.candidateId().isEmpty()) continue;
+            out.putIfAbsent(rg.candidateId(), rg);
+        }
+        return out;
+    }
+
+    private static String renderUnitKey(String renderUnitId) {
+        if (renderUnitId == null || renderUnitId.isEmpty()) return null;
+        return renderUnitId;
     }
 
     private static String domKey(int pageIndex, Placement placement, int domId) {

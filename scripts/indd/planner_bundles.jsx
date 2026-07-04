@@ -375,6 +375,7 @@ function _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources) {
 
 function _plannerBundleWithoutPlacedContentBranches(candidate, slot, slotSources, clusterIndex) {
     if (slot !== "SHELL_SLOT" || !slotSources) return slotSources;
+    if (_plannerBundleAllowsClosedShellPlacedContentOwnership(candidate)) return slotSources;
     var copy = {
         visualSourceObjectIds: _plannerBundlePrunePlacedContentBranches(
                 candidate, slot, slotSources.visualSourceObjectIds || [], clusterIndex),
@@ -387,6 +388,9 @@ function _plannerBundleWithoutPlacedContentBranches(candidate, slot, slotSources
 function _plannerBundlePrunePlacedContentBranches(candidate, slot, ids, clusterIndex) {
     if (slot !== "SHELL_SLOT" || !ids || ids.length === 0
             || !clusterIndex || !clusterIndex.sourceInfo) {
+        return _sortedNumericIds(ids || []);
+    }
+    if (_plannerBundleAllowsClosedShellPlacedContentOwnership(candidate)) {
         return _sortedNumericIds(ids || []);
     }
     var primary = candidate && candidate.primarySourceObjectId !== undefined
@@ -402,6 +406,16 @@ function _plannerBundlePrunePlacedContentBranches(candidate, slot, ids, clusterI
         _pushUniqueId(out, seen, id);
     }
     return _sortedNumericIds(out);
+}
+
+function _plannerBundleAllowsClosedShellPlacedContentOwnership(candidate) {
+    if (!candidate) return false;
+    if (candidate.passId !== "pass.decoration_groups") return false;
+    if (candidate.candidatePurpose !== "SHELL_CANDIDATE") return false;
+    if (candidate.compositeRole !== "textless_group_visual_slot"
+            && candidate.slotRole !== "textless_group_visual_slot") return false;
+    if (candidate.textOwner && candidate.textOwner !== "hwpx_tf") return false;
+    return candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 1;
 }
 
 function _plannerBundleSourceIsInsidePlacedContentBranch(sourceId, rootSourceId, clusterIndex) {
@@ -643,7 +657,15 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
     var ownedTextFrameIds = [];
     var allowInlineAnchorVisualSource = _plannerBundleAllowsInlineAnchorVisualSource(
             candidate, slot);
-    if (explicitVisualIds && explicitVisualIds.length > 0) {
+    if (_plannerBundleAllowsClosedShellPlacedContentOwnership(candidate)
+            && clusterIndex
+            && clusterIndex.descendantSourceObjectIds
+            && candidate.primarySourceObjectId !== null
+            && candidate.primarySourceObjectId !== undefined) {
+        var closedShellSourceIds = clusterIndex.descendantSourceObjectIds(candidate.primarySourceObjectId);
+        visualSourceObjectIds = _plannerBundleNonTextSourceIds(
+                closedShellSourceIds, hiddenVisualIdSet, clusterIndex);
+    } else if (explicitVisualIds && explicitVisualIds.length > 0) {
         visualSourceObjectIds = allowInlineAnchorVisualSource
                 ? _sortedNumericIds(explicitVisualIds)
                 : _plannerBundleSourceIdsWithoutInlineAnchorDescendants(

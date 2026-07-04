@@ -155,6 +155,90 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         return sourceIndex.hasCandidateVectorPaint(itemInfo.id) === true;
     }
 
+    function sourceLooksLikeVisibleVectorMaterial(itemInfo) {
+        if (!itemInfo) return false;
+        if (itemInfo.visible === false || itemInfo.hiddenLayer === true || itemInfo.nonprinting === true) return false;
+        var kind = String(itemInfo.kind || "");
+        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval"
+                && kind !== "Polygon" && kind !== "GraphicLine") {
+            return false;
+        }
+        if (sourceIndex.hasPlacedVisualInSubtree(itemInfo.id)) return false;
+        if (kind === "Group") {
+            return sourceItemHasChildren(itemInfo.id)
+                    && (itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true);
+        }
+        return itemInfo.hasVisibleFill === true
+                || itemInfo.hasVisibleStroke === true
+                || sourceIndex.hasCandidateVectorPaint(itemInfo.id) === true;
+    }
+
+    function markCandidateSourceClaims(candidate, claimed) {
+        if (!candidate || !claimed) return;
+        function mark(ids) {
+            for (var i = 0; ids && i < ids.length; i++) {
+                if (ids[i] === null || ids[i] === undefined) continue;
+                claimed[String(ids[i])] = true;
+            }
+        }
+        mark(candidate.sourceObjectIds);
+        mark(candidate.visualSourceObjectIds);
+        mark(candidate.exportSourceObjectIds);
+    }
+
+    function appendUnclaimedVisibleVectorSourceCandidates() {
+        var claimed = {};
+        for (var ci = 0; candidates && ci < candidates.length; ci++) {
+            markCandidateSourceClaims(candidates[ci], claimed);
+        }
+        var appended = 0;
+        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
+            var itemInfo = sourceItems[si];
+            if (!itemInfo || itemInfo.id === null || itemInfo.id === undefined) continue;
+            if (claimed[String(itemInfo.id)] === true) continue;
+            if (!sourceLooksLikeVisibleVectorMaterial(itemInfo)) continue;
+            if (sourceHasStoryFlowAnchor(itemInfo.id)) continue;
+            if (sourceHasEditableTextDescendantForBase(itemInfo.id, itemInfo.pageIndex)) continue;
+
+            var sourceIds = null;
+            try { sourceIds = sourceIndex.pageLocalSourceObjectIds(itemInfo.id, itemInfo.pageIndex); } catch (eFallbackSourceIds) {}
+            sourceIds = sourceIds && sourceIds.length > 0 ? sourceIds : [itemInfo.id];
+            sourceIds = _sortedNumericIds(sourceIds);
+            if (!sourceSetHasExecutableShellMaterial(sourceIds)) continue;
+
+            var exportIds = shellExportSourceIdsForSourceSet(itemInfo.id, sourceIds);
+            if (!exportIds || exportIds.length === 0) exportIds = sourceIds;
+            if (!sourceSetHasExecutableShellMaterial(exportIds)) continue;
+
+            var item = null;
+            try { item = sourceIndex.domItem(itemInfo.id); } catch (eFallbackDomItem) {}
+            _pushExtractionCandidate(candidates, candidateSeen, "pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                sourceObjectIds: sourceIds,
+                exportSourceObjectIds: exportIds,
+                exportTargetObjectId: itemInfo.id,
+                visualSourceObjectIds: exportIds,
+                pageIndex: itemInfo.pageIndex,
+                unit: "GROUP_OR_ITEM",
+                mode: "TEXTLESS_CANDIDATE",
+                candidatePurpose: "SHELL_CANDIDATE",
+                compositeRole: sourceIds.length > 1
+                        ? "unclaimed_visible_vector_source_set"
+                        : "unclaimed_visible_vector_source",
+                slotRole: "shell_slot_only",
+                renderMode: "SLOT_ONLY",
+                hiddenVisualSourceObjectIds: [],
+                containsEditableText: false,
+                textOwner: "none",
+                required: false
+            }));
+            recordDecorationSourceSet(itemInfo.pageIndex, sourceIds);
+            for (var mi = 0; mi < sourceIds.length; mi++) claimed[String(sourceIds[mi])] = true;
+            for (var ei = 0; ei < exportIds.length; ei++) claimed[String(exportIds[ei])] = true;
+            appended++;
+        }
+        basePerfStats.unclaimedVisibleVectorFallbackCount = appended;
+    }
+
     function isUnsafeNativeGraphicLineShell(itemInfo) {
         if (!itemInfo || String(itemInfo.kind || "") !== "GraphicLine") return false;
         var strokeName = String(itemInfo.strokeColorName || itemInfo.strokeColor || "");
@@ -1084,6 +1168,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             }
         }
     }
+    appendUnclaimedVisibleVectorSourceCandidates();
     basePerfMarker("03d05d_base_main_done");
     basePerfWrite("done", sourceItems.length);
 }

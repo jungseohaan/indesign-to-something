@@ -16,6 +16,7 @@ function _validateExtractionResults(plan, extractionResults) {
     _validateCompositeSourceSetCandidateContracts(plan, issues);
     var rows = extractionResults && extractionResults.results ? extractionResults.results : [];
     _validateExtractionResultRowDuplicates(rows, issues);
+    _validateExtractionResultRenderUnitContracts(plan, rows, candidateById, issues);
     var counters = _validateExtractionResultRows(
             rows,
             passById, candidateById, issues);
@@ -77,6 +78,125 @@ function _assertObjectPlanGate(ctx, objectPlanDiagnostics) {
                 + _objectPlanGateIssueCodesForMessage(gate.issueCodeCounts));
     }
     return gate;
+}
+
+function _validateSourceOwnershipStageGate(
+        sourceCoverageDiagnostics, sourceOwnershipModelDiagnostics, objectPlanDiagnostics) {
+    var issues = [];
+    var coverageSummary = sourceCoverageDiagnostics ? sourceCoverageDiagnostics.summary : null;
+    var modelSummary = sourceOwnershipModelDiagnostics ? sourceOwnershipModelDiagnostics.summary : null;
+
+    if (!coverageSummary) {
+        issues.push({
+            code: "missing_source_coverage_summary",
+            severity: "ERROR"
+        });
+    } else {
+        if (coverageSummary.unresolvedCount && coverageSummary.unresolvedCount > 0) {
+            issues.push({
+                code: "source_coverage_unresolved",
+                severity: "ERROR",
+                unresolvedCount: coverageSummary.unresolvedCount,
+                visibleMaterialUnresolvedCount: coverageSummary.visibleMaterialUnresolvedCount || 0
+            });
+        }
+        if (coverageSummary.visibleMaterialUnresolvedCount
+                && coverageSummary.visibleMaterialUnresolvedCount > 0) {
+            issues.push({
+                code: "visible_source_material_unresolved",
+                severity: "ERROR",
+                visibleMaterialUnresolvedCount: coverageSummary.visibleMaterialUnresolvedCount
+            });
+        }
+    }
+
+    if (!modelSummary) {
+        issues.push({
+            code: "missing_source_ownership_model_summary",
+            severity: "ERROR"
+        });
+    } else if (modelSummary.duplicateSlotOwnerCount
+            && modelSummary.duplicateSlotOwnerCount > 0) {
+        issues.push({
+            code: "duplicate_source_slot_owner",
+            severity: "ERROR",
+            duplicateSlotOwnerCount: modelSummary.duplicateSlotOwnerCount,
+            duplicateSlotKeys: modelSummary.duplicateSlotKeys || []
+        });
+    }
+
+    _validateSourceOwnershipRenderUnits(
+            sourceOwnershipModelDiagnostics, objectPlanDiagnostics, issues);
+
+    return {
+        schemaVersion: 1,
+        policy: "POLICY-source-ownership",
+        mode: "source-ownership-stage-gate",
+        status: issues.length ? "FAIL" : "OK",
+        issueCount: issues.length,
+        issueCodeCounts: _objectPlanGateIssueCodeCounts(issues),
+        issues: issues
+    };
+}
+
+function _assertSourceOwnershipStageGate(
+        ctx, sourceCoverageDiagnostics, sourceOwnershipModelDiagnostics, objectPlanDiagnostics) {
+    var gate = _validateSourceOwnershipStageGate(
+            sourceCoverageDiagnostics, sourceOwnershipModelDiagnostics, objectPlanDiagnostics);
+    if (ctx && ctx.outputDir) {
+        writeJson(ctx.outputDir + "/source-ownership-stage-gate.json", gate);
+    }
+    if (gate.status !== "OK") {
+        throw new Error("Source ownership validation failed: "
+                + gate.issueCount
+                + " issue(s): "
+                + _objectPlanGateIssueCodesForMessage(gate.issueCodeCounts));
+    }
+    return gate;
+}
+
+function _validateSourceOwnershipRenderUnits(
+        sourceOwnershipModelDiagnostics, objectPlanDiagnostics, issues) {
+    if (!sourceOwnershipModelDiagnostics) return;
+    var renderUnitsDoc = sourceOwnershipModelDiagnostics.renderUnits || null;
+    if (!renderUnitsDoc) {
+        issues.push({
+            code: "missing_render_unit_diagnostics",
+            severity: "ERROR"
+        });
+        return;
+    }
+
+    var objectPlanIds = {};
+    var plans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans
+            ? objectPlanDiagnostics.objectPlans
+            : [];
+    for (var p = 0; p < plans.length; p++) {
+        var plan = plans[p];
+        if (plan && plan.objectPlanId) objectPlanIds[String(plan.objectPlanId)] = true;
+    }
+
+    var renderUnits = renderUnitsDoc.renderUnits || [];
+    for (var r = 0; r < renderUnits.length; r++) {
+        var unit = renderUnits[r];
+        if (!unit) continue;
+        if (!unit.objectPlanId) {
+            issues.push({
+                code: "render_unit_missing_object_plan",
+                severity: "ERROR",
+                renderUnitId: unit.renderUnitId || null,
+                slotId: unit.slotId || null
+            });
+        } else if (!objectPlanIds[String(unit.objectPlanId)]) {
+            issues.push({
+                code: "render_unit_unknown_object_plan",
+                severity: "ERROR",
+                renderUnitId: unit.renderUnitId || null,
+                objectPlanId: unit.objectPlanId,
+                slotId: unit.slotId || null
+            });
+        }
+    }
 }
 
 function _objectPlanGateIssueCodeCounts(issues) {
@@ -167,6 +287,96 @@ function _extractionResultRowDuplicateKey(row) {
         boundsKey(row.bounds),
         arrKey(row.sourceObjectIds)
     ].join("|");
+}
+
+function _validateExtractionResultRenderUnitContracts(plan, rows, candidateById, issues) {
+    var renderUnits = plan && plan.renderUnits ? plan.renderUnits : [];
+    var renderUnitById = {};
+    var renderUnitByCandidateId = {};
+    for (var ui = 0; ui < renderUnits.length; ui++) {
+        var unit = renderUnits[ui];
+        if (!unit) continue;
+        if (unit.renderUnitId) renderUnitById[String(unit.renderUnitId)] = unit;
+        if (unit.candidateId) renderUnitByCandidateId[String(unit.candidateId)] = unit;
+    }
+    if ((!renderUnits || renderUnits.length === 0) && rows && rows.length > 0) {
+        issues.push({
+            code: "rendered_result_without_render_unit_plan",
+            severity: "ERROR",
+            resultCount: rows.length
+        });
+        return;
+    }
+    for (var ri = 0; rows && ri < rows.length; ri++) {
+        var row = rows[ri];
+        if (!row) continue;
+        var candidate = row.candidateId && candidateById ? candidateById[String(row.candidateId)] : null;
+        var expectedUnit = candidate && candidate.renderUnitId
+                ? renderUnitById[String(candidate.renderUnitId)]
+                : (row.candidateId ? renderUnitByCandidateId[String(row.candidateId)] : null);
+        if (!row.renderUnitId) {
+            issues.push({
+                code: "rendered_result_missing_render_unit",
+                severity: "ERROR",
+                exportId: row.exportId || null,
+                candidateId: row.candidateId || null,
+                planPassId: row.planPassId || null,
+                expectedRenderUnitId: expectedUnit ? expectedUnit.renderUnitId || null : null
+            });
+            continue;
+        }
+        var rowUnit = renderUnitById[String(row.renderUnitId)];
+        if (!rowUnit) {
+            issues.push({
+                code: "rendered_result_unknown_render_unit",
+                severity: "ERROR",
+                exportId: row.exportId || null,
+                candidateId: row.candidateId || null,
+                planPassId: row.planPassId || null,
+                renderUnitId: row.renderUnitId
+            });
+            continue;
+        }
+        if (expectedUnit && rowUnit.renderUnitId !== expectedUnit.renderUnitId) {
+            issues.push({
+                code: "rendered_result_render_unit_mismatch",
+                severity: "ERROR",
+                exportId: row.exportId || null,
+                candidateId: row.candidateId || null,
+                renderUnitId: row.renderUnitId,
+                expectedRenderUnitId: expectedUnit.renderUnitId || null
+            });
+        }
+        var rowSlotIdentityKey = row.renderUnitSlotIdentityKey
+                || (candidate ? candidate.renderUnitSlotIdentityKey : null);
+        var rowUnitMatchesSlotIdentity = rowSlotIdentityKey
+                && rowUnit.slotIdentityKey
+                && String(rowSlotIdentityKey) === String(rowUnit.slotIdentityKey);
+        if (row.candidateId && rowUnit.candidateId
+                && String(row.candidateId) !== String(rowUnit.candidateId)
+                && !rowUnitMatchesSlotIdentity) {
+            issues.push({
+                code: "rendered_result_render_unit_candidate_mismatch",
+                severity: "ERROR",
+                exportId: row.exportId || null,
+                candidateId: row.candidateId,
+                renderUnitId: row.renderUnitId,
+                renderUnitCandidateId: rowUnit.candidateId
+            });
+        }
+        if (row.planPassId && rowUnit.passId
+                && String(row.planPassId) !== String(rowUnit.passId)) {
+            issues.push({
+                code: "rendered_result_render_unit_pass_mismatch",
+                severity: "ERROR",
+                exportId: row.exportId || null,
+                candidateId: row.candidateId || null,
+                renderUnitId: row.renderUnitId,
+                resultPassId: row.planPassId,
+                renderUnitPassId: rowUnit.passId
+            });
+        }
+    }
 }
 
 function _buildExtractionValidationIndexes(plan, issues) {

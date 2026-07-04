@@ -20,6 +20,8 @@ public class RenderedGroup {
     private boolean zOrderKnown; // true: IDML z-order normalizer가 실제 원본 순서를 확인함
     private String itemType;     // "vector" | "group" | "text_decoration" | "image" | "other"
     private String exportUnitId; // Stable executed export unit contract id
+    private String renderUnitId; // Stage 1 RenderUnit id that authorized this render
+    private String renderUnitSlotIdentityKey;
     private String planPassId;   // ExtractionPlan pass that produced this render
     private String candidateId;  // ExtractionPlan candidate id
     private String compositeRole;
@@ -94,6 +96,12 @@ public class RenderedGroup {
 
     public String exportUnitId() { return exportUnitId; }
     public void exportUnitId(String v) { this.exportUnitId = v; }
+
+    public String renderUnitId() { return renderUnitId; }
+    public void renderUnitId(String v) { this.renderUnitId = v; }
+
+    public String renderUnitSlotIdentityKey() { return renderUnitSlotIdentityKey; }
+    public void renderUnitSlotIdentityKey(String v) { this.renderUnitSlotIdentityKey = v; }
 
     public String planPassId() { return planPassId; }
     public void planPassId(String v) { this.planPassId = v; }

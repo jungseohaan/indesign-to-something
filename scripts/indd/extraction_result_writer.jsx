@@ -42,6 +42,10 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
             planPassId: item.planPassId || null,
             candidateId: stampedCandidateId,
             stampedCandidateId: stampedCandidateId,
+            renderUnitId: item.renderUnitId || (planCandidate ? planCandidate.renderUnitId : null) || null,
+            renderUnitSlotIdentityKey: item.renderUnitSlotIdentityKey
+                    || (planCandidate ? planCandidate.renderUnitSlotIdentityKey : null)
+                    || null,
             exportUnitId: item.exportUnitId || null,
             exportUnitContractKey: item.exportUnitContractKey || null,
             candidateMatchStrategy: item.candidateMatchStrategy || null,
@@ -145,6 +149,8 @@ function _slimExtractionPlanForWrite(plan) {
         return {
             candidateId: c.candidateId,
             exportUnitId: c.exportUnitId,
+            renderUnitId: c.renderUnitId,
+            renderUnitSlotIdentityKey: c.renderUnitSlotIdentityKey,
             passId: c.passId,
             pageIndex: c.pageIndex,
             unit: c.unit,
@@ -207,6 +213,10 @@ function _slimExtractionPlanForWrite(plan) {
         sourceClusterQuerySummary: plan.sourceClusterQuerySummary,
         plannerBundleSummary: plan.plannerBundleSummary,
         objectPlanSummary: plan.objectPlanSummary,
+        sourceCoverageSummary: plan.sourceCoverageSummary,
+        sourceOwnershipModelSummary: plan.sourceOwnershipModelSummary,
+        sourceOwnershipStageGateSummary: plan.sourceOwnershipStageGateSummary,
+        renderUnits: plan.renderUnits || [],
         preObjectPlanTextlessShellSuppressionSummary:
                 plan.preObjectPlanTextlessShellSuppressionSummary,
         sourceSlotCanonicalizationSummary: plan.sourceSlotCanonicalizationSummary,

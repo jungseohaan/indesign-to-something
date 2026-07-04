@@ -936,6 +936,263 @@ function _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourc
     };
 }
 
+function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItems) {
+    if (!candidates || !sourceItems || sourceItems.length === 0) return 0;
+    var infoById = {};
+    var childIdsByParentId = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        infoById[String(src.id)] = src;
+        if (src.parentId !== null && src.parentId !== undefined) {
+            var parentKey = String(src.parentId);
+            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+            childIdsByParentId[parentKey].push(src.id);
+        }
+    }
+
+    function mark(ids, claimed) {
+        for (var mi = 0; ids && mi < ids.length; mi++) {
+            if (ids[mi] === null || ids[mi] === undefined) continue;
+            claimed[String(ids[mi])] = true;
+        }
+    }
+
+    function sourceHasPlacedVisualInSubtree(sourceId, visiting) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        var key = String(sourceId);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        var kind = String(src.kind || "");
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+        if (src.hasPlacedVisual === true) return true;
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceHasPlacedVisualInSubtree(children[ci], visiting)) return true;
+        }
+        return false;
+    }
+
+    function sourceHasEditableTextDescendant(sourceId, pageIndex, visiting) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        var key = String(sourceId);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        if (String(src.kind || "") === "TextFrame"
+                && src.textFrameClass === "editable"
+                && src.hasText === true
+                && (pageIndex === null || pageIndex === undefined || src.pageIndex === pageIndex)) {
+            return true;
+        }
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceHasEditableTextDescendant(children[ci], pageIndex, visiting)) return true;
+        }
+        return false;
+    }
+
+    function sourceLooksLikeVisibleVectorMaterial(src) {
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        var kind = String(src.kind || "");
+        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval"
+                && kind !== "Polygon" && kind !== "GraphicLine") {
+            return false;
+        }
+        if (sourceHasPlacedVisualInSubtree(src.id)) return false;
+        if (kind === "Group") {
+            return src.hasChildren === true
+                    && (src.hasVisibleFill === true || src.hasVisibleStroke === true);
+        }
+        return src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true;
+    }
+
+    function collectSamePageSubtree(sourceId, pageIndex, seen, out) {
+        var src = infoById[String(sourceId)];
+        if (!src) return;
+        if (pageIndex !== null && pageIndex !== undefined
+                && src.pageIndex !== null && src.pageIndex !== undefined
+                && src.pageIndex !== pageIndex) {
+            return;
+        }
+        _pushUniqueId(out, seen, sourceId);
+        var children = childIdsByParentId[String(sourceId)] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            collectSamePageSubtree(children[ci], pageIndex, seen, out);
+        }
+    }
+
+    function sourceSetHasVisibleVectorMaterial(sourceIds) {
+        for (var si = 0; sourceIds && si < sourceIds.length; si++) {
+            if (sourceLooksLikeVisibleVectorMaterial(infoById[String(sourceIds[si])])) return true;
+        }
+        return false;
+    }
+
+    var claimed = {};
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!candidate) continue;
+        mark(candidate.sourceObjectIds, claimed);
+        mark(candidate.visualSourceObjectIds, claimed);
+        mark(candidate.exportSourceObjectIds, claimed);
+        mark(candidate.hiddenVisualSourceObjectIds, claimed);
+    }
+
+    var appended = 0;
+    for (var si = 0; si < sourceItems.length; si++) {
+        var src = sourceItems[si];
+        if (!src || src.id === null || src.id === undefined) continue;
+        if (claimed[String(src.id)] === true) continue;
+        if (!sourceLooksLikeVisibleVectorMaterial(src)) continue;
+        if (sourceHasEditableTextDescendant(src.id, src.pageIndex)) continue;
+
+        var sourceIds = [];
+        var seen = {};
+        collectSamePageSubtree(src.id, src.pageIndex, seen, sourceIds);
+        sourceIds = _sortedNumericIds(sourceIds.length > 0 ? sourceIds : [src.id]);
+        if (!sourceSetHasVisibleVectorMaterial(sourceIds)) continue;
+
+        var candidateId = sourceIds.length > 1
+                ? _candidateCompositeId("pass.decoration_groups", src.pageIndex, sourceIds,
+                        "unclaimed_visible_vector_source")
+                : _candidateId("pass.decoration_groups", src.id, src.pageIndex);
+        candidates.push({
+            candidateId: candidateId,
+            passId: "pass.decoration_groups",
+            sourceObjectIds: sourceIds,
+            executionSourceObjectIds: sourceIds.slice(0),
+            primarySourceObjectId: src.id,
+            pageIndex: src.pageIndex,
+            kind: src.kind || null,
+            unit: "GROUP_OR_ITEM",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            bounds: src.bounds || null,
+            parentId: src.parentId,
+            parentKind: src.parentKind || null,
+            composite: sourceIds.length > 1,
+            compositeRole: sourceIds.length > 1
+                    ? "unclaimed_visible_vector_source_set"
+                    : "unclaimed_visible_vector_source",
+            slotRole: "shell_slot_only",
+            exportSourceObjectIds: sourceIds.slice(0),
+            exportTargetObjectId: src.id,
+            hiddenVisualSourceObjectIds: [],
+            visualSourceObjectIds: sourceIds.slice(0),
+            ownedTextFrameIds: [],
+            editableTextFrameIds: [],
+            hiddenTextFrameIds: [],
+            requiresTextHidden: false,
+            textOwner: "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_TEXT_SHELL",
+            visualLayer: "LABEL_BACKDROP",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            ownershipSlot: "SHELL_SLOT",
+            reason: "unclaimed_visible_vector_source",
+            zOrder: src.zOrder !== undefined ? src.zOrder : 0,
+            required: false
+        });
+        mark(sourceIds, claimed);
+        appended++;
+    }
+    return appended;
+}
+
+function _appendUnresolvedVisibleVectorCoverageCandidates(candidates, sourceCoverageDiagnostics, sourceItems) {
+    if (!candidates || !sourceCoverageDiagnostics || !sourceItems) return 0;
+    var infoById = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        infoById[String(src.id)] = src;
+    }
+    function isVisibleVectorSource(src) {
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        var kind = String(src.kind || "");
+        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval"
+                && kind !== "Polygon" && kind !== "GraphicLine") {
+            return false;
+        }
+        return src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true;
+    }
+    var existing = {};
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!candidate) continue;
+        var key = String(candidate.passId || "") + "|" + String(candidate.pageIndex) + "|"
+                + _sourceSetKey(candidate.sourceObjectIds || []);
+        existing[key] = true;
+    }
+    var appended = 0;
+    var rows = sourceCoverageDiagnostics.sourceObjects || [];
+    for (var ri = 0; ri < rows.length; ri++) {
+        var row = rows[ri];
+        if (!row || row.coverageStatus !== "UNRESOLVED") continue;
+        var src = infoById[String(row.sourceObjectId)];
+        if (!isVisibleVectorSource(src)) continue;
+        var sourceIds = [src.id];
+        var sourceKey = "pass.decoration_groups|" + String(src.pageIndex) + "|" + _sourceSetKey(sourceIds);
+        if (existing[sourceKey]) continue;
+        candidates.push({
+            candidateId: _candidateId("pass.decoration_groups", src.id, src.pageIndex),
+            passId: "pass.decoration_groups",
+            sourceObjectIds: sourceIds,
+            executionSourceObjectIds: sourceIds.slice(0),
+            primarySourceObjectId: src.id,
+            pageIndex: src.pageIndex,
+            kind: src.kind || null,
+            unit: "GROUP_OR_ITEM",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            bounds: src.bounds || null,
+            parentId: src.parentId,
+            parentKind: src.parentKind || null,
+            composite: false,
+            compositeRole: "unresolved_visible_vector_source",
+            slotRole: "shell_slot_only",
+            exportSourceObjectIds: sourceIds.slice(0),
+            exportTargetObjectId: src.id,
+            hiddenVisualSourceObjectIds: [],
+            visualSourceObjectIds: sourceIds.slice(0),
+            ownedTextFrameIds: [],
+            editableTextFrameIds: [],
+            hiddenTextFrameIds: [],
+            requiresTextHidden: false,
+            textOwner: "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_TEXT_SHELL",
+            visualLayer: "LABEL_BACKDROP",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            ownershipSlot: "SHELL_SLOT",
+            reason: "unresolved_visible_vector_source",
+            zOrder: src.zOrder !== undefined ? src.zOrder : 0,
+            required: false
+        });
+        existing[sourceKey] = true;
+        appended++;
+    }
+    return appended;
+}
+
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
     var candidates = [];
@@ -1013,6 +1270,48 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         executionCandidates = multiTextParentSuppressionDiagnostics.candidates;
         _marker(ctx.outputDir, "03d16g_plan_suppressTextlessGroupChildrenAfterRebuild");
     }
+    var unclaimedVisibleVectorFallbackCount =
+            _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems);
+    if (unclaimedVisibleVectorFallbackCount > 0) {
+        _marker(ctx.outputDir, "03d16g1_plan_appendUnclaimedVisibleVectors");
+        plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, executionCandidates);
+        _marker(ctx.outputDir, "03d16g2_plan_rebuildPlannerBundlesAfterUnclaimedVectors");
+        objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
+        _marker(ctx.outputDir, "03d16g3_plan_rebuildObjectPlansAfterUnclaimedVectors");
+        executionCandidates = _buildExecutionCandidatesFromObjectPlans(executionCandidates, objectPlanDiagnostics);
+        _marker(ctx.outputDir, "03d16g4_plan_rebuildExecutionCandidatesAfterUnclaimedVectors");
+        executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
+        _marker(ctx.outputDir, "03d16g5_plan_excludeChildShellSourcesAfterUnclaimedVectors");
+    }
+    var sourceCoverageDiagnostics = _buildSourceCoverageDiagnostics(
+            sourceItems, executionCandidates, objectPlanDiagnostics);
+    var unresolvedVisibleVectorCoverageFallbackCount =
+            _appendUnresolvedVisibleVectorCoverageCandidates(
+                    executionCandidates, sourceCoverageDiagnostics, sourceItems);
+    if (unresolvedVisibleVectorCoverageFallbackCount > 0) {
+        _marker(ctx.outputDir, "03d16g6_plan_appendUnresolvedVisibleVectors");
+        plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, executionCandidates);
+        _marker(ctx.outputDir, "03d16g7_plan_rebuildPlannerBundlesAfterUnresolvedVectors");
+        objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
+        _marker(ctx.outputDir, "03d16g8_plan_rebuildObjectPlansAfterUnresolvedVectors");
+        executionCandidates = _buildExecutionCandidatesFromObjectPlans(executionCandidates, objectPlanDiagnostics);
+        _marker(ctx.outputDir, "03d16g9_plan_rebuildExecutionCandidatesAfterUnresolvedVectors");
+        executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
+        _marker(ctx.outputDir, "03d16g10_plan_excludeChildShellSourcesAfterUnresolvedVectors");
+        sourceCoverageDiagnostics = _buildSourceCoverageDiagnostics(
+                sourceItems, executionCandidates, objectPlanDiagnostics);
+    }
+    try { writeJson(ctx.outputDir + "/source-coverage.json", sourceCoverageDiagnostics); } catch (eSourceCoverageWrite) {}
+    _marker(ctx.outputDir, "03d16h_plan_sourceCoverage");
+    var sourceOwnershipModelDiagnostics = _buildSourceOwnershipModelDiagnostics(
+            sourceItems, executionCandidates, objectPlanDiagnostics);
+    try { writeJson(ctx.outputDir + "/source-bundles.json", sourceOwnershipModelDiagnostics.sourceBundles); } catch (eSourceBundlesWrite) {}
+    try { writeJson(ctx.outputDir + "/ownership-slots.json", sourceOwnershipModelDiagnostics.ownershipSlots); } catch (eOwnershipSlotsWrite) {}
+    try { writeJson(ctx.outputDir + "/slot-owners.json", sourceOwnershipModelDiagnostics.slotOwners); } catch (eSlotOwnersWrite) {}
+    try { writeJson(ctx.outputDir + "/render-units.json", sourceOwnershipModelDiagnostics.renderUnits); } catch (eRenderUnitsWrite) {}
+    _marker(ctx.outputDir, "03d16i_plan_sourceOwnershipModel");
+    _attachRenderUnitsToExecutionCandidates(executionCandidates, sourceOwnershipModelDiagnostics);
+    _marker(ctx.outputDir, "03d16j_plan_attachRenderUnits");
     var sourceSlotRegistryDiagnostics = _buildSourceSlotRegistryDiagnostics(
             plannerBundleDiagnostics, objectPlanDiagnostics, sourceItems);
     _marker(ctx.outputDir, "03d17_plan_sourceSlotRegistry");
@@ -1051,6 +1350,11 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         sourceClusterQuerySummary: sourceClusterQueryDiagnostics.summary,
         plannerBundleSummary: plannerBundleDiagnostics.summary,
         objectPlanSummary: objectPlanDiagnostics.summary,
+        sourceCoverageSummary: sourceCoverageDiagnostics.summary,
+        sourceOwnershipModelSummary: sourceOwnershipModelDiagnostics.summary,
+        renderUnits: sourceOwnershipModelDiagnostics.renderUnits
+                ? sourceOwnershipModelDiagnostics.renderUnits.renderUnits || []
+                : [],
         preObjectPlanTextlessShellSuppressionSummary: {
             suppressedCount: preObjectPlanTextlessShellSuppressionDiagnostics.suppressedCount,
             suppressed: preObjectPlanTextlessShellSuppressionDiagnostics.suppressed
@@ -1072,6 +1376,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         sourceClusterQueryDiagnostics: sourceClusterQueryDiagnostics,
         plannerBundleDiagnostics: plannerBundleDiagnostics,
         objectPlanDiagnostics: objectPlanDiagnostics,
+        sourceCoverageDiagnostics: sourceCoverageDiagnostics,
+        sourceOwnershipModelDiagnostics: sourceOwnershipModelDiagnostics,
         preObjectPlanTextlessShellSuppressionDiagnostics:
                 preObjectPlanTextlessShellSuppressionDiagnostics,
         sourceSlotCanonicalizationDiagnostics: sourceSlotCanonicalizationDiagnostics.diagnostics,
@@ -1081,6 +1387,70 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         sourceSlotRegistryDiagnostics: sourceSlotRegistryDiagnostics
     };
     return plan;
+}
+
+function _attachRenderUnitsToExecutionCandidates(executionCandidates, sourceOwnershipModelDiagnostics) {
+    if (!executionCandidates || !sourceOwnershipModelDiagnostics
+            || !sourceOwnershipModelDiagnostics.renderUnits) {
+        return;
+    }
+    var renderUnits = sourceOwnershipModelDiagnostics.renderUnits.renderUnits || [];
+    var byCandidateId = {};
+    var bySlotIdentityKey = {};
+    for (var ri = 0; ri < renderUnits.length; ri++) {
+        var unit = renderUnits[ri];
+        if (!unit) continue;
+        if (unit.candidateId) byCandidateId[String(unit.candidateId)] = unit;
+        if (unit.slotIdentityKey) bySlotIdentityKey[String(unit.slotIdentityKey)] = unit;
+    }
+
+    function candidateOwnershipSlot(candidate) {
+        if (!candidate) return "CONTENT_VISUAL_SLOT";
+        if (candidate.ownershipSlot) {
+            if (candidate.ownershipSlot === "TEXTLESS_GROUP_VISUAL_SLOT") return "SHELL_SLOT";
+            return candidate.ownershipSlot;
+        }
+        if (candidate.visualAction === "PLACE_TEXT_SHELL") return "SHELL_SLOT";
+        if (candidate.visualAction === "PLACE_TABLE_STYLE") return "TABLE_STYLE_SLOT";
+        if (candidate.passId === "pass.decoration_groups"
+                || candidate.passId === "pass.editable_textframe_visual_shells"
+                || candidate.slotRole === "shell_slot_only"
+                || candidate.slotRole === "textless_group_visual_slot") {
+            return "SHELL_SLOT";
+        }
+        return "CONTENT_VISUAL_SLOT";
+    }
+
+    function candidatePlacement(candidate) {
+        if (candidate && candidate.placement) return candidate.placement;
+        if (candidate && candidate.passId === "pass.inline_objects") return "INLINE";
+        return "FLOATING";
+    }
+
+    function candidateSlotIdentityKey(candidate) {
+        if (!candidate) return null;
+        var ids = candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0
+                ? candidate.visualSourceObjectIds
+                : (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0
+                        ? candidate.exportSourceObjectIds
+                        : candidate.sourceObjectIds || []);
+        var sourceKey = _sourceSetKey(ids || []);
+        if (!sourceKey) return null;
+        return String(candidate.pageIndex) + "|"
+                + candidatePlacement(candidate) + "|"
+                + candidateOwnershipSlot(candidate) + "|"
+                + sourceKey;
+    }
+
+    for (var ci = 0; ci < executionCandidates.length; ci++) {
+        var candidate = executionCandidates[ci];
+        if (!candidate || !candidate.candidateId) continue;
+        var renderUnit = byCandidateId[String(candidate.candidateId)]
+                || bySlotIdentityKey[String(candidateSlotIdentityKey(candidate))];
+        if (!renderUnit) continue;
+        candidate.renderUnitId = renderUnit.renderUnitId || null;
+        candidate.renderUnitSlotIdentityKey = renderUnit.slotIdentityKey || null;
+    }
 }
 
 function _excludeDirectChildShellSourcesFromParentShellExports(candidates, sourceItems) {

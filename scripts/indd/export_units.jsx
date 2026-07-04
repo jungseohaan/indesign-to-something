@@ -183,6 +183,10 @@ function _stampExportUnitsOnRenderedItems(ctx, renderedFloatingItems) {
         var contract = _exportUnitContract(item, planCandidate);
         item.exportUnitId = contract.exportUnitId;
         item.exportUnitContractKey = contract.contractKey;
+        if (!item.renderUnitId && planCandidate && planCandidate.renderUnitId) {
+            item.renderUnitId = planCandidate.renderUnitId;
+            item.renderUnitSlotIdentityKey = planCandidate.renderUnitSlotIdentityKey || null;
+        }
         if (!item.slotRole) item.slotRole = contract.slotRole;
     }
 }
