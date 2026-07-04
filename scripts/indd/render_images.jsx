@@ -356,10 +356,10 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
 
         var domId = renderTarget.id;
         var imagePlanPassId = isGroupRender ? "pass.image_textless_groups" : "pass.image_placed_frames";
-        var imageSourceIds = isGroupRender
-                ? (candidate.sourceObjectIds || _collectSourceObjectIds(renderTarget))
-                : [domId];
-        var imageIsSourceSetCandidate = isGroupRender && imageSourceIds && imageSourceIds.length > 1;
+        var imageSourceIds = candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0
+                ? candidate.sourceObjectIds
+                : (isGroupRender ? _collectSourceObjectIds(renderTarget) : [domId]);
+        var imageIsSourceSetCandidate = imageSourceIds && imageSourceIds.length > 1;
 
         var sourceBounds = null;
         try { sourceBounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
@@ -413,7 +413,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                         childImageIds: null
                     }, item, {
                         textOwner: "none",
-                        sourceObjectIds: [domId],
+                        sourceObjectIds: imageSourceIds,
                         reason: "standalone_image_copy"
                     }));
                     continue;
