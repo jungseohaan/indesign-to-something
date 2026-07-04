@@ -479,7 +479,7 @@ public class ResolvedToASTBuilder {
         Materialization materialization = enumValue(Materialization.class,
                 jsonString(o, "materialization"), Materialization.EXTRACTED_PNG_VECTOR);
         double[] renderSourceBounds = rg.cropSourceBounds();
-        return new ObjectPlan(
+        ObjectPlan plan = new ObjectPlan(
                 rg.id(),
                 "planner_declared_rendered:" + jsonString(o, "passId") + ":" + jsonString(o, "kind"),
                 rg.pageIndex(),
@@ -506,6 +506,14 @@ public class ResolvedToASTBuilder {
                 rg.layerId(),
                 rg.layerName(),
                 rg.layerIndex());
+        return plan
+                .withExtractionSourceObjectIds(
+                        jsonIntArray(o, "exportSourceObjectIds"),
+                        jsonIntArray(o, "hiddenVisualSourceObjectIds"))
+                .withSourceTreeDiagnostics(
+                        jsonIntArray(o, "sourceRootObjectIds"),
+                        jsonIntArray(o, "clusterSourceObjectIds"),
+                        jsonIntArray(o, "omittedClusterSourceObjectIds"));
     }
 
     private static String renderedPageIdKey(int pageIndex, int id) {

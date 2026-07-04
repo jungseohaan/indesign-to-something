@@ -128,10 +128,28 @@ function _objectPlanEditableTextFrames(sourceItems) {
 }
 
 function _objectPlanCanonicalVisualSourceZOrder(plan, sourceById) {
-    var sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.visualSourceObjectIds : null, sourceById);
+    var sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.sourceRootObjectIds : null, sourceById);
+    if (sourceZ >= 0) return sourceZ;
+    sourceZ = _objectPlanMaxNormalizedSourceZOrder(plan ? plan.visualSourceObjectIds : null, sourceById);
+    if (sourceZ >= 0) return sourceZ;
+    sourceZ = _objectPlanMaxNormalizedSourceZOrder(plan ? plan.sourceObjectIds : null, sourceById);
+    if (sourceZ >= 0) return sourceZ;
+    sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.visualSourceObjectIds : null, sourceById);
     if (sourceZ >= 0) return sourceZ;
     sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.sourceObjectIds : null, sourceById);
     return sourceZ >= 0 ? sourceZ : (plan && plan.zOrder !== null && plan.zOrder !== undefined ? plan.zOrder : -1);
+}
+
+function _objectPlanMaxNormalizedSourceZOrder(ids, sourceById) {
+    var max = -1;
+    for (var i = 0; ids && i < ids.length; i++) {
+        var src = sourceById ? sourceById[String(ids[i])] : null;
+        if (!src || src.zOrder === null || src.zOrder === undefined) continue;
+        if (src.zOrderSource && String(src.zOrderSource) !== "idml_spread") continue;
+        var z = Number(src.zOrder);
+        if (!isNaN(z) && z > max) max = z;
+    }
+    return max;
 }
 
 function _objectPlanMaxSourceZOrder(ids, sourceById) {

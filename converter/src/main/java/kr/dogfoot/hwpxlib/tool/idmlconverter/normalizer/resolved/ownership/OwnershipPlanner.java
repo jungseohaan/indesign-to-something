@@ -12667,6 +12667,7 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (plan == null || !plan.hasVisibleVisual()) continue;
+            if (isPlannerDeclaredObjectPlan(plan)) continue;
             if (isPlannerDeclaredInlineTextShellContract(plan)) continue;
             int sourceZ = canonicalVisualSourceZOrder(plan);
             VisualLayer layer = canonicalVisualPlane(plan, sourceZ);
@@ -12686,10 +12687,16 @@ public final class OwnershipPlanner {
     }
 
     private int canonicalVisualSourceZOrder(ObjectPlan plan) {
-        int sourceZ = maxPageItemZOrder(visualSourceIds(plan));
+        int sourceZ = maxPageItemZOrder(plan.sourceRootObjectIds);
+        if (sourceZ >= 0) return sourceZ;
+        sourceZ = maxPageItemZOrder(visualSourceIds(plan));
         if (sourceZ >= 0) return sourceZ;
         sourceZ = maxPageItemZOrder(plan.sourceObjectIds);
         return sourceZ >= 0 ? sourceZ : plan.zOrder;
+    }
+
+    private static boolean isPlannerDeclaredObjectPlan(ObjectPlan plan) {
+        return plan != null && "planner_declared_object_plan".equals(safe(plan.reason));
     }
 
     private VisualLayer canonicalVisualPlane(ObjectPlan plan, int zOrder) {

@@ -781,7 +781,7 @@ public class HwpxImageBuilder {
             return z;
         }
         if ("CONTENT_BACKDROP".equals(visualLayer)) {
-            return 10000 + z;
+            return z;
         }
         return originalZOrder;
     }
