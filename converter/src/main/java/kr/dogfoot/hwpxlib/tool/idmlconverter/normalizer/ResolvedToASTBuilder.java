@@ -244,7 +244,7 @@ public class ResolvedToASTBuilder {
     }
 
     /**
-     * Stage 1: SPEC-035 OwnershipPlanner 관찰 모드.
+     * Stage 1: source ownership policy OwnershipPlanner 관찰 모드.
      *
      * <p>아직 legacy Phase 실행 결과를 바꾸지 않는다. ObjectPlan과 invariant
      * warning만 기록해 현재 정책 충돌을 눈으로 추적할 수 있게 한다.</p>
@@ -669,6 +669,16 @@ public class ResolvedToASTBuilder {
         ctx.rebuildOwnershipPlanLinesFromPlans();
         writeJsonLines("ownership-plan.jsonl", ctx.ownershipPlanLines, "ownership plan");
         writeJsonLines("ownership-warnings.jsonl", ctx.ownershipWarningLines, "ownership warnings");
+        writeOwnershipTraceLog();
+    }
+
+    private void writeOwnershipTraceLog() {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        lines.add("phase\tdecision\tpageIndex\trenderId\texportUnitId\tcandidateId\tplanPassId\tslotRole\tsourceFile\thwpxFile\tobjectPlanDomId\tobjectPlanCandidateId\ttextAction\tvisualAction\tplacement\tvisualLayer\tmaterialization\tsourceObjectIds\texportSourceObjectIds\thiddenVisualSourceObjectIds\tdetail");
+        if (ctx != null && ctx.ownershipTraceLines != null) {
+            lines.addAll(ctx.ownershipTraceLines);
+        }
+        writeJsonLines("ownership-trace.tsv", lines, "ownership trace");
     }
 
     private void writeJsonLines(String fileName, java.util.List<String> lines, String label) {

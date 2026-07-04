@@ -23,7 +23,7 @@ import java.util.List;
  * Stage 3 visual executor: 얇은 라인-추적 visual을 floating PNG 대신 HWPX 텍스트
  * 강조(character shading)로 흡수한다. ABSORB_TEXT_STYLE visual action에 해당한다.
  *
- * <p>SPEC-036: BackgroundInjector(Phase 6)에서 분리한 순수 실행 로직. ownership 판단을
+ * <p>source ownership policy: BackgroundInjector(Phase 6)에서 분리한 순수 실행 로직. ownership 판단을
  * 새로 하지 않고, 이미 floating 후보로 들어온 얇은 강조 backdrop을 편집 텍스트에 붙인다.</p>
  */
 public final class VisualTextEmphasisAbsorber {

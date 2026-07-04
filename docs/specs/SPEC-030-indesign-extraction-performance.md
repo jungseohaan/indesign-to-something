@@ -120,7 +120,7 @@
 - 적용: 25+ for-loop 에 페이지 게이트 추가
 - 데스크탑 UI: "특정 페이지만 다시 추출" 버튼
 
-#### A.4 SPEC-025 fully editable 모드에서 PNG 렌더 스킵 (예상 -10~20%)
+#### A.4 Source ownership fully editable 모드에서 PNG 렌더 스킵 (예상 -10~20%)
 - 단일 캡슐 배지 (예: "가" / "나") — Phase 3 가 INLINE_TEXT_FRAME 으로 처리 가능
 - 다중 박스 배지 (ㅍㅎㅂㅅ) — Phase 3 가 tryInlineGroupAsBoxList 로 처리
 - 노란 강조 도형 — Phase 3 가 floating ASTFigure 로 처리
@@ -390,4 +390,4 @@ src/main/java/.../resolved/ResolvedDataReader.java  # 슬림화된 JSON 호환
 ## 관련 SPEC
 
 - [SPEC-011](SPEC-011-extract-cache.md) (추출 캐시)
-- [SPEC-025](SPEC-025-text-image-rendering-removal.md) (텍스트 이미지 렌더링 제거 — A.4 의 기반)
+- [POLICY-source-ownership](POLICY-source-ownership.md) (텍스트/PNG ownership 기준)

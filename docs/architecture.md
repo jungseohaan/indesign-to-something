@@ -267,7 +267,7 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
        │           모든 시각 배치 (배경/플로팅/배지)   │
        │           내부: BackgroundInjector.inject     │
        │           + stage3/Visual* 헬퍼               │
-       │           (구 Phase 6 + Phase 7 통합, SPEC-035)│
+       │           (구 Phase 6 + Phase 7 통합)          │
        └───────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -292,9 +292,9 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
 | 4.5 | `normalizer/resolved/phase4_5/BulletInserter.java` | 99 | 불릿 |
 | 5 | `normalizer/resolved/phase5/WrapPhase5.java` | 391 | textwrap 분할 |
 | Stage 3 | `normalizer/resolved/stage3/VisualBuilder.java` | 30 | 시각 배치 진입점 (BackgroundInjector.inject 브리지) |
-| Stage 3 | `normalizer/resolved/phase6/BackgroundInjector.java` | 994 | 시각 배치 실행 본체 (SPEC-036: dead 779 삭제 + 실행 653 Stage 3 이동, 구 3182) |
-| Stage 3 | `normalizer/resolved/stage3/VisualTextEmphasisAbsorber.java` | 544 | ABSORB_TEXT_STYLE 실행 (SPEC-036 분리) |
-| Stage 3 | `normalizer/resolved/stage3/VisualTfInlineCompositor.java` | 171 | TF inline 자식 PNG 합성 (SPEC-036 분리) |
+| Stage 3 | `normalizer/resolved/phase6/BackgroundInjector.java` | 994 | 시각 배치 실행 본체 (legacy dead path 삭제 + 실행 경로 Stage 3 이동, 구 3182) |
+| Stage 3 | `normalizer/resolved/stage3/VisualTextEmphasisAbsorber.java` | 544 | ABSORB_TEXT_STYLE 실행 |
+| Stage 3 | `normalizer/resolved/stage3/VisualTfInlineCompositor.java` | 171 | TF inline 자식 PNG 합성 |
 | Stage 3 | `normalizer/resolved/stage3/Visual*.java` (14개) | — | 배치 plan/실행/z-순서/크롭/오버플로우 헬퍼 |
 | — | `normalizer/resolved/shared/ParagraphTextHelpers.java` | — | phase 공유 헬퍼 |
 | — | `normalizer/resolved/ResolvedBuildContext.java` | — | phase 간 공유 컨텍스트 |
@@ -656,8 +656,7 @@ ExtendScript는 JSON 출력 시 제어 문자를 이스케이프하지 못한다
 | SPEC-016 | resolved 선택적 오버라이드 + 매칭 신뢰도 카운트 |
 | SPEC-017 | 테이블 셀 품질 게이트 v2 |
 | SPEC-018 | Semantic 추출 (M3 진행 중, `--extract-semantics`) |
-| SPEC-021/022 | 중첩 뱃지 추출 + 외곽선 데코 병합 |
-| SPEC-023 | 외곽선 텍스트 배지 라운드 배경 병합 |
+| Source ownership policy | 중첩 뱃지, 외곽선 데코, 텍스트 쉘 ownership |
 | SPEC-024 | 빈칸 RuleBelow → underscore 변환 |
 
 전체 목록: [docs/specs/](specs/)

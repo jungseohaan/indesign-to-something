@@ -596,7 +596,7 @@ public class IDMLToHwpxConverter {
                 earlyWarnings.add("[Resolved] overlay 보강 실패: " + e.getMessage());
             }
         }
-        // SPEC-035: source ownership/placement is decided by ObjectPlan only.
+        // source ownership policy: source ownership/placement is decided by ObjectPlan only.
         // Legacy floating-image merge mutates text-frame geometry after planning,
         // so it is intentionally disabled.
         // Phase 2.10: orphan 렌더 그래픽 주입

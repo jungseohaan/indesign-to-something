@@ -69,7 +69,7 @@ Adobe InDesign(`.indd` / `.idml`) 문서를 한글(`.hwpx`)로 변환한다.
 | 수식이 깨짐 (BT/EH/NP) | `phase3/MathProcessor` + `equationconverter/idml/` |
 | 표 셀 변환 이상 | `phase4/TableBuilder` |
 | 페이지 배경 PNG 이슈 | `phase6/BackgroundInjector` + ExtendScript `exportPageBackgrounds()` |
-| 배지/회전 텍스트가 PNG로 못 빠짐 | `scripts/extract_indd.jsx` (`classifyTextFrame`, `isRenderableTextFrame`) → SPEC-025 참조 |
+| 배지/회전 텍스트가 PNG로 못 빠짐 | `scripts/extract_indd.jsx` (`classifyTextFrame`, `isRenderableTextFrame`) → source ownership policy 참조 |
 | HWPX 출력에서 단락 높이/줄간격 이상 | `converter/LineSpacingResolver` |
 | HWPX 글상자 모양 이상 (회전/라운드) | `converter/FrameTransformations` |
 | 폰트가 잘못 매핑됨 | `font/FontCandidateMatcher` + `font-mapping.json` |
@@ -97,7 +97,7 @@ cd desktop && npm run tauri dev
 
 ## 6. 활성 작업 (2026-05-20)
 
-- **SPEC-025** (텍스트 이미지 렌더링 제거): Tier A.5/A.6/B 구현 완료, **미테스트** — InDesign 재추출 필요
+- **source ownership policy** (텍스트 이미지 렌더링 제거): Tier A.5/A.6/B 구현 완료, **미테스트** — InDesign 재추출 필요
 - 잔여 Tier: A.1.5 / A.4 / A.8 / Tier B 효과 / Phase 5 마스터 스프레드 instance화
 - 다른 Active: SPEC-012, 014, 015, 018, desktop-app
 - 자세한 인덱스: [docs/specs/INDEX.md](docs/specs/INDEX.md)

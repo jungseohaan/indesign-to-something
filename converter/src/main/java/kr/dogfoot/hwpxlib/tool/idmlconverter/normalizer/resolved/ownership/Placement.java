@@ -1,6 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 
-/** SPEC-035: 객체가 HWPX에서 놓이는 흐름. */
+/** Source ownership policy: HWPX placement flow for a planned object. */
 public enum Placement {
     INLINE,
     FLOATING,

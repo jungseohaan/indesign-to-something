@@ -42,6 +42,8 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
             planPassId: item.planPassId || null,
             candidateId: stampedCandidateId,
             stampedCandidateId: stampedCandidateId,
+            exportUnitId: item.exportUnitId || null,
+            exportUnitContractKey: item.exportUnitContractKey || null,
             candidateMatchStrategy: item.candidateMatchStrategy || null,
             file: item.file || null,
             bounds: item.bounds || null,
@@ -97,6 +99,7 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
         results: results,
         diagnostics: extractionDiagnostics || []
     };
+    extractionResults.exportUnits = _buildExportUnitsFromExtractionResults(extractionResults);
     extractionResults.validation = _validateExtractionResults(ctx.extractionPlan, extractionResults);
     return extractionResults;
 }
@@ -138,6 +141,7 @@ function _slimExtractionPlanForWrite(plan) {
         if (!c) return c;
         return {
             candidateId: c.candidateId,
+            exportUnitId: c.exportUnitId,
             passId: c.passId,
             pageIndex: c.pageIndex,
             unit: c.unit,

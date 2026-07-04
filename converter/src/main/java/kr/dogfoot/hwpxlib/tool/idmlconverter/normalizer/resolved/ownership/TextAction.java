@@ -1,6 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 
-/** SPEC-035: 텍스트 픽셀/문자 데이터의 최종 소유자. */
+/** Source ownership policy: final owner of text pixels and character data. */
 public enum TextAction {
     OWNED_BY_HWPX_TEXT,
     OWNED_BY_PNG,

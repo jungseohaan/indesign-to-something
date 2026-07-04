@@ -143,7 +143,7 @@ class RunBuilder {
             Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
                     ? cr.tracking() : sc.tracking;
             if (trackingVal != null && trackingVal != 0) {
-                // SPEC-029: IDML tracking 1/1000 em → HWPX spacing % (1/100 em). 표준 변환은 /10.
+                // resolved spacing policy: IDML tracking 1/1000 em → HWPX spacing % (1/100 em). 표준 변환은 /10.
                 // (이전 한국어 fontName 케이스는 × 0.5 = ×50 적용으로 자간 5배 과대 → 제거)
                 tr.letterSpacing((short) Math.round(trackingVal / 10.0));
             }

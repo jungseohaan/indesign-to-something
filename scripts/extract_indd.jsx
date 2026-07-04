@@ -136,6 +136,7 @@ function _loadExtractInddModules(scriptArgs, configPath) {
         "resolved_collectors.jsx",
         "text_collectors.jsx",
         "preview_export.jsx",
+        "export_units.jsx",
         "extraction_result_writer.jsx",
         "extraction_validation.jsx",
         "extraction_orchestrator.jsx"

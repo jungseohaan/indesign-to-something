@@ -10,7 +10,7 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
 
 - **브랜치**: `open-indd` — main 머지 전
 - **진행 중 SPEC**:
-  - [SPEC-025](docs/specs/SPEC-025-text-image-rendering-removal.md) (텍스트 이미지 렌더링 제거) — Tier A.5/A.6/B 구현 완료, **미테스트** (InDesign 재추출 필요). 잔여: A.1.5/A.4/A.8/Tier B 효과
+  - source ownership policy — Tier A.5/A.6/B 구현 완료, **미테스트** (InDesign 재추출 필요). 잔여: A.1.5/A.4/A.8/Tier B 효과
   - [SPEC-027](docs/specs/SPEC-027-badge-scribble-outline-png.md) (배지 scribble 외곽선 PNG 폴백) — 신규(2026-05-20). 일러스트 톤 배지 외곽선만 PNG, 텍스트는 HWPX. **데이터 조사 단계**
 - **기타 Active SPEC**: SPEC-012 (속성 우선순위), SPEC-014 (폰트 자동 매핑), SPEC-015 (AST 디버깅), SPEC-018 (시멘틱 M3)
 - **전체 SPEC 인덱스**: [docs/specs/INDEX.md](docs/specs/INDEX.md)
@@ -165,11 +165,11 @@ src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 │       │   ├── VisualPlacementPlan(Builder/Executor).java # 배치 plan/실행
 │       │   ├── VisualZOrderPlanner.java / VisualOverlapZOrderPlanner.java # z-순서 (zOrder 결정 권위, BI dead 복사본 삭제됨)
 │       │   ├── VisualCropper.java / VisualOverflowPlacer.java # 크롭/오버플로우
-│       │   ├── VisualTextEmphasisAbsorber.java # ABSORB_TEXT_STYLE 실행 (SPEC-036, 구 BI tryAbsorbTextEmphasisBackdrop)
-│       │   ├── VisualTfInlineCompositor.java   # TF inline 자식 PNG 합성 (SPEC-036, 구 BI compositeTfInlineVisuals)
+│       │   ├── VisualTextEmphasisAbsorber.java # ABSORB_TEXT_STYLE 실행 (source ownership policy, 구 BI tryAbsorbTextEmphasisBackdrop)
+│       │   ├── VisualTfInlineCompositor.java   # TF inline 자식 PNG 합성 (source ownership policy, 구 BI compositeTfInlineVisuals)
 │       │   └── VisualLayeringRules.java / VisualSyntheticLinePlacer.java / VisualPngHeader.java 등
 │       └── shared/ParagraphTextHelpers.java # phase 공유 헬퍼
-│       # ※ phase7/RenderableFramePlacer 는 제거됨 → 로직이 BackgroundInjector.inject + stage3/Visual* 로 흡수 (SPEC-035)
+│       # ※ phase7/RenderableFramePlacer 는 제거됨 → 로직이 BackgroundInjector.inject + stage3/Visual* 로 흡수 (source ownership policy)
 ├── converter/                     # HWPX 출력 (W4로 9개 모듈 분리)
 │   ├── ASTToHwpxConverter.java    # HWPX 변환 메인
 │   ├── HwpxConverterContext.java  # 변환 공유 상태

@@ -4,7 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildCo
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
- * SPEC-036: 렌더 그래픽의 "배치 vs 억제" 결정을 한 곳으로 모으기 위한 공용 결정 함수.
+ * source ownership policy: 렌더 그래픽의 "배치 vs 억제" 결정을 한 곳으로 모으기 위한 공용 결정 함수.
  *
  * <p>Stage 3 visual execution is plan-only. This resolver reports only the
  * already-decided ObjectPlan rejection reason; it does not create fallback

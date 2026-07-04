@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""SPEC-036 Tier 0 — 캐릭터화 하네스.
+"""source ownership policy Tier 0 — 캐릭터화 하네스.
 
 render-decisions.jsonl(변환 시 ResolvedBuildContext.recordRenderedDecision 출력)을 읽어
 OwnershipPlanner의 plan(planVisualAction)과 실제 배치 결과(decision)가 어긋나는 항목을 찾는다.
 
-plan↔실제 불일치 = SPEC-036이 해소하려는 "두 결정 시스템 공존" 버그의 정량 지표.
+plan↔실제 불일치 = source ownership policy이 해소하려는 "두 결정 시스템 공존" 버그의 정량 지표.
   - DROPPED_DESPITE_PLAN : plan=PLACE_FLOATING_PNG 인데 어디에도 배치 안 됨 → 누락(예: page53 일러스트)
   - PLACED_DESPITE_DROP  : plan=DROP_VISUAL 인데 floating 배치됨 → 중복
 

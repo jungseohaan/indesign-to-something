@@ -133,6 +133,9 @@ public final class VisualSyntheticLinePlacer {
                 if (childPlan.visualLayer != null) {
                     fig.visualLayer(childPlan.visualLayer.name());
                 }
+                fig.extractionCandidateId(childPlan.candidateId);
+                fig.extractionPlanPassId(childPlan.planPassId);
+                fig.extractionSlotRole(childPlan.slotRole);
                 fig.fromGroup(true);
                 fig.sourceId("synth_line_" + cid);
                 sections.get(pageIdx).addBlockAtFront(fig);

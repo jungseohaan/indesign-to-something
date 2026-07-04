@@ -566,7 +566,7 @@ public class ASTRunConverter {
             boolean hasText = vt != null
                     && vt.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
             if (!hasText) continue;
-            // SPEC-020: 빈 컨테이너(fill=None, stroke=None)는 PNG 안의 시각적 배경 위에
+            // inline anchor source policy: 빈 컨테이너(fill=None, stroke=None)는 PNG 안의 시각적 배경 위에
             // 텍스트를 오버레이하는 입력란이므로 PNG 폐기 대상이 아님.
             String fc = childTf.fillColor();
             String sc = childTf.strokeColor();
@@ -1222,7 +1222,7 @@ public class ASTRunConverter {
             // rendered bounds X 좌표 저장 (인라인 객체 정렬용)
             if (rg.bounds() != null && rg.bounds().length >= 4) {
                 obj.boundsX(rg.bounds()[1]);
-                // SPEC-020: 페이지 절대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
+                // inline anchor source policy: 페이지 절대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
                 // cellX/cellY fallback 으로 겹치는 문제 방지.
                 double scale = resolvedData != null ? resolvedData.scaleFactor() : 1.0;
                 obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(rg.bounds()[1] * scale));

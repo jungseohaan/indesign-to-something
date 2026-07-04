@@ -160,7 +160,7 @@ public class ResolvedDataReader {
             JsonArray arr = root.getAsJsonArray("editableTextFrameIds");
             Set<String> ids = new java.util.HashSet<>();
             for (int i = 0; i < arr.size(); i++) {
-                // SPEC-025: synthetic master instance IDs (예: "2453_pi20") 는 문자열로 그대로 사용
+                // source ownership policy: synthetic master instance IDs (예: "2453_pi20") 는 문자열로 그대로 사용
                 ids.add(arr.get(i).getAsString());
             }
             data.editableTextFrameIds(ids);
@@ -582,6 +582,7 @@ public class ResolvedDataReader {
             itemType = group.type();
         }
         group.itemType(itemType);
+        group.exportUnitId(getString(o, "exportUnitId"));
         group.planPassId(getString(o, "planPassId"));
         group.candidateId(getString(o, "candidateId"));
         group.compositeRole(getString(o, "compositeRole"));

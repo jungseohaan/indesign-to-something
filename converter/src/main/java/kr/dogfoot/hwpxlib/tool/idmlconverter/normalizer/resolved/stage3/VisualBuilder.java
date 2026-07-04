@@ -24,7 +24,7 @@ import java.util.List;
 /**
  * Stage 3 visual execution entry point.
  *
- * <p>SPEC-035의 목표 구조에서는 Stage 1 ObjectPlan이 모든 visual ownership,
+ * <p>source ownership policy의 목표 구조에서는 Stage 1 ObjectPlan이 모든 visual ownership,
  * placement, layer를 결정하고 이 클래스는 plan을 실행만 한다. 현재는 Phase 6/7의
  * legacy executors를 내부 브리지로 호출하되, 상위 파이프라인에서 Phase 6/7 직접 의존을
  * 제거해 이후 executor를 하나씩 흡수할 수 있게 한다.</p>
@@ -169,6 +169,9 @@ public final class VisualBuilder {
         if (plan.visualLayer != null) {
             fig.visualLayer(plan.visualLayer.name());
         }
+        fig.extractionCandidateId(plan.candidateId);
+        fig.extractionPlanPassId(plan.planPassId);
+        fig.extractionSlotRole(plan.slotRole);
         fig.fromGroup(true);
         fig.imageData(png);
         fig.imageFormat("png");

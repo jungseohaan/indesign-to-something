@@ -37,6 +37,9 @@ function _runRenderPhases(doc, ctx, allItems) {
                     ? ctx.extractionPlan
                     : _slimExtractionPlanForWrite(ctx.extractionPlan));
     _marker(ctx.outputDir, "03g_writeExtractionPlan_done");
+    writeJson(ctx.outputDir + "/source-graph.json",
+            _buildSourceGraphFromExtractionPlan(ctx.extractionPlan));
+    _marker(ctx.outputDir, "03g2_writeSourceGraph_done");
     var planDiagnostics = ctx._extractionPlanDiagnostics || {};
     var plannerBundleDiagnostics = planDiagnostics.plannerBundleDiagnostics
             || _buildPlannerBundles(ctx.extractionPlan.sourceItems, ctx.extractionPlan.candidates);
@@ -243,11 +246,13 @@ function _runRenderPhases(doc, ctx, allItems) {
 
     try {
         _marker(ctx.outputDir, "09d_extractionResults");
+        _stampExportUnitsOnRenderedItems(ctx, renderedFloatingItems);
         var extractionResults = _buildExtractionResults(ctx, renderedFloatingItems,
                 renderedImageFrames, renderedGraphicFrames, renderedVectorFrames,
                 renderedMasterGraphics, tfShellFrames,
                 decoResult.textlessShellDiagnostics || []);
         writeJson(ctx.outputDir + "/extraction-results.json", extractionResults);
+        writeJson(ctx.outputDir + "/export-units.json", extractionResults.exportUnits);
         if (extractionResults.validation && extractionResults.validation.status !== "OK") {
             throw new Error("Extraction plan validation failed: " + extractionResults.validation.issueCount + " issue(s)");
         }
@@ -313,7 +318,7 @@ function _runRenderPhases(doc, ctx, allItems) {
         _diagFile.close();
     } catch (eDiagWrite) {}
 
-    // 편집 가능 TextFrame ID 목록 (SPEC-025: synthetic master instance ID는 문자열로 유지)
+    // 편집 가능 TextFrame ID 목록 (source ownership policy: synthetic master instance ID는 문자열로 유지)
     var pngOwnedTextFrameIds = {};
     try {
         for (var _poi = 0; _poi < renderedFloatingItems.length; _poi++) {

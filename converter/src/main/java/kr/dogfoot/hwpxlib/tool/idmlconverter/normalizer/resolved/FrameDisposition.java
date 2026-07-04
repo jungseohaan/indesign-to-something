@@ -3,7 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved;
 /**
  * Legacy Phase가 각 DOM 객체(TF/Group/PNG)에 내린 처리 소유권 결정.
  *
- * <p>SPEC-035의 목표 구조에서는 {@code OwnershipPlanner/ObjectPlan}이
+ * <p>source ownership policy의 목표 구조에서는 {@code OwnershipPlanner/ObjectPlan}이
  * textAction과 visualAction을 한 번에 결정한다. 이 enum은 그 전까지
  * Phase 2/3/4/legacy Stage 3 visual executor 사이의 중복 배치를 막기 위한 임시 bridge 상태다.</p>
  *

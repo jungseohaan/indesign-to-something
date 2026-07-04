@@ -7,9 +7,9 @@
 > Goal: Decide IDML source ownership once, then execute that plan without
 > case-specific reinterpretation.
 
-This is the canonical policy for source ownership. `SPEC-035` is only a
-migration note; the former render-ownership SPEC-036 policy is consolidated
-here.
+This is the canonical policy for source ownership. Removed ownership SPECs are
+intentionally not linked from this policy; their usable rules have been
+consolidated here.
 
 ## 1. Core Principles
 

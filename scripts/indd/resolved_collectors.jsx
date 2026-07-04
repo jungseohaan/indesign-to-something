@@ -422,7 +422,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     } catch (e) {}
     _marker(outputDir, "10f_rangeStoryIds_pageItems_done");
 
-    // SPEC-025: off-canvas TF story 도 rangeStoryIds 에 추가.
+    // source ownership policy: off-canvas TF story 도 rangeStoryIds 에 추가.
     // off-canvas TF 는 parentPage=null 이므로 위 두 수집 경로에서 모두 누락됨.
     // instanceMasterFrames 가 스토리 클론을 만들려면 원본 story 가 storyById 에 있어야 함.
     _marker(outputDir, "10g_rangeStoryIds_offCanvas");
@@ -456,7 +456,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     } catch (e) {}
     _marker(outputDir, "10g_rangeStoryIds_offCanvas_done");
 
-    // SPEC-025: 마스터 스프레드의 TextFrame 스토리도 rangeStoryIds 에 추가 (Phase 5 master instancing 용)
+    // source ownership policy: 마스터 스프레드의 TextFrame 스토리도 rangeStoryIds 에 추가 (Phase 5 master instancing 용)
     // 증분 추출에서도 마스터 스토리는 항상 수집 (변경 여부와 무관)
     _marker(outputDir, "10h_rangeStoryIds_master");
     try {
@@ -495,10 +495,10 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     var textFrames = collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems);
     _marker(outputDir, "10j_collectTextFrames_done");
 
-    // SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
+    // source ownership policy Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
     // 증분 추출에서도 실행 (마스터 인스턴스는 경량 연산)
     _marker(outputDir, "10k_instanceMasterFrames");
-    try { instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds); } catch (ePhase5) { $.writeln("[SPEC-025 Phase 5 error] " + ePhase5); }
+    try { instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds); } catch (ePhase5) { $.writeln("[source ownership policy Phase 5 error] " + ePhase5); }
     _marker(outputDir, "10k_instanceMasterFrames_done");
 
     writeProgress(outputDir, "resolved_items", 0, rangePageCount);
@@ -615,7 +615,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             var mtf = msItems[mi];
             try { if (mtf.constructor.name !== "TextFrame") continue; } catch (e) { continue; }
             // editable 분류만 인스턴스화 (background/renderable 은 PNG 처리)
-            // SPEC-025 Phase 5 보강: auto page number TF(ACE 18, \u0018) 및 text variable TF(\uFEFF)도
+            // source ownership policy Phase 5 보강: auto page number TF(ACE 18, \u0018) 및 text variable TF(\uFEFF)도
             // hashiraEditable=true 일 때 인스턴스화 → 하시라/페이지번호 변환 지원.
             var cls = null;
             try { cls = classifyTextFrameCached(mtf); } catch (e) {}
@@ -663,7 +663,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             if (hashiraSpecialType === "textvar") continue;
             if (cls !== "editable" && !hashiraSpecialType) continue;
             var baseId = ""; try { baseId = mtf.id.toString(); } catch (e) { continue; }
-            // SPEC-025: 마스터 TF 가 위치한 master page 의 스프레드 내 인덱스(0=LEFT,1=RIGHT) →
+            // source ownership policy: 마스터 TF 가 위치한 master page 의 스프레드 내 인덱스(0=LEFT,1=RIGHT) →
             // 동일 인덱스의 content page 에만 인스턴스 생성 (반대편 페이지로의 잘못된 복제 방지).
             // side.toString() 은 InDesign 버전마다 반환값이 달라 신뢰하지 않음 → 인덱스 비교로 대체.
             var mtfSpreadPageIdx = -1;
@@ -853,10 +853,10 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
         }
     }
     if (frameClones > 0 || storyClones > 0) {
-        $.writeln("[SPEC-025 Phase 5] cloned " + frameClones + " master frame instances, " + storyClones + " story copies");
+        $.writeln("[source ownership policy Phase 5] cloned " + frameClones + " master frame instances, " + storyClones + " story copies");
     }
 
-    // SPEC-025 Phase 5 보강 (2026-05-22): off-canvas master override 처리.
+    // source ownership policy Phase 5 보강 (2026-05-22): off-canvas master override 처리.
     // TF.masterPageItem 이 설정된 일반 spread item 이 parentPage=null (pasteboard 영역, y<0 등) 일 경우
     // Phase 2 가 pageIndex<0 으로 건너뜀 → 인스턴스화 안 됨.
     // 해결: 부모 spread 의 모든 doc page 에 clone (보통 1~2 페이지 spread).
@@ -907,7 +907,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     try { __mpi = !!oTf.masterPageItem; } catch (e) {}
                     var __snippet = "";
                     try { __snippet = String(oTf.contents).substring(0, 40); } catch (e) {}
-                    $.writeln("[SPEC-025 off-canvas] id=" + oTf.id + " masterPageItem=" + __mpi + " text=" + __snippet);
+                    $.writeln("[source ownership policy off-canvas] id=" + oTf.id + " masterPageItem=" + __mpi + " text=" + __snippet);
                 } catch (e) {}
                 // 3) 텍스트 콘텐츠가 있어야 의미 있음 (background 빈칸/장식 제외).
                 //    classifyTextFrame 가 renderable 로 분류해도 master override 는 검색 가능 텍스트로 처리.
@@ -1021,9 +1021,9 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 }
             }
         }
-    } catch (eOC) { $.writeln("[SPEC-025 Phase 5 off-canvas error] " + eOC); }
+    } catch (eOC) { $.writeln("[source ownership policy Phase 5 off-canvas error] " + eOC); }
     if (offCanvasClones > 0) {
-        $.writeln("[SPEC-025 Phase 5] off-canvas overrides: " + offCanvasClones + " frame clones");
+        $.writeln("[source ownership policy Phase 5] off-canvas overrides: " + offCanvasClones + " frame clones");
     }
 }
 

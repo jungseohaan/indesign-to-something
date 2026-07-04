@@ -478,6 +478,287 @@ function _includeOwnedInlineVisualsInTextlessShellCandidates(candidates, allItem
     return candidates;
 }
 
+function _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems, candidates, candidateSeen) {
+    if (!sourceItems || !candidates) return candidates || [];
+    var indexes = null;
+    try { indexes = _buildSourceItemIndexes(sourceItems || []); } catch (eIndex) { indexes = null; }
+    if (!indexes) return candidates;
+    var sourceInfoById = indexes.sourceInfoById || {};
+    var childIdsByParentId = indexes.childIdsByParentId || {};
+
+    function info(id) {
+        return sourceInfoById ? sourceInfoById[String(id)] : null;
+    }
+
+    function hasInlineAnchorMetadata(src) {
+        if (!src) return false;
+        var ap = String(src.anchoredPosition || "");
+        var sp = String(src.storyAnchorPlacement || "");
+        if (ap.length > 0 && ap !== "PAGE") return true;
+        if (sp.length > 0 && sp !== "PAGE") return true;
+        return false;
+    }
+
+    function collectSubtree(rootId) {
+        var ids = [], seen = {};
+        function visit(id) {
+            if (id === null || id === undefined || seen[String(id)]) return;
+            seen[String(id)] = true;
+            ids.push(id);
+            var children = childIdsByParentId[String(id)] || [];
+            for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
+        }
+        visit(rootId);
+        return _sortedNumericIds(ids);
+    }
+
+    function sourceHasVisibleVisual(src) {
+        if (!src) return false;
+        if (String(src.kind || "") === "TextFrame") return false;
+        if (src.visible === false || src.hiddenLayer === true) return false;
+        return src.hasPlacedVisual === true
+                || src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true
+                || String(src.kind || "") === "Group";
+    }
+
+    function pushCandidate(candidate) {
+        if (!candidate || !candidate.candidateId) return;
+        var key = String(candidate.candidateId);
+        if (candidateSeen && candidateSeen[key]) return;
+        if (candidateSeen) candidateSeen[key] = true;
+        candidates.push(candidate);
+    }
+
+    for (var i = 0; i < sourceItems.length; i++) {
+        var root = sourceItems[i];
+        if (!root || String(root.kind || "") !== "Group") continue;
+        if (root.visible === false || root.hiddenLayer === true) continue;
+        if (hasInlineAnchorMetadata(root)) continue;
+        var subtree = collectSubtree(root.id);
+        if (subtree.length <= 1) continue;
+        var editableIds = [], editableSeen = {};
+        var visualIds = [], visualSeen = {};
+        var hasTableText = false;
+        var hasNestedInline = false;
+        for (var si = 0; si < subtree.length; si++) {
+            var src = info(subtree[si]);
+            if (!src) continue;
+            if (src.id !== root.id && hasInlineAnchorMetadata(src)) {
+                hasNestedInline = true;
+                break;
+            }
+            if (String(src.kind || "") === "TextFrame") {
+                if (src.hasTablesInStory === true || Number(src.tableCountInStory || 0) > 0) {
+                    hasTableText = true;
+                    break;
+                }
+                if (src.textFrameClass === "editable" && src.hasText === true) {
+                    _pushUniqueId(editableIds, editableSeen, src.id);
+                }
+                continue;
+            }
+            if (sourceHasVisibleVisual(src)) {
+                _pushUniqueId(visualIds, visualSeen, src.id);
+            }
+        }
+        if (hasNestedInline || hasTableText) continue;
+        if (editableIds.length < 2 || visualIds.length === 0) continue;
+        editableIds = _sortedNumericIds(editableIds);
+        visualIds = _sortedNumericIds(visualIds);
+        subtree = _sortedNumericIds(subtree);
+        var candidateId = _candidateCompositeId(
+                "pass.decoration_groups",
+                root.pageIndex,
+                subtree,
+                "textless_group_visual_slot");
+        pushCandidate({
+            candidateId: candidateId,
+            passId: "pass.decoration_groups",
+            sourceObjectIds: subtree,
+            executionSourceObjectIds: subtree.slice(0),
+            primarySourceObjectId: root.id,
+            pageIndex: root.pageIndex,
+            kind: root.kind || "Group",
+            unit: "GROUP_OR_ITEM",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            bounds: root.bounds || null,
+            parentId: root.parentId,
+            parentKind: root.parentKind || null,
+            composite: true,
+            compositeRole: "textless_group_visual_slot",
+            slotRole: "textless_group_visual_slot",
+            exportSourceObjectIds: visualIds,
+            exportTargetObjectId: root.id,
+            hiddenVisualSourceObjectIds: editableIds.slice(0),
+            visualSourceObjectIds: visualIds.slice(0),
+            ownedTextFrameIds: editableIds.slice(0),
+            editableTextFrameIds: editableIds.slice(0),
+            hiddenTextFrameIds: editableIds.slice(0),
+            requiresTextHidden: true,
+            textOwner: "hwpx_tf",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "OWNED_BY_HWPX_TEXT",
+            visualAction: "PLACE_TEXT_SHELL",
+            visualLayer: "LABEL_BACKDROP",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            ownershipSlot: "TEXTLESS_GROUP_VISUAL_SLOT",
+            reason: "multi_text_parent_group_textless_visual",
+            zOrder: root.zOrder !== undefined ? root.zOrder : 0,
+            required: false
+        });
+    }
+    return candidates;
+}
+
+function _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourceItems) {
+    if (!candidates || candidates.length === 0) {
+        return { candidates: candidates || [], suppressedCount: 0, suppressed: [] };
+    }
+    var indexes = null;
+    try { indexes = _buildSourceItemIndexes(sourceItems || []); } catch (eIndex) { indexes = null; }
+    var sourceInfoById = indexes ? indexes.sourceInfoById || {} : {};
+
+    function info(id) {
+        return sourceInfoById ? sourceInfoById[String(id)] : null;
+    }
+
+    function parentIdOf(id) {
+        var src = info(id);
+        if (!src) return null;
+        return src.parentId !== undefined && src.parentId !== null ? src.parentId : null;
+    }
+
+    function isDescendantOf(childId, parentId) {
+        if (childId === null || childId === undefined || parentId === null || parentId === undefined) return false;
+        if (String(childId) === String(parentId)) return true;
+        var cur = parentIdOf(childId);
+        var guard = 0;
+        while (cur !== null && cur !== undefined && guard++ < 100) {
+            if (String(cur) === String(parentId)) return true;
+            cur = parentIdOf(cur);
+        }
+        return false;
+    }
+
+    function ids(candidate, field) {
+        return _sortedNumericIds(candidate && candidate[field] || []);
+    }
+
+    function containsAll(ownerIds, childIds) {
+        if (!childIds || childIds.length === 0) return false;
+        var set = {};
+        for (var i = 0; ownerIds && i < ownerIds.length; i++) set[String(ownerIds[i])] = true;
+        for (var ci = 0; ci < childIds.length; ci++) {
+            if (!set[String(childIds[ci])]) return false;
+        }
+        return true;
+    }
+
+    function primaryId(candidate) {
+        if (!candidate) return null;
+        if (candidate.primarySourceObjectId !== undefined && candidate.primarySourceObjectId !== null) {
+            return candidate.primarySourceObjectId;
+        }
+        var sourceIds = ids(candidate, "sourceObjectIds");
+        return sourceIds.length > 0 ? sourceIds[0] : null;
+    }
+
+    function isTextlessParentGroup(candidate) {
+        return candidate
+                && candidate.passId === "pass.decoration_groups"
+                && candidate.slotRole === "textless_group_visual_slot"
+                && candidate.textOwner === "hwpx_tf";
+    }
+
+    function isInlineTextlessShellCarrier(candidate) {
+        return candidate
+                && candidate.passId === "pass.inline_objects"
+                && candidate.textOwner === "hwpx_tf"
+                && candidate.visualAction === "PLACE_TEXT_SHELL";
+    }
+
+    function isTextlessShellCarrier(candidate) {
+        return isTextlessParentGroup(candidate) || isInlineTextlessShellCarrier(candidate);
+    }
+
+    function isSuppressibleChild(candidate) {
+        if (!candidate || candidate.disabled === true) return false;
+        if (isTextlessParentGroup(candidate)) return true;
+        if (candidate.visualAction === "DROP_VISUAL") return false;
+        if (candidate.materialization === "HWPX_TEXT"
+                || candidate.materialization === "HWPX_TABLE_STYLE"
+                || candidate.materialization === "NATIVE_SOURCE_SHAPE") {
+            return false;
+        }
+        return candidate.passId === "pass.decoration_groups"
+                || candidate.passId === "pass.image_textless_groups"
+                || candidate.passId === "pass.image_placed_frames"
+                || candidate.passId === "pass.vector_shape_frames"
+                || candidate.passId === "pass.complex_graphic_frames";
+    }
+
+    var parents = [];
+    for (var pi = 0; pi < candidates.length; pi++) {
+        if (isTextlessShellCarrier(candidates[pi])) {
+            parents.push({
+                candidate: candidates[pi],
+                primaryId: primaryId(candidates[pi]),
+                editableIds: ids(candidates[pi], "editableTextFrameIds")
+            });
+        }
+    }
+    if (parents.length === 0) {
+        return { candidates: candidates, suppressedCount: 0, suppressed: [] };
+    }
+
+    var out = [];
+    var suppressed = [];
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!isSuppressibleChild(candidate)) {
+            out.push(candidate);
+            continue;
+        }
+        var candidatePrimary = primaryId(candidate);
+        var coveredBy = null;
+        for (var pp = 0; pp < parents.length; pp++) {
+            var parent = parents[pp];
+            if (String(candidate.pageIndex) !== String(parent.candidate.pageIndex)) continue;
+            if (String(candidate.candidateId || "") === String(parent.candidate.candidateId || "")) continue;
+            if ((isTextlessParentGroup(candidate) || candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0)
+                    && !containsAll(parent.candidate.editableTextFrameIds || [],
+                            candidate.editableTextFrameIds || [])) {
+                continue;
+            }
+            if (!isDescendantOf(candidatePrimary, parent.primaryId)) continue;
+            coveredBy = parent.candidate;
+            break;
+        }
+        if (!coveredBy) {
+            out.push(candidate);
+            continue;
+        }
+        suppressed.push({
+            candidateId: candidate.candidateId || null,
+            suppressedByCandidateId: coveredBy.candidateId || null,
+            pageIndex: candidate.pageIndex,
+            primarySourceObjectId: candidatePrimary,
+            reason: "covered_by_textless_parent_group_export"
+        });
+    }
+    return {
+        candidates: out,
+        suppressedCount: suppressed.length,
+        suppressed: suppressed
+    };
+}
+
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
     var candidates = [];
@@ -513,6 +794,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d10a_plan_restoreTextFrameStyleShellCandidates");
     candidates = _includeOwnedInlineVisualsInTextlessShellCandidates(candidates, allItems, planCache, sourceItems);
     _marker(ctx.outputDir, "03d11_plan_includeInlineVisuals");
+    _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
+    _marker(ctx.outputDir, "03d12_plan_multiTextParentGroups");
     var sourceClusterQueryDiagnostics = _buildSourceClusterQueryDiagnostics(sourceClusterIndex, candidates);
     _marker(ctx.outputDir, "03d13_plan_clusterQueries");
     var plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, candidates);
@@ -527,8 +810,13 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             executionCandidates, sourceItems);
     executionCandidates = sourceSlotCanonicalizationDiagnostics.candidates;
     _marker(ctx.outputDir, "03d16b_plan_canonicalizeSourceSlots");
+    var multiTextParentSuppressionDiagnostics = _suppressChildExportsCoveredByTextlessGroupCandidates(
+            executionCandidates, sourceItems);
+    executionCandidates = multiTextParentSuppressionDiagnostics.candidates;
+    _marker(ctx.outputDir, "03d16b2_plan_suppressTextlessGroupChildren");
     if (sourceSlotCanonicalizationDiagnostics.diagnostics
-            && sourceSlotCanonicalizationDiagnostics.diagnostics.suppressedCount > 0) {
+            && sourceSlotCanonicalizationDiagnostics.diagnostics.suppressedCount > 0
+            || multiTextParentSuppressionDiagnostics.suppressedCount > 0) {
         plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, executionCandidates);
         _marker(ctx.outputDir, "03d16c_plan_rebuildPlannerBundlesAfterSubsumed");
         objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics);
@@ -537,6 +825,10 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         _marker(ctx.outputDir, "03d16e_plan_rebuildExecutionCandidatesAfterSubsumed");
         executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
         _marker(ctx.outputDir, "03d16f_plan_excludeChildShellSourcesFromParentExportsAfterRebuild");
+        multiTextParentSuppressionDiagnostics = _suppressChildExportsCoveredByTextlessGroupCandidates(
+                executionCandidates, sourceItems);
+        executionCandidates = multiTextParentSuppressionDiagnostics.candidates;
+        _marker(ctx.outputDir, "03d16g_plan_suppressTextlessGroupChildrenAfterRebuild");
     }
     var sourceSlotRegistryDiagnostics = _buildSourceSlotRegistryDiagnostics(
             plannerBundleDiagnostics, objectPlanDiagnostics, sourceItems);

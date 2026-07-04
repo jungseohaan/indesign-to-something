@@ -68,7 +68,7 @@
 - 단순: 풀수록 수학 1 페이지
 - 중간: 중3영어교과서 u1 첫 페이지 (테이블 + 인라인 + 배지)
 - 복잡: 중3-1국어 페이지 (수식 + 그림 + 다단)
-- 회귀: 최근 SPEC 영향 케이스 (SPEC-022/023/024 픽스 대상)
+- 회귀: source ownership policy와 최근 RuleBelow 픽스 대상
 
 각 케이스에 대해:
 - `output.idml`, `resolved.json`, `Links/`, 추출된 `pageBackgrounds/`, `renderedFloating/`을 `testFile/golden/<case>/` 에 보존

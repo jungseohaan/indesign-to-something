@@ -166,7 +166,7 @@ public final class StoryConverter {
                         continue;
                     }
                     // sourceId → DOM decimal → textFrame → storyId
-                    // SPEC-025: master instance ("_pi" 접미사) 도 처리
+                    // source ownership policy: master instance ("_pi" 접미사) 도 처리
                     String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
                     if (domId == null) continue;
                     if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) continue;
@@ -2727,7 +2727,7 @@ public final class StoryConverter {
             // 런 변환 (ResolvedParagraph → runs 직접)
             boolean stopAfterThisRun = false;
             boolean firstTextRunAfterLeadingAnchor = false;
-            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 의 너비를 paragraph leftMargin 으로
+            // source ownership policy: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 의 너비를 paragraph leftMargin 으로
             // 적용해 InDesign 의 "1 ←여기부터 내려쓰기" 효과 재현 (예: 페이지 32 "가 같은 사건을..." 발문)
             ResolvedTextFrame firstAnchorTf = null;
             List<ResolvedRun> runs = rp.runs();
@@ -2867,7 +2867,7 @@ public final class StoryConverter {
                         if (firstTextRunAfterLeadingAnchor && !preserveUnderlineBlank) {
                             runText = stripLeadingAnchorLayoutSpaces(runText);
                         }
-                        // SPEC-025: ACE 7 (IndentToHere, \u0007 or \u0008) 감지 — 첫 inline anchor 이후
+                        // source ownership policy: ACE 7 (IndentToHere, \u0007 or \u0008) 감지 — 첫 inline anchor 이후
                         // 처음 등장한 위치에서 후속 줄 좌측 들여쓰기를 위해 paragraph leftMargin 적용
                         if (firstAnchorTf != null && para.leftMargin() == null) {
                             int aceIdx = runText.indexOf('\u0007');

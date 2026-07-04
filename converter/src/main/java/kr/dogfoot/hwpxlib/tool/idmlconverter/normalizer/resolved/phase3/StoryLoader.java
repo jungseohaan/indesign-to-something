@@ -149,7 +149,7 @@ public class StoryLoader {
                 resolvedRuns = resolvedStory.paragraphs().get(i).runs();
             }
 
-            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 다음에 \u0007 (BEL) 또는
+            // source ownership policy: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 다음에 \u0007 (BEL) 또는
             // \u0008 (BS, IDML 변환값) 이 나오면 첫 anchor TF 폭만큼 paragraph leftMargin 적용.
             // (예: "1  가 같은 사건을..." 패턴에서 "가" 부터의 줄은 "1" 폭만큼 들여쓰기)
             if (resolvedRuns != null && resolvedRuns.size() >= 2 && para.leftMargin() == null) {
@@ -476,7 +476,7 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    // SPEC-025: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
+                                    // source ownership policy: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
                                     // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
                                     java.util.List<ASTInlineObject> boxList =
                                             InlineFrameHandler.tryInlineGroupAsBoxList(ctx, domId);
@@ -564,7 +564,7 @@ public class StoryLoader {
                                                 }
                                                 para.addItem(textRun);
                                             } else {
-                                                // SPEC-025: 빈 inline TextFrame 이지만 fillColor 가 있으면 데코 박스 (예: 본문 빈칸 강조 박스)
+                                                // source ownership policy: 빈 inline TextFrame 이지만 fillColor 가 있으면 데코 박스 (예: 본문 빈칸 강조 박스)
                                                 ASTInlineObject emptyBox = InlineFrameHandler.tryInlineEmptyFilledBoxAsFrame(ctx, domId);
                                                 if (emptyBox != null) {
                                                     para.addItem(emptyBox);

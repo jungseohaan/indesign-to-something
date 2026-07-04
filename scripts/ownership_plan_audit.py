@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit SPEC-035/SPEC-036 ownership output for one extract directory.
+"""Audit source ownership policy ownership output for one extract directory.
 
 The converter writes three useful JSONL files next to resolved.json:
 

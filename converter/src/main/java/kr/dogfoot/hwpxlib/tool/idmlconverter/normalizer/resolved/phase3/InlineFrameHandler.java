@@ -190,7 +190,7 @@ public class InlineFrameHandler {
     }
 
     /**
-     * SPEC-025: Group 앵커가 다수의 시각적 박스(예: 자모 ㅍ ㅎ ㅂ ㅅ 배지)를 포함하면
+     * source ownership policy: Group 앵커가 다수의 시각적 박스(예: 자모 ㅍ ㅎ ㅂ ㅅ 배지)를 포함하면
      * 각 자식 TextFrame 을 개별 INLINE_TEXT_FRAME (rounded box 스타일) 로 분해하여 검색 가능한
      * 텍스트로 렌더링한다.
      *
@@ -940,7 +940,7 @@ public class InlineFrameHandler {
             }
         }
 
-        // SPEC-028: Oval 배경 배지인데 종횡비가 심하게 틀어진 경우 (ratio < 0.6),
+        // inline placement policy: Oval 배경 배지인데 종횡비가 심하게 틀어진 경우 (ratio < 0.6),
         // Group bounds 에 TextFrame 높이까지 포함되어 비례 왜곡이 발생한 것으로 판단.
         // (예: AboveLine 앵커, 원형 배경+텍스트프레임이 상하 적층된 구조 → 6.48×12.27pt → "●" 오렌더)
         // 이 경우 INLINE_TEXT_FRAME 생성을 포기하고 space run으로 대체 (floating badge 가 시각을 담당).
@@ -1409,15 +1409,17 @@ public class InlineFrameHandler {
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
             imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
-            obj.imageFillData(imageData);
-            obj.forceImageFill(true);
-            applyInlineShellTextMargins(ctx, obj, shellPlan, anchorItem, childTfs);
             if (visibleShellTextFrameCount(childTfs) > 1) {
-                buildCompositeInlineShellParagraph(ctx, childTfs, obj);
+                obj.imageFillData(imageData);
+                obj.forceImageFill(true);
+                attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
                 for (ResolvedTextFrame childTf : childTfs) {
                     markInlineShellChildTextPlaced(ctx, childTf);
                 }
             } else {
+                obj.imageFillData(imageData);
+                obj.forceImageFill(true);
+                applyInlineShellTextMargins(ctx, obj, shellPlan, anchorItem, childTfs);
                 for (ResolvedTextFrame childTf : childTfs) {
                     if (isOrcCarrierTextFrame(childTf)) {
                         continue;
@@ -1434,6 +1436,66 @@ public class InlineFrameHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static void attachInlineShellChildTextOverlays(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] shellBounds,
+            java.util.List<ResolvedTextFrame> childTfs,
+            ASTInlineObject shellObj) {
+        if (ctx == null || shellObj == null || childTfs == null || childTfs.isEmpty()) return;
+        if (!validBounds(shellBounds)) return;
+        for (ResolvedTextFrame childTf : childTfs) {
+            ASTInlineObject overlay = buildInlineShellChildTextOverlay(ctx, pageIndex, shellBounds, childTf, shellObj);
+            if (overlay != null) shellObj.addOverlayFrame(overlay);
+        }
+    }
+
+    private static ASTInlineObject buildInlineShellChildTextOverlay(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] shellBounds,
+            ResolvedTextFrame childTf,
+            ASTInlineObject shellObj) {
+        if (ctx == null || childTf == null || shellObj == null) return null;
+        if (isOrcCarrierTextFrame(childTf)) return null;
+        String text = normalizeInlineShellText(childTf.frameVisibleText());
+        if (text.isEmpty()) return null;
+        double[] tb = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellBounds);
+        if (!validBounds(tb)) return null;
+
+        double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double textW = Math.abs(tb[3] - tb[1]) * scale;
+        double textH = Math.abs(tb[2] - tb[0]) * scale;
+        if (textW <= 0 || textH <= 0) return null;
+
+        ASTInlineObject overlay = new ASTInlineObject();
+        overlay.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        overlay.sourceId("u" + childTf.id());
+        overlay.width(CoordinateConverter.pointsToHwpunits(textW));
+        overlay.height(CoordinateConverter.pointsToHwpunits(textH));
+        overlay.keepInline(false);
+        overlay.isOverlay(true);
+        overlay.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
+        overlay.verticalJustification(childTf.verticalJustification() != null
+                ? childTf.verticalJustification()
+                : "CenterAlign");
+
+        long relX = CoordinateConverter.pointsToHwpunits((tb[1] - shellBounds[1]) * scale);
+        long relY = CoordinateConverter.pointsToHwpunits((tb[0] - shellBounds[0]) * scale);
+        overlay.overlayX(relX);
+        overlay.overlayY(relY);
+        overlay.overlayParentWidth(shellObj.width());
+        overlay.overlayParentHeight(shellObj.height());
+        double[] pageLocal = normalizeSpreadBoundsToPageLocal(ctx, pageIndex, tb);
+        overlay.resolvedPageX(CoordinateConverter.pointsToHwpunits(pageLocal[1] * scale));
+        overlay.resolvedPageY(CoordinateConverter.pointsToHwpunits(pageLocal[0] * scale));
+        overlay.resolvedWidth(overlay.width());
+        overlay.resolvedHeight(overlay.height());
+
+        buildBadgeParagraph(ctx, childTf, overlay);
+        return overlay.paragraphs() == null || overlay.paragraphs().isEmpty() ? null : overlay;
     }
 
     private static boolean extractedShellImageOwnsGeometry(ObjectPlan plan) {
@@ -2348,7 +2410,7 @@ public class InlineFrameHandler {
     }
 
     /**
-     * SPEC-025: 인라인 앵커가 빈(텍스트 없음) TextFrame 이면서 fillColor 가 있는 데코 박스
+     * source ownership policy: 인라인 앵커가 빈(텍스트 없음) TextFrame 이면서 fillColor 가 있는 데코 박스
      * (예: 본문 빈칸 / 강조 박스) → INLINE_TEXT_FRAME 으로 변환.
      *
      * 조건:
@@ -2888,7 +2950,7 @@ public class InlineFrameHandler {
         if (story != null && !story.paragraphs().isEmpty()) {
             ResolvedParagraph rp = story.paragraphs().get(0);
             if (rp.runs() != null && !rp.runs().isEmpty()) {
-                // SPEC-025: 첫 run 이 비어 있는 경우가 있어 (placeholder/empty),
+                // source ownership policy: 첫 run 이 비어 있는 경우가 있어 (placeholder/empty),
                 // 실제 콘텐츠가 있는 첫 run 을 찾아 폰트/색상 추출
                 ResolvedRun rr = null;
                 for (ResolvedRun candidate : rp.runs()) {
@@ -2927,7 +2989,7 @@ public class InlineFrameHandler {
                         run.underline(true);
                     }
                 }
-                // SPEC-025: IDML 단락에 RuleBelow="true" 가 있거나 paragraph style 에 ruleBelowOn=true 면
+                // source ownership policy: IDML 단락에 RuleBelow="true" 가 있거나 paragraph style 에 ruleBelowOn=true 면
                 // 인라인 텍스트에 char-level underline 적용 (예: "소단원 도입 예(1103)" style)
                 IDMLParagraph ip0 = idmlStory.paragraphs().get(0);
                 boolean hasRuleBelow = ip0.ruleBelowOn();
@@ -3191,7 +3253,7 @@ public class InlineFrameHandler {
      * 교과서 빈칸 채우기 문제의 ( ) 안 공백 등.
      */
     static ASTTextRun createSpaceRunForEmptyAnchor(ResolvedBuildContext ctx, int anchoredObjectId) {
-        // SPEC-020: 빈칸박스 TextFrame(공백 내용)은 실제 bounds 폭에 맞춰 공백 수 계산
+        // inline anchor source policy: 빈칸박스 TextFrame(공백 내용)은 실제 bounds 폭에 맞춰 공백 수 계산
         // + 밑줄 적용 — 배경 PNG의 "빈칸 밑줄"과 위치/길이 동조.
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
         double widthPt = 20.0;
@@ -3303,7 +3365,7 @@ public class InlineFrameHandler {
                     double[] bounds = effectiveBounds;
                     if (bounds != null && bounds.length >= 4) {
                         obj.boundsX(bounds[1]); // rendered X 좌표 (인라인 정렬용)
-                        // SPEC-020: 페이지 상대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
+                        // inline anchor source policy: 페이지 상대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
                         // cellX/cellY fallback 으로 겹치는 문제를 막는다.
                         // rendered bounds는 spread 좌표일 수 있으므로 page bounds를 빼서 HWP PAPER 좌표로 정규화한다.
                         double[] pageRelative = toPageRelativeRenderedBounds(ctx, rg, bounds);
@@ -4062,6 +4124,28 @@ public class InlineFrameHandler {
             double shift = Math.rint((out[0] - shellBounds[0]) / pageHeight) * pageHeight;
             out[0] -= shift;
             out[2] -= shift;
+        }
+        return out;
+    }
+
+    private static double[] normalizeSpreadBoundsToPageLocal(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] bounds) {
+        if (!validBounds(bounds)) return bounds;
+        double[] out = new double[] { bounds[0], bounds[1], bounds[2], bounds[3] };
+        double[] page = pageBounds(ctx, pageIndex);
+        if (page == null || page.length < 4) return out;
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double pageTop = page[0] / scale;
+        double pageLeft = page[1] / scale;
+        if (pageLeft > 1.0 && out[1] >= pageLeft - 0.5) {
+            out[1] -= pageLeft;
+            out[3] -= pageLeft;
+        }
+        if (pageTop > 1.0 && out[0] >= pageTop - 0.5) {
+            out[0] -= pageTop;
+            out[2] -= pageTop;
         }
         return out;
     }

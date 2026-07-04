@@ -140,7 +140,7 @@ public final class FramePlacer {
                 if (shouldSkipNonEditableTf(ctx, tf, tfDomId, idx)) continue;
             }
             // badge_group_child(non-editable)는 부모 PNG가 텍스트를 포함하므로 글상자 배치 건너뜀.
-            // SPEC-025: editable로 승격된 frame은 !isEditableTextFrame 가드로 보호됨 → 건너뛰지 않음
+            // source ownership policy: editable로 승격된 frame은 !isEditableTextFrame 가드로 보호됨 → 건너뛰지 않음
             boolean skipAsBadgeChild = !editableForHwpx
                     && tfDomId >= 0 && idx.badgeChildDomIds.contains(tfDomId);
             if (skipAsBadgeChild) { continue; }
@@ -163,7 +163,7 @@ public final class FramePlacer {
             double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
             double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
 
-            // SPEC-035: linked/threaded TextFrames do not merge geometry.
+            // source ownership policy: linked/threaded TextFrames do not merge geometry.
             boolean hasNextPageChain = hasNextPageChainOnDifferentPage(ctx, tf);
 
             LocalFrameBounds localBounds = computeLocalFrameBounds(
@@ -201,7 +201,7 @@ public final class FramePlacer {
                 double origH = h;
                 h += y;
                 y = 0;
-                // SPEC-025: _oc 해시라 헤더 등 페이지 위쪽 경계선에 위치한 TF (예: y=-8, h=8) 는
+                // source ownership policy: _oc 해시라 헤더 등 페이지 위쪽 경계선에 위치한 TF (예: y=-8, h=8) 는
                 // 클램핑 후 h=0 이 되어 스킵됨 → 원래 높이를 복원해 페이지 상단에 배치.
                 if (h <= 0 && origH > 0) h = origH;
             }
@@ -232,7 +232,7 @@ public final class FramePlacer {
             if (w <= 0) continue;
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
-            // SPEC-025: master instance clones use synthetic ids like "2453_pi20" — not pure numeric.
+            // source ownership policy: master instance clones use synthetic ids like "2453_pi20" — not pure numeric.
             block.sourceId(ParagraphTextHelpers.domIdToSourceId(tf.id()));
             block.storyId(tf.storyId());
             // \uFFFC 로 시작하는 TF에 inline TF가 좌측 가장자리를 공유하는 경우

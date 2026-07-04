@@ -8,7 +8,7 @@
 function loadConversionConfig(configPath) {
     var defaults = {
         rendering: {
-            // SPEC-025: 텍스트 이미지 렌더링 제거 (Tier A/B). false면 기존 동작.
+            // source ownership policy: 텍스트 이미지 렌더링 제거 (Tier A/B). false면 기존 동작.
             // - masterPageEditable: 조건 5 (item.masterPageItem 오버라이드) → editable
             // - hashiraEditable: 조건 6 (margin + 하시라 paragraph/character style) → editable
             // - rotationEditable: 회전 텍스트 (조건 8.5) → editable + HWPX rotation
@@ -16,7 +16,7 @@ function loadConversionConfig(configPath) {
             textFrame: { maxTextLength: 30,
                 decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 },
                 decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true },
-                // SPEC-025 추가 플래그
+                // source ownership policy 추가 플래그
                 // - inlineTextEditable: 조건 7 (isInlineItem) 에서 텍스트 콘텐츠가 있으면 editable 로
                 // - groupShortTextEditable: 조건 8 (Group 안 짧은 장식) 도 editable 로 (콘텐츠 텍스트 보존)
                 // - oneCharEditable: 조건 11 (≤1자 빈 프레임) 에서 실제 1자가 있으면 editable 로
@@ -69,7 +69,7 @@ function loadConversionConfig(configPath) {
                 ["opacityThreshold", "tintThreshold"]);
             _mergeKeys(defaults.rendering.rotation, r.rotation,
                 ["minAngle"]);
-            // SPEC-025 플래그
+            // source ownership policy 플래그
             _mergeKeys(defaults.rendering.textFrame.spec025,
                 r.textFrame && r.textFrame.spec025,
                 ["masterPageEditable", "hashiraEditable", "rotationEditable", "nonprintingEditable",

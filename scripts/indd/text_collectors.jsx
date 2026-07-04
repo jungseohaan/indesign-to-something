@@ -758,7 +758,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                     try { runData.strikeThru = rng.strikeThru; } catch (e) {}
 
                     // U+FFFC(인라인 마커) + U+0016(블록 앵커 마커) 분리
-                    // SPEC-020: InDesign이 사용자 정의 위치/Above-Line 앵커에는 \x16 을 쓰는데
+                    // inline anchor source policy: InDesign이 사용자 정의 위치/Above-Line 앵커에는 \x16 을 쓰는데
                     // 기존 로직은 \uFFFC 만 인식해서 모든 \x16 앵커가 누락됐다.
                     var runText = runData.text || "";
                     if (runText.indexOf("\uFFFC") >= 0 || runText.indexOf("\u0016") >= 0) {
@@ -978,7 +978,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                                 runData.fillColor = cellRng.fillColor.name;
                                             }
                                         } catch (er) {}
-                                        // SPEC-020: 셀 런도 inline anchor 마커(\uFFFC/\u0016) 분리
+                                        // inline anchor source policy: 셀 런도 inline anchor 마커(\uFFFC/\u0016) 분리
                                         var cellRunText = runData.text || "";
                                         if (cellRunText.indexOf("\uFFFC") >= 0 || cellRunText.indexOf("\u0016") >= 0) {
                                             var cellParts = cellRunText.split(/[\uFFFC\u0016]/);
@@ -1031,7 +1031,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                 cellData.paragraphs.push(cpData);
                             }
                         } catch (ec3) {}
-                        // SPEC-020: 셀 텍스트에 anchor 마커가 없어도 (IDML에 <Content>가 없고
+                        // inline anchor source policy: 셀 텍스트에 anchor 마커가 없어도 (IDML에 <Content>가 없고
                         // Group이 CharacterStyleRange에 직접 임베드된 경우) cell.allPageItems
                         // 로 fallback. 이미 paragraphs 에서 잡힌 anchor ID는 건너뛴다.
                         try {
@@ -1221,7 +1221,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
             try { fData.cornerRadius = tf.topLeftCornerRadius; } catch (e) {}
             _copyLayerInfo(fData, tf);
 
-            // SPEC-025: 진단/분류 정보 (텍스트 이미지 렌더링 제거 작업용)
+            // source ownership policy: 진단/분류 정보 (텍스트 이미지 렌더링 제거 작업용)
             // SPEC-030: classification 제거 (Java 신 파이프라인 미사용)
             try { fData.isMasterPageItem = !!tf.masterPageItem; } catch (e) { fData.isMasterPageItem = false; }
             try { fData.nonprinting = !!tf.nonprinting; } catch (e) { fData.nonprinting = false; }
@@ -1331,7 +1331,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
 }
 
 /**
- * SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화한다.
+ * source ownership policy Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화한다.
  *
  * 각 master TextFrame 에 대해:
  * 1. 적용된 doc page 마다 clone TextFrame entry 추가 (synthetic id+storyId)

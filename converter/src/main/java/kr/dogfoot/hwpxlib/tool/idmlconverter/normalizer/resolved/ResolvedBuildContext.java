@@ -136,7 +136,7 @@ public final class ResolvedBuildContext {
     public java.util.Set<Integer> customAnchoredInlineIds = new java.util.HashSet<>();
 
     /*
-     * SPEC-035 migration note:
+     * source ownership policy migration note:
      *
      * 아래 disposition/map/set 묶음은 현재 legacy Phase 2/3/6/7 사이에서
      * "이미 배치됨", "inline으로 유지", "floating으로 전환", "배경 shell 흡수"
@@ -349,10 +349,13 @@ public final class ResolvedBuildContext {
     /** rendered page_object의 최종 배치/스킵 사유 추적용 JSONL 라인. */
     public java.util.List<String> renderDecisionLines = new java.util.ArrayList<>();
 
-    /** SPEC-035 OwnershipPlanner 관찰 모드: ObjectPlan JSONL 라인. */
+    /** ExtractionPlan candidate -> PNG -> ObjectPlan -> HWPX placement human-readable trace. */
+    public java.util.List<String> ownershipTraceLines = new java.util.ArrayList<>();
+
+    /** source ownership policy OwnershipPlanner 관찰 모드: ObjectPlan JSONL 라인. */
     public java.util.List<String> ownershipPlanLines = new java.util.ArrayList<>();
 
-    /** SPEC-035 OwnershipPlanner 관찰 모드: invariant warning JSONL 라인. */
+    /** source ownership policy OwnershipPlanner 관찰 모드: invariant warning JSONL 라인. */
     public java.util.List<String> ownershipWarningLines = new java.util.ArrayList<>();
 
     /**
@@ -367,7 +370,7 @@ public final class ResolvedBuildContext {
     public TextFlowIndex textFlowIndex = TextFlowIndex.empty();
 
     /**
-     * SPEC-035 Stage 1 ObjectPlan.
+     * source ownership policy Stage 1 ObjectPlan.
      *
      * <p>현재는 legacy Phase가 전부 plan executor로 이관되기 전의 중간 단계다.
      * 실행 단계는 여기서 선언된 plan을 정확한 render/placement key로 조회해 실행만 한다.
@@ -377,6 +380,7 @@ public final class ResolvedBuildContext {
     private final java.util.Map<String, ObjectPlan> ownershipPlanRenderedCache = new java.util.HashMap<>();
     private java.util.Map<String, ObjectPlan> ownershipPlanByRenderFileKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByRenderKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByCandidateKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
@@ -509,6 +513,7 @@ public final class ResolvedBuildContext {
         ownershipPlanRenderedCache.clear();
         ownershipPlanByRenderFileKey = null;
         ownershipPlanByRenderKey = null;
+        ownershipPlanByCandidateKey = null;
         ownershipPlanByDomKey = null;
         ownershipPlanByFileBoundsKey = null;
         ownershipPlanByFileKey = null;
@@ -769,8 +774,11 @@ public final class ResolvedBuildContext {
         if (rg == null || placement == null) return null;
         ObjectPlan plan = renderedOnly(ownershipPlanByRenderFileKey.get(
                 renderFileKey(rg.pageIndex(), placement, rg.id(), rg.file())));
+        ObjectPlan candidatePlan = renderedOnly(ownershipPlanByCandidateKey.get(
+                candidateKey(rg.pageIndex(), placement, rg.candidateId())));
         ObjectPlan renderPlan = renderedOnly(ownershipPlanByRenderKey.get(
                 renderKey(rg.pageIndex(), placement, rg.id())));
+        if (plan == null) plan = candidatePlan;
         if (plan == null) plan = renderPlan;
         if (plan == null) {
             plan = renderedOnly(ownershipPlanByFileBoundsKey.get(
@@ -798,6 +806,7 @@ public final class ResolvedBuildContext {
         if (!ownershipPlanIndexDirty && ownershipPlanByRenderFileKey != null) return;
         ownershipPlanByRenderFileKey = new java.util.HashMap<>();
         ownershipPlanByRenderKey = new java.util.HashMap<>();
+        ownershipPlanByCandidateKey = new java.util.HashMap<>();
         ownershipPlanByDomKey = new java.util.HashMap<>();
         ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
         ownershipPlanByFileKey = new java.util.HashMap<>();
@@ -811,6 +820,9 @@ public final class ResolvedBuildContext {
                         renderKey(plan.pageIndex, plan.placement, plan.renderId),
                         plan);
             }
+            putPreferred(ownershipPlanByCandidateKey,
+                    candidateKey(plan.pageIndex, plan.placement, plan.candidateId),
+                    plan);
             putPreferred(ownershipPlanByDomKey, domKey(plan.pageIndex, plan.placement, plan.domId), plan);
             putPreferred(ownershipPlanByFileBoundsKey,
                     fileBoundsKey(plan.pageIndex, plan.placement, plan.file, plan.bounds),
@@ -922,6 +934,11 @@ public final class ResolvedBuildContext {
         return pageIndex + "|" + placement + "|" + renderId;
     }
 
+    private static String candidateKey(int pageIndex, Placement placement, String candidateId) {
+        if (candidateId == null || candidateId.isEmpty()) return null;
+        return pageIndex + "|" + placement + "|" + candidateId;
+    }
+
     private static String domKey(int pageIndex, Placement placement, int domId) {
         return pageIndex + "|" + placement + "|" + domId;
     }
@@ -973,6 +990,10 @@ public final class ResolvedBuildContext {
                 .append("\"pageIndex\":").append(rg.pageIndex()).append(',')
                 .append("\"file\":\"").append(jsonEscape(executedFile)).append("\",")
                 .append("\"sourceFile\":\"").append(jsonEscape(rg.file())).append("\",")
+                .append("\"exportUnitId\":\"").append(jsonEscape(rg.exportUnitId())).append("\",")
+                .append("\"candidateId\":\"").append(jsonEscape(rg.candidateId())).append("\",")
+                .append("\"planPassId\":\"").append(jsonEscape(rg.planPassId())).append("\",")
+                .append("\"slotRole\":\"").append(jsonEscape(rg.slotRole())).append("\",")
                 .append("\"reason\":\"").append(jsonEscape(rg.reason())).append("\",")
                 .append("\"itemType\":\"").append(jsonEscape(rg.itemType())).append("\",")
                 .append("\"visualOwner\":\"").append(jsonEscape(rg.visualOwner())).append("\",")
@@ -985,6 +1006,9 @@ public final class ResolvedBuildContext {
                     .append("\"planPolicyLayer\":\"").append(plan.visualPolicyLayer()).append("\",")
                     .append("\"planPlacement\":\"").append(plan.placement).append("\",")
                     .append("\"planMaterialization\":\"").append(plan.materialization).append("\",")
+                    .append("\"objectPlanCandidateId\":\"").append(jsonEscape(plan.candidateId)).append("\",")
+                    .append("\"objectPlanPassId\":\"").append(jsonEscape(plan.planPassId)).append("\",")
+                    .append("\"objectPlanSlotRole\":\"").append(jsonEscape(plan.slotRole)).append("\",")
                     .append("\"planZOrder\":").append(plan.zOrder).append(',')
                     .append("\"planReason\":\"").append(jsonEscape(plan.reason)).append("\",")
                     .append("\"planFile\":\"").append(jsonEscape(plan.file)).append("\"");
@@ -1016,6 +1040,42 @@ public final class ResolvedBuildContext {
         }
         sb.append('}');
         renderDecisionLines.add(sb.toString());
+        ownershipTraceLines.add(renderedDecisionTraceLine(rg, plan, phase, decision, detail, executedFile));
+    }
+
+    private static String renderedDecisionTraceLine(
+            RenderedGroup rg,
+            ObjectPlan plan,
+            String phase,
+            String decision,
+            String detail,
+            String executedFile) {
+        return tsv(phase)
+                + "\t" + tsv(decision)
+                + "\t" + rg.pageIndex()
+                + "\t" + rg.id()
+                + "\t" + tsv(rg.exportUnitId())
+                + "\t" + tsv(rg.candidateId())
+                + "\t" + tsv(rg.planPassId())
+                + "\t" + tsv(rg.slotRole())
+                + "\t" + tsv(rg.file())
+                + "\t" + tsv(executedFile)
+                + "\t" + (plan != null ? plan.domId : "")
+                + "\t" + tsv(plan != null ? plan.candidateId : "")
+                + "\t" + tsv(plan != null ? plan.textAction.name() : "")
+                + "\t" + tsv(plan != null ? plan.visualAction.name() : "")
+                + "\t" + tsv(plan != null ? plan.placement.name() : "")
+                + "\t" + tsv(plan != null ? plan.visualLayer.name() : "")
+                + "\t" + tsv(plan != null ? plan.materialization.name() : "")
+                + "\t" + tsv(plan != null ? ObjectPlan.intArrayJson(plan.sourceObjectIds) : "")
+                + "\t" + tsv(plan != null ? ObjectPlan.intArrayJson(plan.exportSourceObjectIds) : "")
+                + "\t" + tsv(plan != null ? ObjectPlan.intArrayJson(plan.hiddenVisualSourceObjectIds) : "")
+                + "\t" + tsv(detail);
+    }
+
+    private static String tsv(String value) {
+        if (value == null) return "";
+        return value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
     }
 
     private static boolean sameBounds(double[] a, double[] b) {

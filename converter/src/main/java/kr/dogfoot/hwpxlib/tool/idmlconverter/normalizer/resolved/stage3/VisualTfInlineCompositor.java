@@ -14,7 +14,7 @@ import java.io.File;
  * 자식들을 부모 PNG 위에 합성한다. ownership 판단을 새로 하지 않고, 이미 floating PNG로
  * 베이킹되기로 정해진 부모에 대해서만 inline 자식 픽셀을 합성하는 순수 이미지 연산이다.
  *
- * <p>SPEC-036: BackgroundInjector(Phase 6)에서 분리한 image 합성 로직.</p>
+ * <p>source ownership policy: BackgroundInjector(Phase 6)에서 분리한 image 합성 로직.</p>
  */
 public final class VisualTfInlineCompositor {
 

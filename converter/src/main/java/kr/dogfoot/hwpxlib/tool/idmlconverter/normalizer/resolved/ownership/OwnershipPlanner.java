@@ -182,6 +182,8 @@ public final class OwnershipPlanner {
         timed("dropEditableTextFrameFallbackShellsOwnedByCompositeSlots", this::dropEditableTextFrameFallbackShellsOwnedByCompositeSlots);
         timed("finalizeVisualDepthContracts", this::finalizeVisualDepthContracts);
         timed("restorePlannerDeclaredInlineTextShellContracts", this::restorePlannerDeclaredInlineTextShellContracts);
+        timed("completeRenderedExtractionSourceContracts", this::completeRenderedExtractionSourceContracts);
+        timed("completeSourceTreeDiagnostics", this::completeSourceTreeDiagnostics);
         timed("writePlans", this::writePlans);
         timed("validate", this::validate);
         ConversionTiming.metric("stage1.ownershipPlanner.plans", plans.size());
@@ -6545,6 +6547,117 @@ public final class OwnershipPlanner {
         }
     }
 
+    private void completeRenderedExtractionSourceContracts() {
+        int completed = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            RenderedGroup rendered = renderedGroupForPlan(plan);
+            if (rendered == null) continue;
+            int[] exportSourceIds = rendered.exportSourceObjectIds();
+            int[] hiddenVisualSourceIds = rendered.hiddenVisualSourceObjectIds();
+            if ((exportSourceIds == null || exportSourceIds.length == 0)
+                    && (hiddenVisualSourceIds == null || hiddenVisualSourceIds.length == 0)) {
+                ObjectPlan next = plan.withExtractionCandidate(
+                        rendered.candidateId(),
+                        rendered.planPassId(),
+                        rendered.slotRole());
+                plans.set(i, next);
+                completed++;
+                continue;
+            }
+            ObjectPlan next = plan.withExtractionSourceObjectIds(exportSourceIds, hiddenVisualSourceIds)
+                    .withExtractionCandidate(rendered.candidateId(), rendered.planPassId(), rendered.slotRole());
+            plans.set(i, next);
+            completed++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.renderedExtractionSourceContracts", completed);
+    }
+
+    private void completeSourceTreeDiagnostics() {
+        if (data == null) return;
+        Map<Integer, int[]> clusterByRoot = new HashMap<>();
+        int completed = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) {
+                continue;
+            }
+            int[] roots = sourceRootObjectIds(plan.sourceObjectIds);
+            int[] cluster = clusterSourceObjectIds(roots, clusterByRoot);
+            int[] omitted = omittedClusterSourceObjectIds(plan, cluster);
+            plans.set(i, plan.withSourceTreeDiagnostics(roots, cluster, omitted));
+            completed++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceTreeDiagnostics", completed);
+    }
+
+    private int[] sourceRootObjectIds(int[] sourceObjectIds) {
+        LinkedHashSet<Integer> sourceSet = toLinkedSet(sourceObjectIds);
+        LinkedHashSet<Integer> roots = new LinkedHashSet<>();
+        for (int sourceId : sourceSet) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.parentId() == null || item.parentId().isBlank()) {
+                roots.add(sourceId);
+                continue;
+            }
+            int parentId = parseFlexibleId(item.parentId());
+            if (parentId < 0 || !sourceSet.contains(parentId)) {
+                roots.add(sourceId);
+            }
+        }
+        if (roots.isEmpty()) roots.addAll(sourceSet);
+        return toIntArray(roots);
+    }
+
+    private int[] clusterSourceObjectIds(int[] sourceRootObjectIds, Map<Integer, int[]> clusterByRoot) {
+        LinkedHashSet<Integer> cluster = new LinkedHashSet<>();
+        if (sourceRootObjectIds == null) return new int[0];
+        for (int rootId : sourceRootObjectIds) {
+            int[] rootCluster = clusterByRoot.computeIfAbsent(rootId, this::clusterSourceObjectIdsForRoot);
+            addAll(rootCluster, cluster);
+        }
+        return toIntArray(cluster);
+    }
+
+    private int[] clusterSourceObjectIdsForRoot(int rootId) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        ids.add(rootId);
+        if (data != null) {
+            for (String descendantId : data.buildDescendantSet(String.valueOf(rootId), 256)) {
+                int parsed = parseFlexibleId(descendantId);
+                if (parsed >= 0) ids.add(parsed);
+            }
+        }
+        return toIntArray(ids);
+    }
+
+    private int[] omittedClusterSourceObjectIds(ObjectPlan plan, int[] clusterSourceObjectIds) {
+        if (plan == null || clusterSourceObjectIds == null || clusterSourceObjectIds.length == 0) {
+            return new int[0];
+        }
+        LinkedHashSet<Integer> claimed = new LinkedHashSet<>();
+        addAll(plan.sourceObjectIds, claimed);
+        addAll(plan.visualSourceObjectIds, claimed);
+        addAll(plan.styleSourceObjectIds, claimed);
+        addAll(plan.exportSourceObjectIds, claimed);
+        addAll(plan.hiddenVisualSourceObjectIds, claimed);
+        addAll(plan.ownedTextFrameIds, claimed);
+        addAll(plan.descendantVisualObjectIds, claimed);
+        LinkedHashSet<Integer> omitted = new LinkedHashSet<>();
+        for (int sourceId : clusterSourceObjectIds) {
+            if (!claimed.contains(sourceId)) {
+                omitted.add(sourceId);
+            }
+        }
+        return toIntArray(omitted);
+    }
+
+    private LinkedHashSet<Integer> toLinkedSet(int[] values) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        addAll(values, ids);
+        return ids;
+    }
+
     private void validate() {
         warnDuplicateVisibleSourceIds();
         warnConflictingTextOwnership();
@@ -7378,6 +7491,10 @@ public final class OwnershipPlanner {
         for (RenderedGroup rg : renderedGroupsForPageId(plan.pageIndex, plan.renderId.intValue())) {
             if (rg == null) continue;
             int score = 0;
+            if (plan.candidateId != null && !plan.candidateId.isEmpty()
+                    && plan.candidateId.equals(rg.candidateId())) {
+                score += 32;
+            }
             if (plan.file != null && plan.file.equals(rg.file())) score += 16;
             if (plan.placement == placementOf(rg)) score += 8;
             if (plan.reason != null && plan.reason.equals(rg.reason())) score += 4;

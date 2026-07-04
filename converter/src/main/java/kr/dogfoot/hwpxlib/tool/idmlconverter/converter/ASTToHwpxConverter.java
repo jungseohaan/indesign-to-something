@@ -258,7 +258,7 @@ public class ASTToHwpxConverter {
      * 같은 storyId를 공유하는 TextFrameBlock이 2개 이상이면 linkId를 할당한다.
      */
     private void buildStoryLinkMap() {
-        // SPEC-035: source TextFrames must remain independently owned visible
+        // source ownership policy: source TextFrames must remain independently owned visible
         // outputs.  Do not create HWPX linked text boxes by storyId.
         ctx.storyLinkIds.clear();
         ctx.storyLinkIndex.clear();

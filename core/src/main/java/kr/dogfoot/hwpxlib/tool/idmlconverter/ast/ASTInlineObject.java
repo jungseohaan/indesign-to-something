@@ -91,7 +91,7 @@ public class ASTInlineObject extends ASTInlineItem {
     private boolean nativeGraphicsAllowed;
     // true이면 imageFillData를 전역 native-textbox-graphics 정책과 무관하게 도형 배경(imgBrush)으로 emit.
     // InDesign에서 추출한 장식 PNG(곡선 꺾쇠/말풍선 등)를 인라인 박스 배경으로 깔고 텍스트는
-    // 검색 가능한 런으로 위에 올리는 경우에만 사용(텍스트 래스터화가 아니므로 SPEC-025 정책과 무관).
+    // 검색 가능한 런으로 위에 올리는 경우에만 사용(텍스트 래스터화가 아니므로 source ownership policy 정책과 무관).
     private boolean forceImageFill;
 
     // IMAGE 그룹 내 오버레이 텍스트프레임 목록 (IMAGE kind 전용)

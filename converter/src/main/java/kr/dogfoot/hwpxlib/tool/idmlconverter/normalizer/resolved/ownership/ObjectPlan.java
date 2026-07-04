@@ -6,6 +6,9 @@ import java.util.Arrays;
 public final class ObjectPlan {
     public final int domId;
     public final String kind;
+    public final String candidateId;
+    public final String planPassId;
+    public final String slotRole;
     public final int pageIndex;
     public final TextAction textAction;
     public final VisualAction visualAction;
@@ -13,8 +16,13 @@ public final class ObjectPlan {
     public final Placement placement;
     public final Integer renderId;
     public final int[] sourceObjectIds;
+    public final int[] sourceRootObjectIds;
+    public final int[] clusterSourceObjectIds;
+    public final int[] omittedClusterSourceObjectIds;
     public final int[] visualSourceObjectIds;
     public final int[] styleSourceObjectIds;
+    public final int[] exportSourceObjectIds;
+    public final int[] hiddenVisualSourceObjectIds;
     public final int[] ownedTextFrameIds;
     public final int[] descendantVisualObjectIds;
     public final String sourceBundleKey;
@@ -155,8 +163,95 @@ public final class ObjectPlan {
             String sourceLayerId,
             String sourceLayerName,
             int sourceLayerIndex) {
+        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
+                renderId, sourceObjectIds, visualSourceObjectIds, styleSourceObjectIds,
+                null, null, null, null, null,
+                ownedTextFrameIds, descendantVisualObjectIds, sourceBundleKey,
+                materialization, coordinateSpace, anchorOwner, zOrder, reason, file,
+                bounds, renderSourceBounds, sourceLayerId, sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    private ObjectPlan(
+            int domId,
+            String kind,
+            int pageIndex,
+            TextAction textAction,
+            VisualAction visualAction,
+            VisualLayer visualLayer,
+            Placement placement,
+            Integer renderId,
+            int[] sourceObjectIds,
+            int[] visualSourceObjectIds,
+            int[] styleSourceObjectIds,
+            int[] exportSourceObjectIds,
+            int[] hiddenVisualSourceObjectIds,
+            int[] sourceRootObjectIds,
+            int[] clusterSourceObjectIds,
+            int[] omittedClusterSourceObjectIds,
+            int[] ownedTextFrameIds,
+            int[] descendantVisualObjectIds,
+            String sourceBundleKey,
+            Materialization materialization,
+            CoordinateSpace coordinateSpace,
+            String anchorOwner,
+            int zOrder,
+            String reason,
+            String file,
+            double[] bounds,
+            double[] renderSourceBounds,
+            String sourceLayerId,
+            String sourceLayerName,
+            int sourceLayerIndex) {
+        this(domId, kind, null, null, null, pageIndex, textAction, visualAction,
+                visualLayer, placement, renderId, sourceObjectIds, visualSourceObjectIds,
+                styleSourceObjectIds, exportSourceObjectIds, hiddenVisualSourceObjectIds,
+                sourceRootObjectIds, clusterSourceObjectIds, omittedClusterSourceObjectIds,
+                ownedTextFrameIds, descendantVisualObjectIds, sourceBundleKey,
+                materialization, coordinateSpace, anchorOwner, zOrder, reason, file,
+                bounds, renderSourceBounds, sourceLayerId, sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    private ObjectPlan(
+            int domId,
+            String kind,
+            String candidateId,
+            String planPassId,
+            String slotRole,
+            int pageIndex,
+            TextAction textAction,
+            VisualAction visualAction,
+            VisualLayer visualLayer,
+            Placement placement,
+            Integer renderId,
+            int[] sourceObjectIds,
+            int[] visualSourceObjectIds,
+            int[] styleSourceObjectIds,
+            int[] exportSourceObjectIds,
+            int[] hiddenVisualSourceObjectIds,
+            int[] sourceRootObjectIds,
+            int[] clusterSourceObjectIds,
+            int[] omittedClusterSourceObjectIds,
+            int[] ownedTextFrameIds,
+            int[] descendantVisualObjectIds,
+            String sourceBundleKey,
+            Materialization materialization,
+            CoordinateSpace coordinateSpace,
+            String anchorOwner,
+            int zOrder,
+            String reason,
+            String file,
+            double[] bounds,
+            double[] renderSourceBounds,
+            String sourceLayerId,
+            String sourceLayerName,
+            int sourceLayerIndex) {
         this.domId = domId;
         this.kind = kind;
+        this.candidateId = candidateId;
+        this.planPassId = planPassId;
+        this.slotRole = slotRole;
         this.pageIndex = pageIndex;
         this.textAction = textAction;
         this.visualAction = visualAction;
@@ -164,11 +259,26 @@ public final class ObjectPlan {
         this.placement = placement;
         this.renderId = renderId;
         this.sourceObjectIds = sourceObjectIds != null ? Arrays.copyOf(sourceObjectIds, sourceObjectIds.length) : new int[0];
+        this.sourceRootObjectIds = sourceRootObjectIds != null
+                ? Arrays.copyOf(sourceRootObjectIds, sourceRootObjectIds.length)
+                : new int[0];
+        this.clusterSourceObjectIds = clusterSourceObjectIds != null
+                ? Arrays.copyOf(clusterSourceObjectIds, clusterSourceObjectIds.length)
+                : new int[0];
+        this.omittedClusterSourceObjectIds = omittedClusterSourceObjectIds != null
+                ? Arrays.copyOf(omittedClusterSourceObjectIds, omittedClusterSourceObjectIds.length)
+                : new int[0];
         this.visualSourceObjectIds = visualSourceObjectIds != null
                 ? Arrays.copyOf(visualSourceObjectIds, visualSourceObjectIds.length)
                 : Arrays.copyOf(this.sourceObjectIds, this.sourceObjectIds.length);
         this.styleSourceObjectIds = styleSourceObjectIds != null
                 ? Arrays.copyOf(styleSourceObjectIds, styleSourceObjectIds.length)
+                : new int[0];
+        this.exportSourceObjectIds = exportSourceObjectIds != null
+                ? Arrays.copyOf(exportSourceObjectIds, exportSourceObjectIds.length)
+                : new int[0];
+        this.hiddenVisualSourceObjectIds = hiddenVisualSourceObjectIds != null
+                ? Arrays.copyOf(hiddenVisualSourceObjectIds, hiddenVisualSourceObjectIds.length)
                 : new int[0];
         this.ownedTextFrameIds = ownedTextFrameIds != null
                 ? Arrays.copyOf(ownedTextFrameIds, ownedTextFrameIds.length)
@@ -275,6 +385,46 @@ public final class ObjectPlan {
                 anchorOwner,
                 zOrder,
                 newReason != null ? newReason : reason,
+                file,
+                bounds,
+                renderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withExtractionCandidate(
+            String newCandidateId,
+            String newPlanPassId,
+            String newSlotRole) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                newCandidateId,
+                newPlanPassId,
+                newSlotRole,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                exportSourceObjectIds,
+                hiddenVisualSourceObjectIds,
+                sourceRootObjectIds,
+                clusterSourceObjectIds,
+                omittedClusterSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
                 file,
                 bounds,
                 renderSourceBounds,
@@ -691,6 +841,85 @@ public final class ObjectPlan {
                 sourceLayerIndex);
     }
 
+    public ObjectPlan withExtractionSourceObjectIds(
+            int[] newExportSourceObjectIds,
+            int[] newHiddenVisualSourceObjectIds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                candidateId,
+                planPassId,
+                slotRole,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                newExportSourceObjectIds,
+                newHiddenVisualSourceObjectIds,
+                sourceRootObjectIds,
+                clusterSourceObjectIds,
+                omittedClusterSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                renderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withSourceTreeDiagnostics(
+            int[] newSourceRootObjectIds,
+            int[] newClusterSourceObjectIds,
+            int[] newOmittedClusterSourceObjectIds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                candidateId,
+                planPassId,
+                slotRole,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                exportSourceObjectIds,
+                hiddenVisualSourceObjectIds,
+                newSourceRootObjectIds,
+                newClusterSourceObjectIds,
+                newOmittedClusterSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                renderSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
     public ObjectPlan withPageIndexAndBounds(int newPageIndex, double[] newBounds, String newReason) {
         return new ObjectPlan(
                 domId,
@@ -798,6 +1027,9 @@ public final class ObjectPlan {
         sb.append('{')
                 .append("\"domId\":").append(domId).append(',')
                 .append("\"kind\":\"").append(escape(kind)).append("\",")
+                .append("\"candidateId\":\"").append(escape(candidateId)).append("\",")
+                .append("\"planPassId\":\"").append(escape(planPassId)).append("\",")
+                .append("\"slotRole\":\"").append(escape(slotRole)).append("\",")
                 .append("\"pageIndex\":").append(pageIndex).append(',')
                 .append("\"textAction\":\"").append(textAction).append("\",")
                 .append("\"visualAction\":\"").append(visualAction).append("\",")
@@ -806,8 +1038,13 @@ public final class ObjectPlan {
                 .append("\"placement\":\"").append(placement).append("\",")
                 .append("\"renderId\":").append(renderId != null ? renderId : -1).append(',')
                 .append("\"sourceObjectIds\":").append(intArrayJson(sourceObjectIds)).append(',')
+                .append("\"sourceRootObjectIds\":").append(intArrayJson(sourceRootObjectIds)).append(',')
+                .append("\"clusterSourceObjectIds\":").append(intArrayJson(clusterSourceObjectIds)).append(',')
+                .append("\"omittedClusterSourceObjectIds\":").append(intArrayJson(omittedClusterSourceObjectIds)).append(',')
                 .append("\"visualSourceObjectIds\":").append(intArrayJson(visualSourceObjectIds)).append(',')
                 .append("\"styleSourceObjectIds\":").append(intArrayJson(styleSourceObjectIds)).append(',')
+                .append("\"exportSourceObjectIds\":").append(intArrayJson(exportSourceObjectIds)).append(',')
+                .append("\"hiddenVisualSourceObjectIds\":").append(intArrayJson(hiddenVisualSourceObjectIds)).append(',')
                 .append("\"ownedTextFrameIds\":").append(intArrayJson(ownedTextFrameIds)).append(',')
                 .append("\"descendantVisualObjectIds\":").append(intArrayJson(descendantVisualObjectIds)).append(',')
                 .append("\"sourceBundleKey\":\"").append(escape(sourceBundleKey)).append("\",")
@@ -838,7 +1075,7 @@ public final class ObjectPlan {
         return sb.toString();
     }
 
-    static String intArrayJson(int[] values) {
+    public static String intArrayJson(int[] values) {
         if (values == null || values.length == 0) return "[]";
         StringBuilder sb = new StringBuilder(values.length * 8 + 2);
         sb.append('[');

@@ -6,8 +6,8 @@
 
 This is the canonical index for source ownership. The detailed policy is split
 into the linked modules below, and those modules are canonical by reference from
-this file. `SPEC-035` is only a migration note; the former render-ownership
-SPEC-036 policy is consolidated here.
+this file. Removed ownership SPECs are intentionally not linked from this
+policy; their usable rules have been consolidated here.
 
 ## Reading Order
 
@@ -87,3 +87,58 @@ When a page issue is reported, use this lookup first:
   `ObjectPlan` model or report that the request needs more confirmation.
 - After Stage 1 writes `ObjectPlan`, no later code may mutate ownership fields.
 - Bypass code is not allowed.
+
+## V2 Implementation Baseline
+
+V2 development starts from this policy, not from page regressions. A change is
+V2-compatible only when it can be expressed as source metadata -> `ObjectPlan`
+-> executor behavior.
+
+Before changing a placer, injector, inline handler, renderer, or writer:
+
+1. Identify the source bundle and ownership slot involved.
+2. Confirm which `ObjectPlan` field should carry the decision.
+3. Add or strengthen the Stage 1 decision if the field is missing or ambiguous.
+4. Make the later stage execute the plan without changing ownership,
+   placement, layer, materialization, or text ownership.
+5. Add validation for the invariant that would have caught the regression.
+
+The first V2 code target is therefore the `ObjectPlan` contract and
+`OwnershipPlanner` output. Legacy phases may remain as execution bridges, but
+they are not allowed to become a second policy layer.
+
+## Stage Boundary Contract
+
+| Stage | Owner | May Decide | Must Not Decide |
+|---|---|---|---|
+| 0 Input Prepare | IDML/resolved/extractor import | source indexes, resolved metadata, extractor candidates | ownership, placement, layer, materialization |
+| 1 Ownership Planner | `OwnershipPlanner` / `ObjectPlan` | text/visual/style slot owner, placement, coordinate space, policy layer, z-order contract | AST construction or HWPX emission |
+| 2 Text Builder | text executor | HWPX text emitted from `textAction` and `ownedTextFrameIds` | PNG placement, shell ownership, inline/floating conversion |
+| 3 Visual Builder | visual executor | PNG/vector/native/table style emitted from `visualAction` and materialization | text ownership, slot reassignment, fallback visual owner creation |
+| 4 Validate | validator | invariant checks and diagnostics | new ownership, new visible material, late mutation of `ObjectPlan` |
+
+Any code path outside Stage 1 that needs page number, literal text, coordinates,
+color, pixel/alpha analysis, occlusion, or an `alreadyHandled` set to decide
+whether a source is visible is evidence that the required source-slot fact is
+missing from Stage 1.
+
+## Code Mapping
+
+The Java ownership enums are policy terms, not legacy SPEC terms:
+
+- `TextAction`: `OWNED_BY_HWPX_TEXT`, `OWNED_BY_PNG`,
+  `HIDDEN_SEMANTIC`, `DROP_TEXT`
+- `VisualAction`: `PLACE_INLINE_PNG`, `PLACE_FLOATING_PNG`,
+  `PLACE_TEXT_SHELL`, `ABSORB_TEXT_STYLE`, `PLACE_TABLE_STYLE`,
+  `DROP_VISUAL`
+- `Materialization`: `HWPX_TEXT`, `HWPX_TABLE_STYLE`,
+  `NATIVE_SOURCE_SHAPE`, `EXTRACTED_PNG_VECTOR`,
+  `TEXTLESS_VISUAL_FRAGMENT`, `COMPLETE_PNG`
+- `Placement`: `INLINE`, `FLOATING`, `TABLE`, `NONE`
+- `CoordinateSpace`: `STORY_FLOW`, `PAGE`, `SOURCE_LOCAL`
+- `VisualLayer`: implementation layer that must map back to exactly one of
+  `BACKGROUND`, `DECORATION`, `CONTENT`, or `TEXT`
+
+If a new enum value seems necessary, first update the canonical policy module
+that defines the source-owned behavior, then add validation showing why the
+existing four policy layers or slot actions cannot express it.
