@@ -147,16 +147,6 @@ public final class BackgroundInjector {
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OUTSIDE_PAGE", "no visible page intersection");
                 continue;
             }
-            double minEdgeStripVisibleWidth = VisualShellPreparationRules.minimumVisibleWidthForMasterEdgeStrip(
-                    ctx, rg, rawLeft, rawRight, rawTop, rawBottom,
-                    cropRefLeft, cropRefRight, visLeft, visRight, pageWidthMm, pageHeightMm);
-            if (minEdgeStripVisibleWidth > 0 && (visRight - visLeft) < minEdgeStripVisibleWidth) {
-                if (rawLeft < 0.0 || cropRefLeft < 0.0) {
-                    visRight = Math.min(pageWidthMm, visLeft + minEdgeStripVisibleWidth);
-                } else if (rawRight > pageWidthMm || cropRefRight > pageWidthMm) {
-                    visLeft = Math.max(0.0, visRight - minEdgeStripVisibleWidth);
-                }
-            }
             PreparedVisualImage prepared = new PreparedVisualImage(imageData);
             boolean shouldCompositeTfInlineVisuals = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(ctx, rg);
             boolean keepPlannedContainerBackdropFill =

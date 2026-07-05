@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.StylePropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.PolicyLayer;
@@ -616,11 +617,37 @@ public final class ResolvedBuildContext {
 
     public ObjectPlan findTextFrameOwnershipPlan(int domId) {
         if (domId < 0) return null;
+        ObjectPlan fallback = null;
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null || plan.domId != domId) continue;
-            if (plan.kind != null && plan.kind.startsWith("text_frame")) return plan;
+            if (!isTextFrameOwnershipPlan(plan, domId)) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return plan;
+            if (fallback == null) fallback = plan;
         }
-        return null;
+        return fallback;
+    }
+
+    private static boolean isTextFrameOwnershipPlan(ObjectPlan plan, int domId) {
+        if (plan == null || domId < 0) return false;
+        if (plan.kind != null) {
+            String kind = plan.kind;
+            if (kind.startsWith("text_frame")
+                    || kind.startsWith("planner_declared_text_frame")
+                    || kind.contains(":TextFrame")) {
+                return true;
+            }
+        }
+        if (plan.materialization == Materialization.HWPX_TEXT
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+            return true;
+        }
+        if (plan.ownedTextFrameIds != null) {
+            for (int textFrameId : plan.ownedTextFrameIds) {
+                if (textFrameId == domId) return true;
+            }
+        }
+        return plan.sourceBundleKey != null
+                && plan.sourceBundleKey.equals("textFrame." + domId);
     }
 
     public boolean ownershipPlanPlacesFloatingHwpxText(int domId) {

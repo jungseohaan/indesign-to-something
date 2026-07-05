@@ -831,9 +831,16 @@ function _objectPlanTextAction(bundle, sourceById) {
 }
 
 function _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById) {
-    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.inline_objects"
+            && bundle.passId !== "pass.page_textless_graphic_groups") {
+        return false;
+    }
     if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
-    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    if ((!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)
+            && (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0)) {
+        return false;
+    }
     for (var i = 0; i < bundle.ownedTextFrameIds.length; i++) {
         var src = sourceById ? sourceById[String(bundle.ownedTextFrameIds[i])] : null;
         if (!src || String(src.kind || "") !== "TextFrame") return false;

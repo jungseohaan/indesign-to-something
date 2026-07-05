@@ -171,20 +171,6 @@ public final class VisualCropper {
                 ? (int) Math.round((visRight - visLeft) / fullW * img.getWidth())
                 : (int) Math.round((visRight - cropRefLeft) / cropRefW * img.getWidth()) - pxX;
         int pxH = (int) Math.round((visBottom - cropRefTop) / cropRefH * img.getHeight()) - pxY;
-        if (hasCropSourceBounds && masterEdgeStrip
-                && cropRefLeft < -0.5 && Math.abs(visLeft) < 0.5
-                && visRight > rawRight + 0.1) {
-            int desiredPxW = (int) Math.round((visRight - visLeft) / cropRefW * img.getWidth());
-            desiredPxW = Math.max(1, Math.min(img.getWidth(), desiredPxW));
-            pxX = Math.max(0, img.getWidth() - desiredPxW);
-            pxW = img.getWidth() - pxX;
-        } else if (hasCropSourceBounds && masterEdgeStrip
-                && cropRefRight > pageWidthMm + 0.5 && Math.abs(visRight - pageWidthMm) < 0.5
-                && visLeft < rawLeft - 0.1) {
-            int desiredPxW = (int) Math.round((visRight - visLeft) / cropRefW * img.getWidth());
-            pxX = 0;
-            pxW = Math.max(1, Math.min(img.getWidth(), desiredPxW));
-        }
         return new PageCropPlan(pxX, pxY, pxW, pxH, pageAnchoredStripCrop, null, null);
     }
 

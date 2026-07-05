@@ -84,6 +84,7 @@ public final class TextFlowDiagnosticsBuilder {
                     outPara.sourceParagraph = paragraph;
                     outPara.styleName = paragraph.styleName();
                     outPara.justification = paragraph.justification();
+                    outPara.generatedPrefixText = paragraph.generatedPrefixText();
                     int runIndex = 0;
                     for (ResolvedRun run : paragraph.runs()) {
                         TextFlowDiagnostics.TextFlowRun outRun = buildRun(ctx, run, runIndex++);
@@ -267,6 +268,9 @@ public final class TextFlowDiagnosticsBuilder {
         flow.inlineSlotCount = 0;
         for (TextFlowDiagnostics.TextFlowParagraph paragraph : flow.paragraphs) {
             if (paragraph == null || paragraph.runs == null) continue;
+            if (paragraph.generatedPrefixText != null) {
+                flow.textLength += paragraph.generatedPrefixText.length();
+            }
             for (TextFlowDiagnostics.TextFlowRun run : paragraph.runs) {
                 if (run == null) continue;
                 if ("INLINE_SLOT".equals(run.kind)) {

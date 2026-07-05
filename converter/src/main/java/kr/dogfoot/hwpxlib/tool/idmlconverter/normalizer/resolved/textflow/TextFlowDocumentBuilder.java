@@ -36,6 +36,7 @@ public final class TextFlowDocumentBuilder {
             out.index = paragraph.index;
             out.styleName = paragraph.styleName;
             out.justification = paragraph.justification;
+            out.generatedPrefixText = paragraph.generatedPrefixText;
             for (TextFlowDiagnostics.TextFlowRun run : paragraph.runs) {
                 TextFlowDocument.TextFlowAtom atom = buildAtom(run, index, stack);
                 if (atom != null) out.atoms.add(atom);

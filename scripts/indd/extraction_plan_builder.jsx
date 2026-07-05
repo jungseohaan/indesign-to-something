@@ -1441,8 +1441,64 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         for (var i = 0; i < sourceIds.length; i++) {
             var src = info(sourceIds[i]);
             if (!src || String(src.kind || "") !== "TextFrame") continue;
-            if (src.textFrameClass !== "editable") continue;
+            if (!isEditableTextFrameSource(src)) continue;
             _pushUniqueId(out, seen, sourceIds[i]);
+        }
+        return _sortedNumericIds(out);
+    }
+
+    function isEditableTextFrameSource(src) {
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.textFrameClass === "editable") return true;
+        if (src.hasText === true) return true;
+        return Number(src.textLength || 0) > 0;
+    }
+
+    function isInlineTextFrameSource(src) {
+        if (!src) return false;
+        var placement = String(src.storyAnchorPlacement || src.anchoredPosition || "");
+        return placement.indexOf("INLINE") >= 0 || String(src.parentKind || "") === "Character";
+    }
+
+    function splitTextFrameIdsForPageTextlessGroup(sourceIds) {
+        var hidden = [];
+        var hiddenSeen = {};
+        var pngOwned = [];
+        var pngOwnedSeen = {};
+        for (var i = 0; i < sourceIds.length; i++) {
+            var src = info(sourceIds[i]);
+            if (!src || String(src.kind || "") !== "TextFrame") continue;
+            if (!isEditableTextFrameSource(src)) continue;
+            if (src.simpleMarkerLabelContents === true && !isInlineTextFrameSource(src)) {
+                _pushUniqueId(pngOwned, pngOwnedSeen, sourceIds[i]);
+            } else {
+                _pushUniqueId(hidden, hiddenSeen, sourceIds[i]);
+            }
+        }
+        return {
+            hiddenTextFrameIds: _sortedNumericIds(hidden),
+            pngOwnedTextFrameIds: _sortedNumericIds(pngOwned)
+        };
+    }
+
+    function unionSourceIds(a, b) {
+        var out = [];
+        var seen = {};
+        mergeIds(out, seen, a || []);
+        mergeIds(out, seen, b || []);
+        return _sortedNumericIds(out);
+    }
+
+    function subtractSourceIds(ids, removeIds) {
+        var remove = {};
+        for (var i = 0; removeIds && i < removeIds.length; i++) {
+            remove[String(removeIds[i])] = true;
+        }
+        var out = [];
+        var seen = {};
+        for (var j = 0; ids && j < ids.length; j++) {
+            if (remove[String(ids[j])]) continue;
+            _pushUniqueId(out, seen, ids[j]);
         }
         return _sortedNumericIds(out);
     }
@@ -1469,7 +1525,14 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             }
             allSourceIds = _sortedNumericIds(allSourceIds);
             exportIds = _sortedNumericIds(exportIds);
-            var hiddenTextFrameIds = textFrameIdsFromSources(allSourceIds);
+            var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(allSourceIds);
+            var hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
+            var pngOwnedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
+            exportIds = subtractSourceIds(exportIds, hiddenTextFrameIds);
+            var visualSourceIds = exportIds.slice(0);
+            exportIds = unionSourceIds(exportIds, pngOwnedTextFrameIds);
+            var executionSourceIds = subtractSourceIds(allSourceIds, hiddenTextFrameIds);
+            executionSourceIds = unionSourceIds(executionSourceIds, pngOwnedTextFrameIds);
             if (exportIds.length < 2 || allSourceIds.length < 2) continue;
             var candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
@@ -1484,6 +1547,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 candidateId: candidateId,
                 passId: "pass.page_textless_graphic_groups",
                 sourceObjectIds: allSourceIds,
+                executionSourceObjectIds: executionSourceIds,
                 primarySourceObjectId: allSourceIds.length > 0 ? allSourceIds[0] : null,
                 pageIndex: Number(pageKey),
                 kind: "PageTextlessGraphicGroup",
@@ -1501,14 +1565,15 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 exportSourceObjectIds: exportIds,
                 exportTargetObjectId: null,
                 hiddenVisualSourceObjectIds: hiddenTextFrameIds,
-                visualSourceObjectIds: exportIds,
+                visualSourceObjectIds: visualSourceIds,
                 styleSourceObjectIds: [],
+                ownedTextFrameIds: pngOwnedTextFrameIds,
                 editableTextFrameIds: hiddenTextFrameIds,
                 hiddenTextFrameIds: hiddenTextFrameIds,
                 requiresTextHidden: hiddenTextFrameIds.length > 0,
-                textOwner: "none",
-                containsEditableText: false,
-                completePngTextAllowed: false,
+                textOwner: pngOwnedTextFrameIds.length > 0 ? "indesign_png" : "none",
+                containsEditableText: pngOwnedTextFrameIds.length > 0,
+                completePngTextAllowed: pngOwnedTextFrameIds.length > 0,
                 ownershipSlot: "CONTENT_VISUAL_SLOT",
                 materialization: "EXTRACTED_PNG_VECTOR",
                 textAction: "DROP_TEXT",
@@ -1529,6 +1594,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 sourceObjectCount: allSourceIds.length,
                 exportSourceObjectCount: exportIds.length,
                 hiddenTextFrameCount: hiddenTextFrameIds.length,
+                pngOwnedTextFrameCount: pngOwnedTextFrameIds.length,
                 bounds: b
             });
             appended++;
@@ -1676,6 +1742,62 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         return _sortedNumericIds(out);
     }
 
+    function splitTextFrameIdsForPageTextlessGroup(sourceIds) {
+        var hidden = [];
+        var hiddenSeen = {};
+        var pngOwned = [];
+        var pngOwnedSeen = {};
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            var src = info(sourceIds[i]);
+            if (!src || String(src.kind || "") !== "TextFrame") continue;
+            if (!isEditableTextFrameSource(src)) continue;
+            if (src.simpleMarkerLabelContents === true && !isInlineTextFrameSource(src)) {
+                _pushUniqueId(pngOwned, pngOwnedSeen, sourceIds[i]);
+            } else {
+                _pushUniqueId(hidden, hiddenSeen, sourceIds[i]);
+            }
+        }
+        return {
+            hiddenTextFrameIds: _sortedNumericIds(hidden),
+            pngOwnedTextFrameIds: _sortedNumericIds(pngOwned)
+        };
+    }
+
+    function isEditableTextFrameSource(src) {
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.textFrameClass === "editable") return true;
+        if (src.hasText === true) return true;
+        return Number(src.textLength || 0) > 0;
+    }
+
+    function isInlineTextFrameSource(src) {
+        if (!src) return false;
+        var placement = String(src.storyAnchorPlacement || src.anchoredPosition || "");
+        return placement.indexOf("INLINE") >= 0 || String(src.parentKind || "") === "Character";
+    }
+
+    function unionSourceIds(a, b) {
+        var out = [];
+        var seen = {};
+        mergeIds(out, seen, a || []);
+        mergeIds(out, seen, b || []);
+        return _sortedNumericIds(out);
+    }
+
+    function subtractSourceIds(ids, removeIds) {
+        var remove = {};
+        for (var i = 0; removeIds && i < removeIds.length; i++) {
+            remove[String(removeIds[i])] = true;
+        }
+        var out = [];
+        var seen = {};
+        for (var j = 0; ids && j < ids.length; j++) {
+            if (remove[String(ids[j])]) continue;
+            _pushUniqueId(out, seen, ids[j]);
+        }
+        return _sortedNumericIds(out);
+    }
+
     function minZ(component) {
         var out = null;
         for (var i = 0; i < component.length; i++) {
@@ -1716,8 +1838,7 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
                     if (used[j]) continue;
                     var touches = false;
                     for (var k = 0; k < component.length; k++) {
-                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)
-                                && entriesShareStructuralRoot(component[k], entries[j])) {
+                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)) {
                             touches = true;
                             break;
                         }
@@ -1731,7 +1852,6 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
 
             var merged = copyCandidate(component[0].candidate);
             merged.sourceObjectIds = mergedIds(component, "sourceObjectIds");
-            merged.executionSourceObjectIds = merged.sourceObjectIds.slice(0);
             merged.visualSourceObjectIds = mergedIds(component, "visualSourceObjectIds");
             merged.exportSourceObjectIds = mergedIds(component, "exportSourceObjectIds");
             merged.hiddenVisualSourceObjectIds = mergedIds(component, "hiddenVisualSourceObjectIds");
@@ -1739,6 +1859,21 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             merged.hiddenTextFrameIds = mergedIds(component, "hiddenTextFrameIds");
             merged.ownedTextFrameIds = mergedIds(component, "ownedTextFrameIds");
             merged.styleSourceObjectIds = mergedIds(component, "styleSourceObjectIds");
+            var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(merged.sourceObjectIds);
+            merged.hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
+            merged.editableTextFrameIds = textFrameSplit.hiddenTextFrameIds;
+            merged.hiddenVisualSourceObjectIds = textFrameSplit.hiddenTextFrameIds;
+            merged.ownedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
+            merged.visualSourceObjectIds = subtractSourceIds(
+                    merged.visualSourceObjectIds || [], merged.hiddenTextFrameIds || []);
+            merged.exportSourceObjectIds = subtractSourceIds(
+                    merged.exportSourceObjectIds || [], merged.hiddenTextFrameIds || []);
+            merged.exportSourceObjectIds = unionSourceIds(
+                    merged.exportSourceObjectIds || [], merged.ownedTextFrameIds || []);
+            merged.executionSourceObjectIds = subtractSourceIds(
+                    merged.sourceObjectIds || [], merged.hiddenTextFrameIds || []);
+            merged.executionSourceObjectIds = unionSourceIds(
+                    merged.executionSourceObjectIds || [], merged.ownedTextFrameIds || []);
             merged.bounds = null;
             for (var bi = 0; bi < component.length; bi++) {
                 merged.bounds = unionBounds(merged.bounds, component[bi].bounds);
@@ -1747,6 +1882,9 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             merged.primarySourceObjectId = merged.sourceObjectIds.length > 0 ? merged.sourceObjectIds[0] : null;
             merged.requiresTextHidden = merged.hiddenTextFrameIds.length > 0
                     || merged.editableTextFrameIds.length > 0;
+            merged.textOwner = merged.ownedTextFrameIds.length > 0 ? "indesign_png" : "none";
+            merged.containsEditableText = merged.ownedTextFrameIds.length > 0;
+            merged.completePngTextAllowed = merged.ownedTextFrameIds.length > 0;
             merged.reason = "merged_overlapping_page_textless_graphic_group_candidates";
             merged.candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
@@ -1767,6 +1905,7 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
                 sourceObjectCount: merged.sourceObjectIds.length,
                 exportSourceObjectCount: merged.exportSourceObjectIds.length,
                 hiddenTextFrameCount: merged.hiddenTextFrameIds.length,
+                pngOwnedTextFrameCount: merged.ownedTextFrameIds.length,
                 bounds: merged.bounds
             });
         }
@@ -1915,6 +2054,7 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
     function isSuppressibleChild(candidate) {
         if (!candidate || candidate.disabled === true || isPageGroup(candidate)) return false;
         if (candidate.passId !== "pass.decoration_groups"
+                && candidate.passId !== "pass.editable_textframe_visual_shells"
                 && candidate.passId !== "pass.image_textless_groups"
                 && candidate.passId !== "pass.image_placed_frames"
                 && candidate.passId !== "pass.vector_shape_frames"

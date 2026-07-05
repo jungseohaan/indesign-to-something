@@ -377,6 +377,7 @@ public class ResolvedDataReader {
         para.shadingOn(getBoxedBool(o, "shadingOn"));
         para.shadingColor(getString(o, "shadingColor"));
         para.shadingTint(getBoxedDouble(o, "shadingTint"));
+        para.generatedPrefixText(replaceInDesignSpecialCharCodes(getString(o, "generatedPrefixText")));
         para.justification(getString(o, "justification"));
 
         // leading: can be number or string "Auto"

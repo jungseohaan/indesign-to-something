@@ -718,7 +718,17 @@ function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
     var ids = [];
     var seen = {};
     if (candidate && candidate.passId === "pass.page_textless_graphic_groups") {
-        return ids;
+        for (var pi = 0; candidate.ownedTextFrameIds && pi < candidate.ownedTextFrameIds.length; pi++) {
+            var pageGroupTextId = candidate.ownedTextFrameIds[pi];
+            var pageGroupTextSource = clusterIndex && clusterIndex.sourceInfo
+                    ? clusterIndex.sourceInfo(pageGroupTextId)
+                    : null;
+            if (!pageGroupTextSource || pageGroupTextSource.kind !== "TextFrame") continue;
+            if (pageGroupTextSource.textFrameClass !== "editable") continue;
+            if (pageGroupTextSource.simpleMarkerLabelContents !== true) continue;
+            _pushUniqueId(ids, seen, pageGroupTextId);
+        }
+        return _sortedNumericIds(ids);
     }
     function addDeclared(sourceIds) {
         for (var i = 0; sourceIds && i < sourceIds.length; i++) {

@@ -182,6 +182,7 @@ public class StoryLoader {
             ConversionTiming.addCounter("phase3.storyLoader.styleContextNanos",
                     System.nanoTime() - styleContextStart);
 
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
             buildParagraphContent(ctx, ip, resolvedParagraph, resolvedRuns, storyId, i, sc, para);
 
             paragraphs.add(para);
@@ -787,6 +788,7 @@ public class StoryLoader {
             ResolvedParagraph resolvedParagraph,
             ASTParagraph para) {
         if (ctx == null || resolvedParagraph == null || resolvedParagraph.runs() == null || para == null) return;
+        appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
         ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
                 .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
                 .truncateAtParagraphBreak(true);
@@ -822,6 +824,23 @@ public class StoryLoader {
                 para.addItem(textRun);
             }
             if (text.indexOf('\r') >= 0) break;
+        }
+    }
+
+    private static void appendGeneratedParagraphPrefix(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph resolvedParagraph,
+            ASTParagraph para) {
+        if (ctx == null || resolvedParagraph == null || para == null) return;
+        String prefix = ResolvedTextFlowAstConverter.generatedPrefixToInsert(resolvedParagraph);
+        if (prefix == null || prefix.trim().isEmpty()) return;
+        ResolvedRun styleRun = ResolvedTextFlowAstConverter.firstVisibleResolvedRun(resolvedParagraph);
+        if (styleRun == null) return;
+        ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
+                .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
+                .truncateAtParagraphBreak(false);
+        for (ASTTextRun run : ResolvedTextFlowAstConverter.convertRunText(prefix, styleRun, para, options)) {
+            para.addItem(run);
         }
     }
 

@@ -2731,6 +2731,7 @@ public final class StoryConverter {
             // 적용해 InDesign 의 "1 ←여기부터 내려쓰기" 효과 재현 (예: 페이지 32 "가 같은 사건을..." 발문)
             ResolvedTextFrame firstAnchorTf = null;
             List<ResolvedRun> runs = rp.runs();
+            appendGeneratedParagraphPrefix(ctx, rp, para);
             if (runs != null) {
                 int runIndex = -1;
                 for (ResolvedRun run : runs) {
@@ -3117,6 +3118,32 @@ public final class StoryConverter {
         if (text == null) return false;
         String cleaned = text.replace("\r", "").replace("\n", "").trim();
         return cleaned.matches("\\d{1,4}");
+    }
+
+    private static void appendGeneratedParagraphPrefix(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph resolvedParagraph,
+            ASTParagraph para) {
+        if (ctx == null || resolvedParagraph == null || para == null) return;
+        String prefix = ResolvedTextFlowAstConverter.generatedPrefixToInsert(resolvedParagraph);
+        if (prefix == null || prefix.trim().isEmpty()) return;
+        ResolvedRun styleRun = ResolvedTextFlowAstConverter.firstVisibleResolvedRun(resolvedParagraph);
+        if (styleRun == null) return;
+        TextStyleApplicator.ResolvedStyleOptions styleOptions =
+                new TextStyleApplicator.ResolvedStyleOptions();
+        styleOptions.proportionalScaleAsFontSize = true;
+        styleOptions.applyVerticalScale = false;
+        List<ASTTextRun> textRuns = ResolvedTextFlowAstConverter.convertRunText(
+                prefix,
+                styleRun,
+                para,
+                ResolvedTextFlowAstConverter.options()
+                        .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
+                        .styleOptions(styleOptions)
+                        .truncateAtParagraphBreak(false));
+        for (ASTTextRun textRun : textRuns) {
+            para.addItem(textRun);
+        }
     }
 
     private static boolean hasVisibleText(ASTParagraph para) {

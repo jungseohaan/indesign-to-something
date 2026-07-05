@@ -65,37 +65,6 @@ public final class VisualShellPreparationRules {
                 && isPaperFilledContainerShell(ctx, rg);
     }
 
-    public static double minimumVisibleWidthForMasterEdgeStrip(
-            ResolvedBuildContext ctx,
-            RenderedGroup rg,
-            double rawLeft,
-            double rawRight,
-            double rawTop,
-            double rawBottom,
-            double cropRefLeft,
-            double cropRefRight,
-            double visLeft,
-            double visRight,
-            double pageWidth,
-            double pageHeight) {
-        if (ctx == null || rg == null || pageWidth >= 1e8) return 0.0;
-        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-        if (!isMasterStripPlan(plan)) return 0.0;
-
-        boolean leftEdge = (rawLeft < -0.5 || cropRefLeft < -0.5) && Math.abs(visLeft) < 0.5;
-        boolean rightEdge = (rawRight > pageWidth + 0.5 || cropRefRight > pageWidth + 0.5)
-                && Math.abs(visRight - pageWidth) < 0.5;
-        if (!leftEdge && !rightEdge) return 0.0;
-
-        double fullW = Math.max(rawRight - rawLeft, cropRefRight - cropRefLeft);
-        double fullH = rawBottom - rawTop;
-        if (fullW <= 1.0 || fullH <= 0.5) return 0.0;
-        double maxStripHeight = pageHeight < 1e8 ? Math.min(40.0, pageHeight * 0.15) : 40.0;
-        if (fullH > maxStripHeight) return 0.0;
-
-        return Math.max(Math.min(fullW * 0.60, 24.0), 0.0);
-    }
-
     public static boolean isMasterEdgeStripPlan(
             ResolvedBuildContext ctx,
             RenderedGroup rg,

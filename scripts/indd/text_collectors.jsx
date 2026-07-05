@@ -42,6 +42,22 @@ function normalizeTextFrameInsetSpacing(rawInset) {
     return [one, one, one, one];
 }
 
+function paragraphGeneratedPrefixText(para) {
+    if (!para) return "";
+    var candidates = [
+        "bulletsAndNumberingResultText",
+        "numberingResultText",
+        "bulletAndNumberingResultText"
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+        try {
+            var value = para[candidates[i]];
+            if (typeof value === "string" && value.length > 0) return value;
+        } catch (e) {}
+    }
+    return "";
+}
+
 function characterStyleChangesExportedRunProps(cs) {
     if (!cs) return false;
     try {
@@ -629,11 +645,16 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                 shadingOn: false,
                 shadingColor: null,
                 shadingTint: null,
+                generatedPrefixText: null,
                 tabStops: [],
                 runs: []
             };
 
             paraData.styleName = paraStyleNameForStats;
+            var generatedPrefix = paragraphGeneratedPrefixText(para);
+            if (generatedPrefix) {
+                paraData.generatedPrefixText = generatedPrefix;
+            }
             try { paraData.leading = para.leading; } catch (e) {}
             try { paraData.autoLeading = para.autoLeading; } catch (e) {}
             try { paraData.justification = para.justification.toString(); } catch (e) {}
@@ -964,6 +985,10 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                             for (var cp = 0; cp < cellParas.length; cp++) {
                                 var cellPara = cellParas[cp];
                                 var cpData = { runs: [] };
+                                var cellGeneratedPrefix = paragraphGeneratedPrefixText(cellPara);
+                                if (cellGeneratedPrefix) {
+                                    cpData.generatedPrefixText = cellGeneratedPrefix;
+                                }
                                 try {
                                     var cellTSRs = cellPara.textStyleRanges.everyItem().getElements();
                                     for (var cr = 0; cr < cellTSRs.length; cr++) {

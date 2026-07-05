@@ -202,6 +202,7 @@ public final class OwnershipPlanner {
         timed("dropNonCanonicalRenderedGraphicFrameSlots", this::dropNonCanonicalRenderedGraphicFrameSlots);
         timed("normalizeVisualSlotsExcludeTableStyleSources", this::normalizeVisualSlotsExcludeTableStyleSources);
         timed("normalizeDuplicateVisibleSourceSlots", this::normalizeDuplicateVisibleSourceSlots);
+        timed("normalizeStoryFlowInlineVisualMaterialSlots", this::normalizeStoryFlowInlineVisualMaterialSlots);
         timed("bindPaperInlineAnchorsToPageMaterialSlots", this::bindPaperInlineAnchorsToPageMaterialSlots);
         timed("dropFloatingPageClonesOwnedByStoryFlowInlineSlots", this::dropFloatingPageClonesOwnedByStoryFlowInlineSlots);
         timed("dropVisualOnlyCompositeShellCarriersCoveredByChildShellSlots.2", this::dropVisualOnlyCompositeShellCarriersCoveredByChildShellSlots);
@@ -422,8 +423,46 @@ public final class OwnershipPlanner {
                     .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
                     .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
         }
+        if (isImportedStoryFlowInlineShellSlotWithPagePosition(plan)) {
+            return plan.withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            "anchored_shell_slot_uses_page_position")
+                    .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
+        }
+        if (isPlannerDeclaredInlineGraphicLineTextStyleMarker(plan)) {
+            return plan.withVisualAction(VisualAction.ABSORB_TEXT_STYLE,
+                            "inline_graphic_line_text_style_marker")
+                    .withStyleSourceObjectIds(visualSourceIds(plan))
+                    .withVisualSourceObjectIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]);
+        }
         if (!isPlannerDeclaredStandaloneInlineVisual(plan)) return plan;
         return plan.withVisualAction(VisualAction.PLACE_INLINE_PNG, plan.reason);
+    }
+
+    private boolean isImportedStoryFlowInlineShellSlotWithPagePosition(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!isShellOnlyVisualSlot(plan)) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (!hasIdmlAnchoredPagePositionSource(plan)) return false;
+        return true;
+    }
+
+    private boolean hasIdmlAnchoredPagePositionSource(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (plan.domId >= 0 && hasIdmlAnchoredPagePosition(plan.domId)) return true;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (hasIdmlAnchoredPagePosition(sourceId)) return true;
+        }
+        for (int sourceId : visualSourceIds(plan)) {
+            if (hasIdmlAnchoredPagePosition(sourceId)) return true;
+        }
+        return false;
     }
 
     private boolean isPlannerDeclaredStandaloneInlineVisual(ObjectPlan plan) {
@@ -438,6 +477,38 @@ public final class OwnershipPlanner {
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         if (safe(plan.file).isEmpty()) return false;
         return plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0;
+    }
+
+    private boolean isPlannerDeclaredInlineGraphicLineTextStyleMarker(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (!safe(plan.kind).startsWith("planner_declared_rendered:")) return false;
+        if (!"planner_declared_object_plan".equals(safe(plan.reason))) return false;
+        if (!hasInlineObjectPlanSignal(plan)) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+            return false;
+        }
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length != 1) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(visualIds[0]));
+        if (item == null || !item.isInline()) return false;
+        if (!"GraphicLine".equals(safe(item.type()))) return false;
+        if (hasDescendantTextFrameExcluding(String.valueOf(visualIds[0]),
+                new HashSet<>(), new HashSet<>())) {
+            return false;
+        }
+        double[] b = boundsOf(item);
+        if (b == null || b.length < 4) b = plan.bounds;
+        if (b == null || b.length < 4) return true;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        double longAxis = Math.max(w, h);
+        double shortAxis = Math.min(w, h);
+        return longAxis >= 6.0 && shortAxis <= 3.0;
     }
 
     private boolean hasInlineObjectPlanSignal(ObjectPlan plan) {
@@ -11060,6 +11131,65 @@ public final class OwnershipPlanner {
             dropConsumedPageMaterialPlan(material.domId,
                     "page_material_slot_consumed_by_paper_inline_anchor");
         }
+    }
+
+    private void normalizeStoryFlowInlineVisualMaterialSlots() {
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isStoryFlowInlineVisualMaterialSlot(plan)) continue;
+            ObjectPlan replacement = plan
+                    .withVisualAction(VisualAction.PLACE_INLINE_PNG,
+                            "story_flow_inline_anchor_material_slot")
+                    .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW);
+            plans.set(i, replacement);
+            normalized++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.storyFlowInlineVisualMaterial.normalized",
+                normalized);
+    }
+
+    private boolean isStoryFlowInlineVisualMaterialSlot(ObjectPlan plan) {
+        if (!isVisibleRenderedVisual(plan)) return false;
+        if (plan.placement != Placement.FLOATING || plan.coordinateSpace != CoordinateSpace.PAGE) {
+            return false;
+        }
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (isShellOnlyVisualSlot(plan)) return false;
+        if (hasIdmlAnchoredPagePositionSource(plan)) return false;
+        if (!isVisualOnlyPlan(plan)) return false;
+        if (!hasStoryFlowInlineAnchorMaterialSignal(plan)) return false;
+        if (hasPlacedContentSourceTree(plan)) return false;
+        if (hasTextFrameSourceTree(plan)) return false;
+        return true;
+    }
+
+    private static boolean isShellOnlyVisualSlot(ObjectPlan plan) {
+        if (plan == null) return false;
+        String slotRole = safe(plan.slotRole);
+        if ("shell_slot_only".equals(slotRole)) return true;
+        if ("direct_child_shell_slot".equals(slotRole)) return true;
+        if ("TEXTLESS_SHELL_SLOT".equals(slotRole)) return true;
+        String candidateId = safe(plan.candidateId);
+        return candidateId.contains(".shell_slot_only")
+                || candidateId.endsWith("shell_slot_only")
+                || candidateId.contains(".direct_child_shell_slot")
+                || candidateId.endsWith("direct_child_shell_slot");
+    }
+
+    private boolean hasStoryFlowInlineAnchorMaterialSignal(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (hasResolvedInlineAnchor(plan.domId)) return true;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (hasResolvedInlineAnchor(sourceId)) return true;
+        }
+        for (int sourceId : visualSourceIds(plan)) {
+            if (hasResolvedInlineAnchor(sourceId)) return true;
+        }
+        return false;
     }
 
     private ObjectPlan findPageMaterialForPaperInlineAnchor(ObjectPlan inline) {

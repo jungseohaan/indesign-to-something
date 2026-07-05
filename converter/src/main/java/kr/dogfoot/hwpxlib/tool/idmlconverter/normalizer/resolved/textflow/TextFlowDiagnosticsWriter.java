@@ -61,6 +61,7 @@ public final class TextFlowDiagnosticsWriter {
         sb.append("{\"index\":").append(paragraph.index);
         sb.append(",\"styleName\":\"").append(escape(paragraph.styleName)).append("\"");
         sb.append(",\"justification\":\"").append(escape(paragraph.justification)).append("\"");
+        appendString(sb, "generatedPrefixText", paragraph.generatedPrefixText);
         sb.append(",\"runs\":[");
         for (int i = 0; i < paragraph.runs.size(); i++) {
             if (i > 0) sb.append(',');
