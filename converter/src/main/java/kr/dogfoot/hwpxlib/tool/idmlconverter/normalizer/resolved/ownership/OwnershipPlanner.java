@@ -12896,7 +12896,7 @@ public final class OwnershipPlanner {
     private void finalizeFloatingTextShellBackPlaneContracts() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
-            if (isFloatingOwnedUngroupedContainerBackdropShell(plan)) {
+            if (isFloatingOwnedTextShellOverlappingNonOwnedText(plan)) {
                 plans.set(i, plan.withVisualLayer(VisualLayer.CONTAINER_BACKDROP));
                 continue;
             }
@@ -12926,7 +12926,7 @@ public final class OwnershipPlanner {
                 || hasExplicitTextlessShellSignal(plan);
     }
 
-    private boolean isFloatingOwnedUngroupedContainerBackdropShell(ObjectPlan plan) {
+    private boolean isFloatingOwnedTextShellOverlappingNonOwnedText(ObjectPlan plan) {
         if (plan == null || data == null) return false;
         if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (plan.visualLayer != VisualLayer.LABEL_BACKDROP) return false;
@@ -12934,45 +12934,8 @@ public final class OwnershipPlanner {
         if (effectiveCoordinateSpace(plan) != CoordinateSpace.PAGE) return false;
         if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
-        if (!isDirectChildShellSlotPlan(plan)) return false;
-        if (!hasUngroupedPanelAndRuleLineSources(plan)) return false;
-        return overlapsNonOwnedLocalVisibleMaterial(plan);
-    }
-
-    private boolean hasUngroupedPanelAndRuleLineSources(ObjectPlan plan) {
-        if (plan == null || data == null) return false;
-        int[] visualIds = visualSourceIds(plan);
-        if (visualIds.length == 0) visualIds = plan.exportSourceObjectIds;
-        if (visualIds == null || visualIds.length == 0) return false;
-        boolean hasPanelShape = false;
-        boolean hasRuleLine = false;
-        for (int sourceId : visualIds) {
-            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
-            if (item == null || item.sourceHidden()) continue;
-            if (item.parentId() != null && !item.parentId().isBlank()) return false;
-            if (isRuleLineSourceItem(item)) {
-                hasRuleLine = true;
-                continue;
-            }
-            if (isSimpleDrawableShape(item)) {
-                hasPanelShape = true;
-            }
-        }
-        return hasPanelShape && hasRuleLine;
-    }
-
-    private boolean overlapsNonOwnedLocalVisibleMaterial(ObjectPlan shell) {
-        if (shell == null || shell.bounds == null || area(shell.bounds) <= 0.0) return false;
-        for (ObjectPlan candidate : plans) {
-            if (candidate == null || candidate == shell) continue;
-            if (candidate.pageIndex != shell.pageIndex) continue;
-            if (containsAny(candidate.sourceObjectIds, shell.sourceObjectIds)) continue;
-            if (candidate.bounds == null || area(candidate.bounds) <= 0.0) continue;
-            if (overlapArea(shell.bounds, candidate.bounds) <= 0.0) continue;
-            if (candidate.hasVisibleVisual()) return true;
-            if (candidate.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
-        }
-        return false;
+        if (plan.bounds == null || plan.bounds.length < 4 || area(plan.bounds) <= 0.0) return false;
+        return countOverlappingNonOwnedHwpxTextPlans(plan) > 0;
     }
 
     private boolean hasRuleLineSource(ObjectPlan plan) {
