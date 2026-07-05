@@ -1002,6 +1002,38 @@ public class HwpxTextBoxBuilder {
         return bfId;
     }
 
+    String createTransparentTextFrameBorderFill() {
+        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
+        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
+
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        bf.createSlash();
+        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        bf.createBackSlash();
+        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+
+        bf.createLeftBorder();
+        bf.leftBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createRightBorder();
+        bf.rightBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createTopBorder();
+        bf.topBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createBottomBorder();
+        bf.bottomBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+
+        bf.createDiagonal();
+        bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+
+        bf.createFillBrush();
+        VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), "none", "#FF000000");
+        return bfId;
+    }
+
 
     // ── 페이지 레벨 오버레이 (셀 내부에서 승격된 플로팅 텍스트박스) ──
 

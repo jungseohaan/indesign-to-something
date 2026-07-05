@@ -65,8 +65,6 @@ public final class OwnershipPlanner {
     private static final double CONCEPT_LABEL_SHELL_MIN_AREA_RATIO = 0.30;
     private static final double CONCEPT_LABEL_SHELL_MAX_AREA_RATIO = 2.60;
     private static final double CONCEPT_LABEL_SHELL_OVERLAP_MIN = 0.55;
-    private static final int BACKGROUND_LAYER_Z_BAND = 100_000;
-    private static final int CONTENT_BACKDROP_LAYER_Z_BAND = 200_000;
 
     private OwnershipPlanner(ResolvedBuildContext ctx) {
         this.ctx = ctx;
@@ -12871,7 +12869,12 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (plan == null || !plan.hasVisibleVisual()) continue;
-            if (isPlannerDeclaredInlineTextShellContract(plan)) continue;
+            if (isPlannerDeclaredInlineTextShellContract(plan)) {
+                if (isInlineOwnedTextShellBackPlane(plan, plan.visualLayer)) {
+                    plans.set(i, plan.withVisualLayer(VisualLayer.TEXT_CARD_BACKDROP));
+                }
+                continue;
+            }
             int sourceZ = canonicalVisualSourceZOrder(plan);
             VisualLayer layer = canonicalVisualPlane(plan, sourceZ);
             int plannedZ = canonicalVisualDepthZOrder(layer, sourceZ);
@@ -12893,7 +12896,12 @@ public final class OwnershipPlanner {
     private void finalizeFloatingTextShellBackPlaneContracts() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
+            if (isFloatingOwnedUngroupedContainerBackdropShell(plan)) {
+                plans.set(i, plan.withVisualLayer(VisualLayer.CONTAINER_BACKDROP));
+                continue;
+            }
             if (!isFloatingFrontTextShellCandidate(plan)) continue;
+            if (hasRuleLineSource(plan)) continue;
             if (!overlapsNonOwnedContentVisualPlan(plan)
                     && countOverlappingNonOwnedHwpxTextPlans(plan) < 2) {
                 continue;
@@ -12916,6 +12924,87 @@ public final class OwnershipPlanner {
         return isDirectChildShellSlotPlan(plan)
                 || "shell_slot_only".equals(safe(plan.slotRole))
                 || hasExplicitTextlessShellSignal(plan);
+    }
+
+    private boolean isFloatingOwnedUngroupedContainerBackdropShell(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.visualLayer != VisualLayer.LABEL_BACKDROP) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.PAGE) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (!isDirectChildShellSlotPlan(plan)) return false;
+        if (!hasUngroupedPanelAndRuleLineSources(plan)) return false;
+        return overlapsNonOwnedLocalVisibleMaterial(plan);
+    }
+
+    private boolean hasUngroupedPanelAndRuleLineSources(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length == 0) visualIds = plan.exportSourceObjectIds;
+        if (visualIds == null || visualIds.length == 0) return false;
+        boolean hasPanelShape = false;
+        boolean hasRuleLine = false;
+        for (int sourceId : visualIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.sourceHidden()) continue;
+            if (item.parentId() != null && !item.parentId().isBlank()) return false;
+            if (isRuleLineSourceItem(item)) {
+                hasRuleLine = true;
+                continue;
+            }
+            if (isSimpleDrawableShape(item)) {
+                hasPanelShape = true;
+            }
+        }
+        return hasPanelShape && hasRuleLine;
+    }
+
+    private boolean overlapsNonOwnedLocalVisibleMaterial(ObjectPlan shell) {
+        if (shell == null || shell.bounds == null || area(shell.bounds) <= 0.0) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == shell) continue;
+            if (candidate.pageIndex != shell.pageIndex) continue;
+            if (containsAny(candidate.sourceObjectIds, shell.sourceObjectIds)) continue;
+            if (candidate.bounds == null || area(candidate.bounds) <= 0.0) continue;
+            if (overlapArea(shell.bounds, candidate.bounds) <= 0.0) continue;
+            if (candidate.hasVisibleVisual()) return true;
+            if (candidate.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
+        }
+        return false;
+    }
+
+    private boolean hasRuleLineSource(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (containsRuleLineSource(plan.visualSourceObjectIds)) return true;
+        if (containsRuleLineSource(plan.exportSourceObjectIds)) return true;
+        return containsRuleLineSource(plan.sourceObjectIds);
+    }
+
+    private boolean containsRuleLineSource(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (isRuleLineSourceItem(item)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isRuleLineSourceItem(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if ("GraphicLine".equals(type)) return true;
+        if (!"Polygon".equals(type) && !"Rectangle".equals(type)) return false;
+        double[] b = item.geometricBounds();
+        if (b == null || b.length < 4) return false;
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        double min = Math.min(w, h);
+        double max = Math.max(w, h);
+        boolean strokeOnly = !isNoneColor(item.strokeColorName())
+                && (isNoneColor(item.fillColorName()) || item.fillColorName() == null);
+        return strokeOnly && min <= 2.8 && max >= 12.0;
     }
 
     private boolean overlapsNonOwnedContentVisualPlan(ObjectPlan shell) {
@@ -12961,12 +13050,6 @@ public final class OwnershipPlanner {
         if (layer == VisualLayer.PAGE_BACKGROUND) {
             return 0;
         }
-        if (layer == VisualLayer.CONTAINER_BACKDROP) {
-            return BACKGROUND_LAYER_Z_BAND + Math.max(0, sourceZ);
-        }
-        if (layer == VisualLayer.CONTENT_BACKDROP) {
-            return CONTENT_BACKDROP_LAYER_Z_BAND + Math.max(0, sourceZ);
-        }
         return Math.max(0, sourceZ);
     }
 
@@ -12989,7 +13072,10 @@ public final class OwnershipPlanner {
         if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && layer == VisualLayer.CONTAINER_BACKDROP
                 && !isPlanAllowedBackgroundPlane(plan, zOrder)) {
-            return VisualLayer.LABEL_BACKDROP;
+            layer = VisualLayer.LABEL_BACKDROP;
+        }
+        if (isInlineOwnedTextShellBackPlane(plan, layer)) {
+            return VisualLayer.TEXT_CARD_BACKDROP;
         }
         if (isTextCarrierBackdropShell(plan, layer, zOrder)) {
             return VisualLayer.CONTAINER_BACKDROP;
@@ -13012,6 +13098,16 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTENT_BACKDROP;
         }
         return layer;
+    }
+
+    private static boolean isInlineOwnedTextShellBackPlane(ObjectPlan plan, VisualLayer layer) {
+        return plan != null
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && layer == VisualLayer.LABEL_BACKDROP
+                && plan.placement == Placement.INLINE
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0;
     }
 
     private boolean isTextCarrierBackdropShell(

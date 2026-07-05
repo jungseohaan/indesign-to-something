@@ -21,12 +21,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 BEHIND_TEXT_LAYERS = {
     "PAGE_BACKGROUND",
     "CONTAINER_BACKDROP",
+    "TEXT_CARD_BACKDROP",
     "CONTENT_BACKDROP",
 }
 
 IN_FRONT_LAYERS = {
     "CONTAINER_FACE",
-    "TEXT_CARD_BACKDROP",
     "LABEL_CONNECTOR_BACKDROP",
     "LABEL_BACKDROP",
     "LABEL_OVERLAY_BACKDROP",

@@ -893,7 +893,7 @@ public class OwnershipPlannerTest {
         Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
         Assert.assertEquals(VisualLayer.CONTAINER_BACKDROP, shellPlan.visualLayer);
         Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(shell));
-        Assert.assertEquals(100_000 + 79, shellPlan.zOrder);
+        Assert.assertEquals(79, shellPlan.zOrder);
     }
 
     @Test
@@ -1362,9 +1362,9 @@ public class OwnershipPlannerTest {
         ObjectPlan plan = findRenderedPlan(ctx, 2000, "pdf_export");
 
         Assert.assertNotNull(plan);
-        Assert.assertEquals(200_000, plan.zOrder);
-        Assert.assertEquals(VisualLayer.CONTENT_BACKDROP, plan.visualLayer);
-        Assert.assertEquals(PolicyLayer.CONTENT, plan.visualPolicyLayer());
+        Assert.assertEquals(0, plan.zOrder);
+        Assert.assertEquals(VisualLayer.CONTAINER_BACKDROP, plan.visualLayer);
+        Assert.assertEquals(PolicyLayer.BACKGROUND, plan.visualPolicyLayer());
         Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(visual));
     }
 
