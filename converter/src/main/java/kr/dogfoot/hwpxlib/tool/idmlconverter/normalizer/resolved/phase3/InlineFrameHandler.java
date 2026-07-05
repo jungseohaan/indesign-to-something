@@ -1409,7 +1409,8 @@ public class InlineFrameHandler {
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
             imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
-            if (visibleShellTextFrameCount(childTfs) > 1) {
+            boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
+            if (visibleShellTextFrameCount(childTfs) > 1 || separatedHwpxTextChannel) {
                 obj.imageFillData(imageData);
                 obj.forceImageFill(true);
                 attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
@@ -1436,6 +1437,17 @@ public class InlineFrameHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static boolean shouldAttachSeparatedHwpxTextAsOverlay(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (shellPlan == null || childTfs == null || childTfs.isEmpty()) return false;
+        if (shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (!extractedShellImageOwnsGeometry(shellPlan)) return false;
+        return hasHwpxTextOwnershipForChildren(ctx, shellPlan, childTfs);
     }
 
     private static void attachInlineShellChildTextOverlays(
@@ -1780,10 +1792,10 @@ public class InlineFrameHandler {
             java.util.List<ResolvedTextFrame> childTfs) {
         if (ctx == null || shell == null) return null;
         ObjectPlan direct = ctx.findOwnershipPlanForRendered(shell);
-        if (isInlineTextShellOwnerForChildren(direct, shell, childTfs)) return direct;
+        if (isInlineTextShellOwnerForChildren(ctx, direct, shell, childTfs)) return direct;
         if (ctx.ownershipPlans == null) return null;
         for (ObjectPlan plan : ctx.ownershipPlans) {
-            if (isInlineTextShellOwnerForChildren(plan, shell, childTfs)) return plan;
+            if (isInlineTextShellOwnerForChildren(ctx, plan, shell, childTfs)) return plan;
         }
         return null;
     }
@@ -1883,15 +1895,16 @@ public class InlineFrameHandler {
     }
 
     private static boolean isInlineTextShellOwnerForChildren(
+            ResolvedBuildContext ctx,
             ObjectPlan plan,
             RenderedGroup shell,
             java.util.List<ResolvedTextFrame> childTfs) {
         if (plan == null || shell == null || childTfs == null || childTfs.isEmpty()) return false;
         if (plan.placement != Placement.INLINE) return false;
         if (!ShellRole.isTextShell(plan)) return false;
-        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (!isExecutableTextlessShellCarrier(plan, shell)) return false;
         if (plan.domId != shell.id() && !containsInt(plan.sourceObjectIds, shell.id())) return false;
+        if (!hasHwpxTextOwnershipForChildren(ctx, plan, childTfs)) return false;
         for (ResolvedTextFrame childTf : childTfs) {
             if (childTf == null || childTf.id() == null) return false;
             int childId;
@@ -1903,6 +1916,53 @@ public class InlineFrameHandler {
             if (!containsInt(plan.ownedTextFrameIds, childId)) return false;
         }
         return true;
+    }
+
+    private static boolean hasHwpxTextOwnershipForChildren(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (shellPlan == null || childTfs == null || childTfs.isEmpty()) return false;
+        if (shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
+        if (ctx == null || ctx.ownershipPlans == null) return false;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || childTf.id() == null) return false;
+            int childId;
+            try {
+                childId = Integer.parseInt(childTf.id());
+            } catch (NumberFormatException e) {
+                return false;
+            }
+            if (!hasHwpxTextOwnershipForTextFrame(ctx, childId)) return false;
+        }
+        return true;
+    }
+
+    private static boolean hasHwpxTextOwnershipForOwnedTextFrameIds(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan) {
+        if (shellPlan == null || shellPlan.ownedTextFrameIds == null
+                || shellPlan.ownedTextFrameIds.length == 0) {
+            return false;
+        }
+        if (shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
+        if (ctx == null || ctx.ownershipPlans == null) return false;
+        for (int textFrameDomId : shellPlan.ownedTextFrameIds) {
+            if (!hasHwpxTextOwnershipForTextFrame(ctx, textFrameDomId)) return false;
+        }
+        return true;
+    }
+
+    private static boolean hasHwpxTextOwnershipForTextFrame(ResolvedBuildContext ctx, int textFrameDomId) {
+        if (ctx == null || ctx.ownershipPlans == null || textFrameDomId < 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.domId == textFrameDomId || containsInt(plan.ownedTextFrameIds, textFrameDomId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isExecutableTextlessShellCarrier(ObjectPlan plan, RenderedGroup shell) {
@@ -3697,7 +3757,7 @@ public class InlineFrameHandler {
             if (plan != null
                     && plan.placement == Placement.INLINE
                     && ShellRole.isTextShell(plan)
-                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan)
                     && plan.ownedTextFrameIds != null
                     && plan.ownedTextFrameIds.length > 0) {
                 return true;
@@ -4238,8 +4298,11 @@ public class InlineFrameHandler {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!ShellRole.isTextShell(plan)) continue;
-            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (!containsInt(plan.ownedTextFrameIds, textFrameDomId)) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                    && !hasHwpxTextOwnershipForTextFrame(ctx, textFrameDomId)) {
+                continue;
+            }
             RenderedGroup rendered = findRenderedGroupForPlan(ctx, plan, plan.domId);
             if (isExecutableTextlessShellCarrier(plan, rendered)) {
                 return plan;
@@ -4265,7 +4328,7 @@ public class InlineFrameHandler {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!ShellRole.isTextShell(plan)) continue;
-            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (!hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan)) continue;
             if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
             RenderedGroup rendered = findRenderedGroupForDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
             if (!isExecutableTextlessShellCarrier(plan, rendered)) continue;

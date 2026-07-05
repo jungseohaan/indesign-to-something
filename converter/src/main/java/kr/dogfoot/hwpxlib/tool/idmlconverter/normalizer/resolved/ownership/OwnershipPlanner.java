@@ -8764,10 +8764,24 @@ public final class OwnershipPlanner {
         if (plan == null) return false;
         if (plan.placement != Placement.FLOATING) return false;
         if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (isTextShellWithSeparatedHiddenTextChannel(plan)) return true;
         if (hasExtractedTextlessShellVisual(plan)) return false;
         String reason = safe(plan.reason);
         return "sibling_group_text_shell".equals(reason)
                 || "story_flow_inline_shell_visual_only".equals(reason);
+    }
+
+    private boolean isTextShellWithSeparatedHiddenTextChannel(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (plan.exportSourceObjectIds == null || plan.exportSourceObjectIds.length == 0) return false;
+        if (plan.hiddenVisualSourceObjectIds == null || plan.hiddenVisualSourceObjectIds.length == 0) return false;
+        for (int tfId : plan.ownedTextFrameIds) {
+            if (contains(plan.hiddenVisualSourceObjectIds, tfId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private double[] visualShellSourceBounds(ObjectPlan plan) {

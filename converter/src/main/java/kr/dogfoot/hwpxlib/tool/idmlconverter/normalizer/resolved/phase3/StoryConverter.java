@@ -3090,29 +3090,23 @@ public final class StoryConverter {
         if (text == null || text.isEmpty()) return text;
 
         int i = 0;
+        boolean sawAnchorLayoutControl = false;
+        boolean sawLeadingSpace = false;
         while (i < text.length()) {
             char ch = text.charAt(i);
             if (ch == ' ' || ch == '\t' || ch == '\u00A0') {
+                sawLeadingSpace = true;
+                i++;
+            } else if (isAnchorLayoutControl(ch)) {
+                sawAnchorLayoutControl = true;
                 i++;
             } else {
                 break;
             }
         }
-        if (i == 0 || i >= text.length()) return text;
-
-        if (isAnchorLayoutControl(text.charAt(i))) {
-            int j = i;
-            while (j < text.length()) {
-                char ch = text.charAt(j);
-                if (isAnchorLayoutControl(ch) || ch == ' ' || ch == '\t' || ch == '\u00A0') {
-                    j++;
-                } else {
-                    break;
-                }
-            }
-            return " " + text.substring(j);
-        }
-        return text;
+        if (!sawAnchorLayoutControl) return text;
+        if (i >= text.length()) return "";
+        return sawLeadingSpace ? " " + text.substring(i) : text.substring(i);
     }
 
     private static boolean isAnchorLayoutControl(char ch) {
