@@ -226,7 +226,7 @@ function _runRenderPhases(doc, ctx, allItems) {
             exactShellSlotDuplicateSummary: ctx.extractionPlan.exactShellSlotDuplicateSummary,
             sourceSlotRegistrySummary: ctx.extractionPlan.sourceSlotRegistrySummary,
             fullDiagnosticsSkipped: true,
-            enableFullDiagnostics: "run with perfMode standard/high or argument 13 '--diagnostics'"
+            enableFullDiagnostics: "run with argument 13 '--diagnostics' or perfMode diagnostics/debug"
         });
         _marker(ctx.outputDir, "03h_writePlannerDiagnosticsSummary_done");
     }

@@ -1283,8 +1283,11 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
         _marker(ctx.outputDir, "03d16g5_plan_excludeChildShellSourcesAfterUnclaimedVectors");
     }
+    var sourceCoverageOptions = {
+        fullDiagnostics: ctx.writePlannerDiagnostics === true
+    };
     var sourceCoverageDiagnostics = _buildSourceCoverageDiagnostics(
-            sourceItems, executionCandidates, objectPlanDiagnostics);
+            sourceItems, executionCandidates, objectPlanDiagnostics, sourceCoverageOptions);
     var unresolvedVisibleVectorCoverageFallbackCount =
             _appendUnresolvedVisibleVectorCoverageCandidates(
                     executionCandidates, sourceCoverageDiagnostics, sourceItems);
@@ -1299,16 +1302,41 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
         _marker(ctx.outputDir, "03d16g10_plan_excludeChildShellSourcesAfterUnresolvedVectors");
         sourceCoverageDiagnostics = _buildSourceCoverageDiagnostics(
-                sourceItems, executionCandidates, objectPlanDiagnostics);
+                sourceItems, executionCandidates, objectPlanDiagnostics, sourceCoverageOptions);
     }
+    _marker(ctx.outputDir, "03d16h0_plan_sourceCoverageBuild");
     try { writeJson(ctx.outputDir + "/source-coverage.json", sourceCoverageDiagnostics); } catch (eSourceCoverageWrite) {}
     _marker(ctx.outputDir, "03d16h_plan_sourceCoverage");
     var sourceOwnershipModelDiagnostics = _buildSourceOwnershipModelDiagnostics(
-            sourceItems, executionCandidates, objectPlanDiagnostics);
-    try { writeJson(ctx.outputDir + "/source-bundles.json", sourceOwnershipModelDiagnostics.sourceBundles); } catch (eSourceBundlesWrite) {}
-    try { writeJson(ctx.outputDir + "/ownership-slots.json", sourceOwnershipModelDiagnostics.ownershipSlots); } catch (eOwnershipSlotsWrite) {}
-    try { writeJson(ctx.outputDir + "/slot-owners.json", sourceOwnershipModelDiagnostics.slotOwners); } catch (eSlotOwnersWrite) {}
+            sourceItems, executionCandidates, objectPlanDiagnostics, {
+                fullDiagnostics: ctx.writePlannerDiagnostics === true
+            });
+    _marker(ctx.outputDir, "03d16i0_plan_sourceOwnershipModelBuild");
+    if (ctx.writePlannerDiagnostics === true) {
+        try { writeJson(ctx.outputDir + "/source-bundles.json", sourceOwnershipModelDiagnostics.sourceBundles); } catch (eSourceBundlesWrite) {}
+        _marker(ctx.outputDir, "03d16i1_plan_writeSourceBundles");
+        try { writeJson(ctx.outputDir + "/ownership-slots.json", sourceOwnershipModelDiagnostics.ownershipSlots); } catch (eOwnershipSlotsWrite) {}
+        _marker(ctx.outputDir, "03d16i2_plan_writeOwnershipSlots");
+        try { writeJson(ctx.outputDir + "/slot-owners.json", sourceOwnershipModelDiagnostics.slotOwners); } catch (eSlotOwnersWrite) {}
+        _marker(ctx.outputDir, "03d16i3_plan_writeSlotOwners");
+    } else {
+        try {
+            writeJson(ctx.outputDir + "/source-ownership-model-summary.json", {
+                schemaVersion: 1,
+                policy: "POLICY-source-ownership",
+                mode: "source-ownership-model-summary",
+                sourceBundles: sourceOwnershipModelDiagnostics.sourceBundles.summary,
+                ownershipSlots: sourceOwnershipModelDiagnostics.ownershipSlots.summary,
+                slotOwners: sourceOwnershipModelDiagnostics.slotOwners.summary,
+                renderUnits: sourceOwnershipModelDiagnostics.renderUnits.summary,
+                summary: sourceOwnershipModelDiagnostics.summary,
+                fullDiagnosticsSkipped: true
+            });
+        } catch (eSourceOwnershipSummaryWrite) {}
+        _marker(ctx.outputDir, "03d16i1_plan_writeSourceOwnershipSummary");
+    }
     try { writeJson(ctx.outputDir + "/render-units.json", sourceOwnershipModelDiagnostics.renderUnits); } catch (eRenderUnitsWrite) {}
+    _marker(ctx.outputDir, "03d16i4_plan_writeRenderUnits");
     _marker(ctx.outputDir, "03d16i_plan_sourceOwnershipModel");
     _attachRenderUnitsToExecutionCandidates(executionCandidates, sourceOwnershipModelDiagnostics);
     _marker(ctx.outputDir, "03d16j_plan_attachRenderUnits");

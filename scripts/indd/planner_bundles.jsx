@@ -670,6 +670,11 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
                 ? _sortedNumericIds(explicitVisualIds)
                 : _plannerBundleSourceIdsWithoutInlineAnchorDescendants(
                         explicitVisualIds, clusterIndex);
+        if (visualSourceObjectIds.length === 0
+                && candidate.passId === "pass.editable_textframe_visual_shells") {
+            visualSourceObjectIds = _plannerBundleTextFrameShellSourceIds(
+                    explicitVisualIds, clusterIndex);
+        }
     } else {
         var visualBase = candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0
                 ? candidate.exportSourceObjectIds

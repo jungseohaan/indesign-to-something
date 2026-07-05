@@ -794,7 +794,9 @@ function normalizeSourceItemZOrder(sourceItems, ctx) {
     }
 }
 
-function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiagnostics) {
+function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiagnostics, options) {
+    options = options || {};
+    var fullDiagnostics = options.fullDiagnostics === true;
     var claimsBySourceId = {};
     var plans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans
             ? objectPlanDiagnostics.objectPlans
@@ -890,6 +892,7 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
         if (!src || src.id === null || src.id === undefined) continue;
         var srcClaims = claimsBySourceId[String(src.id)] || [];
         var status = _sourceCoverageStatusForSource(src, srcClaims);
+        var claimKinds = _sourceCoverageClaimKinds(srcClaims);
         var row = {
             sourceObjectId: src.id,
             coverageStatus: status,
@@ -912,17 +915,24 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
             hasVisibleFill: src.hasVisibleFill === true,
             hasVisibleStroke: src.hasVisibleStroke === true,
             storyAnchorPlacement: src.storyAnchorPlacement || null,
-            coverageClaimKinds: _sourceCoverageClaimKinds(srcClaims),
-            claims: srcClaims
+            coverageClaimKinds: claimKinds
         };
-        rows.push(row);
+        if (fullDiagnostics) {
+            row.claims = srcClaims;
+            rows.push(row);
+        }
         _incrementSourceCoverageCount(summary.statusCounts, status);
         if (status === "UNRESOLVED") {
             summary.unresolvedCount++;
             if (_sourceCoverageHasPotentialVisibleMaterial(src)) {
                 summary.visibleMaterialUnresolvedCount++;
             }
-            if (unresolvedRows.length < 200) unresolvedRows.push(row);
+            var unresolvedRow = row;
+            if (!fullDiagnostics) {
+                unresolvedRow = _sourceCoverageProblemRow(row, srcClaims);
+                rows.push(unresolvedRow);
+            }
+            if (unresolvedRows.length < 200) unresolvedRows.push(unresolvedRow);
         } else if (status === "DROPPED_INTENTIONAL") {
             summary.droppedIntentionalCount++;
         } else if (status === "PROVENANCE_ONLY") {
@@ -933,11 +943,25 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
     return {
         schemaVersion: 1,
         policy: "POLICY-source-ownership",
-        mode: "source-coverage-diagnostics",
+        mode: fullDiagnostics
+                ? "source-coverage-diagnostics"
+                : "source-coverage-summary",
         summary: summary,
+        fullDiagnostics: fullDiagnostics,
+        fullDiagnosticsSkipped: !fullDiagnostics,
         unresolvedPreview: unresolvedRows,
         sourceObjects: rows
     };
+}
+
+function _sourceCoverageProblemRow(row, claims) {
+    var out = {};
+    for (var key in row) {
+        if (!row.hasOwnProperty(key)) continue;
+        out[key] = row[key];
+    }
+    out.claims = claims || [];
+    return out;
 }
 
 function _sourceCoveragePlanHasVisibleVisual(plan) {
@@ -1008,7 +1032,9 @@ function _incrementSourceCoverageCount(map, key) {
     map[key]++;
 }
 
-function _buildSourceOwnershipModelDiagnostics(sourceItems, candidates, objectPlanDiagnostics) {
+function _buildSourceOwnershipModelDiagnostics(sourceItems, candidates, objectPlanDiagnostics, options) {
+    options = options || {};
+    var fullDiagnostics = options.fullDiagnostics === true;
     var plans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans
             ? objectPlanDiagnostics.objectPlans
             : [];
@@ -1040,16 +1066,16 @@ function _buildSourceOwnershipModelDiagnostics(sourceItems, candidates, objectPl
         var bundle = _sourceModelBundleFromObjectPlan(plan);
         if (!seenBundleIds[bundle.bundleId]) {
             seenBundleIds[bundle.bundleId] = true;
-            bundleRows.push(bundle);
+            if (fullDiagnostics) bundleRows.push(bundle);
             _incrementSourceCoverageCount(summary.bundleTypeCounts, bundle.bundleType);
         }
         var slots = _sourceModelSlotsFromObjectPlan(plan);
         for (var s = 0; s < slots.length; s++) {
             var slot = slots[s];
-            slotRows.push(slot);
+            if (fullDiagnostics) slotRows.push(slot);
             _incrementSourceCoverageCount(summary.slotCounts, slot.ownershipSlot);
             var owner = _sourceModelOwnerFromSlot(slot, plan);
-            ownerRows.push(owner);
+            if (fullDiagnostics) ownerRows.push(owner);
             _incrementSourceCoverageCount(summary.ownerCounts, owner.owner);
             _incrementSourceCoverageCount(summary.materializationCounts, owner.materialization);
             if (!ownerCountBySlotKey[slot.slotIdentityKey]) ownerCountBySlotKey[slot.slotIdentityKey] = 0;
@@ -1072,43 +1098,55 @@ function _buildSourceOwnershipModelDiagnostics(sourceItems, candidates, objectPl
         }
     }
 
-    summary.bundleCount = bundleRows.length;
-    summary.slotCount = slotRows.length;
-    summary.slotOwnerCount = ownerRows.length;
+    summary.bundleCount = _sourceModelObjectKeyCount(seenBundleIds);
+    summary.slotCount = _sourceModelCountMapTotal(summary.slotCounts);
+    summary.slotOwnerCount = _sourceModelCountMapTotal(summary.ownerCounts);
     summary.renderUnitCount = renderUnitRows.length;
 
     return {
         sourceBundles: {
             schemaVersion: 1,
             policy: "POLICY-source-ownership",
-            mode: "source-bundle-diagnostics",
+            mode: fullDiagnostics
+                    ? "source-bundle-diagnostics"
+                    : "source-bundle-summary",
             summary: {
-                bundleCount: bundleRows.length,
+                bundleCount: summary.bundleCount,
                 bundleTypeCounts: summary.bundleTypeCounts
             },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
             bundles: bundleRows
         },
         ownershipSlots: {
             schemaVersion: 1,
             policy: "POLICY-source-ownership",
-            mode: "ownership-slot-diagnostics",
+            mode: fullDiagnostics
+                    ? "ownership-slot-diagnostics"
+                    : "ownership-slot-summary",
             summary: {
-                slotCount: slotRows.length,
+                slotCount: summary.slotCount,
                 slotCounts: summary.slotCounts,
                 duplicateSlotOwnerCount: summary.duplicateSlotOwnerCount,
                 duplicateSlotKeys: summary.duplicateSlotKeys
             },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
             slots: slotRows
         },
         slotOwners: {
             schemaVersion: 1,
             policy: "POLICY-source-ownership",
-            mode: "slot-owner-diagnostics",
+            mode: fullDiagnostics
+                    ? "slot-owner-diagnostics"
+                    : "slot-owner-summary",
             summary: {
-                slotOwnerCount: ownerRows.length,
+                slotOwnerCount: summary.slotOwnerCount,
                 ownerCounts: summary.ownerCounts,
                 materializationCounts: summary.materializationCounts
             },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
             owners: ownerRows
         },
         renderUnits: {
@@ -1122,6 +1160,23 @@ function _buildSourceOwnershipModelDiagnostics(sourceItems, candidates, objectPl
         },
         summary: summary
     };
+}
+
+function _sourceModelObjectKeyCount(map) {
+    var count = 0;
+    for (var key in map) {
+        if (map.hasOwnProperty(key)) count++;
+    }
+    return count;
+}
+
+function _sourceModelCountMapTotal(map) {
+    var total = 0;
+    for (var key in map) {
+        if (!map.hasOwnProperty(key)) continue;
+        total += Number(map[key] || 0);
+    }
+    return total;
 }
 
 function _sourceModelBundleFromObjectPlan(plan) {
