@@ -89,7 +89,7 @@ function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
             plan.zOrder = sourceZ;
             zOrderUpdates++;
         }
-        var layer = _objectPlanCanonicalVisualLayer(plan, editableTextFrames, sourceZ);
+        var layer = _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFrames, sourceZ);
         if (layer && plan.visualLayer !== layer) {
             plan.visualLayer = layer;
             plan.policyLayer = _objectPlanPolicyLayerForVisualLayer(layer);
@@ -163,15 +163,23 @@ function _objectPlanMaxSourceZOrder(ids, sourceById) {
     return max;
 }
 
-function _objectPlanCanonicalVisualLayer(plan, editableTextFrames, zOrder) {
+function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFrames, zOrder) {
     if (!plan) return null;
+    if (plan.visualLayer === "PAGE_BACKGROUND"
+            && plan.passId !== "pass.page_backgrounds"
+            && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder)) {
+        return "CONTENT_VISUAL";
+    }
+    if (plan.visualLayer === "CONTAINER_BACKDROP"
+            && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder)) {
+        return plan.visualAction === "PLACE_TEXT_SHELL" ? "LABEL_BACKDROP" : "CONTENT_VISUAL";
+    }
     if (plan.visualAction === "PLACE_TEXT_SHELL"
             && plan.placement === "FLOATING"
             && plan.coordinateSpace === "PAGE"
             && (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0)
             && plan.visualLayer === "LABEL_BACKDROP"
-            && (_objectPlanIsPageEdgeSpanningBounds(plan.bounds)
-                    || _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFrames))) {
+            && _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder)) {
         return "CONTAINER_BACKDROP";
     }
     if (plan.visualAction === "PLACE_FLOATING_PNG"
@@ -181,6 +189,36 @@ function _objectPlanCanonicalVisualLayer(plan, editableTextFrames, zOrder) {
         return "CONTENT_BACKDROP";
     }
     return plan.visualLayer;
+}
+
+function _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder) {
+    if (!plan) return false;
+    if (!_objectPlanHasPageLevelSourceRoot(plan, sourceById)) return false;
+    if (_objectPlanHasTextOwnershipSignal(plan)) return false;
+    if (!_objectPlanIsBackgroundBoundsSanityCandidate(plan.bounds)) return false;
+    return _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFrames);
+}
+
+function _objectPlanHasTextOwnershipSignal(plan) {
+    return !!(plan
+            && ((plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0)
+                    || (plan.hiddenVisualSourceObjectIds && plan.hiddenVisualSourceObjectIds.length > 0)
+                    || plan.textAction === "OWNED_BY_HWPX_TEXT"));
+}
+
+function _objectPlanHasPageLevelSourceRoot(plan, sourceById) {
+    var roots = plan ? (plan.sourceRootObjectIds && plan.sourceRootObjectIds.length > 0
+            ? plan.sourceRootObjectIds
+            : plan.sourceObjectIds) : null;
+    if (!roots || roots.length === 0) return false;
+    for (var i = 0; i < roots.length; i++) {
+        var src = sourceById ? sourceById[String(roots[i])] : null;
+        if (!src) return false;
+        if (src.parentId !== null && src.parentId !== undefined && String(src.parentId) !== "") {
+            return false;
+        }
+    }
+    return true;
 }
 
 function _objectPlanIsBehindLocalText(bounds, pageIndex, zOrder, editableTextFrames) {
@@ -196,7 +234,7 @@ function _objectPlanIsBehindLocalText(bounds, pageIndex, zOrder, editableTextFra
     return false;
 }
 
-function _objectPlanIsPageEdgeSpanningBounds(bounds) {
+function _objectPlanIsBackgroundBoundsSanityCandidate(bounds) {
     if (!bounds || bounds.length < 4 || _objectPlanArea(bounds) <= 0) return false;
     var h = Math.abs(bounds[2] - bounds[0]);
     var w = Math.abs(bounds[3] - bounds[1]);

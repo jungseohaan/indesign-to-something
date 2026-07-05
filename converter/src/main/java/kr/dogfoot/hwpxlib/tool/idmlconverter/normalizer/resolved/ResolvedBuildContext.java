@@ -760,41 +760,36 @@ public final class ResolvedBuildContext {
             return ownershipPlanRenderedCache.get(cacheKey);
         }
         ensureOwnershipPlanIndexes();
-        ObjectPlan renderUnitPlan = renderedOnly(ownershipPlanByRenderUnitKey.get(
-                renderUnitKey(rg.renderUnitId())));
-        if (renderUnitPlan != null) {
-            ownershipPlanRenderedCache.put(cacheKey, renderUnitPlan);
-            return renderUnitPlan;
-        }
         Placement placement = placementOf(rg);
-        ObjectPlan plan = findRenderedPlanForPlacement(rg, placement);
         Placement alternatePlacement = placement == Placement.INLINE ? Placement.FLOATING : Placement.INLINE;
-        ObjectPlan alternatePlan = findRenderedPlanForPlacement(rg, alternatePlacement);
+        ObjectPlan plan = findRenderedPlanForPlacement(rg, placement, false);
+        ObjectPlan alternatePlan = findRenderedPlanForPlacement(rg, alternatePlacement, false);
         if (plan == null || (alternatePlan != null && alternatePlan.hasVisibleVisual() && !plan.hasVisibleVisual())) {
             plan = alternatePlan;
         }
-        ObjectPlan renderPlan = renderedOnly(ownershipPlanByRenderKey.get(
-                renderKey(rg.pageIndex(), placement, rg.id())));
-        if (renderPlan == null) {
-            renderPlan = renderedOnly(ownershipPlanByRenderKey.get(
-                    renderKey(rg.pageIndex(), alternatePlacement, rg.id())));
+        if (plan == null) {
+            plan = findRenderedPlanForPlacement(rg, placement, true);
+            alternatePlan = findRenderedPlanForPlacement(rg, alternatePlacement, true);
+            if (plan == null || (alternatePlan != null && alternatePlan.hasVisibleVisual() && !plan.hasVisibleVisual())) {
+                plan = alternatePlan;
+            }
         }
         if (plan == null) {
-            plan = renderPlan;
+            plan = renderedOnly(ownershipPlanByRenderUnitKey.get(renderUnitKey(rg.renderUnitId())));
         }
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
     }
 
-    private ObjectPlan findRenderedPlanForPlacement(RenderedGroup rg, Placement placement) {
+    private ObjectPlan findRenderedPlanForPlacement(
+            RenderedGroup rg,
+            Placement placement,
+            boolean allowCandidateFallback) {
         if (rg == null || placement == null) return null;
         ObjectPlan plan = renderedOnly(ownershipPlanByRenderFileKey.get(
                 renderFileKey(rg.pageIndex(), placement, rg.id(), rg.file())));
-        ObjectPlan candidatePlan = renderedOnly(ownershipPlanByCandidateKey.get(
-                candidateKey(rg.pageIndex(), placement, rg.candidateId())));
         ObjectPlan renderPlan = renderedOnly(ownershipPlanByRenderKey.get(
                 renderKey(rg.pageIndex(), placement, rg.id())));
-        if (plan == null) plan = candidatePlan;
         if (plan == null) plan = renderPlan;
         if (plan == null) {
             plan = renderedOnly(ownershipPlanByFileBoundsKey.get(
@@ -810,6 +805,10 @@ public final class ResolvedBuildContext {
         }
         if (plan == null) {
             plan = renderedOnly(ownershipPlanByDomKey.get(domKey(rg.pageIndex(), placement, rg.id())));
+        }
+        if (allowCandidateFallback && plan == null) {
+            plan = renderedOnly(ownershipPlanByCandidateKey.get(
+                    candidateKey(rg.pageIndex(), placement, rg.candidateId())));
         }
         return plan;
     }
