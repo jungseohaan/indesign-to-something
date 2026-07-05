@@ -55,6 +55,8 @@ public final class OwnershipPlanValidator {
         v.validateCompositeClippedImageOwnersAreSpecific();
         v.validatePlacedContentVisualsStayContentLayer();
         v.validateBackgroundShellDoesNotOwnText();
+        v.validateBackgroundDepthBand();
+        v.validateRenderedPlanExactArtifactMatchPreferred();
         v.validateVisibleVisualSourcesArePageLocal();
         v.validateTextlessVisualFragmentsArePageLocal();
         v.validateDirectInlineAnchoredTextShellsStayInline();
@@ -559,6 +561,65 @@ public final class OwnershipPlanValidator {
                             + " visualLayer=" + plan.visualLayer
                             + " policyLayer=" + plan.visualPolicyLayer());
         }
+    }
+
+    private void validateBackgroundDepthBand() {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || !hasVisibleVisualSlot(plan)) continue;
+            if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND && plan.zOrder != 0) {
+                warn("STAGE4_PAGE_BACKGROUND_NOT_BOTTOM_Z",
+                        "plan=" + planRef(plan)
+                                + " visualLayer=" + plan.visualLayer
+                                + " zOrder=" + plan.zOrder);
+            }
+            if (plan.visualLayer == VisualLayer.CONTAINER_BACKDROP && plan.zOrder >= 200_000) {
+                warn("STAGE4_BACKGROUND_VISUAL_OUT_OF_BACKGROUND_BAND",
+                        "plan=" + planRef(plan)
+                                + " visualLayer=" + plan.visualLayer
+                                + " zOrder=" + plan.zOrder);
+            }
+        }
+    }
+
+    private void validateRenderedPlanExactArtifactMatchPreferred() {
+        if (ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) return;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null) continue;
+            ObjectPlan exact = findExactRenderedArtifactPlan(rg);
+            if (exact == null) continue;
+            ObjectPlan matched = ctx.findOwnershipPlanForRendered(rg);
+            if (matched == null || matched == exact) continue;
+            if (sameRenderedArtifact(matched, rg)) continue;
+            warn("STAGE4_RENDERED_PLAN_ARTIFACT_MISMATCH",
+                    "renderedId=" + rg.id()
+                            + " renderedFile=" + safe(rg.file())
+                            + " exact=" + planRef(exact)
+                            + " matched=" + planRef(matched));
+        }
+    }
+
+    private ObjectPlan findExactRenderedArtifactPlan(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg) {
+        if (rg == null) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.renderId == null) continue;
+            if (plan.pageIndex != rg.pageIndex()) continue;
+            if (plan.renderId.intValue() != rg.id()) continue;
+            if (!safe(plan.file).equals(safe(rg.file()))) continue;
+            return plan;
+        }
+        return null;
+    }
+
+    private static boolean sameRenderedArtifact(
+            ObjectPlan plan,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg) {
+        return plan != null
+                && rg != null
+                && plan.renderId != null
+                && plan.renderId.intValue() == rg.id()
+                && safe(plan.file).equals(safe(rg.file()));
     }
 
     private void validateVisibleVisualSourcesArePageLocal() {

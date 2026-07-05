@@ -65,6 +65,8 @@ public final class OwnershipPlanner {
     private static final double CONCEPT_LABEL_SHELL_MIN_AREA_RATIO = 0.30;
     private static final double CONCEPT_LABEL_SHELL_MAX_AREA_RATIO = 2.60;
     private static final double CONCEPT_LABEL_SHELL_OVERLAP_MIN = 0.55;
+    private static final int BACKGROUND_LAYER_Z_BAND = 100_000;
+    private static final int CONTENT_BACKDROP_LAYER_Z_BAND = 200_000;
 
     private OwnershipPlanner(ResolvedBuildContext ctx) {
         this.ctx = ctx;
@@ -78,6 +80,10 @@ public final class OwnershipPlanner {
 
     private void run() {
         timed("importPreplannedObjectPlans", this::importPreplannedObjectPlans);
+        timed("planRenderedItems", this::planRenderedItems);
+        timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
+        timed("planNativeParentTextShells", this::planNativeParentTextShells);
+        timed("planNativeSiblingTextShells", this::planNativeSiblingTextShells);
         int legacyBridgePlanStart = plans.size();
         int legacyBridgeWarningStart = ctx.ownershipWarningLines.size();
         List<String> preBridgePlanJsons = snapshotPlanJsons();
@@ -89,6 +95,9 @@ public final class OwnershipPlanner {
         int legacyBridgeWarningDelta = ctx.ownershipWarningLines.size() - legacyBridgeWarningStart;
         recordLegacyBridgeMetrics(legacyBridgePlanStart, legacyBridgeWarningStart, legacyBridgeSkipped);
         recordLegacyBridgeDiagnostics(legacyBridgePlanStart, preBridgePlanJsons, legacyBridgeSkipped);
+        timed("ensureOwnedTextFramePlansForVisibleTextShells", this::ensureOwnedTextFramePlansForVisibleTextShells);
+        timed("finalizeFloatingTextShellBackPlaneContracts", this::finalizeFloatingTextShellBackPlaneContracts);
+        timed("finalizeOwnedTextFrameDepthContracts.afterShellOwnedTextPlans", this::finalizeOwnedTextFrameDepthContracts);
         writeAndValidatePlans();
         ConversionTiming.metric("stage1.ownershipPlanner.importedPreplannedPlans",
                 importedPreplannedObjectPlanCount);
@@ -111,7 +120,6 @@ public final class OwnershipPlanner {
      * imported ObjectPlan directly and this bridge should disappear.</p>
      */
     private void runLegacyOwnershipMutationBridge() {
-        timed("planRenderedItems", this::planRenderedItems);
         timed("planTextFrames", this::planTextFrames);
         timed("resolveSiblingGroupTextShellOwners", this::resolveSiblingGroupTextShellOwners);
         timed("resolveIndependentSiblingTextShellOwners", this::resolveIndependentSiblingTextShellOwners);
@@ -146,9 +154,6 @@ public final class OwnershipPlanner {
         timed("declareInlineTextShellOwners", this::declareInlineTextShellOwners);
         timed("declareAtomicOwnershipRootTextHiddenShellOwners", this::declareAtomicOwnershipRootTextHiddenShellOwners);
         timed("declareDirectTextHiddenShellOwners", this::declareDirectTextHiddenShellOwners);
-        timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
-        timed("planNativeParentTextShells", this::planNativeParentTextShells);
-        timed("planNativeSiblingTextShells", this::planNativeSiblingTextShells);
         timed("normalizeDuplicateSiblingLabelTextOwners", this::normalizeDuplicateSiblingLabelTextOwners);
         timed("planUnownedVisualOnlyChildShellSlots", this::planUnownedVisualOnlyChildShellSlots);
         timed("dropCompositeTextShellParentsCoveredByDirectShellSlots", this::dropCompositeTextShellParentsCoveredByDirectShellSlots);
@@ -216,10 +221,8 @@ public final class OwnershipPlanner {
         timed("normalizeTextlessFragmentBoundsToRenderSource", this::normalizeTextlessFragmentBoundsToRenderSource);
         timed("completeTextFrameShellStyleSources.final", this::completeTextFrameShellStyleSources);
         timed("dropEditableTextFrameFallbackShellsOwnedByCompositeSlots", this::dropEditableTextFrameFallbackShellsOwnedByCompositeSlots);
-        timed("ensureOwnedTextFramePlansForVisibleTextShells", this::ensureOwnedTextFramePlansForVisibleTextShells);
         timed("finalizeVisualDepthContracts", this::finalizeVisualDepthContracts);
         timed("restorePlannerDeclaredInlineTextShellContracts", this::restorePlannerDeclaredInlineTextShellContracts);
-        timed("ensureOwnedTextFramePlansForVisibleTextShells.final", this::ensureOwnedTextFramePlansForVisibleTextShells);
         timed("finalizeOwnedTextFrameDepthContracts.final", this::finalizeOwnedTextFrameDepthContracts);
         timed("completeRenderedExtractionSourceContracts", this::completeRenderedExtractionSourceContracts);
         timed("completeSourceTreeDiagnostics", this::completeSourceTreeDiagnostics);
@@ -259,6 +262,8 @@ public final class OwnershipPlanner {
         ctx.legacyBridgeSummaryLines.clear();
         Map<String, Integer> addedByCategory = new LinkedHashMap<>();
         Map<String, Integer> mutatedByCategory = new LinkedHashMap<>();
+        Map<String, Integer> addedByMigrationKey = new LinkedHashMap<>();
+        Map<String, Integer> mutatedByMigrationKey = new LinkedHashMap<>();
         int mutated = 0;
         int comparable = Math.min(planStart, Math.min(preBridgePlanJsons.size(), plans.size()));
         for (int i = 0; i < comparable; i++) {
@@ -269,8 +274,10 @@ public final class OwnershipPlanner {
             mutated++;
             String category = legacyBridgePlanCategory(plan);
             increment(mutatedByCategory, category);
+            increment(mutatedByMigrationKey, legacyBridgePlanMigrationKey(plan));
             ctx.legacyBridgeMutatedPlanLines.add("{\"index\":" + i
                     + ",\"category\":\"" + ObjectPlan.escape(category) + "\""
+                    + ",\"migrationKey\":\"" + ObjectPlan.escape(legacyBridgePlanMigrationKey(plan)) + "\""
                     + ",\"before\":" + before
                     + ",\"after\":" + after
                     + "}");
@@ -280,8 +287,10 @@ public final class OwnershipPlanner {
             if (plan == null) continue;
             String category = legacyBridgePlanCategory(plan);
             increment(addedByCategory, category);
+            increment(addedByMigrationKey, legacyBridgePlanMigrationKey(plan));
             ctx.legacyBridgeAddedPlanLines.add("{\"index\":" + i
                     + ",\"category\":\"" + ObjectPlan.escape(category) + "\""
+                    + ",\"migrationKey\":\"" + ObjectPlan.escape(legacyBridgePlanMigrationKey(plan)) + "\""
                     + ",\"plan\":" + plan.toJson()
                     + "}");
         }
@@ -292,6 +301,8 @@ public final class OwnershipPlanner {
                 + ",\"mutatedPreplannedPlans\":" + mutated
                 + ",\"addedByCategory\":" + countMapJson(addedByCategory)
                 + ",\"mutatedByCategory\":" + countMapJson(mutatedByCategory)
+                + ",\"addedByMigrationKey\":" + countMapJson(addedByMigrationKey)
+                + ",\"mutatedByMigrationKey\":" + countMapJson(mutatedByMigrationKey)
                 + "}");
         ConversionTiming.metric("stage1.ownershipPlanner.legacyBridge.mutatedPreplannedPlans", mutated);
     }
@@ -332,6 +343,25 @@ public final class OwnershipPlanner {
             return "DROP_OR_CLEANUP";
         }
         return "OTHER";
+    }
+
+    private static String legacyBridgePlanMigrationKey(ObjectPlan plan) {
+        if (plan == null) return "NULL";
+        return legacyBridgePlanCategory(plan)
+                + "|kind=" + migrationKeyPart(plan.kind)
+                + "|materialization=" + (plan.materialization != null ? plan.materialization.name() : "NONE")
+                + "|text=" + (plan.textAction != null ? plan.textAction.name() : "NONE")
+                + "|visual=" + (plan.visualAction != null ? plan.visualAction.name() : "NONE")
+                + "|layer=" + (plan.visualLayer != null ? plan.visualLayer.name() : "NONE")
+                + "|placement=" + (plan.placement != null ? plan.placement.name() : "NONE")
+                + "|reason=" + migrationKeyPart(plan.reason);
+    }
+
+    private static String migrationKeyPart(String value) {
+        if (value == null || value.isBlank()) return "";
+        int colon = value.indexOf(':');
+        String primary = colon >= 0 ? value.substring(0, colon) : value;
+        return primary.length() <= 64 ? primary : primary.substring(0, 64);
     }
 
     private static void increment(Map<String, Integer> counts, String key) {
@@ -5444,10 +5474,15 @@ public final class OwnershipPlanner {
                 && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
             return VisualLayer.PAGE_BACKGROUND;
         }
-        if (isSourceDepthPageOrSpreadBackdropImage(rg, sourceIds)
+        if (isSourceAuthoredPageWashBackdropImage(rg, sourceIds)
                 && !(visualAction == VisualAction.PLACE_TEXT_SHELL
                 && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
             return VisualLayer.PAGE_BACKGROUND;
+        }
+        if (isSourceDepthPageOrSpreadBackdropImage(rg, sourceIds)
+                && !(visualAction == VisualAction.PLACE_TEXT_SHELL
+                && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
+            return VisualLayer.CONTAINER_BACKDROP;
         }
         if (visualAction == VisualAction.PLACE_INLINE_PNG) {
             return VisualLayer.CONTENT_VISUAL;
@@ -9297,6 +9332,12 @@ public final class OwnershipPlanner {
 
     private boolean isDirectChildShellSlotPlan(ObjectPlan plan) {
         if (plan == null) return false;
+        if ("direct_child_shell_slot".equals(safe(plan.slotRole))) return true;
+        String candidateId = safe(plan.candidateId);
+        if (candidateId.contains(".direct_child_shell_slot")
+                || candidateId.endsWith("direct_child_shell_slot")) {
+            return true;
+        }
         return isDirectChildShellSlotRender(renderedGroupForPlan(plan));
     }
 
@@ -12830,7 +12871,6 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (plan == null || !plan.hasVisibleVisual()) continue;
-            if (isPlannerDeclaredObjectPlan(plan)) continue;
             if (isPlannerDeclaredInlineTextShellContract(plan)) continue;
             int sourceZ = canonicalVisualSourceZOrder(plan);
             VisualLayer layer = canonicalVisualPlane(plan, sourceZ);
@@ -12850,10 +12890,82 @@ public final class OwnershipPlanner {
         finalizeOwnedTextFrameDepthContracts();
     }
 
+    private void finalizeFloatingTextShellBackPlaneContracts() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isFloatingFrontTextShellCandidate(plan)) continue;
+            if (!overlapsNonOwnedContentVisualPlan(plan)
+                    && countOverlappingNonOwnedHwpxTextPlans(plan) < 2) {
+                continue;
+            }
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withOwnedTextFrameIds(new int[0])
+                    .withVisualLayer(VisualLayer.CONTAINER_BACKDROP)
+                    .withZOrder(0));
+        }
+    }
+
+    private boolean isFloatingFrontTextShellCandidate(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.visualLayer != VisualLayer.LABEL_BACKDROP) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.PAGE) return false;
+        if (plan.bounds == null || plan.bounds.length < 4 || area(plan.bounds) <= 0.0) return false;
+        return isDirectChildShellSlotPlan(plan)
+                || "shell_slot_only".equals(safe(plan.slotRole))
+                || hasExplicitTextlessShellSignal(plan);
+    }
+
+    private boolean overlapsNonOwnedContentVisualPlan(ObjectPlan shell) {
+        if (shell == null || shell.bounds == null) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == shell) continue;
+            if (candidate.pageIndex != shell.pageIndex) continue;
+            if (!candidate.hasVisibleVisual()) continue;
+            if (candidate.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && candidate.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            if (candidate.visualPolicyLayer() != PolicyLayer.CONTENT) continue;
+            if (containsAny(candidate.sourceObjectIds, shell.sourceObjectIds)) continue;
+            if (candidate.bounds == null || candidate.bounds.length < 4 || area(candidate.bounds) <= 0.0) {
+                continue;
+            }
+            if (overlapArea(shell.bounds, candidate.bounds) > 0.0) return true;
+        }
+        return false;
+    }
+
+    private int countOverlappingNonOwnedHwpxTextPlans(ObjectPlan shell) {
+        if (shell == null || shell.bounds == null) return 0;
+        int count = 0;
+        HashSet<Integer> seen = new HashSet<>();
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == shell) continue;
+            if (candidate.pageIndex != shell.pageIndex) continue;
+            if (candidate.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (candidate.domId < 0 || contains(shell.ownedTextFrameIds, candidate.domId)) continue;
+            if (!seen.add(candidate.domId)) continue;
+            double[] tb = candidate.bounds;
+            if (tb == null || tb.length < 4 || area(tb) <= 0.0) continue;
+            if (overlapArea(shell.bounds, tb) <= 0.0) continue;
+            count++;
+            if (count >= 2) return count;
+        }
+        return count;
+    }
+
     private static int canonicalVisualDepthZOrder(VisualLayer layer, int sourceZ) {
-        if (layer == VisualLayer.PAGE_BACKGROUND
-                || layer == VisualLayer.CONTAINER_BACKDROP) {
+        if (layer == VisualLayer.PAGE_BACKGROUND) {
             return 0;
+        }
+        if (layer == VisualLayer.CONTAINER_BACKDROP) {
+            return BACKGROUND_LAYER_Z_BAND + Math.max(0, sourceZ);
+        }
+        if (layer == VisualLayer.CONTENT_BACKDROP) {
+            return CONTENT_BACKDROP_LAYER_Z_BAND + Math.max(0, sourceZ);
         }
         return Math.max(0, sourceZ);
     }
@@ -12881,6 +12993,16 @@ public final class OwnershipPlanner {
         }
         if (isTextCarrierBackdropShell(plan, layer, zOrder)) {
             return VisualLayer.CONTAINER_BACKDROP;
+        }
+        if (isTextlessShellBehindNonOwnedLocalMaterial(plan, layer, zOrder)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
+        if (layer == VisualLayer.CONTENT_BACKDROP
+                && plan.visualAction == VisualAction.PLACE_FLOATING_PNG
+                && plan.placement == Placement.FLOATING
+                && hasPlacedContentContract(plan)
+                && !isBehindLocalHwpxTextBySourceDepth(renderedGroupForPlan(plan), plan.pageIndex, zOrder)) {
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (layer != VisualLayer.CONTENT_VISUAL) return layer;
         if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return layer;
@@ -12912,6 +13034,91 @@ public final class OwnershipPlanner {
                 && isBehindLocalHwpxTextBySourceDepth(b, plan.pageIndex, zOrder);
     }
 
+    private boolean isTextlessShellBehindNonOwnedLocalMaterial(
+            ObjectPlan plan,
+            VisualLayer layer,
+            int zOrder) {
+        if (plan == null || data == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.PAGE) return false;
+        if (layer != VisualLayer.LABEL_BACKDROP) return false;
+        if (!isDirectChildShellSlotPlan(plan) && !hasExplicitTextlessShellSignal(plan)) return false;
+        if (plan.bounds == null || plan.bounds.length < 4 || area(plan.bounds) <= 0.0) return false;
+        return overlapsNonOwnedHwpxTextInFrontBySourceDepth(plan, zOrder)
+                || overlapsNonOwnedHwpxTextPlanInFrontBySourceDepth(plan, zOrder)
+                || overlapsContentVisualInFrontBySourceDepth(plan, zOrder);
+    }
+
+    private boolean overlapsNonOwnedHwpxTextInFrontBySourceDepth(ObjectPlan shell, int shellZOrder) {
+        if (shell == null || data == null) return false;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            if (tf.pageIndex() != shell.pageIndex) continue;
+            int textId = parseFlexibleId(tf.id());
+            if (contains(shell.ownedTextFrameIds, textId)) continue;
+            int textZOrder = textFrameSourceZOrder(tf);
+            if (textZOrder <= shellZOrder) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4 || area(tb) <= 0.0) continue;
+            if (overlapArea(shell.bounds, tb) > 0.0) return true;
+        }
+        return false;
+    }
+
+    private boolean overlapsNonOwnedHwpxTextPlanInFrontBySourceDepth(ObjectPlan shell, int shellZOrder) {
+        if (shell == null || shell.bounds == null || data == null) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == shell) continue;
+            if (candidate.pageIndex != shell.pageIndex) continue;
+            if (candidate.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (candidate.domId < 0 || contains(shell.ownedTextFrameIds, candidate.domId)) continue;
+            int textZOrder = textFrameSourceZOrder(data.getTextFrame(String.valueOf(candidate.domId)));
+            if (textZOrder <= shellZOrder) continue;
+            double[] tb = candidate.bounds;
+            if (tb == null || tb.length < 4 || area(tb) <= 0.0) {
+                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(candidate.domId));
+                tb = tf != null
+                        ? (tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds())
+                        : null;
+            }
+            if (tb == null || tb.length < 4 || area(tb) <= 0.0) continue;
+            if (overlapArea(shell.bounds, tb) > 0.0) return true;
+        }
+        return false;
+    }
+
+    private boolean overlapsContentVisualInFrontBySourceDepth(ObjectPlan shell, int shellZOrder) {
+        if (shell == null || shell.bounds == null) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == shell) continue;
+            if (candidate.pageIndex != shell.pageIndex) continue;
+            if (!candidate.hasVisibleVisual()) continue;
+            if (candidate.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && candidate.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            if (candidate.visualPolicyLayer() != PolicyLayer.CONTENT) continue;
+            if (overlapArea(shell.bounds, candidate.bounds) <= 0.0) continue;
+            int contentZOrder = canonicalVisualSourceZOrder(candidate);
+            if (contentZOrder > shellZOrder) return true;
+        }
+        return false;
+    }
+
+    private boolean hasPlacedContentContract(ObjectPlan plan) {
+        return hasPlacedContentSourceTree(plan) || isContentVisualSlotPlan(plan);
+    }
+
+    private static boolean isContentVisualSlotPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        if ("CONTENT_VISUAL_SLOT".equals(safe(plan.slotRole))) return true;
+        String candidateId = safe(plan.candidateId);
+        return candidateId.contains("CONTENT_VISUAL_SLOT")
+                || candidateId.contains(".content_visual_slot")
+                || candidateId.endsWith("content_visual_slot");
+    }
+
     private VisualLayer canonicalPlacedContentVisualLayer(ObjectPlan plan) {
         if (plan == null) return null;
         VisualLayer layer = plan.visualLayer;
@@ -12920,6 +13127,10 @@ public final class OwnershipPlanner {
             return layer;
         }
         if (isPageSpanningBackdropVisualFragmentContract(plan)) {
+            return VisualLayer.PAGE_BACKGROUND;
+        }
+        if (isSourceAuthoredPageWashBackdropImage(
+                renderedGroupForPlan(plan), plan.sourceObjectIds)) {
             return VisualLayer.PAGE_BACKGROUND;
         }
         if (!hasPlacedContentSourceTree(plan)) return layer;
@@ -12937,6 +13148,10 @@ public final class OwnershipPlanner {
                     : VisualLayer.CONTENT_VISUAL;
         }
         if (layer == VisualLayer.CONTENT_BACKDROP) {
+            if (isSourceDepthPageOrSpreadBackdropImage(
+                    renderedGroupForPlan(plan), plan.sourceObjectIds)) {
+                return VisualLayer.CONTAINER_BACKDROP;
+            }
             return layer;
         }
         if (isSourceDepthPageOrSpreadBackdropImage(
@@ -12994,8 +13209,10 @@ public final class OwnershipPlanner {
     /**
      * Placed images can be real CONTENT, but a page/spread-sized placed image
      * whose source depth is behind local editable text is a source-owned
-     * backdrop. This is decided in Stage 1 from source bounds and z-depth so
-     * later HWPX placement does not need to promote/demote visuals.
+     * backdrop. It still remains a placed backdrop, not a synthetic page
+     * background, unless the source itself was declared as a page background.
+     * This keeps Stage 1 as the only promotion/demotion point while avoiding a
+     * second page-background execution path for ordinary placed images.
      */
     private boolean isSourceDepthPageOrSpreadBackdropImage(RenderedGroup rg, int[] sourceIds) {
         if (rg == null || data == null) return false;
@@ -13009,6 +13226,52 @@ public final class OwnershipPlanner {
         int sourceZ = maxPageItemZOrder(sourceIds);
         if (sourceZ < 0) sourceZ = rg.zOrder();
         return isBehindLocalHwpxTextBySourceDepth(rg, rg.pageIndex(), sourceZ);
+    }
+
+    private boolean isSourceAuthoredPageWashBackdropImage(RenderedGroup rg, int[] sourceIds) {
+        if (rg == null || data == null) return false;
+        if (!isImageOrPdfExportReason(rg.reason())) return false;
+        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
+        if ("inline_object".equals(safe(rg.type()))) return false;
+        if (renderedVisualContainsTextPixels(rg)) return false;
+        if (editableTextFrameIdsOf(rg).length > 0) return false;
+        if (!hasPageLevelSourceRoots(sourceIds)) return false;
+        if (!isBackgroundBoundsSanityCandidate(rg.bounds())) return false;
+
+        for (int rootId : sourceRootObjectIds(sourceIds)) {
+            ResolvedPageItem root = data.getPageItem(String.valueOf(rootId));
+            if (!isPageWashRootFrame(root, rg.pageIndex())) continue;
+            if (hasLowOpacityPlacedDescendant(rootId, sourceIds)) return true;
+        }
+        return false;
+    }
+
+    private boolean isPageWashRootFrame(ResolvedPageItem item, int pageIndex) {
+        if (item == null || item.sourceHidden()) return false;
+        if (item.isInline()) return false;
+        if (item.parentId() != null && !item.parentId().isBlank()) return false;
+        if (!isNativeSourceShapeMaterializationAllowed(item)) return false;
+        if (!sourceItemHasVisibleShellMaterial(item)) return false;
+        double[] pageLocal = pageLocalBoundsOf(item, pageIndex, true);
+        return isMaterialPageBackdropOnPage(item, pageIndex, pageLocal);
+    }
+
+    private boolean hasLowOpacityPlacedDescendant(int rootId, int[] sourceIds) {
+        if (data == null || sourceIds == null) return false;
+        HashSet<Integer> sourceSet = new HashSet<>();
+        for (int sourceId : sourceIds) {
+            sourceSet.add(sourceId);
+        }
+        for (String childId : data.buildDescendantSet(String.valueOf(rootId), 8)) {
+            int id = parseFlexibleId(childId);
+            if (id < 0 || !sourceSet.contains(id)) continue;
+            ResolvedPageItem child = data.getPageItem(childId);
+            if (!isPlacedContentItem(child)) continue;
+            if (child.opacity() > 0.0 && child.opacity() <= 35.0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isBackgroundBoundsSanityCandidate(double[] b) {
