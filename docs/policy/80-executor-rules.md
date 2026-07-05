@@ -7,18 +7,25 @@
 
 Executor emission order:
 
+- HWPX execution uses two planes: text/table structure and textless graphic
+  material. Executors may translate Stage 1 plans into those planes, but they
+  must not create additional foreground/background role bands.
 - Executor emission must preserve the finalized Stage 1 source-depth contract.
   When HWPX XML order affects overlapping objects in the same execution plane,
   emit planned objects back-to-front: smaller `ObjectPlan.zOrder` first, larger
   `ObjectPlan.zOrder` later. This is not a new ownership decision and must not
   recalculate, promote, demote, or drop any plan.
-- Pixel preparation must not remove the fill of a visual whose finalized policy
-  layer is `BACKGROUND`. Knockout/transparent-paper preparation is allowed only
-  for planned shell material where the fill is not the owned visual slot.
+- Pixel preparation must not remove the fill of a planned textless graphic.
+  Knockout/transparent-paper preparation is allowed only when Stage 1 explicitly
+  declares that the removed pixels are not the owned visual slot.
 
 Text Builder:
 
 - Emits only planned HWPX text/table text.
+- Emits editable HWPX table structure as visually neutral carriers. It must not
+  recreate table/cell decoration as HWPX cell fill, border, pattern, shadow, or
+  synthetic outer line. Visible table decoration must come from planned
+  textless graphic material.
 - Builds source story/cell flow before container placement. The flow already
   contains source inline anchors and planned inline objects.
 - A source tab is a TextFlow token and may be emitted only once. If Text Builder
@@ -175,6 +182,7 @@ Text Builder:
   plans as floating/wrapping carriers do not participate in the story line box.
 - Does not merge unrelated TextFrames.
 - Does not create shell/table fallback visuals.
+- Does not create HWPX table decoration fallback visuals.
 
 Visual Builder:
 
@@ -184,22 +192,23 @@ Visual Builder:
   `hiddenVisualSourceObjectIds`) as Stage 1 output. It must not reinterpret
   broad ancestry `sourceObjectIds` as the visible material set.
 - Does not change inline/floating placement.
-- Uses `ObjectPlan.zOrder`, `ObjectPlan.visualLayer`, and the policy-layer
-  plane mapping as execution inputs; it does not recompute z-order or foreground
-  plane from overlap, bounds, or rendered pixels.
+- Uses `ObjectPlan.zOrder`, `ObjectPlan.visualLayer`, and the Stage 1
+  two-plane mapping as execution inputs; it does not recompute z-order or
+  foreground plane from overlap, bounds, or rendered pixels.
 - Stage 3 placement helpers may convert planned bounds into HWPX units and copy
   planned `visualLayer`, `zOrder`, and source layer metadata into executable
   records. They are adapters, not planners. A method/class in Stage 3 must not
   decide whether a visual is background, decoration, content, behind text, or in
   front of text.
 - When execution needs the HWPX plane, it translates the finalized
-  `ObjectPlan.visualLayer` through the canonical `VisualPlanePolicy` table.
-  Executor-local foreground/background layer lists are not allowed.
+  `ObjectPlan` through the canonical `VisualPlanePolicy` table. Executor-local
+  foreground/background layer lists are not allowed.
 - Does not search alternate inline/floating placement, source-only matches, or
   overlap-scored fallback plans when no exact render/placement plan is found.
-- Does not lower shell/background visuals because they overlap TextFrames with
-  semantic text. If a shell must sit behind text, Stage 1 must express that in
-  the plan's layer and z-order.
+- Does not lower or raise shell/background/content visuals because they overlap
+  TextFrames with semantic text. Editable text/table structure is already in the
+  text/table plane; if a graphic still covers it, the graphic asset or Stage 1
+  plane mapping is wrong.
 - Does not replace missing extracted material with synthetic bounds-based
   graphics.
 - Does not treat an existing cached/rendered file path as ownership evidence.

@@ -40,13 +40,14 @@ policy; their usable rules have been consolidated here.
    - native/extracted shell ownership
    - direct child/sibling shell slots
    - text-owning shell execution requirements
-8. [Table Style](../policy/60-table-policy.md)
-   - table/cell style ownership
+8. [Table Structure](../policy/60-table-policy.md)
+   - table structure ownership
+   - table decoration visual ownership
    - table-like carrier rules
    - table placement and row geometry
 9. [Layers And Z-Depth](../policy/70-layer-zdepth.md)
-   - four policy layers
-   - IDML source depth
+   - two HWPX execution planes
+   - single textless graphic layer
    - HWPX plane mapping
 10. [Executor Rules](../policy/80-executor-rules.md)
    - allowed executor behavior
@@ -68,7 +69,8 @@ When a page issue is reported, use this lookup first:
 | inline vs floating mismatch | [Placement And Inline Ownership](../policy/30-placement-inline-policy.md) |
 | text merge/font/layout issue | [Text](../policy/40-text-policy.md) |
 | missing label/shell/background shell | [Textless Shells](../policy/50-textless-shell-policy.md) |
-| table fill/stroke/row placement issue | [Table Style](../policy/60-table-policy.md) |
+| table structure/row placement issue | [Table Structure](../policy/60-table-policy.md) |
+| table fill/stroke/decoration issue | [Layers And Z-Depth](../policy/70-layer-zdepth.md) |
 | object covering another object | [Layers And Z-Depth](../policy/70-layer-zdepth.md) |
 | Java/executor fallback suspicion | [Executor Rules](../policy/80-executor-rules.md) |
 | regression guard or forbidden workaround | [Validation, Forbidden Patterns, Cleanup](../policy/90-validation-invariants.md) |
@@ -79,6 +81,11 @@ When a page issue is reported, use this lookup first:
 - Later stages execute `ObjectPlan`; they do not reinterpret ownership,
   placement, layer, or materialization.
 - Editable/searchable text is HWPX text or HWPX table text.
+- HWPX table structure is editable, but table/cell visual decoration is
+  textless graphic material unless Stage 1 explicitly says otherwise.
+- HWPX execution has only two reliable planes: editable text/table structure
+  and image/graphic material. The graphic material is planned as source-owned
+  textless PNG/vector groups; HWPX emitters must not rebuild layer semantics.
 - Visual material must come from IDML source material or extractor metadata.
 - One source bundle slot has exactly one visible owner.
 - Original IDML source metadata is the source of truth: source ids, parentage,
@@ -118,9 +125,9 @@ they are not allowed to become a second policy layer.
 | Stage | Owner | May Decide | Must Not Decide |
 |---|---|---|---|
 | 0 Input Prepare | IDML/resolved/extractor import | source indexes, resolved metadata, extractor candidates | ownership, placement, layer, materialization |
-| 1 Ownership Planner | `OwnershipPlanner` / `ObjectPlan` | text/visual/style slot owner, placement, coordinate space, policy layer, z-order contract | AST construction or HWPX emission |
+| 1 Ownership Planner | `OwnershipPlanner` / `ObjectPlan` | text/visual/table-structure/graphic slot owner, placement, coordinate space, HWPX plane contract, z-order contract | AST construction or HWPX emission |
 | 2 Text Builder | text executor | HWPX text emitted from `textAction` and `ownedTextFrameIds` | PNG placement, shell ownership, inline/floating conversion |
-| 3 Visual Builder | visual executor | PNG/vector/native/table style emitted from `visualAction` and materialization | text ownership, slot reassignment, fallback visual owner creation |
+| 3 Visual Builder | visual executor | PNG/vector/native/table structure emitted from `visualAction` and materialization | text ownership, slot reassignment, fallback visual owner creation, visual layer repair |
 | 4 Validate | validator | invariant checks and diagnostics | new ownership, new visible material, late mutation of `ObjectPlan` |
 
 Any code path outside Stage 1 that needs page number, literal text, coordinates,
@@ -142,9 +149,12 @@ The Java ownership enums are policy terms, not legacy SPEC terms:
   `TEXTLESS_VISUAL_FRAGMENT`, `COMPLETE_PNG`
 - `Placement`: `INLINE`, `FLOATING`, `TABLE`, `NONE`
 - `CoordinateSpace`: `STORY_FLOW`, `PAGE`, `SOURCE_LOCAL`
-- `VisualLayer`: implementation layer that must map back to exactly one of
-  `BACKGROUND`, `DECORATION`, `CONTENT`, or `TEXT`
+- `VisualLayer`: implementation compatibility label. In V2 policy it must map
+  to one of the two HWPX execution planes: text/table structure or textless
+  graphic material. Legacy role labels such as `BACKGROUND`, `DECORATION`, and
+  `CONTENT` may exist only as diagnostics or migration hints; they must not
+  create a third ownership layer.
 
 If a new enum value seems necessary, first update the canonical policy module
 that defines the source-owned behavior, then add validation showing why the
-existing four policy layers or slot actions cannot express it.
+existing HWPX plane contract or slot actions cannot express it.

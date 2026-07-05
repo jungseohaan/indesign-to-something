@@ -15,7 +15,7 @@ That file links to these modules and makes them canonical by reference.
 - [30-placement-inline-policy.md](30-placement-inline-policy.md): page/story placement and inline ownership
 - [40-text-policy.md](40-text-policy.md): HWPX text ownership and TextFrame layout constraints
 - [50-textless-shell-policy.md](50-textless-shell-policy.md): native/extracted textless shell rules
-- [60-table-policy.md](60-table-policy.md): table/cell style and table-like carrier rules
-- [70-layer-zdepth.md](70-layer-zdepth.md): four policy layers and source z-depth
+- [60-table-policy.md](60-table-policy.md): editable table structure and textless table decoration rules
+- [70-layer-zdepth.md](70-layer-zdepth.md): two HWPX planes, textless graphic grouping, and source z-depth
 - [80-executor-rules.md](80-executor-rules.md): executor behavior and forbidden fallback paths
 - [90-validation-invariants.md](90-validation-invariants.md): invariants, forbidden patterns, cleanup direction

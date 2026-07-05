@@ -28,15 +28,24 @@ Required slots:
 - `TEXT_SLOT`: HWPX paragraph/run, TextFrame text, and table text.
 - `SHELL_SLOT`: textless label/background shell, outline, callout shell, or
   container chrome.
-- `TABLE_STYLE_SLOT`: cell fill, border, inset, row/column sizing, and fixed
-  table bounds.
+- `TABLE_STRUCTURE_SLOT`: editable HWPX table structure: table object, rows,
+  columns, merged cells, fixed table bounds, row/column geometry, and cell text
+  anchoring. During migration the Java enum/value may still be named
+  `TABLE_STYLE_SLOT`; in V2 policy that name means table structure only, not
+  visual decoration.
+- `TABLE_DECORATION_SLOT`: table/cell visual decoration such as fill, border,
+  rounded cell plates, row bands, shadows, patterns, masks, and decorative
+  separators. This material is owned by textless graphic PNG/vector bundles,
+  normally through `SHELL_SLOT` or another graphic visual slot. It is not emitted
+  as HWPX table style.
 
-An IDML table whose source story is table-only owns `TABLE_STYLE_SLOT` and is
-materialized as an HWPX table unless Stage 1 assigns that same table source to a
-more specific anchored/table owner.  The table cell paragraphs remain editable
-HWPX text inside the table.  Nearby floating markers or source-positioned
-graphics keep their own `CONTENT_VISUAL_SLOT`/`SHELL_SLOT`; their placement is
-not used as a reason to dissolve the table into independent TextFrames.
+An IDML table whose source story is table-only owns the table structure slot and
+is materialized as an HWPX table unless Stage 1 assigns that same table source
+to a more specific anchored/table owner. The table cell paragraphs remain
+editable HWPX text inside the table. Nearby floating markers, cell plates, row
+bands, borders, source-positioned graphics, and other visual decoration keep
+their own textless graphic slot; their placement is not used as a reason to
+dissolve the table into independent TextFrames.
 - `CONTENT_VISUAL_SLOT`: photo, illustration, chart, QR, complete marker, or
   graphic-only complete visual with positive source evidence. Stage 1 may assign
   this slot only when the source tree contains placed content (`Image`, `PDF`,
@@ -84,8 +93,8 @@ Executable owner priority:
    only as provenance.
 4. A broad parent/group candidate is executable only for residual visual
    material not owned by child slots. If child `SHELL_SLOT`, `CONTENT_VISUAL_SLOT`,
-   or `TABLE_STYLE_SLOT` owners cover all painted descendants, the parent is
-   provenance-only and must be `DROP_VISUAL`.
+   table structure, or table decoration owners cover all painted descendants,
+   the parent is provenance-only and must be `DROP_VISUAL`.
 5. If a broad parent hides a child source id in `hiddenVisualSourceObjectIds`,
    that child is absent from the parent rendered asset. A planned child
    candidate for that source remains executable and must not be suppressed by
@@ -104,7 +113,8 @@ Executable owner priority:
 Required materialization values:
 
 - `HWPX_TEXT`
-- `HWPX_TABLE_STYLE`
+- `HWPX_TABLE_STYLE` (migration name for HWPX table structure, not cell visual
+  decoration)
 - `EXTRACTED_PNG_VECTOR`
 - `TEXTLESS_VISUAL_FRAGMENT`
 - `NATIVE_SOURCE_SHAPE`
@@ -120,22 +130,24 @@ Slot ownership rules:
   different visible plan already owns that same `SHELL_SLOT`.
 - A visible parent composite plan may keep broad `sourceObjectIds` for tracing,
   but it must remove from `visualSourceObjectIds` every descendant source id
-  whose `TEXT_SLOT`, `SHELL_SLOT`, `TABLE_STYLE_SLOT`, or `CONTENT_VISUAL_SLOT`
-  is owned by another visible plan. If a parent PNG file still contains those
-  descendant pixels, the parent plan is not a valid visible owner for that file.
-  Stage 1 must either split the parent into source-slot owners or drop the
-  parent composite. Later stages must not rely on z-order to hide the duplicate.
+  whose `TEXT_SLOT`, `SHELL_SLOT`, table structure/decoration slot, or
+  `CONTENT_VISUAL_SLOT` is owned by another visible plan. If a parent PNG file
+  still contains those descendant pixels, the parent plan is not a valid visible
+  owner for that file. Stage 1 must either split the parent into source-slot
+  owners or drop the parent composite. Later stages must not rely on z-order to
+  hide the duplicate.
 - A parent composite whose extracted PNG bakes editable text pixels or a child
   text-shell marker into the image cannot be retained as a background/container
   visual for that same area unless Stage 1 assigns that text/marker slot to
   `OWNED_BY_PNG`. If the text/marker is HWPX-owned, the parent composite is an
   ancestry carrier only and must not emit the baked PNG.
 - A broad parent/background render is allowed only when its
-  `visualSourceObjectIds` describe a pure background/container slot after child
-  text, label, table-style, and content slots are subtracted. If subtraction
-  would require editing pixels out of an already exported PNG, that render is
-  not executable; the extractor must provide a textless/childless render or
-  Stage 1 must choose direct child slots instead.
+  `visualSourceObjectIds` describe one textless graphic slot after child text,
+  table structure, and independent content slots are subtracted. Table
+  decoration may remain in that graphic slot when it is visual-only material.
+  If subtraction would require editing pixels out of an already exported PNG,
+  that render is not executable; the extractor must provide a textless/
+  childless render or Stage 1 must choose direct child slots instead.
 - Extraction planning must prefer not creating duplicate pixels over creating
   them and deleting them later. When a parent decoration/background source owns
   a `SHELL_SLOT` but contains a child source with its own `CONTENT_VISUAL_SLOT`

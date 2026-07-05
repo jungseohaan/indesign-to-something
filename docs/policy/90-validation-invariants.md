@@ -25,6 +25,10 @@
 - One source bundle slot has one visible owner.
 - One TextFrame cannot be both `OWNED_BY_PNG` and `OWNED_BY_HWPX_TEXT`.
 - The same source bundle slot cannot be emitted both inline and floating.
+- Editable HWPX text/table structure must not be covered by textless graphic
+  material in the HWPX execution plane. If exact source occlusion is required,
+  the affected source bundle must be planned as `COMPLETE_PNG` instead of
+  editable text/table output.
 - The same source bundle slot cannot be emitted by multiple extraction passes.
   Pass names, rendered ids, file prefixes, crop sizes, or fallback channels do
   not create a second visible owner.
@@ -65,8 +69,11 @@
   closed set, and `exportTargetObjectId` must be the source-set root. If the
   executor exports a descendant/leaf instead, or the result row reports a
   narrower source set, validation must fail before HWPX conversion.
-- `PLACE_TEXT_SHELL` must be behind the text it owns unless the source explicitly
-  defines a front mask/outline slot.
+- `PLACE_TEXT_SHELL` material is textless graphic material and must not cover
+  editable text/table structure. Source-authored masks or outlines that would
+  cover editable text are not represented as a third HWPX plane; Stage 1 must
+  either accept the editable-text visual loss or choose `COMPLETE_PNG` for that
+  bundle.
 - A visible `PLACE_TEXT_SHELL` with `textAction=OWNED_BY_HWPX_TEXT` must list at
   least one owned TextFrame. If no TextFrame is owned, the shell is visual-only
   and must use `DROP_TEXT`.
@@ -94,9 +101,12 @@
   content owner exists. This prevents a shell/container parent from covering
   HWPX-owned callout text as if it were an independent photo.
 - Hidden source trees have no visible output.
-- `TABLE_STYLE_SLOT` sources cannot also appear as shell/content material.
-- HWPX table cell fill, border, inset, and source-bounds ownership survive to
-  the writer.
+- Table structure sources cannot also appear as shell/content material.
+- Table/cell decoration sources must not appear as HWPX table cell fill,
+  border, pattern, or shadow. They must be covered by exactly one textless
+  graphic owner or be reported as missing visual material.
+- HWPX table source-bounds, row/column geometry, merged cells, and editable
+  cell text ownership survive to the writer.
 - Source layer/z/anchor/page ownership must be traceable in output diagnostics.
 - A visible `BACKGROUND` plan whose source bundle crosses a page/spread boundary
   must satisfy both page-local background invariants: no visible source material
@@ -121,9 +131,9 @@
   style source through `exportSourceObjectIds`, `styleSourceObjectIds`, or an
   equivalent slot-owner field. Broad `sourceObjectIds`/`visualSourceObjectIds`
   ancestry is not proof that the rendered PNG contains the shell.
-- A `BACKGROUND` or `CONTAINER_BACKDROP` plan must not bake HWPX-owned text,
-  label shell glyphs, complete markers, or child content pixels into its PNG.
-  Those are separate visible slots unless explicitly `OWNED_BY_PNG`.
+- A textless graphic plan must not bake HWPX-owned text/table structure into
+  its PNG. Editable text/table sources are hidden before graphic export unless
+  they are explicitly `OWNED_BY_PNG`.
 - Executor-visible `RenderedGroup.bounds` and resolved page-relative
   TextFrame/page-item bounds are resolved-coordinate values. The executor must
   convert them through the shared resolved coordinate scale (`value *
@@ -165,6 +175,8 @@
   ids are relation metadata unless `textAction=OWNED_BY_HWPX_TEXT`.
 - TextFrame merge that does not come from IDML story/thread/table structure.
 - Treating a `textOwner=hwpx_tf` render as a complete PNG.
+- Creating HWPX table fill/border/shadow decoration from source visuals that
+  should be textless graphic material.
 
 ## 13. Cleanup Direction
 
@@ -175,7 +187,7 @@ into one of the source-driven concepts above:
 - slot assignment
 - materialization selection
 - placement from anchor/page ownership
-- layer from source layer/z and policy layer
+- HWPX plane from source ownership plan
 - validator invariant
 
 If a new regression seems to need another condition, first check which source

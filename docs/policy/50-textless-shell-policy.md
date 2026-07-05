@@ -6,6 +6,13 @@
 ## 7. Textless Shell
 
 `PLACE_TEXT_SHELL` means the shell slot and text slot are separate.
+The shell is textless graphic material. Editable/searchable text owned by the
+same source relation is emitted separately as HWPX text/table structure above
+that graphic material. `PLACE_TEXT_SHELL` is not a request to rebuild the shell
+as HWPX fill/stroke/table style, and it is not a foreground mask over editable
+text. If the original source intentionally requires graphic pixels to cover
+editable text, Stage 1 must choose between accepting that visual loss or
+materializing the bundle as `COMPLETE_PNG`.
 
 Execution requirements:
 

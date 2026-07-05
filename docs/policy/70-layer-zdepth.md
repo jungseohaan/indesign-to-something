@@ -3,27 +3,65 @@
 > This file is part of the canonical source ownership policy.
 > The canonical index is `docs/specs/POLICY-source-ownership.md`.
 
-## 9. Visual Layers
+## 9. HWPX Planes And Textless Graphic Groups
 
-Policy uses only four layers:
+V2 does not try to reproduce InDesign's arbitrary visual interleaving as HWPX
+layer policy. HWPX execution is treated as two reliable planes:
 
-`BACKGROUND < DECORATION < CONTENT < TEXT`
+`TEXT_AND_TABLE_STRUCTURE` above `TEXTLESS_GRAPHIC_MATERIAL`
 
-Mapping:
+- `TEXT_AND_TABLE_STRUCTURE`: editable/searchable HWPX text, editable HWPX
+  table structure, table cell text, and transparent text/table carriers.
+- `TEXTLESS_GRAPHIC_MATERIAL`: all non-text source visual material, including
+  page backgrounds, container faces, label shells, table/cell decoration,
+  borders, row bands, speech-bubble shells, connector lines, placed images,
+  charts, QR, inline marker images, masks, and chrome.
 
-- Page and container backgrounds: `BACKGROUND`
-- Label shells, label connectors, outlines, masks, separators, and visual
-  chrome: `DECORATION`
-- Photos, illustrations, charts, QR, complete visuals: `CONTENT`
-- HWPX text/table text: `TEXT`
+The four historical policy roles (`BACKGROUND`, `DECORATION`, `CONTENT`,
+`TEXT`) are migration labels only. They may help diagnostics and legacy enum
+mapping, but they are not allowed to create additional execution layers,
+foreground/background repairs, or role-based z-bands. If an older rule in this
+file requires a `BACKGROUND < DECORATION < CONTENT < TEXT` execution order, the
+two-plane contract above wins.
 
-Original IDML layer and z-order are ownership depth truth for non-text visual
-objects. The four policy layers describe slot role and HWPX plane behavior; they
-do not replace IDML source stacking order for graphics. A visual `BACKGROUND`,
-`DECORATION`, or `CONTENT` object may appear above or below another visual object
-only according to its IDML source depth. If that order looks wrong in HWPX, Stage
-1 must first verify source ancestry/layer/z-order and the chosen visible owner;
-it must not repair the page by policy-band promotion or demotion.
+Within the graphic plane, Stage 1 groups visible non-text source material into
+page-local textless graphic groups. The target grouping is the maximum set of
+non-master graphic source bundles whose visible page-local bounds overlap or
+are connected by the same source group/clip/mask parent, after editable text and
+table structure sources are hidden. A page may therefore have one full-page
+graphic image or several non-overlapping graphic images. Master-page graphics
+are excluded from these page graphic groups and keep separate applied-master
+fragment ownership.
+
+Graphic grouping rules:
+
+- Grouping uses source metadata: source ids, parentage, group membership,
+  clipping/pasted-inside relation, page/spread intersection, visibility, bounds,
+  and normalized source z-order.
+- Bounds overlap may connect graphic sources into one group, but it is not a
+  license to decide text ownership, promote a role, or repair an output
+  occlusion symptom.
+- Editable TextFrames and HWPX table structure do not split graphic groups.
+  They are hidden during graphic export and re-emitted in the text/table plane
+  using source bounds.
+- Table/cell decoration remains part of graphic material; table structure and
+  cell text remain HWPX-owned.
+- Inline source graphics inside text flow, such as number badges, boxes,
+  checkmarks, and other non-editable markers, keep `INLINE` / `STORY_FLOW`
+  placement and use their extracted PNG/vector material. They are not converted
+  to HWPX native shapes.
+- A graphic that intentionally covers editable text in the InDesign source is a
+  known loss under the editable-text policy. V2 keeps editable HWPX text above
+  graphic material. If exact visual occlusion is required for that source
+  bundle, Stage 1 must choose `COMPLETE_PNG` and give up editable text for that
+  bundle; it must not add a foreground graphic exception.
+
+Original IDML layer and z-order remain source metadata for ordering and
+group-internal rendering, but they do not override the two HWPX planes. If a
+visual object appears to cover text in HWPX, Stage 1 must first verify whether
+the text/table source was correctly hidden from the graphic asset and re-emitted
+in the text/table plane. It must not repair the page by policy-band promotion or
+demotion.
 When a rendered candidate has `sourceObjectIds`, Stage 1 must derive
 `ObjectPlan.zOrder` from those source objects before falling back to extractor
 render order. The canonical source depth is the normalized IDML/source-item rank
@@ -32,9 +70,9 @@ page/spread stacking context; larger values are visually in front. A numeric
 `zOrder` copied from an extractor or resolved cache is a fallback only when
 source-item order is unavailable, because some extractors encode that number in
 the opposite direction. Extractor render order is diagnostic/cache order, not
-ownership depth truth. If a content surface's source depth is behind a local
-HWPX-owned TextFrame that it overlaps, Stage 1 may use a behind-text content
-plane (`CONTENT_BACKDROP`) while keeping its policy layer as `CONTENT`.
+ownership depth truth. Source depth may order graphic sources inside one
+textless graphic group, but it must not place graphic material above editable
+HWPX text/table structure.
 When the source collector receives a front-to-back `allPageItems` rank, it must
 keep that raw rank only as diagnostic metadata (`rawZOrder` / `sourceOrder`) and
 write `ObjectPlan.zOrder` from the normalized back-to-front rank. Later stages
@@ -57,9 +95,8 @@ the final z-depth authority. Immediately before `ObjectPlan` is written,
 Stage 1 must finalize every visible visual plan's:
 
 Initial `ObjectPlan` creation may assign a role-based provisional
-`visualLayer`, but it must not decide source-depth plane changes such as
-`CONTENT_VISUAL` versus `CONTENT_BACKDROP`. Those changes belong only to this
-final gate.
+`visualLayer`, but that value is a compatibility label. It must not decide a
+third HWPX plane such as `CONTENT_VISUAL` versus `CONTENT_BACKDROP`.
 For `PLACE_TEXT_SHELL` plans, that provisional role layer must be assigned
 through the Stage 1 text-shell layer helper. Individual restore/split passes
 must not hard-code their own label/container layer choice; they may only provide
@@ -68,13 +105,13 @@ z-order authority.
 
 - `zOrder`, from normalized IDML source depth of `visualSourceObjectIds`, then
   `sourceObjectIds`, then extractor z-order only as a last fallback.
-- `visualLayer`, only when the HWPX plane must be chosen from source-depth
-  metadata, such as a `CONTENT_VISUAL` source that is behind local editable
-  HWPX text in the same page coordinate space.
-- HWPX-owned TextFrame `zOrder` only for source-declared shell ownership: when
-  a visible front-plane text shell owns an editable TextFrame, the editable text
-  plan is placed one level above the finalized shell plan. This is part of the
-  same final depth contract, not an executor repair.
+- `visualLayer`, only as a migration/diagnostic label for the source role. It
+  must still map to one of the two execution planes: text/table structure or
+  textless graphic material.
+- HWPX-owned TextFrame/table text placement is always in the text/table
+  structure plane above textless graphic material. Stage 1 may keep source
+  `zOrder` for diagnostics and intra-plane order, but it must not use visual
+  source depth to cover editable text with a graphic.
 - HWPX text-only plans do not receive a new `visualLayer` while being restored
   from a composite carrier. The owning shell/visual plan carries the visual
   layer; editable text remains in the `TEXT` policy layer and is ordered by the
@@ -99,11 +136,11 @@ executors, and validators consume the finalized contract only. If a later
 stage appears to need a layer promotion/demotion, the Stage 1 finalizer or its
 source metadata inputs are wrong.
 
-The HWPX behind-text/in-front-of-text plane mapping for finalized
-`visualLayer` values is a single Stage 1 policy table implemented by
-`VisualPlanePolicy`. Stage 3/4 adapters and Java HWPX builders may call that
-table to translate a finalized layer name into an HWPX plane, but they must not
-carry their own divergent lists of foreground/background layers.
+The HWPX execution-plane mapping for finalized visual plans is a single Stage 1
+policy table implemented by `VisualPlanePolicy`. Stage 3/4 adapters and Java
+HWPX builders may call that table to translate a finalized plan into the graphic
+or text/table plane, but they must not carry their own divergent lists of
+foreground/background layers.
 
 The final gate may use only IDML/resolved source metadata: source id, parentage,
 group membership, page/spread, bounds, layer, visibility, and normalized source
@@ -128,14 +165,17 @@ small content and placed above text.
 
 Default HWPX plane:
 
-- `BACKGROUND`: behind text
-- `LABEL_BACKDROP`, `LABEL_CONNECTOR_BACKDROP`, and
-  `LABEL_OVERLAY_BACKDROP`: front object plane with the finalized
-  `ObjectPlan.zOrder`. These roles are still logical `DECORATION` and must stay
-  below their owned HWPX text by the Stage 1 text/shell z-order contract. They
-  must not be mapped to the global HWPX `BEHIND_TEXT` plane, because that plane
-  can hide local speech bubbles, labels, and connector shells behind unrelated
-  HWPX table/text carriers.
+- Editable HWPX text, editable HWPX table structure, and table cell text:
+  text/table plane.
+- All planned non-text visual material, including historical `BACKGROUND`,
+  `LABEL_BACKDROP`, `LABEL_CONNECTOR_BACKDROP`, `LABEL_OVERLAY_BACKDROP`,
+  `CONTENT_BACKDROP`, `CONTENT_VISUAL`, `CONTAINER_OUTLINE`, masks, and table
+  decoration: textless graphic plane.
+- Legacy layer labels may influence source grouping diagnostics, but they do
+  not select a foreground graphics plane. A local speech bubble or label shell
+  stays visible by being grouped into the correct textless graphic material and
+  by re-emitting its owned text above it, not by moving the shell above HWPX
+  text/table carriers.
 - `LABEL_CONNECTOR_BACKDROP` is for textless vector
   connector graphics inside a source composite layout that visually connect
   labels/badges. It is not selected from output occlusion or line shape alone;
