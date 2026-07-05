@@ -422,7 +422,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             try { info.hasPlacedVisual = _hasPlacedVisual(item); } catch (ePlaced) {}
         }
         try {
-            if (item.fillColor && item.fillColor.name !== "None" && item.fillColor.name !== "[None]") {
+            if (hasVisibleFill(item)) {
                 info.fillColor = item.fillColor.name;
                 info.fillColorName = item.fillColor.name;
                 try { info.fillTint = item.fillTint; } catch (eFillTint) {}
@@ -430,12 +430,12 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             }
         } catch (eFill) {}
         try {
-            if (item.strokeColor && item.strokeColor.name !== "None" && item.strokeColor.name !== "[None]") {
+            if (hasVisibleStroke(item)) {
                 info.strokeColor = item.strokeColor.name;
                 info.strokeColorName = item.strokeColor.name;
                 try { info.strokeTint = item.strokeTint; } catch (eStrokeTint) {}
                 try { info.strokeWeight = item.strokeWeight || 0; } catch (eStrokeWeight) {}
-                info.hasVisibleStroke = Number(info.strokeWeight || 0) > 0;
+                info.hasVisibleStroke = true;
             }
         } catch (eStroke) {}
         try {

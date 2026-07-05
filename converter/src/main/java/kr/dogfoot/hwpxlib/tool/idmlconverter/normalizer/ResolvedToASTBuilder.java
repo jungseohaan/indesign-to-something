@@ -275,6 +275,7 @@ public class ResolvedToASTBuilder {
             if (plans == null) return;
             Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
             Map<String, RenderedGroup> renderedByPageAndId = renderedGroupsByPageAndId();
+            Set<String> dropClipParentSourceSetCandidateIds = clipParentSourceSetDropCandidateIds(plans);
             int imported = 0;
             for (JsonElement element : plans) {
                 if (element == null || !element.isJsonObject()) continue;
@@ -287,7 +288,8 @@ public class ResolvedToASTBuilder {
                     plan = tableStyleObjectPlanFromJson(planJson);
                 }
                 if (plan == null) {
-                    plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId, renderedByPageAndId);
+                    plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId,
+                            renderedByPageAndId, dropClipParentSourceSetCandidateIds);
                 }
                 if (plan == null) {
                     plan = nativeVectorShapePlanFromJson(planJson);
@@ -303,6 +305,74 @@ public class ResolvedToASTBuilder {
             System.err.println("[ResolvedToASTBuilder] object-plans import skipped: "
                     + e.getMessage());
         }
+    }
+
+    private static Set<String> clipParentSourceSetDropCandidateIds(JsonArray plans) {
+        Set<String> out = new HashSet<>();
+        if (plans == null) return out;
+        List<JsonObject> objects = new ArrayList<>();
+        for (JsonElement element : plans) {
+            if (element != null && element.isJsonObject()) {
+                objects.add(element.getAsJsonObject());
+            }
+        }
+        for (JsonObject clip : objects) {
+            if (!"clip_parent_source_set".equals(jsonString(clip, "compositeRole"))) continue;
+            String candidateId = jsonString(clip, "candidateId");
+            if (candidateId == null || candidateId.isBlank()) continue;
+            int[] clipSources = jsonIntArray(clip, "sourceObjectIds");
+            if (clipSources.length == 0) continue;
+            int clipPage = jsonInt(clip, "pageIndex", -1);
+            if (clipPage < 0) continue;
+
+            Integer nearestDelta = null;
+            for (JsonObject carrier : objects) {
+                if (carrier == clip) continue;
+                if (!isDirectChildTextShellCarrierObjectPlan(carrier)) continue;
+                int carrierPage = jsonInt(carrier, "pageIndex", -1);
+                if (carrierPage < 0) continue;
+                int[] carrierSources = jsonIntArray(carrier, "sourceObjectIds");
+                if (carrierSources.length <= clipSources.length) continue;
+                if (!containsAll(carrierSources, clipSources)) continue;
+                int delta = carrierPage - clipPage;
+                if (nearestDelta == null
+                        || Math.abs(delta) < Math.abs(nearestDelta)
+                        || (Math.abs(delta) == Math.abs(nearestDelta) && delta > nearestDelta)) {
+                    nearestDelta = delta;
+                }
+            }
+
+            if (nearestDelta != null && nearestDelta >= 0) {
+                out.add(candidateId);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isDirectChildTextShellCarrierObjectPlan(JsonObject o) {
+        if (o == null) return false;
+        if (!"direct_child_shell_slot".equals(jsonString(o, "slotRole"))) return false;
+        if (!"PLACE_TEXT_SHELL".equals(jsonString(o, "visualAction"))) return false;
+        if (jsonIntArray(o, "ownedTextFrameIds").length == 0) return false;
+        String contractStatus = jsonString(o, "contractStatus");
+        return "READY_FOR_STAGE1_IMPORT".equals(contractStatus)
+                || isPlannerDeclaredTextShellImport(o);
+    }
+
+    private static boolean containsAll(int[] values, int[] candidates) {
+        if (candidates == null || candidates.length == 0) return true;
+        if (values == null || values.length == 0) return false;
+        for (int candidate : candidates) {
+            boolean found = false;
+            for (int value : values) {
+                if (value == candidate) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return false;
+        }
+        return true;
     }
 
     private Map<String, RenderedGroup> renderedGroupsByCandidateId() {
@@ -443,10 +513,13 @@ public class ResolvedToASTBuilder {
     private static ObjectPlan renderedObjectPlanFromJson(
             JsonObject o,
             Map<String, RenderedGroup> renderedByCandidateId,
-            Map<String, RenderedGroup> renderedByPageAndId) {
+            Map<String, RenderedGroup> renderedByPageAndId,
+            Set<String> dropClipParentSourceSetCandidateIds) {
         if (o == null) return null;
+        boolean clipParentSourceSet = "clip_parent_source_set".equals(jsonString(o, "compositeRole"));
         if (!"READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))
-                && !isPlannerDeclaredTextShellImport(o)) {
+                && !isPlannerDeclaredTextShellImport(o)
+                && !clipParentSourceSet) {
             return null;
         }
         String candidateId = jsonString(o, "candidateId");
@@ -463,8 +536,16 @@ public class ResolvedToASTBuilder {
         if (rg == null || rg.file() == null || rg.file().isEmpty()) return null;
         VisualAction visualAction = enumValue(VisualAction.class,
                 jsonString(o, "visualAction"), VisualAction.DROP_VISUAL);
+        if (clipParentSourceSet
+                && dropClipParentSourceSetCandidateIds != null
+                && dropClipParentSourceSetCandidateIds.contains(candidateId)) {
+            visualAction = VisualAction.DROP_VISUAL;
+        }
         if (visualAction == VisualAction.DROP_VISUAL
-                || visualAction == VisualAction.ABSORB_TEXT_STYLE
+                && !clipParentSourceSet) {
+            return null;
+        }
+        if (visualAction == VisualAction.ABSORB_TEXT_STYLE
                 || visualAction == VisualAction.PLACE_TABLE_STYLE) {
             return null;
         }

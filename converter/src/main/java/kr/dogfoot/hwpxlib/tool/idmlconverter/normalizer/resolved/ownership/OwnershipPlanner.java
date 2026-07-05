@@ -1552,7 +1552,8 @@ public final class OwnershipPlanner {
         TextAction textAction = textActionOf(rg);
         VisualAction visualAction = visualActionOf(rg, placement, textAction);
         int[] sourceIds = sourceIdsOrSelf(rg);
-        VisualLayer visualLayer = visualLayerOf(rg, sourceIds, visualAction, textAction);
+        int[] ownedTextFrameIds = editableTextFrameIdsOf(rg);
+        VisualLayer visualLayer = visualLayerOf(rg, sourceIds, visualAction, textAction, ownedTextFrameIds);
         if (!isImageBackedContentShell(rg)
                 && hasIndependentContentVisualBesideOwnedText(rg)
                 && (visualAction == VisualAction.PLACE_FLOATING_PNG
@@ -1566,7 +1567,6 @@ public final class OwnershipPlanner {
             visualLayer = VisualLayer.CONTENT_VISUAL;
             reason = "hidden_by_source_visibility";
         }
-        int[] ownedTextFrameIds = editableTextFrameIdsOf(rg);
         int[] visualSourceIds = visualSourceIdsForRendered(rg, sourceIds, ownedTextFrameIds, visualAction);
         if (visualAction == VisualAction.PLACE_TEXT_SHELL
                 && !hasExecutableTextShellVisualMaterial(visualSourceIds)) {
@@ -1585,7 +1585,8 @@ public final class OwnershipPlanner {
         if (visualAction == VisualAction.PLACE_TEXT_SHELL
                 && ownedTextFrameIdsUseCalloutOverlayStyle(ownedTextFrameIds)
                 && !hasImageSource(rg)
-                && hasDrawableBackdropShapeSource(rg)) {
+                && hasDrawableBackdropShapeSource(rg)
+                && !isHwpxTextShellBackdropContract(rg, ownedTextFrameIds)) {
             visualLayer = VisualLayer.LABEL_OVERLAY_BACKDROP;
         }
         if (shouldPlanRenderedChildShellFragmentAsNonExecutable(
@@ -2609,6 +2610,9 @@ public final class OwnershipPlanner {
             ObjectPlan shell,
             int[] ownedTextFrameIds,
             VisualLayer fallback) {
+        if (isHwpxTextShellBackdropContract(shell, ownedTextFrameIds)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
         if (ownedTextFrameIdsUseCalloutOverlayStyle(ownedTextFrameIds)) {
             return VisualLayer.LABEL_OVERLAY_BACKDROP;
         }
@@ -2616,6 +2620,16 @@ public final class OwnershipPlanner {
         return hasColoredShapeShellSource(shell)
                 ? VisualLayer.LABEL_BACKDROP
                 : VisualLayer.CONTAINER_BACKDROP;
+    }
+
+    private static boolean isHwpxTextShellBackdropContract(ObjectPlan shell, int[] ownedTextFrameIds) {
+        if (ownedTextFrameIds == null || ownedTextFrameIds.length == 0) return false;
+        if (shell == null) return true;
+        if (shell.visualLayer == VisualLayer.FOREGROUND_MASK
+                || shell.visualLayer == VisualLayer.CONTAINER_OUTLINE) {
+            return false;
+        }
+        return shell.visualPolicyLayer() != PolicyLayer.CONTENT;
     }
 
     private VisualLayer textShellVisualLayerForOwnedTextFrames(int[] ids, VisualLayer fallback) {
@@ -5440,6 +5454,9 @@ public final class OwnershipPlanner {
         if (isPureDecorationPageObject(rg)) {
             return VisualAction.PLACE_FLOATING_PNG;
         }
+        if (isClipParentSourceSetCandidate(rg)) {
+            return VisualAction.DROP_VISUAL;
+        }
         if (data.isNonCanonicalAtomicObjectRender(rg)) {
             return VisualAction.DROP_VISUAL;
         }
@@ -5551,6 +5568,10 @@ public final class OwnershipPlanner {
         return VisualAction.DROP_VISUAL;
     }
 
+    private static boolean isClipParentSourceSetCandidate(RenderedGroup rg) {
+        return rg != null && "clip_parent_source_set".equals(safe(rg.compositeRole()));
+    }
+
     private boolean isPureDecorationPageObject(RenderedGroup rg) {
         if (rg == null) return false;
         if (!isRenderedPageObject(rg)) return false;
@@ -5637,7 +5658,8 @@ public final class OwnershipPlanner {
             RenderedGroup rg,
             int[] sourceIds,
             VisualAction visualAction,
-            TextAction textAction) {
+            TextAction textAction,
+            int[] ownedTextFrameIds) {
         if (visualAction == VisualAction.DROP_VISUAL
                 || visualAction == VisualAction.ABSORB_TEXT_STYLE
                 || visualAction == VisualAction.PLACE_TABLE_STYLE) {
@@ -5680,6 +5702,9 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
+            if (isHwpxTextShellBackdropContract(rg, ownedTextFrameIds)) {
+                return VisualLayer.CONTAINER_BACKDROP;
+            }
             if (isGroupChromeLabelBackdrop(rg)) {
                 return VisualLayer.LABEL_OVERLAY_BACKDROP;
             }
@@ -5791,6 +5816,17 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTAINER_BACKDROP;
         }
         return VisualLayer.CONTENT_VISUAL;
+    }
+
+    private boolean isHwpxTextShellBackdropContract(RenderedGroup rg, int[] ownedTextFrameIds) {
+        if (rg == null) return false;
+        if (ownedTextFrameIds == null || ownedTextFrameIds.length == 0) return false;
+        if (isImageBackedContentShell(rg) && !isBackdropDominantImageShell(rg)) return false;
+        return isDirectChildShellSlotRender(rg)
+                || hasTextlessShellWithInferredEditableTextSource(rg)
+                || isEditableVisualShellWithSeparateHwpxText(rg)
+                || isSourceDeclaredTextlessEditableShell(rg)
+                || isTextFrameBackdropVector(rg);
     }
 
     private boolean isSourceDeclaredTextlessEditableShell(RenderedGroup rg) {
@@ -7368,6 +7404,10 @@ public final class OwnershipPlanner {
 
     private static String canonicalRenderedPlanKey(ObjectPlan plan) {
         if (plan == null) return null;
+        String artifactKey = renderedArtifactIdentity(plan);
+        if (artifactKey != null) {
+            return plan.pageIndex + ":" + plan.domId + ":" + artifactKey;
+        }
         if (plan.renderId != null) {
             return plan.pageIndex + ":" + plan.domId + ":render:" + plan.renderId;
         }
@@ -13202,10 +13242,40 @@ public final class OwnershipPlanner {
     }
 
     private static int canonicalVisualDepthZOrder(VisualLayer layer, int sourceZ) {
+        int z = Math.max(0, sourceZ);
+        PolicyLayer policyLayer = policyLayerForVisualDepth(layer);
+        if (policyLayer == PolicyLayer.BACKGROUND) {
+            if (layer == VisualLayer.PAGE_BACKGROUND) return 0;
+            return z;
+        }
+        if (policyLayer == PolicyLayer.DECORATION) {
+            return 10000 + z;
+        }
+        if (policyLayer == PolicyLayer.CONTENT) {
+            return 20000 + z;
+        }
         if (layer == VisualLayer.PAGE_BACKGROUND) {
             return 0;
         }
-        return Math.max(0, sourceZ);
+        return z;
+    }
+
+    private static PolicyLayer policyLayerForVisualDepth(VisualLayer layer) {
+        if (layer == VisualLayer.PAGE_BACKGROUND
+                || layer == VisualLayer.CONTAINER_BACKDROP
+                || layer == VisualLayer.CONTENT_BACKDROP) {
+            return PolicyLayer.BACKGROUND;
+        }
+        if (layer == VisualLayer.TEXT_CARD_BACKDROP
+                || layer == VisualLayer.CONTAINER_FACE
+                || layer == VisualLayer.LABEL_CONNECTOR_BACKDROP
+                || layer == VisualLayer.LABEL_BACKDROP
+                || layer == VisualLayer.LABEL_OVERLAY_BACKDROP
+                || layer == VisualLayer.CONTAINER_OUTLINE
+                || layer == VisualLayer.FOREGROUND_MASK) {
+            return PolicyLayer.DECORATION;
+        }
+        return PolicyLayer.CONTENT;
     }
 
     private int canonicalVisualSourceZOrder(ObjectPlan plan) {
@@ -13254,6 +13324,9 @@ public final class OwnershipPlanner {
         if (isInlineOwnedTextShellBackPlane(plan, layer)) {
             return VisualLayer.TEXT_CARD_BACKDROP;
         }
+        if (isOwnedTextShellBackPlane(plan, layer)) {
+            return VisualLayer.TEXT_CARD_BACKDROP;
+        }
         if (isTextCarrierBackdropShell(plan, layer, zOrder)) {
             return VisualLayer.CONTAINER_BACKDROP;
         }
@@ -13283,6 +13356,16 @@ public final class OwnershipPlanner {
                 && layer == VisualLayer.LABEL_BACKDROP
                 && plan.placement == Placement.INLINE
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0;
+    }
+
+    private static boolean isOwnedTextShellBackPlane(ObjectPlan plan, VisualLayer layer) {
+        return plan != null
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && (layer == VisualLayer.CONTAINER_BACKDROP
+                || layer == VisualLayer.LABEL_BACKDROP
+                || layer == VisualLayer.CONTENT_BACKDROP)
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0;
     }
@@ -13421,6 +13504,10 @@ public final class OwnershipPlanner {
                     : VisualLayer.CONTENT_VISUAL;
         }
         if (layer == VisualLayer.CONTENT_BACKDROP) {
+            if (plan.visualAction == VisualAction.PLACE_FLOATING_PNG
+                    || plan.visualAction == VisualAction.PLACE_INLINE_PNG) {
+                return VisualLayer.CONTAINER_BACKDROP;
+            }
             if (isSourceDepthPageOrSpreadBackdropImage(
                     renderedGroupForPlan(plan), plan.sourceObjectIds)) {
                 return VisualLayer.CONTAINER_BACKDROP;
@@ -14192,8 +14279,29 @@ public final class OwnershipPlanner {
     }
 
     private static String renderedIdentityKey(ObjectPlan plan) {
-        return plan.pageIndex
-                + ":" + plan.domId;
+        String artifactKey = renderedArtifactIdentity(plan);
+        if (artifactKey != null) {
+            return plan.pageIndex + ":" + plan.domId + ":" + artifactKey;
+        }
+        return plan.pageIndex + ":" + plan.domId;
+    }
+
+    private static String renderedArtifactIdentity(ObjectPlan plan) {
+        if (plan == null) return null;
+        String candidateId = safe(plan.candidateId);
+        if (!candidateId.isEmpty()
+                && (safe(plan.kind).startsWith("planner_declared_rendered:")
+                || "planner_declared_object_plan".equals(safe(plan.reason)))) {
+            return "candidate:" + candidateId;
+        }
+        String file = safe(plan.file);
+        if (!file.isEmpty()) {
+            return "file:" + file;
+        }
+        if (plan.renderId != null) {
+            return "render:" + plan.renderId;
+        }
+        return null;
     }
 
     private static int renderedChannelPriority(ObjectPlan plan) {

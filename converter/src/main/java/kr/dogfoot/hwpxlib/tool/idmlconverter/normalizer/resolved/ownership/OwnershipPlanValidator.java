@@ -48,6 +48,7 @@ public final class OwnershipPlanValidator {
         v.validateParentTextShellDescendantSourcesOwned();
         v.validateParentTextShellOwnedTextFrames();
         v.validateAtomicTextlessShellHasVisibleShellOwner();
+        v.validatePlannerDeclaredTextShellsNotDroppedWithoutOwner();
         v.validateTableStyleSourcesNotVisibleVisuals();
         v.validateCompositeParentDoesNotDuplicateChildShellVisuals();
         v.validateTextHiddenCompositeCarrierDoesNotDuplicateChildShellFragments();
@@ -442,6 +443,46 @@ public final class OwnershipPlanValidator {
                     && containsAny(candidate.ownedTextFrameIds, textFrameSourceIds(droppedShell))) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    private void validatePlannerDeclaredTextShellsNotDroppedWithoutOwner() {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (!isDroppedPlannerDeclaredTextShellContract(plan)) continue;
+            if (hasVisiblePlannerDeclaredTextShellAlternative(plan)) continue;
+            warn("STAGE4_PLANNER_DECLARED_TEXT_SHELL_DROPPED_WITHOUT_OWNER",
+                    "plan=" + planRef(plan)
+                            + " sourceObjectIds=" + ObjectPlan.intArrayJson(plan.sourceObjectIds)
+                            + " textFrameIds=" + ObjectPlan.intArrayJson(textFrameSourceIds(plan)));
+        }
+    }
+
+    private boolean isDroppedPlannerDeclaredTextShellContract(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (!safe(plan.kind).startsWith("planner_declared_rendered:")) return false;
+        if (!"planner_declared_object_plan".equals(safe(plan.reason))) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (!"direct_child_shell_slot".equals(safe(plan.slotRole))) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        return hasVisibleShellMaterialSource(plan);
+    }
+
+    private boolean hasVisiblePlannerDeclaredTextShellAlternative(ObjectPlan droppedShell) {
+        if (droppedShell == null) return false;
+        for (ObjectPlan candidate : ctx.ownershipPlans) {
+            if (candidate == null || candidate == droppedShell) continue;
+            if (candidate.pageIndex != droppedShell.pageIndex) continue;
+            if (!candidate.hasVisibleVisual()) continue;
+            if (!ShellRole.isTextShell(candidate)) continue;
+            if (!containsAny(candidate.ownedTextFrameIds, droppedShell.ownedTextFrameIds)
+                    && !containsAny(candidate.sourceObjectIds, droppedShell.ownedTextFrameIds)) {
+                continue;
+            }
+            if (candidate.renderId != null && candidate.renderId.equals(droppedShell.renderId)) return true;
+            if (containsAny(candidate.sourceObjectIds, droppedShell.sourceObjectIds)) return true;
+            if (containsAny(visualSourceIds(candidate), visualSourceIds(droppedShell))) return true;
         }
         return false;
     }

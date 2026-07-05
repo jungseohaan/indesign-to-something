@@ -315,12 +315,6 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
         if (pgIdx < startPage || pgIdx > endPage) continue;
         var tfShellCandidateMatch = _candidateMatch(candidate, "candidate_direct");
 
-        // 최소 크기 필터 (10pt 미만 무시)
-        try {
-            var gb = item.geometricBounds;
-            if ((gb[3] - gb[1]) < 10 && (gb[2] - gb[0]) < 10) continue;
-        } catch (e) {}
-
         // 복제본에서 텍스트/인라인 객체를 숨기고 fill/stroke만 PNG 내보내기.
         // contents=""는 inline object/복합 story가 섞인 TextFrame에서 실제 렌더 텍스트를
         // 남길 수 있으므로, 그룹 렌더와 같은 content-opacity 숨김 경로를 사용한다.
@@ -359,9 +353,7 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
                     cropSourceBounds = arrCopy(originalBounds);
                     bounds = pageIntersection;
                 }
-                if (!pageIntersection && candidate.pageIndex !== null && candidate.pageIndex !== undefined) {
-                    continue;
-                }
+                if (!pageIntersection && candidate.pageIndex !== null && candidate.pageIndex !== undefined) continue;
                 if (cropSourceBounds) _toPageRelativeBounds(cropSourceBounds, targetPage);
                 _toPageRelativeBounds(bounds, targetPage);
             }
