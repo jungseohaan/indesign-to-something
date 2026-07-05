@@ -1062,10 +1062,27 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             try { tempGroup.exportFile(ExportFormat.PNG_FORMAT, outFile); } catch (eExport) {}
             try { if (!outFile.exists || outFile.length < 512) return false; } catch (eSize) {}
 
+            var exportSourceBounds = null;
+            try { exportSourceBounds = arrCopy(tempGroup.visibleBounds); } catch (eBounds) {}
+            if (!exportSourceBounds) try { exportSourceBounds = arrCopy(tempGroup.geometricBounds); } catch (eBounds2) {}
+
             var exportBounds = null;
-            try { exportBounds = arrCopy(tempGroup.visibleBounds); } catch (eBounds) {}
-            if (!exportBounds) try { exportBounds = arrCopy(tempGroup.geometricBounds); } catch (eBounds2) {}
-            if (exportBounds) _toPageRelativeBounds(exportBounds, page);
+            var exportFullBounds = null;
+            var exportCropSourceBounds = null;
+            if (exportSourceBounds) {
+                exportFullBounds = arrCopy(exportSourceBounds);
+                var visibleExportBounds = arrCopy(exportSourceBounds);
+                var pageIntersection = null;
+                try { pageIntersection = _decoBoundsIntersection(exportSourceBounds, page.bounds); } catch (eIntersect) {}
+                if (pageIntersection && _decoBoundsDiffer(exportSourceBounds, pageIntersection, 0.01)) {
+                    exportCropSourceBounds = arrCopy(exportSourceBounds);
+                    visibleExportBounds = pageIntersection;
+                }
+                exportBounds = arrCopy(visibleExportBounds);
+                _toPageRelativeBounds(exportBounds, page);
+                _toPageRelativeBounds(exportFullBounds, page);
+                if (exportCropSourceBounds) _toPageRelativeBounds(exportCropSourceBounds, page);
+            }
 
             var boundsInfo = _pageRelativeSourceUnionBoundsInfo(sourceItems, page);
             // A source-set composite PNG must be placed with the same geometry used
@@ -1073,7 +1090,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             // duplicated tempGroup's visible bounds because grouping, strokes, masks,
             // and cleared child text frames affect the rendered canvas.
             var bounds = exportBounds || (boundsInfo ? boundsInfo.bounds : null);
-            var cropSourceBounds = boundsInfo ? boundsInfo.cropSourceBounds : null;
+            var cropSourceBounds = exportCropSourceBounds || (boundsInfo ? boundsInfo.cropSourceBounds : null);
 
             var z = 0;
             if (slotPlan.zOrder !== undefined && slotPlan.zOrder !== null) {
@@ -1110,6 +1127,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     exportSourceObjectIds: exportIds,
                     pageRelativeBounds: bounds,
                     exportPageRelativeBounds: exportBounds,
+                    exportFullPageRelativeBounds: exportFullBounds,
                     cropSourceBounds: cropSourceBounds
                 }
             };

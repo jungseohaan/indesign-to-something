@@ -403,12 +403,50 @@ public final class OwnershipPlanner {
     private void importPreplannedObjectPlans() {
         importedPreplannedObjectPlanCount = 0;
         if (ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()) return;
-        plans.addAll(ctx.ownershipPlans);
-        importedPreplannedObjectPlanCount = ctx.ownershipPlans.size();
         for (ObjectPlan plan : ctx.ownershipPlans) {
+            plans.add(canonicalizeImportedPreplannedObjectPlan(plan));
+        }
+        importedPreplannedObjectPlanCount = ctx.ownershipPlans.size();
+        for (ObjectPlan plan : plans) {
             recordPlannerDeclaredInlineTextShellContract(plan);
         }
         ctx.clearOwnershipPlansForRewrite();
+    }
+
+    private ObjectPlan canonicalizeImportedPreplannedObjectPlan(ObjectPlan plan) {
+        if (isPageTextlessGraphicGroupPlan(plan)) {
+            return plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_FLOATING_PNG, plan.reason)
+                    .withVisualLayer(VisualLayer.CONTENT_VISUAL)
+                    .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
+        }
+        if (!isPlannerDeclaredStandaloneInlineVisual(plan)) return plan;
+        return plan.withVisualAction(VisualAction.PLACE_INLINE_PNG, plan.reason);
+    }
+
+    private boolean isPlannerDeclaredStandaloneInlineVisual(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!safe(plan.kind).startsWith("planner_declared_rendered:")) return false;
+        if (!"planner_declared_object_plan".equals(safe(plan.reason))) return false;
+        if (!hasInlineObjectPlanSignal(plan)) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (safe(plan.file).isEmpty()) return false;
+        return plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0;
+    }
+
+    private boolean hasInlineObjectPlanSignal(ObjectPlan plan) {
+        if (plan == null) return false;
+        if ("pass.inline_objects".equals(safe(plan.planPassId))) return true;
+        if (safe(plan.sourceBundleKey).contains("pass.inline_objects")) return true;
+        if (safe(plan.kind).contains(":INLINE_OBJECT")) return true;
+        if (safe(plan.kind).contains(":inline_object")) return true;
+        return safe(plan.file).startsWith("rendered_frames/inline_");
     }
 
     private void recordPlannerDeclaredInlineTextShellContract(ObjectPlan plan) {
@@ -879,7 +917,6 @@ public final class OwnershipPlanner {
         if (rg == null || data == null) return false;
         if (!data.isInlineObjectId(rg.id())) return false;
         if (!"inline_graphic_only".equals(rg.reason())) return false;
-        if (isInlineGraphicLineTextStyleMarker(rg)) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if (!"none".equals(rg.textOwner())) return false;
         if (hasDescendantTextFrameExcluding(String.valueOf(rg.id()), new HashSet<>(), new HashSet<>())) {
@@ -1135,11 +1172,35 @@ public final class OwnershipPlanner {
 
     private void normalizeStage1ContractsBeforeValidation() {
         timed("normalizeTextShellsWithMaterializedTextOwners.final", this::normalizeTextShellsWithMaterializedTextOwners);
+        timed("restorePageTextlessGraphicGroupContracts.final", this::restorePageTextlessGraphicGroupContracts);
         timed("normalizeTextlessShellsWithoutOwnedText.final", this::normalizeTextlessShellsWithoutOwnedText);
         timed("normalizeInlineOwnedTextShellsToStoryFlow.final", this::normalizeInlineOwnedTextShellsToStoryFlow);
         timed("normalizeRawClippedImageVisualSources.final", this::normalizeRawClippedImageVisualSources);
         timed("normalizeVisibleVisualSourcesToPlanPage.final", this::normalizeVisibleVisualSourcesToPlanPage);
         timed("normalizeDuplicateVisibleSourceSlots.final", this::normalizeDuplicateVisibleSourceSlots);
+    }
+
+    private void restorePageTextlessGraphicGroupContracts() {
+        int restored = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isPageTextlessGraphicGroupPlan(plan)) continue;
+            RenderedGroup rendered = renderedGroupForPlan(plan);
+            double[] renderBounds = rendered != null ? rendered.bounds() : null;
+            ObjectPlan replacement = plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_FLOATING_PNG, plan.reason)
+                    .withVisualLayer(VisualLayer.CONTENT_VISUAL)
+                    .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
+            if (renderBounds != null && renderBounds.length >= 4 && isPositiveBounds(renderBounds)) {
+                replacement = replacement.withBounds(renderBounds);
+            }
+            if (replacement == plan) continue;
+            plans.set(i, replacement);
+            restored++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.restorePageTextlessGraphicGroupContracts", restored);
     }
 
     private void normalizeTextShellsWithMaterializedTextOwners() {
@@ -5518,9 +5579,6 @@ public final class OwnershipPlanner {
         if (data.isNonCanonicalAtomicObjectRender(rg)) {
             return VisualAction.DROP_VISUAL;
         }
-        if (isInlineGraphicLineTextStyleMarker(rg)) {
-            return VisualAction.DROP_VISUAL;
-        }
         if (isStandaloneGraphicOnlyInlineObject(rg)) {
             return VisualAction.PLACE_INLINE_PNG;
         }
@@ -8823,11 +8881,17 @@ public final class OwnershipPlanner {
         if (plan == null) return false;
         if (plan.placement != Placement.FLOATING) return false;
         if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (isPageTextlessGraphicGroupPlan(plan)) return false;
         if (isTextShellWithSeparatedHiddenTextChannel(plan)) return true;
         if (hasExtractedTextlessShellVisual(plan)) return false;
         String reason = safe(plan.reason);
         return "sibling_group_text_shell".equals(reason)
                 || "story_flow_inline_shell_visual_only".equals(reason);
+    }
+
+    private static boolean isPageTextlessGraphicGroupPlan(ObjectPlan plan) {
+        return plan != null
+                && "pass.page_textless_graphic_groups".equals(safe(plan.planPassId));
     }
 
     private boolean isTextShellWithSeparatedHiddenTextChannel(ObjectPlan plan) {

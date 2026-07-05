@@ -824,6 +824,10 @@ function _objectPlanVisualAction(bundle) {
     if (bundle.layoutOnlyInlineSlot === true) return "DROP_VISUAL";
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
     if (bundle.policyLayer === "BACKGROUND") return "PLACE_FLOATING_PNG";
+    if (bundle.passId === "pass.inline_objects"
+            && (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0)) {
+        return _objectPlanPlacement(bundle) === "INLINE" ? "PLACE_INLINE_PNG" : "PLACE_FLOATING_PNG";
+    }
     if (bundle.ownershipSlot === "SHELL_SLOT") return "PLACE_TEXT_SHELL";
     if (_objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle)) return "DROP_VISUAL";
     if (bundle.passId === "pass.inline_objects") {
