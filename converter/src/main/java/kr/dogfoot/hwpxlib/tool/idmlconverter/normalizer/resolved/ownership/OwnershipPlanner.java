@@ -13209,12 +13209,28 @@ public final class OwnershipPlanner {
     }
 
     private int canonicalVisualSourceZOrder(ObjectPlan plan) {
-        int sourceZ = maxPageItemZOrder(plan.sourceRootObjectIds);
+        int sourceZ = maxPageItemZOrder(visualDepthSourceRootObjectIds(plan));
+        if (sourceZ >= 0) return sourceZ;
+        sourceZ = maxPageItemZOrder(visualDepthSourceObjectIds(plan));
         if (sourceZ >= 0) return sourceZ;
         sourceZ = maxPageItemZOrder(visualSourceIds(plan));
         if (sourceZ >= 0) return sourceZ;
         sourceZ = maxPageItemZOrder(plan.sourceObjectIds);
         return sourceZ >= 0 ? sourceZ : plan.zOrder;
+    }
+
+    private int[] visualDepthSourceRootObjectIds(ObjectPlan plan) {
+        if (plan == null) return new int[0];
+        int[] roots = withoutSources(plan.sourceRootObjectIds, toLinkedSet(plan.ownedTextFrameIds));
+        if (roots.length > 0) return roots;
+        return sourceRootObjectIds(visualDepthSourceObjectIds(plan));
+    }
+
+    private int[] visualDepthSourceObjectIds(ObjectPlan plan) {
+        if (plan == null) return new int[0];
+        int[] sourceIds = withoutSources(plan.sourceObjectIds, toLinkedSet(plan.ownedTextFrameIds));
+        if (sourceIds.length > 0) return sourceIds;
+        return withoutSources(visualSourceIds(plan), toLinkedSet(plan.ownedTextFrameIds));
     }
 
     private static boolean isPlannerDeclaredObjectPlan(ObjectPlan plan) {
@@ -13224,6 +13240,12 @@ public final class OwnershipPlanner {
     private VisualLayer canonicalVisualPlane(ObjectPlan plan, int zOrder) {
         if (plan == null) return null;
         VisualLayer layer = canonicalPlacedContentVisualLayer(plan);
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && hasPlacedContentContract(plan)) {
+            return isBehindLocalHwpxTextBySourceDepth(plan.bounds, plan.pageIndex, zOrder)
+                    ? VisualLayer.CONTENT_BACKDROP
+                    : VisualLayer.CONTENT_VISUAL;
+        }
         if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && layer == VisualLayer.CONTAINER_BACKDROP
                 && !isPlanAllowedBackgroundPlane(plan, zOrder)) {
