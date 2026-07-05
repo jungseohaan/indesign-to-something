@@ -135,7 +135,7 @@ function _buildDecorationCandidateIndexes(decorationCandidates, itemById) {
  * @return {{ frames: Array, childIds: Object }}
  */
 function exportDecorationGroups(doc, outputDir, startPage, endPage,
-                                itemById, decorationCandidates, imgRenderedIds) {
+                                itemById, decorationCandidates, imgRenderedIds, sourceItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -158,6 +158,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     var decoDirectGroupItemsCache = {};
     var decoPlannedCandidateMatchCache = {};
     var renderedPageKeys = {};
+    var sourceItemIndexes = null;
+    try { sourceItemIndexes = _buildSourceItemIndexes(sourceItems || []); } catch (eSourceIndexes) {}
+    var sourceInfoById = sourceItemIndexes ? sourceItemIndexes.sourceInfoById || {} : {};
 
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -1031,10 +1034,44 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         var renderKey = "sourceset|" + String(slotPlan.candidateId || fileName);
         if (renderedPageKeys[renderKey]) return true;
 
+        function sourceOrderInfoForItem(item) {
+            var src = null;
+            try {
+                if (item && item.id !== undefined && item.id !== null) {
+                    src = sourceInfoById[String(item.id)];
+                }
+            } catch (eItemId) {}
+            var z = null;
+            var order = null;
+            if (src) {
+                if (src.zOrder !== undefined && src.zOrder !== null) z = Number(src.zOrder);
+                if (src.sourceOrder !== undefined && src.sourceOrder !== null) order = Number(src.sourceOrder);
+            }
+            if (isNaN(z) || z === null) {
+                try { z = Number(getItemZOrder(item)); } catch (eDomZ) { z = 0; }
+            }
+            if (isNaN(order) || order === null) {
+                try { order = Number(getItemZOrder(item)); } catch (eDomOrder) { order = 0; }
+            }
+            return { z: z, order: order };
+        }
+
+        function sortSourceItemsByPlannedZOrder(items) {
+            var copy = [];
+            for (var si = 0; si < items.length; si++) copy.push(items[si]);
+            copy.sort(function(a, b) {
+                var ai = sourceOrderInfoForItem(a);
+                var bi = sourceOrderInfoForItem(b);
+                if (ai.z !== bi.z) return ai.z - bi.z;
+                return ai.order - bi.order;
+            });
+            return copy;
+        }
+
         var dups = [];
         var tempGroup = null;
         var savedOutOfScope = [];
-        var ordered = _sortBackToFront(sourceItems);
+        var ordered = sortSourceItemsByPlannedZOrder(sourceItems);
         try {
             for (var i = 0; i < ordered.length; i++) {
                 var hiddenForItem = [];

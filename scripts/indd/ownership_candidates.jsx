@@ -125,27 +125,46 @@ function _pushExtractionCandidate(candidates, seen, passId, item, attrs) {
     });
 }
 
-function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds) {
+function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds, itemById) {
     var ids = editableTextFrameIds || [];
     if (!item || ids.length !== 1) return false;
     var markerText = null;
+    function maybeReadTextFrame(tf) {
+        if (!tf) return false;
+        try {
+            if (tf.constructor.name !== "TextFrame") return false;
+            if (String(tf.id) !== String(ids[0])) return false;
+            markerText = _plainTextOfTextFrameForOwnership(tf);
+            return true;
+        } catch (eReadTf) {}
+        return false;
+    }
     try {
         var nested = item.allPageItems;
         for (var i = 0; i < nested.length; i++) {
-            try {
-                if (nested[i].constructor.name !== "TextFrame") continue;
-                if (String(nested[i].id) !== String(ids[0])) continue;
-                markerText = _plainTextOfTextFrameForOwnership(nested[i]);
-                break;
-            } catch (eNested) {}
+            if (maybeReadTextFrame(nested[i])) break;
         }
     } catch (eAll) {}
     if (markerText === null) {
         try {
-            if (item.constructor.name === "TextFrame" && String(item.id) === String(ids[0])) {
-                markerText = _plainTextOfTextFrameForOwnership(item);
+            var textFrames = item.textFrames;
+            var count = textFrames && textFrames.length !== undefined
+                    ? Number(textFrames.length || 0)
+                    : 0;
+            for (var ti = 0; ti < count; ti++) {
+                if (maybeReadTextFrame(textFrames[ti])) break;
             }
+        } catch (eTextFrames) {}
+    }
+    if (markerText === null) {
+        try {
+            maybeReadTextFrame(item);
         } catch (eSelf) {}
+    }
+    if (markerText === null && itemById) {
+        try {
+            maybeReadTextFrame(itemById[String(ids[0])]);
+        } catch (eById) {}
     }
     return _isSimpleMarkerLabelTextForOwnership(markerText);
 }

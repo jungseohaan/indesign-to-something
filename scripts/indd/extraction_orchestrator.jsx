@@ -295,7 +295,8 @@ function _runRenderPhases(doc, ctx, allItems) {
     var pageTextlessGroupResult = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
             extractionItemById,
             pageTextlessGroupPngCandidates,
-            imgRenderedIds);
+            imgRenderedIds,
+            ctx.extractionPlan.sourceItems);
     _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
     for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
         renderedFloatingItems.push(pageTextlessGroupResult.frames[ptgi]);
@@ -320,7 +321,8 @@ function _runRenderPhases(doc, ctx, allItems) {
     var decoResult  = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
             extractionItemById,
             decoPngCandidates,
-            imgRenderedIds);
+            imgRenderedIds,
+            ctx.extractionPlan.sourceItems);
     var decoChildIds = decoResult.childIds || {};
     _addRenderMeta(decoResult.frames, "page_object", "pass.decoration_groups");
     for (var di = 0; di < decoResult.frames.length; di++) renderedFloatingItems.push(decoResult.frames[di]);
@@ -344,7 +346,8 @@ function _runRenderPhases(doc, ctx, allItems) {
     var renderedVectorFrames = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
             extractionItemById,
             _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.vector_shape_frames"),
-            imgRenderedIds);
+            imgRenderedIds,
+            ctx.extractionPlan.sourceItems);
     _addRenderMeta(renderedVectorFrames.frames, "page_object", "pass.vector_shape_frames");
     for (var vsi = 0; vsi < renderedVectorFrames.frames.length; vsi++) renderedFloatingItems.push(renderedVectorFrames.frames[vsi]);
     try { $.gc(); } catch (e) {}

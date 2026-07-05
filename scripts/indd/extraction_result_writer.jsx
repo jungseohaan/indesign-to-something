@@ -133,6 +133,7 @@ function _slimExtractionPlanForWrite(plan) {
             textLength: src.textLength,
             hasText: src.hasText,
             markerOnlyContents: src.markerOnlyContents,
+            simpleMarkerLabelContents: src.simpleMarkerLabelContents,
             hasChildren: src.hasChildren,
             hasPlacedVisual: src.hasPlacedVisual,
             hasCandidateVectorPaint: src.hasCandidateVectorPaint,
@@ -185,6 +186,8 @@ function _slimExtractionPlanForWrite(plan) {
             visualLayer: c.visualLayer,
             ownershipSlot: c.ownershipSlot,
             textOwner: c.textOwner,
+            requiresTextHidden: c.requiresTextHidden === true,
+            completePngTextAllowed: c.completePngTextAllowed === true,
             placement: c.placement,
             coordinateSpace: c.coordinateSpace,
             reason: c.reason,
@@ -219,6 +222,9 @@ function _slimExtractionPlanForWrite(plan) {
         renderUnits: plan.renderUnits || [],
         preObjectPlanTextlessShellSuppressionSummary:
                 plan.preObjectPlanTextlessShellSuppressionSummary,
+        crossPageClipParentDecorationSuppressionSummary:
+                plan.crossPageClipParentDecorationSuppressionSummary,
+        pageTextlessGraphicGroupSummary: plan.pageTextlessGraphicGroupSummary,
         sourceSlotCanonicalizationSummary: plan.sourceSlotCanonicalizationSummary,
         executionCandidateContractSummary: plan.executionCandidateContractSummary,
         exactShellSlotDuplicateSummary: plan.exactShellSlotDuplicateSummary,

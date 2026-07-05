@@ -15,6 +15,7 @@ function _buildObjectPlanDiagnostics(sourceItems, candidates) {
 function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems) {
     var bundles = plannerBundles && plannerBundles.bundles ? plannerBundles.bundles : [];
     var objectPlans = [];
+    var sourceById = _objectPlanSourceInfoById(sourceItems);
     var summary = {
         planCount: 0,
         executablePlanCount: 0,
@@ -37,7 +38,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     };
 
     for (var i = 0; i < bundles.length; i++) {
-        var plan = _objectPlanFromPlannerBundle(bundles[i], i);
+        var plan = _objectPlanFromPlannerBundle(bundles[i], i, sourceById);
         objectPlans.push(plan);
         summary.planCount++;
         if (plan.executable) summary.executablePlanCount++;
@@ -582,7 +583,7 @@ function _resolveObjectPlanDuplicateTextOwners(objectPlans) {
     var ownersByTextFrameId = {};
     for (var i = 0; i < plans.length; i++) {
         var plan = plans[i];
-        if (!plan || plan.textAction !== "OWNED_BY_HWPX_TEXT") continue;
+        if (!plan || (plan.textAction !== "OWNED_BY_HWPX_TEXT" && plan.textAction !== "OWNED_BY_PNG")) continue;
         if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) continue;
         for (var t = 0; t < plan.ownedTextFrameIds.length; t++) {
             var textId = String(plan.ownedTextFrameIds[t]);
@@ -670,6 +671,7 @@ function _compareObjectPlanTextOwnerPriority(a, b) {
 function _objectPlanTextOwnerPriority(plan) {
     if (!plan) return 0;
     var score = 0;
+    if (plan.textAction === "OWNED_BY_PNG") score += 200;
     if (plan.visualAction === "DROP_VISUAL") score += 20;
     if (plan.visualAction === "PLACE_TEXT_SHELL") score += 40;
     if (plan.ownershipSlot === "SHELL_SLOT") score += 20;
@@ -684,9 +686,9 @@ function _objectPlanTextOwnerPriority(plan) {
     return score;
 }
 
-function _objectPlanFromPlannerBundle(bundle, index) {
+function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     bundle = _normalizeObjectPlanBundle(bundle || {});
-    var textAction = _objectPlanTextAction(bundle);
+    var textAction = _objectPlanTextAction(bundle, sourceById);
     var visualAction = _objectPlanVisualAction(bundle);
     var placement = _objectPlanPlacement(bundle);
     var coordinateSpace = _objectPlanCoordinateSpace(bundle, placement);
@@ -806,10 +808,19 @@ function _objectPlanId(bundle, index) {
     return "objectPlan." + id.replace(/[^A-Za-z0-9_.-]/g, "_");
 }
 
-function _objectPlanTextAction(bundle) {
+function _objectPlanTextAction(bundle, sourceById) {
+    if (bundle && bundle.textAction === "OWNED_BY_PNG") {
+        return "OWNED_BY_PNG";
+    }
+    if (bundle && bundle.textAction === "DROP_TEXT") {
+        return "DROP_TEXT";
+    }
     if (bundle && bundle.ownershipSlot === "SHELL_SLOT"
             && _objectPlanVisualAction(bundle) === "DROP_VISUAL") {
         return "DROP_TEXT";
+    }
+    if (_objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById)) {
+        return "OWNED_BY_PNG";
     }
     if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) {
         return "OWNED_BY_HWPX_TEXT";
@@ -817,6 +828,18 @@ function _objectPlanTextAction(bundle) {
     if (!bundle || bundle.executable !== true) return "DROP_TEXT";
     if (bundle.ownershipSlot === "SHELL_SLOT") return "DROP_TEXT";
     return "DROP_TEXT";
+}
+
+function _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    for (var i = 0; i < bundle.ownedTextFrameIds.length; i++) {
+        var src = sourceById ? sourceById[String(bundle.ownedTextFrameIds[i])] : null;
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.simpleMarkerLabelContents !== true) return false;
+    }
+    return true;
 }
 
 function _objectPlanVisualAction(bundle) {

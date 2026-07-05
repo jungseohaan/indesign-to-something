@@ -230,6 +230,18 @@ function _plainTextOfTextFrameForOwnership(item) {
     return String(text || "").replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC]/g, "");
 }
 
+function _isSimpleMarkerLabelTextForSourceIndex(text) {
+    text = String(text || "").replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC\uFEFF]/g, "");
+    if (!text) return false;
+    if (/^(가|나|다|라|마|바|ㄱ|ㄴ|ㄷ|ㄹ|ㅁ|ㅂ|ㅅ|ㅇ|ㅈ|ㅊ|ㅋ|ㅌ|ㅍ|ㅎ)$/.test(text)) return true;
+    if (/^[0-9]{1,2}$/.test(text)) return true;
+    if (text.length === 1) {
+        var code = text.charCodeAt(0);
+        if (code >= 0x2460 && code <= 0x2473) return true;
+    }
+    return false;
+}
+
 function _storyTableSourceObjectIds(story) {
     var ids = [];
     try {
@@ -339,6 +351,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var textLength = null;
         var rawContents = null;
         var markerOnlyContents = null;
+        var simpleMarkerLabelContents = null;
         var storyId = null;
         var tableCountInStory = null;
         var tableSourceObjectIds = [];
@@ -358,6 +371,12 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             } catch (eRawContents) {
                 rawContents = null;
                 markerOnlyContents = null;
+            }
+            try {
+                simpleMarkerLabelContents = _isSimpleMarkerLabelTextForSourceIndex(
+                        _plainTextOfTextFrameForOwnership(item));
+            } catch (eSimpleMarkerLabel) {
+                simpleMarkerLabelContents = null;
             }
             try {
                 if (parentStory && parentStory.tables) {
@@ -394,6 +413,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             textLength: textLength,
             hasText: textLength !== null ? textLength > 0 : null,
             markerOnlyContents: markerOnlyContents,
+            simpleMarkerLabelContents: simpleMarkerLabelContents,
             storyId: storyId,
             tableCountInStory: tableCountInStory,
             hasTablesInStory: tableCountInStory !== null ? tableCountInStory > 0 : null,

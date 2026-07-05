@@ -125,6 +125,7 @@ function _executionCandidateContractFields() {
         "suffix",
         "mode",
         "requiresTextHidden",
+        "completePngTextAllowed",
         "textOwner",
         "reason",
         "objectPlanId",
@@ -186,12 +187,15 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     if (objectPlan.textAction === "OWNED_BY_HWPX_TEXT") {
         candidate.textOwner = "hwpx_tf";
         candidate.requiresTextHidden = objectPlan.visualAction !== "DROP_VISUAL";
+        candidate.completePngTextAllowed = false;
     } else if (objectPlan.textAction === "OWNED_BY_PNG") {
         candidate.textOwner = "indesign_png";
         candidate.requiresTextHidden = false;
+        candidate.completePngTextAllowed = true;
     } else if (objectPlan.visualAction === "DROP_VISUAL") {
         candidate.textOwner = "none";
         candidate.requiresTextHidden = false;
+        candidate.completePngTextAllowed = false;
     }
     var executionSourceObjectIds = _objectPlanExecutionSourceObjectIds(objectPlan);
     if (executionSourceObjectIds.length > 0) {

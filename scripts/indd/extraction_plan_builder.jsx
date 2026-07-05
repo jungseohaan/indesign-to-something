@@ -194,6 +194,16 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
 function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates, seen, planCache) {
     var inlineScanFrames = [];
     var inlineScanFrameIds = {};
+    var inlineItemById = {};
+    try {
+        for (var mapIdx = 0; mapIdx < allItems.length; mapIdx++) {
+            try {
+                if (allItems[mapIdx] && allItems[mapIdx].id !== undefined && allItems[mapIdx].id !== null) {
+                    inlineItemById[String(allItems[mapIdx].id)] = allItems[mapIdx];
+                }
+            } catch (eMapItem) {}
+        }
+    } catch (eInlineMap) {}
     function isOffCanvasInlineStoryCarrier(tf) {
         try {
             if (!tf || tf.constructor.name !== "TextFrame") return false;
@@ -305,7 +315,8 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates,
                     try {
                         inlineEditableTextFrameIds = planCache ? planCache.textFrameIds(inItem, true, true) : _collectTextFrameIds(inItem, true, true);
                     } catch (eInlineEditableIds) {}
-                    var inlineCompleteMarkerOwnsText = _inlineCompleteMarkerDecisionForOwnership(inItem, inlineEditableTextFrameIds);
+                    var inlineCompleteMarkerOwnsText = _inlineCompleteMarkerDecisionForOwnership(
+                            inItem, inlineEditableTextFrameIds, inlineItemById);
                     var inlineRequiresTextHidden = inlineEditableTextFrameIds.length > 0 && !inlineCompleteMarkerOwnsText;
                     _pushExtractionCandidate(candidates, seen, "pass.inline_objects", inItem, {
                         sourceObjectIds: inlineSourceIds,
@@ -369,7 +380,8 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates,
                             : _collectSourceObjectIds(nativeInlineShell);
                 } catch (eNativeInlineSourceIds) {}
                 var nativeInlineCompleteMarkerOwnsText =
-                        _inlineCompleteMarkerDecisionForOwnership(nativeInlineShell, nativeInlineEditableTextFrameIds);
+                        _inlineCompleteMarkerDecisionForOwnership(
+                                nativeInlineShell, nativeInlineEditableTextFrameIds, inlineItemById);
                 var nativeInlineRequiresTextHidden =
                         nativeInlineEditableTextFrameIds.length > 0 && !nativeInlineCompleteMarkerOwnsText;
                 _pushExtractionCandidate(candidates, seen, "pass.inline_objects", nativeInlineShell, {
@@ -1188,6 +1200,17 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         return [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
     }
 
+    function sourceBounds(id) {
+        var src = info(id);
+        if (!src || !src.bounds || src.bounds.length < 4) return null;
+        return [
+            Number(src.bounds[0]),
+            Number(src.bounds[1]),
+            Number(src.bounds[2]),
+            Number(src.bounds[3])
+        ];
+    }
+
     function boundsHasArea(b) {
         return b && (b[2] - b[0]) > 0.1 && (b[3] - b[1]) > 0.1;
     }
@@ -1215,6 +1238,110 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             if (!isNaN(z)) return z;
         }
         return 0;
+    }
+
+    function sourceHasAncestorInSet(id, sourceSet) {
+        var cur = info(id);
+        var guard = 0;
+        while (cur && guard++ < 64) {
+            var parentId = cur.parentId;
+            if (parentId === null || parentId === undefined) return false;
+            if (sourceSet[String(parentId)]) return true;
+            cur = info(parentId);
+        }
+        return false;
+    }
+
+    function nonPageAncestorIds(id) {
+        var out = [];
+        var seen = {};
+        var cur = info(id);
+        var guard = 0;
+        while (cur && guard++ < 64) {
+            var kind = String(cur.kind || "");
+            if (kind === "Page" || kind === "Spread" || kind === "Document"
+                    || kind === "Story" || kind === "Character"
+                    || kind === "InsertionPoint" || kind === "Cell") {
+                break;
+            }
+            if (cur.id !== null && cur.id !== undefined) {
+                _pushUniqueId(out, seen, cur.id);
+            }
+            if (cur.parentId === null || cur.parentId === undefined) break;
+            cur = info(cur.parentId);
+        }
+        return out;
+    }
+
+    function sourceIdsHaveAncestorRelation(aIds, bIds) {
+        var bSet = {};
+        for (var bi = 0; bIds && bi < bIds.length; bi++) bSet[String(bIds[bi])] = true;
+        for (var ai = 0; aIds && ai < aIds.length; ai++) {
+            if (bSet[String(aIds[ai])]) return true;
+            if (sourceHasAncestorInSet(aIds[ai], bSet)) return true;
+        }
+        var aSet = {};
+        for (var aj = 0; aIds && aj < aIds.length; aj++) aSet[String(aIds[aj])] = true;
+        for (var bj = 0; bIds && bj < bIds.length; bj++) {
+            if (sourceHasAncestorInSet(bIds[bj], aSet)) return true;
+        }
+        return false;
+    }
+
+    function entriesShareStructuralRoot(a, b) {
+        if (!a || !b) return false;
+        var aIds = (a.sourceIds || []).concat(a.exportIds || []);
+        var bIds = (b.sourceIds || []).concat(b.exportIds || []);
+        if (sourceIdsHaveAncestorRelation(aIds, bIds)) return true;
+
+        var aAncestors = {};
+        for (var ai = 0; ai < aIds.length; ai++) {
+            var aa = nonPageAncestorIds(aIds[ai]);
+            for (var aai = 0; aai < aa.length; aai++) aAncestors[String(aa[aai])] = true;
+        }
+        for (var bi = 0; bi < bIds.length; bi++) {
+            var ba = nonPageAncestorIds(bIds[bi]);
+            for (var bai = 0; bai < ba.length; bai++) {
+                if (aAncestors[String(ba[bai])]) return true;
+            }
+        }
+        return false;
+    }
+
+    function visibleBoundsSourceId(id, sourceSet) {
+        var src = info(id);
+        if (!src) return id;
+        if (String(src.kind || "") !== "Image") return id;
+        var parentId = src.parentId;
+        var parent = parentId !== null && parentId !== undefined ? info(parentId) : null;
+        if (!parent || !parent.bounds) return id;
+        var parentKind = String(parent.kind || "");
+        if (parentKind !== "Rectangle" && parentKind !== "Oval" && parentKind !== "Polygon") return id;
+        return parentId;
+    }
+
+    function effectiveCandidateBounds(candidate) {
+        var candidateBounds = bounds(candidate);
+        var idsForBounds = visibleExportIds(candidate);
+        if (!idsForBounds || idsForBounds.length === 0) idsForBounds = sourceIds(candidate);
+        if (!idsForBounds || idsForBounds.length === 0) return candidateBounds;
+
+        var sourceSet = {};
+        for (var i = 0; i < idsForBounds.length; i++) sourceSet[String(idsForBounds[i])] = true;
+
+        var b = null;
+        var used = {};
+        for (var si = 0; si < idsForBounds.length; si++) {
+            var id = idsForBounds[si];
+            if (sourceHasAncestorInSet(id, sourceSet)) continue;
+            var boundsId = visibleBoundsSourceId(id, sourceSet);
+            if (used[String(boundsId)]) continue;
+            used[String(boundsId)] = true;
+            var sb = sourceBounds(boundsId);
+            if (!boundsHasArea(sb)) continue;
+            b = unionBounds(b, sb);
+        }
+        return boundsHasArea(b) ? b : candidateBounds;
     }
 
     function isEligible(candidate) {
@@ -1255,7 +1382,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             candidate: candidate,
             index: index,
             pageIndex: Number(candidate.pageIndex),
-            bounds: bounds(candidate),
+            bounds: effectiveCandidateBounds(candidate),
             sourceIds: sourceIds(candidate),
             exportIds: visibleExportIds(candidate),
             zOrder: zOrderOfCandidate(candidate)
@@ -1292,7 +1419,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     if (used[j]) continue;
                     var touches = false;
                     for (var k = 0; k < component.length; k++) {
-                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)) {
+                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)
+                                && entriesShareStructuralRoot(component[k], entries[j])) {
                             touches = true;
                             break;
                         }
@@ -1396,6 +1524,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             diagnostics.push({
                 candidateId: candidateId,
                 pageIndex: Number(pageKey),
+                coveredCandidateIds: coveredCandidateIds,
                 coveredCandidateCount: coveredCandidateIds.length,
                 sourceObjectCount: allSourceIds.length,
                 exportSourceObjectCount: exportIds.length,
@@ -1412,10 +1541,13 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     };
 }
 
-function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates) {
+function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceItems) {
     if (!candidates || candidates.length === 0) {
         return { candidates: candidates || [], mergedCount: 0, merged: [] };
     }
+    var indexes = null;
+    try { indexes = _buildSourceItemIndexes(sourceItems || []); } catch (eIndex) { indexes = null; }
+    var sourceInfoById = indexes ? indexes.sourceInfoById || {} : {};
 
     function isPageGroup(candidate) {
         return candidate && candidate.passId === "pass.page_textless_graphic_groups";
@@ -1462,6 +1594,77 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates) {
         for (var i = 0; values && i < values.length; i++) {
             _pushUniqueId(target, seen, values[i]);
         }
+    }
+
+    function info(id) {
+        return sourceInfoById ? sourceInfoById[String(id)] : null;
+    }
+
+    function sourceHasAncestorInSet(id, sourceSet) {
+        var cur = info(id);
+        var guard = 0;
+        while (cur && guard++ < 64) {
+            var parentId = cur.parentId;
+            if (parentId === null || parentId === undefined) return false;
+            if (sourceSet[String(parentId)]) return true;
+            cur = info(parentId);
+        }
+        return false;
+    }
+
+    function nonPageAncestorIds(id) {
+        var out = [];
+        var seen = {};
+        var cur = info(id);
+        var guard = 0;
+        while (cur && guard++ < 64) {
+            var kind = String(cur.kind || "");
+            if (kind === "Page" || kind === "Spread" || kind === "Document"
+                    || kind === "Story" || kind === "Character"
+                    || kind === "InsertionPoint" || kind === "Cell") {
+                break;
+            }
+            if (cur.id !== null && cur.id !== undefined) {
+                _pushUniqueId(out, seen, cur.id);
+            }
+            if (cur.parentId === null || cur.parentId === undefined) break;
+            cur = info(cur.parentId);
+        }
+        return out;
+    }
+
+    function sourceIdsHaveAncestorRelation(aIds, bIds) {
+        var bSet = {};
+        for (var bi = 0; bIds && bi < bIds.length; bi++) bSet[String(bIds[bi])] = true;
+        for (var ai = 0; aIds && ai < aIds.length; ai++) {
+            if (bSet[String(aIds[ai])]) return true;
+            if (sourceHasAncestorInSet(aIds[ai], bSet)) return true;
+        }
+        var aSet = {};
+        for (var aj = 0; aIds && aj < aIds.length; aj++) aSet[String(aIds[aj])] = true;
+        for (var bj = 0; bIds && bj < bIds.length; bj++) {
+            if (sourceHasAncestorInSet(bIds[bj], aSet)) return true;
+        }
+        return false;
+    }
+
+    function entriesShareStructuralRoot(a, b) {
+        if (!a || !b) return false;
+        var aIds = (a.candidate.sourceObjectIds || []).concat(a.candidate.exportSourceObjectIds || []);
+        var bIds = (b.candidate.sourceObjectIds || []).concat(b.candidate.exportSourceObjectIds || []);
+        if (sourceIdsHaveAncestorRelation(aIds, bIds)) return true;
+        var aAncestors = {};
+        for (var ai = 0; ai < aIds.length; ai++) {
+            var aa = nonPageAncestorIds(aIds[ai]);
+            for (var aai = 0; aai < aa.length; aai++) aAncestors[String(aa[aai])] = true;
+        }
+        for (var bi = 0; bi < bIds.length; bi++) {
+            var ba = nonPageAncestorIds(bIds[bi]);
+            for (var bai = 0; bai < ba.length; bai++) {
+                if (aAncestors[String(ba[bai])]) return true;
+            }
+        }
+        return false;
     }
 
     function mergedIds(component, field) {
@@ -1513,7 +1716,8 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates) {
                     if (used[j]) continue;
                     var touches = false;
                     for (var k = 0; k < component.length; k++) {
-                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)) {
+                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)
+                                && entriesShareStructuralRoot(component[k], entries[j])) {
                             touches = true;
                             break;
                         }
@@ -1582,6 +1786,72 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates) {
         candidates: out,
         mergedCount: diagnostics.length,
         merged: diagnostics
+    };
+}
+
+function _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItems) {
+    if (!candidates || candidates.length === 0) {
+        return { candidates: candidates || [], suppressedCount: 0, suppressed: [] };
+    }
+    var indexes = null;
+    try { indexes = _buildSourceItemIndexes(sourceItems || []); } catch (eIndex) { indexes = null; }
+    var sourceInfoById = indexes ? indexes.sourceInfoById || {} : {};
+
+    function isClipParentSourceSetDecoration(candidate) {
+        return candidate
+                && candidate.passId === "pass.decoration_groups"
+                && candidate.compositeRole === "clip_parent_source_set";
+    }
+
+    function primarySourceId(candidate) {
+        if (!candidate) return null;
+        if (candidate.primarySourceObjectId !== undefined && candidate.primarySourceObjectId !== null) {
+            return candidate.primarySourceObjectId;
+        }
+        return candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0
+                ? candidate.sourceObjectIds[0]
+                : null;
+    }
+
+    function sourcePageIndex(sourceId) {
+        var src = sourceInfoById ? sourceInfoById[String(sourceId)] : null;
+        return src && src.pageIndex !== undefined && src.pageIndex !== null
+                ? Number(src.pageIndex)
+                : null;
+    }
+
+    var out = [];
+    var suppressed = [];
+    for (var i = 0; i < candidates.length; i++) {
+        var candidate = candidates[i];
+        if (!isClipParentSourceSetDecoration(candidate)) {
+            out.push(candidate);
+            continue;
+        }
+        var primaryId = primarySourceId(candidate);
+        var primaryPageIndex = sourcePageIndex(primaryId);
+        var candidatePageIndex = candidate.pageIndex !== undefined && candidate.pageIndex !== null
+                ? Number(candidate.pageIndex)
+                : null;
+        if (primaryPageIndex !== null
+                && candidatePageIndex !== null
+                && primaryPageIndex !== candidatePageIndex) {
+            suppressed.push({
+                candidateId: candidate.candidateId || null,
+                pageIndex: candidatePageIndex,
+                primarySourceObjectId: primaryId,
+                primarySourcePageIndex: primaryPageIndex,
+                sourceObjectCount: candidate.sourceObjectIds ? candidate.sourceObjectIds.length : 0,
+                reason: "cross_page_clip_parent_source_set_without_parent_context"
+            });
+            continue;
+        }
+        out.push(candidate);
+    }
+    return {
+        candidates: out,
+        suppressedCount: suppressed.length,
+        suppressed: suppressed
     };
 }
 
@@ -1987,9 +2257,13 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
     _marker(ctx.outputDir, "03d12b_plan_pageTextlessGraphicGroups");
     var pageTextlessGraphicGroupMergeDiagnostics =
-            _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates);
+            _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceItems);
     candidates = pageTextlessGraphicGroupMergeDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1_plan_mergeOverlappingPageTextlessGraphicGroups");
+    var crossPageClipParentDecorationSuppressionDiagnostics =
+            _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItems);
+    candidates = crossPageClipParentDecorationSuppressionDiagnostics.candidates;
+    _marker(ctx.outputDir, "03d12b2_plan_suppressCrossPageClipParentDecorations");
     var pageTextlessGraphicGroupSuppressionDiagnostics =
             _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sourceItems);
     candidates = pageTextlessGraphicGroupSuppressionDiagnostics.candidates;
@@ -2135,6 +2409,10 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         preObjectPlanTextlessShellSuppressionSummary: {
             suppressedCount: preObjectPlanTextlessShellSuppressionDiagnostics.suppressedCount,
             suppressed: preObjectPlanTextlessShellSuppressionDiagnostics.suppressed
+        },
+        crossPageClipParentDecorationSuppressionSummary: {
+            suppressedCount: crossPageClipParentDecorationSuppressionDiagnostics.suppressedCount,
+            suppressed: crossPageClipParentDecorationSuppressionDiagnostics.suppressed
         },
         pageTextlessGraphicGroupSummary: {
             appendedCount: pageTextlessGraphicGroupDiagnostics.appendedCount,
