@@ -67,6 +67,13 @@
   narrower source set, validation must fail before HWPX conversion.
 - `PLACE_TEXT_SHELL` must be behind the text it owns unless the source explicitly
   defines a front mask/outline slot.
+- A visible `PLACE_TEXT_SHELL` with `textAction=OWNED_BY_HWPX_TEXT` must list at
+  least one owned TextFrame. If no TextFrame is owned, the shell is visual-only
+  and must use `DROP_TEXT`.
+- A visible text shell whose owned TextFrames are all source-inline and whose
+  source/visual ids include an inline source object must remain
+  `INLINE` / `STORY_FLOW` unless Stage 1 records explicit page-positioned source
+  metadata such as anchored-position or table-cell external-label ownership.
 - When an IDML source group is a closed text-owning shell and its direct visual
   child branches overlap inside that same source group, Stage 1 must keep the
   group as one textless `SHELL_SLOT` owner. The child branches must not be split
@@ -96,6 +103,10 @@
   may come from a non-intersecting adjacent page, and every source child included
   in `visualSourceObjectIds` must either belong to the plan page or intersect the
   plan page bounds.
+- Raw placed `Image` ids clipped by an `Oval`, `Polygon`, or clipping
+  `Rectangle` must not be visible `CONTENT_VISUAL_SLOT` owners. Validation
+  checks the source parent relation and clipping bounds, and Stage 1 must expose
+  the clip-carrying frame/group/page-local fragment instead.
 - Every background/spread source child whose bounds intersect an applied page
   must have exactly one visible page-local owner for that page, unless a visible
   parent plan's rendered file is explicitly the clipped/textless owner for that

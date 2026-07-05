@@ -54,6 +54,7 @@ public final class OwnershipPlanValidator {
         v.validateRawClippedImagesAreNotVisibleOwners();
         v.validateCompositeClippedImageOwnersAreSpecific();
         v.validatePlacedContentVisualsStayContentLayer();
+        v.validateContentVisualSlotDoesNotBecomeBackground();
         v.validateBackgroundShellDoesNotOwnText();
         v.validateBackgroundDepthBand();
         v.validateRenderedPlanExactArtifactMatchPreferred();
@@ -546,6 +547,28 @@ public final class OwnershipPlanValidator {
                     "plan=" + planRef(plan)
                             + " visualLayer=" + plan.visualLayer
                             + " policyLayer=" + plan.visualPolicyLayer());
+        }
+    }
+
+    private void validateContentVisualSlotDoesNotBecomeBackground() {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || !hasVisibleVisualSlot(plan)) continue;
+            if (!isContentVisualSlotPlan(plan)) continue;
+            if (isExplicitPageBackdropContract(plan)) continue;
+            if (isBackgroundSourceLayer(plan)) continue;
+            if (ctx.resolvedData != null && hasVisibleShellRootWithPlacedContentTree(plan)) continue;
+            if (ctx.resolvedData != null && isSourceAuthoredPageWashBackdropContract(plan)) continue;
+            if (isMasterGraphicBackgroundFragmentContract(plan)) continue;
+            if (plan.visualLayer != VisualLayer.PAGE_BACKGROUND
+                    && plan.visualLayer != VisualLayer.CONTAINER_BACKDROP
+                    && plan.visualPolicyLayer() != PolicyLayer.BACKGROUND) {
+                continue;
+            }
+            warn("STAGE4_CONTENT_VISUAL_SLOT_IN_BACKGROUND_PLANE",
+                    "plan=" + planRef(plan)
+                            + " visualLayer=" + plan.visualLayer
+                            + " policyLayer=" + plan.visualPolicyLayer()
+                            + " slotRole=" + safe(plan.slotRole));
         }
     }
 
@@ -1137,6 +1160,84 @@ public final class OwnershipPlanValidator {
         return false;
     }
 
+    private static boolean isContentVisualSlotPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        if ("CONTENT_VISUAL_SLOT".equals(safe(plan.slotRole))) return true;
+        String candidateId = safe(plan.candidateId);
+        return candidateId.contains("CONTENT_VISUAL_SLOT")
+                || candidateId.contains(".content_visual_slot")
+                || candidateId.endsWith("content_visual_slot");
+    }
+
+    private static boolean isExplicitPageBackdropContract(ObjectPlan plan) {
+        String reason = safe(plan != null ? plan.reason : null);
+        return reason.equals("page_spanning_backdrop_visual")
+                || reason.equals("page_spanning_backdrop_visual_fragment");
+    }
+
+    private boolean isSourceAuthoredPageWashBackdropContract(ObjectPlan plan) {
+        if (plan == null || ctx.resolvedData == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+            return false;
+        }
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (plan.visualPolicyLayer() != PolicyLayer.BACKGROUND
+                && plan.visualLayer != VisualLayer.PAGE_BACKGROUND
+                && plan.visualLayer != VisualLayer.CONTAINER_BACKDROP) {
+            return false;
+        }
+        int[] roots = sourceRootIds(plan);
+        if (roots.length == 0) roots = visualSourceIds(plan);
+        for (int rootId : roots) {
+            ResolvedPageItem root = ctx.resolvedData.getPageItem(String.valueOf(rootId));
+            if (!isPageLevelShapeShellRoot(root)) continue;
+            if (hasLowOpacityPlacedDescendant(rootId, visualSourceIds(plan))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isMasterGraphicBackgroundFragmentContract(ObjectPlan plan) {
+        if (plan == null) return false;
+        String reason = safe(plan.reason);
+        if (!reason.equals("master_graphic")
+                && !reason.equals("master_page_graphic")
+                && !reason.equals("master_side_composite")) {
+            return false;
+        }
+        if (plan.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        return plan.visualLayer == VisualLayer.PAGE_BACKGROUND
+                || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP
+                || plan.visualPolicyLayer() == PolicyLayer.BACKGROUND;
+    }
+
+    private static boolean isPageLevelShapeShellRoot(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden() || item.hiddenByParent() || !item.visible()) {
+            return false;
+        }
+        if (item.isInline()) return false;
+        if (item.parentId() != null && !item.parentId().isBlank()) return false;
+        if (!isVisibleShapeShellMaterial(item)) return false;
+        return boundsOf(item) != null;
+    }
+
+    private boolean hasLowOpacityPlacedDescendant(int rootId, int[] sourceIds) {
+        if (rootId <= 0 || ctx.resolvedData == null) return false;
+        HashSet<Integer> sourceSet = new HashSet<>();
+        if (sourceIds != null) {
+            for (int sourceId : sourceIds) sourceSet.add(sourceId);
+        }
+        for (String childId : ctx.resolvedData.buildDescendantSet(String.valueOf(rootId), 8)) {
+            int id = parseInt(childId, -1);
+            if (!sourceSet.isEmpty() && !sourceSet.contains(id)) continue;
+            ResolvedPageItem child = ctx.resolvedData.getPageItem(childId);
+            if (!isPlacedContentItem(child)) continue;
+            if (child.opacity() > 0.0 && child.opacity() <= 35.0) return true;
+        }
+        return false;
+    }
+
     private boolean hasPlacedContentSourceTree(int sourceId) {
         if (ctx.resolvedData == null) return false;
         ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
@@ -1382,6 +1483,14 @@ public final class OwnershipPlanValidator {
             return plan.visualSourceObjectIds;
         }
         return plan.sourceObjectIds != null ? plan.sourceObjectIds : new int[0];
+    }
+
+    private static int[] sourceRootIds(ObjectPlan plan) {
+        if (plan == null) return new int[0];
+        if (plan.sourceRootObjectIds != null && plan.sourceRootObjectIds.length > 0) {
+            return plan.sourceRootObjectIds;
+        }
+        return new int[0];
     }
 
     private static boolean visualSourcesContainAny(ObjectPlan plan, int[] sourceIds) {

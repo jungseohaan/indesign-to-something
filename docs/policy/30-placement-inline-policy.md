@@ -81,6 +81,13 @@ Placement and coordinate space are a single source decision.
   `SHELL_SLOT` material, but it still writes `placement=INLINE` and
   `coordinateSpace=STORY_FLOW`; the file channel never overrides the direct
   story/table anchor owner.
+- If a visible `PLACE_TEXT_SHELL` owns only inline TextFrames and at least one
+  of its source or visual source ids is an inline source object, Stage 1 writes
+  `placement=INLINE` and `coordinateSpace=STORY_FLOW` unless source metadata
+  explicitly marks the shell as page-positioned, such as
+  `AnchoredPosition="Anchored"` or the table-cell external label rule below.
+  This rule is based on source inline ownership, not on the rendered pass or
+  file prefix that supplied the shell PNG.
 - When a visible `PLACE_TEXT_SHELL` owns an editable TextFrame, that TextFrame's
   HWPX text plan follows the shell plan's placement. Inline carrier recovery is
   allowed only when no visible text-shell owner exists for that TextFrame.
@@ -128,6 +135,12 @@ Placement and coordinate space are a single source decision.
   select the clip-carrying frame/group/render bundle as the owner and drop the
   raw image channel. This decision is based on source parent/child metadata and
   clipping bounds, not on output pixels or page-specific symptoms.
+- After replacing a raw clipped `Image` source with its clip-carrying parent,
+  Stage 1 must reapply page-local source filtering. A cross-page/background
+  fragment may keep only visible source ids that belong to the planned page or
+  intersect that page's bounds. Adjacent-page clip parents may remain as
+  ancestry in broader source diagnostics, but they are not page-local visible
+  owners for that fragment.
 - The same rule applies to textless decorative shells made from vector/group
   material. If a visual child is inside a clip-carrying `Oval`, `Polygon`, or
   clipping `Rectangle`, the child-only render must not own the visible

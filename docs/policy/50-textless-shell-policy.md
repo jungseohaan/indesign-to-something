@@ -217,6 +217,15 @@ Execution requirements:
   direct HWPX text plans. Planner duplicate suppression must therefore evaluate
   the carrier by its visual slot and shell role, not by the mere presence of
   `ownedTextFrameIds`.
+- A visible `PLACE_TEXT_SHELL` with no `ownedTextFrameIds` is textless visual
+  material. It must use `textAction=DROP_TEXT`; it must not claim
+  `OWNED_BY_HWPX_TEXT` simply because its source role is a text shell or because
+  a nearby TextFrame exists elsewhere in the source tree.
+- A visible `PLACE_TEXT_SHELL` may switch from text-owning to visual-only when
+  every listed `ownedTextFrameId` already has a separate materialized HWPX
+  text/table owner. In that case the shell keeps the ids only as relation
+  metadata and keeps its visual shell action; it does not create another text
+  owner and does not become a complete PNG.
 - The same applies when deciding whether a parent composite is covered by direct
   child shell slots. A child carrier with `textAction=DROP_TEXT` may still list
   editable TextFrame ids as provenance; that must not exclude it from child

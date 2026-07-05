@@ -96,6 +96,7 @@ public final class OwnershipPlanner {
         timed("ensureOwnedTextFramePlansForVisibleTextShells", this::ensureOwnedTextFramePlansForVisibleTextShells);
         timed("finalizeFloatingTextShellBackPlaneContracts", this::finalizeFloatingTextShellBackPlaneContracts);
         timed("finalizeOwnedTextFrameDepthContracts.afterShellOwnedTextPlans", this::finalizeOwnedTextFrameDepthContracts);
+        timed("normalizeStage1ContractsBeforeValidation", this::normalizeStage1ContractsBeforeValidation);
         writeAndValidatePlans();
         ConversionTiming.metric("stage1.ownershipPlanner.importedPreplannedPlans",
                 importedPreplannedObjectPlanCount);
@@ -223,6 +224,7 @@ public final class OwnershipPlanner {
         timed("restorePlannerDeclaredInlineTextShellContracts", this::restorePlannerDeclaredInlineTextShellContracts);
         timed("finalizeOwnedTextFrameDepthContracts.final", this::finalizeOwnedTextFrameDepthContracts);
         timed("completeRenderedExtractionSourceContracts", this::completeRenderedExtractionSourceContracts);
+        timed("normalizeTextShellsWithMaterializedTextOwners", this::normalizeTextShellsWithMaterializedTextOwners);
         timed("completeSourceTreeDiagnostics", this::completeSourceTreeDiagnostics);
     }
 
@@ -1060,6 +1062,15 @@ public final class OwnershipPlanner {
         Map<Integer, ObjectPlan> shellOwnerByTextFrame = new LinkedHashMap<>();
         for (ObjectPlan plan : plans) {
             if (plan == null) continue;
+            if (isMaterializedHwpxTextOwner(plan)) {
+                if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) {
+                    for (int textFrameId : plan.ownedTextFrameIds) {
+                        existingTextPlanById.putIfAbsent(textFrameId, plan);
+                    }
+                } else if (plan.domId >= 0) {
+                    existingTextPlanById.putIfAbsent(plan.domId, plan);
+                }
+            }
             if (isTextFramePlanKind(plan.kind)
                     && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                     && plan.domId >= 0) {
@@ -1118,6 +1129,174 @@ public final class OwnershipPlanner {
             added++;
         }
         ConversionTiming.metric("stage1.ownershipPlanner.ensureOwnedTextFramePlansForVisibleTextShells.added", added);
+    }
+
+    private void normalizeStage1ContractsBeforeValidation() {
+        timed("normalizeTextShellsWithMaterializedTextOwners.final", this::normalizeTextShellsWithMaterializedTextOwners);
+        timed("normalizeTextlessShellsWithoutOwnedText.final", this::normalizeTextlessShellsWithoutOwnedText);
+        timed("normalizeInlineOwnedTextShellsToStoryFlow.final", this::normalizeInlineOwnedTextShellsToStoryFlow);
+        timed("normalizeRawClippedImageVisualSources.final", this::normalizeRawClippedImageVisualSources);
+        timed("normalizeVisibleVisualSourcesToPlanPage.final", this::normalizeVisibleVisualSourcesToPlanPage);
+        timed("normalizeDuplicateVisibleSourceSlots.final", this::normalizeDuplicateVisibleSourceSlots);
+    }
+
+    private void normalizeTextShellsWithMaterializedTextOwners() {
+        LinkedHashSet<Integer> materializedTextOwners = new LinkedHashSet<>();
+        for (ObjectPlan plan : plans) {
+            if (!isMaterializedHwpxTextOwner(plan)) continue;
+            if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) {
+                addAll(plan.ownedTextFrameIds, materializedTextOwners);
+            } else if (plan.domId >= 0) {
+                materializedTextOwners.add(plan.domId);
+            }
+        }
+        if (materializedTextOwners.isEmpty()) return;
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan shell = plans.get(i);
+            if (shell == null) continue;
+            if (shell.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (shell.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (shell.ownedTextFrameIds == null || shell.ownedTextFrameIds.length == 0) continue;
+            if (!allContainedIn(shell.ownedTextFrameIds, materializedTextOwners)) continue;
+            plans.set(i, shell
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            "text_shell_visual_only_with_separate_hwpx_text"));
+            normalized++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.normalizeTextShellsWithMaterializedTextOwners",
+                normalized);
+    }
+
+    private static boolean isMaterializedHwpxTextOwner(ObjectPlan plan) {
+        if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.materialization == Materialization.HWPX_TEXT
+                && plan.visualAction == VisualAction.DROP_VISUAL) {
+            return true;
+        }
+        return plan.materialization == Materialization.HWPX_TABLE_STYLE
+                && plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
+    }
+
+    private void normalizeTextlessShellsWithoutOwnedText() {
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan shell = plans.get(i);
+            if (shell == null) continue;
+            if (shell.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (shell.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (shell.ownedTextFrameIds != null && shell.ownedTextFrameIds.length > 0) continue;
+            plans.set(i, shell
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            "textless_shell_visual_only_without_hwpx_text"));
+            normalized++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.normalizeTextlessShellsWithoutOwnedText",
+                normalized);
+    }
+
+    private void normalizeInlineOwnedTextShellsToStoryFlow() {
+        if (data == null) return;
+        LinkedHashSet<Integer> inlinedTextFrames = new LinkedHashSet<>();
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan shell = plans.get(i);
+            if (shell == null) continue;
+            if (shell.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (shell.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (shell.placement == Placement.INLINE
+                    && shell.coordinateSpace == CoordinateSpace.STORY_FLOW) continue;
+            if (shell.ownedTextFrameIds == null || shell.ownedTextFrameIds.length == 0) continue;
+            if (!ownedTextFramesAreInlineSource(shell)) continue;
+            if (!hasInlineSourceObject(shell)) continue;
+            if (isTableCellAnchoredExternalLabelShell(shell)) continue;
+            if (hasIdmlAnchoredPagePosition(shell.domId)) continue;
+            if (textShellUsesPagePositionCompositeAssociation(shell)) continue;
+
+            ObjectPlan replacement = shell.withPlacementAndCoordinateSpace(
+                    Placement.INLINE,
+                    CoordinateSpace.STORY_FLOW);
+            plans.set(i, replacement);
+            for (int textFrameId : textFrameIdsForPlanIncludingOwned(replacement)) {
+                inlinedTextFrames.add(textFrameId);
+            }
+            normalized++;
+        }
+        if (!inlinedTextFrames.isEmpty()) {
+            alignOwnedTextFramePlans(toIntArray(inlinedTextFrames), Placement.INLINE);
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.normalizeInlineOwnedTextShellsToStoryFlow",
+                normalized);
+    }
+
+    private void normalizeRawClippedImageVisualSources() {
+        if (data == null) return;
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !plan.hasVisibleVisual()) continue;
+            if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            int[] visualSources = visualSourceIds(plan);
+            if (visualSources.length == 0) continue;
+            LinkedHashSet<Integer> retained = new LinkedHashSet<>();
+            boolean changed = false;
+            for (int sourceId : visualSources) {
+                int clipParentId = rawClippedImageParentId(sourceId);
+                if (clipParentId >= 0) {
+                    retained.add(clipParentId);
+                    changed = true;
+                } else {
+                    retained.add(sourceId);
+                }
+            }
+            if (!changed) continue;
+            plans.set(i, plan.withVisualSourceObjectIds(toIntArray(retained)));
+            normalized++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.normalizeRawClippedImageVisualSources",
+                normalized);
+    }
+
+    private boolean hasInlineSourceObject(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (isInlineSourceObject(plan.domId)) return true;
+        if (plan.sourceObjectIds != null) {
+            for (int sourceId : plan.sourceObjectIds) {
+                if (isInlineSourceObject(sourceId)) return true;
+            }
+        }
+        for (int sourceId : visualSourceIds(plan)) {
+            if (isInlineSourceObject(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean isInlineSourceObject(int sourceId) {
+        if (sourceId < 0 || data == null) return false;
+        if (data.isInlineObjectId(sourceId)) return true;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        return item != null && item.isInline();
+    }
+
+    private int rawClippedImageParentId(int sourceId) {
+        if (data == null) return -1;
+        ResolvedPageItem image = data.getPageItem(String.valueOf(sourceId));
+        if (image == null || !"Image".equals(safe(image.type()))) return -1;
+        ResolvedPageItem parent = directImageClipParent(image);
+        return parent != null ? parseFlexibleId(parent.id()) : -1;
+    }
+
+    private static boolean allContainedIn(int[] ids, LinkedHashSet<Integer> ownerIds) {
+        if (ids == null || ids.length == 0 || ownerIds == null || ownerIds.isEmpty()) return false;
+        for (int id : ids) {
+            if (!ownerIds.contains(id)) return false;
+        }
+        return true;
     }
 
     private static double[] textFrameBounds(ResolvedTextFrame tf) {
@@ -6973,17 +7152,30 @@ public final class OwnershipPlanner {
                 ObjectPlan next = plan.withExtractionCandidate(
                         rendered.candidateId(),
                         rendered.planPassId(),
-                        rendered.slotRole());
+                        renderedSlotRoleForPlan(plan, rendered));
                 plans.set(i, next);
                 completed++;
                 continue;
             }
             ObjectPlan next = plan.withExtractionSourceObjectIds(exportSourceIds, hiddenVisualSourceIds)
-                    .withExtractionCandidate(rendered.candidateId(), rendered.planPassId(), rendered.slotRole());
+                    .withExtractionCandidate(
+                            rendered.candidateId(),
+                            rendered.planPassId(),
+                            renderedSlotRoleForPlan(plan, rendered));
             plans.set(i, next);
             completed++;
         }
         ConversionTiming.metric("stage1.ownershipPlanner.renderedExtractionSourceContracts", completed);
+    }
+
+    private static String renderedSlotRoleForPlan(ObjectPlan plan, RenderedGroup rendered) {
+        String renderedSlotRole = rendered != null ? safe(rendered.slotRole()) : "";
+        if (plan == null) return renderedSlotRole;
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && "CONTENT_VISUAL_SLOT".equals(renderedSlotRole)) {
+            return plan.slotRole;
+        }
+        return renderedSlotRole;
     }
 
     private void completeSourceTreeDiagnostics() {

@@ -41,6 +41,9 @@ VISIBLE_VISUAL_ACTIONS = {
     "PLACE_TEXT_SHELL",
 }
 
+PLACED_CONTENT_TYPES = {"Image", "PDF", "EPS"}
+SHELL_SOURCE_TYPES = {"Group", "Rectangle", "Oval", "Polygon", "GraphicLine"}
+
 
 def load_json(path: Path) -> Any:
     if not path.exists():
@@ -168,6 +171,17 @@ def page_bounds_by_index(resolved: Dict[str, Any]) -> Dict[int, Tuple[float, flo
     return out
 
 
+def source_item_by_id(resolved: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+    out: Dict[int, Dict[str, Any]] = {}
+    for row in resolved.get("pageItems") or []:
+        if not isinstance(row, dict):
+            continue
+        item_id = as_int(row.get("id"), -1)
+        if item_id >= 0:
+            out[item_id] = row
+    return out
+
+
 def is_editable_text_frame(row: Dict[str, Any], editable_ids: set[int]) -> bool:
     tf_id = as_int(row.get("id"), -1)
     if editable_ids and tf_id not in editable_ids:
@@ -235,12 +249,91 @@ def is_visible_visual_plan(row: Dict[str, Any]) -> bool:
 
 
 def collect_visual_plans(extract_dir: Path, selected_pages: Optional[set[int]]) -> List[Dict[str, Any]]:
-    return collect_visual_plans_from_rows(load_jsonl(extract_dir / "ownership-plan.jsonl"), selected_pages)
+    resolved = load_json(extract_dir / "resolved.json") or {}
+    return collect_visual_plans_from_rows(
+        load_jsonl(extract_dir / "ownership-plan.jsonl"),
+        selected_pages,
+        resolved)
+
+
+def source_profile(
+        row: Dict[str, Any],
+        source_items: Dict[int, Dict[str, Any]],
+        page_bounds: Dict[int, Tuple[float, float, float, float]]) -> Dict[str, Any]:
+    source_ids = id_list(row.get("visualSourceObjectIds")) or id_list(row.get("sourceObjectIds"))
+    source_id_set = set(source_ids)
+    type_counts = Counter()
+    layer_counts = Counter()
+    page_level_shape_roots: List[int] = []
+    low_opacity_placed_children: List[int] = []
+    for source_id in source_ids:
+        item = source_items.get(source_id)
+        if not item:
+            type_counts["<missing>"] += 1
+            continue
+        item_type = str(item.get("type") or "<blank>")
+        type_counts[item_type] += 1
+        layer_counts[str(item.get("layerName") or "<blank>")] += 1
+        if item_type in SHELL_SOURCE_TYPES and not str(item.get("parentId") or "").strip():
+            page_level_shape_roots.append(source_id)
+        if item_type in PLACED_CONTENT_TYPES:
+            try:
+                opacity = float(item.get("opacity"))
+            except (TypeError, ValueError):
+                opacity = 100.0
+            parent_id = as_int(item.get("parentId"), -1)
+            if 0.0 < opacity <= 35.0 and (not source_id_set or parent_id in source_id_set):
+                low_opacity_placed_children.append(source_id)
+    b = bounds(row)
+    page_b = page_bounds.get(as_int(row.get("pageIndex"), -1))
+    page_area_ratio = area(b) / area(page_b) if page_b is not None and area(page_b) > 0.0 else 0.0
+    return {
+        "sourceTypeCounts": dict(type_counts),
+        "sourceLayerCounts": dict(layer_counts),
+        "pageAreaRatio": round(page_area_ratio, 4),
+        "hasPlacedContentSource": any(k in PLACED_CONTENT_TYPES for k in type_counts),
+        "hasPageLevelShapeRoot": bool(page_level_shape_roots),
+        "hasLowOpacityPlacedChild": bool(low_opacity_placed_children),
+        "shapeShellOnlySources": bool(type_counts)
+        and all(k in SHELL_SOURCE_TYPES or k == "<missing>" for k in type_counts),
+    }
+
+
+def content_backdrop_class(plan: Dict[str, Any]) -> str:
+    slot_role = str(plan.get("slotRole") or "")
+    if slot_role != "CONTENT_VISUAL_SLOT":
+        return ""
+    layer = str(plan.get("visualLayer") or "")
+    policy_layer = str(plan.get("policyLayer") or "")
+    if layer not in {"PAGE_BACKGROUND", "CONTAINER_BACKDROP"} and policy_layer != "BACKGROUND":
+        return ""
+    reason = str(plan.get("reason") or "")
+    action = str(plan.get("visualAction") or "")
+    if reason in {"page_spanning_backdrop_visual", "page_spanning_backdrop_visual_fragment"}:
+        return "OK_EXPLICIT_PAGE_SPANNING_BACKDROP_CONTRACT"
+    if action == "PLACE_TEXT_SHELL" and plan.get("shapeShellOnlySources"):
+        return "REVIEW_CONTENT_SLOT_SHAPE_SHELL_MISMATCH"
+    if action == "PLACE_TEXT_SHELL":
+        return "REVIEW_CONTENT_SLOT_TEXT_SHELL_MISMATCH"
+    if reason in {"master_graphic", "master_page_graphic", "master_side_composite"}:
+        if plan.get("materialization") == "TEXTLESS_VISUAL_FRAGMENT":
+            return "OK_MASTER_GRAPHIC_BACKGROUND_FRAGMENT_CONTRACT"
+        return "REVIEW_MASTER_GRAPHIC_BACKGROUND_CONTRACT"
+    if (plan.get("hasPlacedContentSource")
+            and plan.get("hasPageLevelShapeRoot")
+            and plan.get("hasLowOpacityPlacedChild")):
+        return "OK_SOURCE_AUTHORED_PAGE_WASH_BACKDROP_CONTRACT"
+    if plan.get("hasPlacedContentSource"):
+        return "REVIEW_PLACED_CONTENT_BACKGROUND_CONTRACT"
+    return "REVIEW_CONTENT_SLOT_BACKGROUND_CONTRACT"
 
 
 def collect_visual_plans_from_rows(
         ownership_plans: Sequence[Dict[str, Any]],
-        selected_pages: Optional[set[int]]) -> List[Dict[str, Any]]:
+        selected_pages: Optional[set[int]],
+        resolved: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    source_items = source_item_by_id(resolved or {})
+    page_bounds = page_bounds_by_index(resolved or {})
     out: List[Dict[str, Any]] = []
     for row in ownership_plans:
         if not is_visible_visual_plan(row):
@@ -251,7 +344,7 @@ def collect_visual_plans_from_rows(
         b = bounds(row)
         if b is None:
             continue
-        out.append({
+        plan = {
             "domId": row.get("domId"),
             "kind": row.get("kind"),
             "candidateId": row.get("candidateId"),
@@ -262,15 +355,23 @@ def collect_visual_plans_from_rows(
             "policyLayer": row.get("policyLayer"),
             "placement": row.get("placement"),
             "materialization": row.get("materialization"),
+            "slotRole": row.get("slotRole"),
+            "planPassId": row.get("planPassId"),
             "zOrder": as_int(row.get("zOrder"), 0),
             "sourceObjectIds": id_list(row.get("sourceObjectIds")),
             "sourceRootObjectIds": id_list(row.get("sourceRootObjectIds")),
             "visualSourceObjectIds": id_list(row.get("visualSourceObjectIds")),
             "ownedTextFrameIds": id_list(row.get("ownedTextFrameIds")),
+            "sourceBundleKey": row.get("sourceBundleKey"),
+            "sourceLayerName": row.get("sourceLayerName"),
+            "sourceLayerIndex": row.get("sourceLayerIndex"),
             "reason": row.get("reason"),
             "file": row.get("file"),
             "bounds": list(b),
-        })
+        }
+        plan.update(source_profile(row, source_items, page_bounds))
+        plan["contentBackdropClass"] = content_backdrop_class(plan)
+        out.append(plan)
     return out
 
 
@@ -340,6 +441,33 @@ def classify_overlap(
     return "INFO_BEHIND_PLANE_OVERLAP"
 
 
+def ownership_diagnostic(plan: Dict[str, Any], tf: Dict[str, Any], relation: str) -> str:
+    layer = str(plan.get("visualLayer") or "")
+    visual_action = str(plan.get("visualAction") or "")
+    text_action = str(plan.get("textAction") or "")
+    policy_layer = str(plan.get("policyLayer") or "")
+    slot_role = str(plan.get("slotRole") or "")
+    tf_id = as_int(tf.get("id"), -1)
+    owned = tf_id in set(plan.get("ownedTextFrameIds") or [])
+    if (visual_action == "PLACE_TEXT_SHELL"
+            and text_action == "OWNED_BY_HWPX_TEXT"
+            and not owned
+            and layer in BEHIND_TEXT_LAYERS):
+        return "OK_TEXT_SHELL_BACKDROP_OVER_NON_OWNED_HWPX_TEXT"
+    if (visual_action == "PLACE_TEXT_SHELL"
+            and text_action == "OWNED_BY_HWPX_TEXT"
+            and not owned
+            and layer in IN_FRONT_LAYERS):
+        return "RISK_TEXT_SHELL_FRONT_OVER_NON_OWNED_HWPX_TEXT"
+    if (slot_role == "CONTENT_VISUAL_SLOT"
+            and layer in {"PAGE_BACKGROUND", "CONTAINER_BACKDROP"}
+            and policy_layer == "BACKGROUND"):
+        return str(plan.get("contentBackdropClass") or "REVIEW_CONTENT_VISUAL_SLOT_IN_BACKGROUND_PLANE")
+    if "TF_HAS_OWNER" in relation and layer in BEHIND_TEXT_LAYERS:
+        return "OK_VISUAL_BEHIND_HWPX_TEXT_OWNER"
+    return "CHECK_VISUAL_TEXT_RELATION"
+
+
 def build_review(extract_dir: Path, selected_pages: Optional[set[int]], min_overlap: float) -> Dict[str, Any]:
     resolved = load_json(extract_dir / "resolved.json") or {}
     ownership_plans = load_jsonl(extract_dir / "ownership-plan.jsonl")
@@ -348,7 +476,7 @@ def build_review(extract_dir: Path, selected_pages: Optional[set[int]], min_over
     page_names = page_name_by_index(resolved)
     page_bounds = page_bounds_by_index(resolved)
     text_frames = collect_text_frames(resolved, selected_pages, text_plans_by_id)
-    visual_plans = collect_visual_plans_from_rows(ownership_plans, selected_pages)
+    visual_plans = collect_visual_plans_from_rows(ownership_plans, selected_pages, resolved)
     text_by_page: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for tf in text_frames:
         text_by_page[tf["pageIndex"]].append(tf)
@@ -361,10 +489,12 @@ def build_review(extract_dir: Path, selected_pages: Optional[set[int]], min_over
             if ob is None or area(ob) < min_overlap:
                 continue
             relation = text_relation(plan, tf, owners_by_tf)
+            diagnostic = ownership_diagnostic(plan, tf, relation)
             overlaps.append({
                 "pageIndex": plan["pageIndex"],
                 "pageName": page_names.get(plan["pageIndex"], str(plan["pageIndex"] + 1)),
                 "severity": classify_overlap(plan, tf, ob, relation),
+                "diagnostic": diagnostic,
                 "plane": plane_for_layer(str(plan.get("visualLayer") or "")),
                 "textRelation": relation,
                 "overlapArea": round(area(ob), 3),
@@ -389,8 +519,13 @@ def build_review(extract_dir: Path, selected_pages: Optional[set[int]], min_over
         "visibleVisualPlans": len(visual_plans),
         "overlaps": len(overlaps),
         "severityCounts": dict(Counter(row["severity"] for row in overlaps)),
+        "diagnosticCounts": dict(Counter(row["diagnostic"] for row in overlaps)),
         "textRelationCounts": dict(Counter(row["textRelation"] for row in overlaps)),
         "visualLayerCounts": dict(Counter(row["visual"].get("visualLayer") for row in overlaps)),
+        "contentBackdropClassCounts": dict(Counter(
+            row["visual"].get("contentBackdropClass")
+            for row in overlaps
+            if row["visual"].get("contentBackdropClass"))),
         "planeCounts": dict(Counter(row["plane"] for row in overlaps)),
     }
     return {
@@ -445,8 +580,9 @@ def write_json(path: Path, review: Dict[str, Any]) -> None:
 
 def write_tsv(path: Path, review: Dict[str, Any]) -> None:
     cols = [
-        "pageIndex", "pageName", "severity", "plane", "textRelation", "overlapArea",
-        "visualDomId", "visualLayer", "visualAction", "placement", "zOrder",
+        "pageIndex", "pageName", "severity", "diagnostic", "plane", "textRelation", "overlapArea",
+        "visualDomId", "visualLayer", "policyLayer", "slotRole", "contentBackdropClass",
+        "visualAction", "placement", "zOrder", "pageAreaRatio", "sourceTypeCounts",
         "textFrameId", "textZOrder", "ownedTextFrameIds", "file", "reason", "text",
     ]
     lines = ["\t".join(cols)]
@@ -454,8 +590,11 @@ def write_tsv(path: Path, review: Dict[str, Any]) -> None:
         plan = row["visual"]
         tf = row["textFrame"]
         values = [
-            row["pageIndex"], row["pageName"], row["severity"], row["plane"], row["textRelation"], row["overlapArea"],
-            plan.get("domId"), plan.get("visualLayer"), plan.get("visualAction"), plan.get("placement"), plan.get("zOrder"),
+            row["pageIndex"], row["pageName"], row["severity"], row["diagnostic"],
+            row["plane"], row["textRelation"], row["overlapArea"],
+            plan.get("domId"), plan.get("visualLayer"), plan.get("policyLayer"), plan.get("slotRole"),
+            plan.get("contentBackdropClass"), plan.get("visualAction"), plan.get("placement"),
+            plan.get("zOrder"), plan.get("pageAreaRatio"), json.dumps(plan.get("sourceTypeCounts"), ensure_ascii=False),
             tf.get("id"), tf.get("zOrder"), ",".join(str(v) for v in plan.get("ownedTextFrameIds") or []),
             plan.get("file"), plan.get("reason"), tf.get("text"),
         ]
@@ -475,8 +614,8 @@ def write_markdown(path: Path, review: Dict[str, Any]) -> None:
         "",
         "## Highest Risk Overlaps",
         "",
-        "| page | severity | relation | visual | layer | z | TF | area | file | reason | text |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| page | severity | diagnostic | content class | relation | visual | layer | policy | slot | z | TF | area | file | reason | text |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     focus_rows = [
         row for row in review["overlaps"]
@@ -490,9 +629,13 @@ def write_markdown(path: Path, review: Dict[str, Any]) -> None:
             + " | ".join(esc(v) for v in (
                 row["pageName"],
                 row["severity"],
+                row.get("diagnostic"),
+                plan.get("contentBackdropClass"),
                 row.get("textRelation"),
                 plan.get("domId"),
                 plan.get("visualLayer"),
+                plan.get("policyLayer"),
+                plan.get("slotRole"),
                 plan.get("zOrder"),
                 tf.get("id"),
                 row["overlapArea"],
@@ -503,7 +646,7 @@ def write_markdown(path: Path, review: Dict[str, Any]) -> None:
             + " |"
         )
     if len(focus_rows) > 160:
-        lines.append(f"| … | {len(focus_rows) - 160} more |  |  |  |  |  |  |  |  |  |")
+        lines.append(f"| … | {len(focus_rows) - 160} more |  |  |  |  |  |  |  |  |  |  |  |  |  |")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -552,7 +695,7 @@ code{font-size:12px}
     for key, value in review["summary"].items():
         parts.append(f"<div class='pill'><strong>{esc(key)}</strong>: {esc(value)}</div>")
     parts.append("</div>")
-    parts.append("<p>Blue boxes are editable HWPX text frames. Red/orange/gray boxes are visual ObjectPlans overlapping them. Purple is the overlap area.</p>")
+    parts.append("<p>Blue boxes are editable HWPX text frames. Red/orange/gray boxes are visual ObjectPlans overlapping them. Purple is the overlap area. Diagnostic labels explain whether the overlap is an expected ownership backdrop or a content/backdrop review target.</p>")
     for page_index in page_indexes:
         page_name = review["pageNames"].get(page_index, str(page_index + 1))
         page_rows = rows_by_page[page_index]
@@ -562,10 +705,13 @@ code{font-size:12px}
         parts.append("<div class='page-grid'>")
         parts.append(svg_for_page(review, page_index))
         severity_counts = Counter(row["severity"] for row in page_rows)
+        diagnostic_counts = Counter(row["diagnostic"] for row in page_rows)
         layer_counts = Counter(row["visual"].get("visualLayer") for row in page_rows)
         parts.append("<aside class='side-pane'>")
         parts.append("<div class='page-summary'>")
         for key, count in severity_counts.most_common():
+            parts.append(f"<span class='mini-pill'>{esc(key)}: {count}</span>")
+        for key, count in diagnostic_counts.most_common():
             parts.append(f"<span class='mini-pill'>{esc(key)}: {count}</span>")
         for key, count in layer_counts.most_common():
             parts.append(f"<span class='mini-pill'>{esc(key)}: {count}</span>")
@@ -584,7 +730,12 @@ code{font-size:12px}
             parts.append(f"<div class='card {sev_class}'>")
             parts.append(f"<strong>{esc(row['severity'])}</strong>{image_html}")
             parts.append("<div class='meta'>")
+            parts.append(f"diagnostic <code>{esc(row.get('diagnostic'))}</code><br>")
             parts.append(f"visual <code>{esc(plan.get('domId'))}</code> · layer <code>{esc(plan.get('visualLayer'))}</code> · plane <code>{esc(row.get('plane'))}</code><br>")
+            parts.append(f"policy <code>{esc(plan.get('policyLayer'))}</code> · slot <code>{esc(plan.get('slotRole'))}</code><br>")
+            if plan.get("contentBackdropClass"):
+                parts.append(f"content class <code>{esc(plan.get('contentBackdropClass'))}</code><br>")
+            parts.append(f"source types <code>{esc(plan.get('sourceTypeCounts'))}</code> · page ratio <code>{esc(plan.get('pageAreaRatio'))}</code><br>")
             parts.append(f"relation <code>{esc(row.get('textRelation'))}</code><br>")
             parts.append(f"action <code>{esc(plan.get('visualAction'))}</code> · placement <code>{esc(plan.get('placement'))}</code> · z <code>{esc(plan.get('zOrder'))}</code><br>")
             parts.append(f"TF <code>{esc(tf.get('id'))}</code> · text z <code>{esc(tf.get('zOrder'))}</code> · overlap {esc(row.get('overlapArea'))}<br>")
