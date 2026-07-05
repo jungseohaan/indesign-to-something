@@ -1012,14 +1012,19 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     function _renderPlannedSourceSetCompositeShell(slotPlan, page, ownershipOpts) {
         if (!slotPlan || !page || !ownershipOpts) return false;
         if (slotPlan.materialization !== "EXTRACTED_PNG_VECTOR") return false;
-        if (slotPlan.visualAction !== "PLACE_TEXT_SHELL") return false;
+        var isPageTextlessGraphicGroup = slotPlan.passId === "pass.page_textless_graphic_groups";
+        if (slotPlan.visualAction !== "PLACE_TEXT_SHELL"
+                && !(isPageTextlessGraphicGroup && slotPlan.visualAction === "PLACE_FLOATING_PNG")) {
+            return false;
+        }
         var exportIds = _sortedNumericIds(slotPlan.exportSourceObjectIds || []);
         if (exportIds.length < 2) return false;
 
         var sourceItems = _itemsForSourceSet(exportIds);
         if (sourceItems.length < 1) return false;
 
-        var fileName = "deco_sourceset_" + String(slotPlan.primarySourceObjectId || exportIds[0])
+        var filePrefix = isPageTextlessGraphicGroup ? "page_textless_sourceset_" : "deco_sourceset_";
+        var fileName = filePrefix + String(slotPlan.primarySourceObjectId || exportIds[0])
                 + "_n" + String(exportIds.length)
                 + "_h" + _decoSourceSetFileHash(exportIds) + ".png";
         var outFile = File(renderDir + "/" + fileName);
@@ -1063,8 +1068,11 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             if (exportBounds) _toPageRelativeBounds(exportBounds, page);
 
             var boundsInfo = _pageRelativeSourceUnionBoundsInfo(sourceItems, page);
-            var bounds = boundsInfo ? boundsInfo.bounds : null;
-            if (!bounds) bounds = exportBounds;
+            // A source-set composite PNG must be placed with the same geometry used
+            // by the actual InDesign export.  The source union can differ from the
+            // duplicated tempGroup's visible bounds because grouping, strokes, masks,
+            // and cleared child text frames affect the rendered canvas.
+            var bounds = exportBounds || (boundsInfo ? boundsInfo.bounds : null);
             var cropSourceBounds = boundsInfo ? boundsInfo.cropSourceBounds : null;
 
             var z = 0;
@@ -1081,9 +1089,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             opts.exportSourceObjectIds = exportIds;
             opts.visualOnlyChildIds = exportIds;
             opts.layerSource = sourceItems[0];
-            opts.reason = ownershipOpts.reason || "planned_source_set_text_shell";
+            opts.reason = ownershipOpts.reason || (isPageTextlessGraphicGroup
+                    ? "planned_page_textless_graphic_group"
+                    : "planned_source_set_text_shell");
 
-            var entryId = -910000000 + (Number(slotPlan.primarySourceObjectId || exportIds[0]) || 0);
+            var entryIdBase = isPageTextlessGraphicGroup ? -920000000 : -910000000;
+            var entryId = entryIdBase + (Number(slotPlan.primarySourceObjectId || exportIds[0]) || 0);
             var entry = {
                 id: entryId,
                 file: "rendered_frames/" + fileName,
@@ -1095,6 +1106,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 exportSanity: {
                     fileBytes: outFile.exists ? outFile.length : 0,
                     sourceSetComposite: true,
+                    pageTextlessGraphicGroup: isPageTextlessGraphicGroup,
                     exportSourceObjectIds: exportIds,
                     pageRelativeBounds: bounds,
                     exportPageRelativeBounds: exportBounds,
@@ -1322,9 +1334,13 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 _isPlannedGraphicOnlyCompositeShellCandidate(slotPlan, slotItem);
         var isTextShellComposite =
                 _isPlannedTextShellCompositeCandidate(slotPlan, slotItem);
+        var isPageTextlessGraphicGroup =
+                slotPlan.passId === "pass.page_textless_graphic_groups"
+                && slotPlan.candidatePurpose === "CONTENT_CANDIDATE";
         if (!isExplicitSlotOnly && !isPageLocalBackgroundShape
                 && !isPlannedVectorShape
-                && !isGraphicOnlyCompositeShell && !isTextShellComposite) continue;
+                && !isGraphicOnlyCompositeShell && !isTextShellComposite
+                && !isPageTextlessGraphicGroup) continue;
         var slotPage = null;
         try { slotPage = slotItem.parentPage; } catch (eSlotPage) {}
         slotPage = _pageForPlannedItem(plannedItems[soi], slotPage);
@@ -1368,6 +1384,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 slotOwnershipOpts.containsText = false;
                 slotOwnershipOpts.containsEditableText = false;
                 slotOwnershipOpts.reason = "planned_text_shell_composite";
+            }
+            if (isPageTextlessGraphicGroup) {
+                slotOwnershipOpts.textOwner = "none";
+                slotOwnershipOpts.containsText = false;
+                slotOwnershipOpts.containsEditableText = false;
+                slotOwnershipOpts.reason = "planned_page_textless_graphic_group";
             }
             if (isExplicitSlotOnly) {
                 slotOwnershipOpts.textOwner = "hwpx_tf";

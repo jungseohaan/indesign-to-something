@@ -319,7 +319,7 @@ public class ASTToHwpxConverter {
         Collections.sort(behindFigures, new Comparator<ASTFigure>() {
             @Override
             public int compare(ASTFigure a, ASTFigure b) {
-                int z = Integer.compare(a.zOrder(), b.zOrder());
+                int z = Integer.compare(textlessGraphicZOrderOf(a), textlessGraphicZOrderOf(b));
                 if (z != 0) return z;
 
                 int area = Long.compare(figureArea(b), figureArea(a));
@@ -400,6 +400,11 @@ public class ASTToHwpxConverter {
         if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
         if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
         return 0;
+    }
+
+    private static int textlessGraphicZOrderOf(ASTFigure fig) {
+        if (fig == null) return 0;
+        return VisualPlanePolicy.textlessGraphicZOrderName(fig.visualLayer(), fig.zOrder());
     }
 
     private static boolean isBehindTextPlaneFigure(ASTFigure fig) {

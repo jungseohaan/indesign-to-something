@@ -717,6 +717,9 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
 function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
     var ids = [];
     var seen = {};
+    if (candidate && candidate.passId === "pass.page_textless_graphic_groups") {
+        return ids;
+    }
     function addDeclared(sourceIds) {
         for (var i = 0; sourceIds && i < sourceIds.length; i++) {
             var id = sourceIds[i];
@@ -932,6 +935,9 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
         return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
                 ? "CONTENT_VISUAL_SLOT"
                 : "SHELL_SLOT";
+    }
+    if (candidate.passId === "pass.page_textless_graphic_groups") {
+        return "CONTENT_VISUAL_SLOT";
     }
     if (candidate.passId === "pass.complex_graphic_frames") {
         return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)

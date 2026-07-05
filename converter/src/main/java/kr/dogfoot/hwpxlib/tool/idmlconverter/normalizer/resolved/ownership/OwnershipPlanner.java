@@ -331,7 +331,9 @@ public final class OwnershipPlanner {
             }
             if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND
                     || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP) {
-                return "BACKGROUND";
+                return plan.visualLayer == VisualLayer.PAGE_BACKGROUND
+                        ? "BACKGROUND_GRAPHIC"
+                        : "TEXTLESS_IMAGE_GROUP";
             }
             if (plan.visualLayer == VisualLayer.CONTENT_VISUAL
                     || plan.visualLayer == VisualLayer.CONTENT_BACKDROP) {
@@ -3964,13 +3966,13 @@ public final class OwnershipPlanner {
         for (int sourceId : sourceIds) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
             if (item == null) return false;
-            if (!isPlainFillOnlyPageMaterialItem(item)) return false;
+            if (!isSingleColorPageBackgroundSourceItem(item)) return false;
             double[] pageLocal = pageLocalBoundsOf(item, plan.pageIndex, true);
             if (isMaterialPageBackdropOnPage(item, plan.pageIndex, pageLocal)) {
                 hasMaterialBackdrop = true;
             }
         }
-        return hasMaterialBackdrop;
+        return hasMaterialBackdrop && isLowestPageWideBackgroundSourceDepth(sourceIds, plan.pageIndex);
     }
 
     private boolean isNativePageMaterialShapeVisualPlan(ObjectPlan plan) {
@@ -3979,7 +3981,7 @@ public final class OwnershipPlanner {
         if (sourceIds.length == 0) return false;
         for (int sourceId : sourceIds) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
-            if (!isPlainFillOnlyPageMaterialItem(item)) return false;
+            if (!isSingleColorPageBackgroundSourceItem(item)) return false;
         }
         return true;
     }
@@ -4001,6 +4003,60 @@ public final class OwnershipPlanner {
         if (fill.isEmpty() || isNoneColor(fill)) return false;
         String stroke = safe(item.strokeColorName());
         return isNoneColor(stroke) || item.strokeWeight() <= 0.01;
+    }
+
+    private static boolean isSingleColorPageBackgroundSourceItem(ResolvedPageItem item) {
+        if (!isPlainFillOnlyPageMaterialItem(item)) return false;
+        if (item.childIds() != null && item.childIds().length > 0) return false;
+        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
+        if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
+        if (item.hasDropShadow()) return false;
+        if (item.gradientFeatherApplied()) return false;
+        return true;
+    }
+
+    private boolean isSingleSourcePageWideBackground(int[] sourceIds, int pageIndex) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return false;
+        int[] roots = sourceRootObjectIds(sourceIds);
+        if (roots.length != 1) return false;
+        ResolvedPageItem root = data.getPageItem(String.valueOf(roots[0]));
+        if (!isSingleColorPageBackgroundSourceItem(root)) return false;
+        double[] pageLocal = pageLocalBoundsOf(root, pageIndex, true);
+        if (!isMaterialPageBackdropOnPage(root, pageIndex, pageLocal)) return false;
+        return isLowestPageWideBackgroundSourceDepth(roots, pageIndex);
+    }
+
+    private boolean isLowestPageWideBackgroundSourceDepth(int[] sourceIds, int pageIndex) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return false;
+        int sourceZ = minPageItemZOrder(sourceIds);
+        if (sourceZ < 0) return false;
+        int lowestPageZ = minVisiblePageLevelSourceZOrder(pageIndex);
+        return lowestPageZ < 0 || sourceZ <= lowestPageZ;
+    }
+
+    private int minPageItemZOrder(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return -1;
+        int min = Integer.MAX_VALUE;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null) {
+                min = Math.min(min, item.zOrder());
+            }
+        }
+        return min == Integer.MAX_VALUE ? -1 : min;
+    }
+
+    private int minVisiblePageLevelSourceZOrder(int pageIndex) {
+        if (data == null || data.pageItems() == null) return -1;
+        int min = Integer.MAX_VALUE;
+        for (ResolvedPageItem item : data.pageItems()) {
+            if (item == null || item.sourceHidden() || item.isInline()) continue;
+            if (item.parentId() != null && !item.parentId().isBlank()) continue;
+            double[] pageLocal = pageLocalBoundsOf(item, pageIndex, true);
+            if (pageLocal == null || pageLocal.length < 4 || area(pageLocal) <= 0.0) continue;
+            min = Math.min(min, item.zOrder());
+        }
+        return min == Integer.MAX_VALUE ? -1 : min;
     }
 
     private void resolveIndependentSiblingTextShellOwners() {
@@ -4087,12 +4143,14 @@ public final class OwnershipPlanner {
         for (int sourceId : visualSourceIds(plan)) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
             if (item == null) continue;
+            if (!isSingleColorPageBackgroundSourceItem(item)) continue;
             double[] pageLocal = pageLocalBoundsOf(item, plan.pageIndex, true);
             if (isMaterialPageBackdropOnPage(item, plan.pageIndex, pageLocal)) {
                 ids.add(sourceId);
             }
         }
-        return toIntArray(ids);
+        int[] result = toIntArray(ids);
+        return isLowestPageWideBackgroundSourceDepth(result, plan.pageIndex) ? result : new int[0];
     }
 
     private static boolean isLargeShellBounds(ObjectPlan shell) {
@@ -5868,6 +5926,7 @@ public final class OwnershipPlanner {
         if (renderedVisualContainsTextPixels(rg)) return false;
         if (!hasPageLevelSourceRoots(sourceIds)) return false;
         if (!isBackgroundBoundsSanityCandidate(rg.bounds())) return false;
+        if (!isSingleSourcePageWideBackground(sourceIds, rg.pageIndex())) return false;
         int sourceZ = maxPageItemZOrder(sourceIds);
         if (sourceZ < 0) sourceZ = rg.zOrder();
         return isBehindLocalHwpxTextBySourceDepth(rg, rg.pageIndex(), sourceZ);
@@ -13256,32 +13315,17 @@ public final class OwnershipPlanner {
     }
 
     private static int canonicalVisualDepthZOrder(VisualLayer layer, int sourceZ) {
-        int z = Math.max(0, sourceZ);
-        PolicyLayer policyLayer = policyLayerForVisualDepth(layer);
-        if (policyLayer == PolicyLayer.BACKGROUND) {
-            if (layer == VisualLayer.PAGE_BACKGROUND) return 0;
-            return z;
-        }
-        if (policyLayer == PolicyLayer.DECORATION) {
-            return 10000 + z;
-        }
-        if (policyLayer == PolicyLayer.CONTENT) {
-            return 20000 + z;
-        }
-        if (layer == VisualLayer.PAGE_BACKGROUND) {
-            return 0;
-        }
-        return z;
+        return VisualPlanePolicy.textlessGraphicZOrder(layer, sourceZ);
     }
 
     private static PolicyLayer policyLayerForVisualDepth(VisualLayer layer) {
-        if (layer == VisualLayer.PAGE_BACKGROUND
-                || layer == VisualLayer.CONTAINER_BACKDROP
-                || layer == VisualLayer.CONTENT_BACKDROP) {
+        if (layer == VisualLayer.PAGE_BACKGROUND) {
             return PolicyLayer.BACKGROUND;
         }
         if (layer == VisualLayer.TEXT_CARD_BACKDROP
+                || layer == VisualLayer.CONTAINER_BACKDROP
                 || layer == VisualLayer.CONTAINER_FACE
+                || layer == VisualLayer.CONTENT_BACKDROP
                 || layer == VisualLayer.LABEL_CONNECTOR_BACKDROP
                 || layer == VisualLayer.LABEL_BACKDROP
                 || layer == VisualLayer.LABEL_OVERLAY_BACKDROP

@@ -165,6 +165,9 @@ function _objectPlanMaxSourceZOrder(ids, sourceById) {
 
 function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFrames, zOrder) {
     if (!plan) return null;
+    if (plan.compositeRole === "background_vector_source") {
+        return "PAGE_BACKGROUND";
+    }
     if (plan.visualLayer === "PAGE_BACKGROUND"
             && plan.passId !== "pass.page_backgrounds"
             && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder)) {
@@ -820,6 +823,7 @@ function _objectPlanVisualAction(bundle) {
     if (!bundle || bundle.executable !== true) return "DROP_VISUAL";
     if (bundle.layoutOnlyInlineSlot === true) return "DROP_VISUAL";
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
+    if (bundle.policyLayer === "BACKGROUND") return "PLACE_FLOATING_PNG";
     if (bundle.ownershipSlot === "SHELL_SLOT") return "PLACE_TEXT_SHELL";
     if (_objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle)) return "DROP_VISUAL";
     if (bundle.passId === "pass.inline_objects") {
@@ -929,6 +933,7 @@ function _objectPlanMigrationStatus(bundle) {
     if (_objectPlanHasInlineTextlessSiblingDecorationContract(bundle)) return "READY_TEXTLESS_CONNECTOR_FRAGMENT";
     if (_objectPlanHasExplicitSlotOnlyContract(bundle)) return "READY_SLOT_ONLY_CLUSTER_FRAGMENT";
     if (_objectPlanHasClosedPlacedContentFrameContract(bundle)) return "READY_CLOSED_PLACED_CONTENT_FRAME";
+    if (_objectPlanHasPageTextlessGraphicGroupContract(bundle)) return "READY_PAGE_TEXTLESS_GRAPHIC_GROUP";
     if (bundle.clusterRelation === "PAGE_OR_SYNTHETIC_BUNDLE") return "NEEDS_SYNTHETIC_SOURCE_MODEL";
     if (bundle.clusterRelation === "NO_CLUSTER_REFERENCE") return "NEEDS_SYNTHETIC_SOURCE_MODEL";
     if (bundle.clusterRelation === "BUNDLE_NARROWER_THAN_CLUSTER") return "NEEDS_VISIBLE_SLOT_EXPLICITNESS";
@@ -1071,10 +1076,25 @@ function _objectPlanHasClosedPlacedContentFrameContract(bundle) {
     return _sourceSetKey(bundle.clusterSourceObjectIds) === _sourceSetKey(bundle.visualSourceObjectIds);
 }
 
+function _objectPlanHasPageTextlessGraphicGroupContract(bundle) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.page_textless_graphic_groups") return false;
+    if (bundle.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (bundle.materialization !== "EXTRACTED_PNG_VECTOR") return false;
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return false;
+    if (!bundle.sourceObjectIds || bundle.sourceObjectIds.length < 2) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length < 2) return false;
+    if (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length < 2) return false;
+    if (!_sourceSetContainsAll(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    if (!_sourceSetContainsAll(bundle.exportSourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    return true;
+}
+
 function _objectPlanMigrationStatusIsImportReady(status) {
     return status === "READY_EXACT_CLUSTER"
             || status === "READY_SLOT_ONLY_CLUSTER_FRAGMENT"
             || status === "READY_CLOSED_PLACED_CONTENT_FRAME"
+            || status === "READY_PAGE_TEXTLESS_GRAPHIC_GROUP"
             || status === "READY_TEXTLESS_CONNECTOR_FRAGMENT"
             || status === "READY_LAYOUT_ONLY_INLINE_SLOT";
 }

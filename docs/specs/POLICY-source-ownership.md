@@ -46,8 +46,9 @@ policy; their usable rules have been consolidated here.
    - table-like carrier rules
    - table placement and row geometry
 9. [Layers And Z-Depth](../policy/70-layer-zdepth.md)
-   - two HWPX execution planes
-   - single textless graphic layer
+   - three HWPX policy strata
+   - background graphic separation
+   - textless image grouping
    - HWPX plane mapping
 10. [Executor Rules](../policy/80-executor-rules.md)
    - allowed executor behavior
@@ -83,9 +84,11 @@ When a page issue is reported, use this lookup first:
 - Editable/searchable text is HWPX text or HWPX table text.
 - HWPX table structure is editable, but table/cell visual decoration is
   textless graphic material unless Stage 1 explicitly says otherwise.
-- HWPX execution has only two reliable planes: editable text/table structure
-  and image/graphic material. The graphic material is planned as source-owned
-  textless PNG/vector groups; HWPX emitters must not rebuild layer semantics.
+- HWPX execution has three policy strata:
+  `BACKGROUND_GRAPHIC < TEXTLESS_IMAGE_GROUP < TEXT_TABLE_STRUCTURE`.
+  Background graphics are source-owned textless material, but they are excluded
+  from ordinary page-local textless image grouping and always form the bottom
+  graphic stratum.
 - Visual material must come from IDML source material or extractor metadata.
 - One source bundle slot has exactly one visible owner.
 - Original IDML source metadata is the source of truth: source ids, parentage,
@@ -150,10 +153,11 @@ The Java ownership enums are policy terms, not legacy SPEC terms:
 - `Placement`: `INLINE`, `FLOATING`, `TABLE`, `NONE`
 - `CoordinateSpace`: `STORY_FLOW`, `PAGE`, `SOURCE_LOCAL`
 - `VisualLayer`: implementation compatibility label. In V2 policy it must map
-  to one of the two HWPX execution planes: text/table structure or textless
-  graphic material. Legacy role labels such as `BACKGROUND`, `DECORATION`, and
-  `CONTENT` may exist only as diagnostics or migration hints; they must not
-  create a third ownership layer.
+  to one of the three HWPX policy strata: background graphic, ordinary textless
+  image group, or text/table structure. Legacy role labels such as
+  `DECORATION` and `CONTENT` may exist only as diagnostics or migration hints;
+  they must not create foreground graphic exceptions above editable text/table
+  structure.
 
 If a new enum value seems necessary, first update the canonical policy module
 that defines the source-owned behavior, then add validation showing why the

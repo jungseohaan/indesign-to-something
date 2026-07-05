@@ -287,6 +287,22 @@ function _runRenderPhases(doc, ctx, allItems) {
     // 2.15. 장식 그룹 렌더링 — exportImagePlacedFrames에서 처리된 ID 제외
     var imgRenderedIds = {};
     for (var iri = 0; iri < renderedImageFrames.length; iri++) imgRenderedIds[renderedImageFrames[iri].id] = true;
+
+    _marker(ctx.outputDir, "06b_pageTextlessGroups");
+    _requireExtractionPass(ctx, "pass.page_textless_graphic_groups");
+    var pageTextlessGroupPngCandidates =
+            _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.page_textless_graphic_groups");
+    var pageTextlessGroupResult = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+            extractionItemById,
+            pageTextlessGroupPngCandidates,
+            imgRenderedIds);
+    _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
+    for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
+        renderedFloatingItems.push(pageTextlessGroupResult.frames[ptgi]);
+        imgRenderedIds[pageTextlessGroupResult.frames[ptgi].id] = true;
+    }
+    try { $.gc(); } catch (ePageTextlessGc) {}
+
     _marker(ctx.outputDir, "07_decoGroups");
     _requireExtractionPass(ctx, "pass.decoration_groups");
     var decoPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.decoration_groups");

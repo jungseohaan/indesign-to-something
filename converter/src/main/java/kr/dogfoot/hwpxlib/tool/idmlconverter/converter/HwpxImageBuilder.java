@@ -771,19 +771,7 @@ public class HwpxImageBuilder {
             String visualLayer,
             int originalZOrder,
             int sourceLayerIndex) {
-        // Stage 1 ObjectPlan.zOrder is the visual order contract. visualLayer
-        // chooses only the HWPX plane/wrap. Local label shells/connectors stay in
-        // the front plane and rely on the planned source-depth relation to sit
-        // below their owned text; moving them to BEHIND_TEXT hides them behind
-        // unrelated HWPX carriers.
-        int z = Math.max(0, originalZOrder);
-        if ("PAGE_BACKGROUND".equals(visualLayer) || "CONTAINER_BACKDROP".equals(visualLayer)) {
-            return z;
-        }
-        if ("CONTENT_BACKDROP".equals(visualLayer)) {
-            return z;
-        }
-        return originalZOrder;
+        return VisualPlanePolicy.textlessGraphicZOrderName(visualLayer, originalZOrder);
     }
 
     // ── 배경 PNG ──

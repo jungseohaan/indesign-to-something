@@ -345,21 +345,19 @@ public final class ObjectPlan {
         if (!hasVisibleVisual()) {
             return hasVisibleText() ? PolicyLayer.TEXT : PolicyLayer.CONTENT;
         }
-        if (visualLayer == VisualLayer.PAGE_BACKGROUND
-                || visualLayer == VisualLayer.CONTAINER_BACKDROP) {
+        if (visualLayer == VisualLayer.PAGE_BACKGROUND) {
             return PolicyLayer.BACKGROUND;
         }
         if (visualLayer == VisualLayer.TEXT_CARD_BACKDROP
+                || visualLayer == VisualLayer.CONTAINER_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_FACE
+                || visualLayer == VisualLayer.CONTENT_BACKDROP
                 || visualLayer == VisualLayer.LABEL_CONNECTOR_BACKDROP
                 || visualLayer == VisualLayer.LABEL_BACKDROP
                 || visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || visualLayer == VisualLayer.FOREGROUND_MASK) {
             return PolicyLayer.DECORATION;
-        }
-        if (visualLayer == VisualLayer.CONTENT_BACKDROP) {
-            return PolicyLayer.BACKGROUND;
         }
         return PolicyLayer.CONTENT;
     }

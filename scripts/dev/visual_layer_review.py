@@ -542,6 +542,19 @@ def esc(value: Any) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
 
+def fmt_num(value: Any, digits: int = 1) -> str:
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return "" if value is None else str(value)
+
+
+def fmt_bounds(value: Any) -> str:
+    if not isinstance(value, (list, tuple)) or len(value) < 4:
+        return ""
+    return "[" + ", ".join(fmt_num(v, 1) for v in value[:4]) + "]"
+
+
 def rect_attrs(b: Sequence[float]) -> str:
     t, l, bottom, r = [float(v) for v in b[:4]]
     return f'x="{l:.3f}" y="{t:.3f}" width="{r - l:.3f}" height="{bottom - t:.3f}"'
@@ -559,14 +572,16 @@ def svg_for_page(review: Dict[str, Any], page_index: int) -> str:
         f'<rect {rect_attrs(page_b)} class="page-bg"><title>page {page_index}</title></rect>',
     ]
     for tf in text_frames:
-        title = f'TF {tf["id"]} z={tf["zOrder"]}: {tf["text"]}'
+        title = f'TF {tf["id"]} z={tf["zOrder"]} bounds={fmt_bounds(tf.get("bounds"))}: {tf["text"]}'
         parts.append(f'<rect {rect_attrs(tf["bounds"])} class="tf-box"><title>{esc(title)}</title></rect>')
     for row in overlaps:
         plan = row["visual"]
         cls = "risk-high" if row["severity"].startswith("HIGH") else ("risk-medium" if row["severity"].startswith("MEDIUM") or row["severity"].startswith("REVIEW") else "risk-low")
         title = (
             f'{row["severity"]} visual={plan.get("domId")} layer={plan.get("visualLayer")} '
-            f'z={plan.get("zOrder")} TF={row["textFrame"].get("id")} area={row["overlapArea"]}'
+            f'z={plan.get("zOrder")} bounds={fmt_bounds(plan.get("bounds"))} '
+            f'TF={row["textFrame"].get("id")} overlap={fmt_bounds(row.get("overlapBounds"))} '
+            f'area={row["overlapArea"]}'
         )
         parts.append(f'<rect {rect_attrs(plan["bounds"])} class="visual-box {cls}"><title>{esc(title)}</title></rect>')
         parts.append(f'<rect {rect_attrs(row["overlapBounds"])} class="overlap-box"><title>{esc(title)}</title></rect>')
@@ -738,6 +753,9 @@ code{font-size:12px}
             parts.append(f"source types <code>{esc(plan.get('sourceTypeCounts'))}</code> · page ratio <code>{esc(plan.get('pageAreaRatio'))}</code><br>")
             parts.append(f"relation <code>{esc(row.get('textRelation'))}</code><br>")
             parts.append(f"action <code>{esc(plan.get('visualAction'))}</code> · placement <code>{esc(plan.get('placement'))}</code> · z <code>{esc(plan.get('zOrder'))}</code><br>")
+            parts.append(f"visual bounds <code>{esc(fmt_bounds(plan.get('bounds')))}</code><br>")
+            parts.append(f"TF bounds <code>{esc(fmt_bounds(tf.get('bounds')))}</code><br>")
+            parts.append(f"overlap bounds <code>{esc(fmt_bounds(row.get('overlapBounds')))}</code><br>")
             parts.append(f"TF <code>{esc(tf.get('id'))}</code> · text z <code>{esc(tf.get('zOrder'))}</code> · overlap {esc(row.get('overlapArea'))}<br>")
             parts.append(f"file <code>{esc(plan.get('file'))}</code><br>reason <code>{esc(plan.get('reason'))}</code>")
             parts.append("</div>")

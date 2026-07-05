@@ -579,9 +579,19 @@ public final class OwnershipPlanValidator {
                     || plan.visualLayer == VisualLayer.CONTENT_BACKDROP)) {
                 continue;
             }
+            if (plan.visualPolicyLayer() == PolicyLayer.DECORATION
+                    && (plan.visualLayer == VisualLayer.CONTAINER_BACKDROP
+                    || plan.visualLayer == VisualLayer.CONTAINER_FACE
+                    || plan.visualLayer == VisualLayer.TEXT_CARD_BACKDROP
+                    || plan.visualLayer == VisualLayer.LABEL_CONNECTOR_BACKDROP
+                    || plan.visualLayer == VisualLayer.LABEL_BACKDROP
+                    || plan.visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
+                    || plan.visualLayer == VisualLayer.CONTAINER_OUTLINE
+                    || plan.visualLayer == VisualLayer.FOREGROUND_MASK)) {
+                continue;
+            }
             if (plan.visualPolicyLayer() == PolicyLayer.BACKGROUND
-                    && (plan.visualLayer == VisualLayer.PAGE_BACKGROUND
-                    || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP)) {
+                    && plan.visualLayer == VisualLayer.PAGE_BACKGROUND) {
                 continue;
             }
             warn("STAGE4_PLACED_CONTENT_UNEXPECTED_LAYER",
@@ -601,7 +611,6 @@ public final class OwnershipPlanValidator {
             if (ctx.resolvedData != null && isSourceAuthoredPageWashBackdropContract(plan)) continue;
             if (isMasterGraphicBackgroundFragmentContract(plan)) continue;
             if (plan.visualLayer != VisualLayer.PAGE_BACKGROUND
-                    && plan.visualLayer != VisualLayer.CONTAINER_BACKDROP
                     && plan.visualPolicyLayer() != PolicyLayer.BACKGROUND) {
                 continue;
             }
@@ -632,12 +641,6 @@ public final class OwnershipPlanValidator {
             if (plan == null || !hasVisibleVisualSlot(plan)) continue;
             if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND && plan.zOrder != 0) {
                 warn("STAGE4_PAGE_BACKGROUND_NOT_BOTTOM_Z",
-                        "plan=" + planRef(plan)
-                                + " visualLayer=" + plan.visualLayer
-                                + " zOrder=" + plan.zOrder);
-            }
-            if (plan.visualLayer == VisualLayer.CONTAINER_BACKDROP && plan.zOrder >= 200_000) {
-                warn("STAGE4_BACKGROUND_VISUAL_OUT_OF_BACKGROUND_BAND",
                         "plan=" + planRef(plan)
                                 + " visualLayer=" + plan.visualLayer
                                 + " zOrder=" + plan.zOrder);
@@ -1224,8 +1227,7 @@ public final class OwnershipPlanValidator {
         }
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         if (plan.visualPolicyLayer() != PolicyLayer.BACKGROUND
-                && plan.visualLayer != VisualLayer.PAGE_BACKGROUND
-                && plan.visualLayer != VisualLayer.CONTAINER_BACKDROP) {
+                && plan.visualLayer != VisualLayer.PAGE_BACKGROUND) {
             return false;
         }
         int[] roots = sourceRootIds(plan);
@@ -1249,7 +1251,6 @@ public final class OwnershipPlanValidator {
         if (plan.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) return false;
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         return plan.visualLayer == VisualLayer.PAGE_BACKGROUND
-                || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP
                 || plan.visualPolicyLayer() == PolicyLayer.BACKGROUND;
     }
 

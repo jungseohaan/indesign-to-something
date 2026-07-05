@@ -6,35 +6,50 @@
 ## 9. HWPX Planes And Textless Graphic Groups
 
 V2 does not try to reproduce InDesign's arbitrary visual interleaving as HWPX
-layer policy. HWPX execution is treated as two reliable planes:
+layer policy. HWPX execution is treated as three reliable policy strata:
 
-`TEXT_AND_TABLE_STRUCTURE` above `TEXTLESS_GRAPHIC_MATERIAL`
+`BACKGROUND_GRAPHIC < TEXTLESS_IMAGE_GROUP < TEXT_TABLE_STRUCTURE`
 
-- `TEXT_AND_TABLE_STRUCTURE`: editable/searchable HWPX text, editable HWPX
+- `BACKGROUND_GRAPHIC`: a page/spread background image that occupies a page-wide
+  bottom surface, has the lowest source z-order among visible page/spread
+  source objects for that page intersection, and is backed by a single-color
+  source paint/fill contract. It is source-owned textless material, but it is
+  not an ordinary page-local graphic-group member.
+- `TEXTLESS_IMAGE_GROUP`: all other non-text source visual material, including
+  container faces, label shells, table/cell decoration, borders, row bands,
+  speech-bubble shells, connector lines, placed images, charts, QR, inline
+  marker images, masks, and chrome.
+- `TEXT_TABLE_STRUCTURE`: editable/searchable HWPX text, editable HWPX
   table structure, table cell text, and transparent text/table carriers.
-- `TEXTLESS_GRAPHIC_MATERIAL`: all non-text source visual material, including
-  page backgrounds, container faces, label shells, table/cell decoration,
-  borders, row bands, speech-bubble shells, connector lines, placed images,
-  charts, QR, inline marker images, masks, and chrome.
 
 The four historical policy roles (`BACKGROUND`, `DECORATION`, `CONTENT`,
 `TEXT`) are migration labels only. They may help diagnostics and legacy enum
 mapping, but they are not allowed to create additional execution layers,
 foreground/background repairs, or role-based z-bands. If an older rule in this
 file requires a `BACKGROUND < DECORATION < CONTENT < TEXT` execution order, the
-two-plane contract above wins.
+three-strata contract above wins.
 
-Within the graphic plane, Stage 1 groups visible non-text source material into
+Stage 1 first separates `BACKGROUND_GRAPHIC` material from ordinary graphic
+material. Background graphics are the bottom stratum and are excluded from the
+ordinary page-local textless image grouping described below. Within
+`TEXTLESS_IMAGE_GROUP`, Stage 1 groups visible non-text source material into
 page-local textless graphic groups. The target grouping is the maximum set of
-non-master graphic source bundles whose visible page-local bounds overlap or
-are connected by the same source group/clip/mask parent, after editable text and
-table structure sources are hidden. A page may therefore have one full-page
-graphic image or several non-overlapping graphic images. Master-page graphics
-are excluded from these page graphic groups and keep separate applied-master
-fragment ownership.
+non-master, non-background graphic source bundles whose visible page-local
+bounds overlap or are connected by the same source group/clip/mask parent, after
+editable text and table structure sources are hidden. A page may therefore have
+one or more background graphics plus one ordinary full-page graphic image or
+several non-overlapping ordinary graphic images. Master-page graphics are
+excluded from these ordinary page graphic groups and keep separate
+applied-master fragment ownership.
 
 Graphic grouping rules:
 
+- A `BACKGROUND_GRAPHIC` is not connected into ordinary textless image groups,
+  even when its bounds overlap every other visual object on the page.
+- `BACKGROUND_GRAPHIC` is allowed only for source material that is page/spread
+  wide, single-color by source paint metadata, and at the lowest source
+  z-depth. Pixel color sampling or output appearance is not a background
+  ownership reason.
 - Grouping uses source metadata: source ids, parentage, group membership,
   clipping/pasted-inside relation, page/spread intersection, visibility, bounds,
   and normalized source z-order.
@@ -42,26 +57,26 @@ Graphic grouping rules:
   license to decide text ownership, promote a role, or repair an output
   occlusion symptom.
 - Editable TextFrames and HWPX table structure do not split graphic groups.
-  They are hidden during graphic export and re-emitted in the text/table plane
-  using source bounds.
-- Table/cell decoration remains part of graphic material; table structure and
-  cell text remain HWPX-owned.
+  They are hidden during graphic export and re-emitted in the
+  `TEXT_TABLE_STRUCTURE` stratum using source bounds.
+- Table/cell decoration remains part of `TEXTLESS_IMAGE_GROUP`; table
+  structure and cell text remain HWPX-owned in `TEXT_TABLE_STRUCTURE`.
 - Inline source graphics inside text flow, such as number badges, boxes,
   checkmarks, and other non-editable markers, keep `INLINE` / `STORY_FLOW`
   placement and use their extracted PNG/vector material. They are not converted
   to HWPX native shapes.
 - A graphic that intentionally covers editable text in the InDesign source is a
-  known loss under the editable-text policy. V2 keeps editable HWPX text above
-  graphic material. If exact visual occlusion is required for that source
+  known loss under the editable-text policy. V2 keeps editable HWPX text/table
+  structure above graphic material. If exact visual occlusion is required for that source
   bundle, Stage 1 must choose `COMPLETE_PNG` and give up editable text for that
   bundle; it must not add a foreground graphic exception.
 
 Original IDML layer and z-order remain source metadata for ordering and
-group-internal rendering, but they do not override the two HWPX planes. If a
+group-internal rendering, but they do not override the three HWPX strata. If a
 visual object appears to cover text in HWPX, Stage 1 must first verify whether
 the text/table source was correctly hidden from the graphic asset and re-emitted
-in the text/table plane. It must not repair the page by policy-band promotion or
-demotion.
+in `TEXT_TABLE_STRUCTURE`. It must not repair the page by policy-band promotion
+or demotion.
 When a rendered candidate has `sourceObjectIds`, Stage 1 must derive
 `ObjectPlan.zOrder` from those source objects before falling back to extractor
 render order. The canonical source depth is the normalized IDML/source-item rank
@@ -106,10 +121,10 @@ z-order authority.
 - `zOrder`, from normalized IDML source depth of `visualSourceObjectIds`, then
   `sourceObjectIds`, then extractor z-order only as a last fallback.
 - `visualLayer`, only as a migration/diagnostic label for the source role. It
-  must still map to one of the two execution planes: text/table structure or
-  textless graphic material.
-- HWPX-owned TextFrame/table text placement is always in the text/table
-  structure plane above textless graphic material. Stage 1 may keep source
+  must still map to one of the three policy strata: background graphic,
+  ordinary textless image group, or text/table structure.
+- HWPX-owned TextFrame/table text placement is always in
+  `TEXT_TABLE_STRUCTURE` above textless graphic material. Stage 1 may keep source
   `zOrder` for diagnostics and intra-plane order, but it must not use visual
   source depth to cover editable text with a graphic.
 - HWPX text-only plans do not receive a new `visualLayer` while being restored
@@ -136,10 +151,11 @@ executors, and validators consume the finalized contract only. If a later
 stage appears to need a layer promotion/demotion, the Stage 1 finalizer or its
 source metadata inputs are wrong.
 
-The HWPX execution-plane mapping for finalized visual plans is a single Stage 1
+The HWPX execution-strata mapping for finalized visual plans is a single Stage 1
 policy table implemented by `VisualPlanePolicy`. Stage 3/4 adapters and Java
-HWPX builders may call that table to translate a finalized plan into the graphic
-or text/table plane, but they must not carry their own divergent lists of
+HWPX builders may call that table to translate a finalized plan into
+`BACKGROUND_GRAPHIC`, `TEXTLESS_IMAGE_GROUP`, or `TEXT_TABLE_STRUCTURE`, but
+they must not carry their own divergent lists of
 foreground/background layers.
 
 The final gate may use only IDML/resolved source metadata: source id, parentage,
@@ -163,14 +179,16 @@ Stage 1 must compare against the normalized page width/height converted back to
 the candidate's page-local unit; otherwise a full-page visual can be misread as
 small content and placed above text.
 
-Default HWPX plane:
+Default HWPX strata:
 
-- Editable HWPX text, editable HWPX table structure, and table cell text:
-  text/table plane.
-- All planned non-text visual material, including historical `BACKGROUND`,
+- `PAGE_BACKGROUND`: `BACKGROUND_GRAPHIC`.
+- All planned non-text visual material except `PAGE_BACKGROUND`, including
+  historical `BACKGROUND`,
   `LABEL_BACKDROP`, `LABEL_CONNECTOR_BACKDROP`, `LABEL_OVERLAY_BACKDROP`,
   `CONTENT_BACKDROP`, `CONTENT_VISUAL`, `CONTAINER_OUTLINE`, masks, and table
-  decoration: textless graphic plane.
+  decoration: `TEXTLESS_IMAGE_GROUP`.
+- Editable HWPX text, editable HWPX table structure, and table cell text:
+  `TEXT_TABLE_STRUCTURE`.
 - Legacy layer labels may influence source grouping diagnostics, but they do
   not select a foreground graphics plane. A local speech bubble or label shell
   stays visible by being grouped into the correct textless graphic material and
@@ -336,10 +354,10 @@ Default HWPX plane:
   carriers are fixed-position visual/text containers and must not create an
   extra page before the section break. Real semantic tables keep their own
   table pagination policy in the table builder.
-- `CONTAINER_BACKDROP` is a `BACKGROUND` slot and must not be emitted on the
-  front-object plane merely to keep it visible. If it disappears behind a page
-  paper/background object, fix the page/background z-plane contract instead of
-  moving the carrier in front of text.
+- `CONTAINER_BACKDROP` is ordinary `TEXTLESS_IMAGE_GROUP` material, not
+  `BACKGROUND_GRAPHIC`. If it disappears behind a page paper/background object,
+  fix the source grouping/background separation contract instead of moving the
+  carrier in front of text.
 - textless label/backdrop shell: logical `DECORATION`, below its owned text and
   above container/background faces. When HWPX table carriers would occlude a
   behind-plane label shell, materialize the label shell in the front plane with a
@@ -540,16 +558,11 @@ Default HWPX plane:
   owns only the visual `SHELL_SLOT`. Its editable child TextFrames keep direct
   HWPX text ownership, and non-executable label helper plans must drop their
   duplicate text claims.
-- HWPX execution plane and z-band must agree. A visual emitted in the page
-  background z-band is emitted behind text; it must not remain on the front
-  object plane because of a stale generic content layer.
-- `PAGE_BACKGROUND` and `CONTAINER_BACKDROP` may be mapped to the HWPX visible
-  bottom background z-band during emission. This is not a new ownership
-  decision: it only adapts the finalized background policy layer so broad
-  page/master backdrops cannot cover planned content/shell visuals in the same
-  HWPX behind-text plane. The band must remain visible in HWPX; it must not use
-  a negative/deep z-order that can place the image behind the paper itself.
-  Source order is still preserved among visuals inside each execution band.
+- HWPX execution stratum and z-band must agree. Only `PAGE_BACKGROUND` may be
+  emitted in the bottom `BACKGROUND_GRAPHIC` z-band. `CONTAINER_BACKDROP`,
+  `CONTENT_BACKDROP`, label shells, outlines, masks, content visuals, and table
+  decoration remain ordinary `TEXTLESS_IMAGE_GROUP` material ordered by source
+  depth inside that stratum.
 - HWPX placement is an execution mapping, not an ownership decision point. The
   converter may map a Stage 1 `visualLayer` to the required HWPX plane/z-band,
   but it must not solve overlap, missing, or duplicate symptoms by recalculating

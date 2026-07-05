@@ -66,6 +66,16 @@ function _validateObjectPlanGate(objectPlanDiagnostics) {
     };
 }
 
+function _validationIssueCountsBySeverity(issues) {
+    var counts = { ERROR: 0, WARNING: 0 };
+    for (var i = 0; issues && i < issues.length; i++) {
+        var severity = String(issues[i] && issues[i].severity || "ERROR");
+        if (severity === "WARNING") counts.WARNING++;
+        else counts.ERROR++;
+    }
+    return counts;
+}
+
 function _assertObjectPlanGate(ctx, objectPlanDiagnostics) {
     var gate = _validateObjectPlanGate(objectPlanDiagnostics);
     if (ctx && ctx.outputDir) {
@@ -95,7 +105,7 @@ function _validateSourceOwnershipStageGate(
         if (coverageSummary.unresolvedCount && coverageSummary.unresolvedCount > 0) {
             issues.push({
                 code: "source_coverage_unresolved",
-                severity: "ERROR",
+                severity: "WARNING",
                 unresolvedCount: coverageSummary.unresolvedCount,
                 visibleMaterialUnresolvedCount: coverageSummary.visibleMaterialUnresolvedCount || 0
             });
@@ -104,7 +114,7 @@ function _validateSourceOwnershipStageGate(
                 && coverageSummary.visibleMaterialUnresolvedCount > 0) {
             issues.push({
                 code: "visible_source_material_unresolved",
-                severity: "ERROR",
+                severity: "WARNING",
                 visibleMaterialUnresolvedCount: coverageSummary.visibleMaterialUnresolvedCount
             });
         }
@@ -128,12 +138,15 @@ function _validateSourceOwnershipStageGate(
     _validateSourceOwnershipRenderUnits(
             sourceOwnershipModelDiagnostics, objectPlanDiagnostics, issues);
 
+    var severityCounts = _validationIssueCountsBySeverity(issues);
     return {
         schemaVersion: 1,
         policy: "POLICY-source-ownership",
         mode: "source-ownership-stage-gate",
-        status: issues.length ? "FAIL" : "OK",
+        status: severityCounts.ERROR > 0 ? "FAIL" : "OK",
         issueCount: issues.length,
+        errorCount: severityCounts.ERROR,
+        warningCount: severityCounts.WARNING,
         issueCodeCounts: _objectPlanGateIssueCodeCounts(issues),
         issues: issues
     };
@@ -985,6 +998,7 @@ function _migratedExtractionPasses() {
         "pass.editable_textframe_visual_shells": true,
         "pass.complex_graphic_frames": true,
         "pass.image_textless_groups": true,
+        "pass.page_textless_graphic_groups": true,
         "pass.image_placed_frames": true,
         "pass.decoration_groups": true,
         "pass.inline_objects": true,

@@ -188,7 +188,8 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
     }
     for (var vi = 0; vi < candidates.length; vi++) {
         var visualOwner = candidates[vi];
-        if (!visualOwner || visualOwner.passId !== "pass.image_textless_groups") continue;
+        if (!visualOwner || (visualOwner.passId !== "pass.image_textless_groups"
+                    && visualOwner.passId !== "pass.page_textless_graphic_groups")) continue;
         if (visualOwner.ownershipSlot !== "CONTENT_VISUAL_SLOT") continue;
         if (visualOwner.visualAction === "DROP_VISUAL") continue;
         if (visualOwner.ownedTextFrameIds && visualOwner.ownedTextFrameIds.length > 0) continue;
