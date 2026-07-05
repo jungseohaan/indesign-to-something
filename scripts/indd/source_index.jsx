@@ -141,10 +141,11 @@ function _storyAnchorPlacementForItem(doc, item, parentStory) {
 
 function _isInlineFlowItemBySourceInfo(sourceInfo) {
     if (!sourceInfo) return false;
-    var placement = String(sourceInfo.storyAnchorPlacement || "");
-    if (placement !== "INLINE") return false;
-    return String(sourceInfo.parentKind || "") === "Character"
-            || String(sourceInfo.parentKind || "") === "InsertionPoint";
+    var parentKind = String(sourceInfo.parentKind || "");
+    if (parentKind === "Character" || parentKind === "InsertionPoint") return true;
+    var placement = String(sourceInfo.storyAnchorPlacement || "").toUpperCase();
+    var anchoredPosition = String(sourceInfo.anchoredPosition || "").toUpperCase();
+    return placement === "INLINE" || anchoredPosition === "INLINE_POSITION";
 }
 
 function _isClipCarryingShapeKind(kind) {

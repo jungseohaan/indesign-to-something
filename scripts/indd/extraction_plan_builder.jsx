@@ -1073,7 +1073,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         return null;
     }
 
-    function expandSourceIds(sourceIds, includeTextLike) {
+    function expandSourceIds(sourceIds, includeTextLike, includeInlineFlow) {
         var out = [];
         var seen = {};
         var expanded = [];
@@ -1092,6 +1092,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 continue;
             }
             if (!includeTextLike && sourceIsTextLike(id)) continue;
+            if (includeInlineFlow !== true && sourceIsInlineFlow(id)) continue;
+            if (sourceIsStoryAnchoredMaterial(id)) continue;
             _pushUniqueId(out, seen, id);
         }
         return _sortedNumericIds(out);
@@ -1108,6 +1110,10 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         var guard = 0;
         while (cur && guard++ < 64) {
             var kind = String(cur.kind || "");
+            var parentKind = String(cur.parentKind || "");
+            if (parentKind === "Character" || parentKind === "InsertionPoint") {
+                return true;
+            }
             if (kind === "Character" || kind === "InsertionPoint" || kind === "Cell"
                     || kind === "Story") {
                 return true;
@@ -1125,6 +1131,37 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         var storyAnchorPlacement = String(src.storyAnchorPlacement || "").toUpperCase();
         return anchoredPosition === "ANCHORED"
                 || storyAnchorPlacement === "FLOATING_ANCHORED";
+    }
+
+    function sourcePageIndex(id) {
+        var src = info(id);
+        return src && src.pageIndex !== undefined && src.pageIndex !== null
+                ? Number(src.pageIndex)
+                : null;
+    }
+
+    function sourceHasCrossPageClipParent(id, pageIndex) {
+        var clipParentId = clipCarryingParentId(id);
+        if (clipParentId === null || clipParentId === undefined) return false;
+        var clipPageIndex = sourcePageIndex(clipParentId);
+        return clipPageIndex !== null
+                && pageIndex !== null
+                && pageIndex !== undefined
+                && Number(clipPageIndex) !== Number(pageIndex);
+    }
+
+    function candidateHasCrossPageClipParentContext(candidate, pageIndex) {
+        var values = visibleExportIds(candidate)
+                .concat(sourceIds(candidate))
+                .concat(candidate && candidate.visualSourceObjectIds || []);
+        var seen = {};
+        for (var i = 0; i < values.length; i++) {
+            var id = values[i];
+            if (id === null || id === undefined || seen[String(id)]) continue;
+            seen[String(id)] = true;
+            if (sourceHasCrossPageClipParent(id, pageIndex)) return true;
+        }
+        return false;
     }
 
     function sourceHasPageWideBackgroundShapeOnPage(src, rolePageIndex) {
@@ -1364,6 +1401,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         }
         var pageIndex = candidate.pageIndex;
         if (pageIndex === null || pageIndex === undefined || Number(pageIndex) < 0) return false;
+        if (candidateHasCrossPageClipParentContext(candidate, pageIndex)) return false;
         var b = bounds(candidate);
         if (!boundsHasArea(b)) return false;
         var exportIds = visibleExportIds(candidate);
@@ -1419,8 +1457,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     if (used[j]) continue;
                     var touches = false;
                     for (var k = 0; k < component.length; k++) {
-                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)
-                                && entriesShareStructuralRoot(component[k], entries[j])) {
+                        if (boundsOverlapWithPad(component[k].bounds, entries[j].bounds, pad)) {
                             touches = true;
                             break;
                         }
@@ -1503,6 +1540,30 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         return _sortedNumericIds(out);
     }
 
+    function sourceHasVisiblePaint(id) {
+        var src = info(id);
+        if (!src) return false;
+        if (sourceIsTextLike(id)) return false;
+        return src.hasCandidateVectorPaint === true
+                || src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasPlacedVisual === true;
+    }
+
+    function visiblePaintSourceIds(sourceIds, pageIndex) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < sourceIds.length; i++) {
+            var id = sourceIds[i];
+            if (!sourceHasVisiblePaint(id)) continue;
+            if (sourceIsInlineFlow(id)) continue;
+            if (sourceIsStoryAnchoredMaterial(id)) continue;
+            if (sourceHasCrossPageClipParent(id, pageIndex)) continue;
+            _pushUniqueId(out, seen, id);
+        }
+        return _sortedNumericIds(out);
+    }
+
     var appended = 0;
     var diagnostics = [];
     for (var pageKey in byPage) {
@@ -1517,8 +1578,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             var minZ = null;
             for (var ei = 0; ei < component.length; ei++) {
                 var entry = component[ei];
-                mergeIds(allSourceIds, allSourceSeen, expandSourceIds(entry.sourceIds, true));
-                mergeIds(exportIds, exportSeen, expandSourceIds(entry.exportIds, false));
+                mergeIds(allSourceIds, allSourceSeen, expandSourceIds(entry.sourceIds, true, false));
+                mergeIds(exportIds, exportSeen, expandSourceIds(entry.exportIds, false, false));
                 b = unionBounds(b, entry.bounds);
                 minZ = minZ === null ? entry.zOrder : Math.min(minZ, entry.zOrder);
                 coveredCandidateIds.push(entry.candidate.candidateId || null);
@@ -1529,6 +1590,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             var hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
             var pngOwnedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
             exportIds = subtractSourceIds(exportIds, hiddenTextFrameIds);
+            exportIds = unionSourceIds(exportIds, visiblePaintSourceIds(allSourceIds, Number(pageKey)));
             var visualSourceIds = exportIds.slice(0);
             exportIds = unionSourceIds(exportIds, pngOwnedTextFrameIds);
             var executionSourceIds = subtractSourceIds(allSourceIds, hiddenTextFrameIds);
@@ -1942,6 +2004,10 @@ function _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItem
                 && candidate.compositeRole === "clip_parent_source_set";
     }
 
+    function isDecorationCandidate(candidate) {
+        return candidate && candidate.passId === "pass.decoration_groups";
+    }
+
     function primarySourceId(candidate) {
         if (!candidate) return null;
         if (candidate.primarySourceObjectId !== undefined && candidate.primarySourceObjectId !== null) {
@@ -1959,11 +2025,52 @@ function _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItem
                 : null;
     }
 
+    function clipCarryingParentId(id) {
+        var src = sourceInfoById ? sourceInfoById[String(id)] : null;
+        if (!src || src.parentId === null || src.parentId === undefined) return null;
+        var parent = sourceInfoById[String(src.parentId)];
+        for (var depth = 0; depth < 16 && parent; depth++) {
+            var kind = String(parent.kind || "");
+            if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
+                return parent.hasChildren ? parent.id : null;
+            }
+            if (kind !== "Group") return null;
+            if (parent.parentId === null || parent.parentId === undefined) return null;
+            parent = sourceInfoById[String(parent.parentId)];
+        }
+        return null;
+    }
+
+    function sourceHasCrossPageClipParent(id, pageIndex) {
+        var clipParentId = clipCarryingParentId(id);
+        if (clipParentId === null || clipParentId === undefined) return false;
+        var clipPageIndex = sourcePageIndex(clipParentId);
+        return clipPageIndex !== null
+                && pageIndex !== null
+                && pageIndex !== undefined
+                && Number(clipPageIndex) !== Number(pageIndex);
+    }
+
+    function candidateHasCrossPageClipParentContext(candidate, pageIndex) {
+        var values = []
+                .concat(candidate && candidate.exportSourceObjectIds || [])
+                .concat(candidate && candidate.visualSourceObjectIds || [])
+                .concat(candidate && candidate.sourceObjectIds || []);
+        var seen = {};
+        for (var i = 0; i < values.length; i++) {
+            var id = values[i];
+            if (id === null || id === undefined || seen[String(id)]) continue;
+            seen[String(id)] = true;
+            if (sourceHasCrossPageClipParent(id, pageIndex)) return true;
+        }
+        return false;
+    }
+
     var out = [];
     var suppressed = [];
     for (var i = 0; i < candidates.length; i++) {
         var candidate = candidates[i];
-        if (!isClipParentSourceSetDecoration(candidate)) {
+        if (!isDecorationCandidate(candidate)) {
             out.push(candidate);
             continue;
         }
@@ -1972,16 +2079,20 @@ function _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItem
         var candidatePageIndex = candidate.pageIndex !== undefined && candidate.pageIndex !== null
                 ? Number(candidate.pageIndex)
                 : null;
-        if (primaryPageIndex !== null
+        var primaryCrossPage = isClipParentSourceSetDecoration(candidate)
+                && primaryPageIndex !== null
                 && candidatePageIndex !== null
-                && primaryPageIndex !== candidatePageIndex) {
+                && primaryPageIndex !== candidatePageIndex;
+        if (primaryCrossPage || candidateHasCrossPageClipParentContext(candidate, candidatePageIndex)) {
             suppressed.push({
                 candidateId: candidate.candidateId || null,
                 pageIndex: candidatePageIndex,
                 primarySourceObjectId: primaryId,
                 primarySourcePageIndex: primaryPageIndex,
                 sourceObjectCount: candidate.sourceObjectIds ? candidate.sourceObjectIds.length : 0,
-                reason: "cross_page_clip_parent_source_set_without_parent_context"
+                reason: primaryCrossPage
+                        ? "cross_page_clip_parent_source_set_without_parent_context"
+                        : "cross_page_clip_parent_context_without_parent_context"
             });
             continue;
         }
@@ -2354,6 +2465,63 @@ function _appendUnresolvedVisibleVectorCoverageCandidates(candidates, sourceCove
     return { warningCount: warnings.length, warnings: warnings };
 }
 
+function _backfillVisibleCandidateVisualSources(candidates, sourceItems) {
+    if (!candidates || candidates.length === 0) return candidates || [];
+    var indexes = null;
+    try { indexes = _buildSourceItemIndexes(sourceItems || []); } catch (eIndex) { indexes = null; }
+    var sourceInfoById = indexes ? indexes.sourceInfoById || {} : {};
+    var childIdsByParentId = indexes ? indexes.childIdsByParentId || {} : {};
+
+    function isVisibleCandidate(candidate) {
+        if (!candidate || candidate.disabled === true) return false;
+        var action = String(candidate.visualAction || "");
+        if (action === "DROP_VISUAL" || action === "") return false;
+        var materialization = String(candidate.materialization || "");
+        if (materialization === "HWPX_TEXT"
+                || materialization === "HWPX_TABLE_STYLE"
+                || materialization === "NATIVE_SOURCE_SHAPE") {
+            return false;
+        }
+        return true;
+    }
+
+    function sourceIsHiddenByTextOwnership(candidate, sourceId) {
+        var key = String(sourceId);
+        var textIds = candidate.hiddenTextFrameIds || candidate.editableTextFrameIds || [];
+        for (var ti = 0; ti < textIds.length; ti++) {
+            if (String(textIds[ti]) === key) return true;
+        }
+        var hiddenIds = candidate.hiddenVisualSourceObjectIds || [];
+        for (var hi = 0; hi < hiddenIds.length; hi++) {
+            if (String(hiddenIds[hi]) === key) return true;
+        }
+        return false;
+    }
+
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!isVisibleCandidate(candidate)) continue;
+        if (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0) continue;
+        var exportIds = candidate.exportSourceObjectIds || [];
+        if (!exportIds || exportIds.length === 0) continue;
+        var visualIds = [];
+        var seen = {};
+        for (var ei = 0; ei < exportIds.length; ei++) {
+            var sourceId = exportIds[ei];
+            if (sourceIsHiddenByTextOwnership(candidate, sourceId)) continue;
+            if (!_sourceHasExecutableShellMaterialMetadataInIndex(
+                    sourceId, sourceInfoById, childIdsByParentId)) {
+                continue;
+            }
+            _pushUniqueId(visualIds, seen, sourceId);
+        }
+        if (visualIds.length === 0) continue;
+        candidate.visualSourceObjectIds = _sortedNumericIds(visualIds);
+        candidate.visualSourceBackfilledFromExportSourceIds = true;
+    }
+    return candidates;
+}
+
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
     var candidates = [];
@@ -2414,6 +2582,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d12a_plan_suppressTextlessGroupChildrenBeforeObjectPlans");
     var sourceClusterQueryDiagnostics = _buildSourceClusterQueryDiagnostics(sourceClusterIndex, candidates);
     _marker(ctx.outputDir, "03d13_plan_clusterQueries");
+    candidates = _backfillVisibleCandidateVisualSources(candidates, sourceItems);
+    _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
     var plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, candidates);
     _marker(ctx.outputDir, "03d14_plan_plannerBundles");
     var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
@@ -2455,6 +2625,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         executionCandidates = pageTextlessExecutionSuppressionDiagnostics.candidates;
         _marker(ctx.outputDir, "03d16g0_plan_suppressPageTextlessGraphicGroupChildrenAfterRebuild");
     }
+    executionCandidates = _backfillVisibleCandidateVisualSources(executionCandidates, sourceItems);
+    _marker(ctx.outputDir, "03d16g0a_plan_backfillExecutionVisualSources");
     var unclaimedVisibleVectorFallbackDiagnostics =
             _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems);
     _marker(ctx.outputDir, "03d16g1_plan_warnUnclaimedVisibleVectors");

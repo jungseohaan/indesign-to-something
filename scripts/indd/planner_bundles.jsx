@@ -865,9 +865,24 @@ function _plannerBundleAllowsInlineAnchorStyleSource(candidate, slot) {
 }
 
 function _plannerBundleAllowsInlineAnchorVisualSource(candidate, slot) {
-    if (!candidate || slot !== "SHELL_SLOT") return false;
+    if (!candidate) return false;
     if (candidate.passId !== "pass.inline_objects") return false;
-    return _plannerBundleInlineObjectIsTextShell(candidate);
+    if (slot === "SHELL_SLOT") {
+        if ((!candidate.ownedTextFrameIds || candidate.ownedTextFrameIds.length === 0)
+                && (!candidate.hiddenTextFrameIds || candidate.hiddenTextFrameIds.length === 0)
+                && (!candidate.editableTextFrameIds || candidate.editableTextFrameIds.length === 0)) {
+            return true;
+        }
+        return _plannerBundleInlineObjectIsTextShell(candidate);
+    }
+    if (slot === "CONTENT_VISUAL_SLOT"
+            && (candidate.slotRole === "direct_child_shell_slot"
+                || candidate.compositeRole === "direct_child_shell_slot")
+            && candidate.textOwner === "indesign_png"
+            && candidate.completePngTextAllowed === true) {
+        return true;
+    }
+    return false;
 }
 
 function _plannerBundleSourceIdsWithoutInlineAnchorDescendants(sourceIds, clusterIndex) {
