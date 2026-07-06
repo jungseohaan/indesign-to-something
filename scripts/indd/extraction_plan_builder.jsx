@@ -1040,9 +1040,13 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             return pageWideBackgroundMinZByPage[key];
         }
         var minZ = null;
+        var pb = pageBounds(pageIndex);
         for (var i = 0; sourceItems && i < sourceItems.length; i++) {
             var src = sourceItems[i];
-            if (!sourceLooksLikePageWideSingleColorFill(src, pageIndex)) continue;
+            if (!src || !src.bounds || src.bounds.length < 4) continue;
+            if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+            if (src.isInline === true) continue;
+            if (!pb || pb.length < 4 || !boundsIntersects(src.bounds, pb)) continue;
             var z = Number(src.zOrder || 0);
             if (minZ === null || z < minZ) minZ = z;
         }
@@ -1167,9 +1171,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     function sourceHasPageWideBackgroundShapeOnPage(src, rolePageIndex) {
         if (!sourceLooksLikePageWideSingleColorFill(src, rolePageIndex)) return false;
         if (_isBackgroundLayerName(src.layerName)) return true;
-        var minZ = minPageWideBackgroundZ(rolePageIndex);
-        if (minZ === null || minZ === undefined) return false;
-        return Number(src.zOrder || 0) <= Number(minZ) + 0.001;
+        return true;
     }
 
     function sourceHasPageWideBackgroundShape(id, pageIndex) {
@@ -1218,6 +1220,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         if (!candidate || candidate.passId === "pass.page_backgrounds") return false;
         if (!candidateHasBackgroundRole(candidate)) return false;
         if (candidateHasEditableTextSignal(candidate)) return false;
+        candidate.disabled = false;
         candidate.compositeRole = "background_vector_source";
         candidate.slotRole = "background_shell_slot";
         candidate.materialization = "EXTRACTED_PNG_VECTOR";
@@ -1227,7 +1230,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         candidate.placement = "FLOATING";
         candidate.coordinateSpace = "PAGE";
         candidate.ownershipSlot = "SHELL_SLOT";
-        candidate.backgroundReason = "page_wide_single_color_lowest_source_z";
+        candidate.backgroundDeferred = false;
+        candidate.backgroundReason = "page_wide_single_color_fill_excluded_from_overlap_group";
         return true;
     }
 
@@ -2244,6 +2248,65 @@ function _mergePageTextlessGraphicGroupDiagnostics(target, appended, suppression
     }
 }
 
+function _normalizePageCoordinateCandidateBounds(candidates, sourceIndex) {
+    if (!candidates || !sourceIndex || !sourceIndex.pageBounds) return candidates || [];
+    var normalized = 0;
+
+    function hasArea(b) {
+        return b && b.length >= 4
+                && Number(b[2]) > Number(b[0])
+                && Number(b[3]) > Number(b[1]);
+    }
+
+    function intersects(a, b) {
+        if (!hasArea(a) || !hasArea(b)) return false;
+        return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
+                && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
+    }
+
+    function pageRelativeIntersection(bounds, pageBounds) {
+        if (!intersects(bounds, pageBounds)) return null;
+        var top = Math.max(Number(bounds[0]), Number(pageBounds[0]));
+        var left = Math.max(Number(bounds[1]), Number(pageBounds[1]));
+        var bottom = Math.min(Number(bounds[2]), Number(pageBounds[2]));
+        var right = Math.min(Number(bounds[3]), Number(pageBounds[3]));
+        if (bottom <= top || right <= left) return null;
+        return [
+            top - Number(pageBounds[0]),
+            left - Number(pageBounds[1]),
+            bottom - Number(pageBounds[0]),
+            right - Number(pageBounds[1])
+        ];
+    }
+
+    for (var i = 0; i < candidates.length; i++) {
+        var candidate = candidates[i];
+        if (!candidate || !hasArea(candidate.bounds)) continue;
+        if (candidate.placement === "INLINE" || candidate.coordinateSpace === "STORY_FLOW") continue;
+        if (candidate.pageIndex === null || candidate.pageIndex === undefined) continue;
+        var pb = null;
+        try { pb = sourceIndex.pageBounds(Number(candidate.pageIndex)); } catch (ePageBounds) { pb = null; }
+        if (!hasArea(pb)) continue;
+        var rel = pageRelativeIntersection(candidate.bounds, pb);
+        if (!rel) continue;
+        if (Math.abs(Number(candidate.bounds[0]) - rel[0]) < 0.001
+                && Math.abs(Number(candidate.bounds[1]) - rel[1]) < 0.001
+                && Math.abs(Number(candidate.bounds[2]) - rel[2]) < 0.001
+                && Math.abs(Number(candidate.bounds[3]) - rel[3]) < 0.001) {
+            continue;
+        }
+        candidate.sourceBounds = candidate.sourceBounds || candidate.bounds.slice(0);
+        candidate.bounds = rel;
+        normalized++;
+    }
+    try {
+        if (normalized > 0 && sourceIndex.stats) {
+            sourceIndex.stats.pageCoordinateCandidateBoundsNormalized = normalized;
+        }
+    } catch (eStats) {}
+    return candidates;
+}
+
 function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItems) {
     if (!candidates || !sourceItems || sourceItems.length === 0) {
         return { warningCount: 0, warnings: [] };
@@ -2584,6 +2647,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13_plan_clusterQueries");
     candidates = _backfillVisibleCandidateVisualSources(candidates, sourceItems);
     _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
+    candidates = _normalizePageCoordinateCandidateBounds(candidates, sourceIndex);
+    _marker(ctx.outputDir, "03d13b_plan_normalizePageCoordinateBounds");
     var plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, candidates);
     _marker(ctx.outputDir, "03d14_plan_plannerBundles");
     var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);

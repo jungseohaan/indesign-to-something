@@ -4162,7 +4162,7 @@ public final class OwnershipPlanner {
         if (sourceIds == null || sourceIds.length == 0 || data == null) return false;
         int sourceZ = minPageItemZOrder(sourceIds);
         if (sourceZ < 0) return false;
-        int lowestPageZ = minVisiblePageLevelSourceZOrder(pageIndex);
+        int lowestPageZ = minVisibleSourceZOrderOnPage(pageIndex);
         return lowestPageZ < 0 || sourceZ <= lowestPageZ;
     }
 
@@ -4184,6 +4184,18 @@ public final class OwnershipPlanner {
         for (ResolvedPageItem item : data.pageItems()) {
             if (item == null || item.sourceHidden() || item.isInline()) continue;
             if (item.parentId() != null && !item.parentId().isBlank()) continue;
+            double[] pageLocal = pageLocalBoundsOf(item, pageIndex, true);
+            if (pageLocal == null || pageLocal.length < 4 || area(pageLocal) <= 0.0) continue;
+            min = Math.min(min, item.zOrder());
+        }
+        return min == Integer.MAX_VALUE ? -1 : min;
+    }
+
+    private int minVisibleSourceZOrderOnPage(int pageIndex) {
+        if (data == null || data.pageItems() == null) return -1;
+        int min = Integer.MAX_VALUE;
+        for (ResolvedPageItem item : data.pageItems()) {
+            if (item == null || item.sourceHidden() || item.isInline()) continue;
             double[] pageLocal = pageLocalBoundsOf(item, pageIndex, true);
             if (pageLocal == null || pageLocal.length < 4 || area(pageLocal) <= 0.0) continue;
             min = Math.min(min, item.zOrder());

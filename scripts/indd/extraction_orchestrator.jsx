@@ -375,10 +375,19 @@ function _runRenderPhases(doc, ctx, allItems) {
     try {
         _marker(ctx.outputDir, "09d_extractionResults");
         _stampExportUnitsOnRenderedItems(ctx, renderedFloatingItems);
+        var textlessDiagnostics = [];
+        try {
+            textlessDiagnostics = textlessDiagnostics.concat(
+                    pageTextlessGroupResult.textlessShellDiagnostics || []);
+            textlessDiagnostics = textlessDiagnostics.concat(
+                    decoResult.textlessShellDiagnostics || []);
+        } catch (eTextlessDiagMerge) {
+            textlessDiagnostics = decoResult.textlessShellDiagnostics || [];
+        }
         var extractionResults = _buildExtractionResults(ctx, renderedFloatingItems,
                 renderedImageFrames, renderedGraphicFrames, renderedVectorFrames,
                 renderedMasterGraphics, tfShellFrames,
-                decoResult.textlessShellDiagnostics || []);
+                textlessDiagnostics);
         writeJson(ctx.outputDir + "/extraction-results.json", extractionResults);
         writeJson(ctx.outputDir + "/export-units.json", extractionResults.exportUnits);
         if (extractionResults.validation && extractionResults.validation.status !== "OK") {
@@ -434,7 +443,13 @@ function _runRenderPhases(doc, ctx, allItems) {
     resolved.renderedGraphicFrames = renderedGraphicFrames;
     resolved.renderedImageFrames   = renderedImageFrames;
     resolved.renderedFloatingItems = renderedFloatingItems;
-    resolved.textlessShellDiagnostics = decoResult.textlessShellDiagnostics || [];
+    try {
+        resolved.textlessShellDiagnostics = []
+                .concat(pageTextlessGroupResult.textlessShellDiagnostics || [])
+                .concat(decoResult.textlessShellDiagnostics || []);
+    } catch (eResolvedTextlessDiagMerge) {
+        resolved.textlessShellDiagnostics = decoResult.textlessShellDiagnostics || [];
+    }
     try {
         var _diagFile = File(ctx.outputDir + "/textless-shell-diagnostics.jsonl");
         _diagFile.encoding = "UTF-8";

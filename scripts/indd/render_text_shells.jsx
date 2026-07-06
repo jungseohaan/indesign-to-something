@@ -1014,17 +1014,67 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 
     function _renderPlannedSourceSetCompositeShell(slotPlan, page, ownershipOpts) {
         if (!slotPlan || !page || !ownershipOpts) return false;
-        if (slotPlan.materialization !== "EXTRACTED_PNG_VECTOR") return false;
+        function fail(reason, detail) {
+            var diagItem = null;
+            try {
+                var diagId = slotPlan.primarySourceObjectId;
+                if ((diagId === null || diagId === undefined)
+                        && slotPlan.exportSourceObjectIds
+                        && slotPlan.exportSourceObjectIds.length > 0) {
+                    diagId = slotPlan.exportSourceObjectIds[0];
+                }
+                if (diagId !== null && diagId !== undefined && itemById) {
+                    diagItem = itemById[String(diagId)];
+                }
+            } catch (eDiagItem) {}
+            var copiedDetail = detail || {};
+            copiedDetail.materialization = slotPlan.materialization || null;
+            copiedDetail.visualAction = slotPlan.visualAction || null;
+            copiedDetail.passId = slotPlan.passId || null;
+            copiedDetail.candidatePurpose = slotPlan.candidatePurpose || null;
+            copiedDetail.exportSourceObjectCount = slotPlan.exportSourceObjectIds
+                    ? slotPlan.exportSourceObjectIds.length : 0;
+            if (diagItem) {
+                _recordPlannedShellRenderDiagnosticForCandidate(
+                        diagItem,
+                        page,
+                        slotPlan,
+                        reason,
+                        copiedDetail);
+            } else if (textlessShellDiagnostics.length < 2000) {
+                textlessShellDiagnostics.push({
+                    id: null,
+                    pageIndex: page && page.documentOffset !== undefined ? page.documentOffset : -1,
+                    accepted: false,
+                    reason: reason,
+                    candidateId: slotPlan.candidateId || null,
+                    slotRole: slotPlan.slotRole || null,
+                    compositeRole: slotPlan.compositeRole || null,
+                    exportSourceObjectIds: slotPlan.exportSourceObjectIds || [],
+                    detail: copiedDetail
+                });
+            }
+            return false;
+        }
+        if (slotPlan.materialization !== "EXTRACTED_PNG_VECTOR") {
+            return fail("planned_source_set_render_not_png_vector", {});
+        }
         var isPageTextlessGraphicGroup = slotPlan.passId === "pass.page_textless_graphic_groups";
         if (slotPlan.visualAction !== "PLACE_TEXT_SHELL"
                 && !(isPageTextlessGraphicGroup && slotPlan.visualAction === "PLACE_FLOATING_PNG")) {
-            return false;
+            return fail("planned_source_set_render_visual_action_not_supported", {});
         }
         var exportIds = _sortedNumericIds(slotPlan.exportSourceObjectIds || []);
-        if (exportIds.length < 2) return false;
+        if (exportIds.length < 2) return fail("planned_source_set_render_not_composite", {
+            exportSourceObjectIds: exportIds
+        });
 
         var sourceItems = _itemsForSourceSet(exportIds);
-        if (sourceItems.length < 1) return false;
+        if (sourceItems.length < 1) {
+            return fail("planned_source_set_render_no_source_items", {
+                exportSourceObjectIds: exportIds
+            });
+        }
 
         var filePrefix = isPageTextlessGraphicGroup ? "page_textless_sourceset_" : "deco_sourceset_";
         var fileName = filePrefix + String(slotPlan.primarySourceObjectId || exportIds[0])
@@ -1072,8 +1122,48 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         var tempGroup = null;
         var savedOutOfScope = [];
         var ordered = sortSourceItemsByPlannedZOrder(sourceItems);
+        var groupCreateErrors = [];
+        var sourceItemDebug = [];
+        function itemParentKey(item) {
+            try {
+                var p = item ? item.parent : null;
+                if (p && p.id !== undefined && p.id !== null) return String(p.id);
+            } catch (eParentKey) {}
+            return "";
+        }
+        function groupItemsInParent(items, parentItem) {
+            if (!items || items.length === 0) return null;
+            if (items.length === 1) return items[0];
+            var group = null;
+            try {
+                if (parentItem && parentItem.groups) group = parentItem.groups.add(items);
+            } catch (eParentGroup) {
+                try { groupCreateErrors.push("parent:" + String(eParentGroup)); } catch (ePushParent) {}
+            }
+            if (!group) {
+                try { group = page.groups.add(items); }
+                catch (ePageGroup) {
+                    try { groupCreateErrors.push("page:" + String(ePageGroup)); } catch (ePushPage) {}
+                }
+            }
+            if (!group) {
+                try { group = doc.groups.add(items); }
+                catch (eDocGroup) {
+                    try { groupCreateErrors.push("doc:" + String(eDocGroup)); } catch (ePushDoc) {}
+                }
+            }
+            return group;
+        }
         try {
             for (var i = 0; i < ordered.length; i++) {
+                try {
+                    sourceItemDebug.push({
+                        id: ordered[i].id,
+                        kind: ordered[i].constructor ? ordered[i].constructor.name : null,
+                        parentId: ordered[i].parent && ordered[i].parent.id !== undefined ? ordered[i].parent.id : null,
+                        parentKind: ordered[i].parent && ordered[i].parent.constructor ? ordered[i].parent.constructor.name : null
+                    });
+                } catch (eSourceItemDebug) {}
                 var hiddenForItem = [];
                 try { hiddenForItem = _collectOutOfScopeChildrenForSourceIds(ordered[i], exportIds); } catch (eOutOfScope) {}
                 if (hiddenForItem && hiddenForItem.length > 0) {
@@ -1089,15 +1179,74 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             if (dups.length === 1) {
                 tempGroup = dups[0];
             } else {
-                try {
-                    tempGroup = page.groups.add(dups);
-                } catch (eGroupPage) {
-                    try { tempGroup = doc.groups.add(dups); } catch (eGroupDoc) {}
+                var parentBuckets = {};
+                var parentItems = {};
+                for (var dbi = 0; dbi < dups.length; dbi++) {
+                    var key = itemParentKey(dups[dbi]);
+                    if (!parentBuckets[key]) parentBuckets[key] = [];
+                    parentBuckets[key].push(dups[dbi]);
+                    try { if (!parentItems[key]) parentItems[key] = dups[dbi].parent; } catch (eParentBucket) {}
+                }
+                var bucketGroups = [];
+                for (var bucketKey in parentBuckets) {
+                    if (parentBuckets.hasOwnProperty && !parentBuckets.hasOwnProperty(bucketKey)) continue;
+                    var bucketGroup = groupItemsInParent(parentBuckets[bucketKey], parentItems[bucketKey]);
+                    if (bucketGroup) bucketGroups.push(bucketGroup);
+                }
+                if (bucketGroups.length === 1) {
+                    tempGroup = bucketGroups[0];
+                } else if (bucketGroups.length > 1) {
+                    var parentForTempGroup = null;
+                    try { parentForTempGroup = bucketGroups[0] ? bucketGroups[0].parent : null; } catch (eParentForTempGroup) {}
+                    try {
+                        if (parentForTempGroup && parentForTempGroup.groups) {
+                            tempGroup = parentForTempGroup.groups.add(bucketGroups);
+                        }
+                    } catch (eGroupParent) {
+                        try { groupCreateErrors.push("bucketParent:" + String(eGroupParent)); } catch (ePushBucketParent) {}
+                    }
+                    if (!tempGroup) {
+                        try {
+                            tempGroup = page.groups.add(bucketGroups);
+                        } catch (eGroupPage) {
+                            try { groupCreateErrors.push("bucketPage:" + String(eGroupPage)); } catch (ePushBucketPage) {}
+                            try { tempGroup = doc.groups.add(bucketGroups); }
+                            catch (eGroupDoc) {
+                                try { groupCreateErrors.push("bucketDoc:" + String(eGroupDoc)); } catch (ePushBucketDoc) {}
+                            }
+                        }
+                    }
                 }
             }
-            if (!tempGroup) return false;
+            if (!tempGroup) {
+                return fail("planned_source_set_render_group_create_failed", {
+                    exportSourceObjectIds: exportIds,
+                    duplicateCount: dups.length,
+                    groupCreateErrors: groupCreateErrors,
+                    sourceItems: sourceItemDebug
+                });
+            }
             try { tempGroup.exportFile(ExportFormat.PNG_FORMAT, outFile); } catch (eExport) {}
-            try { if (!outFile.exists || outFile.length < 512) return false; } catch (eSize) {}
+            try {
+                if (!outFile.exists || outFile.length < 512) {
+                    return fail("planned_source_set_render_export_too_small", {
+                        fileName: fileName,
+                        fileExists: outFile.exists,
+                        fileBytes: outFile.exists ? outFile.length : 0,
+                        exportSourceObjectIds: exportIds,
+                        sourceItemCount: sourceItems.length,
+                        duplicateCount: dups.length
+                    });
+                }
+            } catch (eSize) {
+                return fail("planned_source_set_render_export_size_check_failed", {
+                    fileName: fileName,
+                    error: String(eSize),
+                    exportSourceObjectIds: exportIds,
+                    sourceItemCount: sourceItems.length,
+                    duplicateCount: dups.length
+                });
+            }
 
             var exportSourceBounds = null;
             try { exportSourceBounds = arrCopy(tempGroup.visibleBounds); } catch (eBounds) {}
@@ -1177,7 +1326,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
             return true;
         } catch (e) {
-            return false;
+            return fail("planned_source_set_render_exception", {
+                error: String(e),
+                exportSourceObjectIds: exportIds,
+                sourceItemCount: sourceItems ? sourceItems.length : 0,
+                duplicateCount: dups ? dups.length : 0
+            });
         } finally {
             try {
                 if (savedOutOfScope && savedOutOfScope.length > 0) {

@@ -535,17 +535,69 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 || lower.indexOf("backdrop") >= 0;
     }
 
-    function sourceIsBackgroundVectorCandidate(info, sourceId) {
+    var pageWideSingleColorMinZByPage = {};
+
+    function sourceBoundsIntersects(a, b) {
+        if (!a || !b || a.length < 4 || b.length < 4) return false;
+        return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
+                && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
+    }
+
+    function sourceLooksLikePageWideSingleColorFill(info, pageIndex) {
         if (!info) return false;
         var kindName = String(info.kind || "");
-        if (kindName !== "Rectangle" && kindName !== "Oval"
-                && kindName !== "Polygon" && kindName !== "GraphicLine") {
-            return false;
+        if (kindName !== "Rectangle" && kindName !== "Oval" && kindName !== "Polygon") return false;
+        if (!info.bounds || info.bounds.length < 4) return false;
+        if (info.hasChildren === true || info.hasPlacedVisual === true) return false;
+        if (sourceIndex.hasPlacedVisualInSubtree(info.id) === true) return false;
+        if (info.hasVisibleFill !== true || info.hasVisibleStroke === true) return false;
+        if (info.visible === false || info.hiddenLayer === true || info.nonprinting === true) return false;
+        var pb = null;
+        try { pb = sourceIndex.pageBounds(Number(pageIndex)); } catch (ePageBounds) { pb = null; }
+        if (!pb || pb.length < 4 || !sourceBoundsIntersects(info.bounds, pb)) return false;
+        var pageWidth = Math.max(0, Number(pb[3]) - Number(pb[1]));
+        var pageHeight = Math.max(0, Number(pb[2]) - Number(pb[0]));
+        if (pageWidth <= 0 || pageHeight <= 0) return false;
+        var width = Math.max(0, Number(info.bounds[3]) - Number(info.bounds[1]));
+        var height = Math.max(0, Number(info.bounds[2]) - Number(info.bounds[0]));
+        var touchesLeft = Number(info.bounds[1]) <= Number(pb[1]) + 1.0;
+        var touchesRight = Number(info.bounds[3]) >= Number(pb[3]) - 1.0;
+        var touchesTop = Number(info.bounds[0]) <= Number(pb[0]) + 1.0;
+        var touchesBottom = Number(info.bounds[2]) >= Number(pb[2]) - 1.0;
+        var spansWidth = width >= pageWidth * 0.85 && touchesLeft && touchesRight;
+        var spansHeight = height >= pageHeight * 0.85 && touchesTop && touchesBottom;
+        return spansWidth || spansHeight;
+    }
+
+    function minPageWideSingleColorSourceZ(pageIndex) {
+        var key = String(pageIndex);
+        if (pageWideSingleColorMinZByPage.hasOwnProperty(key)) {
+            return pageWideSingleColorMinZByPage[key];
         }
+        var minZ = null;
+        var pb = null;
+        try { pb = sourceIndex.pageBounds(Number(pageIndex)); } catch (ePageBounds) { pb = null; }
+        for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+            var src = sourceItems[i];
+            if (!src || !src.bounds || src.bounds.length < 4) continue;
+            if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+            if (src.isInline === true) continue;
+            if (!pb || pb.length < 4 || !sourceBoundsIntersects(src.bounds, pb)) continue;
+            var z = Number(src.zOrder || 0);
+            if (minZ === null || z < minZ) minZ = z;
+        }
+        pageWideSingleColorMinZByPage[key] = minZ;
+        return minZ;
+    }
+
+    function sourceIsBackgroundVectorCandidate(info, sourceId, pageIndex) {
+        if (!sourceLooksLikePageWideSingleColorFill(info, pageIndex)) return false;
         if (info.hasChildren === true || info.hasPlacedVisual === true) return false;
         if (sourceIndex.hasPlacedVisualInSubtree(sourceId)) return false;
         if (sourceIndex.hasCandidateVectorPaint(sourceId) !== true) return false;
-        return sourceLayerNameIsBackground(info.layerName);
+        var minZ = minPageWideSingleColorSourceZ(pageIndex);
+        if (minZ === null || minZ === undefined) return false;
+        return Number(info.zOrder || 0) <= Number(minZ) + 0.001;
     }
 
     function sourceBoundsAreaForBase(sourceId) {
@@ -895,7 +947,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 var ownedByClipParentShell = sourceHasClipParentShellOwner(id, extractionPageIndex);
                 if (!directSiblingTextShellOwned
                         && !ownedByClipParentShell
-                        && sourceIsBackgroundVectorCandidate(itemInfo, id)) {
+                        && sourceIsBackgroundVectorCandidate(itemInfo, id, extractionPageIndex)) {
                     var backgroundVectorSourceIds = null;
                     try {
                         backgroundVectorSourceIds = sourceIndex.pageLocalSourceObjectIds(id, extractionPageIndex);
