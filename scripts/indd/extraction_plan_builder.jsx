@@ -361,6 +361,54 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
         return false;
     }
 
+    function boundsAreaForPlan(b) {
+        try {
+            if (!b || b.length < 4) return 0;
+            var h = Math.max(0, Number(b[2]) - Number(b[0]));
+            var w = Math.max(0, Number(b[3]) - Number(b[1]));
+            return h * w;
+        } catch (e) {}
+        return 0;
+    }
+
+    function boundsIntersectionAreaForPlan(a, b) {
+        try {
+            if (!a || !b || a.length < 4 || b.length < 4) return 0;
+            var t = Math.max(Number(a[0]), Number(b[0]));
+            var l = Math.max(Number(a[1]), Number(b[1]));
+            var bt = Math.min(Number(a[2]), Number(b[2]));
+            var r = Math.min(Number(a[3]), Number(b[3]));
+            if (bt <= t || r <= l) return 0;
+            return (bt - t) * (r - l);
+        } catch (e) {}
+        return 0;
+    }
+
+    function boundsIntersectionForPlan(a, b) {
+        try {
+            if (!a || !b || a.length < 4 || b.length < 4) return null;
+            var t = Math.max(Number(a[0]), Number(b[0]));
+            var l = Math.max(Number(a[1]), Number(b[1]));
+            var bt = Math.min(Number(a[2]), Number(b[2]));
+            var r = Math.min(Number(a[3]), Number(b[3]));
+            if (bt <= t || r <= l) return null;
+            return [t, l, bt, r];
+        } catch (e) {}
+        return null;
+    }
+
+    function masterEntriesStronglyOverlapForPlan(a, b, pad) {
+        if (!a || !b) return false;
+        if (!boundsIntersectForPlan(a.bounds, b.bounds, pad)) return false;
+        var overlap = boundsIntersectionAreaForPlan(a.bounds, b.bounds);
+        if (overlap <= 0.01) return false;
+        var areaA = boundsAreaForPlan(a.bounds);
+        var areaB = boundsAreaForPlan(b.bounds);
+        var minArea = Math.min(areaA, areaB);
+        if (minArea <= 0.01) return false;
+        return overlap / minArea >= 0.05;
+    }
+
     function isTopLevelMasterItemForPlan(item) {
         try {
             if (!item) return false;
@@ -379,6 +427,100 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
         return false;
     }
 
+    function masterDirectChildItemsForPlan(item) {
+        var out = [];
+        try {
+            if (!item || _itemKind(item) !== "Group") return out;
+            var rootId = item.id;
+            var nested = item.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                try {
+                    var child = nested[i];
+                    if (!child || child.id === undefined || child.id === null) continue;
+                    var parent = child.parent;
+                    if (!parent || parent.id !== rootId) continue;
+                    if (_itemKind(child) === "TextFrame") continue;
+                    if (isOnHiddenLayer(child)) continue;
+                    try { if (child.visible === false) continue; } catch (eVis) {}
+                    try { if (child.nonprinting) continue; } catch (eNp) {}
+                    out.push(child);
+                } catch (eChild) {}
+            }
+        } catch (e) {}
+        return out;
+    }
+
+    function masterGroupShouldUseChildEntriesForPlan(item, bounds, pageBounds) {
+        try {
+            if (!item || _itemKind(item) !== "Group") return false;
+            if (!bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return false;
+            var pageH = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));
+            var pageW = Math.abs(Number(pageBounds[3]) - Number(pageBounds[1]));
+            var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+            if (pageH <= 0.01 || pageW <= 0.01 || h <= 0.01 || w <= 0.01) return false;
+            if (h <= pageH * 1.25 && w <= pageW * 1.25) return false;
+            return masterDirectChildItemsForPlan(item).length > 0;
+        } catch (e) {}
+        return false;
+    }
+
+    function isPaperFillOnlyMasterMaskForPlan(item, bounds, pageBounds) {
+        try {
+            if (!item || !bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return false;
+            if (!hasVisibleFill(item)) return false;
+            if (hasVisibleStroke(item)) return false;
+            var fillName = "";
+            try { fillName = item.fillColor ? String(item.fillColor.name || "") : ""; } catch (eFill) {}
+            fillName = fillName.toLowerCase();
+            if (fillName !== "paper" && fillName !== "[paper]") return false;
+            if (_hasPlacedVisual(item)) return false;
+            try {
+                var nested = item.allPageItems;
+                for (var ni = 0; nested && ni < nested.length; ni++) {
+                    var child = nested[ni];
+                    if (!child) continue;
+                    if (_hasPlacedVisual(child)) return false;
+                    if (hasVisibleStroke(child)) return false;
+                    if (hasVisibleFill(child)) {
+                        var childFill = "";
+                        try { childFill = child.fillColor ? String(child.fillColor.name || "") : ""; } catch (eChildFill) {}
+                        childFill = childFill.toLowerCase();
+                        if (childFill !== "paper" && childFill !== "[paper]") return false;
+                    }
+                }
+            } catch (eNested) {}
+            var pageH = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));
+            var pageW = Math.abs(Number(pageBounds[3]) - Number(pageBounds[1]));
+            var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+            if (pageH <= 0.01 || pageW <= 0.01 || h <= 0.01 || w <= 0.01) return false;
+            var touchesEdge = bounds[0] <= pageBounds[0] + 0.01
+                    || bounds[1] <= pageBounds[1] + 0.01
+                    || bounds[2] >= pageBounds[2] - 0.01
+                    || bounds[3] >= pageBounds[3] - 0.01;
+            return touchesEdge && (h >= pageH * 0.5 || w >= pageW * 0.5);
+        } catch (e) {}
+        return false;
+    }
+
+    function appendPlanMasterEntries(entries, item, bounds, pageBounds) {
+        if (isPaperFillOnlyMasterMaskForPlan(item, bounds, pageBounds)) return;
+        if (masterGroupShouldUseChildEntriesForPlan(item, bounds, pageBounds)) {
+            var children = masterDirectChildItemsForPlan(item);
+            for (var ci = 0; ci < children.length; ci++) {
+                try {
+                    var cb = _itemBounds(children[ci]);
+                    if (!cb || !boundsIntersectForPlan(cb, pageBounds, 5)) continue;
+                    if (isPaperFillOnlyMasterMaskForPlan(children[ci], cb, pageBounds)) continue;
+                    entries.push({ item: children[ci], bounds: cb });
+                } catch (eChildEntry) {}
+            }
+            return;
+        }
+        entries.push({ item: item, bounds: bounds });
+    }
+
     function clusterPlanMasterEntries(entries) {
         var clusters = [];
         var used = [];
@@ -395,7 +537,7 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                     if (used[j]) continue;
                     var touches = false;
                     for (var k = 0; k < cluster.length; k++) {
-                        if (boundsIntersectForPlan(cluster[k].bounds, entries[j].bounds, pad)) {
+                        if (masterEntriesStronglyOverlapForPlan(cluster[k], entries[j], pad)) {
                             touches = true;
                             break;
                         }
@@ -475,7 +617,7 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                         if (!isTopLevelMasterItemForPlan(item)) continue;
                         var b = _itemBounds(item);
                         if (!b || !boundsIntersectForPlan(b, masterPageBounds, 5)) continue;
-                        entries.push({ item: item, bounds: b });
+                        appendPlanMasterEntries(entries, item, b, masterPageBounds);
                     } catch (eItem) {}
                 }
                 cachedClusters = [];
@@ -484,9 +626,11 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                     for (var ci = 0; ci < clusters.length; ci++) {
                         var sourceIds = collectPlanEntrySourceIds(clusters[ci]);
                         if (sourceIds.length === 0) continue;
+                        var clusterBounds = unionPlanEntryBounds(clusters[ci]) || masterPageBounds;
+                        var visibleClusterBounds = boundsIntersectionForPlan(clusterBounds, masterPageBounds) || clusterBounds;
                         cachedClusters.push({
                             sourceIds: sourceIds,
-                            bounds: unionPlanEntryBounds(clusters[ci]) || masterPageBounds,
+                            bounds: visibleClusterBounds,
                             clusterIndex: ci
                         });
                     }
@@ -3195,8 +3339,7 @@ function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
             next.hiddenTextFrameIds = removeIds(next.hiddenTextFrameIds || [], removeSet);
             next.reason = "page_textless_group_excludes_inline_carrier_visual_source";
             if ((next.exportSourceObjectIds || []).length < 1 && (next.visualSourceObjectIds || []).length < 1) {
-                next.disabled = true;
-                next.visualAction = "DROP_VISUAL";
+                continue;
             }
             pruned.push(next);
         }

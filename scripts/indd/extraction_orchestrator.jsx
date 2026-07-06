@@ -355,9 +355,11 @@ function _runRenderPhases(doc, ctx, allItems) {
     // 2.18. 마스터 스프레드 그래픽 렌더링
     _marker(ctx.outputDir, "09b_masterGraphics");
     _requireExtractionPass(ctx, "pass.master_page_graphics");
+    var masterPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.master_page_graphics");
     var renderedMasterGraphics = exportMasterPageGraphics(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-            _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.master_page_graphics"));
-    _addRenderMeta(renderedMasterGraphics, "page_object", "pass.master_page_graphics");
+            masterPngCandidates,
+            inlinePngCandidates);
+    _addRenderMeta(renderedMasterGraphics, null, "pass.master_page_graphics");
     for (var mgi = 0; mgi < renderedMasterGraphics.length; mgi++) renderedFloatingItems.push(renderedMasterGraphics[mgi]);
     try { $.gc(); } catch (e) {}
 

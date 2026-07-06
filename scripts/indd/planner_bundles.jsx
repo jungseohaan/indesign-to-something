@@ -1056,6 +1056,13 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
     if (candidate.passId === "pass.inline_objects") {
         if (_plannerBundleIsDirectChildShellSlot(candidate)) return "SHELL_SLOT";
         if (_plannerBundleInlineObjectIsTextShell(candidate)) return "SHELL_SLOT";
+        if ((!candidate.ownedTextFrameIds || candidate.ownedTextFrameIds.length === 0)
+                && (!candidate.editableTextFrameIds || candidate.editableTextFrameIds.length === 0)
+                && (!candidate.hiddenTextFrameIds || candidate.hiddenTextFrameIds.length === 0)
+                && ((candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0)
+                    || (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0))) {
+            return "CONTENT_VISUAL_SLOT";
+        }
         return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
                 ? "CONTENT_VISUAL_SLOT"
                 : "SHELL_SLOT";

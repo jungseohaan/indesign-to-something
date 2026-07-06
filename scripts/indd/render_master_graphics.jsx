@@ -5,7 +5,7 @@
  * It must not create ownership, placement, or fallback decisions.
  */
 
-function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCandidates) {
+function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCandidates, inlineCandidates) {
     // Strategy v13: 마스터 page side의 visible visual layer를 합성 PNG로 내보낸다.
     //
     // 이전 구현은 각 master page side에서 가장 큰 non-TF/non-Group item 하나만 export했다.
@@ -37,6 +37,16 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         var _mck = String(_mc.pageIndex);
         if (!masterCandidatesByPage[_mck]) masterCandidatesByPage[_mck] = [];
         masterCandidatesByPage[_mck].push(_mc);
+    }
+    var inlineCandidatesByPage = {};
+    for (var _ici = 0; inlineCandidates && _ici < inlineCandidates.length; _ici++) {
+        var _ic = inlineCandidates[_ici];
+        if (!_ic || _ic.pageIndex === null || _ic.pageIndex === undefined) continue;
+        if (_ic.placement && _ic.placement !== "INLINE") continue;
+        if (_ic.visualAction && _ic.visualAction !== "PLACE_INLINE_PNG") continue;
+        var _ick = String(_ic.pageIndex);
+        if (!inlineCandidatesByPage[_ick]) inlineCandidatesByPage[_ick] = [];
+        inlineCandidatesByPage[_ick].push(_ic);
     }
 
     // masterSpreadId → [{docIdx, masterPageIdx}, ...] 빌드
@@ -106,6 +116,31 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                    (b[3] - b[1]) > VISIBLE_INTERSECTION_EPS;
         } catch (e) {}
         return false;
+    }
+
+    function _boundsArea(b) {
+        try {
+            if (!b || b.length < 4) return 0;
+            var h = Math.max(0, Number(b[2]) - Number(b[0]));
+            var w = Math.max(0, Number(b[3]) - Number(b[1]));
+            return h * w;
+        } catch (e) {}
+        return 0;
+    }
+
+    function _boundsIntersectionArea(a, b) {
+        var inter = _boundsIntersection(a, b);
+        return inter ? _boundsArea(inter) : 0;
+    }
+
+    function _masterEntriesStronglyOverlap(a, b, pad) {
+        if (!a || !b) return false;
+        if (!_boundsIntersect(a.bounds, b.bounds, pad)) return false;
+        var overlap = _boundsIntersectionArea(a.bounds, b.bounds);
+        if (overlap <= VISIBLE_INTERSECTION_EPS) return false;
+        var minArea = Math.min(_boundsArea(a.bounds), _boundsArea(b.bounds));
+        if (minArea <= VISIBLE_INTERSECTION_EPS) return false;
+        return overlap / minArea >= 0.05;
     }
 
     function _boundsIntersection(a, b) {
@@ -186,7 +221,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                     if (used[j]) continue;
                     var touches = false;
                     for (var k = 0; k < cluster.length; k++) {
-                        if (_boundsIntersect(cluster[k].bounds, pageItems[j].bounds, pad)) {
+                        if (_masterEntriesStronglyOverlap(cluster[k], pageItems[j], pad)) {
                             touches = true;
                             break;
                         }
@@ -314,6 +349,115 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return false;
     }
 
+    function _directMasterGroupChildItems(item) {
+        var out = [];
+        try {
+            if (!item || !item.constructor || item.constructor.name !== "Group") return out;
+            var rootId = item.id;
+            var nested = item.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                try {
+                    var child = nested[i];
+                    if (!child || child.id === undefined || child.id === null) continue;
+                    var parent = child.parent;
+                    if (!parent || parent.id !== rootId) continue;
+                    if (child.constructor && child.constructor.name === "TextFrame") continue;
+                    if (isOnHiddenLayer(child)) continue;
+                    try { if (child.visible === false) continue; } catch (eVis) {}
+                    try { if (child.nonprinting) continue; } catch (eNp) {}
+                    out.push(child);
+                } catch (eChild) {}
+            }
+        } catch (e) {}
+        return out;
+    }
+
+    function _masterHasPlacedVisual(item) {
+        try { if (item.images && item.images.length > 0) return true; } catch (eImage) {}
+        try { if (item.pdfs && item.pdfs.length > 0) return true; } catch (ePdf) {}
+        try { if (item.epss && item.epss.length > 0) return true; } catch (eEps) {}
+        return false;
+    }
+
+    function _masterGroupShouldUseChildEntries(item, bounds, pageBounds) {
+        try {
+            if (!item || !item.constructor || item.constructor.name !== "Group") return false;
+            if (!bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return false;
+            var pageH = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));
+            var pageW = Math.abs(Number(pageBounds[3]) - Number(pageBounds[1]));
+            var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+            if (pageH <= 0.01 || pageW <= 0.01 || h <= 0.01 || w <= 0.01) return false;
+            if (h <= pageH * 1.25 && w <= pageW * 1.25) return false;
+            return _directMasterGroupChildItems(item).length > 0;
+        } catch (e) {}
+        return false;
+    }
+
+    function _isPaperFillOnlyMasterMask(item, bounds, pageBounds) {
+        try {
+            if (!item || !bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return false;
+            if (!hasVisibleFill(item)) return false;
+            if (hasVisibleStroke(item)) return false;
+            var fillName = "";
+            try { fillName = item.fillColor ? String(item.fillColor.name || "") : ""; } catch (eFill) {}
+            fillName = fillName.toLowerCase();
+            if (fillName !== "paper" && fillName !== "[paper]") return false;
+            if (_masterHasPlacedVisual(item)) return false;
+            try {
+                var nested = item.allPageItems;
+                for (var ni = 0; nested && ni < nested.length; ni++) {
+                    var child = nested[ni];
+                    if (!child) continue;
+                    if (_masterHasPlacedVisual(child)) return false;
+                    if (hasVisibleStroke(child)) return false;
+                    if (hasVisibleFill(child)) {
+                        var childFill = "";
+                        try { childFill = child.fillColor ? String(child.fillColor.name || "") : ""; } catch (eChildFill) {}
+                        childFill = childFill.toLowerCase();
+                        if (childFill !== "paper" && childFill !== "[paper]") return false;
+                    }
+                }
+            } catch (eNested) {}
+            var pageH = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));
+            var pageW = Math.abs(Number(pageBounds[3]) - Number(pageBounds[1]));
+            var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+            if (pageH <= 0.01 || pageW <= 0.01 || h <= 0.01 || w <= 0.01) return false;
+            var touchesEdge = bounds[0] <= pageBounds[0] + 0.01
+                    || bounds[1] <= pageBounds[1] + 0.01
+                    || bounds[2] >= pageBounds[2] - 0.01
+                    || bounds[3] >= pageBounds[3] - 0.01;
+            return touchesEdge && (h >= pageH * 0.5 || w >= pageW * 0.5);
+        } catch (e) {}
+        return false;
+    }
+
+    function _appendMasterPageEntries(pageItems, item, bounds, pageBounds, sourceDepthOrder) {
+        if (_isPaperFillOnlyMasterMask(item, bounds, pageBounds)) return;
+        if (_masterGroupShouldUseChildEntries(item, bounds, pageBounds)) {
+            var children = _directMasterGroupChildItems(item);
+            for (var ci = 0; ci < children.length; ci++) {
+                try {
+                    var cb = _masterItemBounds(children[ci]);
+                    if (!cb || !_masterItemBelongsToPage(cb, pageBounds)) continue;
+                    if (_isPaperFillOnlyMasterMask(children[ci], cb, pageBounds)) continue;
+                    pageItems.push({
+                        item: children[ci],
+                        bounds: cb,
+                        sourceDepthOrder: (sourceDepthOrder * 1000) + (children.length - 1 - ci)
+                    });
+                } catch (eChildEntry) {}
+            }
+            return;
+        }
+        pageItems.push({
+            item: item,
+            bounds: bounds,
+            sourceDepthOrder: sourceDepthOrder
+        });
+    }
+
     function _collectIdsForMasterItems(entries) {
         var ids = [], seen = {};
         for (var i = 0; i < entries.length; i++) {
@@ -374,6 +518,25 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             return _candidateMatch(bestSuperset, "candidate_source_set_contains_master_cluster");
         }
         return null;
+    }
+
+    function _findInlineCandidateForMasterDirectSources(pageIndex, sourceIds) {
+        if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return null;
+        if (!sourceIds || sourceIds.length === 0) return null;
+        var list = inlineCandidatesByPage[String(pageIndex)] || [];
+        var best = null;
+        var bestSize = 999999;
+        for (var i = 0; i < list.length; i++) {
+            var candidate = list[i];
+            if (!candidate || !candidate.sourceObjectIds || candidate.sourceObjectIds.length === 0) continue;
+            if (!_sourceSetContainsAll(sourceIds, candidate.sourceObjectIds)) continue;
+            var candidateSize = candidate.sourceObjectIds.length;
+            if (candidateSize < bestSize) {
+                best = candidate;
+                bestSize = candidateSize;
+            }
+        }
+        return best ? _candidateMatch(best, "candidate_inline_source_set_contained_by_master_direct") : null;
     }
 
     function _isDynamicMasterTextFrame(tf) {
@@ -517,11 +680,13 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                         // source depth evidence. Earlier entries are visually
                         // above later master background faces, so convert the
                         // order into an HWPX-increasing z depth once here.
-                        pageItems.push({
-                            item: masterGraphicItems[pii],
-                            bounds: pib,
-                            sourceDepthOrder: masterGraphicItems.length - 1 - pii
-                        });
+                        _appendMasterPageEntries(
+                            pageItems,
+                            masterGraphicItems[pii],
+                            pib,
+                            mpBnds,
+                            masterGraphicItems.length - 1 - pii
+                        );
                     }
                 } catch (e) {}
             }
@@ -699,13 +864,9 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                             relBottom: directVisibleBounds[2] - mpBnds[0],
                             relRight:  directVisibleBounds[3] - mpBnds[1],
                             sourceObjectIds: directSourceIds,
-                            sourceZOrder: directEntry.sourceDepthOrder
+                            sourceZOrder: directEntry.sourceDepthOrder,
+                            masterDirectChildCluster: true
                         };
-                        var directInlineAnchorSourceId = _directInlineAnchorSourceId(directEntry, directSourceIds);
-                        if (directInlineAnchorSourceId !== null && directInlineAnchorSourceId !== undefined) {
-                            directCluster.inlineAnchorSourceObjectId = directInlineAnchorSourceId;
-                            directCluster.inlineSourceTreeClosed = true;
-                        }
                         if (directHiddenTextSourceIds.length > 0) {
                             directCluster.hiddenTextFrameIds = directHiddenTextSourceIds;
                         }
@@ -761,7 +922,12 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                         master.relBottom,
                         master.relRight
                     ])) continue;
-                var masterCandidateMatch = _findMasterCandidateForSources(
+                var inlineCandidateMatch = master.masterDirectChildCluster === true
+                        ? _findInlineCandidateForMasterDirectSources(
+                                pgEntry.docIdx,
+                                master.sourceObjectIds || [parseInt(msId2, 10)])
+                        : null;
+                var masterCandidateMatch = inlineCandidateMatch || _findMasterCandidateForSources(
                         pgEntry.docIdx,
                         master.sourceObjectIds || [parseInt(msId2, 10)]);
                 if (!masterCandidateMatch) {
@@ -769,6 +935,16 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                         " cluster=" + mi + ": no applied-page candidate at result creation");
                     continue;
                 }
+                var matchedCandidate = masterCandidateMatch.candidate || null;
+                var matchedInline = inlineCandidateMatch && matchedCandidate;
+                var resultSourceObjectIds = matchedInline && matchedCandidate.sourceObjectIds
+                        && matchedCandidate.sourceObjectIds.length > 0
+                        ? matchedCandidate.sourceObjectIds
+                        : (master.sourceObjectIds || [parseInt(msId2, 10)]);
+                var resultExportSourceObjectIds = matchedInline && matchedCandidate.exportSourceObjectIds
+                        && matchedCandidate.exportSourceObjectIds.length > 0
+                        ? matchedCandidate.exportSourceObjectIds
+                        : resultSourceObjectIds;
                 dbg("  result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
                     " cluster=" + mi +
                     " rel=["+master.relTop+","+master.relLeft+","+master.relBottom+","+master.relRight+"]");
@@ -786,20 +962,31 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                     zOrder: master.sourceZOrder !== null && master.sourceZOrder !== undefined
                             ? master.sourceZOrder
                             : mi,
-                    isMasterGraphic: true
+                    isMasterGraphic: !matchedInline,
+                    type: matchedInline ? "inline_object" : "page_object",
+                    placementRole: matchedInline ? "inline_object" : null,
+                    placement: matchedInline ? "INLINE" : "FLOATING",
+                    coordinateSpace: matchedInline ? "STORY_FLOW" : "PAGE",
+                    planPassId: matchedInline ? "pass.inline_objects" : "pass.master_page_graphics",
+                    slotRole: matchedInline
+                            ? (matchedCandidate.slotRole || matchedCandidate.ownershipSlot || "CONTENT_VISUAL_SLOT")
+                            : null
                 }, null, {
-                    sourceObjectIds: master.sourceObjectIds || [parseInt(msId2, 10)],
-                    editableTextFrameIds: pageTextFrameIds,
-                    textFrameIds: pageTextFrameIds,
-                    hiddenTextFrameIds: pageTextFrameIds,
-                    textHiddenBeforeExport: pageTextFrameIds.length > 0,
-                    textOwner: pageTextFrameIds.length > 0 ? "hwpx_tf" : "none",
+                    sourceObjectIds: resultSourceObjectIds,
+                    exportSourceObjectIds: resultExportSourceObjectIds,
+                    editableTextFrameIds: matchedInline ? [] : pageTextFrameIds,
+                    textFrameIds: matchedInline ? [] : pageTextFrameIds,
+                    hiddenTextFrameIds: matchedInline ? [] : pageTextFrameIds,
+                    textHiddenBeforeExport: matchedInline ? false : pageTextFrameIds.length > 0,
+                    textOwner: matchedInline ? "none" : (pageTextFrameIds.length > 0 ? "hwpx_tf" : "none"),
                     containsText: false,
                     containsEditableText: false,
                     placementAllowed: true,
-                    reason: pageTextFrameIds.length > 0
+                    reason: matchedInline
+                            ? "inline_graphic_only"
+                            : (pageTextFrameIds.length > 0
                             ? "master_graphic_textless"
-                            : "master_graphic"
+                            : "master_graphic")
                 }));
             }
         }

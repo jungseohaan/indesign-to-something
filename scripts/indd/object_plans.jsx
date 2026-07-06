@@ -799,7 +799,9 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         layoutOnlyInlineSlot: bundle.layoutOnlyInlineSlot === true,
         sourceInlineFlow: bundle.sourceInlineFlow === true,
         inlineCompositeLayoutDescendant: bundle.inlineCompositeLayoutDescendant === true,
-        inlineAnchorSourceObjectId: bundle.inlineAnchorSourceObjectId || null,
+        inlineAnchorSourceObjectId: bundle.sourceInlineFlow === true
+                ? (bundle.inlineAnchorSourceObjectId || null)
+                : null,
         inlineSourceTreeClosed: bundle.inlineSourceTreeClosed === true,
         connectorDecorationVisual: bundle.connectorDecorationVisual === true,
         primarySourceObjectId: bundle.primarySourceObjectId !== undefined
@@ -1054,7 +1056,7 @@ function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
 }
 
 function _objectPlanPlacement(bundle) {
-    if (bundle && bundle.inlineAnchorSourceObjectId) return "INLINE";
+    if (bundle && bundle.inlineAnchorSourceObjectId && bundle.sourceInlineFlow === true) return "INLINE";
     if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
     if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";

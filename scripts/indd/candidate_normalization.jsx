@@ -1225,6 +1225,8 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             return null;
         }
         var candidateSourceSet = _sourceIdSet(candidate.sourceObjectIds);
+        var primaryTargetId = primaryNonGroupShellExportTargetId(candidate, editableIds, candidateSourceSet);
+        if (primaryTargetId !== null && primaryTargetId !== undefined) return primaryTargetId;
         var best = null;
         var bestArea = Number.MAX_VALUE;
         for (var i = 0; i < candidate.sourceObjectIds.length; i++) {
@@ -1245,6 +1247,20 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             }
         }
         return best;
+    }
+
+    function primaryNonGroupShellExportTargetId(candidate, editableIds, candidateSourceSet) {
+        var primaryId = candidate ? candidate.primarySourceObjectId : null;
+        if (primaryId === null || primaryId === undefined) return null;
+        if (!candidateSourceSet || !candidateSourceSet[String(primaryId)]) return null;
+        if (!sourceCanBeShellExportTarget(primaryId, candidateSourceSet)) return null;
+        var primarySource = sourceInfoById[String(primaryId)];
+        var kind = primarySource ? String(primarySource.kind || "") : "";
+        if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") return null;
+        for (var ti = 0; ti < editableIds.length; ti++) {
+            if (!sourceContainsSourceId(primaryId, editableIds[ti])) return null;
+        }
+        return primaryId;
     }
 
     function sourceIdsInSubtree(candidate, rootId) {

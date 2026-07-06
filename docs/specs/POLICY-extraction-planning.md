@@ -226,6 +226,12 @@ The final candidate gate is stricter:
   direct source export is allowed only as the same applied-page planned source
   material, not as a fallback channel or a replacement candidate. Page-less
   master candidates are not valid for visible export results.
+- master source origin does not override placement ownership. When an applied
+  master source object is also the direct source of a planned
+  `pass.inline_objects` story-flow candidate, `pass.master_page_graphics` must
+  not stamp it as a floating master result. If InDesign requires a direct master
+  export to produce the pixels, that result is stamped with the inline
+  candidate, `placement=INLINE`, and `coordinateSpace=STORY_FLOW`.
 - master page graphic candidates are `TEXTLESS_CANDIDATE` exports. Master
   TextFrames in the planned source cluster are hidden before export even when
   they do not have a document `parentPage`; the result row records those source

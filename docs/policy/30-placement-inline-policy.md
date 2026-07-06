@@ -75,6 +75,13 @@ Placement and coordinate space are a single source decision.
   marks the object as page-positioned, including explicit
   `AnchoredPosition="Anchored"` or the table-cell external label condition
   above.
+- The same rule applies when the source object is authored on a master spread.
+  Master authorship is provenance. If IDML story tokens or resolved story flow
+  declare the source as the direct inline slot owner, `pass.inline_objects`
+  remains the visible ownership channel. A master direct export may provide the
+  PNG bytes for that inline `RenderUnit`, but it must be stamped back onto the
+  inline candidate and must not become a separate `pass.master_page_graphics`
+  floating owner.
 - When the direct inline anchor paragraph contains visible story text before or
   after the anchor, the shell must flow with that paragraph. Stage 1 may choose
   the higher-quality `page_object` `deco_*` extracted shell file as the visible

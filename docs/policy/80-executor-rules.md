@@ -68,6 +68,11 @@ Text Builder:
   `page_object` render is the canonical extracted shell for an inline source,
   the table-cell executor attaches that shell material to the same inline shell
   carrier.
+- If Stage 1 says a master-origin source is a story-flow inline visual, a
+  master direct export may be used only as that inline plan's material file.
+  The executor must stamp the result with the inline candidate, inline
+  placement, and story-flow coordinate space. It must not also emit a floating
+  master-page graphic owner for the same source slot.
 - Code must not rebuild cell text from a resolved story as a fallback. Missing
   cell text or missing inline anchors are Stage 1/Text Builder planning defects,
   not an invitation for executor recovery.

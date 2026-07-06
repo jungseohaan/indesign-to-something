@@ -25,6 +25,11 @@
 - One source bundle slot has one visible owner.
 - One TextFrame cannot be both `OWNED_BY_PNG` and `OWNED_BY_HWPX_TEXT`.
 - The same source bundle slot cannot be emitted both inline and floating.
+- A source slot with `STORY_FLOW` inline ownership cannot also be emitted as a
+  visible `pass.master_page_graphics` floating owner, even when the source
+  object was authored on a master spread. Master-origin inline material may use
+  a master direct-export file only when the result is stamped back to the inline
+  candidate/plan.
 - Editable HWPX text/table structure must not be covered by textless graphic
   material in the HWPX execution plane. If exact source occlusion is required,
   the affected source bundle must be planned as `COMPLETE_PNG` instead of

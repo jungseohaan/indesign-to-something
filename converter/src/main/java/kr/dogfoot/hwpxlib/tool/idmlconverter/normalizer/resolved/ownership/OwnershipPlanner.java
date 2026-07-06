@@ -11239,6 +11239,8 @@ public final class OwnershipPlanner {
 
     private boolean isStoryFlowInlineVisualMaterialSlot(ObjectPlan plan) {
         if (!isVisibleRenderedVisual(plan)) return false;
+        if ("pass.master_page_graphics".equals(safe(plan.planPassId))) return false;
+        if (isMasterPageGraphicPlan(plan)) return false;
         if (plan.placement != Placement.FLOATING || plan.coordinateSpace != CoordinateSpace.PAGE) {
             return false;
         }
@@ -11253,6 +11255,25 @@ public final class OwnershipPlanner {
         if (hasPlacedContentSourceTree(plan)) return false;
         if (hasTextFrameSourceTree(plan)) return false;
         return true;
+    }
+
+    private static boolean isMasterPageGraphicPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        String reason = safe(plan.reason);
+        if ("master_graphic".equals(reason)
+                || "master_graphic_textless".equals(reason)
+                || "master_page_graphic".equals(reason)
+                || "master_side_composite".equals(reason)) {
+            return true;
+        }
+        String kind = safe(plan.kind);
+        if (kind.contains("pass.master_page_graphics")) return true;
+        String candidateId = safe(plan.candidateId);
+        if (candidateId.contains("pass.master_page_graphics")) return true;
+        String file = safe(plan.file);
+        return file.contains("rendered_frames/master_")
+                || file.startsWith("master_")
+                || file.contains("/master_");
     }
 
     private static boolean isShellOnlyVisualSlot(ObjectPlan plan) {
@@ -11706,7 +11727,7 @@ public final class OwnershipPlanner {
         if (visualIds != null) {
             for (int sourceId : visualIds) ids.add(sourceId);
         }
-        if (isExtractedTextShellOwner(plan)) {
+        if (isExtractedTextShellOwner(plan) && ids.isEmpty()) {
             RenderedGroup rendered = renderedGroupForPlan(plan);
             if (rendered != null && rendered.exportSourceObjectIds() != null) {
                 for (int sourceId : rendered.exportSourceObjectIds()) ids.add(sourceId);

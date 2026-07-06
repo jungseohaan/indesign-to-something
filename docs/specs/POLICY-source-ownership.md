@@ -57,6 +57,10 @@ policy; their usable rules have been consolidated here.
     - invariants
     - forbidden patterns
     - cleanup direction
+12. [Implementation Audit Map](../policy/95-implementation-audit.md)
+    - source ownership code paths
+    - current conformance status
+    - remaining cleanup targets
 
 ## Canonical Shortcut
 
@@ -96,6 +100,11 @@ When a page issue is reported, use this lookup first:
   layer, z-order, bounds, and style.
 - Page number, literal text, object size, character count, color sampling,
   pixel analysis, and occlusion heuristics are not ownership reasons.
+- Source origin and placement owner are separate facts. A graphic authored on a
+  master spread is not automatically `pass.master_page_graphics`; if IDML story
+  flow owns its visible slot, its `ObjectPlan` remains `placement=INLINE` and
+  `coordinateSpace=STORY_FLOW` even when the executable pixels are obtained
+  through an applied-master direct export.
 - IDML, resolved metadata, this index, and the linked canonical policy modules
   are the only ownership truth.
 - If a requested fix would add a page/text/coordinate/color/symptom condition,
@@ -158,6 +167,26 @@ The Java ownership enums are policy terms, not legacy SPEC terms:
   `DECORATION` and `CONTENT` may exist only as diagnostics or migration hints;
   they must not create foreground graphic exceptions above editable text/table
   structure.
+
+## Terminology Reconciliation
+
+Older code and diagnostics may still mention four visual roles:
+`BACKGROUND`, `DECORATION`, `CONTENT`, and `TEXT`. They are source-role
+diagnostics only. They do not create four HWPX execution layers.
+
+The executable HWPX policy has exactly three strata:
+
+1. `BACKGROUND_GRAPHIC`: planned page/spread background material.
+2. `TEXTLESS_IMAGE_GROUP`: all ordinary non-text source graphics, including
+   historical decoration/content roles, table/cell decoration, masks, charts,
+   photos, shells, badges, and master page graphic fragments.
+3. `TEXT_TABLE_STRUCTURE`: editable HWPX text and editable HWPX table
+   structure.
+
+If a rule appears to require a separate decoration/content foreground layer,
+that rule is legacy wording. Stage 1 must instead decide whether the source
+bundle is editable HWPX text/table, a textless image group, a background
+graphic, or a complete PNG that intentionally gives up editability.
 
 If a new enum value seems necessary, first update the canonical policy module
 that defines the source-owned behavior, then add validation showing why the

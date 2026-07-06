@@ -19,3 +19,4 @@ That file links to these modules and makes them canonical by reference.
 - [70-layer-zdepth.md](70-layer-zdepth.md): background graphics, textless image grouping, text/table structure, and source z-depth
 - [80-executor-rules.md](80-executor-rules.md): executor behavior and forbidden fallback paths
 - [90-validation-invariants.md](90-validation-invariants.md): invariants, forbidden patterns, cleanup direction
+- [95-implementation-audit.md](95-implementation-audit.md): ownership code path audit and cleanup targets

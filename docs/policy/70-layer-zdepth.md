@@ -40,7 +40,10 @@ editable text and table structure sources are hidden. A page may therefore have
 one or more background graphics plus one ordinary full-page graphic image or
 several non-overlapping ordinary graphic images. Master-page graphics are
 excluded from these ordinary page graphic groups and keep separate
-applied-master fragment ownership.
+applied-master fragment ownership. Master-page grouping is limited to
+master-origin material whose placement owner is page/floating; master-origin
+story-flow inline slots are excluded from master graphic grouping and execute
+through their inline `ObjectPlan`.
 
 Graphic grouping rules:
 
@@ -236,6 +239,10 @@ Default HWPX strata:
   clusters is only pixel preparation; it must carry the source depth forward so
   a local master panel can remain above a broader master backdrop when the IDML
   source order says so.
+- A direct master fragment that materializes a story-flow inline source keeps
+  the inline plan's placement and coordinate space. Its master source depth is
+  diagnostic/source ordering metadata inside the extracted asset; it cannot
+  convert the fragment into a floating master-page owner.
 - A single pure `BACKGROUND` visual slot may materialize as page-local visual
   fragments on multiple pages when the source bounds physically cross a
   page/spread boundary. This is not a new ownership decision: every fragment

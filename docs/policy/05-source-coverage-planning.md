@@ -153,6 +153,24 @@ Master page material is planned in two steps:
    `SourceBundle` or bundle fragment with its own page index, bounds,
    placement, and slot owners.
 
+Master source origin is provenance, not placement ownership.
+
+- `pass.master_page_graphics` owns only applied-master material whose placement
+  owner is page/floating. It groups master-origin graphics with other
+  master-origin page/floating graphics for the same applied page fragment.
+- A master-origin source object that appears in IDML story flow as an inline
+  slot is owned by the story-flow channel. Its visible `RenderUnit` and
+  `ObjectPlan` remain `placement=INLINE`, `coordinateSpace=STORY_FLOW`, and
+  `planPassId=pass.inline_objects`.
+- If InDesign can render that story-flow inline source only through an
+  applied-master direct export, the exported PNG is still the executable
+  material for the inline `RenderUnit`. It must be stamped with the inline
+  candidate/plan identity, not re-owned as a floating master graphic.
+- A broad master cluster may keep such inline source ids as provenance only
+  when its visible material proves that those pixels are absent. Otherwise the
+  cluster must be narrowed or dropped; it must not become a second visible owner
+  for the same inline source slot.
+
 A directly exported master fragment is valid only when it is the materialization
 of an existing page-local `RenderUnit`. Rendering a direct master file and then
 adding an ObjectPlan afterward is not allowed.
