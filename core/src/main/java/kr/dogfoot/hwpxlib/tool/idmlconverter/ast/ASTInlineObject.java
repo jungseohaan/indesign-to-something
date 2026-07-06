@@ -79,6 +79,11 @@ public class ASTInlineObject extends ASTInlineItem {
     // inline_object 타입 (IDML AnchoredPosition=InlineOrAbove)은 항상 true
     private boolean keepInline = false;
 
+    // true이면 HWPX 문단 줄상자 높이에 참여한다.
+    // 작은 배지/표식은 글자처럼 줄높이에 참여하지만, 닫힌 inline visual carrier
+    // (도표/삽화 PNG)는 story 흐름에는 남아도 문단 leading을 이미지 높이로 키우지 않는다.
+    private boolean affectsLineSpacing = true;
+
     // Stage 1 ownership plan execution hints. Inline writers must not discard
     // source z/layer because inline shells can overlap page-positioned carriers.
     private int plannedZOrder = Integer.MIN_VALUE;
@@ -237,6 +242,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public boolean keepInline() { return keepInline; }
     public void keepInline(boolean v) { this.keepInline = v; }
+
+    public boolean affectsLineSpacing() { return affectsLineSpacing; }
+    public void affectsLineSpacing(boolean v) { this.affectsLineSpacing = v; }
 
     public int plannedZOrder() { return plannedZOrder; }
     public void plannedZOrder(int v) { this.plannedZOrder = v; }

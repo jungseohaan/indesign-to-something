@@ -130,7 +130,9 @@ function _executionCandidateContractFields() {
         "reason",
         "objectPlanId",
         "renderUnitId",
-        "renderUnitSlotIdentityKey"
+        "renderUnitSlotIdentityKey",
+        "inlineAnchorSourceObjectId",
+        "inlineSourceTreeClosed"
     ];
 }
 
@@ -184,6 +186,8 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     candidate.placement = objectPlan.placement || null;
     candidate.coordinateSpace = objectPlan.coordinateSpace || null;
     candidate.ownershipSlot = objectPlan.ownershipSlot || candidate.ownershipSlot || null;
+    candidate.inlineAnchorSourceObjectId = objectPlan.inlineAnchorSourceObjectId || null;
+    candidate.inlineSourceTreeClosed = objectPlan.inlineSourceTreeClosed === true;
     if (objectPlan.textAction === "OWNED_BY_HWPX_TEXT") {
         candidate.textOwner = "hwpx_tf";
         candidate.requiresTextHidden = objectPlan.visualAction !== "DROP_VISUAL";

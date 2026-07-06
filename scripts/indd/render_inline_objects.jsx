@@ -163,12 +163,10 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         var inFill = inItem.fillColor ? inItem.fillColor.name : "None";
                         var inStroke = inItem.strokeColor ? inItem.strokeColor.name : "None";
                         var inSW = inItem.strokeWeight || 0;
-                        var inContent = inItem.contentType ? inItem.contentType.toString() : "";
                         // 채움/선 없고, 그래픽 콘텐츠 없는 빈 프레임 → 스페이서
                         if (!plannedPageVisual &&
                             (inFill === "None" || inFill === "[None]") &&
-                            ((inStroke === "None" || inStroke === "[None]") || inSW === 0) &&
-                            inContent !== "1886548852" /* GraphicType with image */ ) {
+                            ((inStroke === "None" || inStroke === "[None]") || inSW === 0)) {
                             // allGraphics 확인 — 이미지가 있으면 건너뛰지 않음
                             var hasGraphic = false;
                             try { hasGraphic = inItem.allGraphics && inItem.allGraphics.length > 0; } catch(eg) {}

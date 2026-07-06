@@ -275,6 +275,7 @@ public class ResolvedToASTBuilder {
             if (plans == null) return;
             Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
             Map<String, RenderedGroup> renderedByPageAndId = renderedGroupsByPageAndId();
+            Map<String, RenderedGroup> renderedByPageAndSourceId = renderedGroupsByPageAndSourceId();
             Set<String> dropClipParentSourceSetCandidateIds = clipParentSourceSetDropCandidateIds(plans);
             int imported = 0;
             for (JsonElement element : plans) {
@@ -289,7 +290,8 @@ public class ResolvedToASTBuilder {
                 }
                 if (plan == null) {
                     plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId,
-                            renderedByPageAndId, dropClipParentSourceSetCandidateIds);
+                            renderedByPageAndId, renderedByPageAndSourceId,
+                            dropClipParentSourceSetCandidateIds);
                 }
                 if (plan == null) {
                     plan = nativeVectorShapePlanFromJson(planJson);
@@ -298,6 +300,7 @@ public class ResolvedToASTBuilder {
                 ctx.addOwnershipPlan(plan);
                 imported++;
             }
+            normalizeClosedInlineCarrierFlowTextPlans();
             if (imported > 0) {
                 System.err.println("[ResolvedToASTBuilder] imported planner-declared object plans=" + imported);
             }
@@ -305,6 +308,126 @@ public class ResolvedToASTBuilder {
             System.err.println("[ResolvedToASTBuilder] object-plans import skipped: "
                     + e.getMessage());
         }
+    }
+
+    private void normalizeClosedInlineCarrierFlowTextPlans() {
+        if (ctx == null || ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()
+                || resolvedData == null) {
+            return;
+        }
+        Set<Integer> flowTextFrameIds = closedInlineCarrierFlowTextFrameIds();
+        if (flowTextFrameIds.isEmpty()) return;
+        for (int i = 0; i < ctx.ownershipPlans.size(); i++) {
+            ObjectPlan plan = ctx.ownershipPlans.get(i);
+            if (!isFloatingHwpxTextPlan(plan)) continue;
+            if (!containsAny(plan.ownedTextFrameIds, flowTextFrameIds)
+                    && !flowTextFrameIds.contains(plan.domId)) {
+                continue;
+            }
+            ctx.ownershipPlans.set(i,
+                    plan.withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW));
+        }
+    }
+
+    private Set<Integer> closedInlineCarrierFlowTextFrameIds() {
+        Set<Integer> out = new HashSet<>();
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null
+                    || plan.placement != Placement.INLINE
+                    || plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            RenderedGroup rg = renderedGroupForImportedPlan(plan);
+            if (rg == null || !rg.inlineSourceTreeClosed()) continue;
+            double[] primaryVisualBounds = primaryVisualSourceBounds(rg);
+            if (!validBounds(primaryVisualBounds)) continue;
+            int[] hiddenIds = plan.hiddenVisualSourceObjectIds != null && plan.hiddenVisualSourceObjectIds.length > 0
+                    ? plan.hiddenVisualSourceObjectIds
+                    : rg.hiddenVisualSourceObjectIds();
+            if (hiddenIds == null) continue;
+            for (int hiddenId : hiddenIds) {
+                ResolvedTextFrame tf = resolvedData.getTextFrame(String.valueOf(hiddenId));
+                if (tf == null || tf.sourceHidden()) continue;
+                double[] tb = tf.geometricBounds();
+                if (!validBounds(tb)) continue;
+                double centerY = (tb[0] + tb[2]) / 2.0;
+                if (centerY < primaryVisualBounds[0] || centerY > primaryVisualBounds[2]) {
+                    out.add(hiddenId);
+                }
+            }
+        }
+        return out;
+    }
+
+    private RenderedGroup renderedGroupForImportedPlan(ObjectPlan plan) {
+        if (plan == null || resolvedData == null) return null;
+        for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+            if (renderedGroupMatchesImportedPlan(plan, rg)) return rg;
+        }
+        for (RenderedGroup rg : resolvedData.allRenderedGraphicFrames()) {
+            if (renderedGroupMatchesImportedPlan(plan, rg)) return rg;
+        }
+        for (RenderedGroup rg : resolvedData.allRenderedImageFrames()) {
+            if (renderedGroupMatchesImportedPlan(plan, rg)) return rg;
+        }
+        for (RenderedGroup rg : resolvedData.allRenderedPdfFrames()) {
+            if (renderedGroupMatchesImportedPlan(plan, rg)) return rg;
+        }
+        return null;
+    }
+
+    private static boolean renderedGroupMatchesImportedPlan(ObjectPlan plan, RenderedGroup rg) {
+        if (plan == null || rg == null) return false;
+        if (plan.renderId != null && rg.id() == plan.renderId) return true;
+        if (plan.file != null && !plan.file.isEmpty() && plan.file.equals(rg.file())) return true;
+        if (plan.candidateId != null && !plan.candidateId.isEmpty()
+                && plan.candidateId.equals(rg.candidateId())) return true;
+        return false;
+    }
+
+    private double[] primaryVisualSourceBounds(RenderedGroup rg) {
+        if (rg == null || resolvedData == null) return null;
+        int[] sourceIds = rg.exportSourceObjectIds() != null && rg.exportSourceObjectIds().length > 0
+                ? rg.exportSourceObjectIds()
+                : rg.visualOnlyChildIds();
+        if (sourceIds == null || sourceIds.length == 0) sourceIds = rg.sourceObjectIds();
+        double[] best = null;
+        double bestArea = -1.0;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = resolvedData.getPageItem(String.valueOf(sourceId));
+            if (item == null || "TextFrame".equals(item.type()) || "Group".equals(item.type())) continue;
+            double[] b = item.geometricBounds();
+            if (!validBounds(b)) continue;
+            double w = Math.max(0.0, b[3] - b[1]);
+            double h = Math.max(0.0, b[2] - b[0]);
+            double area = w * h;
+            if ("GraphicLine".equals(item.type())) area *= 0.05;
+            if (area > bestArea) {
+                bestArea = area;
+                best = b;
+            }
+        }
+        return best;
+    }
+
+    private static boolean isFloatingHwpxTextPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.DROP_VISUAL
+                && plan.materialization == Materialization.HWPX_TEXT
+                && plan.placement == Placement.FLOATING;
+    }
+
+    private static boolean containsAny(int[] ids, Set<Integer> candidates) {
+        if (ids == null || candidates == null || candidates.isEmpty()) return false;
+        for (int id : ids) {
+            if (candidates.contains(id)) return true;
+        }
+        return false;
+    }
+
+    private static boolean validBounds(double[] b) {
+        return b != null && b.length >= 4 && b[2] > b[0] && b[3] > b[1];
     }
 
     private static Set<String> clipParentSourceSetDropCandidateIds(JsonArray plans) {
@@ -395,6 +518,16 @@ public class ResolvedToASTBuilder {
         return out;
     }
 
+    private Map<String, RenderedGroup> renderedGroupsByPageAndSourceId() {
+        Map<String, RenderedGroup> out = new HashMap<>();
+        if (resolvedData == null) return out;
+        indexRenderedGroupsByPageAndSourceId(out, resolvedData.allRenderedFloatingItems());
+        indexRenderedGroupsByPageAndSourceId(out, resolvedData.allRenderedGraphicFrames());
+        indexRenderedGroupsByPageAndSourceId(out, resolvedData.allRenderedImageFrames());
+        indexRenderedGroupsByPageAndSourceId(out, resolvedData.allRenderedPdfFrames());
+        return out;
+    }
+
     private static void indexRenderedGroupsByCandidateId(
             Map<String, RenderedGroup> out,
             Collection<RenderedGroup> renderedGroups) {
@@ -412,6 +545,27 @@ public class ResolvedToASTBuilder {
         for (RenderedGroup rg : renderedGroups) {
             if (rg == null) continue;
             out.putIfAbsent(renderedPageIdKey(rg.pageIndex(), rg.id()), rg);
+        }
+    }
+
+    private static void indexRenderedGroupsByPageAndSourceId(
+            Map<String, RenderedGroup> out,
+            Collection<RenderedGroup> renderedGroups) {
+        if (out == null || renderedGroups == null) return;
+        for (RenderedGroup rg : renderedGroups) {
+            if (rg == null) continue;
+            putRenderedSourceKeys(out, rg, rg.sourceObjectIds());
+            putRenderedSourceKeys(out, rg, rg.exportSourceObjectIds());
+        }
+    }
+
+    private static void putRenderedSourceKeys(Map<String, RenderedGroup> out,
+                                              RenderedGroup rg,
+                                              int[] sourceIds) {
+        if (out == null || rg == null || sourceIds == null) return;
+        for (int sourceId : sourceIds) {
+            if (sourceId <= 0) continue;
+            out.putIfAbsent(renderedPageIdKey(rg.pageIndex(), sourceId), rg);
         }
     }
 
@@ -514,6 +668,7 @@ public class ResolvedToASTBuilder {
             JsonObject o,
             Map<String, RenderedGroup> renderedByCandidateId,
             Map<String, RenderedGroup> renderedByPageAndId,
+            Map<String, RenderedGroup> renderedByPageAndSourceId,
             Set<String> dropClipParentSourceSetCandidateIds) {
         if (o == null) return null;
         boolean clipParentSourceSet = "clip_parent_source_set".equals(jsonString(o, "compositeRole"));
@@ -532,6 +687,10 @@ public class ResolvedToASTBuilder {
                     jsonInt(o, "domId", sourceIds.length > 0 ? sourceIds[0] : -1));
             int pageIndex = jsonInt(o, "pageIndex", -1);
             rg = renderedByPageAndId.get(renderedPageIdKey(pageIndex, primarySourceId));
+        }
+        if (rg == null && renderedByPageAndSourceId != null) {
+            int pageIndex = jsonInt(o, "pageIndex", -1);
+            rg = renderedGroupByPlanSource(o, renderedByPageAndSourceId, pageIndex);
         }
         if (rg == null || rg.file() == null || rg.file().isEmpty()) return null;
         VisualAction visualAction = enumValue(VisualAction.class,
@@ -588,6 +747,10 @@ public class ResolvedToASTBuilder {
                 rg.layerName(),
                 rg.layerIndex());
         return plan
+                .withExtractionCandidate(
+                        jsonString(o, "candidateId"),
+                        jsonString(o, "passId"),
+                        jsonString(o, "slotRole"))
                 .withExtractionSourceObjectIds(
                         jsonIntArray(o, "exportSourceObjectIds"),
                         jsonIntArray(o, "hiddenVisualSourceObjectIds"))
@@ -595,6 +758,43 @@ public class ResolvedToASTBuilder {
                         jsonIntArray(o, "sourceRootObjectIds"),
                         jsonIntArray(o, "clusterSourceObjectIds"),
                         jsonIntArray(o, "omittedClusterSourceObjectIds"));
+    }
+
+    private static RenderedGroup renderedGroupByPlanSource(
+            JsonObject o,
+            Map<String, RenderedGroup> renderedByPageAndSourceId,
+            int pageIndex) {
+        if (o == null || renderedByPageAndSourceId == null || pageIndex < 0) return null;
+        int primarySourceId = jsonInt(o, "primarySourceObjectId", -1);
+        RenderedGroup rg = renderedByPageAndSourceId.get(renderedPageIdKey(pageIndex, primarySourceId));
+        if (rg != null && renderedGroupMatchesPlanSources(o, rg)) return rg;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        for (int sourceId : sourceIds) {
+            rg = renderedByPageAndSourceId.get(renderedPageIdKey(pageIndex, sourceId));
+            if (rg != null && renderedGroupMatchesPlanSources(o, rg)) return rg;
+        }
+        int[] exportSourceIds = jsonIntArray(o, "exportSourceObjectIds");
+        for (int sourceId : exportSourceIds) {
+            rg = renderedByPageAndSourceId.get(renderedPageIdKey(pageIndex, sourceId));
+            if (rg != null && renderedGroupMatchesPlanSources(o, rg)) return rg;
+        }
+        return null;
+    }
+
+    private static boolean renderedGroupMatchesPlanSources(JsonObject o, RenderedGroup rg) {
+        if (o == null || rg == null) return false;
+        int[] planSources = jsonIntArray(o, "sourceObjectIds");
+        int[] renderedSources = rg.sourceObjectIds();
+        if (planSources.length > 0 && renderedSources != null && renderedSources.length > 0
+                && containsAll(renderedSources, planSources)) {
+            return true;
+        }
+        int[] planExports = jsonIntArray(o, "exportSourceObjectIds");
+        int[] renderedExports = rg.exportSourceObjectIds();
+        return planExports.length > 0
+                && renderedExports != null
+                && renderedExports.length > 0
+                && containsAll(renderedExports, planExports);
     }
 
     private static String renderedPageIdKey(int pageIndex, int id) {

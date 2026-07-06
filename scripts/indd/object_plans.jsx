@@ -752,6 +752,8 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         layoutOnlyInlineSlot: bundle.layoutOnlyInlineSlot === true,
         sourceInlineFlow: bundle.sourceInlineFlow === true,
         inlineCompositeLayoutDescendant: bundle.inlineCompositeLayoutDescendant === true,
+        inlineAnchorSourceObjectId: bundle.inlineAnchorSourceObjectId || null,
+        inlineSourceTreeClosed: bundle.inlineSourceTreeClosed === true,
         connectorDecorationVisual: bundle.connectorDecorationVisual === true,
         primarySourceObjectId: bundle.primarySourceObjectId !== undefined
                 ? bundle.primarySourceObjectId
@@ -925,7 +927,7 @@ function _objectPlanVisualAction(bundle) {
         return _objectPlanPlacement(bundle) === "INLINE" ? "PLACE_INLINE_PNG" : "PLACE_FLOATING_PNG";
     }
     if (bundle.ownershipSlot === "CONTENT_VISUAL_SLOT") {
-        return bundle.passId === "pass.inline_objects" && _objectPlanPlacement(bundle) === "INLINE"
+        return _objectPlanPlacement(bundle) === "INLINE"
                 ? "PLACE_INLINE_PNG"
                 : "PLACE_FLOATING_PNG";
     }
@@ -942,6 +944,7 @@ function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
 }
 
 function _objectPlanPlacement(bundle) {
+    if (bundle && bundle.inlineAnchorSourceObjectId) return "INLINE";
     if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
     if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";

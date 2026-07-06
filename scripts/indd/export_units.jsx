@@ -125,6 +125,8 @@ function _buildSourceGraphFromExtractionPlan(plan) {
             id: src.id,
             pageIndex: src.pageIndex,
             kind: src.kind,
+            contentType: src.contentType || null,
+            isGraphicContentFrame: src.isGraphicContentFrame === true,
             parentId: src.parentId,
             parentKind: src.parentKind,
             anchoredPosition: src.anchoredPosition,

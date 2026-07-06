@@ -179,6 +179,11 @@ final class ParaPrFactory {
             lsValue = dslCtx.targetLineSpacingPct;
             lsType = "percent";
         }
+        if ("fixed".equals(lsType)
+                && shouldPreferAutoLeadingPercent(astPara, lsValue)) {
+            lsValue = astPara.autoLeadingPercent();
+            lsType = "percent";
+        }
         if (lsValue != null) {
             LineSpacingType hwpxType = "fixed".equals(lsType)
                     ? LineSpacingType.FIXED : LineSpacingType.PERCENT;
@@ -194,6 +199,45 @@ final class ParaPrFactory {
         }
 
         return newId;
+    }
+
+    private static boolean shouldPreferAutoLeadingPercent(ASTParagraph para, Integer fixedLeading) {
+        if (para == null || fixedLeading == null || fixedLeading <= 0) return false;
+        Integer autoLeading = para.autoLeadingPercent();
+        if (autoLeading == null || autoLeading <= 0) return false;
+        int dominantFont = dominantTextFontSize(para);
+        if (dominantFont <= 0) return false;
+        int textLength = meaningfulTextLength(para);
+        if (textLength < 20) return false;
+        return fixedLeading >= Math.round(dominantFont * 1.75f);
+    }
+
+    private static int dominantTextFontSize(ASTParagraph para) {
+        int bestFont = 0;
+        int bestLen = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            Integer fs = run.fontSizeHwpunits();
+            if (fs == null || fs <= 0) continue;
+            int len = run.text() != null ? run.text().trim().length() : 0;
+            if (len > bestLen) {
+                bestLen = len;
+                bestFont = fs;
+            }
+        }
+        return bestFont;
+    }
+
+    private static int meaningfulTextLength(ASTParagraph para) {
+        int total = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text == null) continue;
+            total += text.trim().length();
+        }
+        return total;
     }
 
     /**

@@ -242,6 +242,8 @@ public class ASTRunConverter {
                     kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                             .loadPlannedInlineAnchorItems(tmpCtx, domId, null, null);
             if (plannedItems != null) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                        .applyClosedInlineCarrierTextAlignment(tmpCtx, domId, para);
                 if (!plannedItems.isEmpty()) {
                     for (ASTInlineItem item : plannedItems) {
                         if (item != null) para.addItem(item);
@@ -269,7 +271,7 @@ public class ASTRunConverter {
         // ASTRunConverter 는 ResolvedBuildContext 가 없으므로 임시 ctx 를 만들어 호출.
         if (resolvedData != null && ig.selfId() != null) {
             int boxDomId = -1;
-            try { boxDomId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
+            boxDomId = parseInlineGraphicDomId(ig.selfId());
             if (boxDomId > 0) {
                 if (isDoviraSubunitMarkerObject(boxDomId, resolvedData)) {
                     return;
@@ -322,6 +324,21 @@ public class ASTRunConverter {
         // DOM id 파싱 (이하 badge_group / inline_object 판별에 공통 사용)
         if (resolvedData != null && domId > 0 && isDoviraSubunitMarkerObject(domId, resolvedData)) {
             return;
+        }
+
+        if (resolvedData != null && domId > 0) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup anchoredRg =
+                    findRenderedGroupForInlineAnchor(domId, resolvedData);
+            if (anchoredRg != null && anchoredRg.file() != null) {
+                if (shouldDropRenderedInlineByOwnershipPlan(tmpCtx, anchoredRg)) {
+                    return;
+                }
+                ASTInlineObject inlineImg = loadRenderedGroupAsInlineImage(ig, anchoredRg, null, resolvedData);
+                if (inlineImg != null) {
+                    para.addItem(inlineImg);
+                    return;
+                }
+            }
         }
 
         // inline_object PNG (imageLoader 불필요)
@@ -480,13 +497,22 @@ public class ASTRunConverter {
 
     private static int domIdFromInlineGraphic(IDMLCharacterRun.InlineGraphic ig) {
         if (ig == null || ig.selfId() == null) return -1;
+        return parseInlineGraphicDomId(ig.selfId());
+    }
+
+    private static int parseInlineGraphicDomId(String selfId) {
+        if (selfId == null || selfId.isEmpty()) return -1;
         try {
-            String id = ig.selfId().startsWith("u") || ig.selfId().startsWith("U")
-                    ? ig.selfId().substring(1)
-                    : ig.selfId();
-            return Integer.parseInt(id, 16);
+            if (selfId.startsWith("u") || selfId.startsWith("U")) {
+                return Integer.parseInt(selfId.substring(1), 16);
+            }
+            return Integer.parseInt(selfId, 10);
         } catch (Exception e) {
-            return -1;
+            try {
+                return Integer.parseInt(selfId, 16);
+            } catch (Exception ignored) {
+                return -1;
+            }
         }
     }
 
@@ -591,6 +617,25 @@ public class ASTRunConverter {
             }
         }
         return false;
+    }
+
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup findRenderedGroupForInlineAnchor(
+            int anchorDomId,
+            ResolvedData resolvedData) {
+        if (anchorDomId <= 0 || resolvedData == null
+                || resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup best = null;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                : resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.file() == null) continue;
+            if (rg.inlineAnchorSourceObjectId() != anchorDomId) continue;
+            if (!rg.inlineSourceTreeClosed()) continue;
+            best = rg;
+            break;
+        }
+        return best;
     }
 
     private static boolean isDoviraSubunitMarkerRender(
@@ -1245,6 +1290,9 @@ public class ASTRunConverter {
             obj.anchoredPosition(ig.anchoredPosition());
             obj.textWrapMode(ig.textWrapMode());
             obj.keepInline(true); // IDML AnchoredPosition=InlineOrAbove → floating 추출 금지
+            if (rg.inlineSourceTreeClosed()) {
+                obj.affectsLineSpacing(false);
+            }
 
             // 그룹 자체 + 자식 ID를 consumed로 마킹 → orphan 주입에서 제외
             resolvedData.markConsumedRenderedGraphic(String.valueOf(rg.id()));

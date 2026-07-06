@@ -67,7 +67,12 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
             textHiddenBeforeExport: item.textHiddenBeforeExport === true,
             hiddenTextFrameIds: item.hiddenTextFrameIds || item.childIds || (planCandidate ? planCandidate.hiddenTextFrameIds : null) || [],
             placement: item.placement || (planCandidate ? planCandidate.placement : null) || null,
-            coordinateSpace: item.coordinateSpace || (planCandidate ? planCandidate.coordinateSpace : null) || null
+            coordinateSpace: item.coordinateSpace || (planCandidate ? planCandidate.coordinateSpace : null) || null,
+            inlineAnchorSourceObjectId: item.inlineAnchorSourceObjectId
+                    || (planCandidate ? planCandidate.inlineAnchorSourceObjectId : null)
+                    || null,
+            inlineSourceTreeClosed: item.inlineSourceTreeClosed === true
+                    || (planCandidate && planCandidate.inlineSourceTreeClosed === true)
         };
     }
     var results = [];
@@ -130,6 +135,8 @@ function _slimExtractionPlanForWrite(plan) {
             hiddenLayer: src.hiddenLayer,
             nonprinting: src.nonprinting,
             textFrameClass: src.textFrameClass,
+            contentType: src.contentType,
+            isGraphicContentFrame: src.isGraphicContentFrame === true,
             textLength: src.textLength,
             hasText: src.hasText,
             markerOnlyContents: src.markerOnlyContents,

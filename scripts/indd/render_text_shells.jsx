@@ -1061,7 +1061,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         }
         var isPageTextlessGraphicGroup = slotPlan.passId === "pass.page_textless_graphic_groups";
         if (slotPlan.visualAction !== "PLACE_TEXT_SHELL"
-                && !(isPageTextlessGraphicGroup && slotPlan.visualAction === "PLACE_FLOATING_PNG")) {
+                && !(isPageTextlessGraphicGroup
+                    && (slotPlan.visualAction === "PLACE_FLOATING_PNG"
+                        || slotPlan.visualAction === "PLACE_INLINE_PNG"))) {
             return fail("planned_source_set_render_visual_action_not_supported", {});
         }
         var exportIds = _sortedNumericIds(slotPlan.exportSourceObjectIds || []);
@@ -1351,6 +1353,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 decoChildIds[exportIds[mi]] = true;
                 renderedIds[exportIds[mi]] = true;
             }
+            var renderedSourceIds = _sortedNumericIds(slotPlan.sourceObjectIds || []);
+            for (var rsi = 0; rsi < renderedSourceIds.length; rsi++) {
+                renderedIds[renderedSourceIds[rsi]] = true;
+            }
             return true;
         } catch (e) {
             return fail("planned_source_set_render_exception", {
@@ -1600,6 +1606,11 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 renderObjectId: _plannedSlotRenderObjectId(slotPlan),
                 slotRole: slotPlan.slotRole,
                 renderMode: slotPlan.mode,
+                placementRole: slotPlan.placement === "INLINE" ? "inline_object" : null,
+                inlineAnchorSourceObjectId: slotPlan.inlineAnchorSourceObjectId || null,
+                inlineSourceTreeClosed: slotPlan.inlineSourceTreeClosed === true,
+                placement: slotPlan.placement || null,
+                coordinateSpace: slotPlan.coordinateSpace || null,
                 placementAllowed: true,
                 reason: "decoration_group",
                 textOwner: "none"

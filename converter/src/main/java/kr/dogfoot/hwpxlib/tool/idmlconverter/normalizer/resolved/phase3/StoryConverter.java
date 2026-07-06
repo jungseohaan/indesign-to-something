@@ -2713,6 +2713,9 @@ public final class StoryConverter {
                 if (styleJust != null) para.alignment(styleJust);
             }
             Double fixedLeading = rp.fixedLeading();
+            if (rp.autoLeading() != null && rp.autoLeading() > 0) {
+                para.autoLeadingPercent((int) Math.round(rp.autoLeading()));
+            }
             if (fixedLeading != null && fixedLeading > 0) {
                 // InDesign Leading(pt) → HWPX 고정 줄간격(HWPUNIT)
                 para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
@@ -2791,6 +2794,7 @@ public final class StoryConverter {
                                     InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId,
                                             prevRunText, nextRunText);
                             if (plannedItems != null) {
+                                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, para);
                                 for (ASTInlineItem item : plannedItems) para.addItem(item);
                                 continue;
                             }

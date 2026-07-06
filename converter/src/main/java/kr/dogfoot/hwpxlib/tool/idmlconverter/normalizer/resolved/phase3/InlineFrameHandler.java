@@ -44,6 +44,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -3389,7 +3390,8 @@ public class InlineFrameHandler {
             boolean plannedAnchorMaterial = plan != null
                     && plan.placement == Placement.INLINE
                     && plan.visualAction == VisualAction.PLACE_INLINE_PNG
-                    && isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
+                    && (isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)
+                    || isClosedRenderedMaterialForInlineAnchor(rg, anchoredObjectId));
             if (rg.id() != anchoredObjectId && !plannedAnchorMaterial) continue;
             boolean proceed = plannedAnchorMaterial || isInlineRenderedGroupType(rg);
             if (!proceed && rg.itemType() == null) {
@@ -3495,6 +3497,9 @@ public class InlineFrameHandler {
                     }
 
                     obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+                    if (rg.inlineSourceTreeClosed()) {
+                        obj.affectsLineSpacing(false);
+                    }
 
                     // AnchoredPosition="Anchored" 커스텀 위치 앵커: IDML에서 앵커 문자가 공간을 차지하고
                     // 이미지가 앵커 기준 오프셋에 배치되어 이미지 우측~텍스트 시작 사이에 gap이 생김.
@@ -3546,8 +3551,13 @@ public class InlineFrameHandler {
             String previousText,
             String nextText) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return null;
+        List<ASTInlineItem> closedCarrierItems =
+                loadClosedInlineCarrierFlowItems(ctx, anchoredObjectId);
         boolean hasDirectPlan = hasDirectExecutableInlinePlan(ctx, anchoredObjectId);
-        if (!hasDirectPlan) return null;
+        if (!hasDirectPlan && (closedCarrierItems == null || closedCarrierItems.isEmpty())) return null;
+        if (closedCarrierItems != null && !closedCarrierItems.isEmpty()) {
+            return closedCarrierItems;
+        }
 
         List<ASTInlineItem> items = new ArrayList<>();
 
@@ -3635,6 +3645,216 @@ public class InlineFrameHandler {
             items.add(image);
         }
         return items;
+    }
+
+    private static List<ASTInlineItem> loadClosedInlineCarrierFlowItems(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        ClosedInlineCarrier carrier = findClosedInlineCarrier(ctx, anchoredObjectId);
+        if (carrier == null || carrier.rendered == null) return null;
+        double[] primaryVisualBounds = primaryVisualSourceBounds(ctx, carrier.rendered);
+        if (!validBounds(primaryVisualBounds)) return null;
+
+        List<ResolvedTextFrame> before = new ArrayList<>();
+        List<ResolvedTextFrame> after = new ArrayList<>();
+        int[] hiddenIds = carrier.plan.hiddenVisualSourceObjectIds != null
+                && carrier.plan.hiddenVisualSourceObjectIds.length > 0
+                ? carrier.plan.hiddenVisualSourceObjectIds
+                : carrier.rendered.hiddenVisualSourceObjectIds();
+        if (hiddenIds == null || hiddenIds.length == 0) return null;
+        for (int hiddenId : hiddenIds) {
+            if (!ctx.ownershipPlanPlacesInlineHwpxText(hiddenId)) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(hiddenId));
+            if (tf == null || tf.sourceHidden()) continue;
+            double[] tb = tf.geometricBounds();
+            if (!validBounds(tb)) continue;
+            double centerY = (tb[0] + tb[2]) / 2.0;
+            if (centerY < primaryVisualBounds[0]) {
+                before.add(tf);
+            } else if (centerY > primaryVisualBounds[2]) {
+                after.add(tf);
+            }
+        }
+        if (before.isEmpty() && after.isEmpty()) return null;
+
+        sortTextFramesBySourceBounds(before);
+        sortTextFramesBySourceBounds(after);
+
+        ASTInlineObject image = loadInlineObject(ctx, anchoredObjectId);
+        if (image == null) return null;
+
+        List<ASTInlineItem> out = new ArrayList<>();
+        appendClosedCarrierTextItems(ctx, out, before);
+        if (!out.isEmpty()) appendLineBreak(out);
+        out.add(image);
+        if (!after.isEmpty()) appendLineBreak(out);
+        appendClosedCarrierTextItems(ctx, out, after);
+        return out;
+    }
+
+    public static boolean applyClosedInlineCarrierTextAlignment(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ASTParagraph paragraph) {
+        if (paragraph == null) return false;
+        ClosedInlineCarrier carrier = findClosedInlineCarrier(ctx, anchoredObjectId);
+        if (carrier == null) return false;
+        int[] hiddenIds = carrier.plan.hiddenVisualSourceObjectIds != null
+                && carrier.plan.hiddenVisualSourceObjectIds.length > 0
+                ? carrier.plan.hiddenVisualSourceObjectIds
+                : carrier.rendered.hiddenVisualSourceObjectIds();
+        if (hiddenIds == null || hiddenIds.length == 0) return false;
+        for (int hiddenId : hiddenIds) {
+            if (!ctx.ownershipPlanPlacesInlineHwpxText(hiddenId)) continue;
+            ResolvedTextFrame tf = ctx.resolvedData != null
+                    ? ctx.resolvedData.getTextFrame(String.valueOf(hiddenId))
+                    : null;
+            if (tf == null || tf.sourceHidden()) continue;
+            String alignment = shellTextAlignment(ctx, tf);
+            if (alignment == null || alignment.isEmpty()) continue;
+            paragraph.alignment(closedInlineCarrierParagraphAlignment(alignment));
+            return true;
+        }
+        return false;
+    }
+
+    private static String closedInlineCarrierParagraphAlignment(String alignment) {
+        if (alignment == null) return null;
+        String normalized = alignment.toLowerCase(Locale.ROOT);
+        if (normalized.contains("left")) return "LEFT_ALIGN";
+        if (normalized.contains("right")) return "RIGHT_ALIGN";
+        if (normalized.contains("center")) return "CENTER_ALIGN";
+        return alignment;
+    }
+
+    private static ClosedInlineCarrier findClosedInlineCarrier(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null
+                    || plan.placement != Placement.INLINE
+                    || plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            boolean direct = isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
+            RenderedGroup rg = direct
+                    ? findRenderedGroupForDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)
+                    : findRenderedGroupForPlan(ctx, plan, anchoredObjectId);
+            if (!direct && !isClosedRenderedMaterialForInlineAnchor(rg, anchoredObjectId)) continue;
+            if (rg == null || !rg.inlineSourceTreeClosed()) continue;
+            return new ClosedInlineCarrier(plan, rg);
+        }
+        return null;
+    }
+
+    private static void appendClosedCarrierTextItems(
+            ResolvedBuildContext ctx,
+            List<ASTInlineItem> out,
+            List<ResolvedTextFrame> textFrames) {
+        if (out == null || textFrames == null || textFrames.isEmpty()) return;
+        boolean firstFrame = true;
+        for (ResolvedTextFrame tf : textFrames) {
+            List<ASTInlineItem> items = inlineFlowItemsForTextFrame(ctx, tf);
+            if (items == null || items.isEmpty()) continue;
+            if (!firstFrame) appendSpaceRun(out);
+            out.addAll(items);
+            try {
+                ctx.setTextDisposition(Integer.parseInt(tf.id()), FrameDisposition.TEXT_BLOCK_PLACED);
+            } catch (NumberFormatException ignored) {
+                // Non-numeric ids cannot be registered in source ownership disposition.
+            }
+            firstFrame = false;
+        }
+    }
+
+    private static List<ASTInlineItem> inlineFlowItemsForTextFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || tf == null) return null;
+        List<ASTParagraph> paragraphs = null;
+        if (tf.storyId() != null) {
+            paragraphs = convertShellTextParagraphs(ctx, textFlowUnitForTextFrame(ctx, tf));
+            if (paragraphs == null || paragraphs.isEmpty()) {
+                paragraphs = convertShellTextParagraphs(ctx, ctx.resolvedData.getStory(tf.storyId()));
+            }
+        }
+        if (paragraphs == null || paragraphs.isEmpty()) {
+            String text = tf.frameVisibleText();
+            if (text == null) return null;
+            text = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+            if (text.isEmpty()) return null;
+            ASTParagraph paragraph = new ASTParagraph();
+            addSyntheticRunsFromTextFrame(ctx, paragraph, tf, text);
+            paragraphs = new ArrayList<>();
+            paragraphs.add(paragraph);
+        }
+        List<ASTInlineItem> out = new ArrayList<>();
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            if (!out.isEmpty()) appendLineBreak(out);
+            out.addAll(paragraph.items());
+        }
+        return out;
+    }
+
+    private static void sortTextFramesBySourceBounds(List<ResolvedTextFrame> textFrames) {
+        if (textFrames == null || textFrames.size() < 2) return;
+        textFrames.sort((a, b) -> {
+            double[] ab = a != null ? a.geometricBounds() : null;
+            double[] bb = b != null ? b.geometricBounds() : null;
+            if (!validBounds(ab) || !validBounds(bb)) return 0;
+            if (Math.abs(ab[0] - bb[0]) > 1.0) return Double.compare(ab[0], bb[0]);
+            return Double.compare(ab[1], bb[1]);
+        });
+    }
+
+    private static double[] primaryVisualSourceBounds(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return null;
+        int[] sourceIds = rg.exportSourceObjectIds() != null && rg.exportSourceObjectIds().length > 0
+                ? rg.exportSourceObjectIds()
+                : rg.visualOnlyChildIds();
+        if (sourceIds == null || sourceIds.length == 0) sourceIds = rg.sourceObjectIds();
+        double[] best = null;
+        double bestArea = -1.0;
+        if (sourceIds == null) return null;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (item == null || "TextFrame".equals(item.type()) || "Group".equals(item.type())) continue;
+            double[] b = item.geometricBounds();
+            if (!validBounds(b)) continue;
+            double w = Math.max(0.0, b[3] - b[1]);
+            double h = Math.max(0.0, b[2] - b[0]);
+            double area = w * h;
+            if ("GraphicLine".equals(item.type())) area *= 0.05;
+            if (area > bestArea) {
+                bestArea = area;
+                best = b;
+            }
+        }
+        return best;
+    }
+
+    private static void appendLineBreak(List<ASTInlineItem> items) {
+        if (items == null) return;
+        if (!items.isEmpty() && items.get(items.size() - 1) instanceof ASTBreak) return;
+        items.add(new ASTBreak(ASTBreak.BreakType.LINE));
+    }
+
+    private static void appendSpaceRun(List<ASTInlineItem> items) {
+        ASTTextRun space = new ASTTextRun();
+        space.text(" ");
+        items.add(space);
+    }
+
+    private static final class ClosedInlineCarrier {
+        final ObjectPlan plan;
+        final RenderedGroup rendered;
+
+        ClosedInlineCarrier(ObjectPlan plan, RenderedGroup rendered) {
+            this.plan = plan;
+            this.rendered = rendered;
+        }
     }
 
     private static boolean hasDirectExecutableInlinePlan(
@@ -4442,6 +4662,15 @@ public class InlineFrameHandler {
                 || containsAnyStringId(descendants, plan.ownedTextFrameIds);
     }
 
+    private static boolean isClosedRenderedMaterialForInlineAnchor(
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        return rg != null
+                && anchoredObjectId >= 0
+                && rg.inlineSourceTreeClosed()
+                && rg.inlineAnchorSourceObjectId() == anchoredObjectId;
+    }
+
     private static RenderedGroup findRenderedGroupForDirectInlineAnchorPlan(
             ResolvedBuildContext ctx,
             ObjectPlan plan,
@@ -4454,7 +4683,11 @@ public class InlineFrameHandler {
             if (rg == null) continue;
             boolean same = rg.id() == anchoredObjectId
                     || rg.id() == plan.domId
-                    || (plan.renderId != null && rg.id() == plan.renderId);
+                    || (plan.renderId != null && rg.id() == plan.renderId)
+                    || isClosedRenderedMaterialForInlineAnchor(rg, anchoredObjectId);
+            if (!same && renderedGroupMatchesPlan(rg, plan)) {
+                same = true;
+            }
             if (!same && ctx.resolvedData != null) {
                 java.util.Set<String> descendants =
                         ctx.resolvedData.buildDescendantSet(String.valueOf(anchoredObjectId), 8);

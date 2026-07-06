@@ -131,6 +131,7 @@ public final class StoryFlowAssembler {
             List<ASTInlineItem> plannedItems =
                     InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchorId, null, null);
             if (plannedItems != null) {
+                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchorId, paragraph);
                 appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
                 continue;
             }
@@ -170,6 +171,7 @@ public final class StoryFlowAssembler {
                     List<ASTInlineItem> plannedItems =
                             InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, null, null);
                     if (plannedItems != null) {
+                        InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, paragraph);
                         appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
                         continue;
                     }

@@ -226,6 +226,7 @@ public final class OwnershipPlanner {
         timed("finalizeOwnedTextFrameDepthContracts.final", this::finalizeOwnedTextFrameDepthContracts);
         timed("completeRenderedExtractionSourceContracts", this::completeRenderedExtractionSourceContracts);
         timed("normalizeTextShellsWithMaterializedTextOwners", this::normalizeTextShellsWithMaterializedTextOwners);
+        timed("restoreInlineCarrierVisualContracts", this::restoreInlineCarrierVisualContracts);
         timed("completeSourceTreeDiagnostics", this::completeSourceTreeDiagnostics);
     }
 
@@ -415,6 +416,14 @@ public final class OwnershipPlanner {
     }
 
     private ObjectPlan canonicalizeImportedPreplannedObjectPlan(ObjectPlan plan) {
+        if (isClosedInlineCarrierVisualPlan(plan)) {
+            return plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_INLINE_PNG, plan.reason)
+                    .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR)
+                    .withOwnedTextFrameIds(new int[0]);
+        }
         if (isPageTextlessGraphicGroupPlan(plan)) {
             return plan
                     .withTextAction(TextAction.DROP_TEXT)
@@ -1256,6 +1265,7 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isPageTextlessGraphicGroupPlan(plan)) continue;
+            if (isClosedInlineCarrierVisualPlan(plan)) continue;
             RenderedGroup rendered = renderedGroupForPlan(plan);
             double[] renderBounds = rendered != null ? rendered.bounds() : null;
             ObjectPlan replacement = plan
@@ -6993,9 +7003,7 @@ public final class OwnershipPlanner {
             return Placement.FLOATING;
         }
         if (isRenderedPageObject(rg)
-                && hasDirectResolvedInlineAnchorSource(rg)
-                && !hasAnchoredPagePositionSource(rg)
-                && hasStoryFlowPlacementContext(rg)) {
+                && hasDirectResolvedInlineAnchorSource(rg)) {
             return Placement.INLINE;
         }
         if ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType())) {
@@ -7157,7 +7165,6 @@ public final class OwnershipPlanner {
         int declaredAnchorSourceId = rg.inlineAnchorSourceObjectId();
         if (declaredAnchorSourceId > 0) {
             if (hasResolvedInlineAnchor(declaredAnchorSourceId)
-                    && !hasIdmlAnchoredPagePosition(declaredAnchorSourceId)
                     && rg.inlineSourceTreeClosed()) {
                 return declaredAnchorSourceId;
             }
@@ -7201,9 +7208,22 @@ public final class OwnershipPlanner {
         if (data == null || domId < 0 || data.stories() == null) return false;
         Boolean cached = resolvedInlineAnchorCache.get(domId);
         if (cached != null) return cached;
-        boolean found = hasResolvedStoryInlineAnchor(domId) || hasIdmlStoryInlineAnchor(domId);
+        boolean found = hasResolvedPageItemInlineAnchor(domId)
+                || hasResolvedStoryInlineAnchor(domId)
+                || hasIdmlStoryInlineAnchor(domId);
         resolvedInlineAnchorCache.put(domId, found);
         return found;
+    }
+
+    private boolean hasResolvedPageItemInlineAnchor(int domId) {
+        if (data == null || domId < 0) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(domId));
+        if (item == null) return false;
+        if (item.isInline()) return true;
+        String anchoredPosition = safe(item.anchoredPosition());
+        String storyAnchorPlacement = safe(item.storyAnchorPlacement());
+        return "INLINE_POSITION".equals(anchoredPosition)
+                || "INLINE".equals(storyAnchorPlacement);
     }
 
     private boolean hasResolvedStoryInlineAnchor(int domId) {
@@ -7416,6 +7436,38 @@ public final class OwnershipPlanner {
             completed++;
         }
         ConversionTiming.metric("stage1.ownershipPlanner.renderedExtractionSourceContracts", completed);
+    }
+
+    private void restoreInlineCarrierVisualContracts() {
+        int restored = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !plan.hasVisibleVisual()) continue;
+            RenderedGroup rendered = renderedGroupForPlan(plan);
+            if (!isClosedInlineCarrierVisual(rendered)) continue;
+            if (plan.placement == Placement.INLINE
+                    && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                    && plan.visualAction == VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            ObjectPlan replacement = plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
+                    .withVisualAction(VisualAction.PLACE_INLINE_PNG,
+                            plan.reason != null ? plan.reason : "inline_carrier_visual_contract")
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR)
+                    .withOwnedTextFrameIds(new int[0]);
+            plans.set(i, replacement);
+            restored++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.inlineCarrierVisualContracts.restored",
+                restored);
+    }
+
+    private boolean isClosedInlineCarrierVisual(RenderedGroup rendered) {
+        if (rendered == null) return false;
+        if (rendered.inlineAnchorSourceObjectId() <= 0) return false;
+        return rendered.inlineSourceTreeClosed();
     }
 
     private static String renderedSlotRoleForPlan(ObjectPlan plan, RenderedGroup rendered) {
@@ -8989,6 +9041,18 @@ public final class OwnershipPlanner {
     private static boolean isPageTextlessGraphicGroupPlan(ObjectPlan plan) {
         return plan != null
                 && "pass.page_textless_graphic_groups".equals(safe(plan.planPassId));
+    }
+
+    private static boolean isClosedInlineCarrierVisualPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) return false;
+        String slotRole = safe(plan.slotRole);
+        String candidateId = safe(plan.candidateId);
+        String kind = safe(plan.kind);
+        return "page_textless_inline_carrier_visual".equals(slotRole)
+                || candidateId.contains("inline_carrier_")
+                || kind.contains("page_textless_inline_carrier_visual");
     }
 
     private boolean isTextShellWithSeparatedHiddenTextChannel(ObjectPlan plan) {

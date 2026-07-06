@@ -436,6 +436,7 @@ public class StoryLoader {
                                             InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId,
                                                     partText, nextPartText);
                                     if (plannedItems != null) {
+                                        InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, para);
                                         for (ASTInlineItem item : plannedItems) para.addItem(item);
                                         anchorIdx++;
                                         continue;
@@ -807,6 +808,7 @@ public class StoryLoader {
                 List<ASTInlineItem> plannedItems =
                         InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
                 if (plannedItems != null) {
+                    InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, para);
                     appendInlineItemsKeepingObjectsInline(para, plannedItems);
                     continue;
                 }
@@ -893,6 +895,7 @@ public class StoryLoader {
                 List<ASTInlineItem> plannedItems =
                         InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
                 if (plannedItems == null || plannedItems.isEmpty()) continue;
+                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, target);
                 for (ASTInlineItem item : plannedItems) {
                     if (item instanceof ASTInlineObject) {
                         ((ASTInlineObject) item).keepInline(true);
@@ -1050,6 +1053,9 @@ public class StoryLoader {
         }
         if (resolvedParagraph.justification() != null) {
             para.alignment(resolvedParagraph.justification());
+        }
+        if (resolvedParagraph.autoLeading() != null && resolvedParagraph.autoLeading() > 0) {
+            para.autoLeadingPercent((int) Math.round(resolvedParagraph.autoLeading()));
         }
         Double fixedLeading = resolvedParagraph.fixedLeading();
         if (fixedLeading != null && fixedLeading > 0) {

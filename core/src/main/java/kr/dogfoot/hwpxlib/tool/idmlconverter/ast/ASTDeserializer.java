@@ -335,6 +335,7 @@ public class ASTDeserializer {
         para.spaceAfter(getBoxedLong(o, "spaceAfter"));
         para.lineSpacing(getBoxedInt(o, "lineSpacing"));
         para.lineSpacingType(getString(o, "lineSpacingType"));
+        para.autoLeadingPercent(getBoxedInt(o, "autoLeadingPercent"));
         para.letterSpacing(getBoxedShort(o, "letterSpacing"));
 
         // shading
@@ -423,6 +424,9 @@ public class ASTDeserializer {
         obj.anchoredPosition(getString(o, "anchoredPosition"));
         obj.textWrapMode(getString(o, "textWrapMode"));
         obj.textWrapSide(getString(o, "textWrapSide"));
+        if (o.has("affectsLineSpacing")) {
+            obj.affectsLineSpacing(getBool(o, "affectsLineSpacing"));
+        }
         obj.textWrapTop(getLong(o, "textWrapTop"));
         obj.textWrapLeft(getLong(o, "textWrapLeft"));
         obj.textWrapBottom(getLong(o, "textWrapBottom"));

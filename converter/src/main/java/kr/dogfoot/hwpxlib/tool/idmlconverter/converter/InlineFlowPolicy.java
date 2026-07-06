@@ -16,6 +16,7 @@ final class InlineFlowPolicy {
 
     static boolean usesNonFlowWrapping(ASTInlineObject obj) {
         if (obj == null) return false;
+        if (!obj.affectsLineSpacing()) return true;
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
         boolean isAboveLine = obj.anchoredPosition() != null
                 && obj.anchoredPosition().startsWith("AboveLine");
@@ -27,6 +28,7 @@ final class InlineFlowPolicy {
     static boolean participatesInLineSpacing(ASTInlineObject obj) {
         if (obj == null) return false;
         if (obj.isOverlay()) return false;
+        if (!obj.affectsLineSpacing()) return false;
         return !usesNonFlowWrapping(obj);
     }
 }

@@ -24,6 +24,30 @@ function _itemParentKind(item) {
     try { return item && item.parent && item.parent.constructor ? item.parent.constructor.name : null; } catch (e) { return null; }
 }
 
+function _itemContentTypeName(item) {
+    try {
+        if (!item || item.contentType === undefined || item.contentType === null) return null;
+        var value = item.contentType;
+        try {
+            if (typeof ContentType !== "undefined" && value === ContentType.GRAPHIC_TYPE) {
+                return "GRAPHIC_TYPE";
+            }
+        } catch (eEnum) {}
+        var text = String(value);
+        if (text === "1886548852" || text === "ContentType.GRAPHIC_TYPE"
+                || text === "GRAPHIC_TYPE" || text === "GraphicType") {
+            return "GRAPHIC_TYPE";
+        }
+        return text;
+    } catch (e) {
+        return null;
+    }
+}
+
+function _itemIsGraphicContentFrame(item) {
+    return _itemContentTypeName(item) === "GRAPHIC_TYPE";
+}
+
 function isInlineItem(item) {
     try {
         var cur = item.parent;
@@ -411,6 +435,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             hiddenLayer: false,
             nonprinting: false,
             textFrameClass: textFrameClass,
+            contentType: _itemContentTypeName(item),
+            isGraphicContentFrame: _itemIsGraphicContentFrame(item),
             textLength: textLength,
             hasText: textLength !== null ? textLength > 0 : null,
             markerOnlyContents: markerOnlyContents,
@@ -929,6 +955,8 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
             hiddenLayer: src.hiddenLayer === true,
             nonprinting: src.nonprinting === true,
             textFrameClass: src.textFrameClass || null,
+            contentType: src.contentType || null,
+            isGraphicContentFrame: src.isGraphicContentFrame === true,
             hasText: src.hasText,
             hasChildren: src.hasChildren === true,
             hasPlacedVisual: src.hasPlacedVisual === true,

@@ -95,7 +95,7 @@ public class HwpxImageBuilder {
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
         String wrapMode = obj.textWrapMode();
         boolean idmlWrapping = isAnchored && wrapMode != null && !"None".equals(wrapMode);
-        boolean useWrapping = idmlWrapping;
+        boolean useWrapping = InlineFlowPolicy.usesNonFlowWrapping(obj);
 
         // TextWrapMethod / TextFlowSide 결정
         TextWrapMethod twm;
@@ -103,6 +103,11 @@ public class HwpxImageBuilder {
         if (idmlWrapping) {
             twm = mapTextWrapMethod(wrapMode);
             tfs = mapTextFlowSide(obj.textWrapSide());
+        } else if (useWrapping) {
+            // Story-flow inline material that must not resize the paragraph line box
+            // still needs to occupy its own vertical band in the story.
+            twm = TextWrapMethod.TOP_AND_BOTTOM;
+            tfs = TextFlowSide.BOTH_SIDES;
         } else {
             // 인라인(treatAsChar=1)은 텍스트 흐름 자체의 visible object다.
             // BEHIND_TEXT로 내리면 셀 fill/background 뒤에 숨을 수 있으므로

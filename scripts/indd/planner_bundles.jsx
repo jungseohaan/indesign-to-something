@@ -104,6 +104,11 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     exportSourceObjectIds = _plannerBundlePrunePlacedContentBranches(
             declaredCandidate, slot, exportSourceObjectIds, clusterIndex);
     exportSourceObjectIds = _plannerBundleSourceIdsIntersect(exportSourceObjectIds, sourceIds);
+    if (slot === "CONTENT_VISUAL_SLOT"
+            && (!slotSources.visualSourceObjectIds || slotSources.visualSourceObjectIds.length === 0)
+            && exportSourceObjectIds && exportSourceObjectIds.length > 0) {
+        slotSources.visualSourceObjectIds = _sortedNumericIds(exportSourceObjectIds);
+    }
     var hiddenVisualSourceObjectIds = _plannerBundleSourceIdsMinus(
             declaredCandidate.hiddenVisualSourceObjectIds || [], exportSourceObjectIds);
     hiddenVisualSourceObjectIds = _plannerBundleSourceIdsIntersect(hiddenVisualSourceObjectIds, sourceIds);
@@ -163,6 +168,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         required: candidate.required === true,
         sourceInlineFlow: sourceInlineFlow,
         inlineCompositeLayoutDescendant: inlineCompositeLayoutDescendant,
+        inlineAnchorSourceObjectId: candidate.inlineAnchorSourceObjectId || null,
+        inlineSourceTreeClosed: candidate.inlineSourceTreeClosed === true,
         connectorDecorationVisual: connectorDecorationVisual,
         zOrder: zOrder,
         bounds: candidate.bounds || null

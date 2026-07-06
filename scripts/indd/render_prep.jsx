@@ -1693,6 +1693,14 @@ function applyRenderOwnership(entry, renderTarget, opts) {
     }
     if (opts.slotRole) entry.slotRole = opts.slotRole;
     if (opts.renderMode) entry.renderMode = opts.renderMode;
+    if (opts.inlineAnchorSourceObjectId !== undefined && opts.inlineAnchorSourceObjectId !== null) {
+        entry.inlineAnchorSourceObjectId = opts.inlineAnchorSourceObjectId;
+    }
+    if (opts.inlineSourceTreeClosed !== undefined && opts.inlineSourceTreeClosed !== null) {
+        entry.inlineSourceTreeClosed = opts.inlineSourceTreeClosed === true;
+    }
+    if (opts.placement) entry.placement = opts.placement;
+    if (opts.coordinateSpace) entry.coordinateSpace = opts.coordinateSpace;
     _annotateAtomicObjectOwnership(entry, renderTarget, opts, sourceIds, editableTfIds, textOwner);
     var visualOnlyIds = opts.visualOnlyChildIds;
     if (visualOnlyIds === undefined || visualOnlyIds === null) {

@@ -95,7 +95,7 @@ public final class TextFlowDiagnosticsBuilder {
                 flow.paragraphs.add(outPara);
             }
             recomputeFlowCounters(flow);
-            collectInlineWarnings(flow, diagnostics, warnedInlineSlots);
+            collectInlineWarnings(ctx, flow, diagnostics, warnedInlineSlots);
             diagnostics.flows.add(flow);
         }
         return diagnostics;
@@ -283,6 +283,7 @@ public final class TextFlowDiagnosticsBuilder {
     }
 
     private static void collectInlineWarnings(
+            ResolvedBuildContext ctx,
             TextFlowDiagnostics.TextFlow flow,
             TextFlowDiagnostics diagnostics,
             Set<String> warnedInlineSlots) {
@@ -291,6 +292,7 @@ public final class TextFlowDiagnosticsBuilder {
             if (paragraph == null || paragraph.runs == null) continue;
             for (TextFlowDiagnostics.TextFlowRun run : paragraph.runs) {
                 if (run == null || !"INLINE_SLOT".equals(run.kind) || run.planVisualAction != null) continue;
+                if (!inlineSlotHasPotentialVisibleMaterial(ctx, run)) continue;
                 String code = unplannedInlineWarningCode(run);
                 String key = code + ":" + run.anchoredObjectId + ":" + safe(run.sourceStatus);
                 if (warnedInlineSlots.add(key)) {
@@ -300,6 +302,29 @@ public final class TextFlowDiagnosticsBuilder {
                 }
             }
         }
+    }
+
+    private static boolean inlineSlotHasPotentialVisibleMaterial(
+            ResolvedBuildContext ctx,
+            TextFlowDiagnostics.TextFlowRun run) {
+        if (ctx == null || ctx.resolvedData == null || run == null || run.anchoredObjectId == null) {
+            return true;
+        }
+        if (!"NATIVE_INLINE_SOURCE".equals(run.sourceStatus)
+                && !"NATIVE_PAGE_SOURCE".equals(run.sourceStatus)) {
+            return true;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(run.anchoredObjectId));
+        if (item == null) return true;
+        if (item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if ("Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) return true;
+        if (item.childIds() != null && item.childIds().length > 0) return true;
+        String fill = item.fillColorName();
+        if (fill != null && !"None".equals(fill) && !"[None]".equals(fill)) return true;
+        String stroke = item.strokeColorName();
+        return stroke != null && !"None".equals(stroke) && !"[None]".equals(stroke)
+                && item.strokeWeight() > 0;
     }
 
     private static void applySourceMetadata(
