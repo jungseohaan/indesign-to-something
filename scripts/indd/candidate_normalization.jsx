@@ -75,6 +75,27 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         return true;
     }
 
+    function textBearingEditableSourceIds(sourceIds, pageIndex) {
+        var ids = [];
+        var seen = {};
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            var sourceId = sourceIds[i];
+            var src = sourceInfoById[String(sourceId)];
+            if (!src || String(src.kind || "") !== "TextFrame") continue;
+            if (src.textFrameClass !== "editable" || src.hasText !== true) continue;
+            if (pageIndex !== null && pageIndex !== undefined && src.pageIndex !== pageIndex) continue;
+            _pushUniqueId(ids, seen, sourceId);
+        }
+        return _sortedNumericIds(ids);
+    }
+
+    function sourceIsTextlessTextFrameShellMaterial(sourceId) {
+        var src = sourceInfoById[String(sourceId)];
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.hasText === true) return false;
+        return sourceHasTextFrameShellStyle(sourceId);
+    }
+
     function textlessShellExportSourceIds(sourceIds, editableTextIds) {
         var editableSet = _sourceIdSet(editableTextIds || []);
         var ids = [];
@@ -128,12 +149,18 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
     }
 
     function isClosedTextlessGroupVisualSlot(candidate) {
-        if (!candidate || candidate.passId !== "pass.decoration_groups") return false;
-        if (candidate.candidatePurpose !== "SHELL_CANDIDATE") return false;
-        if (candidate.compositeRole !== "textless_group_visual_slot"
-                && candidate.slotRole !== "textless_group_visual_slot") return false;
+        if (!candidate) return false;
+        var pageTextlessGroup = candidate.passId === "pass.page_textless_graphic_groups"
+                && (candidate.compositeRole === "page_textless_graphic_group"
+                || candidate.slotRole === "page_textless_graphic_group");
+        if (!pageTextlessGroup) {
+            if (candidate.passId !== "pass.decoration_groups") return false;
+            if (candidate.candidatePurpose !== "SHELL_CANDIDATE") return false;
+            if (candidate.compositeRole !== "textless_group_visual_slot"
+                    && candidate.slotRole !== "textless_group_visual_slot") return false;
+        }
         if (candidate.primarySourceObjectId === null || candidate.primarySourceObjectId === undefined) return false;
-        if (candidate.textOwner && candidate.textOwner !== "hwpx_tf") return false;
+        if (!pageTextlessGroup && candidate.textOwner && candidate.textOwner !== "hwpx_tf") return false;
         return true;
     }
 
@@ -143,7 +170,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
         if (sourceHasInlineAnchorAncestor(sourceId)) return false;
         var kind = String(src.kind || "");
-        if (kind === "TextFrame") return false;
+        if (kind === "TextFrame") return sourceIsTextlessTextFrameShellMaterial(sourceId);
         if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
         if (kind === "Group") return true;
         return src.hasPlacedVisual === true
@@ -194,6 +221,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         var editableIds = _sourceIdsUnion(
                 candidate.editableTextFrameIds || [],
                 candidate.hiddenTextFrameIds || []);
+        editableIds = textBearingEditableSourceIds(editableIds, candidate.pageIndex);
         editableIds = _sourceIdsUnion(
                 editableIds,
                 editableTextIdsInSourceSet(fullSourceIds, candidate.pageIndex));
@@ -215,6 +243,8 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                 : (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0
                         ? candidate.exportSourceObjectIds
                         : [rootId]);
+        exportIds = _sourceIdsUnion(exportIds, visualIds);
+        var hiddenSourceIds = _sourceIdsMinus(fullSourceIds, exportIds);
 
         var beforeSource = _sourceSetKey(candidate.sourceObjectIds || []);
         var beforeVisual = _sourceSetKey(candidate.visualSourceObjectIds || []);
@@ -227,9 +257,9 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         candidate.visualSourceObjectIds = _sourceIdsUnion(candidate.visualSourceObjectIds || [], visualIds);
         candidate.exportSourceObjectIds = _sortedNumericIds(exportIds);
         candidate.exportTargetObjectId = rootId;
-        candidate.hiddenVisualSourceObjectIds = _sortedNumericIds(editableIds);
+        candidate.hiddenVisualSourceObjectIds = _sortedNumericIds(hiddenSourceIds);
         candidate.editableTextFrameIds = _sortedNumericIds(editableIds);
-        candidate.hiddenTextFrameIds = _sourceIdsUnion(candidate.hiddenTextFrameIds || [], editableIds);
+        candidate.hiddenTextFrameIds = _sortedNumericIds(editableIds);
         candidate.ownedTextFrameIds = _sourceIdsUnion(candidate.ownedTextFrameIds || [], editableIds);
         candidate.requiresTextHidden = true;
         candidate.textOwner = "hwpx_tf";

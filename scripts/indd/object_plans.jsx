@@ -328,6 +328,11 @@ function _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems) {
                     "empty_text_frame_visual_shell"));
             continue;
         }
+        if (_objectPlansHaveVisualDecisionForFrame(objectPlans, id)) {
+            objectPlans.push(_textFrameCleanupObjectPlan(src, id, pageIndex, zOrder,
+                    "empty_text_frame_visual_source"));
+            continue;
+        }
         if (_objectPlansHaveTextDecisionForFrame(objectPlans, id)) continue;
         objectPlans.push(_textFrameObjectPlan(src, id, pageIndex, zOrder,
                 "pass.empty_editable_text_frames", "editable_text_frame"));
@@ -376,6 +381,25 @@ function _objectPlansHaveTextDecisionForFrame(objectPlans, textFrameId) {
         if (String(plan.primarySourceObjectId) === key) return true;
         for (var t = 0; plan.ownedTextFrameIds && t < plan.ownedTextFrameIds.length; t++) {
             if (String(plan.ownedTextFrameIds[t]) === key) return true;
+        }
+    }
+    return false;
+}
+
+function _objectPlansHaveVisualDecisionForFrame(objectPlans, textFrameId) {
+    var key = String(textFrameId);
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan) continue;
+        var visualFields = [
+            plan.visualSourceObjectIds || [],
+            plan.styleSourceObjectIds || [],
+            plan.exportSourceObjectIds || []
+        ];
+        for (var f = 0; f < visualFields.length; f++) {
+            for (var v = 0; v < visualFields[f].length; v++) {
+                if (String(visualFields[f][v]) === key) return true;
+            }
         }
     }
     return false;

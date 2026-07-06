@@ -1697,6 +1697,12 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         return Number(src.textLength || 0) > 0;
     }
 
+    function sourceIsTextlessTextFrameShellMaterial(src) {
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
+        return src.hasVisibleFill === true || src.hasVisibleStroke === true;
+    }
+
     function isInlineTextFrameSource(src) {
         if (!src) return false;
         var placement = String(src.storyAnchorPlacement || src.anchoredPosition || "");
@@ -1711,6 +1717,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         for (var i = 0; i < sourceIds.length; i++) {
             var src = info(sourceIds[i]);
             if (!src || String(src.kind || "") !== "TextFrame") continue;
+            if (sourceIsTextlessTextFrameShellMaterial(src)) continue;
             if (!isEditableTextFrameSource(src)) continue;
             if (src.simpleMarkerLabelContents === true && !isInlineTextFrameSource(src)) {
                 _pushUniqueId(pngOwned, pngOwnedSeen, sourceIds[i]);
@@ -1749,6 +1756,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     function sourceHasVisiblePaint(id) {
         var src = info(id);
         if (!src) return false;
+        if (sourceIsTextlessTextFrameShellMaterial(src)) return true;
         if (sourceIsTextLike(id)) return false;
         return src.hasCandidateVectorPaint === true
                 || src.hasVisibleFill === true
@@ -2090,6 +2098,7 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         for (var i = 0; sourceIds && i < sourceIds.length; i++) {
             var src = info(sourceIds[i]);
             if (!src || String(src.kind || "") !== "TextFrame") continue;
+            if (sourceIsTextlessTextFrameShellMaterial(src)) continue;
             if (!isEditableTextFrameSource(src)) continue;
             if (src.simpleMarkerLabelContents === true && !isInlineTextFrameSource(src)) {
                 _pushUniqueId(pngOwned, pngOwnedSeen, sourceIds[i]);
@@ -2220,6 +2229,11 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             merged.editableTextFrameIds = textFrameSplit.hiddenTextFrameIds;
             merged.hiddenVisualSourceObjectIds = textFrameSplit.hiddenTextFrameIds;
             merged.ownedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
+            var visiblePagePaintIds = visiblePaintSourceIds(merged.sourceObjectIds || [], Number(pageKey));
+            merged.visualSourceObjectIds = unionSourceIds(
+                    merged.visualSourceObjectIds || [], visiblePagePaintIds);
+            merged.exportSourceObjectIds = unionSourceIds(
+                    merged.exportSourceObjectIds || [], visiblePagePaintIds);
             merged.visualSourceObjectIds = subtractSourceIds(
                     merged.visualSourceObjectIds || [], merged.hiddenTextFrameIds || []);
             merged.exportSourceObjectIds = subtractSourceIds(

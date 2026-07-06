@@ -4946,14 +4946,24 @@ public final class OwnershipPlanner {
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
         int[] executableSourceIds = renderedExportSourceIdsOrSourceIds(rg, sourceIds);
         LinkedHashSet<Integer> hiddenVisualSources = new LinkedHashSet<>();
+        LinkedHashSet<Integer> hiddenTextlessShellSources = new LinkedHashSet<>();
         if (rg != null && rg.hiddenVisualSourceObjectIds() != null) {
             for (int hiddenSourceId : rg.hiddenVisualSourceObjectIds()) {
                 hiddenVisualSources.add(hiddenSourceId);
+                if (sourceIdIsTextlessVisibleTextFrameShellMaterial(hiddenSourceId)) {
+                    hiddenTextlessShellSources.add(hiddenSourceId);
+                }
             }
         }
-        for (int sourceId : executableSourceIds) {
-            if (!contains(ownedTextFrameIds, sourceId)
-                    && !hiddenVisualSources.contains(sourceId)) {
+        LinkedHashSet<Integer> executableCandidates = new LinkedHashSet<>();
+        addAll(executableSourceIds, executableCandidates);
+        for (int sourceId : hiddenTextlessShellSources) {
+            if (contains(sourceIds, sourceId)) executableCandidates.add(sourceId);
+        }
+        for (int sourceId : executableCandidates) {
+            boolean textlessShellSource = hiddenTextlessShellSources.contains(sourceId);
+            if ((!contains(ownedTextFrameIds, sourceId) || textlessShellSource)
+                    && (!hiddenVisualSources.contains(sourceId) || textlessShellSource)) {
                 ids.add(sourceId);
             }
         }
@@ -11871,6 +11881,14 @@ public final class OwnershipPlanner {
         if (!"TextFrame".equals(safe(item.type()))) return false;
         if (!isNoneColor(item.fillColorName())) return true;
         return !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+    }
+
+    private boolean sourceIdIsTextlessVisibleTextFrameShellMaterial(int sourceId) {
+        if (!sourceIdHasVisibleTextFrameShellMaterial(sourceId)) return false;
+        if (data == null || sourceId <= 0) return false;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+        if (tf != null) return !hasSemanticText(tf);
+        return true;
     }
 
     private boolean ownsTextFrameShellStyleSource(ObjectPlan plan) {
