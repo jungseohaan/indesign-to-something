@@ -91,6 +91,29 @@ public final class StoryConverter {
         return Math.round(nanos / 10000.0) / 100.0;
     }
 
+    private static boolean isStandaloneBlockTextOwnedByInlineShell(
+            ResolvedBuildContext ctx,
+            String domId) {
+        if (ctx == null || domId == null || domId.isEmpty()) return false;
+        try {
+            int id = Integer.parseInt(domId);
+            if (ctx.ownershipPlans == null) return false;
+            for (ObjectPlan plan : ctx.ownershipPlans) {
+                if (plan == null) continue;
+                if (plan.placement != Placement.INLINE) continue;
+                if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+                if (!ShellRole.isTextShell(plan)) continue;
+                if (plan.ownedTextFrameIds == null) continue;
+                for (int ownedId : plan.ownedTextFrameIds) {
+                    if (ownedId == id) return true;
+                }
+            }
+            return false;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
     /** ParagraphStyle에서 미리 구한 스타일 속성 (런에서 없을 때 폴백용) */
     static class StyleContext {
         final String fillColor;
@@ -169,6 +192,7 @@ public final class StoryConverter {
                     // source ownership policy: master instance ("_pi" 접미사) 도 처리
                     String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
                     if (domId == null) continue;
+                    if (isStandaloneBlockTextOwnedByInlineShell(ctx, domId)) continue;
                     if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) continue;
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {

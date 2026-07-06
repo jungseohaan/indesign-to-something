@@ -1444,6 +1444,7 @@ public class InlineFrameHandler {
             ObjectPlan shellPlan,
             java.util.List<ResolvedTextFrame> childTfs) {
         if (shellPlan == null || childTfs == null || childTfs.isEmpty()) return false;
+        if (visibleShellTextFrameCount(childTfs) <= 1) return false;
         if (shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (!extractedShellImageOwnsGeometry(shellPlan)) return false;
@@ -3580,6 +3581,20 @@ public class InlineFrameHandler {
         ASTInlineObject ownedTextShell = loadPlannedInlineTextShellForTextFrame(ctx, anchoredObjectId);
         if (ownedTextShell != null) {
             items.add(ownedTextShell);
+            return items;
+        }
+
+        List<ASTInlineObject> ownedTextShellFragments =
+                loadPlannedInlineTextShellFragmentsForOwnedTextFrame(ctx, anchoredObjectId);
+        if (ownedTextShellFragments != null && !ownedTextShellFragments.isEmpty()) {
+            items.addAll(ownedTextShellFragments);
+            return items;
+        }
+
+        ASTInlineObject ownedTextFrameShell =
+                loadPlannedInlineTextShellForOwnedTextFrame(ctx, anchoredObjectId);
+        if (ownedTextFrameShell != null) {
+            items.add(ownedTextFrameShell);
             return items;
         }
 

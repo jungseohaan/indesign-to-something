@@ -237,6 +237,19 @@ public class ASTRunConverter {
         int domId = domIdFromInlineGraphic(ig);
         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
                 inlineBridgeContext(resolvedData);
+        if (domId > 0) {
+            List<ASTInlineItem> plannedItems =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                            .loadPlannedInlineAnchorItems(tmpCtx, domId, null, null);
+            if (plannedItems != null) {
+                if (!plannedItems.isEmpty()) {
+                    for (ASTInlineItem item : plannedItems) {
+                        if (item != null) para.addItem(item);
+                    }
+                }
+                return;
+            }
+        }
         if (domId > 0
                 && kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                 .hasDirectDropOnlyInlinePlanForAnchor(tmpCtx, domId)) {
