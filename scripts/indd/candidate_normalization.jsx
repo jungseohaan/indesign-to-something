@@ -2470,6 +2470,9 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
     }
     if (completedExportSourceProvenance) {
         rebuildCandidateMetaIndexes();
+        if (pruneSamePageShellSubsumedCandidatesBeforeDiagnostics()) {
+            rebuildCandidateMetaIndexes();
+        }
     }
 
     var legacyNormalizationFilterDiagnostics = {
@@ -2616,7 +2619,6 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (passId !== "pass.vector_shape_frames"
                 && passId !== "pass.complex_graphic_frames"
                 && passId !== "pass.decoration_groups") return null;
-        if (isLeafOutlineGlyphVectorCandidate(candidateMeta)) return null;
         var shells = shellSourceSetsByPage[candidateMeta.pageKey] || [];
         var candidateVisibleIds = _isExtractionShellCandidate(candidate)
                 ? visibleShellSlotSourceIds(candidate)

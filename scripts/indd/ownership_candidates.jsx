@@ -489,7 +489,7 @@ function _sourceHasExecutableShellMaterialMetadataInIndex(sourceId, sourceInfoBy
     if (!src) return false;
     var kind = String(src.kind || "");
     if (kind === "TextFrame") {
-        return _sourceHasVisiblePaintMetadataInIndex(sourceId, sourceInfoById);
+        return _sourceHasTextFrameShellStyleMetadataInIndex(sourceId, sourceInfoById);
     }
     if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine") {
         return _sourceHasVisiblePaintMetadataInIndex(sourceId, sourceInfoById)

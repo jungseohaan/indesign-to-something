@@ -248,15 +248,11 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
             var subsumingShell = null;
             for (var oi = 0; oi < owners.length; oi++) {
                 var shell = owners[oi];
-                if (!containsId(shell.sourceObjectIds, textFrameId)
-                        && !containsId(shell.exportSourceObjectIds, textFrameId)
-                        && !containsId(shell.styleSourceObjectIds, textFrameId)) {
-                    continue;
-                }
-                if (containsId(shell.styleSourceObjectIds, textFrameId)
-                        || containsId(shell.editableTextFrameIds, textFrameId)
-                        || containsId(shell.ownedTextFrameIds, textFrameId)
-                        || containsId(shell.hiddenTextFrameIds, textFrameId)) {
+                var shellVisiblyOwnsTextFrameStyle =
+                        containsId(shell.exportSourceObjectIds, textFrameId)
+                        || containsId(shell.visualSourceObjectIds, textFrameId)
+                        || containsId(shell.styleSourceObjectIds, textFrameId);
+                if (shellVisiblyOwnsTextFrameStyle) {
                     subsumed = true;
                     subsumingShell = shell;
                     break;

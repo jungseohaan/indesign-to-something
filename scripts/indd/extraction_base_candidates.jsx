@@ -1197,7 +1197,9 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             }
 
             if (kind === "TextFrame") {
-                var hasShellPaint = itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true;
+                var hasShellPaint = itemInfo.hasVisibleFill === true
+                        || itemInfo.hasVisibleStroke === true
+                        || _sourceHasTextFrameShellStyleMetadataInIndex(id, sourceIndex.sourceInfoById);
                 if (hasShellPaint) {
                     var tfShellSourceIds = [id];
                     _pushExtractionCandidate(candidates, candidateSeen, "pass.editable_textframe_visual_shells", item, candidateAttrsForInfo(itemInfo, {
@@ -1226,6 +1228,10 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 }
 
 function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen) {
+    function itemInfoHasTextFrameShellStyle(itemInfo) {
+        if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") return false;
+        return itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true;
+    }
     function hasCandidate(passId, pageIndex, sourceIds) {
         var sourceKey = _sourceSetKey(sourceIds || []);
         for (var ci = 0; candidates && ci < candidates.length; ci++) {
@@ -1265,9 +1271,9 @@ function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems
         var itemInfo = sourceItems[i];
         if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") continue;
         if (itemInfo.textFrameClass !== "editable") continue;
-        if (itemInfo.hasVisibleFill !== true && itemInfo.hasVisibleStroke !== true) continue;
         if (itemInfo.id === null || itemInfo.id === undefined) continue;
         var id = itemInfo.id;
+        if (!itemInfoHasTextFrameShellStyle(itemInfo)) continue;
         var sourceIds = [id];
         if (hasCandidate("pass.editable_textframe_visual_shells", itemInfo.pageIndex, sourceIds)) continue;
         if (hasInlineDirectChildShellOwner(itemInfo.pageIndex, itemInfo)) continue;

@@ -611,8 +611,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     function _clearTableOnlyCarrierTextFrames(item) {
         function clearOne(tf) {
             if (!_isTableOnlyCarrierTextFrame(tf)) return;
-            try { tf.contents = ""; return; } catch (eContents) {}
-            try { tf.parentStory.contents = ""; } catch (eStory) {}
+            try { hideOneTextFrameContent(tf); return; } catch (eContentPaint) {}
         }
         try {
             if (item && item.constructor.name === "TextFrame") clearOne(item);

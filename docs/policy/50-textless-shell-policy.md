@@ -55,6 +55,18 @@ Execution requirements:
   overlap. Filled backgrounds, placed images, broad masks, and fragments that
   match more than one TextFrame remain independent visual/content/background
   candidates.
+- A table/carrier sibling decoration shell is local, not page-wide. If one
+  source parent contains several visual-only decoration siblings and
+  marker-only/table-carrier TextFrames, Stage 1 must first split the visual
+  siblings into page-local connected components whose visible bounds overlap or
+  touch. A candidate may include only the marker/carrier TextFrames whose
+  bounds overlap or touch that component. Sharing the same parent, layer, or
+  table carrier alone is not enough to make distant siblings one executable
+  shell PNG.
+- Suppression for such a shell is component-local. A broad parent may keep
+  provenance in `sourceObjectIds`, but it may not suppress or absorb child
+  shell/content visual slots outside the local connected component that the
+  candidate actually exports.
 - A page/floating decoration group must not be split into inferred
   `direct_child_shell_slot` children merely because it contains several visual
   shapes and TextFrames. Group splitting is allowed only for source-declared

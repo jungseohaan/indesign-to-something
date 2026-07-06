@@ -477,6 +477,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             }
         } catch (eFill) {}
         try {
+            if (item.strokeWeight !== undefined && item.strokeWeight !== null) {
+                info.strokeWeight = Number(item.strokeWeight || 0);
+            }
+        } catch (eStrokeWeightAny) {}
+        try {
             if (hasVisibleStroke(item)) {
                 info.strokeColor = item.strokeColor.name;
                 info.strokeColorName = item.strokeColor.name;

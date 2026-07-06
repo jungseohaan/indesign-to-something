@@ -767,6 +767,9 @@ function _plannerBundleTextFramesAreSimpleMarkers(textFrameIds, clusterIndex) {
 function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
     var ids = [];
     var seen = {};
+    if (candidate && candidate.compositeRole === "table_carrier_textless_shell") {
+        return [];
+    }
     if (candidate && candidate.passId === "pass.page_textless_graphic_groups") {
         for (var pi = 0; candidate.ownedTextFrameIds && pi < candidate.ownedTextFrameIds.length; pi++) {
             var pageGroupTextId = candidate.ownedTextFrameIds[pi];
@@ -1039,6 +1042,9 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
                 : "SHELL_SLOT";
     }
     if (candidate.passId === "pass.page_textless_graphic_groups") {
+        if (_plannerBundlePageTextlessGroupIsDecorationOnly(candidate, clusterIndex)) {
+            return "SHELL_SLOT";
+        }
         return "CONTENT_VISUAL_SLOT";
     }
     if (candidate.passId === "pass.complex_graphic_frames") {
@@ -1059,6 +1065,26 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
     return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
             ? "CONTENT_VISUAL_SLOT"
             : "SHELL_SLOT";
+}
+
+function _plannerBundlePageTextlessGroupIsDecorationOnly(candidate, clusterIndex) {
+    if (!candidate || candidate.passId !== "pass.page_textless_graphic_groups") return false;
+    if (_plannerBundleHasContentVisualEvidence(candidate, clusterIndex)) return false;
+    if (candidate.completePngTextAllowed === true || candidate.textOwner === "indesign_png") return false;
+    if (!clusterIndex || !clusterIndex.sourceInfo) return false;
+    var ids = candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0
+            ? candidate.visualSourceObjectIds
+            : (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0
+                    ? candidate.exportSourceObjectIds
+                    : (candidate.sourceObjectIds || []));
+    var visualCount = 0;
+    for (var i = 0; ids && i < ids.length; i++) {
+        var src = clusterIndex.sourceInfo(ids[i]);
+        if (!src || String(src.kind || "") === "TextFrame") continue;
+        visualCount++;
+        if (!_plannerBundleSourceIsTextlessVectorDecoration(src, clusterIndex)) return false;
+    }
+    return visualCount > 0;
 }
 
 function _plannerBundleHasContentVisualEvidence(candidate, clusterIndex) {

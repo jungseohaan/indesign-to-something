@@ -26,6 +26,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Group
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
@@ -277,15 +278,11 @@ public final class TableBuilder {
                     astTable.anchoredFlowWithText(true);
                 }
                 applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
-                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
-                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
-                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                            ctx, tf, placement.table, placement.pageIdx);
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -329,7 +326,7 @@ public final class TableBuilder {
             return;
         }
         for (ObjectPlan plan : ctx.ownershipPlans) {
-            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.kind == null || !plan.kind.startsWith("text_frame:table_only")) continue;
 
             ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(plan.domId));
@@ -371,15 +368,11 @@ public final class TableBuilder {
                     astTable.anchoredFlowWithText(true);
                 }
                 applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
-                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
-                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
-                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                            ctx, tf, placement.table, placement.pageIdx);
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -511,7 +504,26 @@ public final class TableBuilder {
         if (NumberedSideHeadTableNormalizer.normalizePlanned(ctx, result) && ctx != null && ctx.debugAst) {
             result.debugOrNew().note("side-head flow table normalized from Stage 1 plan");
         }
+        stripTableCellDecoration(result);
         return result;
+    }
+
+    private static void stripTableCellDecoration(ASTTable table) {
+        if (table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                cell.fillColor(null);
+                cell.topBorder(null);
+                cell.bottomBorder(null);
+                cell.leftBorder(null);
+                cell.rightBorder(null);
+                cell.topLeftDiagonalLine(false);
+                cell.topRightDiagonalLine(false);
+                cell.diagonalBorder(null);
+            }
+        }
     }
 
     private static List<TablePlacement> splitSpreadWideTable(

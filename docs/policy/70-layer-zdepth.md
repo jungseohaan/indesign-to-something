@@ -56,6 +56,18 @@ Graphic grouping rules:
 - Bounds overlap may connect graphic sources into one group, but it is not a
   license to decide text ownership, promote a role, or repair an output
   occlusion symptom.
+- Source parentage, group membership, clip parentage, or mask parentage may
+  connect graphic sources only when they describe the same local visual
+  component. A shared parent or sibling relation by itself is not a page-wide
+  grouping reason. If siblings under one parent occupy separate page-local
+  connected components, Stage 1 must emit separate textless graphic plans for
+  those components.
+- Table/carrier sibling decoration follows the same component rule. Stage 1 may
+  create a textless shell from sibling decoration only after the visible
+  decoration siblings are split by page-local overlap/touch connectivity, and
+  only local marker/table-carrier TextFrames that touch that component may be
+  hidden from that shell export. This prevents one distant marker/carrier parent
+  from turning an entire page's decoration siblings into one visible PNG.
 - Editable TextFrames and HWPX table structure do not split graphic groups.
   They are hidden during graphic export and re-emitted in the
   `TEXT_TABLE_STRUCTURE` stratum using source bounds.
@@ -88,6 +100,14 @@ the opposite direction. Extractor render order is diagnostic/cache order, not
 ownership depth truth. Source depth may order graphic sources inside one
 textless graphic group, but it must not place graphic material above editable
 HWPX text/table structure.
+For synthetic `PLACE_TEXT_SHELL` composites made from multiple shell sources,
+the executable `ObjectPlan.zOrder` represents the shell component as a graphic
+surface, not the foremost child fragment. Stage 1 therefore uses the lowest
+normalized source depth of the exported shell sources as the composite's
+representative depth. The extractor still renders the component internally with
+InDesign's own stacking order. A single high-z connector, outline fragment, or
+marker inside a broad shell must not pull the whole shell PNG in front of
+independent textless graphics.
 When the source collector receives a front-to-back `allPageItems` rank, it must
 keep that raw rank only as diagnostic metadata (`rawZOrder` / `sourceOrder`) and
 write `ObjectPlan.zOrder` from the normalized back-to-front rank. Later stages

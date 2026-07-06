@@ -129,16 +129,34 @@ function _objectPlanEditableTextFrames(sourceItems) {
 }
 
 function _objectPlanCanonicalVisualSourceZOrder(plan, sourceById) {
-    var sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.sourceRootObjectIds : null, sourceById);
+    var aggregate = _objectPlanUsesLowestVisualSourceZOrder(plan)
+            ? _objectPlanMinSourceZOrder
+            : _objectPlanMaxSourceZOrder;
+    var normalizedAggregate = _objectPlanUsesLowestVisualSourceZOrder(plan)
+            ? _objectPlanMinNormalizedSourceZOrder
+            : _objectPlanMaxNormalizedSourceZOrder;
+    var sourceZ = aggregate(plan ? plan.sourceRootObjectIds : null, sourceById);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = _objectPlanMaxNormalizedSourceZOrder(plan ? plan.visualSourceObjectIds : null, sourceById);
+    sourceZ = normalizedAggregate(plan ? plan.visualSourceObjectIds : null, sourceById);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = _objectPlanMaxNormalizedSourceZOrder(plan ? plan.sourceObjectIds : null, sourceById);
+    sourceZ = normalizedAggregate(plan ? plan.sourceObjectIds : null, sourceById);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.visualSourceObjectIds : null, sourceById);
+    sourceZ = aggregate(plan ? plan.visualSourceObjectIds : null, sourceById);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = _objectPlanMaxSourceZOrder(plan ? plan.sourceObjectIds : null, sourceById);
+    sourceZ = aggregate(plan ? plan.sourceObjectIds : null, sourceById);
     return sourceZ >= 0 ? sourceZ : (plan && plan.zOrder !== null && plan.zOrder !== undefined ? plan.zOrder : -1);
+}
+
+function _objectPlanUsesLowestVisualSourceZOrder(plan) {
+    if (!plan) return false;
+    if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+    if (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length <= 1) return false;
+    return plan.slotRole === "shell_slot_only"
+            || plan.slotRole === "direct_child_shell_slot"
+            || plan.compositeRole === "table_carrier_sibling_decoration"
+            || plan.compositeRole === "direct_child_shell_slot"
+            || plan.passId === "pass.decoration_groups"
+            || plan.passId === "pass.editable_textframe_visual_shells";
 }
 
 function _objectPlanMaxNormalizedSourceZOrder(ids, sourceById) {
@@ -153,6 +171,19 @@ function _objectPlanMaxNormalizedSourceZOrder(ids, sourceById) {
     return max;
 }
 
+function _objectPlanMinNormalizedSourceZOrder(ids, sourceById) {
+    var min = null;
+    for (var i = 0; ids && i < ids.length; i++) {
+        var src = sourceById ? sourceById[String(ids[i])] : null;
+        if (!src || src.zOrder === null || src.zOrder === undefined) continue;
+        if (src.zOrderSource && String(src.zOrderSource) !== "idml_spread") continue;
+        var z = Number(src.zOrder);
+        if (isNaN(z)) continue;
+        min = min === null ? z : Math.min(min, z);
+    }
+    return min === null ? -1 : min;
+}
+
 function _objectPlanMaxSourceZOrder(ids, sourceById) {
     var max = -1;
     for (var i = 0; ids && i < ids.length; i++) {
@@ -162,6 +193,18 @@ function _objectPlanMaxSourceZOrder(ids, sourceById) {
         if (!isNaN(z) && z > max) max = z;
     }
     return max;
+}
+
+function _objectPlanMinSourceZOrder(ids, sourceById) {
+    var min = null;
+    for (var i = 0; ids && i < ids.length; i++) {
+        var src = sourceById ? sourceById[String(ids[i])] : null;
+        if (!src || src.zOrder === null || src.zOrder === undefined) continue;
+        var z = Number(src.zOrder);
+        if (isNaN(z)) continue;
+        min = min === null ? z : Math.min(min, z);
+    }
+    return min === null ? -1 : min;
 }
 
 function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFrames, zOrder) {
@@ -464,7 +507,7 @@ function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder) {
         mode: "TEXT_ONLY",
         candidatePurpose: "table_only_text_frame",
         compositeRole: null,
-        slotRole: "TABLE_STYLE_SLOT",
+        slotRole: "TEXT_SLOT",
         layoutOnlyInlineSlot: false,
         sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
         inlineCompositeLayoutDescendant: false,
@@ -486,19 +529,19 @@ function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder) {
         ownedTextFrameIds: [id],
         exportSourceObjectIds: [],
         hiddenVisualSourceObjectIds: [],
-        materialization: "HWPX_TABLE_STYLE",
+        materialization: "HWPX_TEXT",
         textAction: "OWNED_BY_HWPX_TEXT",
-        visualAction: "PLACE_TABLE_STYLE",
+        visualAction: "DROP_VISUAL",
         placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
         coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
         visualLayer: "CONTENT_VISUAL",
         zOrder: zOrder,
         reason: "table_only_text_frame",
         bounds: src.bounds || null,
-        ownershipSlot: "TABLE_STYLE_SLOT",
+        ownershipSlot: "TEXT_SLOT",
         policyLayer: "TEXT",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
-        migrationStatus: "READY_TABLE_STYLE",
+        migrationStatus: "READY_TEXT_ONLY",
         migrationBlocker: "NONE",
         migrationBlockerDetail: {},
         executable: true,
@@ -871,6 +914,11 @@ function _objectPlanTextAction(bundle, sourceById) {
         return "OWNED_BY_PNG";
     }
     if (bundle && bundle.textAction === "DROP_TEXT") {
+        return "DROP_TEXT";
+    }
+    if (bundle && bundle.ownershipSlot === "SHELL_SLOT"
+            && _objectPlanVisualAction(bundle) === "PLACE_TEXT_SHELL"
+            && bundle.textOwner !== "indesign_png") {
         return "DROP_TEXT";
     }
     if (bundle && bundle.ownershipSlot === "SHELL_SLOT"

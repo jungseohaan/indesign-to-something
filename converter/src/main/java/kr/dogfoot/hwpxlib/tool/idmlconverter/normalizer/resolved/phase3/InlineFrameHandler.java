@@ -5238,100 +5238,10 @@ public class InlineFrameHandler {
         try {
             BufferedImage img = ImageIO.read(new java.io.ByteArrayInputStream(png));
             if (img != null) {
-                img = removeTableStyleSlotPixelsFromTextShell(ctx, rg, img);
                 return flattenOntoWhite(img);
             }
         } catch (Exception ignored) {}
         return png;
-    }
-
-    /**
-     * When a text shell bundle contains a table-only TextFrame, the table owns
-     * its fill/border through TABLE_STYLE_SLOT.  The extracted shell PNG may
-     * still contain those table pixels because extraction happened before
-     * ownership execution.  Clear the table-only child bounds from the shell
-     * image so the slot has exactly one visible owner.
-     */
-    private static BufferedImage removeTableStyleSlotPixelsFromTextShell(
-            ResolvedBuildContext ctx,
-            RenderedGroup rg,
-            BufferedImage src) {
-        if (ctx == null || ctx.resolvedData == null || rg == null || src == null) return src;
-        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-        if (!ShellRole.isTextShell(plan)) return src;
-        if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) return src;
-        double[] shellBounds = rg.bounds();
-        if (!validBounds(shellBounds)) shellBounds = plan.bounds;
-        if (!validBounds(shellBounds)) return src;
-        double shellH = shellBounds[2] - shellBounds[0];
-        double shellW = shellBounds[3] - shellBounds[1];
-        if (shellH <= 0 || shellW <= 0) return src;
-
-        double pxPerPtX = src.getWidth() / shellW;
-        double pxPerPtY = src.getHeight() / shellH;
-        int padX = Math.max(1, (int) Math.ceil(pxPerPtX * 0.35));
-        int padY = Math.max(1, (int) Math.ceil(pxPerPtY * 0.35));
-        BufferedImage out = null;
-        for (int sourceId : plan.sourceObjectIds) {
-            double[] tableBounds = tableOnlyTextFramePageBounds(ctx, sourceId);
-            if (!validBounds(tableBounds)) continue;
-            int x1 = clampInt((int) Math.floor((tableBounds[1] - shellBounds[1]) * pxPerPtX) - padX,
-                    0, src.getWidth());
-            int y1 = clampInt((int) Math.floor((tableBounds[0] - shellBounds[0]) * pxPerPtY) - padY,
-                    0, src.getHeight());
-            int x2 = clampInt((int) Math.ceil((tableBounds[3] - shellBounds[1]) * pxPerPtX) + padX,
-                    0, src.getWidth());
-            int y2 = clampInt((int) Math.ceil((tableBounds[2] - shellBounds[0]) * pxPerPtY) + padY,
-                    0, src.getHeight());
-            if (x2 <= x1 || y2 <= y1) continue;
-            if (out == null) out = copyAsArgb(src);
-            Graphics2D g = out.createGraphics();
-            g.setComposite(java.awt.AlphaComposite.Clear);
-            g.fillRect(x1, y1, x2 - x1, y2 - y1);
-            g.dispose();
-        }
-        return out != null ? out : src;
-    }
-
-    private static double[] tableOnlyTextFramePageBounds(ResolvedBuildContext ctx, int sourceId) {
-        if (ctx == null || ctx.resolvedData == null) return null;
-        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(sourceId));
-        if (tf == null) return null;
-        IDMLStory story = null;
-        if (tf.storyId() != null && ctx.loadIDMLStory != null) {
-            try {
-                story = ctx.loadIDMLStory.apply(tf.storyId());
-            } catch (Exception ignored) {
-                story = null;
-            }
-        }
-        if (!TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, story)) return null;
-        double[] b = tf.pageRelativeBounds();
-        if (validBounds(b)) return b;
-        b = tf.geometricBounds();
-        if (!validBounds(b)) return null;
-        if (ctx.resolvedData.pages() == null || tf.pageIndex() < 0 || tf.pageIndex() >= ctx.resolvedData.pages().size()) {
-            return b;
-        }
-        ResolvedPage page = ctx.resolvedData.pages().get(tf.pageIndex());
-        if (page == null) return b;
-        double[] xy = page.toPageRelative(b);
-        if (xy == null || xy.length < 2) return b;
-        double h = b[2] - b[0];
-        double w = b[3] - b[1];
-        return new double[]{xy[1], xy[0], xy[1] + h, xy[0] + w};
-    }
-
-    private static BufferedImage copyAsArgb(BufferedImage src) {
-        BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = out.createGraphics();
-        g.drawImage(src, 0, 0, null);
-        g.dispose();
-        return out;
-    }
-
-    private static int clampInt(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
     }
 
     public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
@@ -5569,7 +5479,6 @@ public class InlineFrameHandler {
             if (!pngFile.exists() || !pngFile.isFile()) return null;
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-            img = removeTableStyleSlotPixelsFromTextShell(ctx, rg, img);
             return prepareInlineTextShellImageData(img, preserveSourceCanvas);
         } catch (Exception e) {
             return null;

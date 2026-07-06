@@ -98,6 +98,37 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
         a[3] = Math.max(a[3], b[3]);
         return a;
     }
+    function boundsOverlapOrTouch(a, b) {
+        if (!a || !b || a.length < 4 || b.length < 4) return false;
+        var tolerance = 1.0;
+        return !(a[2] < b[0] - tolerance
+                || b[2] < a[0] - tolerance
+                || a[3] < b[1] - tolerance
+                || b[3] < a[1] - tolerance);
+    }
+    function connectedVisualComponents(entries) {
+        var components = [];
+        var visited = {};
+        for (var i = 0; i < entries.length; i++) {
+            if (visited[String(i)]) continue;
+            var queue = [i];
+            visited[String(i)] = true;
+            var component = [];
+            for (var qi = 0; qi < queue.length; qi++) {
+                var index = queue[qi];
+                var entry = entries[index];
+                component.push(entry);
+                for (var ni = 0; ni < entries.length; ni++) {
+                    if (visited[String(ni)]) continue;
+                    if (!boundsOverlapOrTouch(entry.bounds, entries[ni].bounds)) continue;
+                    visited[String(ni)] = true;
+                    queue.push(ni);
+                }
+            }
+            components.push(component);
+        }
+        return components;
+    }
     function isTableCarrierTextFrame(src) {
         if (!src || String(src.kind || "") !== "TextFrame") return false;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
@@ -147,54 +178,151 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
             var child = children[ci2];
             if (pageIndex === null || pageIndex === undefined) pageIndex = child.pageIndex;
             if (isTableCarrierTextFrame(child)) {
-                pushId(tableTextFrameIds, tableSeen, child.id);
+                tableTextFrameIds.push(child);
                 continue;
             }
             if (!isVisibleDecorationSibling(child)) continue;
-            pushId(visualIds, visualSeen, child.id);
-            b = unionBounds(b, child.bounds || null);
-            if (zOrder === null || Number(child.zOrder || 0) < zOrder) zOrder = Number(child.zOrder || 0);
+            visualIds.push({
+                id: child.id,
+                bounds: child.bounds || null,
+                zOrder: Number(child.zOrder || 0)
+            });
         }
         if (tableTextFrameIds.length === 0 || visualIds.length === 0) continue;
         if (pageIndex === null || pageIndex === undefined || Number(pageIndex) < 0) continue;
-        visualIds = sortedIds(visualIds);
-        tableTextFrameIds = sortedIds(tableTextFrameIds);
-        var sourceIds = visualIds.slice(0);
-        var candidateId = sourceIds.length > 1
-                ? _candidateCompositeId("pass.decoration_groups", Number(pageIndex), sourceIds,
-                        "table_carrier_sibling_decoration")
-                : _candidateId("pass.decoration_groups", sourceIds[0], Number(pageIndex));
+        var components = connectedVisualComponents(visualIds);
+        for (var cc = 0; cc < components.length; cc++) {
+            var component = components[cc];
+            var componentBounds = null;
+            var componentZ = null;
+            var sourceIds = [];
+            var localSeen = {};
+            for (var vi = 0; vi < component.length; vi++) {
+                pushId(sourceIds, localSeen, component[vi].id);
+                componentBounds = unionBounds(componentBounds, component[vi].bounds || null);
+                componentZ = componentZ === null
+                        ? component[vi].zOrder
+                        : Math.min(componentZ, component[vi].zOrder);
+            }
+            sourceIds = sortedIds(sourceIds);
+            var localTableTextFrameIds = [];
+            var localTableSeen = {};
+            for (var ti = 0; ti < tableTextFrameIds.length; ti++) {
+                var tf = tableTextFrameIds[ti];
+                if (!boundsOverlapOrTouch(componentBounds, tf.bounds || null)) continue;
+                pushId(localTableTextFrameIds, localTableSeen, tf.id);
+            }
+            if (localTableTextFrameIds.length === 0) continue;
+            localTableTextFrameIds = sortedIds(localTableTextFrameIds);
+            var candidateId = sourceIds.length > 1
+                    ? _candidateCompositeId("pass.decoration_groups", Number(pageIndex), sourceIds,
+                            "table_carrier_sibling_decoration")
+                    : _candidateId("pass.decoration_groups", sourceIds[0], Number(pageIndex));
+            var seenKey = "pass.decoration_groups|page:" + String(pageIndex)
+                    + "|src:" + _sourceSetKey(sourceIds);
+            if (candidateSeen && candidateSeen[seenKey]) continue;
+            if (candidateSeen) candidateSeen[seenKey] = true;
+            candidates.push({
+                candidateId: candidateId,
+                passId: "pass.decoration_groups",
+                sourceObjectIds: sourceIds,
+                primarySourceObjectId: sourceIds[0],
+                pageIndex: Number(pageIndex),
+                kind: sourceIds.length > 1 ? "TableCarrierSiblingDecorationGroup" : "TableCarrierSiblingDecoration",
+                unit: sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM",
+                mode: "TEXTLESS_CANDIDATE",
+                candidatePurpose: "SHELL_CANDIDATE",
+                bounds: componentBounds,
+                parentId: Number(parentId),
+                parentKind: sourceById[String(parentId)] ? sourceById[String(parentId)].kind || null : null,
+                composite: sourceIds.length > 1,
+                compositeRole: "table_carrier_sibling_decoration",
+                slotRole: "shell_slot_only",
+                tableDecorationRole: "table_carrier_sibling_decoration",
+                exportSourceObjectIds: sourceIds.slice(0),
+                exportTargetObjectId: sourceIds.length === 1 ? sourceIds[0] : null,
+                hiddenVisualSourceObjectIds: localTableTextFrameIds,
+                visualSourceObjectIds: sourceIds.slice(0),
+                styleSourceObjectIds: [],
+                ownedTextFrameIds: [],
+                editableTextFrameIds: localTableTextFrameIds,
+                hiddenTextFrameIds: localTableTextFrameIds,
+                requiresTextHidden: localTableTextFrameIds.length > 0,
+                textOwner: "none",
+                containsEditableText: false,
+                completePngTextAllowed: false,
+                ownershipSlot: "SHELL_SLOT",
+                materialization: "EXTRACTED_PNG_VECTOR",
+                textAction: "DROP_TEXT",
+                visualAction: "PLACE_TEXT_SHELL",
+                visualLayer: "LABEL_BACKDROP",
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                zOrder: componentZ !== null ? componentZ : 0,
+                protectFromPageTextlessGroup: true,
+                required: false,
+                reason: "table_carrier_sibling_decoration"
+            });
+            appended++;
+        }
+    }
+    return { appendedCount: appended };
+}
+
+function _appendTableCarrierTextlessShellCandidates(sourceItems, candidates, candidateSeen) {
+    var appended = 0;
+    function sortedIds(ids) {
+        ids = ids || [];
+        ids.sort(function(a, b) { return Number(a) - Number(b); });
+        return ids;
+    }
+    function isTableCarrierTextFrame(src) {
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (src.textFrameClass !== "editable") return false;
+        if (src.hasTablesInStory !== true && Number(src.tableCountInStory || 0) <= 0) return false;
+        if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
+        return src.markerOnlyContents === true;
+    }
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!isTableCarrierTextFrame(src)) continue;
+        var id = Number(src.id);
+        var pageIndex = Number(src.pageIndex);
+        if (isNaN(id) || isNaN(pageIndex) || pageIndex < 0) continue;
+        var sourceIds = [id];
         var seenKey = "pass.decoration_groups|page:" + String(pageIndex)
                 + "|src:" + _sourceSetKey(sourceIds);
         if (candidateSeen && candidateSeen[seenKey]) continue;
         if (candidateSeen) candidateSeen[seenKey] = true;
         candidates.push({
-            candidateId: candidateId,
+            candidateId: _candidateCompositeId("pass.decoration_groups", pageIndex,
+                    sourceIds, "table_carrier_textless_shell"),
             passId: "pass.decoration_groups",
             sourceObjectIds: sourceIds,
-            primarySourceObjectId: sourceIds[0],
-            pageIndex: Number(pageIndex),
-            kind: sourceIds.length > 1 ? "TableCarrierSiblingDecorationGroup" : "TableCarrierSiblingDecoration",
-            unit: sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM",
+            primarySourceObjectId: id,
+            pageIndex: pageIndex,
+            kind: "TableCarrierTextlessShell",
+            unit: "ITEM",
             mode: "TEXTLESS_CANDIDATE",
             candidatePurpose: "SHELL_CANDIDATE",
-            bounds: b,
-            parentId: Number(parentId),
-            parentKind: sourceById[String(parentId)] ? sourceById[String(parentId)].kind || null : null,
-            composite: sourceIds.length > 1,
-            compositeRole: "table_carrier_sibling_decoration",
+            bounds: src.bounds || null,
+            parentId: src.parentId !== undefined ? src.parentId : null,
+            parentKind: src.parentKind || null,
+            composite: false,
+            compositeRole: "table_carrier_textless_shell",
             slotRole: "shell_slot_only",
-            tableDecorationRole: "table_carrier_sibling_decoration",
+            tableDecorationRole: "table_carrier_textless_shell",
             exportSourceObjectIds: sourceIds.slice(0),
-            exportTargetObjectId: sourceIds.length === 1 ? sourceIds[0] : null,
-            hiddenVisualSourceObjectIds: tableTextFrameIds,
+            exportTargetObjectId: id,
+            hiddenVisualSourceObjectIds: [],
             visualSourceObjectIds: sourceIds.slice(0),
-            styleSourceObjectIds: [],
+            styleSourceObjectIds: sortedIds(src.tableSourceObjectIds || []),
             ownedTextFrameIds: [],
-            editableTextFrameIds: tableTextFrameIds,
-            hiddenTextFrameIds: tableTextFrameIds,
-            requiresTextHidden: tableTextFrameIds.length > 0,
-            textOwner: "none",
+            editableTextFrameIds: [id],
+            hiddenTextFrameIds: [id],
+            requiresTextHidden: true,
+            textOwner: "hwpx_tf",
             containsEditableText: false,
             completePngTextAllowed: false,
             ownershipSlot: "SHELL_SLOT",
@@ -202,12 +330,12 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
             textAction: "DROP_TEXT",
             visualAction: "PLACE_TEXT_SHELL",
             visualLayer: "LABEL_BACKDROP",
-            placement: "FLOATING",
-            coordinateSpace: "PAGE",
-            zOrder: zOrder !== null ? zOrder : 0,
+            placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
+            coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
+            zOrder: src.zOrder !== undefined && src.zOrder !== null ? Number(src.zOrder) : 0,
             protectFromPageTextlessGroup: true,
             required: false,
-            reason: "table_carrier_sibling_decoration"
+            reason: "table_carrier_textless_shell"
         });
         appended++;
     }
@@ -1142,6 +1270,155 @@ function _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourc
             reason: "covered_by_textless_parent_group_export"
         });
     }
+    return {
+        candidates: out,
+        suppressedCount: suppressed.length,
+        suppressed: suppressed
+    };
+}
+
+function _suppressChildShellSlotsCoveredByCompositeShellCandidates(candidates, sourceItems) {
+    if (!candidates || candidates.length === 0) {
+        return { candidates: candidates || [], suppressedCount: 0, suppressed: [] };
+    }
+
+    function ids(candidate, field) {
+        return _sortedNumericIds(candidate && candidate[field] || []);
+    }
+
+    function containsAll(ownerIds, childIds) {
+        if (!childIds || childIds.length === 0) return false;
+        var set = {};
+        for (var i = 0; ownerIds && i < ownerIds.length; i++) set[String(ownerIds[i])] = true;
+        for (var ci = 0; ci < childIds.length; ci++) {
+            if (!set[String(childIds[ci])]) return false;
+        }
+        return true;
+    }
+
+    function visibleExportIds(candidate) {
+        var visualIds = ids(candidate, "visualSourceObjectIds");
+        if (visualIds.length > 0) return visualIds;
+        var exportIds = ids(candidate, "exportSourceObjectIds");
+        if (exportIds.length > 0) return exportIds;
+        return ids(candidate, "sourceObjectIds");
+    }
+
+    function ownershipSlot(candidate) {
+        if (!candidate) return "CONTENT_VISUAL_SLOT";
+        if (candidate.ownershipSlot) {
+            return candidate.ownershipSlot === "TEXTLESS_GROUP_VISUAL_SLOT"
+                    ? "SHELL_SLOT"
+                    : candidate.ownershipSlot;
+        }
+        if (candidate.visualAction === "PLACE_TEXT_SHELL") return "SHELL_SLOT";
+        if (candidate.passId === "pass.decoration_groups"
+                || candidate.passId === "pass.editable_textframe_visual_shells"
+                || candidate.slotRole === "shell_slot_only") {
+            return "SHELL_SLOT";
+        }
+        return "CONTENT_VISUAL_SLOT";
+    }
+
+    function hasOwnedText(candidate) {
+        return (candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0)
+                || (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0)
+                || (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0)
+                || candidate.textOwner === "hwpx_tf";
+    }
+
+    function isCompositeShellOwner(candidate) {
+        if (!candidate || candidate.disabled === true) return false;
+        if (ownershipSlot(candidate) !== "SHELL_SLOT") return false;
+        if (candidate.visualAction && candidate.visualAction !== "PLACE_TEXT_SHELL"
+                && candidate.visualAction !== "PLACE_FLOATING_PNG") {
+            return false;
+        }
+        var visibleIds = visibleExportIds(candidate);
+        if (!visibleIds || visibleIds.length === 0) return false;
+        if (visibleIds.length === 1 && !hasOwnedText(candidate)) return false;
+        return candidate.composite === true
+                || visibleIds.length > 1
+                || hasOwnedText(candidate)
+                || (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 1);
+    }
+
+    function isSuppressibleShellChild(candidate) {
+        if (!candidate || candidate.disabled === true) return false;
+        if (ownershipSlot(candidate) !== "SHELL_SLOT") return false;
+        if (candidate.placement === "INLINE") return false;
+        if (candidate.slotRole === "direct_child_shell_slot"
+                || candidate.compositeRole === "direct_child_shell_slot") {
+            return false;
+        }
+        if (hasOwnedText(candidate)) return false;
+        if (candidate.visualAction === "DROP_VISUAL") return false;
+        if (candidate.passId !== "pass.vector_shape_frames"
+                && candidate.passId !== "pass.decoration_groups"
+                && candidate.passId !== "pass.editable_textframe_visual_shells"
+                && candidate.passId !== "pass.complex_graphic_frames") {
+            return false;
+        }
+        var visibleIds = visibleExportIds(candidate);
+        return visibleIds && visibleIds.length > 0;
+    }
+
+    var owners = [];
+    for (var oi = 0; oi < candidates.length; oi++) {
+        var owner = candidates[oi];
+        if (!isCompositeShellOwner(owner)) continue;
+        owners.push({
+            candidate: owner,
+            visibleIds: visibleExportIds(owner),
+            sourceIds: ids(owner, "sourceObjectIds")
+        });
+    }
+    if (owners.length === 0) {
+        return { candidates: candidates, suppressedCount: 0, suppressed: [] };
+    }
+
+    var out = [];
+    var suppressed = [];
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!isSuppressibleShellChild(candidate)) {
+            out.push(candidate);
+            continue;
+        }
+        var childVisibleIds = visibleExportIds(candidate);
+        var childSourceIds = ids(candidate, "sourceObjectIds");
+        var coveredBy = null;
+        for (var oo = 0; oo < owners.length; oo++) {
+            var ownerEntry = owners[oo];
+            var ownerCandidate = ownerEntry.candidate;
+            if (ownerCandidate === candidate) continue;
+            if (String(ownerCandidate.candidateId || "") === String(candidate.candidateId || "")) continue;
+            if (String(ownerCandidate.pageIndex) !== String(candidate.pageIndex)) continue;
+            if (ownerEntry.visibleIds.length <= childVisibleIds.length
+                    && ownerEntry.sourceIds.length <= childSourceIds.length) {
+                continue;
+            }
+            if (!containsAll(ownerEntry.visibleIds, childVisibleIds)
+                    && !containsAll(ownerEntry.sourceIds, childSourceIds)) {
+                continue;
+            }
+            coveredBy = ownerCandidate;
+            break;
+        }
+        if (!coveredBy) {
+            out.push(candidate);
+            continue;
+        }
+        suppressed.push({
+            candidateId: candidate.candidateId || null,
+            suppressedByCandidateId: coveredBy.candidateId || null,
+            pageIndex: candidate.pageIndex,
+            sourceObjectIds: childSourceIds,
+            visibleSourceObjectIds: childVisibleIds,
+            reason: "covered_by_composite_shell_slot_owner"
+        });
+    }
+
     return {
         candidates: out,
         suppressedCount: suppressed.length,
@@ -3275,6 +3552,198 @@ function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItem
     return { warningCount: warnings.length, warnings: warnings };
 }
 
+function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen) {
+    if (!candidates || !sourceItems || sourceItems.length === 0) {
+        return { appendedCount: 0, appended: [] };
+    }
+    var infoById = {};
+    var childIdsByParentId = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        infoById[String(src.id)] = src;
+        if (src.parentId !== null && src.parentId !== undefined) {
+            var parentKey = String(src.parentId);
+            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+            childIdsByParentId[parentKey].push(src.id);
+        }
+    }
+
+    function mark(ids, claimed) {
+        for (var mi = 0; ids && mi < ids.length; mi++) {
+            if (ids[mi] === null || ids[mi] === undefined) continue;
+            claimed[String(ids[mi])] = true;
+        }
+    }
+
+    function sourceIsInlineFlow(sourceId) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        return src.storyAnchorPlacement === "INLINE"
+                || src.parentKind === "Character"
+                || src.parentKind === "InsertionPoint";
+    }
+
+    function sourceHasEditableTextDescendant(sourceId, pageIndex, visiting) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        var key = String(sourceId);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        if (String(src.kind || "") === "TextFrame"
+                && src.textFrameClass === "editable"
+                && src.hasText === true
+                && (pageIndex === null || pageIndex === undefined || src.pageIndex === pageIndex)) {
+            return true;
+        }
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceHasEditableTextDescendant(children[ci], pageIndex, visiting)) return true;
+        }
+        return false;
+    }
+
+    function sourceHasPlacedVisualInSubtree(sourceId, visiting) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        var key = String(sourceId);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        var kind = String(src.kind || "");
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+        if (src.hasPlacedVisual === true) return true;
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceHasPlacedVisualInSubtree(children[ci], visiting)) return true;
+        }
+        return false;
+    }
+
+    function sourceLooksLikeVisibleVectorMaterial(src) {
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        var kind = String(src.kind || "");
+        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval"
+                && kind !== "Polygon" && kind !== "GraphicLine") {
+            return false;
+        }
+        if (sourceHasPlacedVisualInSubtree(src.id)) return false;
+        if (kind === "Group") {
+            return src.hasChildren === true
+                    && (src.hasVisibleFill === true
+                        || src.hasVisibleStroke === true
+                        || src.hasCandidateVectorPaint === true);
+        }
+        return src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true;
+    }
+
+    function collectSamePageSubtree(sourceId, pageIndex, seen, out) {
+        var src = infoById[String(sourceId)];
+        if (!src) return;
+        if (pageIndex !== null && pageIndex !== undefined
+                && src.pageIndex !== null && src.pageIndex !== undefined
+                && Number(src.pageIndex) !== Number(pageIndex)) {
+            return;
+        }
+        _pushUniqueId(out, seen, sourceId);
+        var children = childIdsByParentId[String(sourceId)] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            collectSamePageSubtree(children[ci], pageIndex, seen, out);
+        }
+    }
+
+    var claimed = {};
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!candidate) continue;
+        mark(candidate.sourceObjectIds, claimed);
+        mark(candidate.visualSourceObjectIds, claimed);
+        mark(candidate.exportSourceObjectIds, claimed);
+        mark(candidate.hiddenVisualSourceObjectIds, claimed);
+    }
+
+    var appended = [];
+    for (var si = 0; si < sourceItems.length; si++) {
+        var src = sourceItems[si];
+        if (!src || src.id === null || src.id === undefined) continue;
+        if (claimed[String(src.id)] === true) continue;
+        if (!sourceLooksLikeVisibleVectorMaterial(src)) continue;
+        if (sourceIsInlineFlow(src.id)) continue;
+        if (sourceHasEditableTextDescendant(src.id, src.pageIndex)) continue;
+
+        var sourceIds = [];
+        var seen = {};
+        collectSamePageSubtree(src.id, src.pageIndex, seen, sourceIds);
+        sourceIds = _sortedNumericIds(sourceIds.length > 0 ? sourceIds : [src.id]);
+        var candidateId = sourceIds.length > 1
+                ? _candidateCompositeId("pass.decoration_groups", src.pageIndex, sourceIds,
+                        "unclaimed_visible_vector_source")
+                : _candidateId("pass.decoration_groups", src.id, src.pageIndex);
+        var seenKey = "pass.decoration_groups|page:" + String(src.pageIndex)
+                + "|src:" + _sourceSetKey(sourceIds);
+        if (candidateSeen && candidateSeen[seenKey]) continue;
+        if (candidateSeen) candidateSeen[seenKey] = true;
+        var candidate = {
+            candidateId: candidateId,
+            passId: "pass.decoration_groups",
+            sourceObjectIds: sourceIds,
+            executionSourceObjectIds: sourceIds.slice(0),
+            primarySourceObjectId: src.id,
+            pageIndex: src.pageIndex,
+            kind: src.kind || "VectorSource",
+            unit: sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            bounds: src.bounds || null,
+            parentId: src.parentId,
+            parentKind: src.parentKind || null,
+            anchoredPosition: src.anchoredPosition,
+            storyAnchorPlacement: src.storyAnchorPlacement,
+            composite: sourceIds.length > 1,
+            compositeRole: sourceIds.length > 1
+                    ? "unclaimed_visible_vector_source_set"
+                    : "unclaimed_visible_vector_source",
+            slotRole: "shell_slot_only",
+            exportSourceObjectIds: sourceIds.slice(0),
+            exportTargetObjectId: src.id,
+            hiddenVisualSourceObjectIds: [],
+            visualSourceObjectIds: sourceIds.slice(0),
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            editableTextFrameIds: [],
+            hiddenTextFrameIds: [],
+            requiresTextHidden: false,
+            textOwner: "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            ownershipSlot: "SHELL_SLOT",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_TEXT_SHELL",
+            visualLayer: "LABEL_BACKDROP",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            zOrder: src.zOrder !== undefined ? src.zOrder : 0,
+            required: false,
+            reason: "unclaimed_visible_vector_source"
+        };
+        candidates.push(candidate);
+        appended.push({
+            candidateId: candidateId,
+            sourceObjectIds: sourceIds,
+            primarySourceObjectId: src.id,
+            pageIndex: src.pageIndex,
+            reason: "unclaimed_visible_vector_source"
+        });
+        mark(sourceIds, claimed);
+    }
+    return { appendedCount: appended.length, appended: appended };
+}
+
 function _appendUnresolvedVisibleVectorCoverageCandidates(candidates, sourceCoverageDiagnostics, sourceItems) {
     if (!candidates || !sourceCoverageDiagnostics || !sourceItems) {
         return { warningCount: 0, warnings: [] };
@@ -3437,6 +3906,9 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d11a_plan_absorbInlineTextShellDecorationDescendants");
     _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
     _marker(ctx.outputDir, "03d12_plan_multiTextParentGroups");
+    var tableCarrierTextlessShellDiagnostics =
+            _appendTableCarrierTextlessShellCandidates(sourceItems, candidates, candidateSeen);
+    _marker(ctx.outputDir, "03d12a0_plan_tableCarrierTextlessShells");
     var tableCarrierSiblingDecorationDiagnostics =
             _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates, candidateSeen);
     _marker(ctx.outputDir, "03d12a1_plan_tableCarrierSiblingDecorations");
@@ -3467,6 +3939,9 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourceItems);
     candidates = preObjectPlanTextlessShellSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12a_plan_suppressTextlessGroupChildrenBeforeObjectPlans");
+    var unclaimedVisibleVectorOwnershipDiagnostics =
+            _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen);
+    _marker(ctx.outputDir, "03d12d_plan_unclaimedVisibleVectorOwnership");
     var sourceClusterQueryDiagnostics = _buildSourceClusterQueryDiagnostics(sourceClusterIndex, candidates);
     _marker(ctx.outputDir, "03d13_plan_clusterQueries");
     candidates = _backfillVisibleCandidateVisualSources(candidates, sourceItems);
@@ -3493,10 +3968,15 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             _suppressChildExportsCoveredByPageTextlessGraphicGroups(executionCandidates, sourceItems);
     executionCandidates = pageTextlessExecutionSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d16b3_plan_suppressPageTextlessGraphicGroupChildren");
+    var compositeShellExecutionSuppressionDiagnostics =
+            _suppressChildShellSlotsCoveredByCompositeShellCandidates(executionCandidates, sourceItems);
+    executionCandidates = compositeShellExecutionSuppressionDiagnostics.candidates;
+    _marker(ctx.outputDir, "03d16b4_plan_suppressCompositeShellSlotChildren");
     if (sourceSlotCanonicalizationDiagnostics.diagnostics
             && sourceSlotCanonicalizationDiagnostics.diagnostics.suppressedCount > 0
             || multiTextParentSuppressionDiagnostics.suppressedCount > 0
-            || pageTextlessExecutionSuppressionDiagnostics.suppressedCount > 0) {
+            || pageTextlessExecutionSuppressionDiagnostics.suppressedCount > 0
+            || compositeShellExecutionSuppressionDiagnostics.suppressedCount > 0) {
         plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, executionCandidates);
         _marker(ctx.outputDir, "03d16c_plan_rebuildPlannerBundlesAfterSubsumed");
         objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
@@ -3513,9 +3993,20 @@ function _buildExtractionPlan(doc, ctx, allItems) {
                 _suppressChildExportsCoveredByPageTextlessGraphicGroups(executionCandidates, sourceItems);
         executionCandidates = pageTextlessExecutionSuppressionDiagnostics.candidates;
         _marker(ctx.outputDir, "03d16g0_plan_suppressPageTextlessGraphicGroupChildrenAfterRebuild");
+        var compositeShellExecutionSuppressionAfterRebuildDiagnostics =
+                _suppressChildShellSlotsCoveredByCompositeShellCandidates(executionCandidates, sourceItems);
+        executionCandidates = compositeShellExecutionSuppressionAfterRebuildDiagnostics.candidates;
+        compositeShellExecutionSuppressionDiagnostics = {
+            candidates: executionCandidates,
+            suppressedCount: (compositeShellExecutionSuppressionDiagnostics.suppressedCount || 0)
+                    + (compositeShellExecutionSuppressionAfterRebuildDiagnostics.suppressedCount || 0),
+            suppressed: (compositeShellExecutionSuppressionDiagnostics.suppressed || []).concat(
+                    compositeShellExecutionSuppressionAfterRebuildDiagnostics.suppressed || [])
+        };
+        _marker(ctx.outputDir, "03d16g0a_plan_suppressCompositeShellSlotChildrenAfterRebuild");
     }
     executionCandidates = _backfillVisibleCandidateVisualSources(executionCandidates, sourceItems);
-    _marker(ctx.outputDir, "03d16g0a_plan_backfillExecutionVisualSources");
+    _marker(ctx.outputDir, "03d16g0b_plan_backfillExecutionVisualSources");
     var unclaimedVisibleVectorFallbackDiagnostics =
             _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems);
     _marker(ctx.outputDir, "03d16g1_plan_warnUnclaimedVisibleVectors");
@@ -3626,11 +4117,17 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             preObjectPlanSuppressedCount: pageTextlessGraphicGroupSuppressionDiagnostics.suppressedCount,
             preObjectPlanSuppressed: pageTextlessGraphicGroupSuppressionDiagnostics.suppressed,
             executionSuppressedCount: pageTextlessExecutionSuppressionDiagnostics.suppressedCount,
-            executionSuppressed: pageTextlessExecutionSuppressionDiagnostics.suppressed
+            executionSuppressed: pageTextlessExecutionSuppressionDiagnostics.suppressed,
+            compositeShellExecutionSuppressedCount:
+                    compositeShellExecutionSuppressionDiagnostics.suppressedCount,
+            compositeShellExecutionSuppressed:
+                    compositeShellExecutionSuppressionDiagnostics.suppressed
         },
         visibleVectorOwnershipWarningSummary: {
             unclaimedWarningCount: unclaimedVisibleVectorFallbackDiagnostics.warningCount || 0,
             unclaimedWarnings: unclaimedVisibleVectorFallbackDiagnostics.warnings || [],
+            unclaimedOwnershipAppendCount: unclaimedVisibleVectorOwnershipDiagnostics.appendedCount || 0,
+            unclaimedOwnershipAppended: unclaimedVisibleVectorOwnershipDiagnostics.appended || [],
             unresolvedWarningCount: unresolvedVisibleVectorCoverageDiagnostics.warningCount || 0,
             unresolvedWarnings: unresolvedVisibleVectorCoverageDiagnostics.warnings || []
         },
@@ -3661,8 +4158,11 @@ function _buildExtractionPlan(doc, ctx, allItems) {
                 pageTextlessGraphicGroupSuppressionDiagnostics,
         pageTextlessExecutionSuppressionDiagnostics:
                 pageTextlessExecutionSuppressionDiagnostics,
+        compositeShellExecutionSuppressionDiagnostics:
+                compositeShellExecutionSuppressionDiagnostics,
         visibleVectorOwnershipWarningDiagnostics: {
             unclaimed: unclaimedVisibleVectorFallbackDiagnostics,
+            unclaimedOwnership: unclaimedVisibleVectorOwnershipDiagnostics,
             unresolved: unresolvedVisibleVectorCoverageDiagnostics
         },
         sourceSlotCanonicalizationDiagnostics: sourceSlotCanonicalizationDiagnostics.diagnostics,

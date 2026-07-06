@@ -2137,12 +2137,10 @@ public final class OwnershipPlanner {
             if (ownedByAnchoredTablePlan) {
                 textAction = TextAction.DROP_TEXT;
             }
-            VisualAction visualAction = tableOnlyTextFrame && !ownedByAnchoredTablePlan
-                    ? VisualAction.PLACE_TABLE_STYLE
-                    : VisualAction.DROP_VISUAL;
+            VisualAction visualAction = VisualAction.DROP_VISUAL;
             if (tableOnlyTextFrame
                     && !ownedByAnchoredTablePlan
-                    && hasTableStyleDecisionForTextFrame(domId)) {
+                    && hasHwpxTextOwnerForTextFrame(domId)) {
                 continue;
             }
             if (!tableOnlyTextFrame && hasDropTextDecisionForTextFrame(domId)) {
@@ -13605,14 +13603,38 @@ public final class OwnershipPlanner {
     }
 
     private int canonicalVisualSourceZOrder(ObjectPlan plan) {
-        int sourceZ = maxPageItemZOrder(visualDepthSourceRootObjectIds(plan));
+        boolean useLowest = usesLowestVisualSourceZOrder(plan);
+        int sourceZ = useLowest
+                ? minPageItemZOrder(visualDepthSourceRootObjectIds(plan))
+                : maxPageItemZOrder(visualDepthSourceRootObjectIds(plan));
         if (sourceZ >= 0) return sourceZ;
-        sourceZ = maxPageItemZOrder(visualDepthSourceObjectIds(plan));
+        sourceZ = useLowest
+                ? minPageItemZOrder(visualDepthSourceObjectIds(plan))
+                : maxPageItemZOrder(visualDepthSourceObjectIds(plan));
         if (sourceZ >= 0) return sourceZ;
-        sourceZ = maxPageItemZOrder(visualSourceIds(plan));
+        sourceZ = useLowest
+                ? minPageItemZOrder(visualSourceIds(plan))
+                : maxPageItemZOrder(visualSourceIds(plan));
         if (sourceZ >= 0) return sourceZ;
-        sourceZ = maxPageItemZOrder(plan.sourceObjectIds);
+        sourceZ = useLowest
+                ? minPageItemZOrder(plan.sourceObjectIds)
+                : maxPageItemZOrder(plan.sourceObjectIds);
         return sourceZ >= 0 ? sourceZ : plan.zOrder;
+    }
+
+    private static boolean usesLowestVisualSourceZOrder(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.visualSourceObjectIds == null || plan.visualSourceObjectIds.length <= 1) return false;
+        String slotRole = safe(plan.slotRole);
+        String candidateId = safe(plan.candidateId);
+        String passId = safe(plan.planPassId);
+        return "shell_slot_only".equals(slotRole)
+                || "direct_child_shell_slot".equals(slotRole)
+                || candidateId.contains("table_carrier_sibling_decoration")
+                || candidateId.contains("direct_child_shell_slot")
+                || "pass.decoration_groups".equals(passId)
+                || "pass.editable_textframe_visual_shells".equals(passId);
     }
 
     private int[] visualDepthSourceRootObjectIds(ObjectPlan plan) {

@@ -286,7 +286,7 @@ public class ResolvedToASTBuilder {
                     plan = textOnlyObjectPlanFromJson(planJson);
                 }
                 if (plan == null) {
-                    plan = tableStyleObjectPlanFromJson(planJson);
+                    plan = tableTextObjectPlanFromJson(planJson);
                 }
                 if (plan == null) {
                     plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId,
@@ -621,12 +621,12 @@ public class ResolvedToASTBuilder {
                 jsonInt(o, "sourceLayerIndex", -1));
     }
 
-    private static ObjectPlan tableStyleObjectPlanFromJson(JsonObject o) {
+    private static ObjectPlan tableTextObjectPlanFromJson(JsonObject o) {
         if (o == null) return null;
         if (!"pass.table_only_text_frames".equals(jsonString(o, "passId"))) return null;
         if (!"OWNED_BY_HWPX_TEXT".equals(jsonString(o, "textAction"))) return null;
-        if (!"PLACE_TABLE_STYLE".equals(jsonString(o, "visualAction"))) return null;
-        if (!"HWPX_TABLE_STYLE".equals(jsonString(o, "materialization"))) return null;
+        if (!"DROP_VISUAL".equals(jsonString(o, "visualAction"))) return null;
+        if (!"HWPX_TEXT".equals(jsonString(o, "materialization"))) return null;
         int[] ownedTextFrameIds = jsonIntArray(o, "ownedTextFrameIds");
         if (ownedTextFrameIds.length == 0) return null;
         int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
@@ -637,10 +637,10 @@ public class ResolvedToASTBuilder {
         Placement placement = enumValue(Placement.class, jsonString(o, "placement"), Placement.FLOATING);
         return new ObjectPlan(
                 domId,
-                "planner_declared_table_style:" + jsonString(o, "kind"),
+                "text_frame:table_only",
                 pageIndex,
                 TextAction.OWNED_BY_HWPX_TEXT,
-                VisualAction.PLACE_TABLE_STYLE,
+                VisualAction.DROP_VISUAL,
                 enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.CONTENT_VISUAL),
                 placement,
                 null,
@@ -650,12 +650,12 @@ public class ResolvedToASTBuilder {
                 ownedTextFrameIds,
                 jsonIntArray(o, "descendantVisualObjectIds"),
                 jsonString(o, "bundleId"),
-                Materialization.HWPX_TABLE_STYLE,
+                Materialization.HWPX_TEXT,
                 enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"),
                         placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE),
                 jsonString(o, "anchorOwner"),
                 jsonInt(o, "zOrder", 0),
-                "planner_declared_table_style",
+                "planner_declared_table_text",
                 null,
                 jsonDoubleArray(o, "bounds"),
                 null,
