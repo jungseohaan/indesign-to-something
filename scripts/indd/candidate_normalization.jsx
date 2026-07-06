@@ -1303,6 +1303,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (src.textFrameClass !== "editable") return null;
         if (!sourceHasTextFrameShellStyle(textFrameId)) return null;
         if (sourceHasInlineAnchorAncestor(textFrameId)) return null;
+        if (textFrameStyleShellCoveredByInlineDirectChildShell(textFrameId, parentCandidate.pageIndex)) return null;
         if (options.skipCoveredByExistingCandidate !== false
                 && textFrameStyleShellCoveredByExistingCandidate(textFrameId, parentCandidate.pageIndex)) {
             return null;
@@ -1350,6 +1351,25 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                     ? candidate.editableTextFrameIds
                     : candidate.hiddenTextFrameIds;
             if (!_sourceIdsContain(ownedIds, textFrameId)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    function textFrameStyleShellCoveredByInlineDirectChildShell(textFrameId, pageIndex) {
+        var src = sourceInfoById[String(textFrameId)];
+        if (!src || src.hasText === true) return false;
+        for (var ci = 0; candidates && ci < candidates.length; ci++) {
+            var candidate = candidates[ci];
+            if (!candidate || candidate.passId !== "pass.inline_objects") continue;
+            if (candidate.pageIndex !== pageIndex) continue;
+            if (candidate.slotRole !== "direct_child_shell_slot"
+                    && candidate.compositeRole !== "direct_child_shell_slot") continue;
+            if (!_sourceIdsContain(candidate.sourceObjectIds || [], textFrameId)
+                    && !_sourceIdsContain(candidate.exportSourceObjectIds || [], textFrameId)
+                    && !_sourceIdsContain(candidate.visualSourceObjectIds || [], textFrameId)) {
+                continue;
+            }
             return true;
         }
         return false;
@@ -2658,7 +2678,10 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         var ids = [];
         if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0) {
             ids = _sortedNumericIds(candidate.exportSourceObjectIds);
-            if (candidate.candidatePurpose === "SHELL_CANDIDATE" && ids.length > 1) {
+            if ((candidate.candidatePurpose === "SHELL_CANDIDATE"
+                        || candidate.slotRole === "direct_child_shell_slot"
+                        || candidate.compositeRole === "direct_child_shell_slot")
+                    && ids.length > 1) {
                 var textOwned = _sourceIdSet(candidate.hiddenTextFrameIds || candidate.editableTextFrameIds || []);
                 var visibleOnly = [];
                 var seenVisibleOnly = {};
@@ -2681,20 +2704,38 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
 
     function exactShellSlotDuplicateKey(candidateMeta) {
         var candidate = candidateMeta ? candidateMeta.candidate : null;
-        if (!_isExtractionShellCandidate(candidate)) return null;
+        if (!isExactShellSlotCompetitor(candidate)) return null;
         var visibleIds = visibleShellSlotSourceIds(candidate);
         if (!visibleIds || visibleIds.length === 0) return null;
         return candidateMeta.pageKey + "|SHELL_SLOT|" + _sourceSetKey(visibleIds);
     }
 
+    function isExactShellSlotCompetitor(candidate) {
+        if (_isExtractionShellCandidate(candidate)) return true;
+        if (!candidate || candidate.passId !== "pass.inline_objects") return false;
+        if (candidate.slotRole !== "direct_child_shell_slot"
+                && candidate.compositeRole !== "direct_child_shell_slot") return false;
+        return (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0)
+                || (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0)
+                || (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0);
+    }
+
     function exactShellSlotCandidatePriority(candidate) {
         if (!candidate) return 0;
-        if (candidate.slotRole === "direct_child_shell_slot") return 40;
-        if (candidate.compositeRole === "direct_child_shell_slot") return 35;
-        if (candidate.slotRole === "shell_slot_only" || candidate.mode === "SLOT_ONLY") return 30;
-        if (candidate.passId === "pass.decoration_groups") return 20;
-        if (candidate.passId === "pass.editable_textframe_visual_shells") return 10;
-        return 10;
+        var score = 10;
+        if (candidate.slotRole === "direct_child_shell_slot") score += 40;
+        if (candidate.compositeRole === "direct_child_shell_slot") score += 35;
+        if (candidate.slotRole === "shell_slot_only" || candidate.mode === "SLOT_ONLY") score += 30;
+        if (candidate.passId === "pass.inline_objects") score += 30;
+        if (candidate.passId === "pass.decoration_groups") score += 20;
+        if (candidate.passId === "pass.editable_textframe_visual_shells") score += 10;
+        if (candidate.textOwner === "hwpx_tf"
+                || (candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0)
+                || (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0)
+                || (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0)) {
+            score += 20;
+        }
+        return score;
     }
 
     var exactShellSlotDuplicateDiagnostics = {
@@ -2755,7 +2796,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
 		var winners = {};
 		for (var fi = 0; fi < candidateList.length; fi++) {
 			var candidate = candidateList[fi];
-			if (!_isExtractionShellCandidate(candidate)) continue;
+			if (!isExactShellSlotCompetitor(candidate)) continue;
 			var key = String(candidate.pageIndex) + "|SHELL_SLOT|"
 					+ _sourceSetKey(visibleShellSlotSourceIds(candidate));
 			var current = winners[key];
@@ -2775,7 +2816,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
 		var out = [];
 		for (var oi = 0; oi < candidateList.length; oi++) {
 			var outCandidate = candidateList[oi];
-			if (!_isExtractionShellCandidate(outCandidate)) {
+			if (!isExactShellSlotCompetitor(outCandidate)) {
 				out.push(outCandidate);
 				continue;
 			}

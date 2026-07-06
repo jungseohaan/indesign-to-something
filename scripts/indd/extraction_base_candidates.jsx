@@ -1236,6 +1236,31 @@ function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems
         }
         return false;
     }
+    function hasInlineDirectChildShellOwner(pageIndex, itemInfo) {
+        var sourceId = itemInfo ? itemInfo.id : null;
+        if (sourceId === null || sourceId === undefined) return false;
+        for (var ci = 0; candidates && ci < candidates.length; ci++) {
+            var candidate = candidates[ci];
+            if (!candidate || candidate.passId !== "pass.inline_objects") continue;
+            if (String(candidate.pageIndex) !== String(pageIndex)) continue;
+            if (candidate.slotRole !== "direct_child_shell_slot"
+                    && candidate.compositeRole !== "direct_child_shell_slot") continue;
+            if (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0
+                    && !_sourceIdsContain(candidate.visualSourceObjectIds || [], sourceId)) {
+                continue;
+            }
+            if ((!candidate.visualSourceObjectIds || candidate.visualSourceObjectIds.length === 0)
+                    && itemInfo.hasText === true) {
+                continue;
+            }
+            if (!_sourceIdsContain(candidate.sourceObjectIds || [], sourceId)
+                    && !_sourceIdsContain(candidate.exportSourceObjectIds || [], sourceId)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
     for (var i = 0; sourceItems && i < sourceItems.length; i++) {
         var itemInfo = sourceItems[i];
         if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") continue;
@@ -1245,6 +1270,7 @@ function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems
         var id = itemInfo.id;
         var sourceIds = [id];
         if (hasCandidate("pass.editable_textframe_visual_shells", itemInfo.pageIndex, sourceIds)) continue;
+        if (hasInlineDirectChildShellOwner(itemInfo.pageIndex, itemInfo)) continue;
         var candidateId = _candidateId("pass.editable_textframe_visual_shells", id, itemInfo.pageIndex);
         candidates.push({
             candidateId: candidateId,

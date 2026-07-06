@@ -613,22 +613,37 @@ function _resolveObjectPlanDuplicateTextOwners(objectPlans) {
         var candidate = plans[p];
         if (!candidate || candidate.textAction !== "OWNED_BY_HWPX_TEXT") continue;
         if (!candidate.ownedTextFrameIds || candidate.ownedTextFrameIds.length === 0) continue;
+        var retainedTextFrameIds = [];
+        var droppedTextFrameIds = [];
         var duplicateOwnedCount = 0;
         var canonicalOwnedCount = 0;
         for (var c = 0; c < candidate.ownedTextFrameIds.length; c++) {
-            var ownedTextId = String(candidate.ownedTextFrameIds[c]);
+            var originalOwnedTextId = candidate.ownedTextFrameIds[c];
+            var ownedTextId = String(originalOwnedTextId);
             var canonicalPlan = canonicalByTextFrameId[ownedTextId];
-            if (!canonicalPlan) continue;
+            if (!canonicalPlan) {
+                retainedTextFrameIds.push(originalOwnedTextId);
+                continue;
+            }
             duplicateOwnedCount++;
-            if (canonicalPlan === candidate) canonicalOwnedCount++;
+            if (canonicalPlan === candidate) {
+                canonicalOwnedCount++;
+                retainedTextFrameIds.push(originalOwnedTextId);
+            } else {
+                droppedTextFrameIds.push(originalOwnedTextId);
+            }
         }
         if (duplicateOwnedCount === 0) continue;
-        if (canonicalOwnedCount > 0) {
+        if (droppedTextFrameIds.length === 0 && canonicalOwnedCount > 0) {
             candidate.textOwnershipResolution = "CANONICAL_TEXT_OWNER";
             continue;
         }
-        if (duplicateOwnedCount < candidate.ownedTextFrameIds.length) {
-            candidate.textOwnershipResolution = "PARTIAL_DUPLICATE_TEXT_OWNER_UNRESOLVED";
+        if (retainedTextFrameIds.length > 0) {
+            candidate.ownedTextFrameIds = retainedTextFrameIds;
+            candidate.textOwnershipResolution = "PARTIAL_DUPLICATE_TEXT_OWNER_RESOLVED";
+            candidate.textOwnershipResolutionReason = "kept_only_text_frames_for_which_this_plan_is_canonical";
+            candidate.reason = String(candidate.reason || "")
+                    + ":partial_text_owner_duplicate_resolved";
             continue;
         }
         candidate.textAction = "DROP_TEXT";
@@ -695,6 +710,9 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     var materialization = _objectPlanMaterialization(bundle, visualAction);
     var migrationStatus = _objectPlanMigrationStatus(bundle);
     var migrationBlocker = _objectPlanMigrationBlocker(bundle, migrationStatus);
+    var ownedTextFrameIds = _sortedNumericIds(bundle.ownedTextFrameIds || []);
+    var visualSourceObjectIds = _objectPlanPolicyVisualSourceIds(
+            bundle.visualSourceObjectIds || [], ownedTextFrameIds, textAction, visualAction);
 
     return {
         objectPlanId: _objectPlanId(bundle, index),
@@ -726,9 +744,9 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         clusterHasTextFrame: bundle.clusterHasTextFrame === true,
         clusterHasPlacedContent: bundle.clusterHasPlacedContent === true,
         clusterHasVisualSource: bundle.clusterHasVisualSource === true,
-        visualSourceObjectIds: _sortedNumericIds(bundle.visualSourceObjectIds || []),
+        visualSourceObjectIds: visualSourceObjectIds,
         styleSourceObjectIds: _sortedNumericIds(bundle.styleSourceObjectIds || []),
-        ownedTextFrameIds: _sortedNumericIds(bundle.ownedTextFrameIds || []),
+        ownedTextFrameIds: ownedTextFrameIds,
         exportSourceObjectIds: _sortedNumericIds(bundle.exportSourceObjectIds || []),
         hiddenVisualSourceObjectIds: _sortedNumericIds(bundle.hiddenVisualSourceObjectIds || []),
         materialization: materialization,
@@ -756,6 +774,20 @@ function _normalizeObjectPlanBundle(bundle) {
         return _closedPlacedContentCarrierBundle(bundle);
     }
     return bundle || {};
+}
+
+function _objectPlanPolicyVisualSourceIds(visualSourceIds, ownedTextFrameIds, textAction, visualAction) {
+    var visualIds = _sortedNumericIds(visualSourceIds || []);
+    var ownedIds = _sortedNumericIds(ownedTextFrameIds || []);
+    if (visualIds.length === 0 || ownedIds.length === 0) return visualIds;
+    if (textAction !== "OWNED_BY_PNG") return visualIds;
+    if (visualAction === "PLACE_TEXT_SHELL") return visualIds;
+    var owned = _sourceIdSet(ownedIds);
+    var out = [];
+    for (var i = 0; i < visualIds.length; i++) {
+        if (!owned[String(visualIds[i])]) out.push(visualIds[i]);
+    }
+    return out;
 }
 
 function _objectPlanBundleIsClosedPlacedContentCarrier(bundle) {
