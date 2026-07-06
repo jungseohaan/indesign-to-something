@@ -1559,6 +1559,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         var seen = {};
         for (var i = 0; i < sourceIds.length; i++) {
             var id = sourceIds[i];
+            if (!sourceBelongsToPageTextlessGroupPage(id, pageIndex)) continue;
             if (!sourceHasVisiblePaint(id)) continue;
             if (sourceIsInlineFlow(id)) continue;
             if (sourceIsStoryAnchoredMaterial(id)) continue;
@@ -1566,6 +1567,24 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             _pushUniqueId(out, seen, id);
         }
         return _sortedNumericIds(out);
+    }
+
+    function filterPageTextlessGroupSourceIds(sourceIds, pageIndex) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            var id = sourceIds[i];
+            if (!sourceBelongsToPageTextlessGroupPage(id, pageIndex)) continue;
+            _pushUniqueId(out, seen, id);
+        }
+        return _sortedNumericIds(out);
+    }
+
+    function sourceBelongsToPageTextlessGroupPage(id, pageIndex) {
+        var pi = sourcePageIndex(id);
+        if (pi === null || pi === undefined || pageIndex === null || pageIndex === undefined) return true;
+        if (Number(pi) === Number(pageIndex)) return true;
+        return sourceHasCrossPageClipParent(id, pageIndex);
     }
 
     var appended = 0;
@@ -1590,6 +1609,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             }
             allSourceIds = _sortedNumericIds(allSourceIds);
             exportIds = _sortedNumericIds(exportIds);
+            allSourceIds = filterPageTextlessGroupSourceIds(allSourceIds, Number(pageKey));
+            exportIds = filterPageTextlessGroupSourceIds(exportIds, Number(pageKey));
             var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(allSourceIds);
             var hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
             var pngOwnedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
@@ -1730,6 +1751,57 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
 
     function info(id) {
         return sourceInfoById ? sourceInfoById[String(id)] : null;
+    }
+
+    function sourcePageIndex(id) {
+        var src = info(id);
+        return src && src.pageIndex !== undefined && src.pageIndex !== null
+                ? Number(src.pageIndex)
+                : null;
+    }
+
+    function clipCarryingParentId(id) {
+        var src = info(id);
+        if (!src || src.parentId === null || src.parentId === undefined) return null;
+        var parent = info(src.parentId);
+        for (var depth = 0; depth < 16 && parent; depth++) {
+            var kind = String(parent.kind || "");
+            if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
+                return parent.hasChildren ? parent.id : null;
+            }
+            if (kind !== "Group") return null;
+            if (parent.parentId === null || parent.parentId === undefined) return null;
+            parent = info(parent.parentId);
+        }
+        return null;
+    }
+
+    function sourceHasCrossPageClipParent(id, pageIndex) {
+        var clipParentId = clipCarryingParentId(id);
+        if (clipParentId === null || clipParentId === undefined) return false;
+        var clipPageIndex = sourcePageIndex(clipParentId);
+        return clipPageIndex !== null
+                && pageIndex !== null
+                && pageIndex !== undefined
+                && Number(clipPageIndex) !== Number(pageIndex);
+    }
+
+    function sourceBelongsToPageTextlessGroupPage(id, pageIndex) {
+        var pi = sourcePageIndex(id);
+        if (pi === null || pi === undefined || pageIndex === null || pageIndex === undefined) return true;
+        if (Number(pi) === Number(pageIndex)) return true;
+        return sourceHasCrossPageClipParent(id, pageIndex);
+    }
+
+    function filterPageTextlessGroupSourceIds(sourceIds, pageIndex) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            var id = sourceIds[i];
+            if (!sourceBelongsToPageTextlessGroupPage(id, pageIndex)) continue;
+            _pushUniqueId(out, seen, id);
+        }
+        return _sortedNumericIds(out);
     }
 
     function sourceHasAncestorInSet(id, sourceSet) {
@@ -1925,6 +1997,22 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             merged.hiddenTextFrameIds = mergedIds(component, "hiddenTextFrameIds");
             merged.ownedTextFrameIds = mergedIds(component, "ownedTextFrameIds");
             merged.styleSourceObjectIds = mergedIds(component, "styleSourceObjectIds");
+            merged.sourceObjectIds = filterPageTextlessGroupSourceIds(
+                    merged.sourceObjectIds, Number(pageKey));
+            merged.visualSourceObjectIds = filterPageTextlessGroupSourceIds(
+                    merged.visualSourceObjectIds, Number(pageKey));
+            merged.exportSourceObjectIds = filterPageTextlessGroupSourceIds(
+                    merged.exportSourceObjectIds, Number(pageKey));
+            merged.hiddenVisualSourceObjectIds = filterPageTextlessGroupSourceIds(
+                    merged.hiddenVisualSourceObjectIds, Number(pageKey));
+            merged.editableTextFrameIds = filterPageTextlessGroupSourceIds(
+                    merged.editableTextFrameIds, Number(pageKey));
+            merged.hiddenTextFrameIds = filterPageTextlessGroupSourceIds(
+                    merged.hiddenTextFrameIds, Number(pageKey));
+            merged.ownedTextFrameIds = filterPageTextlessGroupSourceIds(
+                    merged.ownedTextFrameIds, Number(pageKey));
+            merged.styleSourceObjectIds = filterPageTextlessGroupSourceIds(
+                    merged.styleSourceObjectIds, Number(pageKey));
             var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(merged.sourceObjectIds);
             merged.hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
             merged.editableTextFrameIds = textFrameSplit.hiddenTextFrameIds;

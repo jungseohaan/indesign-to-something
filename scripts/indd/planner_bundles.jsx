@@ -79,6 +79,10 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     slotSources = _plannerBundleWithoutPlacedContentBranches(
             declaredCandidate, slot, slotSources, clusterIndex);
     var exportSourceObjectIds = _sortedNumericIds(declaredCandidate.exportSourceObjectIds || []);
+    if (_plannerBundleShouldExportInlineSimpleMarkerCompletePng(
+            declaredCandidate, slot, slotSources, sourceIds, exportSourceObjectIds, clusterIndex)) {
+        exportSourceObjectIds = _sortedNumericIds(sourceIds || []);
+    }
     if (_plannerBundleShouldFillMissingSlotOnlyExport(
             declaredCandidate, exportSourceObjectIds, slotSources)) {
         exportSourceObjectIds = _sortedNumericIds(slotSources.visualSourceObjectIds || []);
@@ -534,6 +538,26 @@ function _plannerBundleShouldFillMissingSlotOnlyExport(candidate, exportSourceOb
             && slotSources.visualSourceObjectIds.length > 0;
 }
 
+function _plannerBundleShouldExportInlineSimpleMarkerCompletePng(
+        candidate, slot, slotSources, sourceIds, exportSourceObjectIds, clusterIndex) {
+    if (!candidate || candidate.passId !== "pass.inline_objects") return false;
+    if (slot !== "CONTENT_VISUAL_SLOT") return false;
+    if (candidate.slotRole === "direct_child_shell_slot"
+            || candidate.compositeRole === "direct_child_shell_slot") return false;
+    if (exportSourceObjectIds && exportSourceObjectIds.length > 0) return false;
+    if (!slotSources || !slotSources.ownedTextFrameIds
+            || slotSources.ownedTextFrameIds.length === 0) return false;
+    if (!sourceIds || sourceIds.length < 2) return false;
+    for (var i = 0; i < slotSources.ownedTextFrameIds.length; i++) {
+        var src = clusterIndex && clusterIndex.sourceInfo
+                ? clusterIndex.sourceInfo(slotSources.ownedTextFrameIds[i])
+                : null;
+        if (!src || src.kind !== "TextFrame") return false;
+        if (src.simpleMarkerLabelContents !== true) return false;
+    }
+    return true;
+}
+
 function _plannerBundleShouldKeepShellVisualExportSources(slot, exportSourceObjectIds, slotSources) {
     if (slot !== "SHELL_SLOT" || !slotSources) return false;
     if (!slotSources.visualSourceObjectIds || slotSources.visualSourceObjectIds.length === 0) return false;
@@ -706,12 +730,31 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
     } else if (slot === "SHELL_SLOT") {
         ownedTextFrameIds = _plannerBundleEditableTextFrameIds(sourceIds, clusterIndex, hiddenVisualIdSet);
     }
+    if (candidate && candidate.passId === "pass.inline_objects"
+            && slot === "CONTENT_VISUAL_SLOT"
+            && ownedTextFrameIds.length > 0
+            && _plannerBundleTextFramesAreSimpleMarkers(ownedTextFrameIds, clusterIndex)
+            && (!visualSourceObjectIds || visualSourceObjectIds.length === 0)) {
+        visualSourceObjectIds = _plannerBundleNonTextSourceIds(sourceIds, {}, clusterIndex);
+    }
 
     return {
         visualSourceObjectIds: visualSourceObjectIds,
         styleSourceObjectIds: styleSourceObjectIds,
         ownedTextFrameIds: ownedTextFrameIds
     };
+}
+
+function _plannerBundleTextFramesAreSimpleMarkers(textFrameIds, clusterIndex) {
+    if (!textFrameIds || textFrameIds.length === 0) return false;
+    for (var i = 0; i < textFrameIds.length; i++) {
+        var src = clusterIndex && clusterIndex.sourceInfo
+                ? clusterIndex.sourceInfo(textFrameIds[i])
+                : null;
+        if (!src || src.kind !== "TextFrame") return false;
+        if (src.simpleMarkerLabelContents !== true) return false;
+    }
+    return true;
 }
 
 function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
@@ -729,6 +772,33 @@ function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
             _pushUniqueId(ids, seen, pageGroupTextId);
         }
         return _sortedNumericIds(ids);
+    }
+    if (candidate && candidate.passId === "pass.inline_objects") {
+        var inlineEditable = [];
+        var inlineSeen = {};
+        for (var ii = 0; candidate.sourceObjectIds && ii < candidate.sourceObjectIds.length; ii++) {
+            var inlineId = candidate.sourceObjectIds[ii];
+            var inlineSource = clusterIndex && clusterIndex.sourceInfo
+                    ? clusterIndex.sourceInfo(inlineId)
+                    : null;
+            if (!inlineSource || inlineSource.kind !== "TextFrame") continue;
+            if (inlineSource.textFrameClass !== "editable") continue;
+            if (inlineSource.hasText !== true) continue;
+            _pushUniqueId(inlineEditable, inlineSeen, inlineId);
+        }
+        if (inlineEditable.length > 0) {
+            var allSimpleMarkers = true;
+            for (var im = 0; im < inlineEditable.length; im++) {
+                var markerSource = clusterIndex && clusterIndex.sourceInfo
+                        ? clusterIndex.sourceInfo(inlineEditable[im])
+                        : null;
+                if (!markerSource || markerSource.simpleMarkerLabelContents !== true) {
+                    allSimpleMarkers = false;
+                    break;
+                }
+            }
+            if (allSimpleMarkers) return _sortedNumericIds(inlineEditable);
+        }
     }
     function addDeclared(sourceIds) {
         for (var i = 0; sourceIds && i < sourceIds.length; i++) {
@@ -971,6 +1041,7 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
     }
     if (candidate.passId === "pass.master_page_graphics") return "SHELL_SLOT";
     if (candidate.passId === "pass.inline_objects") {
+        if (_plannerBundleIsDirectChildShellSlot(candidate)) return "SHELL_SLOT";
         if (_plannerBundleInlineObjectIsTextShell(candidate)) return "SHELL_SLOT";
         return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
                 ? "CONTENT_VISUAL_SLOT"
@@ -1026,12 +1097,24 @@ function _plannerBundleSourceHasContentVisualEvidence(sourceId, clusterIndex, vi
 
 function _plannerBundleInlineObjectIsTextShell(candidate) {
     if (!candidate || candidate.passId !== "pass.inline_objects") return false;
+    if (_plannerBundleIsDirectChildShellSlot(candidate)
+            && ((candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0)
+                || (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0)
+                || (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0))) {
+        return true;
+    }
     if (candidate.completePngTextAllowed === true || candidate.textOwner === "indesign_png") return false;
     if (candidate.requiresTextHidden === true) return true;
     if (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0) return true;
     if (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0
             && candidate.textOwner === "hwpx_tf") return true;
     return false;
+}
+
+function _plannerBundleIsDirectChildShellSlot(candidate) {
+    if (!candidate) return false;
+    return candidate.slotRole === "direct_child_shell_slot"
+            || candidate.compositeRole === "direct_child_shell_slot";
 }
 
 function _plannerBundlePolicyLayer(candidate, slot, clusterIndex) {

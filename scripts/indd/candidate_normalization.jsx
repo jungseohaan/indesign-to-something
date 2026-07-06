@@ -543,7 +543,9 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             editableIds = textFrameIdsInSourceSet(ownershipSourceIds, candidate.pageIndex);
         }
         if (!editableIds || editableIds.length === 0) return false;
-        if (allTextFramesAreSimpleMarkers(editableIds)) {
+        var isExplicitShellSlot = candidate.slotRole === "direct_child_shell_slot"
+                || candidate.compositeRole === "direct_child_shell_slot";
+        if (!isExplicitShellSlot && allTextFramesAreSimpleMarkers(editableIds)) {
             var beforeMarkerOwner = String(candidate.textOwner || "");
             var beforeMarkerHidden = _sourceSetKey(candidate.hiddenTextFrameIds || []);
             candidate.sourceObjectIds = ownershipSourceIds;
@@ -1489,6 +1491,11 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (!canHaveDirectChildShellSlots(candidate)) return out;
         var editableIds = editableTextIdsInSourceSet(candidate.sourceObjectIds, candidate.pageIndex);
         if (!editableIds) editableIds = [];
+        if (candidate.passId === "pass.inline_objects"
+                && editableIds.length > 0
+                && allTextFramesAreSimpleMarkers(editableIds)) {
+            return out;
+        }
 
         var roots = sourceRootObjectIdsForSourceSet(candidate.sourceObjectIds);
         var candidateSet = _sourceIdSet(candidate.sourceObjectIds);
@@ -1508,6 +1515,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                 var inlineSlotCandidate = makeDirectChildShellSlotCandidate(
                         candidate, inlineShellId, inlineSourceIds, inlineShellTextIds);
                 if (!inlineSlotCandidate) continue;
+                inlineSlotCandidate.directSiblingTextShellSlot = true;
                 generatedSourceKeys[inlineSourceKey] = true;
                 out.push(inlineSlotCandidate);
                 coveredEditable[String(inlineShellTextIds[0])] = true;

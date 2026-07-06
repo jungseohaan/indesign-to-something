@@ -832,6 +832,11 @@ function _objectPlanTextAction(bundle, sourceById) {
 
 function _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById) {
     if (!bundle) return false;
+    if (bundle.ownershipSlot === "SHELL_SLOT"
+            && (bundle.slotRole === "direct_child_shell_slot"
+                || bundle.compositeRole === "direct_child_shell_slot")) {
+        return false;
+    }
     if (bundle.passId !== "pass.inline_objects"
             && bundle.passId !== "pass.page_textless_graphic_groups") {
         return false;

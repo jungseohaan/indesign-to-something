@@ -299,10 +299,17 @@ public final class FramePlacer {
             // 내부 여백 (insetSpacing — 이미 pt로 스케일됨)
             if (tf.insetSpacing() != null) {
                 double[] inset = tf.insetSpacing();
-                block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
-                block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
-                block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
-                block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+                if (isObjectReplacementOnlyInlinePngCarrier(ctx, tf)) {
+                    block.insetTop(0);
+                    block.insetLeft(0);
+                    block.insetBottom(0);
+                    block.insetRight(0);
+                } else {
+                    block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
+                    block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
+                    block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
+                    block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+                }
             }
 
             // 수직 정렬
@@ -1248,6 +1255,49 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    private static boolean isObjectReplacementOnlyInlinePngCarrier(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || ctx.textFlowDocument == null || tf == null || tf.storyId() == null) return false;
+        if (!isOnlyObjectReplacementText(tf.frameVisibleText())) return false;
+        TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(tf.storyId());
+        if (unit == null || unit.paragraphs == null) return false;
+        for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
+            if (paragraph == null || paragraph.atoms == null) continue;
+            for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+                if (!(atom instanceof TextFlowDocument.InlineSlotAtom)) continue;
+                TextFlowDocument.InlineSlotAtom slot = (TextFlowDocument.InlineSlotAtom) atom;
+                if ("PLACE_INLINE_PNG".equals(slot.planVisualAction)
+                        && "INLINE".equals(slot.planPlacement)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isOnlyObjectReplacementText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean sawObjectReplacement = false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '￼') {
+                sawObjectReplacement = true;
+                continue;
+            }
+            if (Character.isWhitespace(ch)
+                    || ch == '\u0003'
+                    || ch == '\u0007'
+                    || ch == '\b'
+                    || ch == '\r'
+                    || ch == '\n') {
+                continue;
+            }
+            return false;
+        }
+        return sawObjectReplacement;
     }
 
     private static String cleanAnchorProbeText(String text) {

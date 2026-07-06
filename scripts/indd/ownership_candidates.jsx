@@ -399,7 +399,6 @@ function _isDirectChildShellSlotCandidate(candidate) {
         return true;
     }
     if (String(candidate.candidateId || "").indexOf("direct_child_shell_slot") >= 0) return true;
-    if (candidate.passId === "pass.inline_objects") return true;
     return false;
 }
 
