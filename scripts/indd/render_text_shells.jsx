@@ -1124,12 +1124,32 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         var ordered = sortSourceItemsByPlannedZOrder(sourceItems);
         var groupCreateErrors = [];
         var sourceItemDebug = [];
+        var hiddenVisualIds = _sortedNumericIds(slotPlan.hiddenVisualSourceObjectIds || []);
         function itemParentKey(item) {
             try {
                 var p = item ? item.parent : null;
                 if (p && p.id !== undefined && p.id !== null) return String(p.id);
             } catch (eParentKey) {}
             return "";
+        }
+        function appendHiddenVisualChildrenForItem(item, out, seen) {
+            if (!item || !hiddenVisualIds || hiddenVisualIds.length === 0) return;
+            for (var hi = 0; hi < hiddenVisualIds.length; hi++) {
+                var hiddenId = hiddenVisualIds[hi];
+                var hiddenItem = null;
+                try { hiddenItem = _findNestedPageItemById(item, hiddenId); } catch (eFindHidden) {}
+                if (!hiddenItem) continue;
+                try {
+                    if (item.id !== undefined && item.id !== null
+                            && String(item.id) === String(hiddenId)) {
+                        continue;
+                    }
+                } catch (eSelfHidden) {}
+                var key = String(hiddenId);
+                if (seen[key]) continue;
+                seen[key] = true;
+                out.push(hiddenItem);
+            }
         }
         function groupItemsInParent(items, parentItem) {
             if (!items || items.length === 0) return null;
@@ -1166,6 +1186,13 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 } catch (eSourceItemDebug) {}
                 var hiddenForItem = [];
                 try { hiddenForItem = _collectOutOfScopeChildrenForSourceIds(ordered[i], exportIds); } catch (eOutOfScope) {}
+                try {
+                    var hiddenSeen = {};
+                    for (var hfi = 0; hfi < hiddenForItem.length; hfi++) {
+                        try { hiddenSeen[String(hiddenForItem[hfi].id)] = true; } catch (eSeenHidden) {}
+                    }
+                    appendHiddenVisualChildrenForItem(ordered[i], hiddenForItem, hiddenSeen);
+                } catch (eHiddenVisualForItem) {}
                 if (hiddenForItem && hiddenForItem.length > 0) {
                     var savedForItem = _hideItemsForExport(hiddenForItem);
                     for (var si = 0; savedForItem && si < savedForItem.length; si++) {

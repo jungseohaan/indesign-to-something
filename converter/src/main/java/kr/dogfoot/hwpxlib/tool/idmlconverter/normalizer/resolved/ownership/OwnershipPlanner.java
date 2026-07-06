@@ -5452,6 +5452,10 @@ public final class OwnershipPlanner {
     }
 
     private int[] tableOnlyStyleSourceIds(int textFrameDomId) {
+        // V2 treats table-only TextFrames as editable table structure only.
+        // IDML table/cell decoration source objects are owned by textless visual
+        // shell slots, not by TABLE_STYLE_SLOT.
+        if (textFrameDomId >= 0) return new int[0];
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
         addRenderedTableCarrierStyleSourceIds(textFrameDomId, ids);
         addParentTableCarrierStyleSourceId(textFrameDomId, ids);
@@ -11509,33 +11513,9 @@ public final class OwnershipPlanner {
     }
 
     private void normalizeVisualSlotsExcludeTableStyleSources() {
-        ensureTableStyleSourceObjectIds();
-        LinkedHashMap<Integer, LinkedHashSet<Integer>> tableStyleSourcesByPage = new LinkedHashMap<>();
-        for (ObjectPlan plan : plans) {
-            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
-            LinkedHashSet<Integer> ids = tableStyleSourcesByPage.computeIfAbsent(
-                    plan.pageIndex, k -> new LinkedHashSet<>());
-            addAll(plan.sourceObjectIds, ids);
-            addAll(plan.visualSourceObjectIds, ids);
-            addAll(plan.styleSourceObjectIds, ids);
-        }
-        if (tableStyleSourcesByPage.isEmpty()) return;
-
-        for (int i = 0; i < plans.size(); i++) {
-            ObjectPlan plan = plans.get(i);
-            if (plan == null || !plan.hasVisibleVisual()) continue;
-            if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE) continue;
-            LinkedHashSet<Integer> tableSources = tableStyleSourcesByPage.get(plan.pageIndex);
-            if (tableSources == null || tableSources.isEmpty()) continue;
-            ObjectPlan next = plan;
-            for (int sourceId : tableSources) {
-                next = removeVisibleSourceFromPlan(next, sourceId,
-                        "visual_slot_absorbed_by_table_style");
-            }
-            if (next != plan) {
-                plans.set(i, next);
-            }
-        }
+        // V2 keeps table geometry editable, but table/cell decoration remains
+        // source-owned textless visual material.  Do not absorb sibling visual
+        // sources into TABLE_STYLE_SLOT and do not demote their PNG owners.
     }
 
     private void ensureTableStyleSourceObjectIds() {

@@ -73,6 +73,154 @@ function _inlineCarrierVisualSourceObjectIds(item, itemInfo, sourceObjectIds) {
     return [];
 }
 
+function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates, candidateSeen) {
+    var appended = 0;
+    var sourceById = {};
+    var childrenByParent = {};
+    function sortedIds(ids) {
+        ids = ids || [];
+        ids.sort(function(a, b) { return Number(a) - Number(b); });
+        return ids;
+    }
+    function pushId(out, seen, id) {
+        if (id === null || id === undefined) return;
+        var key = String(id);
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push(id);
+    }
+    function unionBounds(a, b) {
+        if (!b || b.length < 4) return a;
+        if (!a) return [b[0], b[1], b[2], b[3]];
+        a[0] = Math.min(a[0], b[0]);
+        a[1] = Math.min(a[1], b[1]);
+        a[2] = Math.max(a[2], b[2]);
+        a[3] = Math.max(a[3], b[3]);
+        return a;
+    }
+    function isTableCarrierTextFrame(src) {
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (src.textFrameClass !== "editable") return false;
+        if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
+        return src.markerOnlyContents === true;
+    }
+    function isVisibleDecorationSibling(src) {
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (String(src.kind || "") === "TextFrame") return false;
+        return src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true;
+    }
+    function candidateExists(pageIndex, sourceIds) {
+        var key = _sourceSetKey(sortedIds(sourceIds.slice(0)));
+        for (var ci = 0; ci < candidates.length; ci++) {
+            var candidate = candidates[ci];
+            if (!candidate || String(candidate.pageIndex) !== String(pageIndex)) continue;
+            if (_sourceSetKey(candidate.sourceObjectIds || []) === key) return true;
+            if (_sourceSetKey(candidate.exportSourceObjectIds || []) === key) return true;
+        }
+        return false;
+    }
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        sourceById[String(src.id)] = src;
+        if (src.parentId !== null && src.parentId !== undefined) {
+            var parentKey = String(src.parentId);
+            if (!childrenByParent[parentKey]) childrenByParent[parentKey] = [];
+            childrenByParent[parentKey].push(src);
+        }
+    }
+    for (var parentId in childrenByParent) {
+        if (!childrenByParent.hasOwnProperty(parentId)) continue;
+        var children = childrenByParent[parentId];
+        var tableTextFrameIds = [];
+        var tableSeen = {};
+        var visualIds = [];
+        var visualSeen = {};
+        var pageIndex = null;
+        var zOrder = null;
+        var b = null;
+        for (var ci2 = 0; ci2 < children.length; ci2++) {
+            var child = children[ci2];
+            if (pageIndex === null || pageIndex === undefined) pageIndex = child.pageIndex;
+            if (isTableCarrierTextFrame(child)) {
+                pushId(tableTextFrameIds, tableSeen, child.id);
+                continue;
+            }
+            if (!isVisibleDecorationSibling(child)) continue;
+            pushId(visualIds, visualSeen, child.id);
+            b = unionBounds(b, child.bounds || null);
+            if (zOrder === null || Number(child.zOrder || 0) < zOrder) zOrder = Number(child.zOrder || 0);
+        }
+        if (tableTextFrameIds.length === 0 || visualIds.length === 0) continue;
+        if (pageIndex === null || pageIndex === undefined || Number(pageIndex) < 0) continue;
+        visualIds = sortedIds(visualIds);
+        tableTextFrameIds = sortedIds(tableTextFrameIds);
+        var sourceIds = visualIds.slice(0);
+        var candidateId = sourceIds.length > 1
+                ? _candidateCompositeId("pass.decoration_groups", Number(pageIndex), sourceIds,
+                        "table_carrier_sibling_decoration")
+                : _candidateId("pass.decoration_groups", sourceIds[0], Number(pageIndex));
+        var seenKey = "pass.decoration_groups|page:" + String(pageIndex)
+                + "|src:" + _sourceSetKey(sourceIds);
+        if (candidateSeen && candidateSeen[seenKey]) continue;
+        if (candidateSeen) candidateSeen[seenKey] = true;
+        candidates.push({
+            candidateId: candidateId,
+            passId: "pass.decoration_groups",
+            sourceObjectIds: sourceIds,
+            primarySourceObjectId: sourceIds[0],
+            pageIndex: Number(pageIndex),
+            kind: sourceIds.length > 1 ? "TableCarrierSiblingDecorationGroup" : "TableCarrierSiblingDecoration",
+            unit: sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            bounds: b,
+            parentId: Number(parentId),
+            parentKind: sourceById[String(parentId)] ? sourceById[String(parentId)].kind || null : null,
+            composite: sourceIds.length > 1,
+            compositeRole: "table_carrier_sibling_decoration",
+            slotRole: "shell_slot_only",
+            tableDecorationRole: "table_carrier_sibling_decoration",
+            exportSourceObjectIds: sourceIds.slice(0),
+            exportTargetObjectId: sourceIds.length === 1 ? sourceIds[0] : null,
+            hiddenVisualSourceObjectIds: tableTextFrameIds,
+            visualSourceObjectIds: sourceIds.slice(0),
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            editableTextFrameIds: tableTextFrameIds,
+            hiddenTextFrameIds: tableTextFrameIds,
+            requiresTextHidden: tableTextFrameIds.length > 0,
+            textOwner: "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            ownershipSlot: "SHELL_SLOT",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_TEXT_SHELL",
+            visualLayer: "LABEL_BACKDROP",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            zOrder: zOrder !== null ? zOrder : 0,
+            protectFromPageTextlessGroup: true,
+            required: false,
+            reason: "table_carrier_sibling_decoration"
+        });
+        appended++;
+    }
+    return { appendedCount: appended };
+}
+
+function _candidateIsProtectedDecorationSlot(candidate) {
+    if (!candidate) return false;
+    if (candidate.protectFromPageTextlessGroup === true) return true;
+    return candidate.compositeRole === "table_carrier_sibling_decoration"
+            || candidate.reason === "table_carrier_sibling_decoration";
+}
+
 function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, planCache) {
     var masterCompositeClusterCache = {};
 
@@ -925,6 +1073,7 @@ function _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourc
 
     function isSuppressibleChild(candidate) {
         if (!candidate || candidate.disabled === true) return false;
+        if (_candidateIsProtectedDecorationSlot(candidate)) return false;
         if (isTextlessParentGroup(candidate)) return true;
         if (candidate.passId === "pass.inline_objects"
                 && candidate.slotRole === "inline_textless_sibling_decoration_slot"
@@ -1439,6 +1588,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
 
     function isEligible(candidate) {
         if (!candidate || candidate.disabled === true) return false;
+        if (_candidateIsProtectedDecorationSlot(candidate)) return false;
         if (candidate.passId === "pass.page_textless_graphic_groups") return false;
         if (candidate.passId !== "pass.decoration_groups"
                 && candidate.passId !== "pass.image_textless_groups"
@@ -2308,6 +2458,7 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
 
     function isSuppressibleChild(candidate) {
         if (!candidate || candidate.disabled === true || isPageGroup(candidate)) return false;
+        if (_candidateIsProtectedDecorationSlot(candidate)) return false;
         if (candidate.passId !== "pass.decoration_groups"
                 && candidate.passId !== "pass.editable_textframe_visual_shells"
                 && candidate.passId !== "pass.image_textless_groups"
@@ -2374,6 +2525,90 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
         suppressedCount: suppressed.length,
         suppressed: suppressed
     };
+}
+
+function _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates) {
+    if (!candidates || candidates.length === 0) {
+        return { candidates: candidates || [], excludedCount: 0, excluded: [] };
+    }
+    function ids(candidate, field) {
+        return _sortedNumericIds(candidate && candidate[field] || []);
+    }
+    function idSet(values) {
+        var set = {};
+        for (var i = 0; values && i < values.length; i++) set[String(values[i])] = true;
+        return set;
+    }
+    function removeIds(values, removeSet) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; values && i < values.length; i++) {
+            if (removeSet[String(values[i])]) continue;
+            _pushUniqueId(out, seen, values[i]);
+        }
+        return _sortedNumericIds(out);
+    }
+    function unionIds(a, b) {
+        var out = [];
+        var seen = {};
+        for (var ai = 0; a && ai < a.length; ai++) _pushUniqueId(out, seen, a[ai]);
+        for (var bi = 0; b && bi < b.length; bi++) _pushUniqueId(out, seen, b[bi]);
+        return _sortedNumericIds(out);
+    }
+    function copyCandidate(candidate) {
+        var copy = {};
+        for (var key in candidate) {
+            if (!candidate.hasOwnProperty || !candidate.hasOwnProperty(key)) continue;
+            var value = candidate[key];
+            copy[key] = value && value.constructor === Array ? value.slice(0) : value;
+        }
+        return copy;
+    }
+    var protectedByPage = {};
+    for (var pi = 0; pi < candidates.length; pi++) {
+        var protectedCandidate = candidates[pi];
+        if (!_candidateIsProtectedDecorationSlot(protectedCandidate)) continue;
+        var pageKey = String(protectedCandidate.pageIndex);
+        if (!protectedByPage[pageKey]) protectedByPage[pageKey] = [];
+        protectedByPage[pageKey] = unionIds(
+                protectedByPage[pageKey], ids(protectedCandidate, "exportSourceObjectIds"));
+        protectedByPage[pageKey] = unionIds(
+                protectedByPage[pageKey], ids(protectedCandidate, "visualSourceObjectIds"));
+    }
+    var excluded = [];
+    var out = [];
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!candidate || candidate.passId !== "pass.page_textless_graphic_groups") {
+            out.push(candidate);
+            continue;
+        }
+        var remove = protectedByPage[String(candidate.pageIndex)] || [];
+        if (!remove || remove.length === 0) {
+            out.push(candidate);
+            continue;
+        }
+        var removeSet = idSet(remove);
+        var nextExport = removeIds(candidate.exportSourceObjectIds || [], removeSet);
+        var nextVisual = removeIds(candidate.visualSourceObjectIds || [], removeSet);
+        if (_sourceSetKey(nextExport) === _sourceSetKey(candidate.exportSourceObjectIds || [])
+                && _sourceSetKey(nextVisual) === _sourceSetKey(candidate.visualSourceObjectIds || [])) {
+            out.push(candidate);
+            continue;
+        }
+        var pruned = copyCandidate(candidate);
+        pruned.exportSourceObjectIds = nextExport;
+        pruned.visualSourceObjectIds = nextVisual;
+        pruned.hiddenVisualSourceObjectIds = unionIds(pruned.hiddenVisualSourceObjectIds || [], remove);
+        pruned.reason = "page_textless_group_excludes_protected_decoration_sources";
+        out.push(pruned);
+        excluded.push({
+            candidateId: candidate.candidateId || null,
+            pageIndex: candidate.pageIndex,
+            removedSourceObjectIds: remove
+        });
+    }
+    return { candidates: out, excludedCount: excluded.length, excluded: excluded };
 }
 
 function _mergePageTextlessGraphicGroupDiagnostics(target, appended, suppression) {
@@ -2764,6 +2999,9 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d11a_plan_absorbInlineTextShellDecorationDescendants");
     _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
     _marker(ctx.outputDir, "03d12_plan_multiTextParentGroups");
+    var tableCarrierSiblingDecorationDiagnostics =
+            _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates, candidateSeen);
+    _marker(ctx.outputDir, "03d12a1_plan_tableCarrierSiblingDecorations");
     var pageTextlessGraphicGroupDiagnostics =
             _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
     _marker(ctx.outputDir, "03d12b_plan_pageTextlessGraphicGroups");
@@ -2771,6 +3009,10 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceItems);
     candidates = pageTextlessGraphicGroupMergeDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1_plan_mergeOverlappingPageTextlessGraphicGroups");
+    var protectedDecorationPageGroupExclusionDiagnostics =
+            _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates);
+    candidates = protectedDecorationPageGroupExclusionDiagnostics.candidates;
+    _marker(ctx.outputDir, "03d12b1a_plan_excludeProtectedDecorationFromPageGroups");
     var crossPageClipParentDecorationSuppressionDiagnostics =
             _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItems);
     candidates = crossPageClipParentDecorationSuppressionDiagnostics.candidates;

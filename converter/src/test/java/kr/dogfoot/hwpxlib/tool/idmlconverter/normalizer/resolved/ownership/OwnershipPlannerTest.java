@@ -1662,7 +1662,7 @@ public class OwnershipPlannerTest {
     }
 
     @Test
-    public void tableOnlyCarrierParentShapeBecomesTableStyleSlotNotShellVisual() {
+    public void tableOnlyCarrierSiblingDecorationKeepsShellVisualBesideTableStructure() {
         ResolvedData data = new ResolvedData();
         ResolvedTextFrame tf = textFrame(501, "\u0016");
         tf.storyId("501");
@@ -1672,12 +1672,12 @@ public class OwnershipPlannerTest {
 
         ResolvedPageItem parent = pageItem(
                 500,
-                "Rectangle",
+                "Group",
                 new double[] { 155.0, 63.0, 189.0, 203.0 },
-                "#표색_인디핑크미색",
-                "Black",
-                0.25);
-        parent.childIds(new int[] { 501 });
+                null,
+                null,
+                0.0);
+        parent.childIds(new int[] { 501, 502 });
         data.addPageItem(parent);
 
         ResolvedPageItem tfItem = pageItem(
@@ -1690,27 +1690,39 @@ public class OwnershipPlannerTest {
         tfItem.parentId("500");
         data.addPageItem(tfItem);
 
+        ResolvedPageItem cellDecoration = pageItem(
+                502,
+                "Rectangle",
+                new double[] { 155.0, 63.0, 189.0, 203.0 },
+                "#표색_인디핑크미색",
+                "Black",
+                0.25);
+        cellDecoration.parentId("500");
+        data.addPageItem(cellDecoration);
+
         RenderedGroup shell = rendered(
-                500,
+                502,
                 "page_object",
                 "page_object",
-                "decoration_group",
+                "slot_only_textless_shell",
                 "indesign_png",
                 "hwpx_tf",
                 new String[] { "501" },
-                new int[] { 500, 501 });
+                new int[] { 501, 502 });
         shell.bounds(new double[] { 155.0, 63.0, 189.0, 203.0 });
+        shell.containsEditableText(Boolean.FALSE);
+        shell.containsText(Boolean.FALSE);
         data.addRenderedFloatingItem(shell);
 
         ResolvedBuildContext ctx = plan(data, storyWithSingleCellTable("u1f5i1", "cell text"));
         ObjectPlan tablePlan = findPlanByKind(ctx, 501, "text_frame:table_only");
-        ObjectPlan shellPlan = findRenderedPlan(ctx, 500, "decoration_group");
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 502, "slot_only_textless_shell");
 
         Assert.assertNotNull(tablePlan);
         Assert.assertEquals(VisualAction.PLACE_TABLE_STYLE, tablePlan.visualAction);
-        Assert.assertArrayEquals(new int[] { 500 }, tablePlan.styleSourceObjectIds);
+        Assert.assertArrayEquals(new int[0], tablePlan.styleSourceObjectIds);
         Assert.assertNotNull(shellPlan);
-        Assert.assertEquals(VisualAction.DROP_VISUAL, shellPlan.visualAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
     }
 
     @Test

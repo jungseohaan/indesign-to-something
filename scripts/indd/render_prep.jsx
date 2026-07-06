@@ -598,10 +598,15 @@ function hideTextFramesFromNestedItems(nested) {
 }
 
 function hideRepeatedCellBackgroundCandidates(renderTarget) {
-    // Mixed groups can contain both a decorative title/icon and InDesign table-cell
-    // background rectangles. Later Java absorbs those cell fills into HWP table cells,
-    // so keeping them in the group PNG creates duplicate boxes. Hide only repeated,
-    // fill-only, axis-aligned rectangular backgrounds during PNG export.
+    // Table/cell decoration is source-owned textless visual material.  Older
+    // migration code hid repeated cell background rectangles here because Java
+    // later projected them into HWP table style.  V2 no longer absorbs table
+    // decoration into HWPX table properties, so these source shapes must stay
+    // visible in the extracted PNG/vector group.
+    return [];
+
+    // Legacy implementation kept below as dead reference until the remaining
+    // table-style projection code is fully removed.
     var saved = [];
     try {
         var nested = renderTarget.allPageItems;
