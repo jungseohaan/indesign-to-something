@@ -674,8 +674,14 @@ public class ResolvedToASTBuilder {
         boolean clipParentSourceSet = "clip_parent_source_set".equals(jsonString(o, "compositeRole"));
         if (!"READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))
                 && !isPlannerDeclaredTextShellImport(o)
+                && !isPlannerDeclaredStyleOnlyImport(o)
                 && !clipParentSourceSet) {
             return null;
+        }
+        VisualAction visualAction = enumValue(VisualAction.class,
+                jsonString(o, "visualAction"), VisualAction.DROP_VISUAL);
+        if (visualAction == VisualAction.ABSORB_TEXT_STYLE) {
+            return styleOnlyObjectPlanFromJson(o, visualAction);
         }
         String candidateId = jsonString(o, "candidateId");
         RenderedGroup rg = candidateId != null && !candidateId.isEmpty() && renderedByCandidateId != null
@@ -693,8 +699,6 @@ public class ResolvedToASTBuilder {
             rg = renderedGroupByPlanSource(o, renderedByPageAndSourceId, pageIndex);
         }
         if (rg == null || rg.file() == null || rg.file().isEmpty()) return null;
-        VisualAction visualAction = enumValue(VisualAction.class,
-                jsonString(o, "visualAction"), VisualAction.DROP_VISUAL);
         if (clipParentSourceSet
                 && dropClipParentSourceSetCandidateIds != null
                 && dropClipParentSourceSetCandidateIds.contains(candidateId)) {
@@ -704,8 +708,7 @@ public class ResolvedToASTBuilder {
                 && !clipParentSourceSet) {
             return null;
         }
-        if (visualAction == VisualAction.ABSORB_TEXT_STYLE
-                || visualAction == VisualAction.PLACE_TABLE_STYLE) {
+        if (visualAction == VisualAction.PLACE_TABLE_STYLE) {
             return null;
         }
         int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
@@ -811,6 +814,61 @@ public class ResolvedToASTBuilder {
         if (jsonIntArray(o, "ownedTextFrameIds").length == 0) return false;
         return jsonIntArray(o, "visualSourceObjectIds").length > 0
                 || jsonIntArray(o, "exportSourceObjectIds").length > 0;
+    }
+
+    private static boolean isPlannerDeclaredStyleOnlyImport(JsonObject o) {
+        if (o == null) return false;
+        if (!"ABSORB_TEXT_STYLE".equals(jsonString(o, "visualAction"))) return false;
+        if (!"INLINE".equals(jsonString(o, "placement"))) return false;
+        return jsonIntArray(o, "styleSourceObjectIds").length > 0
+                || jsonIntArray(o, "sourceObjectIds").length > 0;
+    }
+
+    private static ObjectPlan styleOnlyObjectPlanFromJson(JsonObject o, VisualAction visualAction) {
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        int[] styleSourceIds = jsonIntArray(o, "styleSourceObjectIds");
+        if (sourceIds.length == 0) sourceIds = styleSourceIds;
+        if (styleSourceIds.length == 0) styleSourceIds = sourceIds;
+        if (sourceIds.length == 0) return null;
+        int domId = jsonInt(o, "primarySourceObjectId",
+                jsonInt(o, "domId", sourceIds[0]));
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0 || pageIndex < 0) return null;
+        Placement placement = enumValue(Placement.class, jsonString(o, "placement"), Placement.INLINE);
+        return new ObjectPlan(
+                domId,
+                "planner_declared_style_only:" + jsonString(o, "passId") + ":" + jsonString(o, "kind"),
+                pageIndex,
+                enumValue(TextAction.class, jsonString(o, "textAction"), TextAction.DROP_TEXT),
+                visualAction,
+                enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.LABEL_BACKDROP),
+                placement,
+                null,
+                sourceIds,
+                new int[0],
+                styleSourceIds,
+                jsonIntArray(o, "ownedTextFrameIds"),
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                enumValue(Materialization.class, jsonString(o, "materialization"), Materialization.HWPX_TEXT),
+                enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"),
+                        placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE),
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                jsonString(o, "reason"),
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1))
+                .withExtractionCandidate(
+                        jsonString(o, "candidateId"),
+                        jsonString(o, "passId"),
+                        jsonString(o, "slotRole"))
+                .withExtractionSourceObjectIds(
+                        jsonIntArray(o, "exportSourceObjectIds"),
+                        jsonIntArray(o, "hiddenVisualSourceObjectIds"));
     }
 
     private static ObjectPlan layoutOnlyInlineSlotPlanFromJson(JsonObject o) {

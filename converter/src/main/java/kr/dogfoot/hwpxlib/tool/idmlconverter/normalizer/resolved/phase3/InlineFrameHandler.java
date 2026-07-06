@@ -1013,10 +1013,6 @@ public class InlineFrameHandler {
             if (!sameAnchor && !descendantText) continue;
 
             if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                    && plan.visualAction == VisualAction.ABSORB_TEXT_STYLE) {
-                return true;
-            }
-            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                     && plan.placement == Placement.INLINE) {
                 return true;
             }

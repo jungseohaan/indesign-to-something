@@ -88,7 +88,7 @@ public final class TextFlowDiagnosticsBuilder {
                     int runIndex = 0;
                     for (ResolvedRun run : paragraph.runs()) {
                         TextFlowDiagnostics.TextFlowRun outRun = buildRun(ctx, run, runIndex++);
-                        outPara.runs.add(outRun);
+                        if (outRun != null) outPara.runs.add(outRun);
                     }
                     overlayIdmlInlineSlots(ctx, story.id(), outPara);
                 }
@@ -113,10 +113,14 @@ public final class TextFlowDiagnosticsBuilder {
             return out;
         }
         if (run.isInlineAnchor()) {
+            int anchoredObjectId = run.anchoredObjectId();
+            if (isAbsorbedTextStyleAnchor(ctx, anchoredObjectId)) {
+                return null;
+            }
             out.kind = "INLINE_SLOT";
-            out.anchoredObjectId = run.anchoredObjectId();
-            applySourceMetadata(ctx, out, run.anchoredObjectId());
-            ObjectPlan plan = findPlanForAnchor(ctx, run.anchoredObjectId());
+            out.anchoredObjectId = anchoredObjectId;
+            applySourceMetadata(ctx, out, anchoredObjectId);
+            ObjectPlan plan = findPlanForAnchor(ctx, anchoredObjectId);
             if (plan != null) {
                 out.planTextAction = plan.textAction != null ? plan.textAction.name() : null;
                 out.planVisualAction = plan.visualAction != null ? plan.visualAction.name() : null;
@@ -154,6 +158,7 @@ public final class TextFlowDiagnosticsBuilder {
         List<IdmlInlineSlot> missing = new ArrayList<>();
         for (IdmlInlineSlot slot : slots) {
             if (slot.anchorObjectId == null) continue;
+            if (isAbsorbedTextStyleAnchor(ctx, slot.anchorObjectId)) continue;
             if (!paragraphHasInlineAnchor(paragraph, slot.anchorObjectId)) {
                 missing.add(slot);
             }
@@ -214,6 +219,7 @@ public final class TextFlowDiagnosticsBuilder {
     }
 
     private static TextFlowDiagnostics.TextFlowRun buildIdmlInlineRun(ResolvedBuildContext ctx, int anchorObjectId) {
+        if (isAbsorbedTextStyleAnchor(ctx, anchorObjectId)) return null;
         TextFlowDiagnostics.TextFlowRun out = new TextFlowDiagnostics.TextFlowRun();
         out.kind = "INLINE_SLOT";
         out.anchoredObjectId = anchorObjectId;
@@ -227,6 +233,13 @@ public final class TextFlowDiagnosticsBuilder {
             out.planReason = plan.reason;
         }
         return out;
+    }
+
+    private static boolean isAbsorbedTextStyleAnchor(ResolvedBuildContext ctx, int anchorObjectId) {
+        ObjectPlan plan = findPlanForAnchor(ctx, anchorObjectId);
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.visualAction == VisualAction.ABSORB_TEXT_STYLE;
     }
 
     private static boolean paragraphHasInlineAnchor(TextFlowDiagnostics.TextFlowParagraph paragraph, int anchorObjectId) {

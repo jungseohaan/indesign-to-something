@@ -780,6 +780,10 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     var ownedTextFrameIds = _sortedNumericIds(bundle.ownedTextFrameIds || []);
     var visualSourceObjectIds = _objectPlanPolicyVisualSourceIds(
             bundle.visualSourceObjectIds || [], ownedTextFrameIds, textAction, visualAction);
+    var styleSourceObjectIds = _objectPlanStyleSourceObjectIds(bundle, visualAction);
+    if (visualAction === "ABSORB_TEXT_STYLE") {
+        visualSourceObjectIds = [];
+    }
 
     return {
         objectPlanId: _objectPlanId(bundle, index),
@@ -814,7 +818,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         clusterHasPlacedContent: bundle.clusterHasPlacedContent === true,
         clusterHasVisualSource: bundle.clusterHasVisualSource === true,
         visualSourceObjectIds: visualSourceObjectIds,
-        styleSourceObjectIds: _sortedNumericIds(bundle.styleSourceObjectIds || []),
+        styleSourceObjectIds: styleSourceObjectIds,
         ownedTextFrameIds: ownedTextFrameIds,
         exportSourceObjectIds: _sortedNumericIds(bundle.exportSourceObjectIds || []),
         hiddenVisualSourceObjectIds: _sortedNumericIds(bundle.hiddenVisualSourceObjectIds || []),
@@ -857,6 +861,17 @@ function _objectPlanPolicyVisualSourceIds(visualSourceIds, ownedTextFrameIds, te
         if (!owned[String(visualIds[i])]) out.push(visualIds[i]);
     }
     return out;
+}
+
+function _objectPlanStyleSourceObjectIds(bundle, visualAction) {
+    if (!bundle) return [];
+    if (visualAction === "ABSORB_TEXT_STYLE") {
+        var ids = bundle.styleSourceObjectIds && bundle.styleSourceObjectIds.length > 0
+                ? bundle.styleSourceObjectIds
+                : (bundle.sourceObjectIds || []);
+        return _sortedNumericIds(ids);
+    }
+    return _sortedNumericIds(bundle.styleSourceObjectIds || []);
 }
 
 function _objectPlanBundleIsClosedPlacedContentCarrier(bundle) {
@@ -964,6 +979,7 @@ function _objectPlanVisualAction(bundle) {
     if (!bundle || bundle.executable !== true) return "DROP_VISUAL";
     if (bundle.layoutOnlyInlineSlot === true) return "DROP_VISUAL";
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
+    if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) return "ABSORB_TEXT_STYLE";
     if (bundle.policyLayer === "BACKGROUND") return "PLACE_FLOATING_PNG";
     if (bundle.passId === "pass.inline_objects"
             && (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0)) {
@@ -980,6 +996,52 @@ function _objectPlanVisualAction(bundle) {
                 : "PLACE_FLOATING_PNG";
     }
     return "DROP_VISUAL";
+}
+
+function _objectPlanBundleIsInlineVectorTextStyleMarker(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (_objectPlanPlacement(bundle) !== "INLINE") return false;
+    if (bundle.clusterHasTextFrame === true || bundle.clusterHasEditableText === true) return false;
+    if (bundle.clusterHasPlacedContent === true) return false;
+    var counts = bundle.clusterKindCounts || {};
+    var graphicLineCount = Number(counts.GraphicLine || counts.graphicLine || 0);
+    if (graphicLineCount > 0) {
+        for (var lineKind in counts) {
+            if (!counts.hasOwnProperty(lineKind)) continue;
+            if (Number(counts[lineKind] || 0) <= 0) continue;
+            if (lineKind !== "GraphicLine") return false;
+        }
+        return true;
+    }
+    if (!_objectPlanBundleHasOnlyInlineVectorMarkerKinds(counts)) return false;
+    if (!_objectPlanBundleHasTextStyleMarkerBounds(bundle)) return false;
+    return true;
+}
+
+function _objectPlanBundleHasOnlyInlineVectorMarkerKinds(counts) {
+    var visibleKindCount = 0;
+    var rectangleCount = 0;
+    for (var kind in counts) {
+        if (!counts.hasOwnProperty(kind)) continue;
+        if (Number(counts[kind] || 0) <= 0) continue;
+        visibleKindCount += Number(counts[kind] || 0);
+        if (kind === "Rectangle") {
+            rectangleCount += Number(counts[kind] || 0);
+            continue;
+        }
+        if (kind === "Group") continue;
+        return false;
+    }
+    return visibleKindCount > 0 && rectangleCount > 0;
+}
+
+function _objectPlanBundleHasTextStyleMarkerBounds(bundle) {
+    var bounds = bundle ? bundle.bounds : null;
+    if (!bounds || bounds.length < 4) return false;
+    var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+    var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+    if (isNaN(h) || isNaN(w) || h <= 0 || w <= 0) return false;
+    return h <= 3 && w >= h * 4;
 }
 
 function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
@@ -1088,6 +1150,9 @@ function _objectPlanMigrationStatus(bundle) {
 }
 
 function _objectPlanReason(bundle, migrationStatus) {
+    if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) {
+        return "inline_vector_text_style_marker";
+    }
     var parts = ["diagnostic_from_planner_bundle", migrationStatus || "UNKNOWN"];
     if (bundle && bundle.passId) parts.push(bundle.passId);
     if (bundle && bundle.ownershipSlot) parts.push(bundle.ownershipSlot);
