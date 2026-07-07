@@ -273,6 +273,7 @@ public class ResolvedToASTBuilder {
                     ? root.getAsJsonArray("objectPlans")
                     : null;
             if (plans == null) return;
+            Map<String, int[]> sourceSetRefs = objectPlanSourceSetRefs(root);
             Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
             Map<String, RenderedGroup> renderedByPageAndId = renderedGroupsByPageAndId();
             Map<String, RenderedGroup> renderedByPageAndSourceId = renderedGroupsByPageAndSourceId();
@@ -291,7 +292,7 @@ public class ResolvedToASTBuilder {
                 if (plan == null) {
                     plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId,
                             renderedByPageAndId, renderedByPageAndSourceId,
-                            dropClipParentSourceSetCandidateIds);
+                            dropClipParentSourceSetCandidateIds, sourceSetRefs);
                 }
                 if (plan == null) {
                     plan = nativeVectorShapePlanFromJson(planJson);
@@ -669,7 +670,8 @@ public class ResolvedToASTBuilder {
             Map<String, RenderedGroup> renderedByCandidateId,
             Map<String, RenderedGroup> renderedByPageAndId,
             Map<String, RenderedGroup> renderedByPageAndSourceId,
-            Set<String> dropClipParentSourceSetCandidateIds) {
+            Set<String> dropClipParentSourceSetCandidateIds,
+            Map<String, int[]> sourceSetRefs) {
         if (o == null) return null;
         boolean clipParentSourceSet = "clip_parent_source_set".equals(jsonString(o, "compositeRole"));
         if (!"READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))
@@ -758,9 +760,9 @@ public class ResolvedToASTBuilder {
                         jsonIntArray(o, "exportSourceObjectIds"),
                         jsonIntArray(o, "hiddenVisualSourceObjectIds"))
                 .withSourceTreeDiagnostics(
-                        jsonIntArray(o, "sourceRootObjectIds"),
-                        jsonIntArray(o, "clusterSourceObjectIds"),
-                        jsonIntArray(o, "omittedClusterSourceObjectIds"));
+                        jsonSourceSetArray(o, "sourceRootObjectIds", "sourceRootSetId", sourceSetRefs),
+                        jsonSourceSetArray(o, "clusterSourceObjectIds", "clusterSourceSetId", sourceSetRefs),
+                        jsonSourceSetArray(o, "omittedClusterSourceObjectIds", "omittedClusterSourceSetId", sourceSetRefs));
     }
 
     private static RenderedGroup renderedGroupByPlanSource(
@@ -994,6 +996,41 @@ public class ResolvedToASTBuilder {
         int[] out = new int[arr.size()];
         for (int i = 0; i < arr.size(); i++) {
             out[i] = arr.get(i).isJsonNull() ? 0 : arr.get(i).getAsInt();
+        }
+        return out;
+    }
+
+    private static int[] jsonSourceSetArray(
+            JsonObject o,
+            String arrayKey,
+            String refKey,
+            Map<String, int[]> sourceSetRefs) {
+        int[] direct = jsonIntArray(o, arrayKey);
+        if (direct.length > 0 || o == null || refKey == null || sourceSetRefs == null) {
+            return direct;
+        }
+        String ref = jsonString(o, refKey);
+        if (ref == null || ref.isEmpty()) return direct;
+        int[] resolved = sourceSetRefs.get(ref);
+        return resolved != null ? Arrays.copyOf(resolved, resolved.length) : direct;
+    }
+
+    private static Map<String, int[]> objectPlanSourceSetRefs(JsonObject root) {
+        Map<String, int[]> out = new HashMap<>();
+        if (root == null || !root.has("sourceSetRefs") || !root.get("sourceSetRefs").isJsonObject()) {
+            return out;
+        }
+        JsonObject refs = root.getAsJsonObject("sourceSetRefs");
+        if (!refs.has("sourceSets") || !refs.get("sourceSets").isJsonArray()) {
+            return out;
+        }
+        JsonArray sets = refs.getAsJsonArray("sourceSets");
+        for (JsonElement element : sets) {
+            if (element == null || !element.isJsonObject()) continue;
+            JsonObject row = element.getAsJsonObject();
+            String id = jsonString(row, "sourceSetId");
+            if (id == null || id.isEmpty()) continue;
+            out.put(id, jsonIntArray(row, "sourceObjectIds"));
         }
         return out;
     }

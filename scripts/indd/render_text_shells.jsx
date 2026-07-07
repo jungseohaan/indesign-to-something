@@ -161,6 +161,84 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     var sourceItemIndexes = null;
     try { sourceItemIndexes = _buildSourceItemIndexes(sourceItems || []); } catch (eSourceIndexes) {}
     var sourceInfoById = sourceItemIndexes ? sourceItemIndexes.sourceInfoById || {} : {};
+    var decoPerfStats = {
+        passId: decorationCandidates && decorationCandidates.length > 0
+                ? String(decorationCandidates[0].passId || "unknown")
+                : "unknown",
+        candidateCount: decorationCandidates ? decorationCandidates.length : 0,
+        plannedItemCount: plannedItems ? plannedItems.length : 0,
+        phaseMs: {},
+        eventCounts: {},
+        renderEvents: []
+    };
+
+    function _decoPerfNow() {
+        try { return new Date().getTime(); } catch (e) {}
+        return 0;
+    }
+
+    function _decoPerfAdd(map, key, value) {
+        try {
+            if (!map[key]) map[key] = 0;
+            map[key] += value || 0;
+        } catch (e) {}
+    }
+
+    function _decoPerfEndPhase(name, startedAt) {
+        try { _decoPerfAdd(decoPerfStats.phaseMs, name, _decoPerfNow() - startedAt); } catch (e) {}
+    }
+
+    function _decoPerfPageIndex(page) {
+        try { return page && page.documentOffset !== undefined ? page.documentOffset : -1; } catch (e) {}
+        return -1;
+    }
+
+    function _decoPerfItemId(item) {
+        try { return item && item.id !== undefined && item.id !== null ? item.id : null; } catch (e) {}
+        return null;
+    }
+
+    function _decoPerfRecord(kind, item, page, ownershipOpts, startedAt, detail) {
+        try {
+            if (!decoPerfStats.eventCounts[kind]) decoPerfStats.eventCounts[kind] = 0;
+            decoPerfStats.eventCounts[kind]++;
+            if (decoPerfStats.renderEvents.length >= 500) return;
+            var event = {
+                kind: kind,
+                ms: _decoPerfNow() - startedAt,
+                itemId: _decoPerfItemId(item),
+                pageIndex: _decoPerfPageIndex(page)
+            };
+            if (ownershipOpts) {
+                event.candidateId = ownershipOpts.candidateId || null;
+                event.slotRole = ownershipOpts.slotRole || null;
+                event.reason = ownershipOpts.reason || null;
+                event.exportSourceObjectCount = ownershipOpts.exportSourceObjectIds
+                        ? ownershipOpts.exportSourceObjectIds.length : 0;
+                event.sourceObjectCount = ownershipOpts.sourceObjectIds
+                        ? ownershipOpts.sourceObjectIds.length : 0;
+            }
+            if (detail) {
+                for (var dk in detail) {
+                    if (detail.hasOwnProperty(dk)) event[dk] = detail[dk];
+                }
+            }
+            decoPerfStats.renderEvents.push(event);
+        } catch (e) {}
+    }
+
+    function _decoPerfSafePassId() {
+        try { return String(decoPerfStats.passId || "unknown").replace(/[^A-Za-z0-9_-]+/g, "_"); } catch (e) {}
+        return "unknown";
+    }
+
+    function _decoPerfWrite() {
+        try {
+            decoPerfStats.resultCount = results.length;
+            decoPerfStats.textlessShellDiagnosticCount = textlessShellDiagnostics.length;
+            writeJson(outputDir + "/_deco_group_perf_" + _decoPerfSafePassId() + ".json", decoPerfStats);
+        } catch (e) {}
+    }
 
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -705,6 +783,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     }
 
     function _decoRender(item, page, childIdMap, ownershipOpts) {
+        var _perfRenderStartedAt = _decoPerfNow();
+        var _perfCandidateStartedAt = 0;
+        var _perfCandidateMs = 0;
+        var _perfAutoHideMs = 0;
+        var _perfExportMs = 0;
+        var _perfChildIdsMs = 0;
         var domId = item.id;
         try {
             if (ownershipOpts
@@ -724,9 +808,13 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     renderKey: renderKey
                 });
             }
+            _decoPerfRecord("direct_render", item, page, ownershipOpts, _perfRenderStartedAt, {
+                result: "skipped_already_rendered"
+            });
             return [];
         }
         var decoCandidateMatch = null;
+        _perfCandidateStartedAt = _decoPerfNow();
         if (ownershipOpts && ownershipOpts.candidateId && _extractionCandidateLookup
                 && _extractionCandidateLookup.byId
                 && _extractionCandidateLookup.byId[String(ownershipOpts.candidateId)]) {
@@ -738,12 +826,17 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             decoCandidateMatch = _directDecoCandidateMatch(item, page)
                     || _decoFindPlannedExtractionCandidate("pass.decoration_groups", item, page ? page.documentOffset : null);
         }
+        _perfCandidateMs = _decoPerfNow() - _perfCandidateStartedAt;
         if (!decoCandidateMatch) {
             if (ownershipOpts && ownershipOpts.candidateId) {
                 _recordPlannedShellRenderDiagnostic(item, page, "planned_shell_render_no_candidate_match", {
                     candidateId: ownershipOpts.candidateId
                 });
             }
+            _decoPerfRecord("direct_render", item, page, ownershipOpts, _perfRenderStartedAt, {
+                result: "no_candidate_match",
+                candidateMatchMs: _perfCandidateMs
+            });
             return [];
         }
         var pageIndexForFile = -1;
@@ -812,6 +905,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
         }
         var _autoHiddenTFs = null;
+        var _perfAutoHideStartedAt = _decoPerfNow();
         try {
             // A decoration render target may contain editable TextFrames whose
             // visible content is a table/anchored story rather than plain
@@ -837,6 +931,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 resolvedOwnershipOpts = _copiedOwnershipOpts;
             }
         } catch (eAutoHide) {}
+        _perfAutoHideMs = _decoPerfNow() - _perfAutoHideStartedAt;
         // exportFile을 독립 try로 감싸 InDesign 2026 예외가 push를 건너뛰지 않도록 보호
         var _exportOk = false;
         var _exportDup = null;
@@ -847,6 +942,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     && _hasTableOnlyCarrierTextFrame(_exportTarget);
         } catch (eClearCheck) {}
         var _exportError = null;
+        var _perfExportStartedAt = _decoPerfNow();
         try {
             if (_plannedExportSourceIds.length > 0) {
                 var _outOfScopeOwnershipOpts = resolvedOwnershipOpts;
@@ -879,6 +975,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             try { if (_savedOutOfScopeChildren && _savedOutOfScopeChildren.length > 0) _restoreItemsForExport(_savedOutOfScopeChildren); } catch (eRestoreOutOfScope) {}
             try { if (_autoHiddenTFs && _autoHiddenTFs.length > 0) restoreTextFrames(_autoHiddenTFs); } catch (eRestoreAutoHide) {}
         }
+        _perfExportMs = _decoPerfNow() - _perfExportStartedAt;
         if (!_exportOk) {
             if (ownershipOpts && ownershipOpts.candidateId) {
                 _recordPlannedShellRenderDiagnosticForCandidate(
@@ -893,8 +990,15 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                             exportTargetObjectId: _plannedExportTargetId,
                             exportTargetType: _exportTarget && _exportTarget.constructor ? _exportTarget.constructor.name : null,
                             exportSourceObjectIds: _plannedExportSourceIds
-                        });
+                    });
             }
+            _decoPerfRecord("direct_render", item, page, ownershipOpts, _perfRenderStartedAt, {
+                result: "export_failed",
+                candidateMatchMs: _perfCandidateMs,
+                autoHideMs: _perfAutoHideMs,
+                exportMs: _perfExportMs,
+                exportError: _exportError
+            });
             return [];
         }
 
@@ -916,6 +1020,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 
         var childIds = [];
         var skippedClaimedLabelChild = false;
+        var _perfChildIdsStartedAt = _decoPerfNow();
         try {
             var nested = _decoAllPageItems(_exportTargetSource);
             for (var i = 0; i < nested.length; i++) {
@@ -930,6 +1035,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 if (childIdMap) childIdMap[cid] = true;
             }
         } catch (e) {}
+        _perfChildIdsMs = _decoPerfNow() - _perfChildIdsStartedAt;
 
         var _z = 0;
         try { _z = getItemZOrder(item); } catch (e) {}
@@ -975,6 +1081,15 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         results.push(applyRenderOwnership(entry, item, resolvedOwnershipOpts));
         renderedPageKeys[renderKey] = true;
         if (_plannedPageCountForSource(domId) <= 1) renderedIds[domId] = true;
+        _decoPerfRecord("direct_render", item, page, resolvedOwnershipOpts, _perfRenderStartedAt, {
+            result: "rendered",
+            candidateMatchMs: _perfCandidateMs,
+            autoHideMs: _perfAutoHideMs,
+            exportMs: _perfExportMs,
+            childIdsMs: _perfChildIdsMs,
+            childIdCount: childIds.length,
+            fileName: fileName
+        });
         return childIds;
     }
 
@@ -1012,6 +1127,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     }
 
     function _renderPlannedSourceSetCompositeShell(slotPlan, page, ownershipOpts) {
+        var _perfCompositeStartedAt = _decoPerfNow();
         if (!slotPlan || !page || !ownershipOpts) return false;
         function fail(reason, detail) {
             var diagItem = null;
@@ -1053,6 +1169,15 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     detail: copiedDetail
                 });
             }
+            _decoPerfRecord("source_set_composite", diagItem, page, ownershipOpts, _perfCompositeStartedAt, {
+                result: "failed",
+                failReason: reason,
+                passId: slotPlan ? slotPlan.passId || null : null,
+                candidatePurpose: slotPlan ? slotPlan.candidatePurpose || null : null,
+                compositeRole: slotPlan ? slotPlan.compositeRole || null : null,
+                exportSourceObjectCount: slotPlan && slotPlan.exportSourceObjectIds
+                        ? slotPlan.exportSourceObjectIds.length : 0
+            });
             return false;
         }
         if (slotPlan.materialization !== "EXTRACTED_PNG_VECTOR") {
@@ -1356,6 +1481,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             for (var rsi = 0; rsi < renderedSourceIds.length; rsi++) {
                 renderedIds[renderedSourceIds[rsi]] = true;
             }
+            _decoPerfRecord("source_set_composite", tempGroup, page, ownershipOpts, _perfCompositeStartedAt, {
+                result: "rendered",
+                passId: slotPlan.passId || null,
+                candidatePurpose: slotPlan.candidatePurpose || null,
+                compositeRole: slotPlan.compositeRole || null,
+                sourceItemCount: sourceItems.length,
+                duplicateCount: dups.length,
+                exportSourceObjectCount: exportIds.length,
+                fileName: fileName
+            });
             return true;
         } catch (e) {
             return fail("planned_source_set_render_exception", {
@@ -1552,6 +1687,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     // candidate's page-local source set instead of relying on global source-id
     // traversal. This covers both explicit slot-only shells and spread-spanning
     // background shape containers that materialize once per intersecting page.
+    var _perfPhaseStartedAt = _decoPerfNow();
     for (var soi = 0; soi < plannedItems.length; soi++) {
         var slotPlan = plannedItems[soi].candidate;
         var slotItem = plannedItems[soi].item;
@@ -1657,6 +1793,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     { error: String(eSlotOnlyRender) });
         }
     }
+    _decoPerfEndPhase("planned_loop", _perfPhaseStartedAt);
 
     function _hasVisualShapeChild(grp) {
         try {
@@ -3055,6 +3192,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     // Non-Group clip carriers must be rendered before their child groups. If a
     // child group is exported first, InDesign's parent clip path is lost and the
     // child appears as an unclipped visual fragment.
+    _perfPhaseStartedAt = _decoPerfNow();
     for (var i = 0; i < plannedItems.length; i++) {
         var planned = plannedItems[i];
         var item = planned.item;
@@ -3077,10 +3215,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 
         try { _decoRender(item, p1Page, null); } catch (e) {}
     }
+    _decoPerfEndPhase("pass1_clip_carriers", _perfPhaseStartedAt);
 
     // ── Pass 1.5: atomic ownership-root text shell group ─────────────────────
     // 같은 원본 시각 단위 안에 직접 도형과 editable TF가 함께 있으면, sibling
     // label backdrop으로 쪼개기 전에 ownership root 전체를 하나의 textless shell로 소유한다.
+    _perfPhaseStartedAt = _decoPerfNow();
     for (var lgi = 0; lgi < plannedItems.length; lgi++) {
         var leafGrp = plannedItems[lgi].item;
         try { if (!leafGrp || leafGrp.constructor.name !== "Group") continue; } catch (eLeafCn) { continue; }
@@ -3091,10 +3231,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         if (leafPage.documentOffset + 1 < startPage || leafPage.documentOffset + 1 > endPage) continue;
         try { _renderAtomicOwnershipRootTextShellGroup(leafGrp, leafPage); } catch (eLeafRender) {}
     }
+    _decoPerfEndPhase("pass15_atomic_text_shell_root", _perfPhaseStartedAt);
 
     // ── Pass 1.6: graphic-only ownership-root group ──────────────────────────
     // leaf가 아니더라도 자식 도형/하위 그룹이 합쳐져 하나의 원본 시각 단위가 되는
     // graphic-only Group은 부모 mixed/container보다 먼저 추출한다.
+    _perfPhaseStartedAt = _decoPerfNow();
     for (var gori = 0; gori < plannedItems.length; gori++) {
         var graphicRoot = plannedItems[gori].item;
         try { if (!graphicRoot || graphicRoot.constructor.name !== "Group") continue; } catch (eGraphicCn) { continue; }
@@ -3105,8 +3247,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         if (graphicPage.documentOffset + 1 < startPage || graphicPage.documentOffset + 1 > endPage) continue;
         try { _renderGraphicOnlyOwnershipRootGroup(graphicRoot, graphicPage); } catch (eGraphicRender) {}
     }
+    _decoPerfEndPhase("pass16_graphic_root", _perfPhaseStartedAt);
 
     // ── Pass 2~4 통합: Group ─────────────────────────────────────────────────
+    _perfPhaseStartedAt = _decoPerfNow();
     for (var gi = 0; gi < plannedItems.length; gi++) {
         var grp = plannedItems[gi].item;
         if (grp.constructor.name !== "Group") continue;
@@ -3305,7 +3449,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             } catch (e) {}
         }
     }
+    _decoPerfEndPhase("pass2_4_group_loop", _perfPhaseStartedAt);
 
+    _decoPerfWrite();
     return { frames: results, childIds: decoChildIds, textlessShellDiagnostics: textlessShellDiagnostics };
 }
 

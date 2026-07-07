@@ -115,100 +115,6 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
 
 function _slimExtractionPlanForWrite(plan) {
     if (!plan) return plan;
-    function copySourceItem(src) {
-        if (!src) return src;
-        return {
-            id: src.id,
-            pageIndex: src.pageIndex,
-            kind: src.kind,
-            parentId: src.parentId,
-            parentKind: src.parentKind,
-            anchoredPosition: src.anchoredPosition,
-            storyAnchorPlacement: src.storyAnchorPlacement,
-            bounds: src.bounds,
-            sourceOrder: src.sourceOrder,
-            rawZOrder: src.rawZOrder,
-            zOrder: src.zOrder,
-            zOrderSource: src.zOrderSource,
-            layerName: src.layerName,
-            visible: src.visible,
-            hiddenLayer: src.hiddenLayer,
-            nonprinting: src.nonprinting,
-            textFrameClass: src.textFrameClass,
-            contentType: src.contentType,
-            isGraphicContentFrame: src.isGraphicContentFrame === true,
-            textLength: src.textLength,
-            hasText: src.hasText,
-            markerOnlyContents: src.markerOnlyContents,
-            simpleMarkerLabelContents: src.simpleMarkerLabelContents,
-            hasChildren: src.hasChildren,
-            hasPlacedVisual: src.hasPlacedVisual,
-            hasCandidateVectorPaint: src.hasCandidateVectorPaint,
-            hasVisibleFill: src.hasVisibleFill,
-            hasVisibleStroke: src.hasVisibleStroke,
-            fillColorName: src.fillColorName,
-            strokeColorName: src.strokeColorName,
-            strokeWeight: src.strokeWeight,
-            cornerRadius: src.cornerRadius
-        };
-    }
-    function copyCandidate(c) {
-        if (!c) return c;
-        return {
-            candidateId: c.candidateId,
-            exportUnitId: c.exportUnitId,
-            renderUnitId: c.renderUnitId,
-            renderUnitSlotIdentityKey: c.renderUnitSlotIdentityKey,
-            passId: c.passId,
-            pageIndex: c.pageIndex,
-            unit: c.unit,
-            mode: c.mode,
-            candidatePurpose: c.candidatePurpose,
-            required: c.required,
-            disabled: c.disabled === true,
-            parentId: c.parentId,
-            parentKind: c.parentKind,
-            anchoredPosition: c.anchoredPosition,
-            storyAnchorPlacement: c.storyAnchorPlacement,
-            bounds: c.bounds,
-            sourceObjectIds: c.sourceObjectIds,
-            executionSourceObjectIds: c.executionSourceObjectIds,
-            primarySourceObjectId: c.primarySourceObjectId,
-            exportTargetObjectId: c.exportTargetObjectId,
-            exportSourceObjectIds: c.exportSourceObjectIds,
-            hiddenVisualSourceObjectIds: c.hiddenVisualSourceObjectIds,
-            visualSourceObjectIds: c.visualSourceObjectIds,
-            styleSourceObjectIds: c.styleSourceObjectIds,
-            ownedTextFrameIds: c.ownedTextFrameIds,
-            hiddenTextFrameIds: c.hiddenTextFrameIds,
-            editableTextFrameIds: c.editableTextFrameIds,
-            composite: c.composite,
-            compositeRole: c.compositeRole,
-            slotRole: c.slotRole,
-            layoutOnlyInlineSlot: c.layoutOnlyInlineSlot === true,
-            ownedByNativeShellSourceObjectIds: c.ownedByNativeShellSourceObjectIds,
-            materialization: c.materialization,
-            textAction: c.textAction,
-            visualAction: c.visualAction,
-            visualLayer: c.visualLayer,
-            ownershipSlot: c.ownershipSlot,
-            textOwner: c.textOwner,
-            requiresTextHidden: c.requiresTextHidden === true,
-            completePngTextAllowed: c.completePngTextAllowed === true,
-            placement: c.placement,
-            coordinateSpace: c.coordinateSpace,
-            reason: c.reason,
-            suffix: c.suffix
-        };
-    }
-    var sourceItems = [];
-    for (var si = 0; plan.sourceItems && si < plan.sourceItems.length; si++) {
-        sourceItems.push(copySourceItem(plan.sourceItems[si]));
-    }
-    var candidates = [];
-    for (var ci = 0; plan.candidates && ci < plan.candidates.length; ci++) {
-        candidates.push(copyCandidate(plan.candidates[ci]));
-    }
     return {
         schemaVersion: plan.schemaVersion,
         policy: plan.policy,
@@ -218,7 +124,7 @@ function _slimExtractionPlanForWrite(plan) {
         outputDir: plan.outputDir,
         pageRange: plan.pageRange,
         renderOptions: plan.renderOptions,
-        sourceItems: sourceItems,
+        sourceItemSummary: _slimSourceItemsForWrite(plan.sourceItems || [], 100),
         sourceClusterSummary: plan.sourceClusterSummary,
         sourceClusterQuerySummary: plan.sourceClusterQuerySummary,
         plannerBundleSummary: plan.plannerBundleSummary,
@@ -226,7 +132,7 @@ function _slimExtractionPlanForWrite(plan) {
         sourceCoverageSummary: plan.sourceCoverageSummary,
         sourceOwnershipModelSummary: plan.sourceOwnershipModelSummary,
         sourceOwnershipStageGateSummary: plan.sourceOwnershipStageGateSummary,
-        renderUnits: plan.renderUnits || [],
+        renderUnitSummary: _slimRenderUnitsForWrite(plan.renderUnits || [], 50),
         preObjectPlanTextlessShellSuppressionSummary:
                 plan.preObjectPlanTextlessShellSuppressionSummary,
         crossPageClipParentDecorationSuppressionSummary:
@@ -236,9 +142,181 @@ function _slimExtractionPlanForWrite(plan) {
         executionCandidateContractSummary: plan.executionCandidateContractSummary,
         exactShellSlotDuplicateSummary: plan.exactShellSlotDuplicateSummary,
         sourceSlotRegistrySummary: plan.sourceSlotRegistrySummary,
-        candidates: candidates,
+        candidateSummary: _slimCandidatesForWrite(plan.candidates || [], 100),
         exportPasses: plan.exportPasses,
         slimForExecution: true,
         fullDiagnostics: "run with --diagnostics or perfMode diagnostics/debug"
     };
+}
+
+function _slimCandidatesForWrite(candidates, previewLimit) {
+    previewLimit = previewLimit === undefined || previewLimit === null ? 100 : previewLimit;
+    var summary = {
+        candidateCount: candidates ? candidates.length : 0,
+        passCounts: {},
+        modeCounts: {},
+        purposeCounts: {},
+        materializationCounts: {},
+        textActionCounts: {},
+        visualActionCounts: {},
+        placementCounts: {},
+        ownershipSlotCounts: {},
+        disabledCount: 0,
+        requiredCount: 0,
+        previewCount: 0
+    };
+    var preview = [];
+    for (var i = 0; candidates && i < candidates.length; i++) {
+        var c = candidates[i];
+        if (!c) continue;
+        _incrementSlimCount(summary.passCounts, c.passId || "UNKNOWN");
+        _incrementSlimCount(summary.modeCounts, c.mode || "UNKNOWN");
+        _incrementSlimCount(summary.purposeCounts, c.candidatePurpose || "UNKNOWN");
+        _incrementSlimCount(summary.materializationCounts, c.materialization || "UNKNOWN");
+        _incrementSlimCount(summary.textActionCounts, c.textAction || "UNKNOWN");
+        _incrementSlimCount(summary.visualActionCounts, c.visualAction || "UNKNOWN");
+        _incrementSlimCount(summary.placementCounts, c.placement || "UNKNOWN");
+        _incrementSlimCount(summary.ownershipSlotCounts, c.ownershipSlot || "UNKNOWN");
+        if (c.disabled === true) summary.disabledCount++;
+        if (c.required === true) summary.requiredCount++;
+        if (preview.length < previewLimit) {
+            preview.push(_candidatePreviewRow(c));
+        }
+    }
+    summary.previewCount = preview.length;
+    return {
+        schemaVersion: 1,
+        policy: "POLICY-extraction-planning",
+        mode: "candidate-summary",
+        summary: summary,
+        fullDiagnosticsSkipped: true,
+        candidatePreview: preview
+    };
+}
+
+function _candidatePreviewRow(c) {
+    if (!c) return c;
+    return {
+        candidateId: c.candidateId,
+        exportUnitId: c.exportUnitId,
+        renderUnitId: c.renderUnitId,
+        renderUnitSlotIdentityKey: c.renderUnitSlotIdentityKey,
+        passId: c.passId,
+        pageIndex: c.pageIndex,
+        unit: c.unit,
+        mode: c.mode,
+        candidatePurpose: c.candidatePurpose,
+        required: c.required,
+        disabled: c.disabled === true,
+        parentId: c.parentId,
+        parentKind: c.parentKind,
+        bounds: c.bounds,
+        sourceObjectIds: c.sourceObjectIds,
+        executionSourceObjectIds: c.executionSourceObjectIds,
+        primarySourceObjectId: c.primarySourceObjectId,
+        exportTargetObjectId: c.exportTargetObjectId,
+        exportSourceObjectIds: c.exportSourceObjectIds,
+        hiddenVisualSourceObjectIds: c.hiddenVisualSourceObjectIds,
+        visualSourceObjectIds: c.visualSourceObjectIds,
+        styleSourceObjectIds: c.styleSourceObjectIds,
+        ownedTextFrameIds: c.ownedTextFrameIds,
+        hiddenTextFrameIds: c.hiddenTextFrameIds,
+        editableTextFrameIds: c.editableTextFrameIds,
+        compositeRole: c.compositeRole,
+        slotRole: c.slotRole,
+        layoutOnlyInlineSlot: c.layoutOnlyInlineSlot === true,
+        materialization: c.materialization,
+        textAction: c.textAction,
+        visualAction: c.visualAction,
+        visualLayer: c.visualLayer,
+        ownershipSlot: c.ownershipSlot,
+        textOwner: c.textOwner,
+        placement: c.placement,
+        coordinateSpace: c.coordinateSpace,
+        reason: c.reason,
+        suffix: c.suffix
+    };
+}
+
+function _slimSourceItemsForWrite(sourceItems, previewLimit) {
+    previewLimit = previewLimit === undefined || previewLimit === null ? 100 : previewLimit;
+    var summary = {
+        sourceItemCount: sourceItems ? sourceItems.length : 0,
+        kindCounts: {},
+        pageCounts: {},
+        visibleCount: 0,
+        hiddenLayerCount: 0,
+        nonprintingCount: 0,
+        textFrameCount: 0,
+        textFrameWithTextCount: 0,
+        placedVisualCount: 0,
+        vectorPaintCount: 0,
+        visibleFillCount: 0,
+        visibleStrokeCount: 0,
+        previewCount: 0
+    };
+    var preview = [];
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src) continue;
+        _incrementSlimCount(summary.kindCounts, src.kind || "UNKNOWN");
+        _incrementSlimCount(summary.pageCounts, src.pageIndex !== undefined
+                ? String(src.pageIndex)
+                : "UNKNOWN");
+        if (src.visible === true) summary.visibleCount++;
+        if (src.hiddenLayer === true) summary.hiddenLayerCount++;
+        if (src.nonprinting === true) summary.nonprintingCount++;
+        if (src.kind === "TextFrame") {
+            summary.textFrameCount++;
+            if (src.hasText === true) summary.textFrameWithTextCount++;
+        }
+        if (src.hasPlacedVisual === true) summary.placedVisualCount++;
+        if (src.hasCandidateVectorPaint === true) summary.vectorPaintCount++;
+        if (src.hasVisibleFill === true) summary.visibleFillCount++;
+        if (src.hasVisibleStroke === true) summary.visibleStrokeCount++;
+        if (preview.length < previewLimit) {
+            preview.push(_sourceItemPreviewRow(src));
+        }
+    }
+    summary.previewCount = preview.length;
+    return {
+        schemaVersion: 1,
+        policy: "POLICY-extraction-planning",
+        mode: "source-item-summary",
+        summary: summary,
+        fullDiagnosticsSkipped: true,
+        sourceItemPreview: preview
+    };
+}
+
+function _sourceItemPreviewRow(src) {
+    if (!src) return src;
+    return {
+        id: src.id,
+        pageIndex: src.pageIndex,
+        kind: src.kind || null,
+        parentId: src.parentId !== undefined ? src.parentId : null,
+        parentKind: src.parentKind || null,
+        bounds: src.bounds || null,
+        zOrder: src.zOrder !== undefined ? src.zOrder : null,
+        layerName: src.layerName || null,
+        visible: src.visible,
+        hiddenLayer: src.hiddenLayer === true,
+        nonprinting: src.nonprinting === true,
+        textFrameClass: src.textFrameClass || null,
+        contentType: src.contentType || null,
+        hasText: src.hasText,
+        textLength: src.textLength,
+        hasChildren: src.hasChildren === true,
+        hasPlacedVisual: src.hasPlacedVisual === true,
+        hasCandidateVectorPaint: src.hasCandidateVectorPaint === true,
+        hasVisibleFill: src.hasVisibleFill === true,
+        hasVisibleStroke: src.hasVisibleStroke === true
+    };
+}
+
+function _incrementSlimCount(map, key) {
+    key = key || "UNKNOWN";
+    if (!map[key]) map[key] = 0;
+    map[key]++;
 }

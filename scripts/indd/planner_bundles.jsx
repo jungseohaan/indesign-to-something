@@ -6,12 +6,20 @@
  * candidates. This module is diagnostic and must not change placement.
  */
 
-function _buildPlannerBundles(sourceItems, candidates) {
-    var clusterDoc = _buildSourceClusters(sourceItems);
-    var clusterIndex = _createSourceClusterIndex(sourceItems, clusterDoc);
+function _buildPlannerBundles(sourceItems, candidates, options) {
+    options = options || {};
+    var clusterDoc = options.sourceClusterDiagnostics || options.sourceClusterDocument || null;
+    var clusterIndex = options.sourceClusterIndex || null;
+    if (!clusterIndex) {
+        if (!clusterDoc) clusterDoc = _buildSourceClusters(sourceItems);
+        clusterIndex = _createSourceClusterIndex(sourceItems, clusterDoc);
+    } else if (!clusterDoc && clusterIndex.diagnostics) {
+        clusterDoc = clusterIndex.diagnostics;
+    }
     var bundles = [];
     var summary = {
         candidateCount: candidates ? candidates.length : 0,
+        reusedSourceClusterIndex: options.sourceClusterIndex ? true : false,
         bundleCount: 0,
         slotCounts: {},
         policyLayerCounts: {},
@@ -72,9 +80,14 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     var declaredCandidate = _plannerBundleWithInferredSlotContract(
             candidate, slot, sourceIds, clusterRelation, clusterProfile);
     var slotSources = _plannerBundleSlotSources(declaredCandidate, slot, sourceIds, clusterIndex);
-    declaredCandidate = _plannerBundleWithCompletedVisibleFragmentContract(
+    var completedCandidate = _plannerBundleWithCompletedVisibleFragmentContract(
             declaredCandidate, slot, clusterRelation, clusterProfile, slotSources);
-    slotSources = _plannerBundleSlotSources(declaredCandidate, slot, sourceIds, clusterIndex);
+    if (completedCandidate !== declaredCandidate) {
+        declaredCandidate = completedCandidate;
+        slotSources = _plannerBundleSlotSources(declaredCandidate, slot, sourceIds, clusterIndex);
+    } else {
+        declaredCandidate = completedCandidate;
+    }
     slotSources = _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources);
     slotSources = _plannerBundleWithoutPlacedContentBranches(
             declaredCandidate, slot, slotSources, clusterIndex);
@@ -132,7 +145,7 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
             : _plannerBundlePolicyLayer(candidate, slot, clusterIndex);
 
     return {
-        bundleId: _plannerBundleId(candidate, sourceIds),
+        bundleId: _plannerBundleId(candidate, sourceIds, clusterIndex),
         candidateId: candidate.candidateId || null,
         passId: candidate.passId || null,
         pageIndex: candidate.pageIndex,
@@ -180,6 +193,9 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
     if (!sourceIds || sourceIds.length === 0 || !clusterIndex || !clusterIndex.sourceInfo) {
         return false;
     }
+    var cache = _plannerBundleCache(clusterIndex, "inlineFlowBySourceSet");
+    var cacheKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
     var sawInline = false;
     for (var i = 0; i < sourceIds.length; i++) {
         var src = clusterIndex.sourceInfo(sourceIds[i]);
@@ -199,17 +215,67 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
             sawInline = true;
             continue;
         }
+        cache[cacheKey] = false;
         return false;
     }
-    return sawInline;
+    cache[cacheKey] = sawInline;
+    return cache[cacheKey];
+}
+
+function _plannerBundleCache(clusterIndex, name) {
+    if (!clusterIndex) return {};
+    if (!clusterIndex._plannerBundleCache) clusterIndex._plannerBundleCache = {};
+    if (!clusterIndex._plannerBundleCache[name]) clusterIndex._plannerBundleCache[name] = {};
+    return clusterIndex._plannerBundleCache[name];
+}
+
+function _plannerBundleSourceSet(sourceIds, clusterIndex) {
+    var ids = sourceIds || [];
+    var cache = _plannerBundleCache(clusterIndex, "sourceSetByKey");
+    var key = _sourceSetKey(ids);
+    if (!cache[key]) cache[key] = _sourceSetMembership(ids);
+    return cache[key];
+}
+
+function _plannerBundleSourceSetKey(sourceIds, clusterIndex) {
+    var ids = sourceIds || [];
+    var cache = _plannerBundleCache(clusterIndex, "sourceSetKeyByRawKey");
+    var rawKey = String(ids.length) + "|" + String(ids.join ? ids.join(",") : ids);
+    if (cache[rawKey] === undefined) cache[rawKey] = _sourceSetKey(ids);
+    return cache[rawKey];
+}
+
+function _plannerBundleSourceSetContainsAll(sourceIds, requiredIds, clusterIndex) {
+    if (!requiredIds || requiredIds.length === 0) return true;
+    if (!sourceIds || sourceIds.length === 0) return false;
+    var sourceSet = _plannerBundleSourceSet(sourceIds, clusterIndex);
+    for (var i = 0; i < requiredIds.length; i++) {
+        if (!sourceSet[String(requiredIds[i])]) return false;
+    }
+    return true;
+}
+
+function _plannerBundleDescendantSourceObjectIds(clusterIndex, rootId) {
+    if (!clusterIndex || !clusterIndex.descendantSourceObjectIds
+            || rootId === null || rootId === undefined) {
+        return [];
+    }
+    var cache = _plannerBundleCache(clusterIndex, "descendantsByRoot");
+    var key = String(rootId);
+    if (!cache[key]) {
+        cache[key] = _sortedNumericIds(clusterIndex.descendantSourceObjectIds(rootId) || []);
+    }
+    return cache[key].slice(0);
 }
 
 function _plannerBundleIsInsideInlineCompositeLayout(sourceIds, clusterIndex) {
     if (!sourceIds || sourceIds.length === 0 || !clusterIndex || !clusterIndex.sourceInfo) {
         return false;
     }
-    var sourceSet = {};
-    for (var i = 0; i < sourceIds.length; i++) sourceSet[String(sourceIds[i])] = true;
+    var cache = _plannerBundleCache(clusterIndex, "insideInlineCompositeLayoutBySourceSet");
+    var cacheKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
+    var sourceSet = _plannerBundleSourceSet(sourceIds, clusterIndex);
     var ancestorId = null;
     for (var si = 0; si < sourceIds.length; si++) {
         var current = clusterIndex.sourceInfo(sourceIds[si]);
@@ -219,7 +285,10 @@ function _plannerBundleIsInsideInlineCompositeLayout(sourceIds, clusterIndex) {
                 if (!sourceSet[String(current.id)]
                         && _plannerBundleInlineAnchorRootHasCompositeLayout(current.id, clusterIndex)) {
                     if (ancestorId === null) ancestorId = String(current.id);
-                    else if (ancestorId !== String(current.id)) return false;
+                    else if (ancestorId !== String(current.id)) {
+                        cache[cacheKey] = false;
+                        return false;
+                    }
                 }
                 break;
             }
@@ -228,7 +297,8 @@ function _plannerBundleIsInsideInlineCompositeLayout(sourceIds, clusterIndex) {
             guard++;
         }
     }
-    return ancestorId !== null;
+    cache[cacheKey] = ancestorId !== null;
+    return cache[cacheKey];
 }
 
 function _plannerBundleSourceIsInlineAnchorRoot(source) {
@@ -240,7 +310,10 @@ function _plannerBundleSourceIsInlineAnchorRoot(source) {
 
 function _plannerBundleInlineAnchorRootHasCompositeLayout(rootId, clusterIndex) {
     if (!clusterIndex || !clusterIndex.descendantSourceObjectIds || !clusterIndex.sourceInfo) return false;
-    var descendants = clusterIndex.descendantSourceObjectIds(rootId);
+    var cache = _plannerBundleCache(clusterIndex, "inlineAnchorCompositeLayoutByRoot");
+    var cacheKey = String(rootId);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
+    var descendants = _plannerBundleDescendantSourceObjectIds(clusterIndex, rootId);
     if (!descendants || descendants.length === 0) return false;
     var editableTextCount = 0;
     var visualCount = 0;
@@ -258,7 +331,8 @@ function _plannerBundleInlineAnchorRootHasCompositeLayout(rootId, clusterIndex) 
             visualCount++;
         }
     }
-    return editableTextCount > 1 && visualCount > 0;
+    cache[cacheKey] = editableTextCount > 1 && visualCount > 0;
+    return cache[cacheKey];
 }
 
 function _plannerBundleIsInlineCompositeTextlessVectorDecoration(
@@ -299,13 +373,20 @@ function _plannerBundleSourceIsTextlessVectorDecoration(source, clusterIndex) {
         if (!clusterIndex || !clusterIndex.descendantSourceObjectIds || !clusterIndex.sourceInfo) {
             return false;
         }
-        var descendants = clusterIndex.descendantSourceObjectIds(source.id);
+        var cache = _plannerBundleCache(clusterIndex, "textlessVectorDecorationBySource");
+        var cacheKey = String(source.id);
+        if (cache[cacheKey] !== undefined) return cache[cacheKey];
+        var descendants = _plannerBundleDescendantSourceObjectIds(clusterIndex, source.id);
         if (!descendants || descendants.length === 0) return false;
         for (var i = 0; i < descendants.length; i++) {
             if (String(descendants[i]) === String(source.id)) continue;
             var child = clusterIndex.sourceInfo(descendants[i]);
-            if (!_plannerBundleSourceIsTextlessVectorDecorationLeaf(child)) return false;
+            if (!_plannerBundleSourceIsTextlessVectorDecorationLeaf(child)) {
+                cache[cacheKey] = false;
+                return false;
+            }
         }
+        cache[cacheKey] = true;
         return true;
     }
     return _plannerBundleSourceIsTextlessVectorDecorationLeaf(source);
@@ -337,7 +418,14 @@ function _plannerBundleHasExecutableShellMaterial(slotSources, clusterIndex) {
 }
 
 function _plannerBundleSourceHasExecutableVisualMaterial(sourceId, clusterIndex) {
-    return _plannerBundleSourceHasExecutableVisualMaterialInSubtree(sourceId, clusterIndex, {});
+    if (!clusterIndex || sourceId === null || sourceId === undefined) {
+        return _plannerBundleSourceHasExecutableVisualMaterialInSubtree(sourceId, clusterIndex, {});
+    }
+    var cache = _plannerBundleCache(clusterIndex, "executableVisualMaterialBySource");
+    var key = String(sourceId);
+    if (cache[key] !== undefined) return cache[key];
+    cache[key] = _plannerBundleSourceHasExecutableVisualMaterialInSubtree(sourceId, clusterIndex, {});
+    return cache[key];
 }
 
 function _plannerBundleSourceHasExecutableVisualMaterialInSubtree(sourceId, clusterIndex, visiting) {
@@ -450,6 +538,13 @@ function _plannerBundleSourceHasPlacedContentBranch(sourceId, clusterIndex, visi
         return false;
     }
     var key = String(sourceId);
+    if (!visiting) {
+        var cache = _plannerBundleCache(clusterIndex, "placedContentBranchBySource");
+        if (cache[key] !== undefined) return cache[key];
+        var cachedResult = _plannerBundleSourceHasPlacedContentBranch(sourceId, clusterIndex, {});
+        cache[key] = cachedResult;
+        return cachedResult;
+    }
     visiting = visiting || {};
     if (visiting[key]) return false;
     visiting[key] = true;
@@ -478,7 +573,7 @@ function _plannerBundleSourceIdsUnion(a, b) {
 }
 
 function _plannerBundleSourceIdsMinus(sourceIds, removedIds) {
-    var removed = _sourceIdSet(removedIds || []);
+    var removed = _sourceSetMembership(removedIds || []);
     var ids = [];
     var seen = {};
     for (var i = 0; sourceIds && i < sourceIds.length; i++) {
@@ -489,7 +584,7 @@ function _plannerBundleSourceIdsMinus(sourceIds, removedIds) {
 }
 
 function _plannerBundleSourceIdsIntersect(sourceIds, allowedIds) {
-    var allowed = _sourceIdSet(allowedIds || []);
+    var allowed = _sourceSetMembership(allowedIds || []);
     var ids = [];
     var seen = {};
     for (var i = 0; sourceIds && i < sourceIds.length; i++) {
@@ -627,7 +722,7 @@ function _plannerBundleShouldInferDecorationFragmentSlotContract(
 }
 
 function _plannerBundleClusterProfile(clusterSourceObjectIds, sourceIds, pageIndex, clusterIndex) {
-    var sourceSet = _sourceIdSet(sourceIds || []);
+    var sourceSet = _plannerBundleSourceSet(sourceIds || [], clusterIndex);
     var profile = {
         clusterKindCounts: {},
         omittedClusterSourceObjectIds: [],
@@ -693,7 +788,8 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
             && clusterIndex.descendantSourceObjectIds
             && candidate.primarySourceObjectId !== null
             && candidate.primarySourceObjectId !== undefined) {
-        var closedShellSourceIds = clusterIndex.descendantSourceObjectIds(candidate.primarySourceObjectId);
+        var closedShellSourceIds = _plannerBundleDescendantSourceObjectIds(
+                clusterIndex, candidate.primarySourceObjectId);
         visualSourceObjectIds = _plannerBundleNonTextSourceIds(
                 closedShellSourceIds, hiddenVisualIdSet, clusterIndex);
     } else if (explicitVisualIds && explicitVisualIds.length > 0) {
@@ -711,7 +807,8 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
                 ? candidate.exportSourceObjectIds
                 : sourceIds;
         if (_plannerBundleShouldUseClosedPlacedContentFrame(candidate, slot, visualBase, clusterIndex)) {
-            visualBase = clusterIndex.descendantSourceObjectIds(candidate.primarySourceObjectId);
+            visualBase = _plannerBundleDescendantSourceObjectIds(
+                    clusterIndex, candidate.primarySourceObjectId);
         }
         visualSourceObjectIds = _plannerBundleNonTextSourceIds(visualBase, hiddenVisualIdSet, clusterIndex);
         if (visualSourceObjectIds.length === 0
@@ -840,7 +937,10 @@ function _plannerBundleSourceIsInlineOwnedForParentShell(src) {
 function _plannerBundleSourceRootObjectIds(sourceIds, clusterIndex) {
     if (!sourceIds || sourceIds.length === 0) return [];
     if (!clusterIndex || !clusterIndex.sourceInfo) return _sortedNumericIds(sourceIds);
-    var sourceSet = _sourceIdSet(sourceIds);
+    var cache = _plannerBundleCache(clusterIndex, "rootObjectIdsBySourceSet");
+    var cacheKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    if (cache[cacheKey]) return cache[cacheKey].slice(0);
+    var sourceSet = _plannerBundleSourceSet(sourceIds, clusterIndex);
     var roots = [];
     for (var i = 0; i < sourceIds.length; i++) {
         var id = sourceIds[i];
@@ -857,7 +957,9 @@ function _plannerBundleSourceRootObjectIds(sourceIds, clusterIndex) {
         }
         if (!parentInSet) roots.push(id);
     }
-    return _sortedNumericIds(roots);
+    roots = _sortedNumericIds(roots);
+    cache[cacheKey] = roots.slice(0);
+    return roots;
 }
 
 function _plannerBundleClusterSourceObjectIds(primarySourceObjectId, sourceRootObjectIds, clusterIndex) {
@@ -867,15 +969,20 @@ function _plannerBundleClusterSourceObjectIds(primarySourceObjectId, sourceRootO
     var roots = sourceRootObjectIds && sourceRootObjectIds.length > 0
             ? sourceRootObjectIds
             : (primarySourceObjectId !== null && primarySourceObjectId !== undefined ? [primarySourceObjectId] : []);
+    var cache = _plannerBundleCache(clusterIndex, "clusterSourceIdsByRoots");
+    var cacheKey = _plannerBundleSourceSetKey(roots, clusterIndex);
+    if (cache[cacheKey]) return cache[cacheKey].slice(0);
     var out = [];
     var seen = {};
     for (var i = 0; i < roots.length; i++) {
-        var descendants = clusterIndex.descendantSourceObjectIds(roots[i]);
+        var descendants = _plannerBundleDescendantSourceObjectIds(clusterIndex, roots[i]);
         for (var j = 0; descendants && j < descendants.length; j++) {
             _pushUniqueId(out, seen, descendants[j]);
         }
     }
-    return _sortedNumericIds(out);
+    out = _sortedNumericIds(out);
+    cache[cacheKey] = out.slice(0);
+    return out;
 }
 
 function _plannerBundleShouldUseClosedPlacedContentFrame(candidate, slot, sourceIds, clusterIndex) {
@@ -885,7 +992,7 @@ function _plannerBundleShouldUseClosedPlacedContentFrame(candidate, slot, source
     if (!clusterIndex || !clusterIndex.descendantSourceObjectIds || !clusterIndex.sourceInfo) return false;
     var primary = candidate.primarySourceObjectId;
     if (primary === null || primary === undefined) return false;
-    var descendants = clusterIndex.descendantSourceObjectIds(primary);
+    var descendants = _plannerBundleDescendantSourceObjectIds(clusterIndex, primary);
     if (!descendants || descendants.length <= sourceIds.length) return false;
     for (var i = 0; i < descendants.length; i++) {
         var src = clusterIndex.sourceInfo(descendants[i]);
@@ -977,17 +1084,25 @@ function _plannerBundleSourceIdsWithoutInlineAnchorDescendants(sourceIds, cluste
 
 function _plannerBundleSourceHasInlineAnchorAncestor(sourceId, clusterIndex) {
     if (sourceId === null || sourceId === undefined || !clusterIndex || !clusterIndex.sourceInfo) return false;
+    var cache = _plannerBundleCache(clusterIndex, "inlineAnchorAncestorBySource");
+    var cacheKey = String(sourceId);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
     var current = clusterIndex.sourceInfo(sourceId);
     for (var depth = 0; depth < 200 && current; depth++) {
         if (typeof _isInlineFlowItemBySourceInfo === "function"
                 ? _isInlineFlowItemBySourceInfo(current)
                 : (String(current.parentKind || "") === "Character"
                     || String(current.parentKind || "") === "InsertionPoint")) {
+            cache[cacheKey] = true;
             return true;
         }
-        if (current.parentId === null || current.parentId === undefined) return false;
+        if (current.parentId === null || current.parentId === undefined) {
+            cache[cacheKey] = false;
+            return false;
+        }
         current = clusterIndex.sourceInfo(current.parentId);
     }
+    cache[cacheKey] = false;
     return false;
 }
 
@@ -1013,15 +1128,21 @@ function _plannerBundleEditableTextFrameIds(sourceIds, clusterIndex, hiddenVisua
     return _sortedNumericIds(ids);
 }
 
-function _plannerBundleId(candidate, sourceIds) {
+function _plannerBundleId(candidate, sourceIds, clusterIndex) {
     var passId = String(candidate.passId || "pass.unknown").replace(/[^A-Za-z0-9_.-]/g, "_");
     var pageIndex = candidate.pageIndex !== null && candidate.pageIndex !== undefined ? candidate.pageIndex : "none";
-    var sourceKey = sourceIds && sourceIds.length > 0 ? _sourceSetKey(sourceIds).replace(/,/g, "_") : "page";
+    var sourceKey = sourceIds && sourceIds.length > 0
+            ? _plannerBundleSourceSetKey(sourceIds, clusterIndex).replace(/,/g, "_")
+            : "page";
     return "bundle." + passId + ".page." + pageIndex + ".src." + sourceKey;
 }
 
 function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
     if (!candidate) return "UNKNOWN_SLOT";
+    if (candidate.ownershipSlot) {
+        if (candidate.ownershipSlot === "TEXTLESS_GROUP_VISUAL_SLOT") return "CONTENT_VISUAL_SLOT";
+        return candidate.ownershipSlot;
+    }
     if (candidate.slotRole === "shell_slot_only") return "SHELL_SLOT";
     if (candidate.passId === "pass.editable_textframe_visual_shells") return "SHELL_SLOT";
     if (candidate.passId === "pass.decoration_groups") return "SHELL_SLOT";
@@ -1116,6 +1237,13 @@ function _plannerBundleSourceHasContentVisualEvidence(sourceId, clusterIndex, vi
         return false;
     }
     var key = String(sourceId);
+    if (!visiting) {
+        var cache = _plannerBundleCache(clusterIndex, "contentVisualEvidenceBySource");
+        if (cache[key] !== undefined) return cache[key];
+        var cachedResult = _plannerBundleSourceHasContentVisualEvidence(sourceId, clusterIndex, {});
+        cache[key] = cachedResult;
+        return cachedResult;
+    }
     visiting = visiting || {};
     if (visiting[key]) return false;
     visiting[key] = true;
@@ -1277,11 +1405,11 @@ function _plannerBundleClusterRelation(sourceIds, clusterIds, primarySourceObjec
         return "NO_CLUSTER_REFERENCE";
     }
     if (!clusterIds || clusterIds.length === 0) return "NO_CLUSTER_REFERENCE";
-    var bundleKey = _sourceSetKey(sourceIds);
-    var clusterKey = _sourceSetKey(clusterIds);
+    var bundleKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    var clusterKey = _plannerBundleSourceSetKey(clusterIds, clusterIndex);
     if (bundleKey === clusterKey) return "EXACT_SOURCE_CLUSTER";
-    if (_sourceSetContainsAll(sourceIds, clusterIds)) return "BUNDLE_BROADER_THAN_CLUSTER";
-    if (_sourceSetContainsAll(clusterIds, sourceIds)) return "BUNDLE_NARROWER_THAN_CLUSTER";
+    if (_plannerBundleSourceSetContainsAll(sourceIds, clusterIds, clusterIndex)) return "BUNDLE_BROADER_THAN_CLUSTER";
+    if (_plannerBundleSourceSetContainsAll(clusterIds, sourceIds, clusterIndex)) return "BUNDLE_NARROWER_THAN_CLUSTER";
     return "BUNDLE_DIVERGES_FROM_CLUSTER";
 }
 

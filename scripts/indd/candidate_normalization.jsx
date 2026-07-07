@@ -13,6 +13,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
     var sourceInfoById = sourceContext.sourceInfoById;
     var childIdsByParentId = sourceContext.childIdsByParentId;
     var closedSubtreeIdsByRootAndSourceSet = {};
+    var closedTextlessGroupSourceClosureByRootPage = {};
     var hiddenInlineSourceIdsByPage = null;
     var inlineCandidateSourceIdSet = {};
     var inlineOwnedSourceSet = {};
@@ -199,6 +200,10 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
     }
 
     function closedTextlessGroupSourceClosure(rootId, rootPageIndex) {
+        var cacheKey = String(rootId) + "|" + String(rootPageIndex);
+        if (closedTextlessGroupSourceClosureByRootPage.hasOwnProperty(cacheKey)) {
+            return closedTextlessGroupSourceClosureByRootPage[cacheKey].slice(0);
+        }
         var ids = sourceIdsInCompleteSubtree(rootId);
         var seen = _sourceIdSet(ids || []);
         for (var key in sourceInfoById) {
@@ -209,7 +214,9 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             if (!sourceIsDescendantOfRootByParentChain(src.id, rootId, rootPageIndex)) continue;
             _pushUniqueId(ids, seen, src.id);
         }
-        return _sortedNumericIds(ids || []);
+        ids = _sortedNumericIds(ids || []);
+        closedTextlessGroupSourceClosureByRootPage[cacheKey] = ids.slice(0);
+        return ids;
     }
 
     function completeClosedTextlessGroupVisualSlot(candidate) {
@@ -696,6 +703,28 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         return true;
     }
 
+    function _normalizationPageSourceKey(pageIndex, sourceId) {
+        return String(pageIndex) + "|" + String(sourceId);
+    }
+
+    function buildDirectChildShellSourceIndex() {
+        if (directChildShellSourceIndex !== null) return directChildShellSourceIndex;
+        directChildShellSourceIndex = {};
+        for (var ci = 0; candidates && ci < candidates.length; ci++) {
+            var child = candidates[ci];
+            if (!child || !_isPlannerDeclaredDirectChildShellSlot(child)) continue;
+            var passKey = String(child.passId || "");
+            var pageKey = String(child.pageIndex);
+            var sourceIds = child.sourceObjectIds || [];
+            for (var si = 0; si < sourceIds.length; si++) {
+                var key = passKey + "|" + pageKey + "|" + String(sourceIds[si]);
+                if (!directChildShellSourceIndex[key]) directChildShellSourceIndex[key] = [];
+                directChildShellSourceIndex[key].push(child);
+            }
+        }
+        return directChildShellSourceIndex;
+    }
+
     function isExecutableResidualShellExportSource(candidate, sourceId) {
         if (textFrameStyleSourceBelongsToDirectChildShellSlot(candidate, sourceId)) return false;
         return isExportableShellVisualSource(sourceId)
@@ -709,12 +738,13 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                 || !_sourceIdsContain(parentCandidate.hiddenVisualSourceObjectIds, sourceId)) {
             return false;
         }
-        for (var ci = 0; candidates && ci < candidates.length; ci++) {
-            var child = candidates[ci];
+        var index = buildDirectChildShellSourceIndex();
+        var key = String(parentCandidate.passId || "") + "|" + String(parentCandidate.pageIndex)
+                + "|" + String(sourceId);
+        var matches = index[key] || [];
+        for (var ci = 0; ci < matches.length; ci++) {
+            var child = matches[ci];
             if (!child || child === parentCandidate) continue;
-            if (child.pageIndex !== parentCandidate.pageIndex) continue;
-            if (!_isPlannerDeclaredDirectChildShellSlot(child)) continue;
-            if (!child.sourceObjectIds || !_sourceIdsContain(child.sourceObjectIds, sourceId)) continue;
             if (!_candidateSourceIdArrayContainsAll(parentCandidate.sourceObjectIds, child.sourceObjectIds)) continue;
             return true;
         }
@@ -1386,39 +1416,54 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         };
     }
 
-    function textFrameStyleShellCoveredByExistingCandidate(textFrameId, pageIndex) {
-        if (!sourceHasTextFrameShellStyle(textFrameId)) return false;
+    function buildTextFrameStyleCoverageIndex() {
+        if (textFrameStyleCoverageIndex !== null) return textFrameStyleCoverageIndex;
+        textFrameStyleCoverageIndex = {};
         for (var ci = 0; candidates && ci < candidates.length; ci++) {
             var candidate = candidates[ci];
             if (!candidate || candidate.passId !== "pass.decoration_groups") continue;
-            if (candidate.pageIndex !== pageIndex) continue;
-            if (!candidate.exportSourceObjectIds || !_sourceIdsContain(candidate.exportSourceObjectIds, textFrameId)) continue;
+            if (!candidate.exportSourceObjectIds || candidate.exportSourceObjectIds.length === 0) continue;
             var ownedIds = candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0
                     ? candidate.editableTextFrameIds
                     : candidate.hiddenTextFrameIds;
-            if (!_sourceIdsContain(ownedIds, textFrameId)) continue;
-            return true;
+            if (!ownedIds || ownedIds.length === 0) continue;
+            var ownedSet = _sourceIdSet(ownedIds);
+            for (var ei = 0; ei < candidate.exportSourceObjectIds.length; ei++) {
+                var sourceId = candidate.exportSourceObjectIds[ei];
+                if (!ownedSet[String(sourceId)]) continue;
+                textFrameStyleCoverageIndex[_normalizationPageSourceKey(candidate.pageIndex, sourceId)] = true;
+            }
         }
-        return false;
+        return textFrameStyleCoverageIndex;
+    }
+
+    function buildInlineDirectChildShellCoverageIndex() {
+        if (inlineDirectChildShellCoverageIndex !== null) return inlineDirectChildShellCoverageIndex;
+        inlineDirectChildShellCoverageIndex = {};
+        for (var ci = 0; candidates && ci < candidates.length; ci++) {
+            var candidate = candidates[ci];
+            if (!candidate || candidate.passId !== "pass.inline_objects") continue;
+            if (candidate.slotRole !== "direct_child_shell_slot"
+                    && candidate.compositeRole !== "direct_child_shell_slot") continue;
+            var ids = _sourceIdsUnion(
+                    candidate.sourceObjectIds || [],
+                    _sourceIdsUnion(candidate.exportSourceObjectIds || [], candidate.visualSourceObjectIds || []));
+            for (var ii = 0; ii < ids.length; ii++) {
+                inlineDirectChildShellCoverageIndex[_normalizationPageSourceKey(candidate.pageIndex, ids[ii])] = true;
+            }
+        }
+        return inlineDirectChildShellCoverageIndex;
+    }
+
+    function textFrameStyleShellCoveredByExistingCandidate(textFrameId, pageIndex) {
+        if (!sourceHasTextFrameShellStyle(textFrameId)) return false;
+        return buildTextFrameStyleCoverageIndex()[_normalizationPageSourceKey(pageIndex, textFrameId)] === true;
     }
 
     function textFrameStyleShellCoveredByInlineDirectChildShell(textFrameId, pageIndex) {
         var src = sourceInfoById[String(textFrameId)];
         if (!src || src.hasText === true) return false;
-        for (var ci = 0; candidates && ci < candidates.length; ci++) {
-            var candidate = candidates[ci];
-            if (!candidate || candidate.passId !== "pass.inline_objects") continue;
-            if (candidate.pageIndex !== pageIndex) continue;
-            if (candidate.slotRole !== "direct_child_shell_slot"
-                    && candidate.compositeRole !== "direct_child_shell_slot") continue;
-            if (!_sourceIdsContain(candidate.sourceObjectIds || [], textFrameId)
-                    && !_sourceIdsContain(candidate.exportSourceObjectIds || [], textFrameId)
-                    && !_sourceIdsContain(candidate.visualSourceObjectIds || [], textFrameId)) {
-                continue;
-            }
-            return true;
-        }
-        return false;
+        return buildInlineDirectChildShellCoverageIndex()[_normalizationPageSourceKey(pageIndex, textFrameId)] === true;
     }
 
     function makeTableSiblingShellSlotCandidate(parentCandidate, rootId, sourceIds) {
@@ -1864,7 +1909,8 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             var existingCandidate = candidates[ei];
             existingByKey[existingCandidate.passId + "|" + existingCandidate.pageIndex + "|" + _sourceSetKey(existingCandidate.sourceObjectIds)] = existingCandidate;
         }
-        for (var ci = 0; ci < candidates.length; ci++) {
+        var originalCandidateCount = candidates.length;
+        for (var ci = 0; ci < originalCandidateCount; ci++) {
             var parentCandidate = candidates[ci];
             var childSlots = directChildShellSlotCandidatesForCompositeShell(parentCandidate);
             if (!childSlots || childSlots.length === 0) {
@@ -1903,7 +1949,8 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             existingByKey[existingCandidate.passId + "|" + existingCandidate.pageIndex + "|"
                     + _sourceSetKey(existingCandidate.sourceObjectIds)] = existingCandidate;
         }
-        for (var ci = 0; ci < candidates.length; ci++) {
+        var originalCandidateCount = candidates.length;
+        for (var ci = 0; ci < originalCandidateCount; ci++) {
             var parentCandidate = candidates[ci];
             if (!parentCandidate || parentCandidate.passId !== "pass.inline_objects") continue;
             if (parentCandidate.suppressedByDirectChildShellSlots === true) continue;
@@ -2212,6 +2259,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
 
     function rebuildSamePageShellSourceSetsForPruning() {
         shellSourceSetsByPage = {};
+        shellVisibleSourceIndexByPage = {};
         for (var i = 0; i < metas.length; i++) {
             var candidate = metas[i].candidate;
             if (!candidate || candidate.passId !== "pass.decoration_groups") continue;
@@ -2299,12 +2347,20 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
     var indexesByPage = {};
     var shellIndexesByPage = {};
     var shellSourceSetsByPage = {};
+    var shellVisibleSourceIndexByPage = {};
+    var directChildShellSourceIndex = null;
+    var textFrameStyleCoverageIndex = null;
+    var inlineDirectChildShellCoverageIndex = null;
 
     function rebuildCandidateMetaIndexes() {
         var indexes = _buildExtractionCandidateMetaIndexes(candidates, sourceInfoById);
         metas = indexes.metas;
         indexesByPage = indexes.indexesByPage;
         shellIndexesByPage = indexes.shellIndexesByPage;
+        shellVisibleSourceIndexByPage = {};
+        directChildShellSourceIndex = null;
+        textFrameStyleCoverageIndex = null;
+        inlineDirectChildShellCoverageIndex = null;
     }
 
     rebuildCandidateMetaIndexes();
@@ -2615,6 +2671,27 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         shellSourceSetsByPage[pageKey].push(metas[i]);
     }
 
+    function shellMetasContainingVisibleSource(pageKey, sourceId) {
+        var pageIndex = shellVisibleSourceIndexByPage[pageKey];
+        if (!pageIndex) {
+            pageIndex = {};
+            var pageShells = shellSourceSetsByPage[pageKey] || [];
+            for (var psi = 0; psi < pageShells.length; psi++) {
+                var shellMeta = pageShells[psi];
+                var shellCandidate = shellMeta ? shellMeta.candidate : null;
+                if (!shellCandidate || shellCandidate.suppressedByDirectChildShellSlots === true) continue;
+                var visibleIds = visibleShellSlotSourceIds(shellCandidate);
+                for (var vsi = 0; visibleIds && vsi < visibleIds.length; vsi++) {
+                    var key = String(visibleIds[vsi]);
+                    if (!pageIndex[key]) pageIndex[key] = [];
+                    pageIndex[key].push(shellMeta);
+                }
+            }
+            shellVisibleSourceIndexByPage[pageKey] = pageIndex;
+        }
+        return pageIndex[String(sourceId)] || [];
+    }
+
     function isClosedGraphicOnlyDecorationShell(candidateMeta) {
         var candidate = candidateMeta ? candidateMeta.candidate : null;
         if (!candidate || candidate.passId !== "pass.decoration_groups") return false;
@@ -2635,11 +2712,11 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (passId !== "pass.vector_shape_frames"
                 && passId !== "pass.complex_graphic_frames"
                 && passId !== "pass.decoration_groups") return null;
-        var shells = shellSourceSetsByPage[candidateMeta.pageKey] || [];
         var candidateVisibleIds = _isExtractionShellCandidate(candidate)
                 ? visibleShellSlotSourceIds(candidate)
                 : _sortedNumericIds(candidate.sourceObjectIds || []);
         if (!candidateVisibleIds || candidateVisibleIds.length === 0) return null;
+        var shells = shellMetasContainingVisibleSource(candidateMeta.pageKey, candidateVisibleIds[0]);
         for (var s = 0; s < shells.length; s++) {
             var shellMeta = shells[s];
             if (!shellMeta || shellMeta.index === candidateMeta.index) continue;

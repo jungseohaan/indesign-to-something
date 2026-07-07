@@ -39,6 +39,33 @@ Each registered source object must receive one coverage status:
 `UNRESOLVED` is a blocking Stage 1 error. A later renderer, Java bridge, or
 executor must not convert `UNRESOLVED` into visible material.
 
+Complete source coverage is a logical invariant, not a requirement to emit,
+copy, or serialize full diagnostic rows for every source object during normal
+conversion. The authoritative Stage 1 coverage store is a compact indexed map:
+
+- `sourceObjectId`
+- `coverageStatus`
+- `ownerRef`
+- `reasonCode`
+
+Full per-object coverage rows are diagnostic expansion, not executor input.
+They are emitted only in trace/dev mode, or for failing objects, conflicting
+objects, and the minimal ancestry needed to explain those failures.
+
+Coverage is source-tree aware:
+
+- When a visible PNG/vector owner exports a source `Group` or other parent
+  source, all visible descendant source objects included by that parent export
+  are covered by the same visible owner. Coverage validation must therefore
+  claim descendants from the source tree; it must not require a second child
+  owner unless the parent export explicitly excludes that child source.
+- A `Group` source is not visible material merely because aggregate metadata
+  reports child fill/stroke. If the group has children and no direct vector
+  paint/placed content of its own, it is `PROVENANCE_ONLY` when its visible
+  children are owned.
+- A source object with actual visible material that is not reachable from a
+  visible/style/text owner remains `UNRESOLVED` and must fail Stage 1.
+
 ## 2. Model Layers
 
 The closed planner model has five layers. They must be created in this order.
@@ -208,7 +235,16 @@ The fix belongs in Stage 0 or Stage 1, not in Java recovery code.
 
 ## 6. Required Diagnostics
 
-Stage 1 diagnostics must include:
+Stage 1 normal diagnostics must include compact summaries and failing rows for:
+
+- source coverage status counts and unresolved/conflicting source ids;
+- bundle membership counts and failing bundle references;
+- ownership slot counts and duplicate/conflicting slot references;
+- final owner counts per bundle slot;
+- confirmed PNG/vector `RenderUnit` counts, failures, and bounded previews;
+- `ObjectPlan` executor contract validation summary.
+
+Stage 1 trace/dev diagnostics must be able to expand:
 
 - `source-coverage.json`: one row per `SourceObject` with coverage status.
 - `source-bundles.json`: bundle membership and bundle type.
@@ -216,6 +252,16 @@ Stage 1 diagnostics must include:
 - `slot-owners.json`: final owner per bundle slot.
 - `render-units.json`: confirmed PNG/vector export units.
 - `object-plans.json`: executor contract derived from the above.
+
+Expanded diagnostics may use stable source-set references instead of repeating
+large source id arrays in every row. A human-readable trace may expand those
+references on demand, but executors and validators must consume the compact
+coverage map and explicit ObjectPlan/RenderUnit contracts.
+
+Normal conversion output must not serialize the full `RenderUnit` table when
+the in-memory Stage 1 model already holds it for validation and execution.
+`render-units.json` may therefore be a summary artifact with bounded preview
+rows unless trace/dev diagnostics are enabled.
 
 The validation gate must fail when:
 

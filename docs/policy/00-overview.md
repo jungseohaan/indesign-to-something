@@ -503,6 +503,12 @@ slots. Each registry entry is keyed by the visible execution identity:
 - hidden/omitted source ids that must not be painted into that slot;
 - materialization, layer, z-order, bounds, and reason.
 
+The registry may store large source-id collections as interned source-set
+references. A source-set reference is a stable identity for a sorted set of
+source ids, and it may be used for recursive clusters, executable export sets,
+hidden/omitted sets, page-local fragments, and diagnostic ancestry. Registry
+lookups compare the references or indexed membership, not freshly copied arrays.
+
 Candidate generation must be registry-gated:
 
 - If no registry entry exists for a source/slot/channel, no candidate is
@@ -553,11 +559,18 @@ Source-tree reads must also be registry-backed:
 - Recursive descendants, source roots, page-local fragments, editable
   TextFrame ids, inline-anchor ancestry, placed-content descendants, and table
   membership are indexed once in Stage 0/1.
+- Stage 0/1 interns repeated source id sets once and exposes stable references
+  for planner, validator, exporter, and diagnostics.
+- Stage 1 diagnostic builders that need source clusters must reuse the
+  prepared source-cluster index instead of rebuilding clusters for every
+  bundle/object-plan refresh.
 - Later planner code may query that index, but must not call live InDesign
   recursive APIs such as `allPageItems` inside loops over candidates, pages, or
   render passes.
 - A candidate/planner loop must not rescan a source subtree to rediscover
   ownership facts that are already in the registry.
+- Diagnostics may expand source-set references for human review, but execution
+  and validation use compact refs, status maps, and indexed membership checks.
 
 Normalize becomes validation:
 
@@ -581,6 +594,19 @@ Performance invariants:
   `PLACE_TEXT_SHELL`.
 - The same source tree is traversed once to build indexes and then only queried
   by id/set lookups.
+- Recursive source-set arrays are not copied into every ObjectPlan, bundle, or
+  coverage row in normal conversion output.
+- Full RenderUnit rows are retained in the in-memory Stage 1 model for
+  validation/execution, but normal conversion output writes only summary and
+  bounded preview rows unless trace/dev diagnostics are enabled.
+- Full source item rows are retained in the in-memory extraction plan and
+  diagnostics/debug output, but normal `extraction-plan.json` and
+  `source-graph.json` write source item summaries and bounded previews instead
+  of duplicating every source row.
+- Full extraction candidates are retained in the in-memory extraction plan for
+  renderer lookup and validation, but normal `extraction-plan.json` writes
+  candidate summaries and bounded previews instead of duplicating every
+  candidate instruction.
 - Page-spanning source material emits explicit page-local slot plans before
   export, so no adjacent-page overflow copy or post-export ownership repair is
   needed.

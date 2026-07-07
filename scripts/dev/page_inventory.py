@@ -173,12 +173,27 @@ def compact_flow(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def source_items_from_extract(extract_dir: Path, extraction_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = extraction_plan.get("sourceItems") or []
+    if rows:
+        return rows
+    source_graph = load_json(extract_dir / "source-graph.json") or {}
+    if isinstance(source_graph, dict):
+        nodes = source_graph.get("nodes") or source_graph.get("nodePreview")
+        if nodes:
+            return nodes
+    summary = extraction_plan.get("sourceItemSummary")
+    if isinstance(summary, dict):
+        return summary.get("sourceItemPreview") or []
+    return []
+
+
 def build_inventory(extract_dir: Path, page_index: Optional[int]) -> Dict[str, Any]:
     extraction_plan = load_json(extract_dir / "extraction-plan.json") or {}
     object_plans_json = load_json(extract_dir / "object-plans.json") or {}
     source_items = [
         compact_source(row)
-        for row in extraction_plan.get("sourceItems") or []
+        for row in source_items_from_extract(extract_dir, extraction_plan)
         if isinstance(row, dict) and page_matches(row, page_index)
     ]
     object_plans = [

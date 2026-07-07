@@ -61,6 +61,17 @@ Required top-level fields:
 
 `sourceItems` are facts. They do not own conversion slots.
 
+The in-memory `ExtractionPlan` keeps full `sourceItems` for planning,
+validation, source-graph generation, and exporter lookup. Normal conversion
+output may replace the full array with `sourceItemSummary` plus bounded preview
+rows. Full source facts for trace tooling belong to diagnostics/debug output;
+normal `source-graph.json` may also be a summary artifact.
+
+The same split applies to `candidates`: the in-memory `ExtractionPlan` keeps
+full candidate instructions for renderer lookup and validation, while normal
+`extraction-plan.json` may replace the full array with `candidateSummary` and
+bounded preview rows after the execution lookup has been built.
+
 Recommended source item fields:
 
 - `id`
@@ -212,6 +223,12 @@ planned source candidate rather than only a broad pass.
 During migration, the first candidate gate may be validation-based: the legacy
 pass can still scan broad DOM collections, but every emitted result must attach
 to a planned candidate.
+
+That migration allowance is for metadata indexing only. A migrated pass must
+not use a broad DOM scan for export discovery, candidate replacement, or
+ownership recovery. New export work must be driven by the planned candidate or
+RenderUnit list, and broad scans may only populate the Stage 0/1 source index
+used by those planned records.
 
 The final candidate gate is stricter:
 

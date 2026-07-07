@@ -9,11 +9,82 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     var indexes = _buildSourceItemIndexes(sourceItems);
     var sourceInfoById = indexes.sourceInfoById;
     var childIdsByParentId = indexes.childIdsByParentId;
+    var sourceHasInlineAnchorAncestorCache = {};
+    var sourceHasEditableTextDescendantCache = {};
+    var directEditableTextChildrenCache = {};
+    var allEditableTextDescendantsCache = {};
+    var hasShellStructureMaterialCache = {};
+    var collectSubtreeSourceIdsCache = {};
+    var sourceHasPlacedVisualSourceCache = {};
+    var sourceHasVisibleShellSourceCache = {};
+    var sourceTreeHasVisibleStrokeCache = {};
+    var sourceTreeHasNonPaperFillCache = {};
+    var closedTextOwningShellInfoCache = {};
+    var hasMoreSpecificClosedTextOwningShellCache = {};
+    var descendantClosedTextShellRootsCache = {};
+    var sourceCanBeDirectSiblingTextShellCache = {};
+    var sourceCanBeNativeParentTextShellCache = {};
+    var matchingDirectSiblingTextFrameIdsCache = {};
+    var matchingDescendantSiblingTextFrameIdsCache = {};
+    var matchingDirectSiblingShellSourceIdsCache = {};
+    var parentEditableTextDescendantsCache = {};
+    var sourceCanBeTableSiblingShellCache = {};
+    var sourceCanBeResidualSiblingShellCache = {};
+    var sourceCanBeInlineTextlessSiblingDecorationCache = {};
+    var inlineParentHasEditableTextSiblingCache = {};
+    var upsertDecorationCandidateIndex = null;
+    var sourceBuckets = buildSourceDeclaredShellBuckets();
+
+    function markSourceDeclaredShellStep(tag) {
+        try {
+            if (ctx && ctx.outputDir && typeof _marker === "function") {
+                _marker(ctx.outputDir, tag);
+            }
+        } catch (eMarkSourceDeclaredShellStep) {}
+    }
 
     function pageIndexInCurrentExtraction(pageIndex) {
         if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return false;
         if (ctx && ctx.rangePageCount !== undefined && pageIndex < ctx.rangePageCount) return true;
         return _candidatePageInRange(pageIndex, ctx);
+    }
+
+    function buildSourceDeclaredShellBuckets() {
+        var buckets = {
+            current: [],
+            shellRoots: [],
+            shellShapes: [],
+            groups: [],
+            editableTextFrames: [],
+            inlineVisuals: []
+        };
+        for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+            var src = sourceItems[i];
+            if (!src || src.id === null || src.id === undefined) continue;
+            if (!pageIndexInCurrentExtraction(src.pageIndex)) continue;
+            buckets.current.push(src);
+            var kind = String(src.kind || "");
+            if (kind === "TextFrame") {
+                if (src.textFrameClass === "editable" && src.hasText === true) {
+                    buckets.editableTextFrames.push(src);
+                }
+                continue;
+            }
+            if (kind === "Group") {
+                buckets.groups.push(src);
+                buckets.shellRoots.push(src);
+            } else if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
+                buckets.shellShapes.push(src);
+                buckets.shellRoots.push(src);
+            } else if (kind === "GraphicLine") {
+                buckets.shellRoots.push(src);
+            }
+            if (kind !== "Story" && kind !== "Character" && kind !== "InsertionPoint"
+                    && sourceInfoIsInlineFlow(src)) {
+                buckets.inlineVisuals.push(src);
+            }
+        }
+        return buckets;
     }
 
     function sourceKind(sourceId) {
@@ -23,13 +94,24 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function sourceHasInlineAnchorAncestor(sourceId) {
         if (sourceId === null || sourceId === undefined) return false;
+        var cacheKey = String(sourceId);
+        if (sourceHasInlineAnchorAncestorCache.hasOwnProperty(cacheKey)) {
+            return sourceHasInlineAnchorAncestorCache[cacheKey];
+        }
         var current = sourceInfoById[String(sourceId)];
         for (var depth = 0; depth < 64 && current; depth++) {
-            if (sourceInfoIsInlineFlow(current)) return true;
+            if (sourceInfoIsInlineFlow(current)) {
+                sourceHasInlineAnchorAncestorCache[cacheKey] = true;
+                return true;
+            }
             var parentId = current.parentId;
-            if (parentId === null || parentId === undefined) return false;
+            if (parentId === null || parentId === undefined) {
+                sourceHasInlineAnchorAncestorCache[cacheKey] = false;
+                return false;
+            }
             current = sourceInfoById[String(parentId)];
         }
+        sourceHasInlineAnchorAncestorCache[cacheKey] = false;
         return false;
     }
 
@@ -40,21 +122,37 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function sourceHasEditableTextDescendant(sourceId) {
+        var cacheKey = String(sourceId);
+        if (sourceHasEditableTextDescendantCache.hasOwnProperty(cacheKey)) {
+            return sourceHasEditableTextDescendantCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
+        if (!src) {
+            sourceHasEditableTextDescendantCache[cacheKey] = false;
+            return false;
+        }
         if (src.kind === "TextFrame"
                 && src.textFrameClass === "editable"
                 && src.hasText === true) {
+            sourceHasEditableTextDescendantCache[cacheKey] = true;
             return true;
         }
         var children = childIdsByParentId[String(sourceId)] || [];
         for (var i = 0; i < children.length; i++) {
-            if (sourceHasEditableTextDescendant(children[i])) return true;
+            if (sourceHasEditableTextDescendant(children[i])) {
+                sourceHasEditableTextDescendantCache[cacheKey] = true;
+                return true;
+            }
         }
+        sourceHasEditableTextDescendantCache[cacheKey] = false;
         return false;
     }
 
     function directEditableTextChildren(sourceId) {
+        var cacheKey = String(sourceId);
+        if (directEditableTextChildrenCache.hasOwnProperty(cacheKey)) {
+            return directEditableTextChildrenCache[cacheKey];
+        }
         var children = childIdsByParentId[String(sourceId)] || [];
         var ids = [];
         var seenIds = {};
@@ -66,10 +164,15 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             if (child.hasText !== true) continue;
             _pushUniqueId(ids, seenIds, child.id);
         }
-        return _sortedNumericIds(ids);
+        directEditableTextChildrenCache[cacheKey] = _sortedNumericIds(ids);
+        return directEditableTextChildrenCache[cacheKey];
     }
 
     function allEditableTextDescendants(sourceId) {
+        var cacheKey = String(sourceId);
+        if (allEditableTextDescendantsCache.hasOwnProperty(cacheKey)) {
+            return allEditableTextDescendantsCache[cacheKey];
+        }
         var ids = [];
         var seenIds = {};
         function visit(id) {
@@ -85,7 +188,8 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
         }
         visit(sourceId);
-        return _sortedNumericIds(ids);
+        allEditableTextDescendantsCache[cacheKey] = _sortedNumericIds(ids);
+        return allEditableTextDescendantsCache[cacheKey];
     }
 
     function visualShellChildCount(sourceId) {
@@ -124,14 +228,28 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function hasShellStructureMaterial(sourceId) {
+        var cacheKey = String(sourceId);
+        if (hasShellStructureMaterialCache.hasOwnProperty(cacheKey)) {
+            return hasShellStructureMaterialCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
+        if (!src) {
+            hasShellStructureMaterialCache[cacheKey] = false;
+            return false;
+        }
         var kind = sourceKind(sourceId);
-        if (isShellStructureSourceKind(kind)) return true;
+        if (isShellStructureSourceKind(kind)) {
+            hasShellStructureMaterialCache[cacheKey] = true;
+            return true;
+        }
         var children = childIdsByParentId[String(sourceId)] || [];
         for (var ci = 0; ci < children.length; ci++) {
-            if (hasShellStructureMaterial(children[ci])) return true;
+            if (hasShellStructureMaterial(children[ci])) {
+                hasShellStructureMaterialCache[cacheKey] = true;
+                return true;
+            }
         }
+        hasShellStructureMaterialCache[cacheKey] = false;
         return false;
     }
 
@@ -179,6 +297,10 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function collectSubtreeSourceIds(sourceId) {
+        var cacheKey = String(sourceId);
+        if (collectSubtreeSourceIdsCache.hasOwnProperty(cacheKey)) {
+            return collectSubtreeSourceIdsCache[cacheKey];
+        }
         var ids = [];
         var seenIds = {};
         function visit(id) {
@@ -190,7 +312,8 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
         }
         visit(sourceId);
-        return _sortedNumericIds(ids);
+        collectSubtreeSourceIdsCache[cacheKey] = _sortedNumericIds(ids);
+        return collectSubtreeSourceIdsCache[cacheKey];
     }
 
     function sourceHasTextFrameShellStyleInSourceIndex(sourceId) {
@@ -247,25 +370,50 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function sourceHasPlacedVisualSource(sourceId) {
-        return _sourceHasPlacedVisualMetadataInIndex(sourceId, sourceInfoById, childIdsByParentId);
+        var cacheKey = String(sourceId);
+        if (sourceHasPlacedVisualSourceCache.hasOwnProperty(cacheKey)) {
+            return sourceHasPlacedVisualSourceCache[cacheKey];
+        }
+        sourceHasPlacedVisualSourceCache[cacheKey] = _sourceHasPlacedVisualMetadataInIndex(
+                sourceId, sourceInfoById, childIdsByParentId);
+        return sourceHasPlacedVisualSourceCache[cacheKey];
     }
 
     function sourceHasVisibleShellSource(sourceId) {
+        var cacheKey = String(sourceId);
+        if (sourceHasVisibleShellSourceCache.hasOwnProperty(cacheKey)) {
+            return sourceHasVisibleShellSourceCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
+        if (!src) {
+            sourceHasVisibleShellSourceCache[cacheKey] = false;
+            return false;
+        }
         var kind = String(src.kind || "");
-        if (kind === "TextFrame") return false;
+        if (kind === "TextFrame") {
+            sourceHasVisibleShellSourceCache[cacheKey] = false;
+            return false;
+        }
         if (kind === "Group") {
             var children = childIdsByParentId[String(sourceId)] || [];
             for (var ci = 0; ci < children.length; ci++) {
-                if (sourceHasVisibleShellSource(children[ci])) return true;
+                if (sourceHasVisibleShellSource(children[ci])) {
+                    sourceHasVisibleShellSourceCache[cacheKey] = true;
+                    return true;
+                }
             }
+            sourceHasVisibleShellSourceCache[cacheKey] = false;
             return false;
         }
-        if (kind === "Image" || kind === "PDF") return true;
-        if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine") {
-            return sourceHasVisiblePaint(src) || sourceHasPlacedVisualSource(sourceId);
+        if (kind === "Image" || kind === "PDF") {
+            sourceHasVisibleShellSourceCache[cacheKey] = true;
+            return true;
         }
+        if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine") {
+            sourceHasVisibleShellSourceCache[cacheKey] = sourceHasVisiblePaint(src) || sourceHasPlacedVisualSource(sourceId);
+            return sourceHasVisibleShellSourceCache[cacheKey];
+        }
+        sourceHasVisibleShellSourceCache[cacheKey] = false;
         return false;
     }
 
@@ -336,58 +484,107 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function sourceCanBeTableSiblingShell(sourceId, pageIndex) {
+        var cacheKey = String(sourceId) + "|" + String(pageIndex);
+        if (sourceCanBeTableSiblingShellCache.hasOwnProperty(cacheKey)) {
+            return sourceCanBeTableSiblingShellCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
-        if (src.pageIndex !== pageIndex) return false;
-        if (String(src.parentKind || "") !== "Group") return false;
-        if (!isShellStructureSourceKind(src.kind)) return false;
-        if (src.kind === "GraphicLine") return false;
-        if (sourceHasInlineAnchorAncestor(sourceId)) return false;
-        if (sourceHasEditableTextDescendant(sourceId)) return false;
-        if (sourceHasPlacedVisualSource(sourceId)) return false;
-        if (!sourceHasChildSources(sourceId)) return sourceHasVisibleFillSource(src);
-        return sourceHasVisibleShellSource(sourceId);
+        if (!src) {
+            sourceCanBeTableSiblingShellCache[cacheKey] = false;
+            return false;
+        }
+        if (src.pageIndex !== pageIndex
+                || String(src.parentKind || "") !== "Group"
+                || !isShellStructureSourceKind(src.kind)
+                || src.kind === "GraphicLine"
+                || sourceHasInlineAnchorAncestor(sourceId)
+                || sourceHasEditableTextDescendant(sourceId)
+                || sourceHasPlacedVisualSource(sourceId)) {
+            sourceCanBeTableSiblingShellCache[cacheKey] = false;
+            return false;
+        }
+        sourceCanBeTableSiblingShellCache[cacheKey] = !sourceHasChildSources(sourceId)
+                ? sourceHasVisibleFillSource(src)
+                : sourceHasVisibleShellSource(sourceId);
+        return sourceCanBeTableSiblingShellCache[cacheKey];
     }
 
     function closedTextOwningShellInfo(sourceId) {
+        var cacheKey = String(sourceId);
+        if (closedTextOwningShellInfoCache.hasOwnProperty(cacheKey)) {
+            return closedTextOwningShellInfoCache[cacheKey] || null;
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return null;
-        var kind = String(src.kind || "");
-        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") {
+        if (!src) {
+            closedTextOwningShellInfoCache[cacheKey] = false;
             return null;
         }
-        if (sourceHasInlineAnchorAncestor(sourceId)) return null;
+        var kind = String(src.kind || "");
+        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") {
+            closedTextOwningShellInfoCache[cacheKey] = false;
+            return null;
+        }
+        if (sourceHasInlineAnchorAncestor(sourceId)) {
+            closedTextOwningShellInfoCache[cacheKey] = false;
+            return null;
+        }
 
         var editableIds = allEditableTextDescendants(sourceId);
-        if (!editableIds || editableIds.length === 0) return null;
-        if (sourceHasPlacedVisualSource(sourceId) && editableIds.length !== 1) return null;
-        if (!sourceHasVisibleShellSource(sourceId)) return null;
+        if (!editableIds || editableIds.length === 0) {
+            closedTextOwningShellInfoCache[cacheKey] = false;
+            return null;
+        }
+        if (sourceHasPlacedVisualSource(sourceId) && editableIds.length !== 1) {
+            closedTextOwningShellInfoCache[cacheKey] = false;
+            return null;
+        }
+        if (!sourceHasVisibleShellSource(sourceId)) {
+            closedTextOwningShellInfoCache[cacheKey] = false;
+            return null;
+        }
 
         var sourceIds = collectSubtreeSourceIds(sourceId);
         var exportIds = collectExportSourceIds(sourceIds, editableIds, false, sourceId);
-        if (!exportIds || exportIds.length === 0) return null;
-        return {
+        if (!exportIds || exportIds.length === 0) {
+            closedTextOwningShellInfoCache[cacheKey] = false;
+            return null;
+        }
+        closedTextOwningShellInfoCache[cacheKey] = {
             sourceIds: sourceIds,
             exportIds: exportIds,
             editableIds: editableIds
         };
+        return closedTextOwningShellInfoCache[cacheKey];
     }
 
     function hasMoreSpecificClosedTextOwningShell(sourceId, editableIds) {
-        var children = childIdsByParentId[String(sourceId)] || [];
         var editableKey = _sourceSetKey(editableIds || []);
+        var cacheKey = String(sourceId) + "|" + editableKey;
+        if (hasMoreSpecificClosedTextOwningShellCache.hasOwnProperty(cacheKey)) {
+            return hasMoreSpecificClosedTextOwningShellCache[cacheKey];
+        }
+        var children = childIdsByParentId[String(sourceId)] || [];
         for (var ci = 0; ci < children.length; ci++) {
             var childId = children[ci];
             var childInfo = closedTextOwningShellInfo(childId);
             if (childInfo && _sourceSetKey(childInfo.editableIds || []) === editableKey) {
+                hasMoreSpecificClosedTextOwningShellCache[cacheKey] = true;
                 return true;
             }
-            if (hasMoreSpecificClosedTextOwningShell(childId, editableIds)) return true;
+            if (hasMoreSpecificClosedTextOwningShell(childId, editableIds)) {
+                hasMoreSpecificClosedTextOwningShellCache[cacheKey] = true;
+                return true;
+            }
         }
+        hasMoreSpecificClosedTextOwningShellCache[cacheKey] = false;
         return false;
     }
 
     function descendantClosedTextShellRoots(sourceId) {
+        var cacheKey = String(sourceId);
+        if (descendantClosedTextShellRootsCache.hasOwnProperty(cacheKey)) {
+            return descendantClosedTextShellRootsCache[cacheKey];
+        }
         var roots = [];
         function visit(nodeId) {
             var children = childIdsByParentId[String(nodeId)] || [];
@@ -406,6 +603,7 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             }
         }
         visit(sourceId);
+        descendantClosedTextShellRootsCache[cacheKey] = roots;
         return roots;
     }
 
@@ -484,11 +682,18 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function upsertDecorationShellCandidate(shellItem, attrs) {
         var sourceKey = _sourceSetKey(attrs.sourceObjectIds || []);
-        for (var ci = 0; candidates && ci < candidates.length; ci++) {
-            var candidate = candidates[ci];
-            if (!candidate || candidate.passId !== "pass.decoration_groups") continue;
-            if (candidate.pageIndex !== attrs.pageIndex) continue;
-            if (_sourceSetKey(candidate.sourceObjectIds || []) !== sourceKey) continue;
+        if (upsertDecorationCandidateIndex === null) {
+            upsertDecorationCandidateIndex = {};
+            for (var ci = 0; candidates && ci < candidates.length; ci++) {
+                var indexedCandidate = candidates[ci];
+                if (!indexedCandidate || indexedCandidate.passId !== "pass.decoration_groups") continue;
+                var indexedKey = String(indexedCandidate.pageIndex) + "|" + _sourceSetKey(indexedCandidate.sourceObjectIds || []);
+                upsertDecorationCandidateIndex[indexedKey] = indexedCandidate;
+            }
+        }
+        var candidateKey = String(attrs.pageIndex) + "|" + sourceKey;
+        var candidate = upsertDecorationCandidateIndex[candidateKey] || null;
+        if (candidate) {
             candidate.unit = "GROUP_OR_ITEM";
             candidate.mode = "TEXTLESS_CANDIDATE";
             candidate.candidatePurpose = "SHELL_CANDIDATE";
@@ -528,6 +733,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             return;
         }
         _pushExtractionCandidate(candidates, seen, "pass.decoration_groups", shellItem, attrs);
+        if (candidates && candidates.length > 0) {
+            upsertDecorationCandidateIndex[candidateKey] = candidates[candidates.length - 1];
+        }
     }
 
     function sourceBounds(sourceId) {
@@ -544,11 +752,19 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function matchingDirectSiblingTextFrameIds(shellSourceId, pageIndex) {
+        var cacheKey = String(shellSourceId) + "|" + String(pageIndex);
+        if (matchingDirectSiblingTextFrameIdsCache.hasOwnProperty(cacheKey)) {
+            return matchingDirectSiblingTextFrameIdsCache[cacheKey];
+        }
         var shellSource = sourceInfoById[String(shellSourceId)];
         if (!shellSource || shellSource.parentId === null || shellSource.parentId === undefined) {
+            matchingDirectSiblingTextFrameIdsCache[cacheKey] = [];
             return [];
         }
-        if (!sourceCanBeDirectSiblingTextShell(shellSourceId)) return [];
+        if (!sourceCanBeDirectSiblingTextShell(shellSourceId)) {
+            matchingDirectSiblingTextFrameIdsCache[cacheKey] = [];
+            return [];
+        }
         var siblings = childIdsByParentId[String(shellSource.parentId)] || [];
         var matchingTextFrameIds = [];
         for (var mi = 0; mi < siblings.length; mi++) {
@@ -561,40 +777,74 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             if (!sourceTextFrameFitsShell(shellSourceId, matchSiblingId)) continue;
             matchingTextFrameIds.push(matchSiblingId);
         }
-        return matchingTextFrameIds;
+        matchingDirectSiblingTextFrameIdsCache[cacheKey] = matchingTextFrameIds;
+        return matchingDirectSiblingTextFrameIdsCache[cacheKey];
     }
 
     function matchingDescendantSiblingTextFrameIds(shellSourceId, pageIndex) {
+        var cacheKey = String(shellSourceId) + "|" + String(pageIndex);
+        if (matchingDescendantSiblingTextFrameIdsCache.hasOwnProperty(cacheKey)) {
+            return matchingDescendantSiblingTextFrameIdsCache[cacheKey];
+        }
         var shellSource = sourceInfoById[String(shellSourceId)];
         if (!shellSource || shellSource.parentId === null || shellSource.parentId === undefined) {
+            matchingDescendantSiblingTextFrameIdsCache[cacheKey] = [];
             return [];
         }
-        if (!sourceCanBeDirectSiblingTextShell(shellSourceId)) return [];
-        var siblings = childIdsByParentId[String(shellSource.parentId)] || [];
+        if (!sourceCanBeDirectSiblingTextShell(shellSourceId)) {
+            matchingDescendantSiblingTextFrameIdsCache[cacheKey] = [];
+            return [];
+        }
+        var parentEditableTextIds = editableTextDescendantsUnderParent(shellSource.parentId, pageIndex);
         var matchingTextFrameIds = [];
         var seen = {};
-        for (var si = 0; si < siblings.length; si++) {
-            var siblingId = siblings[si];
-            if (String(siblingId) === String(shellSourceId)) continue;
-            var editableIds = allEditableTextDescendants(siblingId);
+        for (var ei = 0; parentEditableTextIds && ei < parentEditableTextIds.length; ei++) {
+            var textFrameId = parentEditableTextIds[ei];
+            if (seen[String(textFrameId)]) continue;
+            var textFrame = sourceInfoById[String(textFrameId)];
+            if (!textFrame) continue;
+            if (textFrameSourceHasOwnShellStyle(textFrame)) continue;
+            if (matchingDirectSiblingShellSourceIds(textFrameId, pageIndex).length > 0) continue;
+            if (!sourceTextFrameFitsShell(shellSourceId, textFrameId)) continue;
+            seen[String(textFrameId)] = true;
+            matchingTextFrameIds.push(textFrameId);
+        }
+        matchingDescendantSiblingTextFrameIdsCache[cacheKey] = _sortedNumericIds(matchingTextFrameIds);
+        return matchingDescendantSiblingTextFrameIdsCache[cacheKey];
+    }
+
+    function editableTextDescendantsUnderParent(parentId, pageIndex) {
+        var cacheKey = String(parentId) + "|" + String(pageIndex);
+        if (parentEditableTextDescendantsCache.hasOwnProperty(cacheKey)) {
+            return parentEditableTextDescendantsCache[cacheKey];
+        }
+        var ids = [];
+        var seenIds = {};
+        var children = childIdsByParentId[String(parentId)] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            var childId = children[ci];
+            var editableIds = allEditableTextDescendants(childId);
             for (var ei = 0; editableIds && ei < editableIds.length; ei++) {
                 var textFrameId = editableIds[ei];
-                if (seen[String(textFrameId)]) continue;
                 var textFrame = sourceInfoById[String(textFrameId)];
                 if (!textFrame || textFrame.pageIndex !== pageIndex) continue;
-                if (textFrameSourceHasOwnShellStyle(textFrame)) continue;
-                if (matchingDirectSiblingShellSourceIds(textFrameId, pageIndex).length > 0) continue;
-                if (!sourceTextFrameFitsShell(shellSourceId, textFrameId)) continue;
-                seen[String(textFrameId)] = true;
-                matchingTextFrameIds.push(textFrameId);
+                _pushUniqueId(ids, seenIds, textFrameId);
             }
         }
-        return _sortedNumericIds(matchingTextFrameIds);
+        parentEditableTextDescendantsCache[cacheKey] = _sortedNumericIds(ids);
+        return parentEditableTextDescendantsCache[cacheKey];
     }
 
     function matchingDirectSiblingShellSourceIds(textFrameSourceId, pageIndex) {
+        var cacheKey = String(textFrameSourceId) + "|" + String(pageIndex);
+        if (matchingDirectSiblingShellSourceIdsCache.hasOwnProperty(cacheKey)) {
+            return matchingDirectSiblingShellSourceIdsCache[cacheKey];
+        }
         var textFrame = sourceInfoById[String(textFrameSourceId)];
-        if (!textFrame || textFrame.parentId === null || textFrame.parentId === undefined) return [];
+        if (!textFrame || textFrame.parentId === null || textFrame.parentId === undefined) {
+            matchingDirectSiblingShellSourceIdsCache[cacheKey] = [];
+            return [];
+        }
         var siblings = childIdsByParentId[String(textFrame.parentId)] || [];
         var shellIds = [];
         var seen = {};
@@ -607,30 +857,66 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             if (!sourceTextFrameFitsShell(siblingId, textFrameSourceId)) continue;
             _pushUniqueId(shellIds, seen, siblingId);
         }
-        return _sortedNumericIds(shellIds);
+        matchingDirectSiblingShellSourceIdsCache[cacheKey] = _sortedNumericIds(shellIds);
+        return matchingDirectSiblingShellSourceIdsCache[cacheKey];
     }
 
     function sourceCanBeDirectSiblingTextShell(shellSourceId) {
+        var cacheKey = String(shellSourceId);
+        if (sourceCanBeDirectSiblingTextShellCache.hasOwnProperty(cacheKey)) {
+            return sourceCanBeDirectSiblingTextShellCache[cacheKey];
+        }
         var src = sourceInfoById[String(shellSourceId)];
-        if (!src) return false;
+        if (!src) {
+            sourceCanBeDirectSiblingTextShellCache[cacheKey] = false;
+            return false;
+        }
         var kind = String(src.kind || "");
-        if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") return false;
-        if (String(src.parentKind || "") !== "Group") return false;
-        if (sourceHasEditableTextDescendant(shellSourceId)) return false;
-        return sourceHasVisiblePaint(src);
+        sourceCanBeDirectSiblingTextShellCache[cacheKey] = kind === "Rectangle" || kind === "Oval" || kind === "Polygon";
+        if (!sourceCanBeDirectSiblingTextShellCache[cacheKey]) return false;
+        if (String(src.parentKind || "") !== "Group") {
+            sourceCanBeDirectSiblingTextShellCache[cacheKey] = false;
+            return false;
+        }
+        if (sourceHasEditableTextDescendant(shellSourceId)) {
+            sourceCanBeDirectSiblingTextShellCache[cacheKey] = false;
+            return false;
+        }
+        sourceCanBeDirectSiblingTextShellCache[cacheKey] = sourceHasVisiblePaint(src);
+        return sourceCanBeDirectSiblingTextShellCache[cacheKey];
     }
 
     function sourceCanBeNativeParentTextShell(shellSourceId) {
+        var cacheKey = String(shellSourceId);
+        if (sourceCanBeNativeParentTextShellCache.hasOwnProperty(cacheKey)) {
+            return sourceCanBeNativeParentTextShellCache[cacheKey];
+        }
         var src = sourceInfoById[String(shellSourceId)];
-        if (!src) return false;
+        if (!src) {
+            sourceCanBeNativeParentTextShellCache[cacheKey] = false;
+            return false;
+        }
         var kind = String(src.kind || "");
-        if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") return false;
-        if (!sourceHasVisiblePaint(src)) return false;
-        if (sourceHasPlacedVisualSource(shellSourceId)) return false;
+        if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") {
+            sourceCanBeNativeParentTextShellCache[cacheKey] = false;
+            return false;
+        }
+        if (!sourceHasVisiblePaint(src)) {
+            sourceCanBeNativeParentTextShellCache[cacheKey] = false;
+            return false;
+        }
+        if (sourceHasPlacedVisualSource(shellSourceId)) {
+            sourceCanBeNativeParentTextShellCache[cacheKey] = false;
+            return false;
+        }
         var directTextIds = directEditableTextChildren(shellSourceId);
-        if (!directTextIds || directTextIds.length === 0) return false;
+        if (!directTextIds || directTextIds.length === 0) {
+            sourceCanBeNativeParentTextShellCache[cacheKey] = false;
+            return false;
+        }
         var allTextIds = allEditableTextDescendants(shellSourceId);
-        return sourceSetsEqual(directTextIds, allTextIds);
+        sourceCanBeNativeParentTextShellCache[cacheKey] = sourceSetsEqual(directTextIds, allTextIds);
+        return sourceCanBeNativeParentTextShellCache[cacheKey];
     }
 
     function sourceHasVisiblePaint(src) {
@@ -638,31 +924,55 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function sourceTreeHasVisibleStroke(sourceId) {
+        var cacheKey = String(sourceId);
+        if (sourceTreeHasVisibleStrokeCache.hasOwnProperty(cacheKey)) {
+            return sourceTreeHasVisibleStrokeCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
+        if (!src) {
+            sourceTreeHasVisibleStrokeCache[cacheKey] = false;
+            return false;
+        }
         var strokeName = String(src.strokeColorName || src.strokeColor || "");
         var strokeWeight = Number(src.strokeWeight || 0);
         if (strokeName && strokeName !== "None" && strokeName !== "[None]" && strokeWeight > 0) {
+            sourceTreeHasVisibleStrokeCache[cacheKey] = true;
             return true;
         }
         var children = childIdsByParentId[String(sourceId)] || [];
         for (var ci = 0; ci < children.length; ci++) {
-            if (sourceTreeHasVisibleStroke(children[ci])) return true;
+            if (sourceTreeHasVisibleStroke(children[ci])) {
+                sourceTreeHasVisibleStrokeCache[cacheKey] = true;
+                return true;
+            }
         }
+        sourceTreeHasVisibleStrokeCache[cacheKey] = false;
         return false;
     }
 
     function sourceTreeHasNonPaperFill(sourceId) {
+        var cacheKey = String(sourceId);
+        if (sourceTreeHasNonPaperFillCache.hasOwnProperty(cacheKey)) {
+            return sourceTreeHasNonPaperFillCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
+        if (!src) {
+            sourceTreeHasNonPaperFillCache[cacheKey] = false;
+            return false;
+        }
         var fillName = String(src.fillColorName || src.fillColor || "");
         if (fillName && fillName !== "None" && fillName !== "[None]" && fillName !== "Paper" && fillName !== "[Paper]") {
+            sourceTreeHasNonPaperFillCache[cacheKey] = true;
             return true;
         }
         var children = childIdsByParentId[String(sourceId)] || [];
         for (var ci = 0; ci < children.length; ci++) {
-            if (sourceTreeHasNonPaperFill(children[ci])) return true;
+            if (sourceTreeHasNonPaperFill(children[ci])) {
+                sourceTreeHasNonPaperFillCache[cacheKey] = true;
+                return true;
+            }
         }
+        sourceTreeHasNonPaperFillCache[cacheKey] = false;
         return false;
     }
 
@@ -729,11 +1039,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function appendUngroupedOutlineTextShellCandidates() {
         var generated = {};
-        for (var ti = 0; sourceItems && ti < sourceItems.length; ti++) {
-            var tfSource = sourceItems[ti];
-            if (!tfSource || tfSource.kind !== "TextFrame") continue;
-            if (tfSource.textFrameClass !== "editable" || tfSource.hasText !== true) continue;
-            if (!pageIndexInCurrentExtraction(tfSource.pageIndex)) continue;
+        var textFrameSources = sourceBuckets.editableTextFrames || [];
+        for (var ti = 0; ti < textFrameSources.length; ti++) {
+            var tfSource = textFrameSources[ti];
             if (tfSource.parentId === null || tfSource.parentId === undefined) continue;
             if (sourceHasInlineAnchorAncestor(tfSource.id)) continue;
             if (textFrameSourceHasOwnShellStyle(tfSource)) continue;
@@ -805,10 +1113,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function appendDirectSiblingTextShellCandidates() {
         var generated = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var shellSource = sourceItems[si];
-            if (!shellSource || shellSource.id === null || shellSource.id === undefined) continue;
-            if (!pageIndexInCurrentExtraction(shellSource.pageIndex)) continue;
+        var shellSources = sourceBuckets.shellShapes || [];
+        for (var si = 0; si < shellSources.length; si++) {
+            var shellSource = shellSources[si];
             if (!sourceCanBeDirectSiblingTextShell(shellSource.id)) continue;
             var parentId = shellSource.parentId;
             if (parentId === null || parentId === undefined) continue;
@@ -864,10 +1171,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function appendNativeParentTextShellCandidates() {
         var generated = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var shellSource = sourceItems[si];
-            if (!shellSource || shellSource.id === null || shellSource.id === undefined) continue;
-            if (!pageIndexInCurrentExtraction(shellSource.pageIndex)) continue;
+        var shellSources = sourceBuckets.shellShapes || [];
+        for (var si = 0; si < shellSources.length; si++) {
+            var shellSource = shellSources[si];
             if (!sourceCanBeNativeParentTextShell(shellSource.id)) continue;
 
             var editableIds = directEditableTextChildren(shellSource.id);
@@ -912,10 +1218,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function appendDescendantSiblingTextShellCandidates() {
         var generated = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var shellSource = sourceItems[si];
-            if (!shellSource || shellSource.id === null || shellSource.id === undefined) continue;
-            if (!pageIndexInCurrentExtraction(shellSource.pageIndex)) continue;
+        var shellSources = sourceBuckets.shellShapes || [];
+        for (var si = 0; si < shellSources.length; si++) {
+            var shellSource = shellSources[si];
             if (!sourceCanBeDirectSiblingTextShell(shellSource.id)) {
                 continue;
             }
@@ -966,11 +1271,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function appendTableSiblingShellCandidates() {
         var generated = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var parentSource = sourceItems[si];
-            if (!parentSource || parentSource.id === null || parentSource.id === undefined) continue;
-            if (!pageIndexInCurrentExtraction(parentSource.pageIndex)) continue;
-            if (String(parentSource.kind || "") !== "Group") continue;
+        var parentSources = sourceBuckets.groups || [];
+        for (var si = 0; si < parentSources.length; si++) {
+            var parentSource = parentSources[si];
             if (!hasDirectTableOnlyCarrierChild(parentSource.id, parentSource.pageIndex)) continue;
 
             var siblings = childIdsByParentId[String(parentSource.id)] || [];
@@ -1023,23 +1326,31 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function sourceCanBeResidualSiblingShell(sourceId) {
+        var cacheKey = String(sourceId);
+        if (sourceCanBeResidualSiblingShellCache.hasOwnProperty(cacheKey)) {
+            return sourceCanBeResidualSiblingShellCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
-        if (!isShellStructureSourceKind(src.kind)) return false;
-        if (String(src.kind || "") === "GraphicLine") return false;
-        if (sourceHasInlineAnchorAncestor(sourceId)) return false;
-        if (sourceHasEditableTextDescendant(sourceId)) return false;
-        if (sourceHasPlacedVisualSource(sourceId)) return false;
-        if (!sourceHasChildSources(sourceId)) return sourceHasVisibleFillSource(src);
-        return sourceHasVisibleShellSource(sourceId);
+        if (!src
+                || !isShellStructureSourceKind(src.kind)
+                || String(src.kind || "") === "GraphicLine"
+                || sourceHasInlineAnchorAncestor(sourceId)
+                || sourceHasEditableTextDescendant(sourceId)
+                || sourceHasPlacedVisualSource(sourceId)) {
+            sourceCanBeResidualSiblingShellCache[cacheKey] = false;
+            return false;
+        }
+        sourceCanBeResidualSiblingShellCache[cacheKey] = !sourceHasChildSources(sourceId)
+                ? sourceHasVisibleFillSource(src)
+                : sourceHasVisibleShellSource(sourceId);
+        return sourceCanBeResidualSiblingShellCache[cacheKey];
     }
 
     function appendSuppressedParentResidualSiblingShellCandidates() {
         var generated = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var parentSource = sourceItems[si];
-            if (!parentSource || parentSource.id === null || parentSource.id === undefined) continue;
-            if (!pageIndexInCurrentExtraction(parentSource.pageIndex)) continue;
+        var parentSources = sourceBuckets.shellRoots || [];
+        for (var si = 0; si < parentSources.length; si++) {
+            var parentSource = parentSources[si];
             var parentShellInfo = closedTextOwningShellInfo(parentSource.id);
             if (!parentShellInfo) continue;
             var hasMoreSpecific = hasMoreSpecificClosedTextOwningShell(parentSource.id, parentShellInfo.editableIds);
@@ -1096,10 +1407,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function appendClosedTextOwningShellGroupCandidates() {
         var generated = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var sourceEntry = sourceItems[si];
-            if (!sourceEntry || sourceEntry.id === null || sourceEntry.id === undefined) continue;
-            if (!pageIndexInCurrentExtraction(sourceEntry.pageIndex)) continue;
+        var shellSources = sourceBuckets.shellRoots || [];
+        for (var si = 0; si < shellSources.length; si++) {
+            var sourceEntry = shellSources[si];
 
             var shellInfo = closedTextOwningShellInfo(sourceEntry.id);
             if (!shellInfo) continue;
@@ -1151,10 +1461,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
     function appendInlineTextlessSiblingDecorationCandidates() {
         var generated = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var visualSource = sourceItems[si];
-            if (!visualSource || visualSource.id === null || visualSource.id === undefined) continue;
-            if (!pageIndexInCurrentExtraction(visualSource.pageIndex)) continue;
+        var visualSources = sourceBuckets.inlineVisuals || [];
+        for (var si = 0; si < visualSources.length; si++) {
+            var visualSource = visualSources[si];
             if (!sourceCanBeInlineTextlessSiblingDecoration(visualSource.id)) continue;
 
             var subtreeIds = collectSubtreeSourceIds(visualSource.id);
@@ -1199,24 +1508,40 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function sourceCanBeInlineTextlessSiblingDecoration(sourceId) {
+        var cacheKey = String(sourceId);
+        if (sourceCanBeInlineTextlessSiblingDecorationCache.hasOwnProperty(cacheKey)) {
+            return sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey];
+        }
         var src = sourceInfoById[String(sourceId)];
-        if (!src) return false;
-        if (!sourceInfoIsInlineFlow(src)) return false;
+        if (!src || !sourceInfoIsInlineFlow(src)) {
+            sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey] = false;
+            return false;
+        }
         var kind = String(src.kind || "");
         if (kind === "TextFrame" || kind === "Story" || kind === "Character" || kind === "InsertionPoint") {
+            sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey] = false;
             return false;
         }
-        if (src.parentId === null || src.parentId === undefined) return false;
+        if (src.parentId === null || src.parentId === undefined) {
+            sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey] = false;
+            return false;
+        }
         var parent = sourceInfoById[String(src.parentId)];
-        if (!parent || String(parent.kind || "") !== "Group") return false;
-        if (!sourceInfoIsInlineFlow(parent)) return false;
-        if (sourceHasEditableTextDescendant(sourceId)) return false;
-        if (sourceCanBeNativeParentTextShell(sourceId)) return false;
+        if (!parent || String(parent.kind || "") !== "Group"
+                || !sourceInfoIsInlineFlow(parent)
+                || sourceHasEditableTextDescendant(sourceId)
+                || sourceCanBeNativeParentTextShell(sourceId)) {
+            sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey] = false;
+            return false;
+        }
         if (sourceCanBeDirectSiblingTextShell(sourceId)
                 && matchingDirectSiblingTextFrameIds(sourceId, src.pageIndex).length > 0) {
+            sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey] = false;
             return false;
         }
-        return inlineParentHasEditableTextSibling(src.parentId, sourceId);
+        sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey] =
+                inlineParentHasEditableTextSibling(src.parentId, sourceId);
+        return sourceCanBeInlineTextlessSiblingDecorationCache[cacheKey];
     }
 
     function sourceInfoIsInlineFlow(src) {
@@ -1232,6 +1557,10 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function inlineParentHasEditableTextSibling(parentId, sourceId) {
+        var cacheKey = String(parentId) + "|" + String(sourceId);
+        if (inlineParentHasEditableTextSiblingCache.hasOwnProperty(cacheKey)) {
+            return inlineParentHasEditableTextSiblingCache[cacheKey];
+        }
         var siblings = childIdsByParentId[String(parentId)] || [];
         for (var si = 0; si < siblings.length; si++) {
             var siblingId = siblings[si];
@@ -1241,21 +1570,34 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             if (sibling.kind === "TextFrame"
                     && sibling.textFrameClass === "editable"
                     && sibling.hasText === true) {
+                inlineParentHasEditableTextSiblingCache[cacheKey] = true;
                 return true;
             }
             var editableIds = allEditableTextDescendants(siblingId);
-            if (editableIds && editableIds.length > 0) return true;
+            if (editableIds && editableIds.length > 0) {
+                inlineParentHasEditableTextSiblingCache[cacheKey] = true;
+                return true;
+            }
         }
+        inlineParentHasEditableTextSiblingCache[cacheKey] = false;
         return false;
     }
 
     appendClosedTextOwningShellGroupCandidates();
+    markSourceDeclaredShellStep("03d08a_sourceDeclared_closedTextShells");
     appendNativeParentTextShellCandidates();
+    markSourceDeclaredShellStep("03d08b_sourceDeclared_nativeParentTextShells");
     appendDirectSiblingTextShellCandidates();
+    markSourceDeclaredShellStep("03d08c_sourceDeclared_directSiblingTextShells");
     appendDescendantSiblingTextShellCandidates();
+    markSourceDeclaredShellStep("03d08d_sourceDeclared_descendantSiblingTextShells");
     appendInlineTextlessSiblingDecorationCandidates();
+    markSourceDeclaredShellStep("03d08e_sourceDeclared_inlineTextlessSiblingDecorations");
     appendUngroupedOutlineTextShellCandidates();
+    markSourceDeclaredShellStep("03d08f_sourceDeclared_ungroupedOutlineTextShells");
     appendTableSiblingShellCandidates();
+    markSourceDeclaredShellStep("03d08g_sourceDeclared_tableSiblingShells");
     appendSuppressedParentResidualSiblingShellCandidates();
+    markSourceDeclaredShellStep("03d08h_sourceDeclared_residualSiblingShells");
 
 }

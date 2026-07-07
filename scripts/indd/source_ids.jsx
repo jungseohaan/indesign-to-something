@@ -5,20 +5,55 @@
  * extract_indd.jsx and used by planning/validation code.
  */
 
+var _SOURCE_SET_KEY_CACHE = {};
+var _SOURCE_SET_KEY_CACHE_COUNT = 0;
+var _SOURCE_SET_MEMBERSHIP_CACHE = {};
+var _SOURCE_SET_MEMBERSHIP_CACHE_COUNT = 0;
+var _SOURCE_SET_CACHE_LIMIT = 12000;
+
+function _sourceSetRawKey(ids) {
+    if (!ids || ids.length === 0) return "";
+    var out = [];
+    for (var i = 0; i < ids.length; i++) out.push(String(ids[i]));
+    return String(ids.length) + "|" + out.join(",");
+}
+
 function _sourceSetKey(ids) {
     if (!ids || ids.length === 0) return "";
+    var rawKey = _sourceSetRawKey(ids);
+    if (_SOURCE_SET_KEY_CACHE.hasOwnProperty(rawKey)) return _SOURCE_SET_KEY_CACHE[rawKey];
     var copy = [];
     for (var i = 0; i < ids.length; i++) copy.push(Number(ids[i]));
     copy.sort(function(a, b) { return a - b; });
     var out = [];
     for (var j = 0; j < copy.length; j++) out.push(String(copy[j]));
-    return out.join(",");
+    var key = out.join(",");
+    if (_SOURCE_SET_KEY_CACHE_COUNT > _SOURCE_SET_CACHE_LIMIT) {
+        _SOURCE_SET_KEY_CACHE = {};
+        _SOURCE_SET_KEY_CACHE_COUNT = 0;
+    }
+    _SOURCE_SET_KEY_CACHE[rawKey] = key;
+    _SOURCE_SET_KEY_CACHE_COUNT++;
+    return key;
+}
+
+function _sourceSetMembership(ids) {
+    var key = _sourceSetKey(ids || []);
+    if (_SOURCE_SET_MEMBERSHIP_CACHE.hasOwnProperty(key)) return _SOURCE_SET_MEMBERSHIP_CACHE[key];
+    var seen = {};
+    for (var i = 0; ids && i < ids.length; i++) seen[String(ids[i])] = true;
+    if (_SOURCE_SET_MEMBERSHIP_CACHE_COUNT > _SOURCE_SET_CACHE_LIMIT) {
+        _SOURCE_SET_MEMBERSHIP_CACHE = {};
+        _SOURCE_SET_MEMBERSHIP_CACHE_COUNT = 0;
+    }
+    _SOURCE_SET_MEMBERSHIP_CACHE[key] = seen;
+    _SOURCE_SET_MEMBERSHIP_CACHE_COUNT++;
+    return seen;
 }
 
 function _sourceSetContainsAll(containerIds, memberIds) {
     if (!containerIds || !memberIds || memberIds.length === 0) return false;
-    var seen = {};
-    for (var i = 0; i < containerIds.length; i++) seen[String(containerIds[i])] = true;
+    var seen = _sourceSetMembership(containerIds);
     for (var j = 0; j < memberIds.length; j++) {
         if (!seen[String(memberIds[j])]) return false;
     }
@@ -29,8 +64,7 @@ function _sourceSetsIntersect(a, b) {
     if (!a || !b || a.length === 0 || b.length === 0) return false;
     var small = a.length <= b.length ? a : b;
     var large = small === a ? b : a;
-    var seen = {};
-    for (var i = 0; i < large.length; i++) seen[String(large[i])] = true;
+    var seen = _sourceSetMembership(large);
     for (var j = 0; j < small.length; j++) {
         if (seen[String(small[j])]) return true;
     }

@@ -166,6 +166,95 @@ function _buildSourceGraphFromExtractionPlan(plan) {
     };
 }
 
+function _buildSourceGraphSummaryFromExtractionPlan(plan, previewLimit) {
+    previewLimit = previewLimit === undefined || previewLimit === null ? 100 : previewLimit;
+    var childCountByParent = {};
+    var pageCount = {};
+    var kindCounts = {};
+    var sourceItems = plan && plan.sourceItems ? plan.sourceItems : [];
+    var preview = [];
+    var visibleCount = 0;
+    var hiddenLayerCount = 0;
+    var textFrameCount = 0;
+    var textFrameWithTextCount = 0;
+    var placedVisualCount = 0;
+    var visibleFillCount = 0;
+    var visibleStrokeCount = 0;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src) continue;
+        if (preview.length < previewLimit) preview.push(_sourceGraphNodePreview(src));
+        if (src.parentId !== null && src.parentId !== undefined) {
+            var pk = String(src.parentId);
+            childCountByParent[pk] = (childCountByParent[pk] || 0) + 1;
+        }
+        _incrementSourceGraphCount(pageCount, src.pageIndex !== undefined
+                ? String(src.pageIndex)
+                : "UNKNOWN");
+        _incrementSourceGraphCount(kindCounts, src.kind || "UNKNOWN");
+        if (src.visible === true) visibleCount++;
+        if (src.hiddenLayer === true) hiddenLayerCount++;
+        if (src.kind === "TextFrame") {
+            textFrameCount++;
+            if (src.hasText === true) textFrameWithTextCount++;
+        }
+        if (src.hasPlacedVisual === true) placedVisualCount++;
+        if (src.hasVisibleFill === true) visibleFillCount++;
+        if (src.hasVisibleStroke === true) visibleStrokeCount++;
+    }
+    return {
+        schemaVersion: 1,
+        policy: "POLICY-source-ownership",
+        mode: "source-graph-summary",
+        sourceDocument: plan ? plan.sourceDocument : null,
+        pageRange: plan ? plan.pageRange : null,
+        summary: {
+            nodeCount: sourceItems.length,
+            parentCount: Object.keys ? Object.keys(childCountByParent).length : 0,
+            pageCounts: pageCount,
+            kindCounts: kindCounts,
+            visibleCount: visibleCount,
+            hiddenLayerCount: hiddenLayerCount,
+            textFrameCount: textFrameCount,
+            textFrameWithTextCount: textFrameWithTextCount,
+            placedVisualCount: placedVisualCount,
+            visibleFillCount: visibleFillCount,
+            visibleStrokeCount: visibleStrokeCount,
+            previewCount: preview.length
+        },
+        fullDiagnosticsSkipped: true,
+        nodePreview: preview
+    };
+}
+
+function _sourceGraphNodePreview(src) {
+    if (!src) return src;
+    return {
+        id: src.id,
+        pageIndex: src.pageIndex,
+        kind: src.kind,
+        contentType: src.contentType || null,
+        parentId: src.parentId,
+        parentKind: src.parentKind,
+        bounds: src.bounds,
+        zOrder: src.zOrder,
+        visible: src.visible,
+        hiddenLayer: src.hiddenLayer,
+        hasText: src.hasText,
+        textLength: src.textLength,
+        hasChildren: src.hasChildren,
+        hasPlacedVisual: src.hasPlacedVisual,
+        hasVisibleFill: src.hasVisibleFill,
+        hasVisibleStroke: src.hasVisibleStroke
+    };
+}
+
+function _incrementSourceGraphCount(map, key) {
+    key = key || "UNKNOWN";
+    if (!map[key]) map[key] = 0;
+    map[key]++;
+}
+
 function _stampExportUnitsOnRenderedItems(ctx, renderedFloatingItems) {
     if (!renderedFloatingItems) return;
     var candidateById = {};

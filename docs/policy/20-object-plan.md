@@ -7,19 +7,9 @@
 
 Every visible candidate must have one `ObjectPlan` before AST generation.
 
-Required identity fields:
+Required executor identity fields:
 
 - `sourceObjectIds`: source bundle identity.
-- `sourceRootObjectIds`: diagnostic top-level roots inside `sourceObjectIds`.
-  Multi-root composite diagnostics use this to compare the union of closed
-  source trees with the executable bundle.
-- `clusterSourceObjectIds`: diagnostic recursive descendants of the primary
-  source root or source-root union. This may prove a closed source tree during
-  migration, but final executors use explicit slot source fields instead.
-- `clusterKindCounts`, `omittedClusterSourceObjectIds`, and
-  `omittedClusterKindCounts`: diagnostic evidence for narrower-than-cluster
-  blockers. They are not execution inputs; they only show what source kinds
-  Stage 1 has not yet assigned to explicit slots.
 - `visualSourceObjectIds`: source ids used as visible visual material.
 - `styleSourceObjectIds`: source ids absorbed as HWPX style.
 - `ownedTextFrameIds`: TextFrame ids whose text is owned by HWPX.
@@ -34,6 +24,26 @@ Required identity fields:
 - `renderSourceBounds`: optional extractor/source provenance bounds for a
   page-local fragment. It explains what broader source area produced the
   fragment, but `bounds` remains the only visible placement bounds.
+
+Diagnostic evidence fields are separate from the executor contract:
+
+- `sourceRootObjectIds`: diagnostic top-level roots inside `sourceObjectIds`.
+  Multi-root composite diagnostics use this to compare the union of closed
+  source trees with the executable bundle.
+- `clusterSourceObjectIds`: diagnostic recursive descendants of the primary
+  source root or source-root union. This may prove a closed source tree during
+  migration, but final executors use explicit slot source fields instead.
+- `clusterKindCounts`, `omittedClusterSourceObjectIds`, and
+  `omittedClusterKindCounts`: diagnostic evidence for narrower-than-cluster
+  blockers. They are not execution inputs; they only show what source kinds
+  Stage 1 has not yet assigned to explicit slots.
+
+Large recursive source sets may be represented by stable source-set references,
+such as `sourceSetId`, `clusterSourceSetId`, `exportSourceSetId`, and
+`hiddenSourceSetId`, when the expanded arrays are available from Stage 0/1
+diagnostics or trace mode. Validators may expand those references for failing
+records, but executors must not require expanded cluster or omitted-cluster
+arrays to place, hide, export, or drop material.
 
 For `PLACE_TEXT_SHELL`, visible source evidence may come from
 `styleSourceObjectIds` instead of `visualSourceObjectIds` when the shell is a

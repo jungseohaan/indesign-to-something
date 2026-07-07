@@ -121,6 +121,8 @@ function _executionCandidateContractFields() {
         "bounds",
         "zOrder",
         "required",
+        "requiredSlot",
+        "requiredSlotReason",
         "disabled",
         "suffix",
         "mode",

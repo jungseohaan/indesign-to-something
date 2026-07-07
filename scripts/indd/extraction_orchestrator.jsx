@@ -122,7 +122,9 @@ function _runRenderPhases(doc, ctx, allItems) {
                     : _slimExtractionPlanForWrite(ctx.extractionPlan));
     _marker(ctx.outputDir, "03g_writeExtractionPlan_done");
     writeJson(ctx.outputDir + "/source-graph.json",
-            _buildSourceGraphFromExtractionPlan(ctx.extractionPlan));
+            ctx.writePlannerDiagnostics === true
+                    ? _buildSourceGraphFromExtractionPlan(ctx.extractionPlan)
+                    : _buildSourceGraphSummaryFromExtractionPlan(ctx.extractionPlan));
     _marker(ctx.outputDir, "03g2_writeSourceGraph_done");
     var planDiagnostics = ctx._extractionPlanDiagnostics || {};
     var plannerBundleDiagnostics = planDiagnostics.plannerBundleDiagnostics
@@ -132,7 +134,10 @@ function _runRenderPhases(doc, ctx, allItems) {
             || _buildObjectPlanDiagnosticsFromPlannerBundles(
                     plannerBundleDiagnostics, ctx.extractionPlan.sourceItems);
     _marker(ctx.outputDir, "03j_buildObjectPlans_done");
-    writeJson(ctx.outputDir + "/object-plans.json", objectPlanDiagnostics);
+    writeJson(ctx.outputDir + "/object-plans.json",
+            ctx.writePlannerDiagnostics === true
+                    ? objectPlanDiagnostics
+                    : _slimObjectPlanDiagnosticsForWrite(objectPlanDiagnostics));
     _marker(ctx.outputDir, "03l_writeObjectPlans_done");
     var objectPlanValidationGate = _assertObjectPlanGate(ctx, objectPlanDiagnostics);
     ctx.extractionPlan.objectPlanValidationGateSummary = {

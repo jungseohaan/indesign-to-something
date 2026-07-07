@@ -55,17 +55,23 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) summary.plansWithOwnedTextFrames++;
         _incrementObjectPlanSummary(summary.migrationBlockerCounts, plan.migrationBlocker || "NONE");
     }
+    var deduplication = _deduplicateObjectPlansByIdentity(objectPlans);
     _appendEditableTextFrameObjectPlans(objectPlans, sourceItems);
     _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems);
     _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems);
     _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems);
     _appendTextFrameCleanupObjectPlans(objectPlans, sourceItems);
+    var pngOwnedTextFrameCleanup = _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems);
     var textOwnershipResolution = _resolveObjectPlanDuplicateTextOwners(objectPlans);
     var depthFinalization = _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems);
     var validation = _validateObjectPlanDiagnostics(objectPlans);
+    var sourceSetRefs = _attachObjectPlanSourceSetRefs(objectPlans);
     summary = _summarizeObjectPlans(objectPlans, validation);
+    summary.objectPlanDeduplication = deduplication.summary;
+    summary.pngOwnedTextFrameCleanup = pngOwnedTextFrameCleanup.summary;
     summary.textOwnershipResolution = textOwnershipResolution.summary;
     summary.visualDepthFinalization = depthFinalization.summary;
+    summary.sourceSetInterning = sourceSetRefs.summary;
 
     return {
         schemaVersion: 1,
@@ -73,6 +79,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         mode: "object-plan-diagnostics",
         summary: summary,
         validation: validation,
+        sourceSetRefs: sourceSetRefs,
         objectPlans: objectPlans
     };
 }
@@ -80,17 +87,19 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
 function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
     var sourceById = _objectPlanSourceInfoById(sourceItems);
     var editableTextFrames = _objectPlanEditableTextFrames(sourceItems);
+    var editableTextFramesByPage = _objectPlanEditableTextFramesByPage(editableTextFrames);
+    var sourceZOrderCache = {};
     var zOrderUpdates = 0;
     var layerUpdates = 0;
     for (var i = 0; objectPlans && i < objectPlans.length; i++) {
         var plan = objectPlans[i];
         if (!_objectPlanHasVisibleVisual(plan)) continue;
-        var sourceZ = _objectPlanCanonicalVisualSourceZOrder(plan, sourceById);
+        var sourceZ = _objectPlanCanonicalVisualSourceZOrder(plan, sourceById, sourceZOrderCache);
         if (sourceZ >= 0 && plan.zOrder !== sourceZ) {
             plan.zOrder = sourceZ;
             zOrderUpdates++;
         }
-        var layer = _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFrames, sourceZ);
+        var layer = _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByPage, sourceZ);
         if (layer && plan.visualLayer !== layer) {
             plan.visualLayer = layer;
             plan.policyLayer = _objectPlanPolicyLayerForVisualLayer(layer);
@@ -128,23 +137,49 @@ function _objectPlanEditableTextFrames(sourceItems) {
     return out;
 }
 
-function _objectPlanCanonicalVisualSourceZOrder(plan, sourceById) {
-    var aggregate = _objectPlanUsesLowestVisualSourceZOrder(plan)
-            ? _objectPlanMinSourceZOrder
-            : _objectPlanMaxSourceZOrder;
-    var normalizedAggregate = _objectPlanUsesLowestVisualSourceZOrder(plan)
-            ? _objectPlanMinNormalizedSourceZOrder
-            : _objectPlanMaxNormalizedSourceZOrder;
-    var sourceZ = aggregate(plan ? plan.sourceRootObjectIds : null, sourceById);
+function _objectPlanEditableTextFramesByPage(editableTextFrames) {
+    var out = {};
+    for (var i = 0; editableTextFrames && i < editableTextFrames.length; i++) {
+        var tf = editableTextFrames[i];
+        if (!tf) continue;
+        var key = String(tf.pageIndex !== undefined && tf.pageIndex !== null ? tf.pageIndex : -1);
+        if (!out[key]) out[key] = [];
+        out[key].push(tf);
+    }
+    return out;
+}
+
+function _objectPlanCanonicalVisualSourceZOrder(plan, sourceById, cache) {
+    var useMin = _objectPlanUsesLowestVisualSourceZOrder(plan);
+    var sourceZ = _objectPlanAggregateSourceZOrder(plan ? plan.sourceRootObjectIds : null,
+            sourceById, useMin, false, cache);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = normalizedAggregate(plan ? plan.visualSourceObjectIds : null, sourceById);
+    sourceZ = _objectPlanAggregateSourceZOrder(plan ? plan.visualSourceObjectIds : null,
+            sourceById, useMin, true, cache);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = normalizedAggregate(plan ? plan.sourceObjectIds : null, sourceById);
+    sourceZ = _objectPlanAggregateSourceZOrder(plan ? plan.sourceObjectIds : null,
+            sourceById, useMin, true, cache);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = aggregate(plan ? plan.visualSourceObjectIds : null, sourceById);
+    sourceZ = _objectPlanAggregateSourceZOrder(plan ? plan.visualSourceObjectIds : null,
+            sourceById, useMin, false, cache);
     if (sourceZ >= 0) return sourceZ;
-    sourceZ = aggregate(plan ? plan.sourceObjectIds : null, sourceById);
+    sourceZ = _objectPlanAggregateSourceZOrder(plan ? plan.sourceObjectIds : null,
+            sourceById, useMin, false, cache);
     return sourceZ >= 0 ? sourceZ : (plan && plan.zOrder !== null && plan.zOrder !== undefined ? plan.zOrder : -1);
+}
+
+function _objectPlanAggregateSourceZOrder(ids, sourceById, useMin, normalizedOnly, cache) {
+    if (!ids || ids.length === 0) return -1;
+    var key = null;
+    if (cache) {
+        key = (useMin ? "min" : "max") + "|" + (normalizedOnly ? "normalized" : "all") + "|" + _sourceSetKey(ids);
+        if (cache.hasOwnProperty(key)) return cache[key];
+    }
+    var value = useMin
+            ? _objectPlanMinSourceZOrder(ids, sourceById, normalizedOnly)
+            : _objectPlanMaxSourceZOrder(ids, sourceById, normalizedOnly);
+    if (cache && key !== null) cache[key] = value;
+    return value;
 }
 
 function _objectPlanUsesLowestVisualSourceZOrder(plan) {
@@ -159,24 +194,24 @@ function _objectPlanUsesLowestVisualSourceZOrder(plan) {
             || plan.passId === "pass.editable_textframe_visual_shells";
 }
 
-function _objectPlanMaxNormalizedSourceZOrder(ids, sourceById) {
+function _objectPlanMaxSourceZOrder(ids, sourceById, normalizedOnly) {
     var max = -1;
     for (var i = 0; ids && i < ids.length; i++) {
         var src = sourceById ? sourceById[String(ids[i])] : null;
         if (!src || src.zOrder === null || src.zOrder === undefined) continue;
-        if (src.zOrderSource && String(src.zOrderSource) !== "idml_spread") continue;
+        if (normalizedOnly && src.zOrderSource && String(src.zOrderSource) !== "idml_spread") continue;
         var z = Number(src.zOrder);
         if (!isNaN(z) && z > max) max = z;
     }
     return max;
 }
 
-function _objectPlanMinNormalizedSourceZOrder(ids, sourceById) {
+function _objectPlanMinSourceZOrder(ids, sourceById, normalizedOnly) {
     var min = null;
     for (var i = 0; ids && i < ids.length; i++) {
         var src = sourceById ? sourceById[String(ids[i])] : null;
         if (!src || src.zOrder === null || src.zOrder === undefined) continue;
-        if (src.zOrderSource && String(src.zOrderSource) !== "idml_spread") continue;
+        if (normalizedOnly && src.zOrderSource && String(src.zOrderSource) !== "idml_spread") continue;
         var z = Number(src.zOrder);
         if (isNaN(z)) continue;
         min = min === null ? z : Math.min(min, z);
@@ -184,41 +219,18 @@ function _objectPlanMinNormalizedSourceZOrder(ids, sourceById) {
     return min === null ? -1 : min;
 }
 
-function _objectPlanMaxSourceZOrder(ids, sourceById) {
-    var max = -1;
-    for (var i = 0; ids && i < ids.length; i++) {
-        var src = sourceById ? sourceById[String(ids[i])] : null;
-        if (!src || src.zOrder === null || src.zOrder === undefined) continue;
-        var z = Number(src.zOrder);
-        if (!isNaN(z) && z > max) max = z;
-    }
-    return max;
-}
-
-function _objectPlanMinSourceZOrder(ids, sourceById) {
-    var min = null;
-    for (var i = 0; ids && i < ids.length; i++) {
-        var src = sourceById ? sourceById[String(ids[i])] : null;
-        if (!src || src.zOrder === null || src.zOrder === undefined) continue;
-        var z = Number(src.zOrder);
-        if (isNaN(z)) continue;
-        min = min === null ? z : Math.min(min, z);
-    }
-    return min === null ? -1 : min;
-}
-
-function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFrames, zOrder) {
+function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByPage, zOrder) {
     if (!plan) return null;
     if (plan.compositeRole === "background_vector_source") {
         return "PAGE_BACKGROUND";
     }
     if (plan.visualLayer === "PAGE_BACKGROUND"
             && plan.passId !== "pass.page_backgrounds"
-            && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder)) {
+            && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
         return "CONTENT_VISUAL";
     }
     if (plan.visualLayer === "CONTAINER_BACKDROP"
-            && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder)) {
+            && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
         return plan.visualAction === "PLACE_TEXT_SHELL" ? "LABEL_BACKDROP" : "CONTENT_VISUAL";
     }
     if (plan.visualAction === "PLACE_TEXT_SHELL"
@@ -226,24 +238,24 @@ function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFrames, z
             && plan.coordinateSpace === "PAGE"
             && (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0)
             && plan.visualLayer === "LABEL_BACKDROP"
-            && _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder)) {
+            && _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
         return "CONTAINER_BACKDROP";
     }
     if (plan.visualAction === "PLACE_FLOATING_PNG"
             && plan.placement === "FLOATING"
             && plan.visualLayer === "CONTENT_VISUAL"
-            && _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFrames)) {
+            && _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFramesByPage)) {
         return "CONTENT_BACKDROP";
     }
     return plan.visualLayer;
 }
 
-function _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFrames, zOrder) {
+function _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder) {
     if (!plan) return false;
     if (!_objectPlanHasPageLevelSourceRoot(plan, sourceById)) return false;
     if (_objectPlanHasTextOwnershipSignal(plan)) return false;
     if (!_objectPlanIsBackgroundBoundsSanityCandidate(plan.bounds)) return false;
-    return _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFrames);
+    return _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFramesByPage);
 }
 
 function _objectPlanHasTextOwnershipSignal(plan) {
@@ -268,12 +280,14 @@ function _objectPlanHasPageLevelSourceRoot(plan, sourceById) {
     return true;
 }
 
-function _objectPlanIsBehindLocalText(bounds, pageIndex, zOrder, editableTextFrames) {
+function _objectPlanIsBehindLocalText(bounds, pageIndex, zOrder, editableTextFramesByPage) {
     if (!bounds || bounds.length < 4 || _objectPlanArea(bounds) <= 0) return false;
     if (zOrder === null || zOrder === undefined || zOrder < 0) return false;
-    for (var i = 0; editableTextFrames && i < editableTextFrames.length; i++) {
-        var tf = editableTextFrames[i];
-        if (!tf || tf.pageIndex !== pageIndex) continue;
+    var pageKey = String(pageIndex !== undefined && pageIndex !== null ? pageIndex : -1);
+    var pageTextFrames = editableTextFramesByPage ? editableTextFramesByPage[pageKey] : null;
+    for (var i = 0; pageTextFrames && i < pageTextFrames.length; i++) {
+        var tf = pageTextFrames[i];
+        if (!tf) continue;
         if (tf.zOrder === null || tf.zOrder === undefined) continue;
         if (Number(tf.zOrder) <= Number(zOrder)) continue;
         if (_objectPlanOverlapArea(bounds, tf.bounds) > 0) return true;
@@ -352,6 +366,7 @@ function _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems) {
 
 function _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems) {
     if (!objectPlans || !sourceItems) return;
+    var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || String(src.kind || "") !== "TextFrame") continue;
@@ -366,19 +381,25 @@ function _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems) {
         var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
         var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
         if (src.storyAnchorPlacement === "INLINE"
-                && _objectPlansHaveVisibleShellForFrame(objectPlans, id)) {
-            objectPlans.push(_textFrameCleanupObjectPlan(src, id, pageIndex, zOrder,
-                    "empty_text_frame_visual_shell"));
+                && _objectPlanDecisionIndexHasVisibleShell(decisionIndex, id)) {
+            var shellCleanupPlan = _textFrameCleanupObjectPlan(src, id, pageIndex, zOrder,
+                    "empty_text_frame_visual_shell");
+            objectPlans.push(shellCleanupPlan);
+            _addObjectPlanToDecisionIndex(decisionIndex, shellCleanupPlan);
             continue;
         }
-        if (_objectPlansHaveVisualDecisionForFrame(objectPlans, id)) {
-            objectPlans.push(_textFrameCleanupObjectPlan(src, id, pageIndex, zOrder,
-                    "empty_text_frame_visual_source"));
+        if (_objectPlanDecisionIndexHasVisualDecision(decisionIndex, id)) {
+            var visualCleanupPlan = _textFrameCleanupObjectPlan(src, id, pageIndex, zOrder,
+                    "empty_text_frame_visual_source");
+            objectPlans.push(visualCleanupPlan);
+            _addObjectPlanToDecisionIndex(decisionIndex, visualCleanupPlan);
             continue;
         }
-        if (_objectPlansHaveTextDecisionForFrame(objectPlans, id)) continue;
-        objectPlans.push(_textFrameObjectPlan(src, id, pageIndex, zOrder,
-                "pass.empty_editable_text_frames", "editable_text_frame"));
+        if (_objectPlanDecisionIndexHasTextDecision(decisionIndex, id)) continue;
+        var textPlan = _textFrameObjectPlan(src, id, pageIndex, zOrder,
+                "pass.empty_editable_text_frames", "editable_text_frame");
+        objectPlans.push(textPlan);
+        _addObjectPlanToDecisionIndex(decisionIndex, textPlan);
     }
 }
 
@@ -397,8 +418,422 @@ function _appendTextFrameCleanupObjectPlans(objectPlans, sourceItems) {
     }
 }
 
+function _deduplicateObjectPlansByIdentity(objectPlans) {
+    var summary = { removedPlanCount: 0 };
+    if (!objectPlans || objectPlans.length < 2) return { summary: summary };
+    var seen = {};
+    var kept = [];
+    for (var i = 0; i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan) continue;
+        var key = _objectPlanIdentityKey(plan);
+        if (seen[key] === true) {
+            summary.removedPlanCount++;
+            continue;
+        }
+        seen[key] = true;
+        kept.push(plan);
+    }
+    objectPlans.length = 0;
+    for (var k = 0; k < kept.length; k++) {
+        objectPlans.push(kept[k]);
+    }
+    return { summary: summary };
+}
+
+function _objectPlanIdentityKey(plan) {
+    if (!plan) return "null";
+    return [
+        plan.objectPlanId || "",
+        plan.bundleId || "",
+        plan.candidateId || "",
+        plan.passId || "",
+        plan.pageIndex !== undefined ? String(plan.pageIndex) : "",
+        plan.kind || "",
+        plan.materialization || "",
+        plan.textAction || "",
+        plan.visualAction || "",
+        plan.placement || "",
+        plan.coordinateSpace || "",
+        plan.visualLayer || "",
+        plan.ownershipSlot || "",
+        plan.slotRole || "",
+        _sourceSetKey(plan.sourceObjectIds || []),
+        _sourceSetKey(plan.visualSourceObjectIds || []),
+        _sourceSetKey(plan.styleSourceObjectIds || []),
+        _sourceSetKey(plan.exportSourceObjectIds || []),
+        _sourceSetKey(plan.hiddenVisualSourceObjectIds || []),
+        _sourceSetKey(plan.ownedTextFrameIds || [])
+    ].join("|");
+}
+
+function _attachObjectPlanSourceSetRefs(objectPlans) {
+    var interner = _createObjectPlanSourceSetInterner();
+    var fields = [
+        { ids: "sourceObjectIds", ref: "sourceSetId" },
+        { ids: "sourceRootObjectIds", ref: "sourceRootSetId" },
+        { ids: "clusterSourceObjectIds", ref: "clusterSourceSetId" },
+        { ids: "omittedClusterSourceObjectIds", ref: "omittedClusterSourceSetId" },
+        { ids: "visualSourceObjectIds", ref: "visualSourceSetId" },
+        { ids: "styleSourceObjectIds", ref: "styleSourceSetId" },
+        { ids: "ownedTextFrameIds", ref: "ownedTextFrameSetId" },
+        { ids: "exportSourceObjectIds", ref: "exportSourceSetId" },
+        { ids: "hiddenVisualSourceObjectIds", ref: "hiddenVisualSourceSetId" },
+        { ids: "ownedByNativeShellSourceObjectIds", ref: "ownedByNativeShellSourceSetId" }
+    ];
+    var attachedRefCount = 0;
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan) continue;
+        for (var f = 0; f < fields.length; f++) {
+            var field = fields[f];
+            var ids = plan[field.ids] || [];
+            var ref = interner.intern(ids);
+            plan[field.ref] = ref;
+            if (ids.length > 0) attachedRefCount++;
+        }
+    }
+    var result = interner.result();
+    result.summary.attachedRefCount = attachedRefCount;
+    result.summary.planCount = objectPlans ? objectPlans.length : 0;
+    result.summary.refFieldCount = fields.length;
+    return result;
+}
+
+function _createObjectPlanSourceSetInterner() {
+    var byKey = {};
+    var sets = [];
+    function intern(ids) {
+        var key = _sourceSetKey(ids || []);
+        if (key === "") return null;
+        if (byKey[key]) return byKey[key].sourceSetId;
+        var sorted = _sortedNumericIds(ids || []);
+        var id = "ss" + String(sets.length + 1);
+        var row = {
+            sourceSetId: id,
+            sourceObjectCount: sorted.length,
+            sourceObjectIds: sorted
+        };
+        byKey[key] = row;
+        sets.push(row);
+        return id;
+    }
+    function result() {
+        return {
+            schemaVersion: 1,
+            mode: "object-plan-source-set-refs",
+            summary: {
+                uniqueSourceSetCount: sets.length
+            },
+            sourceSets: sets
+        };
+    }
+    return {
+        intern: intern,
+        result: result
+    };
+}
+
+function _slimObjectPlanDiagnosticsForWrite(diagnostics) {
+    if (!diagnostics) return diagnostics;
+    var validation = diagnostics.validation || {};
+    var slimPlans = [];
+    var plans = diagnostics.objectPlans || [];
+    for (var i = 0; i < plans.length; i++) {
+        slimPlans.push(_slimObjectPlanForWrite(plans[i]));
+    }
+    return {
+        schemaVersion: diagnostics.schemaVersion || 1,
+        policy: diagnostics.policy || "POLICY-source-ownership",
+        mode: "object-plan-diagnostics-slim",
+        summary: diagnostics.summary || {},
+        validation: {
+            issueCount: validation.issueCount || 0,
+            importReadyPlanCount: validation.importReadyPlanCount || 0,
+            contractStatusCounts: validation.contractStatusCounts || {},
+            issueCodeCounts: validation.issueCodeCounts || {},
+            issuesOmitted: validation.issues && validation.issues.length > 0,
+            issuePreview: _objectPlanIssuePreview(validation.issues || [], 50)
+        },
+        sourceSetRefs: _slimObjectPlanSourceSetRefsForWrite(diagnostics.sourceSetRefs, slimPlans),
+        fullDiagnosticsSkipped: true,
+        objectPlans: slimPlans
+    };
+}
+
+function _slimObjectPlanSourceSetRefsForWrite(sourceSetRefs, slimPlans) {
+    if (!sourceSetRefs || !sourceSetRefs.sourceSets) return null;
+    var used = {};
+    var refFields = [
+        "sourceRootSetId",
+        "clusterSourceSetId",
+        "omittedClusterSourceSetId"
+    ];
+    for (var i = 0; slimPlans && i < slimPlans.length; i++) {
+        var plan = slimPlans[i];
+        if (!plan) continue;
+        for (var f = 0; f < refFields.length; f++) {
+            var ref = plan[refFields[f]];
+            if (ref) used[String(ref)] = true;
+        }
+    }
+
+    var sets = [];
+    for (var s = 0; s < sourceSetRefs.sourceSets.length; s++) {
+        var row = sourceSetRefs.sourceSets[s];
+        if (!row || !used[String(row.sourceSetId || "")]) continue;
+        sets.push(row);
+    }
+    return {
+        schemaVersion: sourceSetRefs.schemaVersion || 1,
+        mode: "object-plan-source-set-refs-slim",
+        summary: {
+            uniqueSourceSetCount: sets.length,
+            fullUniqueSourceSetCount: sourceSetRefs.summary
+                    ? sourceSetRefs.summary.uniqueSourceSetCount || 0
+                    : 0,
+            retainedRefFieldCount: refFields.length
+        },
+        sourceSets: sets
+    };
+}
+
+function _slimObjectPlanForWrite(plan) {
+    if (!plan) return plan;
+    var out = {};
+    var fields = [
+        "objectPlanId",
+        "bundleId",
+        "candidateId",
+        "passId",
+        "pageIndex",
+        "kind",
+        "mode",
+        "candidatePurpose",
+        "compositeRole",
+        "slotRole",
+        "layoutOnlyInlineSlot",
+        "sourceInlineFlow",
+        "inlineCompositeLayoutDescendant",
+        "inlineAnchorSourceObjectId",
+        "inlineSourceTreeClosed",
+        "connectorDecorationVisual",
+        "primarySourceObjectId",
+        "ownedByNativeShellSourceObjectIds",
+        "ownedByNativeShellSourceSetId",
+        "sourceObjectIds",
+        "sourceSetId",
+        "sourceRootSetId",
+        "clusterSourceSetId",
+        "omittedClusterSourceSetId",
+        "clusterHasEditableText",
+        "clusterHasTextFrame",
+        "clusterHasPlacedContent",
+        "clusterHasVisualSource",
+        "visualSourceObjectIds",
+        "visualSourceSetId",
+        "styleSourceObjectIds",
+        "styleSourceSetId",
+        "ownedTextFrameIds",
+        "ownedTextFrameSetId",
+        "exportSourceObjectIds",
+        "exportSourceSetId",
+        "hiddenVisualSourceObjectIds",
+        "hiddenVisualSourceSetId",
+        "materialization",
+        "textAction",
+        "visualAction",
+        "placement",
+        "coordinateSpace",
+        "visualLayer",
+        "zOrder",
+        "reason",
+        "bounds",
+        "ownershipSlot",
+        "policyLayer",
+        "clusterRelation",
+        "migrationStatus",
+        "migrationBlocker",
+        "migrationBlockerDetail",
+        "contractStatus",
+        "executable",
+        "required"
+    ];
+    for (var i = 0; i < fields.length; i++) {
+        var key = fields[i];
+        if (_objectPlanSlimFieldIsWriteOnlyDiagnostic(key, plan)) continue;
+        if (key === "migrationBlockerDetail" && plan.migrationBlocker === "NONE") continue;
+        if (plan[key] !== undefined && !_objectPlanSlimValueIsEmpty(plan[key])) out[key] = plan[key];
+    }
+    return out;
+}
+
+function _objectPlanSlimFieldIsWriteOnlyDiagnostic(key, plan) {
+    if (key === "sourceSetId") return true;
+    if (key === "visualSourceSetId") return true;
+    if (key === "styleSourceSetId") return true;
+    if (key === "ownedTextFrameSetId") return true;
+    if (key === "exportSourceSetId") return true;
+    if (key === "hiddenVisualSourceSetId") return true;
+    if (key === "ownedByNativeShellSourceSetId") return true;
+    if (key === "sourceInlineFlow") return true;
+    if (key === "inlineCompositeLayoutDescendant") return true;
+    if (key === "connectorDecorationVisual") return true;
+    if (key === "clusterHasEditableText") return true;
+    if (key === "clusterHasTextFrame") return true;
+    if (key === "clusterHasPlacedContent") return true;
+    if (key === "clusterHasVisualSource") return true;
+    if (key === "policyLayer") return true;
+    if (key === "clusterRelation") return true;
+    if (key === "migrationStatus") return true;
+    if (key === "migrationBlocker" && (!plan || plan.migrationBlocker === "NONE")) return true;
+    return false;
+}
+
+function _objectPlanSlimValueIsEmpty(value) {
+    if (value === null || value === undefined) return true;
+    if (value === "") return true;
+    if (value instanceof Array) return value.length === 0;
+    if (typeof value === "object") {
+        for (var key in value) {
+            if (value.hasOwnProperty(key)) return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+function _objectPlanIssuePreview(issues, limit) {
+    var out = [];
+    limit = limit || 0;
+    for (var i = 0; issues && i < issues.length && i < limit; i++) {
+        var issue = issues[i] || {};
+        out.push({
+            code: issue.code || null,
+            detail: issue.detail || {},
+            planCount: issue.plans ? issue.plans.length : 0
+        });
+    }
+    return out;
+}
+
+function _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems) {
+    var summary = {
+        ownedTextFrameCount: 0,
+        mutatedTextFramePlanCount: 0,
+        mutatedShellPlanCount: 0,
+        addedCleanupPlanCount: 0
+    };
+    if (!objectPlans || !sourceItems) return { summary: summary };
+
+    var ownedTextFrameIds = {};
+    for (var i = 0; i < objectPlans.length; i++) {
+        var ownerPlan = objectPlans[i];
+        if (!ownerPlan) continue;
+        if (ownerPlan.textAction !== "OWNED_BY_PNG") continue;
+        if (ownerPlan.visualAction !== "PLACE_INLINE_PNG"
+                && ownerPlan.visualAction !== "PLACE_FLOATING_PNG") continue;
+        if (!ownerPlan.ownedTextFrameIds || ownerPlan.ownedTextFrameIds.length === 0) continue;
+        for (var t = 0; t < ownerPlan.ownedTextFrameIds.length; t++) {
+            var tfId = Number(ownerPlan.ownedTextFrameIds[t]);
+            if (isNaN(tfId)) continue;
+            ownedTextFrameIds[String(tfId)] = tfId;
+        }
+    }
+
+    var sourceById = _objectPlanSourceInfoById(sourceItems);
+    for (var key in ownedTextFrameIds) {
+        if (!ownedTextFrameIds.hasOwnProperty(key)) continue;
+        var src = sourceById[key];
+        if (!src || String(src.kind || "") !== "TextFrame") {
+            delete ownedTextFrameIds[key];
+        }
+    }
+
+    for (var countKey in ownedTextFrameIds) {
+        if (ownedTextFrameIds.hasOwnProperty(countKey)) summary.ownedTextFrameCount++;
+    }
+    if (summary.ownedTextFrameCount === 0) return { summary: summary };
+
+    var textFramePlansById = {};
+    for (var p = 0; p < objectPlans.length; p++) {
+        var plan = objectPlans[p];
+        if (!plan) continue;
+        if (String(plan.kind || "") === "TextFrame"
+                && plan.primarySourceObjectId !== undefined
+                && plan.primarySourceObjectId !== null) {
+            textFramePlansById[String(plan.primarySourceObjectId)] = plan;
+        }
+    }
+
+    for (var mutateKey in ownedTextFrameIds) {
+        if (!ownedTextFrameIds.hasOwnProperty(mutateKey)) continue;
+        var textFramePlan = textFramePlansById[mutateKey];
+        if (!textFramePlan) continue;
+        if (textFramePlan.textAction !== "DROP_TEXT"
+                || textFramePlan.visualAction !== "DROP_VISUAL"
+                || textFramePlan.reason !== "owned_by_inline_complete_png") {
+            _markObjectPlanOwnedByPngCleanup(textFramePlan);
+            summary.mutatedTextFramePlanCount++;
+        }
+    }
+
+    for (var s = 0; s < objectPlans.length; s++) {
+        var shellPlan = objectPlans[s];
+        if (!shellPlan || shellPlan.visualAction !== "PLACE_TEXT_SHELL") continue;
+        if (!_objectPlanAllOwnedTextFramesIn(shellPlan, ownedTextFrameIds)) continue;
+        _markObjectPlanOwnedByPngCleanup(shellPlan);
+        summary.mutatedShellPlanCount++;
+    }
+
+    for (var addKey in ownedTextFrameIds) {
+        if (!ownedTextFrameIds.hasOwnProperty(addKey)) continue;
+        if (textFramePlansById[addKey]) continue;
+        var cleanupSrc = sourceById[addKey];
+        if (!cleanupSrc) continue;
+        var id = Number(addKey);
+        var pageIndex = cleanupSrc.pageIndex !== undefined && cleanupSrc.pageIndex !== null
+                ? cleanupSrc.pageIndex
+                : -1;
+        var zOrder = cleanupSrc.zOrder !== undefined && cleanupSrc.zOrder !== null
+                ? cleanupSrc.zOrder
+                : 0;
+        var cleanupPlan = _textFrameCleanupObjectPlan(cleanupSrc, id, pageIndex, zOrder,
+                "owned_by_inline_complete_png");
+        objectPlans.push(cleanupPlan);
+        textFramePlansById[addKey] = cleanupPlan;
+        summary.addedCleanupPlanCount++;
+    }
+
+    return { summary: summary };
+}
+
+function _markObjectPlanOwnedByPngCleanup(plan) {
+    if (!plan) return;
+    plan.passId = "pass.textframe_cleanup";
+    plan.textAction = "DROP_TEXT";
+    plan.visualAction = "DROP_VISUAL";
+    plan.materialization = "HWPX_TEXT";
+    plan.reason = "owned_by_inline_complete_png";
+    plan.candidatePurpose = "owned_by_inline_complete_png";
+    plan.migrationStatus = "READY_TEXT_CLEANUP";
+    plan.migrationBlocker = "NONE";
+    plan.migrationBlockerDetail = {};
+    plan.executable = true;
+}
+
+function _objectPlanAllOwnedTextFramesIn(plan, ownedTextFrameIds) {
+    if (!plan || !plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return false;
+    for (var i = 0; i < plan.ownedTextFrameIds.length; i++) {
+        var key = String(plan.ownedTextFrameIds[i]);
+        if (!ownedTextFrameIds[key]) return false;
+    }
+    return true;
+}
+
 function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
     if (!objectPlans || !sourceItems) return;
+    var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || String(src.kind || "") !== "TextFrame") continue;
@@ -409,69 +844,87 @@ function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
         if (src.hiddenLayer === true || src.nonprinting === true) continue;
         var id = Number(src.id);
         if (isNaN(id)) continue;
-        if (_objectPlansHaveTableStyleDecisionForFrame(objectPlans, id)) continue;
+        if (_objectPlanDecisionIndexHasTableStyleDecision(decisionIndex, id)) continue;
         var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
         var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
-        objectPlans.push(_tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder));
+        var tablePlan = _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder);
+        objectPlans.push(tablePlan);
+        _addObjectPlanToDecisionIndex(decisionIndex, tablePlan);
     }
 }
 
-function _objectPlansHaveTextDecisionForFrame(objectPlans, textFrameId) {
-    var key = String(textFrameId);
+function _createObjectPlanDecisionIndex(objectPlans) {
+    var index = {
+        textDecisionByFrameId: {},
+        visualDecisionByFrameId: {},
+        tableStyleDecisionByFrameId: {},
+        visibleShellByFrameId: {}
+    };
     for (var i = 0; objectPlans && i < objectPlans.length; i++) {
-        var plan = objectPlans[i];
-        if (!plan) continue;
-        if (String(plan.primarySourceObjectId) === key) return true;
-        for (var t = 0; plan.ownedTextFrameIds && t < plan.ownedTextFrameIds.length; t++) {
-            if (String(plan.ownedTextFrameIds[t]) === key) return true;
-        }
+        _addObjectPlanToDecisionIndex(index, objectPlans[i]);
     }
-    return false;
+    return index;
 }
 
-function _objectPlansHaveVisualDecisionForFrame(objectPlans, textFrameId) {
-    var key = String(textFrameId);
-    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
-        var plan = objectPlans[i];
-        if (!plan) continue;
-        var visualFields = [
-            plan.visualSourceObjectIds || [],
-            plan.styleSourceObjectIds || [],
-            plan.exportSourceObjectIds || []
-        ];
-        for (var f = 0; f < visualFields.length; f++) {
-            for (var v = 0; v < visualFields[f].length; v++) {
-                if (String(visualFields[f][v]) === key) return true;
-            }
-        }
-    }
-    return false;
+function _addObjectPlanToDecisionIndex(index, plan) {
+    if (!index || !plan) return;
+    _markObjectPlanTextDecisionIndex(index, plan);
+    _markObjectPlanVisualDecisionIndex(index, plan);
+    _markObjectPlanTableStyleDecisionIndex(index, plan);
+    _markObjectPlanVisibleShellIndex(index, plan);
 }
 
-function _objectPlansHaveTableStyleDecisionForFrame(objectPlans, textFrameId) {
-    var key = String(textFrameId);
-    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
-        var plan = objectPlans[i];
-        if (!plan || plan.visualAction !== "PLACE_TABLE_STYLE") continue;
-        if (String(plan.primarySourceObjectId) === key) return true;
-        for (var t = 0; plan.ownedTextFrameIds && t < plan.ownedTextFrameIds.length; t++) {
-            if (String(plan.ownedTextFrameIds[t]) === key) return true;
-        }
+function _markObjectPlanTextDecisionIndex(index, plan) {
+    if (plan.primarySourceObjectId !== undefined && plan.primarySourceObjectId !== null) {
+        index.textDecisionByFrameId[String(plan.primarySourceObjectId)] = true;
     }
-    return false;
+    for (var t = 0; plan.ownedTextFrameIds && t < plan.ownedTextFrameIds.length; t++) {
+        index.textDecisionByFrameId[String(plan.ownedTextFrameIds[t])] = true;
+    }
 }
 
-function _objectPlansHaveVisibleShellForFrame(objectPlans, textFrameId) {
-    var key = String(textFrameId);
-    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
-        var plan = objectPlans[i];
-        if (!plan || plan.visualAction !== "PLACE_TEXT_SHELL") continue;
-        if (String(plan.primarySourceObjectId) === key) return true;
-        for (var s = 0; plan.sourceObjectIds && s < plan.sourceObjectIds.length; s++) {
-            if (String(plan.sourceObjectIds[s]) === key) return true;
-        }
+function _markObjectPlanVisualDecisionIndex(index, plan) {
+    _markObjectPlanIds(index.visualDecisionByFrameId, plan.visualSourceObjectIds);
+    _markObjectPlanIds(index.visualDecisionByFrameId, plan.styleSourceObjectIds);
+    _markObjectPlanIds(index.visualDecisionByFrameId, plan.exportSourceObjectIds);
+}
+
+function _markObjectPlanTableStyleDecisionIndex(index, plan) {
+    if (plan.visualAction !== "PLACE_TABLE_STYLE") return;
+    if (plan.primarySourceObjectId !== undefined && plan.primarySourceObjectId !== null) {
+        index.tableStyleDecisionByFrameId[String(plan.primarySourceObjectId)] = true;
     }
-    return false;
+    _markObjectPlanIds(index.tableStyleDecisionByFrameId, plan.ownedTextFrameIds);
+}
+
+function _markObjectPlanVisibleShellIndex(index, plan) {
+    if (plan.visualAction !== "PLACE_TEXT_SHELL") return;
+    if (plan.primarySourceObjectId !== undefined && plan.primarySourceObjectId !== null) {
+        index.visibleShellByFrameId[String(plan.primarySourceObjectId)] = true;
+    }
+    _markObjectPlanIds(index.visibleShellByFrameId, plan.sourceObjectIds);
+}
+
+function _markObjectPlanIds(target, ids) {
+    for (var i = 0; ids && i < ids.length; i++) {
+        target[String(ids[i])] = true;
+    }
+}
+
+function _objectPlanDecisionIndexHasTextDecision(index, textFrameId) {
+    return index && index.textDecisionByFrameId[String(textFrameId)] === true;
+}
+
+function _objectPlanDecisionIndexHasVisualDecision(index, textFrameId) {
+    return index && index.visualDecisionByFrameId[String(textFrameId)] === true;
+}
+
+function _objectPlanDecisionIndexHasTableStyleDecision(index, textFrameId) {
+    return index && index.tableStyleDecisionByFrameId[String(textFrameId)] === true;
+}
+
+function _objectPlanDecisionIndexHasVisibleShell(index, textFrameId) {
+    return index && index.visibleShellByFrameId[String(textFrameId)] === true;
 }
 
 function _objectPlanSourceHasVisibleTextContent(src) {
@@ -982,6 +1435,10 @@ function _objectPlanVisualAction(bundle) {
     if (bundle.layoutOnlyInlineSlot === true) return "DROP_VISUAL";
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
     if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) return "ABSORB_TEXT_STYLE";
+    if (bundle.ownershipSlot === "CONTENT_VISUAL_SLOT"
+            && (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)) {
+        return "DROP_VISUAL";
+    }
     if (bundle.policyLayer === "BACKGROUND") return "PLACE_FLOATING_PNG";
     if (bundle.passId === "pass.inline_objects"
             && (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0)) {
@@ -1309,7 +1766,8 @@ function _objectPlanMigrationStatusIsImportReady(status) {
             || status === "READY_CLOSED_PLACED_CONTENT_FRAME"
             || status === "READY_PAGE_TEXTLESS_GRAPHIC_GROUP"
             || status === "READY_TEXTLESS_CONNECTOR_FRAGMENT"
-            || status === "READY_LAYOUT_ONLY_INLINE_SLOT";
+            || status === "READY_LAYOUT_ONLY_INLINE_SLOT"
+            || status === "READY_TEXT_CLEANUP";
 }
 
 function _objectPlanMigrationBlockerResult(code, bundle, extraDetail) {

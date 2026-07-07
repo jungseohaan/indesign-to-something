@@ -114,7 +114,7 @@ function _validateSourceOwnershipStageGate(
                 && coverageSummary.visibleMaterialUnresolvedCount > 0) {
             issues.push({
                 code: "visible_source_material_unresolved",
-                severity: "WARNING",
+                severity: "ERROR",
                 visibleMaterialUnresolvedCount: coverageSummary.visibleMaterialUnresolvedCount
             });
         }
@@ -629,6 +629,15 @@ function _sourceSetsEqualForExtractionValidation(a, b) {
     return _sourceSetContainsAll(a, b) && _sourceSetContainsAll(b, a);
 }
 
+function _sourceSetRootClosedForExtractionValidation(sourceIds, expectedIds, rootId) {
+    if (_sourceSetsEqualForExtractionValidation(sourceIds || [], expectedIds || [])) return true;
+    if (rootId === null || rootId === undefined) return false;
+    return sourceIds
+            && sourceIds.length === 1
+            && String(sourceIds[0]) === String(rootId)
+            && _sourceSetContainsAll(expectedIds || [], [rootId]);
+}
+
 function _isCompositeGraphicSourceSetCandidate(candidate) {
     if (!candidate) return false;
     if (candidate.passId !== "pass.complex_graphic_frames") return false;
@@ -669,9 +678,10 @@ function _validateCompositeSourceSetCandidateContracts(plan, issues) {
                 sourceObjectIds: candidate.sourceObjectIds || []
             });
         }
-        if (!_sourceSetsEqualForExtractionValidation(
+        if (!_sourceSetRootClosedForExtractionValidation(
                 candidate.exportSourceObjectIds || [],
-                candidate.sourceObjectIds || [])) {
+                candidate.sourceObjectIds || [],
+                rootId)) {
             issues.push({
                 code: "composite_source_set_export_sources_not_closed",
                 severity: "ERROR",
@@ -682,9 +692,10 @@ function _validateCompositeSourceSetCandidateContracts(plan, issues) {
                 exportSourceObjectIds: candidate.exportSourceObjectIds || []
             });
         }
-        if (!_sourceSetsEqualForExtractionValidation(
+        if (!_sourceSetRootClosedForExtractionValidation(
                 candidate.visualSourceObjectIds || [],
-                candidate.sourceObjectIds || [])) {
+                candidate.sourceObjectIds || [],
+                rootId)) {
             issues.push({
                 code: "composite_source_set_visual_sources_not_closed",
                 severity: "ERROR",
@@ -726,9 +737,10 @@ function _validateCompositeSourceSetResultRow(candidate, row, issues) {
             sourceObjectIds: candidate.sourceObjectIds || []
         });
     }
-    if (!_sourceSetsEqualForExtractionValidation(
+    if (!_sourceSetRootClosedForExtractionValidation(
             row.sourceObjectIds || [],
-            candidate.sourceObjectIds || [])) {
+            candidate.sourceObjectIds || [],
+            rootId)) {
         issues.push({
             code: "composite_source_set_result_sources_not_closed",
             severity: "ERROR",
@@ -739,9 +751,10 @@ function _validateCompositeSourceSetResultRow(candidate, row, issues) {
             resultSourceObjectIds: row.sourceObjectIds || []
         });
     }
-    if (!_sourceSetsEqualForExtractionValidation(
+    if (!_sourceSetRootClosedForExtractionValidation(
             row.executionSourceObjectIds || [],
-            candidate.sourceObjectIds || [])) {
+            candidate.sourceObjectIds || [],
+            rootId)) {
         issues.push({
             code: "composite_source_set_result_execution_sources_not_closed",
             severity: "ERROR",
@@ -971,7 +984,11 @@ function _validateExtractionResultRows(rows, passById, candidateById, issues) {
                         reason: row.reason
                     });
                 }
-                if (!row.hiddenTextFrameIds || row.hiddenTextFrameIds.length === 0) {
+                var plannedHiddenTextFrameIds = candidate
+                        ? (candidate.hiddenTextFrameIds || candidate.editableTextFrameIds || candidate.ownedTextFrameIds || [])
+                        : [];
+                if (plannedHiddenTextFrameIds.length > 0
+                        && (!row.hiddenTextFrameIds || row.hiddenTextFrameIds.length === 0)) {
                     issues.push({
                         code: "textless_result_missing_hidden_text_frames",
                         severity: "ERROR",
@@ -1040,10 +1057,22 @@ function _validateExtractionCandidateResultCounts(candidateById, counters, issue
 }
 
 function _validateRequiredExtractionCandidates(plan, resultByCandidateId, issues) {
+    function requiresRenderedResult(candidate) {
+        if (!candidate) return false;
+        if (candidate.disabled === true) return false;
+        if (candidate.visualAction === "DROP_VISUAL") return false;
+        if (candidate.materialization === "HWPX_TEXT"
+                || candidate.materialization === "HWPX_TABLE_STYLE"
+                || candidate.materialization === "NATIVE_SOURCE_SHAPE") {
+            return false;
+        }
+        return true;
+    }
     if (plan && plan.candidates) {
         for (var ri = 0; ri < plan.candidates.length; ri++) {
             var requiredCandidate = plan.candidates[ri];
             if (!requiredCandidate || requiredCandidate.required !== true) continue;
+            if (!requiresRenderedResult(requiredCandidate)) continue;
             if (!resultByCandidateId[requiredCandidate.candidateId]) {
                 issues.push({
                     code: "required_candidate_without_result",

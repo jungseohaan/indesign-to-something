@@ -636,6 +636,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         }
         var key = String(sourceId);
         if (candidateVectorPaintById[key] !== undefined) return candidateVectorPaintById[key];
+        if (info.hasVisibleFill === true || info.hasVisibleStroke === true) {
+            candidateVectorPaintById[key] = true;
+            info.hasCandidateVectorPaint = true;
+            return true;
+        }
         var result = false;
         try {
             var item = domItem(sourceId);
@@ -850,6 +855,16 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
     options = options || {};
     var fullDiagnostics = options.fullDiagnostics === true;
     var claimsBySourceId = {};
+    var childIdsByParentId = {};
+    for (var siIndex = 0; sourceItems && siIndex < sourceItems.length; siIndex++) {
+        var sourceItem = sourceItems[siIndex];
+        if (!sourceItem || sourceItem.id === null || sourceItem.id === undefined) continue;
+        if (sourceItem.parentId !== null && sourceItem.parentId !== undefined) {
+            var parentKey = String(sourceItem.parentId);
+            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+            childIdsByParentId[parentKey].push(sourceItem.id);
+        }
+    }
     var plans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans
             ? objectPlanDiagnostics.objectPlans
             : [];
@@ -888,6 +903,20 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
         for (var i = 0; ids && i < ids.length; i++) addClaim(ids[i], kind, owner);
     }
 
+    function addVisibleClaimsWithDescendants(ids, kind, owner) {
+        var seen = {};
+        function visit(sourceId) {
+            if (sourceId === null || sourceId === undefined) return;
+            var key = String(sourceId);
+            if (seen[key]) return;
+            seen[key] = true;
+            addClaim(sourceId, kind, owner);
+            var children = childIdsByParentId[key] || [];
+            for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
+        }
+        for (var i = 0; ids && i < ids.length; i++) visit(ids[i]);
+    }
+
     for (var p = 0; p < plans.length; p++) {
         var plan = plans[p];
         if (!plan) continue;
@@ -904,8 +933,8 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
         };
         addClaims(plan.sourceObjectIds, "PROVENANCE", owner);
         if (_sourceCoveragePlanHasVisibleVisual(plan)) {
-            addClaims(plan.visualSourceObjectIds, "VISIBLE_VISUAL", owner);
-            addClaims(plan.exportSourceObjectIds, "VISIBLE_EXPORT", owner);
+            addVisibleClaimsWithDescendants(plan.visualSourceObjectIds, "VISIBLE_VISUAL", owner);
+            addVisibleClaimsWithDescendants(plan.exportSourceObjectIds, "VISIBLE_EXPORT", owner);
         }
         if (plan.visualAction === "PLACE_TABLE_STYLE") {
             addClaims(plan.styleSourceObjectIds, "STYLE_OWNER", owner);
@@ -1057,6 +1086,7 @@ function _sourceCoverageHasPotentialVisibleMaterial(src) {
     if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
     if (src.hasPlacedVisual === true) return true;
     if (src.hasCandidateVectorPaint === true) return true;
+    if (kind === "Group" && src.hasChildren === true) return false;
     if (src.hasVisibleFill === true || src.hasVisibleStroke === true) return true;
     return false;
 }
@@ -1206,10 +1236,14 @@ function _buildSourceOwnershipModelDiagnostics(sourceItems, candidates, objectPl
         renderUnits: {
             schemaVersion: 1,
             policy: "POLICY-source-ownership",
-            mode: "render-unit-diagnostics",
+            mode: fullDiagnostics
+                    ? "render-unit-diagnostics"
+                    : "render-unit-compact",
             summary: {
                 renderUnitCount: renderUnitRows.length
             },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
             renderUnits: renderUnitRows
         },
         summary: summary
@@ -1381,6 +1415,66 @@ function _sourceModelRenderUnitFromSlot(slot, plan, owner) {
         cropSourceBounds: plan.cropSourceBounds || null,
         materialization: slot.materialization,
         visualAction: slot.visualAction
+    };
+}
+
+function _slimRenderUnitsForWrite(renderUnitsDoc, previewLimit) {
+    var renderUnits = [];
+    var summary = {};
+    if (renderUnitsDoc && renderUnitsDoc.renderUnits) {
+        renderUnits = renderUnitsDoc.renderUnits || [];
+        summary = renderUnitsDoc.summary || {};
+    } else if (renderUnitsDoc && renderUnitsDoc.length !== undefined) {
+        renderUnits = renderUnitsDoc || [];
+    }
+    previewLimit = previewLimit === undefined || previewLimit === null ? 50 : previewLimit;
+    var preview = [];
+    for (var i = 0; i < renderUnits.length && i < previewLimit; i++) {
+        preview.push(_renderUnitPreviewRow(renderUnits[i]));
+    }
+    return {
+        schemaVersion: renderUnitsDoc && renderUnitsDoc.schemaVersion
+                ? renderUnitsDoc.schemaVersion
+                : 1,
+        policy: "POLICY-source-ownership",
+        mode: "render-unit-summary",
+        summary: {
+            renderUnitCount: summary.renderUnitCount !== undefined
+                    ? summary.renderUnitCount
+                    : renderUnits.length,
+            previewCount: preview.length
+        },
+        fullDiagnosticsSkipped: true,
+        renderUnitPreview: preview
+    };
+}
+
+function _renderUnitPreviewRow(unit) {
+    if (!unit) return unit;
+    return {
+        renderUnitId: unit.renderUnitId || null,
+        objectPlanId: unit.objectPlanId || null,
+        candidateId: unit.candidateId || null,
+        pageIndex: unit.pageIndex,
+        ownershipSlot: unit.ownershipSlot || null,
+        owner: unit.owner || null,
+        placement: unit.placement || null,
+        coordinateSpace: unit.coordinateSpace || null,
+        visualLayer: unit.visualLayer || null,
+        zOrder: unit.zOrder !== undefined ? unit.zOrder : null,
+        bounds: unit.bounds || null,
+        sourceObjectCount: unit.sourceObjectIds ? unit.sourceObjectIds.length : 0,
+        exportSourceObjectCount: unit.exportSourceObjectIds
+                ? unit.exportSourceObjectIds.length
+                : 0,
+        hiddenVisualSourceObjectCount: unit.hiddenVisualSourceObjectIds
+                ? unit.hiddenVisualSourceObjectIds.length
+                : 0,
+        hiddenTextFrameCount: unit.hiddenTextFrameIds
+                ? unit.hiddenTextFrameIds.length
+                : 0,
+        materialization: unit.materialization || null,
+        visualAction: unit.visualAction || null
     };
 }
 
