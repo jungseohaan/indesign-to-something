@@ -4346,6 +4346,350 @@ function _backfillVisibleCandidateVisualSources(candidates, sourceItems) {
     return candidates;
 }
 
+function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidateSeen, options) {
+    options = options || {};
+    var fullDiagnostics = options.fullDiagnostics === true;
+    if (!candidates || !sourceItems || sourceItems.length === 0) {
+        return { appendedCount: 0, appended: [], skipCounts: {}, samples: [] };
+    }
+    var sourceInfoById = {};
+    var childIdsByParentId = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        sourceInfoById[String(src.id)] = src;
+        if (src.parentId !== null && src.parentId !== undefined) {
+            var parentKey = String(src.parentId);
+            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+            childIdsByParentId[parentKey].push(src.id);
+        }
+    }
+    var descendantCache = {};
+    var visibleMaterialCache = {};
+    var editableTextIdsCache = {};
+
+    function source(id) {
+        if (id === null || id === undefined) return null;
+        return sourceInfoById[String(id)] || null;
+    }
+    function isTextLike(src) {
+        var kind = String(src && src.kind || "");
+        return kind === "TextFrame" || kind === "Story"
+                || kind === "Character" || kind === "InsertionPoint" || kind === "Cell";
+    }
+    function isInlineFlow(src) {
+        if (!src) return false;
+        var anchor = String(src.storyAnchorPlacement || "").toUpperCase();
+        var anchored = String(src.anchoredPosition || "").toUpperCase();
+        return anchor === "INLINE" || anchored === "INLINE_POSITION"
+                || String(src.parentKind || "") === "Character";
+    }
+    function canBeInlineVisualContainer(src, child) {
+        if (!src || isTextLike(src)) return false;
+        var kind = String(src.kind || "");
+        if (kind !== "Group" && kind !== "Rectangle"
+                && kind !== "Oval" && kind !== "Polygon") {
+            return false;
+        }
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (child && src.pageIndex !== null && src.pageIndex !== undefined
+                && child.pageIndex !== null && child.pageIndex !== undefined
+                && src.pageIndex >= 0 && child.pageIndex >= 0
+                && String(src.pageIndex) !== String(child.pageIndex)) {
+            return false;
+        }
+        if (isInlineFlow(src)) return true;
+        return child && isInlineFlow(child)
+                && src.storyId !== null && src.storyId !== undefined
+                && child.storyId !== null && child.storyId !== undefined
+                && String(src.storyId) === String(child.storyId);
+    }
+    function descendants(id) {
+        var key = String(id);
+        if (descendantCache[key]) return descendantCache[key].slice(0);
+        var out = [];
+        var seen = {};
+        function visit(current) {
+            if (current === null || current === undefined || seen[String(current)]) return;
+            seen[String(current)] = true;
+            out.push(current);
+            var children = childIdsByParentId[String(current)] || [];
+            for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
+        }
+        visit(id);
+        out = _sortedNumericIds(out);
+        descendantCache[key] = out.slice(0);
+        return out;
+    }
+    function hasDirectVisibleMaterial(src) {
+        if (!src || isTextLike(src)) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        var kind = String(src.kind || "");
+        return kind === "Image" || kind === "PDF" || kind === "EPS"
+                || src.hasPlacedVisual === true
+                || src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true;
+    }
+    function subtreeHasVisibleMaterial(id) {
+        var key = String(id);
+        if (visibleMaterialCache.hasOwnProperty(key)) return visibleMaterialCache[key];
+        var ids = descendants(id);
+        for (var i = 0; i < ids.length; i++) {
+            if (hasDirectVisibleMaterial(source(ids[i]))) {
+                visibleMaterialCache[key] = true;
+                return true;
+            }
+        }
+        visibleMaterialCache[key] = false;
+        return false;
+    }
+    function editableTextIds(id) {
+        var key = String(id);
+        if (editableTextIdsCache.hasOwnProperty(key)) return editableTextIdsCache[key].slice(0);
+        var ids = descendants(id);
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < ids.length; i++) {
+            var src = source(ids[i]);
+            if (src && String(src.kind || "") === "TextFrame"
+                    && src.textFrameClass === "editable"
+                    && src.hasText === true) {
+                _pushUniqueId(out, seen, ids[i]);
+            }
+        }
+        out = _sortedNumericIds(out);
+        editableTextIdsCache[key] = out.slice(0);
+        return out;
+    }
+    function visibleIds(ids) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < ids.length; i++) {
+            if (hasDirectVisibleMaterial(source(ids[i]))) {
+                _pushUniqueId(out, seen, ids[i]);
+            }
+        }
+        return _sortedNumericIds(out);
+    }
+    function unionSourceBounds(ids) {
+        var out = null;
+        for (var i = 0; i < ids.length; i++) {
+            var src = source(ids[i]);
+            if (!src || isTextLike(src) || !src.bounds || src.bounds.length < 4) continue;
+            if (!out) {
+                out = src.bounds.slice(0);
+            } else {
+                out = [
+                    Math.min(out[0], src.bounds[0]),
+                    Math.min(out[1], src.bounds[1]),
+                    Math.max(out[2], src.bounds[2]),
+                    Math.max(out[3], src.bounds[3])
+                ];
+            }
+        }
+        return out;
+    }
+    function topInlineVisualRoot(src) {
+        if (!src || !isInlineFlow(src) || isTextLike(src)) return null;
+        var best = src;
+        var guard = 0;
+        while (best && best.parentId !== null && best.parentId !== undefined && guard < 200) {
+            guard++;
+            var parent = source(best.parentId);
+            if (!canBeInlineVisualContainer(parent, best)) break;
+            best = parent;
+        }
+        return best;
+    }
+    function sourceAlreadyCovered(sourceIds) {
+        for (var ci = 0; ci < candidates.length; ci++) {
+            var candidate = candidates[ci];
+            if (!candidate) continue;
+            var owned = [];
+            owned = owned.concat(candidate.sourceObjectIds || []);
+            owned = owned.concat(candidate.visualSourceObjectIds || []);
+            owned = owned.concat(candidate.exportSourceObjectIds || []);
+            if (_sourceSetContainsAll(owned, sourceIds)) return true;
+        }
+        return false;
+    }
+
+    var diagnostics = {
+        examinedInlineSourceCount: 0,
+        inlineVisibleMaterialSourceCount: 0,
+        rootCount: 0,
+        appendedCount: 0,
+        skipCounts: {},
+        samples: []
+    };
+    function noteSkip(code, item, root, extra) {
+        if (!diagnostics.skipCounts[code]) diagnostics.skipCounts[code] = 0;
+        diagnostics.skipCounts[code]++;
+        if (!fullDiagnostics) return;
+        if (diagnostics.samples.length >= 80) return;
+        diagnostics.samples.push({
+            code: code,
+            sourceObjectId: item && item.id,
+            kind: item && item.kind,
+            pageIndex: item && item.pageIndex,
+            parentId: item && item.parentId,
+            parentKind: item && item.parentKind,
+            storyId: item && item.storyId,
+            rootSourceObjectId: root && root.id,
+            rootKind: root && root.kind,
+            rootParentId: root && root.parentId,
+            rootParentKind: root && root.parentKind,
+            extra: extra || null
+        });
+    }
+
+    var roots = {};
+    var appended = [];
+    for (var si = 0; si < sourceItems.length; si++) {
+        var item = sourceItems[si];
+        if (!item || !isInlineFlow(item) || isTextLike(item)) continue;
+        diagnostics.examinedInlineSourceCount++;
+        if (item.visible === false || item.hiddenLayer === true || item.nonprinting === true) {
+            noteSkip("source_not_visible", item, null, {
+                visible: item.visible,
+                hiddenLayer: item.hiddenLayer,
+                nonprinting: item.nonprinting
+            });
+            continue;
+        }
+        var root = topInlineVisualRoot(item);
+        if (!root || isTextLike(root)) {
+            noteSkip("no_inline_visual_root", item, root, null);
+            continue;
+        }
+        var rootKey = String(root.id);
+        if (roots[rootKey]) {
+            noteSkip("duplicate_root", item, root, null);
+            continue;
+        }
+        if (!subtreeHasVisibleMaterial(root.id)) {
+            noteSkip("no_visible_material", item, root, null);
+            continue;
+        }
+        diagnostics.inlineVisibleMaterialSourceCount++;
+        roots[rootKey] = true;
+        diagnostics.rootCount++;
+        var hiddenTextIds = editableTextIds(root.id);
+        var subtreeIds = descendants(root.id);
+        var exportIds = visibleIds(subtreeIds);
+        if (!exportIds || exportIds.length === 0) {
+            noteSkip("root_without_export_ids", item, root, { subtreeIds: subtreeIds });
+            continue;
+        }
+        if (fullDiagnostics && sourceAlreadyCovered(exportIds)) {
+            noteSkip("source_previously_claimed_but_still_planned", item, root, { exportIds: exportIds });
+        }
+        var pageIndex = Number(root.pageIndex);
+        if (isNaN(pageIndex) || pageIndex < 0) pageIndex = Number(item.pageIndex);
+        var candidateId = _candidateCompositeId(
+                "pass.inline_objects",
+                pageIndex,
+                subtreeIds,
+                "inline_flow_visual_root_" + rootKey);
+        if (candidateSeen && candidateSeen[candidateId]) {
+            noteSkip("candidate_id_seen", item, root, { candidateId: candidateId });
+            continue;
+        }
+        if (candidateSeen) candidateSeen[candidateId] = true;
+        appended.push({
+            candidateId: candidateId,
+            passId: "pass.inline_objects",
+            sourceObjectIds: subtreeIds,
+            executionSourceObjectIds: exportIds.slice(0),
+            primarySourceObjectId: root.id,
+            pageIndex: pageIndex,
+            kind: root.kind || "InlineFlowVisualRoot",
+            unit: "INLINE_OBJECT",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "INLINE_CANDIDATE",
+            bounds: unionSourceBounds(subtreeIds) || root.bounds || null,
+            parentId: root.parentId !== undefined ? root.parentId : null,
+            parentKind: root.parentKind || null,
+            composite: subtreeIds.length > 1,
+            compositeRole: "inline_flow_visual_root",
+            slotRole: "inline_flow_visual_root",
+            exportSourceObjectIds: exportIds.slice(0),
+            exportTargetObjectId: root.id,
+            hiddenVisualSourceObjectIds: [],
+            visualSourceObjectIds: exportIds.slice(0),
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            editableTextFrameIds: hiddenTextIds.slice(0),
+            hiddenTextFrameIds: hiddenTextIds.slice(0),
+            requiresTextHidden: hiddenTextIds.length > 0,
+            textOwner: hiddenTextIds.length > 0 ? "hwpx_tf" : "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            ownershipSlot: "CONTENT_VISUAL_SLOT",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_INLINE_PNG",
+            visualLayer: "CONTENT_VISUAL",
+            placement: "INLINE",
+            coordinateSpace: "STORY_FLOW",
+            inlineAnchorSourceObjectId: root.id,
+            inlineSourceTreeClosed: true,
+            zOrder: root.zOrder !== undefined ? root.zOrder : 0,
+            required: false,
+            reason: "inline_flow_visual_root"
+        });
+    }
+    for (var ai = 0; ai < appended.length; ai++) candidates.push(appended[ai]);
+    diagnostics.appendedCount = appended.length;
+    return {
+        appendedCount: appended.length,
+        appended: fullDiagnostics ? appended : [],
+        skipCounts: diagnostics.skipCounts,
+        samples: fullDiagnostics ? diagnostics.samples : [],
+        diagnostics: diagnostics
+    };
+}
+
+function _inlineFlowVisualRootCandidateSnapshot(candidates, label) {
+    var out = {
+        label: label || "",
+        count: 0,
+        candidates: []
+    };
+    for (var i = 0; candidates && i < candidates.length; i++) {
+        var c = candidates[i];
+        if (!c) continue;
+        if (c.compositeRole !== "inline_flow_visual_root"
+                && c.slotRole !== "inline_flow_visual_root"
+                && c.reason !== "inline_flow_visual_root") {
+            continue;
+        }
+        out.count++;
+        if (out.candidates.length >= 80) continue;
+        out.candidates.push({
+            candidateId: c.candidateId || null,
+            passId: c.passId || null,
+            pageIndex: c.pageIndex,
+            sourceObjectIds: c.sourceObjectIds || [],
+            visualSourceObjectIds: c.visualSourceObjectIds || [],
+            exportSourceObjectIds: c.exportSourceObjectIds || [],
+            hiddenVisualSourceObjectIds: c.hiddenVisualSourceObjectIds || [],
+            editableTextFrameIds: c.editableTextFrameIds || [],
+            hiddenTextFrameIds: c.hiddenTextFrameIds || [],
+            ownedTextFrameIds: c.ownedTextFrameIds || [],
+            textAction: c.textAction || null,
+            visualAction: c.visualAction || null,
+            ownershipSlot: c.ownershipSlot || null,
+            placement: c.placement || null,
+            coordinateSpace: c.coordinateSpace || null,
+            suppressedByDirectChildShellSlots: c.suppressedByDirectChildShellSlots === true,
+            suppressedByDirectChildShellSlotsReason: c.suppressedByDirectChildShellSlotsReason || null
+        });
+    }
+    return out;
+}
+
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
     var candidates = [];
@@ -4372,10 +4716,31 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d07_plan_declaredInlineShells");
     _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d08_plan_textOwningShellGroups");
+    var inlineFlowVisualRootDiagnostics =
+            _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidateSeen, {
+                fullDiagnostics: ctx.writePlannerDiagnostics === true
+            });
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/inline-flow-visual-root-diagnostics.json",
+                    inlineFlowVisualRootDiagnostics || {});
+        } catch (eInlineFlowRootDiagnostics) {}
+    }
+    _marker(ctx.outputDir, "03d08i_plan_inlineFlowVisualRoots");
 
     _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d09_plan_masterComposite");
     candidates = _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems);
+    try {
+        writeJson(ctx.outputDir + "/legacy-normalization-filters.json",
+                _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS || {});
+    } catch (eLegacyNormalizationFiltersWrite) {}
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/inline-flow-root-after-normalize.json",
+                    _inlineFlowVisualRootCandidateSnapshot(candidates, "after_normalize"));
+        } catch (eInlineFlowRootAfterNormalizeWrite) {}
+    }
     _marker(ctx.outputDir, "03d10_plan_normalizeSlots");
     _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
     _marker(ctx.outputDir, "03d10a_plan_restoreTextFrameStyleShellCandidates");
@@ -4427,10 +4792,22 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
     candidates = _normalizePageCoordinateCandidateBounds(candidates, sourceIndex);
     _marker(ctx.outputDir, "03d13b_plan_normalizePageCoordinateBounds");
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/inline-flow-root-before-planner-bundles.json",
+                    _inlineFlowVisualRootCandidateSnapshot(candidates, "before_planner_bundles"));
+        } catch (eInlineFlowRootBeforePlannerBundlesWrite) {}
+    }
     var plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, candidates, {
         sourceClusterDiagnostics: sourceClusterDiagnostics,
         sourceClusterIndex: sourceClusterIndex
     });
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/planner-bundles-diagnostics.json",
+                    plannerBundleDiagnostics || {});
+        } catch (ePlannerBundleDiagnosticsWrite) {}
+    }
     _marker(ctx.outputDir, "03d14_plan_plannerBundles");
     var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
     _marker(ctx.outputDir, "03d15_plan_objectPlans");
@@ -4441,6 +4818,12 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     var sourceSlotCanonicalizationDiagnostics = _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(
             executionCandidates, sourceItems);
     executionCandidates = sourceSlotCanonicalizationDiagnostics.candidates;
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/source-slot-canonicalization-diagnostics.json",
+                    sourceSlotCanonicalizationDiagnostics.diagnostics || {});
+        } catch (eSourceSlotCanonicalizationDiagnostics) {}
+    }
     _marker(ctx.outputDir, "03d16b_plan_canonicalizeSourceSlots");
     var multiTextParentSuppressionDiagnostics = _suppressChildExportsCoveredByTextlessGroupCandidates(
             executionCandidates, sourceItems);

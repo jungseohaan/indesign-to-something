@@ -1318,8 +1318,7 @@ function _objectPlanPolicyVisualSourceIds(visualSourceIds, ownedTextFrameIds, te
     var visualIds = _sortedNumericIds(visualSourceIds || []);
     var ownedIds = _sortedNumericIds(ownedTextFrameIds || []);
     if (visualIds.length === 0 || ownedIds.length === 0) return visualIds;
-    if (textAction !== "OWNED_BY_PNG") return visualIds;
-    if (visualAction === "PLACE_TEXT_SHELL") return visualIds;
+    if (textAction === "OWNED_BY_PNG") return visualIds;
     var owned = _sourceIdSet(ownedIds);
     var out = [];
     for (var i = 0; i < visualIds.length; i++) {

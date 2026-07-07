@@ -208,6 +208,8 @@ public class StoryLoader {
     static void buildParagraphContent(ResolvedBuildContext ctx, IDMLParagraph ip,
             ResolvedParagraph resolvedParagraph, List<ResolvedRun> resolvedRuns,
             String storyId, int paraIndex, StoryConverter.StyleContext sc, ASTParagraph para) {
+        boolean cellPath = storyId == null && resolvedParagraph == null && resolvedRuns == null;
+        String perfPrefix = cellPath ? "phase3.storyLoader.cell" : "phase3.storyLoader.story";
         boolean hasIdmlInlineAnchors = false;
             // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
@@ -369,6 +371,7 @@ public class StoryLoader {
 
                     if (text.contains("\uFFFC")) {
                         hasIdmlInlineAnchors = true;
+                        long inlineBranchStart = System.nanoTime();
                         String[] parts = text.split("\uFFFC", -1);
                         // inlineAnchors 순서로 인라인 ID 목록 생성 (FFFC 출현 순서 보장)
                         List<String> inlineIds = new ArrayList<>();
@@ -416,9 +419,15 @@ public class StoryLoader {
                                 if (!partSplit) {
                                     ResolvedRun matchedRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
                                     if (matchedRR != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
+                                    long createStart = System.nanoTime();
                                     ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, partText, matchedRR != null ? matchedRR : defaultRR, sc);
+                                    ConversionTiming.addCounter(perfPrefix + ".createRunNanos",
+                                            System.nanoTime() - createStart);
                                     if (!RunBuilder.splitBulletRun(ctx, tr, para)) {
+                                        long splitLatinStart = System.nanoTime();
                                         RunBuilder.splitLatinVarsInMixedText(ctx, tr, para);
+                                        ConversionTiming.addCounter(perfPrefix + ".splitLatinVarsNanos",
+                                                System.nanoTime() - splitLatinStart);
                                     }
                                 }
                             }
@@ -590,6 +599,8 @@ public class StoryLoader {
                                 anchorIdx++;
                             }
                         }
+                        ConversionTiming.addCounter(perfPrefix + ".inlineAnchorBranchNanos",
+                                System.nanoTime() - inlineBranchStart);
                     } else {
                         if (firstTextRunAfterLeadingAnchor) {
                             text = StoryConverter.stripLeadingAnchorLayoutSpaces(text);
@@ -605,13 +616,19 @@ public class StoryLoader {
                         if (!splitByResolved) {
                             ResolvedRun matchedRR2 = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, text);
                             if (matchedRR2 != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
+                            long createStart = System.nanoTime();
                             ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, text, matchedRR2 != null ? matchedRR2 : defaultRR, sc);
+                            ConversionTiming.addCounter(perfPrefix + ".createRunNanos",
+                                    System.nanoTime() - createStart);
                             // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
                             if (!RunBuilder.splitBulletRun(ctx, tr, para)) {
                                 if (EHFontGlyphMap.containsEHFractionPattern(text)) {
                                     MathProcessor.splitFractionPatternInText(ctx, text, tr, para);
                                 } else {
+                                    long splitLatinStart = System.nanoTime();
                                     RunBuilder.splitLatinVarsInMixedText(ctx, tr, para);
+                                    ConversionTiming.addCounter(perfPrefix + ".splitLatinVarsNanos",
+                                            System.nanoTime() - splitLatinStart);
                                 }
                             }
                         }
@@ -619,6 +636,8 @@ public class StoryLoader {
                 }
             }
             ConversionTiming.addCounter("phase3.storyLoader.runLoopNanos",
+                    System.nanoTime() - runLoopStart);
+            ConversionTiming.addCounter(perfPrefix + ".runLoopNanos",
                     System.nanoTime() - runLoopStart);
             // 단락 끝 잔여 수식 그룹 flush
             MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
@@ -704,6 +723,7 @@ public class StoryLoader {
             sc.hasTabStops = para.hasTabStops();
             buildParagraphContent(ctx, ip, null, null, cellStoryId, paraIndex, sc, para);
             result.add(para);
+            ConversionTiming.addCounter("phase3.storyLoader.cell.paragraphs", 1);
             paraIndex++;
         }
         applyResolvedCellInlineGraphicRescueAnchors(ctx, resolvedCell, result);

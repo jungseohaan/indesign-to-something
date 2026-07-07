@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
@@ -82,6 +83,18 @@ public final class TableBuilder {
         int tableOnlyPlansPlaced;       // ObjectPlan(text_frame:table_only) → ASTTable
         int duplicateInlineTablesRemoved;
         int total;
+        int textFramesScanned;
+        int textFramesSkippedBeforeStoryLoad;
+        int storyLoadAttempts;
+        int storyWithTables;
+        int storyTablesAlreadyProcessed;
+        long tableOnlyPlansNanos;
+        long storyLoadNanos;
+        long storyTableSetupNanos;
+        long buildAstTableNanos;
+        long splitTableNanos;
+        long suppressVisualNanos;
+        long extractCellInlineNanos;
     }
 
     private static final class TablePlacement {
@@ -104,18 +117,35 @@ public final class TableBuilder {
         Set<String> processedTableIds = new HashSet<>();
         Set<String> pageLevelTableSourceIds = new HashSet<>();
 
+        long tableOnlyStart = System.nanoTime();
         placeTableOnlyPlans(ctx, sections, processedTableIds, report);
+        report.tableOnlyPlansNanos += System.nanoTime() - tableOnlyStart;
 
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            report.textFramesScanned++;
             String storyId = tf.storyId();
             if (storyId == null) continue;
-            IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
-            if (idmlStory == null || !idmlStory.hasTables()) continue;
-            if (allTablesConsumedByAnchoredPlan(ctx, idmlStory)) continue;
-
-            if (tf.sourceHidden()) continue;
+            if (tf.sourceHidden()) {
+                report.textFramesSkippedBeforeStoryLoad++;
+                continue;
+            }
             boolean editableTextFrame = ctx.resolvedData.isEditableTextFrame(tf.id());
             boolean tableAnchorOnlyFrame = TableFrameOwnershipPolicy.isTableAnchorOnlyFrame(tf);
+            if (tf.isInline() && !tableAnchorOnlyFrame) {
+                report.textFramesSkippedBeforeStoryLoad++;
+                continue;
+            }
+            if (!tf.isInline() && !editableTextFrame && !tableAnchorOnlyFrame) {
+                report.textFramesSkippedBeforeStoryLoad++;
+                continue;
+            }
+            report.storyLoadAttempts++;
+            long storyLoadStart = System.nanoTime();
+            IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
+            report.storyLoadNanos += System.nanoTime() - storyLoadStart;
+            if (idmlStory == null || !idmlStory.hasTables()) continue;
+            report.storyWithTables++;
+            if (allTablesConsumedByAnchoredPlan(ctx, idmlStory)) continue;
             boolean detachedInlineTableFrame =
                     TableFrameOwnershipPolicy.shouldPlaceInlineTableAsPageLevel(ctx, tf, idmlStory);
             if (detachedInlineTableFrame) report.detachedInlinePageLevel++;
@@ -149,6 +179,11 @@ public final class TableBuilder {
 
             // 중첩 테이블 부모 탐색 (selfId 접두사 매칭)
             List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> allTables = idmlStory.tables();
+            if (allStoryTablesProcessedOrAnchored(ctx, allTables, processedTableIds)) {
+                report.storyTablesAlreadyProcessed++;
+                continue;
+            }
+            long tableSetupStart = System.nanoTime();
             Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> tableById = new HashMap<>();
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t : allTables) {
                 tableById.put(t.selfId(), t);
@@ -167,6 +202,7 @@ public final class TableBuilder {
                     }
                 }
             }
+            report.storyTableSetupNanos += System.nanoTime() - tableSetupStart;
 
             long tableYOffset = 0;
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : allTables) {
@@ -269,7 +305,9 @@ public final class TableBuilder {
                 }
 
                 // 분기 3 (기본): ASTTable로 변환
+                long buildStart = System.nanoTime();
                 ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
+                report.buildAstTableNanos += System.nanoTime() - buildStart;
                 if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
                     astTable.flowWithText(true);
                 }
@@ -279,13 +317,17 @@ public final class TableBuilder {
                 }
                 applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
 
+                long splitStart = System.nanoTime();
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
+                report.splitTableNanos += System.nanoTime() - splitStart;
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
+                long suppressStart = System.nanoTime();
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
+                report.suppressVisualNanos += System.nanoTime() - suppressStart;
 
                 // 분기 3a: cell-level 모드 — 트리거 셀의 인라인 객체를 floating으로 추출
                 int extractedInThisTable = 0;
@@ -293,8 +335,10 @@ public final class TableBuilder {
                 if (policy.preferCellLevel) {
                     for (TablePlacement placement : tablePlacements) {
                         if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
+                        long extractStart = System.nanoTime();
                         int[] result = extractInlinesFromCells(
                                 placement.table, sections.get(placement.pageIdx), policy, ctx);
+                        report.extractCellInlineNanos += System.nanoTime() - extractStart;
                         extractedInThisTable += result[0];
                         triggerCells += result[1];
                     }
@@ -313,6 +357,7 @@ public final class TableBuilder {
 
         report.duplicateInlineTablesRemoved =
                 removeInlineTablesBySourceId(sections, pageLevelTableSourceIds);
+        recordTiming(report);
         printReport(report);
     }
 
@@ -359,7 +404,9 @@ public final class TableBuilder {
                     thisY = CoordinateConverter.pointsToHwpunits(resolvedTableBounds[0] * scale);
                 }
 
+                long buildStart = System.nanoTime();
                 ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
+                report.buildAstTableNanos += System.nanoTime() - buildStart;
                 if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
                     astTable.flowWithText(true);
                 }
@@ -369,13 +416,17 @@ public final class TableBuilder {
                 }
                 applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
 
+                long splitStart = System.nanoTime();
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
+                report.splitTableNanos += System.nanoTime() - splitStart;
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
+                long suppressStart = System.nanoTime();
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
+                report.suppressVisualNanos += System.nanoTime() - suppressStart;
                 report.asTableCleanCount++;
                 report.tableOnlyPlansPlaced++;
                 report.total++;
@@ -476,12 +527,48 @@ public final class TableBuilder {
         return ctx.toSectionIndex.applyAsInt(placementPageIndex);
     }
 
+    private static boolean allStoryTablesProcessedOrAnchored(
+            ResolvedBuildContext ctx,
+            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> tables,
+            Set<String> processedTableIds) {
+        if (tables == null || tables.isEmpty()) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table : tables) {
+            if (table == null || table.selfId() == null) return false;
+            if (ctx != null && ctx.isAnchoredTableSource(table.selfId())) continue;
+            if (processedTableIds == null || !processedTableIds.contains(table.selfId())) return false;
+        }
+        return true;
+    }
+
     private static boolean allTablesConsumedByAnchoredPlan(ResolvedBuildContext ctx, IDMLStory idmlStory) {
         if (ctx == null || idmlStory == null || idmlStory.tables() == null || idmlStory.tables().isEmpty()) return false;
         for (IDMLTable table : idmlStory.tables()) {
             if (table == null || !ctx.isAnchoredTableSource(table.selfId())) return false;
         }
         return true;
+    }
+
+    private static void recordTiming(Phase4Report report) {
+        if (report == null) return;
+        String prefix = "stage2.textBuilder.tableBuilder.";
+        ConversionTiming.metric(prefix + "textFramesScanned", report.textFramesScanned);
+        ConversionTiming.metric(prefix + "textFramesSkippedBeforeStoryLoad", report.textFramesSkippedBeforeStoryLoad);
+        ConversionTiming.metric(prefix + "storyLoadAttempts", report.storyLoadAttempts);
+        ConversionTiming.metric(prefix + "storyWithTables", report.storyWithTables);
+        ConversionTiming.metric(prefix + "storyTablesAlreadyProcessed", report.storyTablesAlreadyProcessed);
+        ConversionTiming.metric(prefix + "tablesPlaced", report.total);
+        ConversionTiming.metric(prefix + "tableOnlyPlansPlaced", report.tableOnlyPlansPlaced);
+        ConversionTiming.metric(prefix + "tableOnlyPlansMs", millis(report.tableOnlyPlansNanos));
+        ConversionTiming.metric(prefix + "storyLoadMs", millis(report.storyLoadNanos));
+        ConversionTiming.metric(prefix + "storyTableSetupMs", millis(report.storyTableSetupNanos));
+        ConversionTiming.metric(prefix + "buildAstTableMs", millis(report.buildAstTableNanos));
+        ConversionTiming.metric(prefix + "splitTableMs", millis(report.splitTableNanos));
+        ConversionTiming.metric(prefix + "suppressVisualMs", millis(report.suppressVisualNanos));
+        ConversionTiming.metric(prefix + "extractCellInlineMs", millis(report.extractCellInlineNanos));
+    }
+
+    private static double millis(long nanos) {
+        return Math.round(nanos / 10000.0) / 100.0;
     }
 
     public static ASTTable buildPreparedAstTable(

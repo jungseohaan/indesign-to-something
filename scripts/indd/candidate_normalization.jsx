@@ -626,9 +626,11 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         var beforeRequiresHidden = candidate.requiresTextHidden === true;
 
         candidate.sourceObjectIds = ownershipSourceIds;
+        var visibleTraceIds = _sourceIdsUnion(candidate.visualSourceObjectIds || [], visibleExportIds);
+        visibleTraceIds = _sourceIdsMinus(visibleTraceIds, editableIds);
         candidate.exportSourceObjectIds = visibleExportIds;
         candidate.exportTargetObjectId = inlineRootId;
-        candidate.visualSourceObjectIds = visibleExportIds;
+        candidate.visualSourceObjectIds = visibleTraceIds;
         candidate.hiddenVisualSourceObjectIds = [];
         candidate.editableTextFrameIds = _sourceIdsUnion(
                 candidate.editableTextFrameIds || [], editableIds);
@@ -775,6 +777,23 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             _pushUniqueId(ids, seen, sourceId);
         }
         return _sortedNumericIds(ids);
+    }
+
+    function residualShellExportSourceIdsAfterDirectChildSlots(parentCandidate, parentExportIds, childSourceIds) {
+        var residualIds = executableResidualShellExportSourceIds(
+                parentCandidate, _sourceIdsMinus(parentExportIds || [], childSourceIds || []));
+        if (residualIds && residualIds.length > 0) return residualIds;
+
+        // A composite/root export can represent several visible descendants.
+        // When direct child shell slots take some descendants, the root id by
+        // itself may no longer be executable even though uncovered leaf
+        // material remains. Preserve that residual ownership from the trace
+        // sources instead of suppressing the parent slot.
+        var traceIds = _sourceIdsUnion(
+                parentCandidate ? parentCandidate.visualSourceObjectIds || [] : [],
+                parentCandidate ? parentCandidate.sourceObjectIds || [] : []);
+        traceIds = _sourceIdsMinus(traceIds, childSourceIds || []);
+        return executableResidualShellExportSourceIds(parentCandidate, traceIds);
     }
 
     function textFrameShellStyleSourceIdsInCandidate(candidate) {
@@ -1556,8 +1575,8 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         var parentExportIds = parentCandidate.exportSourceObjectIds && parentCandidate.exportSourceObjectIds.length > 0
                 ? _sortedNumericIds(parentCandidate.exportSourceObjectIds)
                 : concreteShellExportSourceIds(parentCandidate);
-        parentExportIds = _sourceIdsMinus(parentExportIds, childSourceIds);
-        parentExportIds = executableResidualShellExportSourceIds(parentCandidate, parentExportIds);
+        parentExportIds = residualShellExportSourceIdsAfterDirectChildSlots(
+                parentCandidate, parentExportIds, childSourceIds);
         if (parentExportIds.length === 0) {
             parentCandidate.hiddenVisualSourceObjectIds = _sourceIdsUnion(
                     parentCandidate.hiddenVisualSourceObjectIds || [], childSourceIds);
@@ -1950,6 +1969,21 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                     + _sourceSetKey(existingCandidate.sourceObjectIds)] = existingCandidate;
         }
         var originalCandidateCount = candidates.length;
+        function isResidualInlineVisualMaterialSource(sourceId) {
+            var src = sourceInfoById[String(sourceId)];
+            if (!src) return false;
+            if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+            var kind = String(src.kind || "");
+            if (kind === "TextFrame" || kind === "Story" || kind === "Character"
+                    || kind === "InsertionPoint" || kind === "Cell") {
+                return false;
+            }
+            return kind === "Image" || kind === "PDF" || kind === "EPS"
+                    || src.hasPlacedVisual === true
+                    || src.hasVisibleFill === true
+                    || src.hasVisibleStroke === true
+                    || src.hasCandidateVectorPaint === true;
+        }
         for (var ci = 0; ci < originalCandidateCount; ci++) {
             var parentCandidate = candidates[ci];
             if (!parentCandidate || parentCandidate.passId !== "pass.inline_objects") continue;
@@ -1989,6 +2023,24 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                 if (coveredEditable[String(editableIds[ciText])]) coveredCount++;
             }
             if (coveredCount < 2 || coveredCount !== editableIds.length) continue;
+            var coveredVisual = {};
+            for (var cvi = 0; cvi < childSlots.length; cvi++) {
+                var childVisibleIds = generatedDirectChildShellSlotVisibleSourceIds(childSlots[cvi]);
+                for (var cvii = 0; childVisibleIds && cvii < childVisibleIds.length; cvii++) {
+                    coveredVisual[String(childVisibleIds[cvii])] = true;
+                }
+            }
+            var hasUncoveredResidualVisual = false;
+            for (var rvi = 0; rvi < visualIds.length; rvi++) {
+                var residualVisualId = visualIds[rvi];
+                if (!parentSourceSet[String(residualVisualId)]) continue;
+                if (coveredVisual[String(residualVisualId)]) continue;
+                if (isResidualInlineVisualMaterialSource(residualVisualId)) {
+                    hasUncoveredResidualVisual = true;
+                    break;
+                }
+            }
+            if (hasUncoveredResidualVisual) continue;
             for (var si = 0; si < childSlots.length; si++) {
                 var child = childSlots[si];
                 var key = child.passId + "|" + child.pageIndex + "|" + _sourceSetKey(child.sourceObjectIds);

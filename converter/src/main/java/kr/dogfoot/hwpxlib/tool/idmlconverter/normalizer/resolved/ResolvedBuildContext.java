@@ -395,6 +395,14 @@ public final class ResolvedBuildContext {
     private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
+    private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByExactDomId;
+    private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByRenderId;
+    private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansBySourceObjectId;
+    private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByVisualSourceObjectId;
+    private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByStyleSourceObjectId;
+    private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByOwnedTextFrameId;
+    private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByAnyObjectId;
+    private final java.util.Map<String, java.util.Set<String>> descendantSetCache = new java.util.HashMap<>();
     private boolean ownershipPlanIndexDirty = true;
 
     /** Stage 1 simple marker label plans. Key: inline anchor DOM id. */
@@ -522,12 +530,20 @@ public final class ResolvedBuildContext {
         ownershipPlanLines.clear();
         ownershipPlanIndexDirty = true;
         ownershipPlanRenderedCache.clear();
+        descendantSetCache.clear();
         ownershipPlanByRenderFileKey = null;
         ownershipPlanByRenderKey = null;
         ownershipPlanByCandidateKey = null;
         ownershipPlanByDomKey = null;
         ownershipPlanByFileBoundsKey = null;
         ownershipPlanByFileKey = null;
+        ownershipPlansByExactDomId = null;
+        ownershipPlansByRenderId = null;
+        ownershipPlansBySourceObjectId = null;
+        ownershipPlansByVisualSourceObjectId = null;
+        ownershipPlansByStyleSourceObjectId = null;
+        ownershipPlansByOwnedTextFrameId = null;
+        ownershipPlansByAnyObjectId = null;
     }
 
     public void rebuildOwnershipPlanLinesFromPlans() {
@@ -602,24 +618,22 @@ public final class ResolvedBuildContext {
 
     public ObjectPlan findOwnershipPlanForDomId(int domId) {
         if (domId < 0) return null;
-        for (ObjectPlan plan : ownershipPlans) {
-            if (plan.domId == domId) return plan;
-        }
-        for (ObjectPlan plan : ownershipPlans) {
-            if (plan.sourceObjectIds != null) {
-                for (int sourceObjectId : plan.sourceObjectIds) {
-                    if (sourceObjectId == domId) return plan;
-                }
-            }
-        }
+        ensureOwnershipPlanIndexes();
+        ObjectPlan exact = firstPlan(ownershipPlansByExactDomId.get(domId));
+        if (exact != null) return exact;
+        ObjectPlan source = firstPlan(ownershipPlansBySourceObjectId.get(domId));
+        if (source != null) return source;
         return null;
     }
 
     public ObjectPlan findTextFrameOwnershipPlan(int domId) {
         if (domId < 0) return null;
         ObjectPlan fallback = null;
-        for (ObjectPlan plan : ownershipPlans) {
-            if (plan == null || plan.domId != domId) continue;
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> candidates = ownershipPlansByExactDomId.get(domId);
+        if (candidates == null || candidates.isEmpty()) return null;
+        for (ObjectPlan plan : candidates) {
+            if (plan == null) continue;
             if (!isTextFrameOwnershipPlan(plan, domId)) continue;
             if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return plan;
             if (fallback == null) fallback = plan;
@@ -678,7 +692,8 @@ public final class ResolvedBuildContext {
 
     public boolean isTextFrameOwnedByTextShellPlan(int domId) {
         if (domId < 0 || ownershipPlans == null) return false;
-        for (ObjectPlan plan : ownershipPlans) {
+        ensureOwnershipPlanIndexes();
+        for (ObjectPlan plan : ownershipPlansForTextShellSource(domId)) {
             if (plan == null) continue;
             if (!isTextShellTextPlacementPlan(plan)) continue;
             if (plan.domId == domId) return true;
@@ -697,7 +712,10 @@ public final class ResolvedBuildContext {
 
     public boolean isTextFrameStyleOwnedByVisibleTextShellPlan(int domId) {
         if (domId < 0 || ownershipPlans == null) return false;
-        for (ObjectPlan plan : ownershipPlans) {
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> candidates = ownershipPlansByStyleSourceObjectId.get(domId);
+        if (candidates == null || candidates.isEmpty()) return false;
+        for (ObjectPlan plan : candidates) {
             if (plan == null || !plan.hasVisibleVisual()) continue;
             if (!ShellRole.isTextShell(plan)) continue;
             if ("editable_textframe_visual_shell".equals(plan.reason)) continue;
@@ -718,7 +736,8 @@ public final class ResolvedBuildContext {
 
     private boolean isTextFrameOwnedByTextShellPlanWithPlacement(int domId, Placement placement) {
         if (domId < 0 || placement == null || ownershipPlans == null) return false;
-        for (ObjectPlan plan : ownershipPlans) {
+        ensureOwnershipPlanIndexes();
+        for (ObjectPlan plan : ownershipPlansForTextShellSource(domId)) {
             if (plan == null) continue;
             if (!isTextShellTextPlacementPlan(plan)) continue;
             if (plan.placement != placement) continue;
@@ -743,7 +762,10 @@ public final class ResolvedBuildContext {
 
     public boolean isVisualSourceClaimedByVisibleTextShellPlan(int sourceId) {
         if (sourceId < 0 || ownershipPlans == null) return false;
-        for (ObjectPlan plan : ownershipPlans) {
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> candidates = ownershipPlansByVisualSourceObjectId.get(sourceId);
+        if (candidates == null || candidates.isEmpty()) return false;
+        for (ObjectPlan plan : candidates) {
             if (plan == null) continue;
             if (!plan.hasVisibleVisual()) continue;
             if (!ShellRole.isTextShell(plan)) continue;
@@ -853,9 +875,30 @@ public final class ResolvedBuildContext {
         ownershipPlanByDomKey = new java.util.HashMap<>();
         ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
         ownershipPlanByFileKey = new java.util.HashMap<>();
+        ownershipPlansByExactDomId = new java.util.HashMap<>();
+        ownershipPlansByRenderId = new java.util.HashMap<>();
+        ownershipPlansBySourceObjectId = new java.util.HashMap<>();
+        ownershipPlansByVisualSourceObjectId = new java.util.HashMap<>();
+        ownershipPlansByStyleSourceObjectId = new java.util.HashMap<>();
+        ownershipPlansByOwnedTextFrameId = new java.util.HashMap<>();
+        ownershipPlansByAnyObjectId = new java.util.HashMap<>();
         java.util.Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null) continue;
+            indexPlan(ownershipPlansByExactDomId, plan.domId, plan);
+            indexPlan(ownershipPlansByAnyObjectId, plan.domId, plan);
+            if (plan.renderId != null) {
+                indexPlan(ownershipPlansByRenderId, plan.renderId, plan);
+                indexPlan(ownershipPlansByAnyObjectId, plan.renderId, plan);
+            }
+            indexPlanArray(ownershipPlansBySourceObjectId, plan.sourceObjectIds, plan);
+            indexPlanArray(ownershipPlansByAnyObjectId, plan.sourceObjectIds, plan);
+            indexPlanArray(ownershipPlansByVisualSourceObjectId, plan.visualSourceObjectIds, plan);
+            indexPlanArray(ownershipPlansByAnyObjectId, plan.visualSourceObjectIds, plan);
+            indexPlanArray(ownershipPlansByStyleSourceObjectId, plan.styleSourceObjectIds, plan);
+            indexPlanArray(ownershipPlansByAnyObjectId, plan.styleSourceObjectIds, plan);
+            indexPlanArray(ownershipPlansByOwnedTextFrameId, plan.ownedTextFrameIds, plan);
+            indexPlanArray(ownershipPlansByAnyObjectId, plan.ownedTextFrameIds, plan);
             RenderedGroup rendered = plan.candidateId != null
                     ? renderedByCandidateId.get(plan.candidateId)
                     : null;
@@ -884,6 +927,117 @@ public final class ResolvedBuildContext {
         }
         ownershipPlanIndexDirty = false;
         ownershipPlanRenderedCache.clear();
+    }
+
+    public java.util.List<ObjectPlan> ownershipPlansForObjectId(int objectId) {
+        if (objectId < 0 || ownershipPlans == null || ownershipPlans.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> plans = ownershipPlansByAnyObjectId.get(objectId);
+        if (plans == null || plans.isEmpty()) return java.util.Collections.emptyList();
+        return plans;
+    }
+
+    public java.util.List<ObjectPlan> ownershipPlansForObjectTree(int objectId, int depth) {
+        if (objectId < 0 || ownershipPlans == null || ownershipPlans.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        ensureOwnershipPlanIndexes();
+        java.util.LinkedHashSet<ObjectPlan> out = new java.util.LinkedHashSet<>();
+        addPlans(out, ownershipPlansByAnyObjectId.get(objectId));
+        if (resolvedData != null && depth > 0) {
+            java.util.Set<String> descendants = descendantSet(objectId, depth);
+            if (descendants != null && !descendants.isEmpty()) {
+                for (String idText : descendants) {
+                    try {
+                        int id = Integer.parseInt(idText);
+                        addPlans(out, ownershipPlansByAnyObjectId.get(id));
+                    } catch (NumberFormatException ignored) {
+                        // resolved DOM ids are numeric in normal extraction output.
+                    }
+                }
+            }
+        }
+        if (out.isEmpty()) return java.util.Collections.emptyList();
+        return new java.util.ArrayList<>(out);
+    }
+
+    public java.util.List<ObjectPlan> ownershipPlansForOwnedTextFrame(int textFrameId) {
+        if (textFrameId < 0 || ownershipPlans == null || ownershipPlans.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> plans = ownershipPlansByOwnedTextFrameId.get(textFrameId);
+        if (plans == null || plans.isEmpty()) return java.util.Collections.emptyList();
+        return plans;
+    }
+
+    public java.util.Set<String> descendantSet(int objectId, int depth) {
+        if (objectId < 0) return java.util.Collections.emptySet();
+        return descendantSet(String.valueOf(objectId), depth);
+    }
+
+    public java.util.Set<String> descendantSet(String objectId, int depth) {
+        if (resolvedData == null || objectId == null || objectId.isEmpty() || depth <= 0) {
+            return java.util.Collections.emptySet();
+        }
+        String key = objectId + "#" + depth;
+        java.util.Set<String> cached = descendantSetCache.get(key);
+        if (cached != null) return cached;
+        java.util.Set<String> descendants = resolvedData.buildDescendantSet(objectId, depth);
+        if (descendants == null || descendants.isEmpty()) {
+            descendants = java.util.Collections.emptySet();
+        } else {
+            descendants = java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<>(descendants));
+        }
+        descendantSetCache.put(key, descendants);
+        return descendants;
+    }
+
+    private java.util.List<ObjectPlan> ownershipPlansForTextShellSource(int domId) {
+        java.util.LinkedHashSet<ObjectPlan> out = new java.util.LinkedHashSet<>();
+        addPlans(out, ownershipPlansByExactDomId.get(domId));
+        addPlans(out, ownershipPlansByOwnedTextFrameId.get(domId));
+        addPlans(out, ownershipPlansBySourceObjectId.get(domId));
+        if (out.isEmpty()) return java.util.Collections.emptyList();
+        return new java.util.ArrayList<>(out);
+    }
+
+    private static ObjectPlan firstPlan(java.util.List<ObjectPlan> plans) {
+        if (plans == null || plans.isEmpty()) return null;
+        for (ObjectPlan plan : plans) {
+            if (plan != null) return plan;
+        }
+        return null;
+    }
+
+    private static void indexPlan(
+            java.util.Map<Integer, java.util.List<ObjectPlan>> index,
+            int id,
+            ObjectPlan plan) {
+        if (index == null || id < 0 || plan == null) return;
+        java.util.List<ObjectPlan> plans = index.computeIfAbsent(id, k -> new java.util.ArrayList<>());
+        if (!plans.contains(plan)) plans.add(plan);
+    }
+
+    private static void indexPlanArray(
+            java.util.Map<Integer, java.util.List<ObjectPlan>> index,
+            int[] ids,
+            ObjectPlan plan) {
+        if (index == null || ids == null || plan == null) return;
+        for (int id : ids) {
+            indexPlan(index, id, plan);
+        }
+    }
+
+    private static void addPlans(
+            java.util.LinkedHashSet<ObjectPlan> out,
+            java.util.List<ObjectPlan> plans) {
+        if (out == null || plans == null || plans.isEmpty()) return;
+        for (ObjectPlan plan : plans) {
+            if (plan != null) out.add(plan);
+        }
     }
 
     private static int[] renderedSourceObjectIds(RenderedGroup rg) {

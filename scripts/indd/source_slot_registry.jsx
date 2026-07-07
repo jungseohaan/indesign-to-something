@@ -104,6 +104,10 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         exactVisibleSlotKeyCache[cacheKey] = key;
         return key;
     }
+    function candidatePlacement(candidate) {
+        if (!candidate) return "";
+        return String(candidate.placement || "").toUpperCase();
+    }
     function exactContentOwnerScore(candidate) {
         if (!candidate) return 0;
         var score = 0;
@@ -141,11 +145,17 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
             candidateId: candidate ? candidate.candidateId || null : null,
             passId: candidate ? candidate.passId || null : null,
             pageIndex: candidate ? candidate.pageIndex : null,
+            placement: candidate ? candidate.placement || null : null,
+            ownershipSlot: candidate ? candidateOwnershipSlot(candidate) : null,
+            visualAction: candidate ? candidate.visualAction || null : null,
             reason: reason,
             sourceObjectIds: candidate ? _sortedNumericIds(candidate.sourceObjectIds || []) : [],
             visibleSourceObjectIds: visibleCandidateSourceIds(candidate),
             ownerCandidateId: ownerCandidate ? ownerCandidate.candidateId || null : null,
             ownerPassId: ownerCandidate ? ownerCandidate.passId || null : null,
+            ownerPlacement: ownerCandidate ? ownerCandidate.placement || null : null,
+            ownerOwnershipSlot: ownerCandidate ? candidateOwnershipSlot(ownerCandidate) : null,
+            ownerVisualAction: ownerCandidate ? ownerCandidate.visualAction || null : null,
             ownerSourceObjectIds: ownerCandidate ? _sortedNumericIds(ownerCandidate.sourceObjectIds || []) : [],
             ownerVisibleSourceObjectIds: visibleCandidateSourceIds(ownerCandidate)
         });
@@ -345,6 +355,11 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         for (var coi = 0; coi < compositeOwners.length; coi++) {
             var compositeOwner = compositeOwners[coi];
             if (!compositeOwner || compositeOwner.candidate === candidate) continue;
+            if (candidatePlacement(compositeOwner.candidate)
+                    && candidatePlacement(candidate)
+                    && candidatePlacement(compositeOwner.candidate) !== candidatePlacement(candidate)) {
+                continue;
+            }
             if (properSubset(compositeOwner.sourceIds, candidateVisibleIds)) {
                 subsumedByVisualOnlyComposite = true;
                 subsumingComposite = compositeOwner.candidate;

@@ -248,7 +248,7 @@ public class InlineFrameHandler {
         });
 
         // anchorId 후손 ID 집합 — Phase A/B/C 세 루프 모두 재사용해 O(P×depth) → O(1) 조회
-        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+        java.util.Set<String> descendantIds = ctx.descendantSet(anchorId, 5);
 
         // Phase B/C O(P×T) → O(1): parentId 인덱스 한 번 빌드
         java.util.Map<String, java.util.List<ResolvedPageItem>> pageItemsByParent = new java.util.HashMap<>();
@@ -692,7 +692,7 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             String anchorId) {
         if (ctx == null || ctx.resolvedData == null || anchorId == null) return false;
-        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 8);
+        java.util.Set<String> descendantIds = ctx.descendantSet(anchorId, 8);
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (tf == null || tf.id() == null) continue;
             if (!anchorId.equals(tf.id()) && !descendantIds.contains(tf.id())) continue;
@@ -824,7 +824,7 @@ public class InlineFrameHandler {
         }
 
         // anchorId 후손 ID 집합 — 아래 세 루프 모두 재사용
-        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+        java.util.Set<String> descendantIds = ctx.descendantSet(anchorId, 5);
 
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
         // hasBadgePng=true: 중첩 그룹 구조(예: Group→Group→TF)도 허용 (최대 5 hop)
@@ -1002,7 +1002,7 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.ownershipPlans == null) return false;
         String anchorId = String.valueOf(anchoredObjectId);
         Set<String> descendants = ctx.resolvedData != null
-                ? ctx.resolvedData.buildDescendantSet(anchorId, 5)
+                ? ctx.descendantSet(anchorId, 5)
                 : java.util.Collections.emptySet();
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null) continue;
@@ -1036,7 +1036,7 @@ public class InlineFrameHandler {
             return true;
         }
         String anchorId = String.valueOf(anchoredObjectId);
-        Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 8);
+        Set<String> descendants = ctx.descendantSet(anchorId, 8);
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (tf == null || tf.id() == null) continue;
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
@@ -1953,7 +1953,10 @@ public class InlineFrameHandler {
 
     private static boolean hasHwpxTextOwnershipForTextFrame(ResolvedBuildContext ctx, int textFrameDomId) {
         if (ctx == null || ctx.ownershipPlans == null || textFrameDomId < 0) return false;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
+        java.util.LinkedHashSet<ObjectPlan> candidates = new java.util.LinkedHashSet<>();
+        candidates.addAll(ctx.ownershipPlansForObjectId(textFrameDomId));
+        candidates.addAll(ctx.ownershipPlansForOwnedTextFrame(textFrameDomId));
+        for (ObjectPlan plan : candidates) {
             if (plan == null) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.domId == textFrameDomId || containsInt(plan.ownedTextFrameIds, textFrameDomId)) {
@@ -2216,7 +2219,7 @@ public class InlineFrameHandler {
             int anchoredObjectId) {
         if (ctx == null || ctx.resolvedData == null) return null;
         String anchorId = String.valueOf(anchoredObjectId);
-        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+        java.util.Set<String> descendantIds = ctx.descendantSet(anchorId, 5);
         ResolvedTextFrame found = null;
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
@@ -3727,7 +3730,7 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
         if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null) return null;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
             if (plan == null
                     || plan.placement != Placement.INLINE
                     || plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
@@ -3857,7 +3860,7 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return false;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) return true;
@@ -3869,7 +3872,7 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return false;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
             if (plan == null) continue;
             if (isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) return true;
         }
@@ -3880,24 +3883,7 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return false;
-        if (hasDirectOwnershipPlanForAnchor(ctx, anchoredObjectId)) return true;
-        java.util.Set<String> ids = new java.util.HashSet<>();
-        ids.add(String.valueOf(anchoredObjectId));
-        if (ctx.resolvedData != null) {
-            ids.addAll(ctx.resolvedData.buildDescendantSet(String.valueOf(anchoredObjectId), 8));
-        }
-        for (ObjectPlan plan : ctx.ownershipPlans) {
-            if (plan == null) continue;
-            if (ids.contains(String.valueOf(plan.domId))) return true;
-            if (plan.renderId != null && ids.contains(String.valueOf(plan.renderId))) return true;
-            if (containsAnyStringId(ids, plan.sourceObjectIds)
-                    || containsAnyStringId(ids, plan.visualSourceObjectIds)
-                    || containsAnyStringId(ids, plan.styleSourceObjectIds)
-                    || containsAnyStringId(ids, plan.ownedTextFrameIds)) {
-                return true;
-            }
-        }
-        return false;
+        return !ctx.ownershipPlansForObjectTree(anchoredObjectId, 8).isEmpty();
     }
 
     public static boolean hasDirectDropOnlyInlinePlanForAnchor(
@@ -3905,7 +3891,7 @@ public class InlineFrameHandler {
             int anchoredObjectId) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return false;
         boolean dropOnly = false;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
@@ -3936,7 +3922,7 @@ public class InlineFrameHandler {
             h = Math.abs(gb[2] - gb[0]);
         }
         if ((w <= 0 || h <= 0) && ctx.ownershipPlans != null) {
-            for (ObjectPlan plan : ctx.ownershipPlans) {
+            for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
                 if (plan == null || plan.placement != Placement.INLINE) continue;
                 if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
                 if (plan.bounds == null || plan.bounds.length < 4) continue;
@@ -4525,7 +4511,7 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             int textFrameDomId) {
         if (ctx == null || ctx.ownershipPlans == null || textFrameDomId < 0) return null;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
+        for (ObjectPlan plan : ctx.ownershipPlansForOwnedTextFrame(textFrameDomId)) {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!ShellRole.isTextShell(plan)) continue;
@@ -4555,7 +4541,7 @@ public class InlineFrameHandler {
         List<ObjectPlan> candidates = new ArrayList<>();
         if (ctx == null || ctx.ownershipPlans == null) return candidates;
         Map<String, ObjectPlan> byOwnedText = new java.util.LinkedHashMap<>();
-        for (ObjectPlan plan : ctx.ownershipPlans) {
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!ShellRole.isTextShell(plan)) continue;
@@ -4647,8 +4633,7 @@ public class InlineFrameHandler {
             return true;
         }
         if (ctx == null || ctx.resolvedData == null) return false;
-        java.util.Set<String> descendants =
-                ctx.resolvedData.buildDescendantSet(String.valueOf(anchoredObjectId), 8);
+        java.util.Set<String> descendants = ctx.descendantSet(anchoredObjectId, 8);
         if (descendants == null || descendants.isEmpty()) return false;
         if (descendants.contains(String.valueOf(plan.domId))) return true;
         if (plan.renderId != null && descendants.contains(String.valueOf(plan.renderId))) return true;
@@ -4685,8 +4670,7 @@ public class InlineFrameHandler {
                 same = true;
             }
             if (!same && ctx.resolvedData != null) {
-                java.util.Set<String> descendants =
-                        ctx.resolvedData.buildDescendantSet(String.valueOf(anchoredObjectId), 8);
+                java.util.Set<String> descendants = ctx.descendantSet(anchoredObjectId, 8);
                 same = descendants != null && descendants.contains(String.valueOf(rg.id()));
             }
             if (!same) continue;
@@ -4754,7 +4738,7 @@ public class InlineFrameHandler {
             int anchoredObjectId) {
         if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null) return false;
         String anchorId = String.valueOf(anchoredObjectId);
-        Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 8);
+        Set<String> descendants = ctx.descendantSet(anchorId, 8);
         boolean hasInlinePngPlan = false;
         boolean hasDescendantHwpxTextPlan = false;
         for (ObjectPlan plan : ctx.ownershipPlans) {
@@ -5504,12 +5488,11 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.resolvedData == null || anchoredObjectId < 0) return false;
         if (ctx.ownershipPlanPlacesFloatingHwpxText(anchoredObjectId)) return true;
         String anchorId = String.valueOf(anchoredObjectId);
-        java.util.Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 8);
-        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
-            if (tf == null || tf.id() == null) continue;
-            if (!descendants.contains(tf.id())) continue;
+        java.util.Set<String> descendants = ctx.descendantSet(anchorId, 8);
+        if (descendants == null || descendants.isEmpty()) return false;
+        for (String descendantId : descendants) {
             int tfDomId;
-            try { tfDomId = Integer.parseInt(tf.id()); }
+            try { tfDomId = Integer.parseInt(descendantId); }
             catch (NumberFormatException e) { continue; }
             if (ctx.ownershipPlanPlacesFloatingHwpxText(tfDomId)) return true;
         }
@@ -5522,12 +5505,11 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.resolvedData == null || anchoredObjectId < 0) return false;
         if (ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)) return true;
         String anchorId = String.valueOf(anchoredObjectId);
-        java.util.Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 8);
-        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
-            if (tf == null || tf.id() == null) continue;
-            if (!descendants.contains(tf.id())) continue;
+        java.util.Set<String> descendants = ctx.descendantSet(anchorId, 8);
+        if (descendants == null || descendants.isEmpty()) return false;
+        for (String descendantId : descendants) {
             int tfDomId;
-            try { tfDomId = Integer.parseInt(tf.id()); }
+            try { tfDomId = Integer.parseInt(descendantId); }
             catch (NumberFormatException e) { continue; }
             if (ctx.ownershipPlanPlacesInlineHwpxText(tfDomId)) return true;
         }
@@ -5710,7 +5692,7 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.resolvedData == null || anchorId == null) return false;
         if (isConceptDiagramTextFrame(ctx, anchorId)) return true;
         if (ctx.conceptDiagramTextFrameIds == null || ctx.conceptDiagramTextFrameIds.isEmpty()) return false;
-        Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+        Set<String> descendants = ctx.descendantSet(anchorId, 5);
         for (String tfId : ctx.conceptDiagramTextFrameIds) {
             if (tfId == null) continue;
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tfId);
