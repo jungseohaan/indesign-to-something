@@ -572,6 +572,7 @@ function _slimObjectPlanSourceSetRefsForWrite(sourceSetRefs, slimPlans) {
     for (var i = 0; slimPlans && i < slimPlans.length; i++) {
         var plan = slimPlans[i];
         if (!plan) continue;
+        if (!_objectPlanSlimPlanNeedsDiagnosticSourceSets(plan)) continue;
         for (var f = 0; f < refFields.length; f++) {
             var ref = plan[refFields[f]];
             if (ref) used[String(ref)] = true;
@@ -676,6 +677,9 @@ function _objectPlanSlimFieldIsWriteOnlyDiagnostic(key, plan) {
     if (key === "exportSourceSetId") return true;
     if (key === "hiddenVisualSourceSetId") return true;
     if (key === "ownedByNativeShellSourceSetId") return true;
+    if ((key === "sourceRootSetId" || key === "clusterSourceSetId"
+            || key === "omittedClusterSourceSetId")
+            && !_objectPlanSlimPlanNeedsDiagnosticSourceSets(plan)) return true;
     if (key === "sourceInlineFlow") return true;
     if (key === "inlineCompositeLayoutDescendant") return true;
     if (key === "connectorDecorationVisual") return true;
@@ -687,6 +691,13 @@ function _objectPlanSlimFieldIsWriteOnlyDiagnostic(key, plan) {
     if (key === "clusterRelation") return true;
     if (key === "migrationStatus") return true;
     if (key === "migrationBlocker" && (!plan || plan.migrationBlocker === "NONE")) return true;
+    return false;
+}
+
+function _objectPlanSlimPlanNeedsDiagnosticSourceSets(plan) {
+    if (!plan) return false;
+    if (plan.contractStatus && plan.contractStatus !== "READY_FOR_STAGE1_IMPORT") return true;
+    if (plan.migrationBlocker && plan.migrationBlocker !== "NONE") return true;
     return false;
 }
 
