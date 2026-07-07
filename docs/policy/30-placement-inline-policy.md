@@ -133,6 +133,15 @@ Placement and coordinate space are a single source decision.
   `renderId` is that anchor. Parent or composite plans that merely include the
   anchor in `sourceObjectIds` or `visualSourceObjectIds` are trace ancestry, not
   executable inline material for that story slot.
+- If one inline source anchor is a composite visual object whose descendants
+  include editable TextFrames and other visual material, and that composite must
+  travel as one inline atom, Stage 1 assigns the composite
+  `materialization=COMPLETE_PNG` and `textAction=OWNED_BY_PNG`. HWPX cannot
+  faithfully express that InDesign structure as a single inline group with
+  nested floating/editable TextFrames. The extractor therefore keeps the child
+  text visible in the PNG and no separate HWPX TextFrame owner is created for
+  those child TextFrames. Direct child shell slots that are independently
+  executable remain separate source slots and are not folded by this rule.
 - If that direct inline-anchor `ObjectPlan` is `DROP_TEXT` plus `DROP_VISUAL`,
   executors must not recreate the anchor through rendered PNG, group, badge, or
   text-shell fallback heuristics.

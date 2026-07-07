@@ -130,7 +130,9 @@ class RunPostProcessor {
 
         boolean hasTarget = false;
         for (ASTInlineItem it : items) {
-            if (it instanceof ASTTextRun && isItalicMathRun((ASTTextRun) it)) {
+            if (it instanceof ASTTextRun
+                    && !isSimplePositionedTextRun((ASTTextRun) it)
+                    && isItalicMathRun((ASTTextRun) it)) {
                 hasTarget = true;
                 break;
             }
@@ -143,7 +145,10 @@ class RunPostProcessor {
 
         for (int i = 0; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
-            if (item instanceof ASTTextRun && isItalicMathRun((ASTTextRun) item)) {
+            if (item instanceof ASTTextRun && isSimplePositionedTextRun((ASTTextRun) item)) {
+                flushItalicMathBuf(mathBuf, mathRuns, newItems);
+                newItems.add(item);
+            } else if (item instanceof ASTTextRun && isItalicMathRun((ASTTextRun) item)) {
                 ASTTextRun tr = (ASTTextRun) item;
                 mathBuf.append(tr.text());
                 IDMLCharacterRun cr = new IDMLCharacterRun();
@@ -180,6 +185,20 @@ class RunPostProcessor {
 
         items.clear();
         items.addAll(newItems);
+    }
+
+    private static boolean isSimplePositionedTextRun(ASTTextRun tr) {
+        if (tr == null || (!tr.subscript() && !tr.superscript())) return false;
+        String text = tr.text();
+        if (text == null) return false;
+        String cleaned = text.trim();
+        if (cleaned.isEmpty() || cleaned.length() > 4) return false;
+        for (int i = 0; i < cleaned.length(); i++) {
+            char c = cleaned.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '+' || c == '-') continue;
+            return false;
+        }
+        return true;
     }
 
     /**

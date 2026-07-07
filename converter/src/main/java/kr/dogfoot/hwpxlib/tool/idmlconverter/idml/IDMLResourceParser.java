@@ -177,6 +177,7 @@ public class IDMLResourceParser {
         def.horizontalScale(parseDoubleAttr(styleElem, "HorizontalScale"));
         def.tracking(parseDoubleAttr(styleElem, "Tracking"));
         def.baselineShift(parseDoubleAttr(styleElem, "BaselineShift"));
+        def.position(getAttrOrNull(styleElem, "Position"));
         def.capitalization(getAttrOrNull(styleElem, "Capitalization"));
         String directShadeColor = firstAttr(styleElem,
                 "CharacterShadingColor", "ShadingColor", "TextShadingColor");

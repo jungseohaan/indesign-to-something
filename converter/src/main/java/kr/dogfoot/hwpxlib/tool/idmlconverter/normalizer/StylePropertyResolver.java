@@ -179,6 +179,7 @@ public class StylePropertyResolver {
         if (child.tracking() != null) merged.tracking(child.tracking());
         if (child.horizontalScale() != null) merged.horizontalScale(child.horizontalScale());
         if (child.baselineShift() != null) merged.baselineShift(child.baselineShift());
+        if (child.position() != null) merged.position(child.position());
         if (child.underline() != null) merged.underline(child.underline());
         if (child.underlineType() != null) merged.underlineType(child.underlineType());
         if (child.underlineWeight() != null) merged.underlineWeight(child.underlineWeight());
@@ -219,6 +220,7 @@ public class StylePropertyResolver {
         copy.tracking(src.tracking());
         copy.horizontalScale(src.horizontalScale());
         copy.baselineShift(src.baselineShift());
+        copy.position(src.position());
         copy.underline(src.underline());
         copy.underlineType(src.underlineType());
         copy.underlineWeight(src.underlineWeight());

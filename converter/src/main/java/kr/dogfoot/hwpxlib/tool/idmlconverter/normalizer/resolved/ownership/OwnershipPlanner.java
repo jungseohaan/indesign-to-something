@@ -416,6 +416,13 @@ public final class OwnershipPlanner {
     }
 
     private ObjectPlan canonicalizeImportedPreplannedObjectPlan(ObjectPlan plan) {
+        if (isPlannerDeclaredInlineGraphicLineTextStyleMarker(plan)) {
+            return plan.withVisualAction(VisualAction.ABSORB_TEXT_STYLE,
+                            "inline_graphic_line_text_style_marker")
+                    .withStyleSourceObjectIds(visualSourceIds(plan))
+                    .withVisualSourceObjectIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]);
+        }
         if (isClosedInlineCarrierVisualPlan(plan)) {
             return plan
                     .withTextAction(TextAction.DROP_TEXT)
@@ -437,13 +444,6 @@ public final class OwnershipPlanner {
                             "anchored_shell_slot_uses_page_position")
                     .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
                     .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
-        }
-        if (isPlannerDeclaredInlineGraphicLineTextStyleMarker(plan)) {
-            return plan.withVisualAction(VisualAction.ABSORB_TEXT_STYLE,
-                            "inline_graphic_line_text_style_marker")
-                    .withStyleSourceObjectIds(visualSourceIds(plan))
-                    .withVisualSourceObjectIds(new int[0])
-                    .withDescendantVisualObjectIds(new int[0]);
         }
         if (!isPlannerDeclaredStandaloneInlineVisual(plan)) return plan;
         return plan.withVisualAction(VisualAction.PLACE_INLINE_PNG, plan.reason);
@@ -490,9 +490,13 @@ public final class OwnershipPlanner {
 
     private boolean isPlannerDeclaredInlineGraphicLineTextStyleMarker(ObjectPlan plan) {
         if (plan == null || data == null) return false;
-        if (!safe(plan.kind).startsWith("planner_declared_rendered:")) return false;
-        if (!"planner_declared_object_plan".equals(safe(plan.reason))) return false;
         if (!hasInlineObjectPlanSignal(plan)) return false;
+        String reason = safe(plan.reason);
+        if (!"planner_declared_object_plan".equals(reason)
+                && !reason.startsWith("diagnostic_from_planner_bundle:")
+                && !"inline_graphic_only".equals(reason)) {
+            return false;
+        }
         if (plan.placement != Placement.INLINE) return false;
         if (effectiveCoordinateSpace(plan) != CoordinateSpace.STORY_FLOW) return false;
         if (plan.textAction != TextAction.DROP_TEXT) return false;
@@ -502,22 +506,86 @@ public final class OwnershipPlanner {
         }
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         int[] visualIds = visualSourceIds(plan);
-        if (visualIds.length != 1) return false;
-        ResolvedPageItem item = data.getPageItem(String.valueOf(visualIds[0]));
-        if (item == null || !item.isInline()) return false;
-        if (!"GraphicLine".equals(safe(item.type()))) return false;
-        if (hasDescendantTextFrameExcluding(String.valueOf(visualIds[0]),
-                new HashSet<>(), new HashSet<>())) {
+        if (visualIds.length == 0) return false;
+        if (isThinInlineTextStyleMarkerPlanBounds(plan, visualIds)) return true;
+        for (int visualId : visualIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(visualId));
+            if (!isInlineTextStyleMarkerVector(item, plan.bounds)) return false;
+            if (hasDescendantTextFrameExcluding(String.valueOf(visualId),
+                    new HashSet<>(), new HashSet<>())) {
+                return false;
+            }
+        }
+        for (int sourceId : plan.sourceObjectIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || contains(visualIds, sourceId)) continue;
+            String type = safe(item.type());
+            if ("Group".equals(type)) continue;
+            if (isInlineTextStyleMarkerVector(item, plan.bounds)) continue;
+            if (isInlineTextStyleMarkerCompanionVector(item)) continue;
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isThinInlineTextStyleMarkerPlanBounds(ObjectPlan plan, int[] visualIds) {
+        if (plan == null || visualIds == null || visualIds.length == 0) return false;
+        if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) return false;
+        if (plan.sourceObjectIds.length > 4) return false;
+        double[] b = plan.bounds;
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        double longAxis = Math.max(w, h);
+        double shortAxis = Math.min(w, h);
+        if (longAxis < 6.0 || shortAxis > 3.2) return false;
+        if (longAxis / Math.max(0.1, shortAxis) < 3.0) return false;
+        for (int visualId : visualIds) {
+            if (hasDescendantTextFrameExcluding(String.valueOf(visualId),
+                    new HashSet<>(), new HashSet<>())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isInlineTextStyleMarkerVector(ResolvedPageItem item, double[] fallbackBounds) {
+        if (item == null) return false;
+        if (!item.isInline()) return false;
+        String type = safe(item.type());
+        if (!"GraphicLine".equals(type)
+                && !"Polygon".equals(type)
+                && !"Rectangle".equals(type)) {
             return false;
         }
         double[] b = boundsOf(item);
-        if (b == null || b.length < 4) b = plan.bounds;
+        if (b == null || b.length < 4) b = fallbackBounds;
         if (b == null || b.length < 4) return true;
         double w = Math.abs(b[3] - b[1]);
         double h = Math.abs(b[2] - b[0]);
         double longAxis = Math.max(w, h);
         double shortAxis = Math.min(w, h);
-        return longAxis >= 6.0 && shortAxis <= 3.0;
+        if (longAxis < 6.0 || shortAxis > 3.2) return false;
+        return longAxis / Math.max(0.1, shortAxis) >= 3.0;
+    }
+
+    private boolean isInlineTextStyleMarkerCompanionVector(ResolvedPageItem item) {
+        if (item == null) return false;
+        if (!item.isInline()) return false;
+        String type = safe(item.type());
+        if (!"GraphicLine".equals(type)
+                && !"Polygon".equals(type)
+                && !"Rectangle".equals(type)) {
+            return false;
+        }
+        if (hasDescendantTextFrameExcluding(item.id(), new HashSet<>(), new HashSet<>())) {
+            return false;
+        }
+        double[] b = boundsOf(item);
+        if (b == null || b.length < 4) return true;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        return Math.max(w, h) <= 8.0 && Math.min(w, h) <= 3.2;
     }
 
     private boolean hasInlineObjectPlanSignal(ObjectPlan plan) {
@@ -1255,9 +1323,27 @@ public final class OwnershipPlanner {
         timed("restorePageTextlessGraphicGroupContracts.final", this::restorePageTextlessGraphicGroupContracts);
         timed("normalizeTextlessShellsWithoutOwnedText.final", this::normalizeTextlessShellsWithoutOwnedText);
         timed("normalizeInlineOwnedTextShellsToStoryFlow.final", this::normalizeInlineOwnedTextShellsToStoryFlow);
+        timed("normalizeInlineTextStyleMarkerVisuals.final", this::normalizeInlineTextStyleMarkerVisuals);
         timed("normalizeRawClippedImageVisualSources.final", this::normalizeRawClippedImageVisualSources);
         timed("normalizeVisibleVisualSourcesToPlanPage.final", this::normalizeVisibleVisualSourcesToPlanPage);
         timed("normalizeDuplicateVisibleSourceSlots.final", this::normalizeDuplicateVisibleSourceSlots);
+    }
+
+    private void normalizeInlineTextStyleMarkerVisuals() {
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isPlannerDeclaredInlineGraphicLineTextStyleMarker(plan)) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.ABSORB_TEXT_STYLE,
+                            "inline_graphic_line_text_style_marker")
+                    .withMaterialization(Materialization.HWPX_TEXT)
+                    .withStyleSourceObjectIds(visualSourceIds(plan))
+                    .withVisualSourceObjectIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
+            normalized++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.normalizeInlineTextStyleMarkerVisuals",
+                normalized);
     }
 
     private void restorePageTextlessGraphicGroupContracts() {
@@ -7777,8 +7863,12 @@ public final class OwnershipPlanner {
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.sourceObjectIds == null || plan.sourceObjectIds.length <= 1) continue;
             if (!hasInlineCompositeHwpxTextSignal(plan)) continue;
-            plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
-                    "inline_parent_contains_hwpx_text_sources"));
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withOwnedTextFrameIds(new int[0])
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "inline_composite_requires_complete_png_text_owner")
+                    .withDescendantVisualObjectIds(new int[0]));
         }
     }
 
@@ -10537,7 +10627,7 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan textPlan = plans.get(i);
             if (textPlan == null) continue;
-            if (!"text_frame".equals(textPlan.kind)) continue;
+            if (!isTextFramePlanKind(textPlan)) continue;
             if (textPlan.domId != textFrameId) continue;
             ObjectPlan restored = textPlan
                     .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
@@ -10549,7 +10639,40 @@ public final class OwnershipPlanner {
             plans.set(i, restored);
             return true;
         }
-        return false;
+        ResolvedTextFrame tf = data != null ? data.getTextFrame(String.valueOf(textFrameId)) : null;
+        if (tf == null || tf.sourceHidden()) return false;
+        plans.add(new ObjectPlan(
+                textFrameId,
+                "planner_declared_text_frame:inline_composite_child",
+                tf.pageIndex() >= 0 ? tf.pageIndex() : shellPlan.pageIndex,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.DROP_VISUAL,
+                VisualLayer.CONTENT_VISUAL,
+                Placement.FLOATING,
+                null,
+                new int[] { textFrameId },
+                new int[0],
+                new int[0],
+                new int[] { textFrameId },
+                new int[0],
+                sourceBundleKeyOf(null, new int[] { textFrameId }, new int[] { textFrameId }),
+                Materialization.HWPX_TEXT,
+                CoordinateSpace.PAGE,
+                shellPlan.anchorOwner,
+                textFrameSourceZOrder(tf),
+                reason,
+                null,
+                textFramePlanBounds(tf, textFrameId, false),
+                tf.layerId(),
+                tf.layerName(),
+                tf.layerIndex()));
+        return true;
+    }
+
+    private static boolean isTextFramePlanKind(ObjectPlan plan) {
+        String kind = safe(plan != null ? plan.kind : null);
+        return "text_frame".equals(kind)
+                || kind.startsWith("planner_declared_text_frame:");
     }
 
     private boolean isDroppedDirectLabelShellOwnedByCompositeCarrier(ObjectPlan plan) {

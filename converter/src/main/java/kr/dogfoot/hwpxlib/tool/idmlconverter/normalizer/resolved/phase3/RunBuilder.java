@@ -268,7 +268,10 @@ class RunBuilder {
     }
 
     private static void applyPositionStyle(ASTTextRun target, ResolvedRun rr, IDMLCharacterRun cr) {
-        String position = rr != null && rr.position() != null ? rr.position() : cr.position();
+        String position = explicitPosition(rr != null ? rr.position() : null);
+        if (position == null) {
+            position = explicitPosition(cr != null ? cr.position() : null);
+        }
         if (position == null) return;
         String p = position.toLowerCase(Locale.ROOT);
         if (p.contains("superscript")) {
@@ -278,6 +281,12 @@ class RunBuilder {
             target.subscript(true);
             target.superscript(false);
         }
+    }
+
+    private static String explicitPosition(String position) {
+        if (position == null || position.trim().isEmpty()) return null;
+        String p = position.toLowerCase(Locale.ROOT);
+        return p.contains("normal") ? null : position;
     }
 
     private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr) {
@@ -623,6 +632,8 @@ class RunBuilder {
         tr.shadeColor(src.shadeColor());
         tr.letterSpacing(src.letterSpacing());
         tr.grepMathFont(src.grepMathFont());
+        tr.subscript(src.subscript());
+        tr.superscript(src.superscript());
         tr.underline(src.underline());
         tr.underlineShape(src.underlineShape());
         tr.underlineColor(src.underlineColor());

@@ -221,6 +221,22 @@ public final class TextStyleApplicator {
             if (p.contains("superscript")) target.superscript(true);
             if (p.contains("subscript")) target.subscript(true);
         }
+        if (opts.applyPosition && resolvedRun.charStyle() != null) {
+            String style = normalizeStyleRef(resolvedRun.charStyle());
+            if (style.contains("superscript") || style.contains("상부자") || style.contains("위첨자")) {
+                target.superscript(true);
+                target.subscript(false);
+            } else if (style.contains("subscript") || style.contains("하부자") || style.contains("아래첨자")) {
+                target.subscript(true);
+                target.superscript(false);
+            }
+        }
+    }
+
+    private static String normalizeStyleRef(String styleRef) {
+        return styleRef == null ? "" : styleRef.toLowerCase(Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%25", "%");
     }
 
     public static boolean absorbProportionalScaleAsFontSize(

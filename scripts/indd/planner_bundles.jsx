@@ -646,6 +646,9 @@ function _plannerBundleShouldExportInlineSimpleMarkerCompletePng(
     if (slot !== "CONTENT_VISUAL_SLOT") return false;
     if (candidate.slotRole === "direct_child_shell_slot"
             || candidate.compositeRole === "direct_child_shell_slot") return false;
+    if (candidate.completePngTextAllowed === true || candidate.textOwner === "indesign_png") {
+        return true;
+    }
     if (exportSourceObjectIds && exportSourceObjectIds.length > 0) return false;
     if (!slotSources || !slotSources.ownedTextFrameIds
             || slotSources.ownedTextFrameIds.length === 0) return false;
@@ -1061,6 +1064,11 @@ function _plannerBundleAllowsInlineAnchorVisualSource(candidate, slot) {
             return true;
         }
         return _plannerBundleInlineObjectIsTextShell(candidate);
+    }
+    if (slot === "CONTENT_VISUAL_SLOT"
+            && candidate.textOwner === "indesign_png"
+            && candidate.completePngTextAllowed === true) {
+        return true;
     }
     if (slot === "CONTENT_VISUAL_SLOT"
             && (candidate.slotRole === "direct_child_shell_slot"

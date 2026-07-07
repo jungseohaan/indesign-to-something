@@ -169,6 +169,29 @@ function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds, i
     return _isSimpleMarkerLabelTextForOwnership(markerText);
 }
 
+function _inlineCompositeCompletePngDecisionForOwnership(item, editableTextFrameIds, itemById) {
+    var ids = editableTextFrameIds || [];
+    if (_inlineCompleteMarkerDecisionForOwnership(item, ids, itemById)) return true;
+    if (!item || ids.length === 0) return false;
+    var kind = _itemKind(item);
+    if (kind !== "Group") return false;
+    var visualChildCount = 0;
+    try {
+        var children = item.allPageItems;
+        for (var i = 0; children && i < children.length; i++) {
+            var childKind = _itemKind(children[i]);
+            if (childKind === "TextFrame") continue;
+            if (childKind === "Rectangle" || childKind === "Oval"
+                    || childKind === "Polygon" || childKind === "GraphicLine"
+                    || childKind === "Image" || childKind === "PDF"
+                    || childKind === "Group") {
+                visualChildCount++;
+            }
+        }
+    } catch (eInlineCompositeChildren) {}
+    return visualChildCount > 0;
+}
+
 function _createExtractionPlanSourceIndexCache(doc, sourceIndex) {
     function itemId(item) {
         try { return item && item.id !== undefined ? item.id : null; } catch (e) {}
@@ -349,7 +372,8 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
     for (var si = 0; sourceItems && si < sourceItems.length; si++) {
         var sourceEntry = sourceItems[si];
         if (!sourceEntry || sourceEntry.id === null || sourceEntry.id === undefined) continue;
-        if (sourceEntry.kind !== "Rectangle" && sourceEntry.kind !== "Oval" && sourceEntry.kind !== "Polygon") continue;
+        if (sourceEntry.kind !== "Rectangle" && sourceEntry.kind !== "Oval"
+                && sourceEntry.kind !== "Polygon" && sourceEntry.kind !== "Group") continue;
         if (!_isInlineFlowItemBySourceInfo(sourceEntry)) continue;
         if (!pageIndexInCurrentExtraction(sourceEntry.pageIndex)) continue;
         var shellItem = planCache && planCache.domItem ? planCache.domItem(sourceEntry.id) : null;
@@ -358,20 +382,27 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
         if (!editableTextFrameIds || editableTextFrameIds.length === 0) continue;
         var sourceObjectIds = [sourceEntry.id].concat(editableTextFrameIds);
         sourceObjectIds = _sortedNumericIds(sourceObjectIds);
-        var completeMarkerOwnsText = _inlineCompleteMarkerDecisionForOwnership(shellItem, editableTextFrameIds);
+        var completeMarkerOwnsText = _inlineCompositeCompletePngDecisionForOwnership(
+                shellItem, editableTextFrameIds);
+        var completeExportSourceIds = completeMarkerOwnsText ? _sortedNumericIds(sourceObjectIds) : [];
         var requiresTextHidden = editableTextFrameIds.length > 0 && !completeMarkerOwnsText;
         _pushExtractionCandidate(candidates, seen, "pass.inline_objects", shellItem, {
             sourceObjectIds: sourceObjectIds,
+            exportSourceObjectIds: completeExportSourceIds,
+            visualSourceObjectIds: completeExportSourceIds,
             pageIndex: sourceEntry.pageIndex,
             unit: "INLINE_OBJECT",
             mode: "TEXTLESS_CANDIDATE",
             candidatePurpose: "INLINE_CANDIDATE",
             editableTextFrameIds: editableTextFrameIds,
+            ownedTextFrameIds: completeMarkerOwnsText ? editableTextFrameIds : [],
             hiddenTextFrameIds: requiresTextHidden ? editableTextFrameIds : [],
             requiresTextHidden: requiresTextHidden,
             textOwner: completeMarkerOwnsText ? "indesign_png" : (requiresTextHidden ? "hwpx_tf" : "none"),
             containsEditableText: completeMarkerOwnsText,
-            completePngTextAllowed: completeMarkerOwnsText
+            completePngTextAllowed: completeMarkerOwnsText,
+            materialization: completeMarkerOwnsText ? "COMPLETE_PNG" : null,
+            textAction: completeMarkerOwnsText ? "OWNED_BY_PNG" : null
         });
     }
 }

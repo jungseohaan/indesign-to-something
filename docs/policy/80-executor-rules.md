@@ -108,6 +108,12 @@ Text Builder:
   emits the editable text for those ids; otherwise the editable text must have a
   separate planned TextFrame/table owner unless the source explicitly declares
   complete-PNG text ownership.
+- When Stage 1 declares an inline composite as
+  `materialization=COMPLETE_PNG` and `textAction=OWNED_BY_PNG`, executors emit
+  only that inline PNG. They must not rebuild descendant TextFrames as floating
+  or table-cell text, and they must not hide those TextFrames before export.
+  The loss of editability is the planned owner decision for an unrepresentable
+  nested inline InDesign composition.
 - A native parent source shape (`NATIVE_SOURCE_SHAPE`) may supply the shell,
   fill, stroke, corner, and inset style for a child editable TextFrame, but it
   should not take the `TEXT_SLOT` away from a direct TextFrame owner. When a
@@ -143,11 +149,12 @@ Text Builder:
   own or displace the surrounding `TEXT_SLOT`. If HWPX cannot materialize that
   decoration faithfully, Stage 1 may drop the visual, but the carrier TextFrame
   text remains `OWNED_BY_HWPX_TEXT`.
-- A source inline `GraphicLine` used as a text-style marker is never a standalone
-  inline PNG owner. Stage 1 must either absorb it into an explicit HWPX text
-  style/underline-tab representation or assign `DROP_VISUAL`; the executor must
-  not preserve it as `PLACE_INLINE_PNG` merely because it is anchored in story
-  flow.
+- A source inline thin vector strip used as a text-style marker is never a
+  standalone inline PNG owner. This includes `GraphicLine`, `Polygon`, or
+  `Rectangle` material wrapped in an inline `Group`. Stage 1 must either absorb
+  it into an explicit HWPX text style/underline-tab representation or assign
+  `DROP_VISUAL`; the executor must not preserve it as `PLACE_INLINE_PNG` merely
+  because it is anchored in story flow.
 - Text Builder must not split, shrink, or horizontally shift a TextFrame from
   `composedLines`, `wrapIndentLeft`, `wrapIndentRight`, paragraph Y offsets, or
   line-gap measurements. Those are extractor diagnostics for validation and

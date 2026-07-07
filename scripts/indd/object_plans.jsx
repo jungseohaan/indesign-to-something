@@ -1452,12 +1452,25 @@ function _objectPlanTextAction(bundle, sourceById) {
     if (_objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById)) {
         return "OWNED_BY_PNG";
     }
+    if (_objectPlanBundleOwnsInlineCompletePngText(bundle)) {
+        return "OWNED_BY_PNG";
+    }
     if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) {
         return "OWNED_BY_HWPX_TEXT";
     }
     if (!bundle || bundle.executable !== true) return "DROP_TEXT";
     if (bundle.ownershipSlot === "SHELL_SLOT") return "DROP_TEXT";
     return "DROP_TEXT";
+}
+
+function _objectPlanBundleOwnsInlineCompletePngText(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.ownershipSlot === "SHELL_SLOT") return false;
+    if (bundle.slotRole === "direct_child_shell_slot"
+            || bundle.compositeRole === "direct_child_shell_slot") return false;
+    return bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0
+            && ((bundle.visualSourceObjectIds && bundle.visualSourceObjectIds.length > 0)
+                || (bundle.exportSourceObjectIds && bundle.exportSourceObjectIds.length > 0));
 }
 
 function _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById) {
@@ -1624,6 +1637,7 @@ function _objectPlanMaterialization(bundle, visualAction) {
     if (visualAction === "PLACE_TABLE_STYLE") return "HWPX_TABLE_STYLE";
     if (visualAction === "ABSORB_TEXT_STYLE") return "HWPX_TEXT";
     if (visualAction === "DROP_VISUAL") return "HWPX_TEXT";
+    if (_objectPlanBundleOwnsInlineCompletePngText(bundle)) return "COMPLETE_PNG";
     return bundle.materialization || "EXTRACTED_PNG_VECTOR";
 }
 
@@ -1650,6 +1664,7 @@ function _objectPlanVisualLayer(bundle) {
 function _objectPlanMigrationStatus(bundle) {
     if (!bundle) return "NEEDS_BUNDLE_SOURCE_POLICY";
     if (bundle.layoutOnlyInlineSlot === true) return "READY_LAYOUT_ONLY_INLINE_SLOT";
+    if (_objectPlanBundleOwnsInlineCompletePngText(bundle)) return "READY_INLINE_COMPLETE_PNG_TEXT_OWNER";
     if (bundle.clusterRelation === "EXACT_SOURCE_CLUSTER") return "READY_EXACT_CLUSTER";
     if (_objectPlanHasInlineTextlessSiblingDecorationContract(bundle)) return "READY_TEXTLESS_CONNECTOR_FRAGMENT";
     if (_objectPlanHasExplicitSlotOnlyContract(bundle)) return "READY_SLOT_ONLY_CLUSTER_FRAGMENT";
@@ -1820,6 +1835,7 @@ function _objectPlanMigrationStatusIsImportReady(status) {
             || status === "READY_CLOSED_PLACED_CONTENT_FRAME"
             || status === "READY_PAGE_TEXTLESS_GRAPHIC_GROUP"
             || status === "READY_TEXTLESS_CONNECTOR_FRAGMENT"
+            || status === "READY_INLINE_COMPLETE_PNG_TEXT_OWNER"
             || status === "READY_LAYOUT_ONLY_INLINE_SLOT"
             || status === "READY_TEXT_CLEANUP";
 }
@@ -1979,11 +1995,23 @@ function _validateObjectPlanTextVisualSeparation(plan, issues, issueCodeCounts, 
     if (overlap.length > 0 && _objectPlanAllowsTextFrameShellSourceOverlap(plan, overlap)) {
         return;
     }
+    if (overlap.length > 0 && _objectPlanAllowsCompletePngTextSourceOverlap(plan, overlap)) {
+        return;
+    }
     if (overlap.length > 0) {
         _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
                 "visual_sources_include_owned_text_frames", [plan],
                 { overlappingIds: overlap });
     }
+}
+
+function _objectPlanAllowsCompletePngTextSourceOverlap(plan, overlap) {
+    if (!plan || !overlap || overlap.length === 0) return false;
+    if (plan.textAction !== "OWNED_BY_PNG") return false;
+    if (plan.materialization !== "COMPLETE_PNG") return false;
+    if (plan.visualAction !== "PLACE_INLINE_PNG"
+            && plan.visualAction !== "PLACE_FLOATING_PNG") return false;
+    return plan.ownershipSlot === "CONTENT_VISUAL_SLOT";
 }
 
 function _objectPlanAllowsTextFrameShellSourceOverlap(plan, overlap) {

@@ -146,6 +146,7 @@ public class ASTMathGrouper {
         clone.fillColor(source.fillColor());
         clone.fontStyle(source.fontStyle());
         clone.position(source.position());
+        clone.baselineShift(source.baselineShift());
         clone.tracking(source.tracking());
         clone.grepMathFont(source.grepMathFont());
         clone.content(newText);
@@ -437,6 +438,12 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
     public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
+        if (emitSimplePositionedFormulaTextRuns(ehRuns, para)) {
+            return;
+        }
+        if (emitSimplePositionedTextRun(ehRuns, para)) {
+            return;
+        }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (hwpScript != null) {
             // 선행 번호 "(숫자) " 분리
@@ -470,6 +477,12 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 (순수 텍스트 등) 일반 텍스트 런으로 폴백.
      */
     public static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        if (emitSimplePositionedFormulaTextRuns(mathRuns, para)) {
+            return;
+        }
+        if (emitSimplePositionedTextRun(mathRuns, para)) {
+            return;
+        }
         String hwpScript = BTFontEquationConverter.convert(mathRuns);
         if (hwpScript != null) {
             String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "GREP_FONT";
@@ -502,6 +515,132 @@ public class ASTMathGrouper {
     }
 
     /**
+     * Short chemical-style formula text such as H2O is authored as text runs
+     * with character Position=Subscript/Superscript. Keep it as editable text
+     * instead of materializing the positioned digit as an equation object.
+     */
+    private static boolean emitSimplePositionedFormulaTextRuns(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        if (!canEmitSimplePositionedFormulaTextRuns(mathRuns)) return false;
+
+        for (IDMLCharacterRun run : mathRuns) {
+            String cleaned = cleanFormulaText(run.content());
+            if (cleaned.isEmpty()) continue;
+            ASTTextRun textRun = textRunFromMathRun(run, cleaned);
+            para.addItem(textRun);
+        }
+        return true;
+    }
+
+    private static boolean canEmitSimplePositionedFormulaTextRuns(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null || mathRuns.size() < 2) return false;
+
+        boolean hasPositionedRun = false;
+        int visibleChars = 0;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) return false;
+            String cleaned = cleanFormulaText(run.content());
+            if (cleaned.isEmpty()) continue;
+            if (!isSimpleFormulaText(cleaned)) return false;
+            visibleChars += cleaned.length();
+            if (run.isSubscript() || run.isSuperscript()) {
+                hasPositionedRun = true;
+            }
+        }
+        if (!hasPositionedRun || visibleChars == 0 || visibleChars > 16) return false;
+        return true;
+    }
+
+    /**
+     * InDesign Position=Subscript/Superscript is a text character property.
+     * A single short token such as the "2" in H2O should remain editable text
+     * with HWPX subscript/superscript instead of becoming an equation object.
+     */
+    private static boolean emitSimplePositionedTextRun(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        if (mathRuns == null || mathRuns.size() != 1) return false;
+        IDMLCharacterRun run = mathRuns.get(0);
+        if (!run.isSubscript() && !run.isSuperscript()) return false;
+
+        String cleaned = cleanSimplePositionedMathText(run.content());
+        if (cleaned.isEmpty() || cleaned.length() > 4 || !isSimplePositionedToken(cleaned)) {
+            return false;
+        }
+
+        ASTTextRun textRun = new ASTTextRun();
+        copyMathRunTextStyle(run, textRun, cleaned);
+        para.addItem(textRun);
+        return true;
+    }
+
+    private static ASTTextRun textRunFromMathRun(IDMLCharacterRun run, String text) {
+        ASTTextRun textRun = new ASTTextRun();
+        copyMathRunTextStyle(run, textRun, text);
+        return textRun;
+    }
+
+    private static void copyMathRunTextStyle(IDMLCharacterRun run, ASTTextRun textRun, String text) {
+        textRun.text(text);
+        textRun.fontFamily(run.fontFamily());
+        textRun.grepMathFont(run.grepMathFont());
+        textRun.characterStyleRef(run.appliedCharacterStyle());
+        textRun.subscript(run.isSubscript());
+        textRun.superscript(run.isSuperscript());
+        if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
+        if (run.fontSize() != null) textRun.fontSizeHwpunits((int) (run.fontSize() * 100));
+        if (run.tracking() != null) textRun.letterSpacing((short) Math.round(run.tracking() / 10.0));
+        if (run.horizontalScale() != null
+                && run.horizontalScale() != 0
+                && run.horizontalScale() != 100) {
+            textRun.horizontalScale((short) Math.round(run.horizontalScale()));
+        }
+        if (run.baselineShift() != null && run.baselineShift() != 0) {
+            textRun.baselineShift((short) Math.round(run.baselineShift()));
+        }
+    }
+
+    private static String cleanSimplePositionedMathText(String text) {
+        if (text == null) return "";
+        String cleaned = ASTPageProcessor.stripACEPlaceholders(text)
+                .replace("`", "")
+                .replace("~", "")
+                .replace("&", "")
+                .trim();
+        while (!cleaned.isEmpty() && (cleaned.charAt(0) == '_' || cleaned.charAt(0) == '^')) {
+            cleaned = cleaned.substring(1);
+        }
+        return cleaned;
+    }
+
+    private static String cleanFormulaText(String text) {
+        if (text == null) return "";
+        return ASTPageProcessor.stripACEPlaceholders(text)
+                .replace("`", "")
+                .replace("~", "")
+                .replace("&", "");
+    }
+
+    private static boolean isSimpleFormulaText(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isLetterOrDigit(c)) continue;
+            if (Character.isWhitespace(c) || c == '\u2005' || c == '\u2007' || c == '\u2009' || c == '\u200A') {
+                continue;
+            }
+            if (c == ':') continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isSimplePositionedToken(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '+' || c == '-') continue;
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * 수식 패턴으로 감지된 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
@@ -511,6 +650,12 @@ public class ASTMathGrouper {
 
     static void flushPatternMathGroup(List<IDMLCharacterRun> patternRuns, ASTParagraph para,
                                         ColorResolver colorResolver) {
+        if (emitSimplePositionedFormulaTextRuns(patternRuns, para)) {
+            return;
+        }
+        if (emitSimplePositionedTextRun(patternRuns, para)) {
+            return;
+        }
         String hwpScript = PatternEquationConverter.convert(patternRuns);
         if (hwpScript != null) {
             // 수식 폰트 등록 (동적 학습)

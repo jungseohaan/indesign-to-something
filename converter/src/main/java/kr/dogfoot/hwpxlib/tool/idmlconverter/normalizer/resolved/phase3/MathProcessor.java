@@ -11,6 +11,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildCo
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Phase 3 수식 처리 — BT/EH/NP 폰트 런을 ASTEquation으로 변환 (W3 Step B).
@@ -69,6 +70,7 @@ class MathProcessor {
             }
 
             ASTTextRun tr = (ASTTextRun) item;
+            applyPositionFromCharacterStyle(tr);
             String ff = tr.fontFamily();
             String currentType = null;
             if (ff != null) {
@@ -77,20 +79,24 @@ class MathProcessor {
                 else if (NPFontGlyphMap.isNPFont(ff)) currentType = "NP";
             }
 
+            if (currentType != null && isSimplePositionedTextRun(tr)) {
+                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                mathGroup.clear();
+                mathType = null;
+                newItems.add(item);
+                continue;
+            }
+
             if (currentType != null) {
                 if (mathType == null || mathType.equals(currentType)) {
                     mathType = currentType;
-                    IDMLCharacterRun cr = new IDMLCharacterRun();
-                    cr.content(tr.text());
-                    cr.fontFamily(ff);
+                    IDMLCharacterRun cr = mathRunFromTextRun(tr, ff);
                     mathGroup.add(cr);
                 } else {
                     flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
                     mathGroup.clear();
                     mathType = currentType;
-                    IDMLCharacterRun cr = new IDMLCharacterRun();
-                    cr.content(tr.text());
-                    cr.fontFamily(ff);
+                    IDMLCharacterRun cr = mathRunFromTextRun(tr, ff);
                     mathGroup.add(cr);
                 }
             } else {
@@ -128,9 +134,7 @@ class MathProcessor {
                     }
                 }
                 if (bridge) {
-                    IDMLCharacterRun cr = new IDMLCharacterRun();
-                    cr.content(tr.text());
-                    cr.fontFamily(tr.fontFamily() != null ? tr.fontFamily() : "");
+                    IDMLCharacterRun cr = mathRunFromTextRun(tr, tr.fontFamily() != null ? tr.fontFamily() : "");
                     mathGroup.add(cr);
                 } else {
                     flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
@@ -146,6 +150,46 @@ class MathProcessor {
             items.clear();
             items.addAll(newItems);
         }
+    }
+
+    private static IDMLCharacterRun mathRunFromTextRun(ASTTextRun tr, String fontFamily) {
+        IDMLCharacterRun cr = new IDMLCharacterRun();
+        cr.content(tr.text());
+        cr.fontFamily(fontFamily);
+        if (tr.subscript()) {
+            cr.position("Subscript");
+        } else if (tr.superscript()) {
+            cr.position("Superscript");
+        }
+        return cr;
+    }
+
+    private static void applyPositionFromCharacterStyle(ASTTextRun tr) {
+        if (tr == null || tr.characterStyleRef() == null) return;
+        String style = tr.characterStyleRef().toLowerCase(Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%25", "%");
+        if (style.contains("superscript") || style.contains("상부자") || style.contains("위첨자")) {
+            tr.superscript(true);
+            tr.subscript(false);
+        } else if (style.contains("subscript") || style.contains("하부자") || style.contains("아래첨자")) {
+            tr.subscript(true);
+            tr.superscript(false);
+        }
+    }
+
+    private static boolean isSimplePositionedTextRun(ASTTextRun tr) {
+        if (tr == null || (!tr.subscript() && !tr.superscript())) return false;
+        String text = tr.text();
+        if (text == null) return false;
+        String cleaned = text.trim();
+        if (cleaned.isEmpty() || cleaned.length() > 4) return false;
+        for (int i = 0; i < cleaned.length(); i++) {
+            char c = cleaned.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '+' || c == '-') continue;
+            return false;
+        }
+        return true;
     }
 
     private static void flushResolvedMathGroup(ResolvedBuildContext ctx, List<IDMLCharacterRun> group, String type,

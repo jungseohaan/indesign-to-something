@@ -278,6 +278,7 @@ public class StoryLoader {
 
             for (int idx = 0; idx < runs.size(); idx++) {
                 IDMLCharacterRun run = runs.get(idx);
+                applyCharacterStylePosition(ctx, run);
 
                 // GREP 수식 리셋: 단일 라틴 문자(수식 변수 x, a, n)는 유지, 나머지 제거
                 if (run.grepMathFont()) {
@@ -1785,6 +1786,25 @@ public class StoryLoader {
             }
         }
         return false;
+    }
+
+    private static void applyCharacterStylePosition(ResolvedBuildContext ctx, IDMLCharacterRun run) {
+        if (ctx == null || ctx.styleResolver == null || run == null) return;
+        String styleRef = run.appliedCharacterStyle();
+        if (styleRef == null || styleRef.isEmpty()) return;
+        IDMLStyleDef style = ctx.styleResolver.getResolvedCharacterStyle(styleRef);
+        if (style == null) return;
+        if (isNormalPosition(run.position()) && style.position() != null) {
+            run.position(style.position());
+        }
+        if (run.baselineShift() == null && style.baselineShift() != null) {
+            run.baselineShift(style.baselineShift());
+        }
+    }
+
+    private static boolean isNormalPosition(String position) {
+        if (position == null || position.trim().isEmpty()) return true;
+        return position.toLowerCase(java.util.Locale.ROOT).contains("normal");
     }
 
     private static String toDecimalStoryId(String storyRef) {

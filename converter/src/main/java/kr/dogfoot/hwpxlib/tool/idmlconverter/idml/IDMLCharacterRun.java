@@ -278,11 +278,27 @@ public class IDMLCharacterRun {
     }
 
     public boolean isSubscript() {
-        return "Subscript".equals(position);
+        return positionLooksLike(position, "subscript")
+                || styleRefLooksLike(appliedCharacterStyle, "subscript", "하부자", "아래첨자");
     }
 
     public boolean isSuperscript() {
-        return "Superscript".equals(position);
+        return positionLooksLike(position, "superscript")
+                || styleRefLooksLike(appliedCharacterStyle, "superscript", "상부자", "위첨자");
+    }
+
+    private static boolean positionLooksLike(String position, String expected) {
+        return position != null && position.toLowerCase(java.util.Locale.ROOT).contains(expected);
+    }
+
+    private static boolean styleRefLooksLike(String styleRef, String english, String koreanA, String koreanB) {
+        if (styleRef == null || styleRef.isEmpty()) return false;
+        String normalized = styleRef.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%25", "%");
+        return normalized.contains(english)
+                || normalized.contains(koreanA)
+                || normalized.contains(koreanB);
     }
 
     public boolean grepMathFont() { return grepMathFont; }
