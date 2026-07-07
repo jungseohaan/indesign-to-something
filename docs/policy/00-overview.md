@@ -571,6 +571,13 @@ Source-tree reads must also be registry-backed:
   ownership facts that are already in the registry.
 - Diagnostics may expand source-set references for human review, but execution
   and validation use compact refs, status maps, and indexed membership checks.
+- The normal conversion path proves source coverage and slot closure by compact
+  proof records (`coverageClaimRef`, `slotClosureRef`, `exportClosureRef`,
+  `hiddenChildrenRef`, and interned source-set refs), not by copying descendant
+  arrays into every candidate, bundle, ObjectPlan, coverage row, or validation
+  row.
+- Expanded recursive arrays are trace/explain data. They are emitted for
+  failing records, not as the default representation of a successful plan.
 
 Normalize becomes validation:
 
@@ -583,6 +590,11 @@ Normalize becomes validation:
   output look correct.
 - If such a correction is needed, the registry/ObjectPlan policy is incomplete
   and candidate generation must be fixed before export.
+- Candidate generation must therefore do slot partitioning before export. A
+  parent composite that excludes child text/shell/table/content slots is born as
+  `SLOT_ONLY` with explicit export/hidden refs, or it is born as `DROP_VISUAL`;
+  it is not emitted as a broad visible candidate and then narrowed by normalize
+  or rebuild passes.
 
 Performance invariants:
 
@@ -596,6 +608,9 @@ Performance invariants:
   by id/set lookups.
 - Recursive source-set arrays are not copied into every ObjectPlan, bundle, or
   coverage row in normal conversion output.
+- Validators on the normal path validate proof refs and indexed membership
+  checks. They expand source trees only for trace/dev explanation or failing
+  records.
 - Full RenderUnit rows are retained in the in-memory Stage 1 model for
   validation/execution, but normal conversion output writes only summary and
   bounded preview rows unless trace/dev diagnostics are enabled.

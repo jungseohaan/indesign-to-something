@@ -52,13 +52,31 @@ Full per-object coverage rows are diagnostic expansion, not executor input.
 They are emitted only in trace/dev mode, or for failing objects, conflicting
 objects, and the minimal ancestry needed to explain those failures.
 
+Closed coverage must be proven with registry-backed proof records, not by
+copying recursive source arrays through every downstream model. Stage 0/1 builds
+and owns these indexes once:
+
+- source parent/child and root/descendant lookup;
+- page-local source fragment lookup;
+- slot-closure membership lookup;
+- source-set interning and membership lookup;
+- coverage claim lookup by source id and by owner ref.
+
+Downstream planners, validators, executors, and diagnostics may reference these
+proof records through stable ids such as `coverageClaimRef`, `slotClosureRef`,
+`exportClosureRef`, `hiddenChildrenRef`, and `sourceSetId`. Normal conversion
+output must not expand a complete recursive source tree merely to prove that the
+tree was covered. Expansion is reserved for trace/dev output, failing records,
+and bounded explanation previews.
+
 Coverage is source-tree aware:
 
 - When a visible PNG/vector owner exports a source `Group` or other parent
   source, all visible descendant source objects included by that parent export
-  are covered by the same visible owner. Coverage validation must therefore
-  claim descendants from the source tree; it must not require a second child
-  owner unless the parent export explicitly excludes that child source.
+  are covered by the same visible owner. Coverage validation must therefore use
+  the source-tree index and the owner's `slotClosureRef`/`exportClosureRef` to
+  claim descendants; it must not rebuild or copy the descendant array in every
+  candidate, bundle, ObjectPlan, or validation row.
 - A `Group` source is not visible material merely because aggregate metadata
   reports child fill/stroke. If the group has children and no direct vector
   paint/placed content of its own, it is `PROVENANCE_ONLY` when its visible
@@ -149,6 +167,14 @@ Java fallback.
 
 `RenderUnit` is created only for a slot owner that needs extracted PNG/vector
 material. It is a confirmed export plan, not a candidate.
+
+The planner creates `RenderUnit`s after the source bundle has been split into
+slot-closed owners. A broad parent candidate must not be created first and then
+corrected by subtracting child slots during normalization. If a parent visible
+slot excludes child text/shell/table/content material, that exclusion is part of
+the `RenderUnit` contract before export through `exportSourceObjectIds`,
+`hiddenTextFrameIds`, `hiddenVisualSourceObjectIds`, and the relevant closure
+refs.
 
 Required `RenderUnit` fields:
 

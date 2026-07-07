@@ -21,6 +21,13 @@ They are transitional records. The final extractor executes confirmed
 If the extractor emits a PNG/vector result that has no RenderUnit, Stage 1 is
 incomplete and validation must fail.
 
+Even during migration, a candidate that stands in for a future `RenderUnit` must
+be slot-closed before export. It may carry broad ancestry for diagnostics, but
+its executable export source set and hidden child declarations must already
+match the slot it will render. Extraction planning must not emit a broad parent
+candidate and rely on normalization, result matching, Java duplicate removal, or
+post-export validation to narrow the visible ownership later.
+
 ## 1. Core Principle
 
 Extraction is not ownership.
@@ -120,6 +127,13 @@ When a parent shell/background candidate contains child content visuals, E1 must
 write a `SLOT_ONLY` candidate for the parent shell and direct E2 to hide those
 child visual sources before export. Creating a full composite and relying on
 Java duplicate removal is an extraction-policy violation.
+
+The same rule applies to text, table, and shell child slots. A parent composite
+candidate is exportable only when its `sourceObjectIds`/`exportSourceObjectIds`,
+hidden text ids, hidden visual ids, and closure refs already describe the
+rendered pixels. Candidate normalization may stabilize ids and attach missing
+diagnostic refs, but it must not invent executable export/hidden sets that
+should have been chosen by source-slot planning.
 
 `exportPasses` describe allowed candidate production. They do not decide final
 visible owners.
@@ -229,6 +243,12 @@ not use a broad DOM scan for export discovery, candidate replacement, or
 ownership recovery. New export work must be driven by the planned candidate or
 RenderUnit list, and broad scans may only populate the Stage 0/1 source index
 used by those planned records.
+
+Pre-export gates use candidate-return lookups as executable instructions, not
+as hints for a second source-set search. A positive gate result returns the exact
+candidate/RenderUnit identity to stamp into the extraction result. A miss means
+the item is skipped or reported; it does not trigger a fallback search through
+all source-set members, descendants, page items, or alternate render channels.
 
 The final candidate gate is stricter:
 

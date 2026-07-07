@@ -25,6 +25,19 @@ Required executor identity fields:
   page-local fragment. It explains what broader source area produced the
   fragment, but `bounds` remains the only visible placement bounds.
 
+Normal executor-facing ObjectPlans must stay small. They may carry explicit
+slot source ids and stable proof references, but they must not carry expanded
+recursive cluster evidence unless that evidence is itself part of the executable
+slot. The normal execution contract is limited to:
+
+- explicit source ids needed for ancestry, visible material, style absorption,
+  text ownership, export, and hidden material;
+- placement, coordinate space, layer/plane, z-order, bounds, materialization,
+  action, and reason fields;
+- compact proof refs such as `coverageClaimRef`, `slotClosureRef`,
+  `exportClosureRef`, `hiddenChildrenRef`, and source-set refs that can be
+  expanded from Stage 0/1 diagnostics when needed.
+
 Diagnostic evidence fields are separate from the executor contract:
 
 - `sourceRootObjectIds`: diagnostic top-level roots inside `sourceObjectIds`.
@@ -44,6 +57,13 @@ such as `sourceSetId`, `clusterSourceSetId`, `exportSourceSetId`, and
 diagnostics or trace mode. Validators may expand those references for failing
 records, but executors must not require expanded cluster or omitted-cluster
 arrays to place, hide, export, or drop material.
+
+In normal conversion output, diagnostic recursive fields are omitted unless a
+plan is failing, not import-ready, or trace/dev diagnostics are enabled. A
+validator on the normal path validates the compact proof refs and indexed
+membership checks; it does not force every ObjectPlan to repeat
+`clusterSourceObjectIds`, `omittedClusterSourceObjectIds`, or other expanded
+evidence arrays.
 
 For `PLACE_TEXT_SHELL`, visible source evidence may come from
 `styleSourceObjectIds` instead of `visualSourceObjectIds` when the shell is a
@@ -128,6 +148,11 @@ Stage 1 has removed child slots owned by inline/table/content plans. The hidden
 visual set for export is `executionSourceObjectIds - exportSourceObjectIds`.
 This keeps broad source ancestry available for diagnostics without letting a
 parent shell hide or export child slots that another ObjectPlan already owns.
+
+This removal happens while building the slot owner and `RenderUnit`, not as a
+post-plan normalization repair. If Stage 1 cannot name the child slots that are
+excluded from the parent export before the parent `RenderUnit` is created, the
+parent plan is not executable and must be reported as a planning defect.
 
 When a parent source bundle loses a child visible slot to a direct child plan,
 the parent plan has only two valid forms:
@@ -218,23 +243,32 @@ document-specific symptom.
 Stage 1 decides in this order:
 
 1. Register every IDML/resolved source object in the selected page range.
-2. Assign a coverage status to every source object:
+2. Build the source-slot registry and compact source-set/proof indexes:
+   parent/child closure, page-local fragments, inline/table/master context,
+   slot closure, source-set interning, and coverage claim lookup.
+3. Assign a coverage status to every source object:
    `VISIBLE_OWNED`, `TEXT_OWNED`, `STYLE_OWNED`, `HIDDEN_BY_OWNER`,
    `DROPPED_INTENTIONAL`, `PROVENANCE_ONLY`, or `UNRESOLVED`.
-3. Build `SourceBundle`s from source tree, story/thread, table/cell,
+4. Build `SourceBundle`s from source tree, story/thread, table/cell,
    inline/anchor, page/spread, and applied-master relationships.
-4. Split every bundle into explicit ownership slots:
+5. Split every bundle into explicit ownership slots:
    `TEXT_SLOT`, `SHELL_SLOT`, `TABLE_STYLE_SLOT`, and
    `CONTENT_VISUAL_SLOT`.
-5. Assign exactly one `SlotOwner` to every visible/style/text slot.
-6. Create `RenderUnit`s for slots whose owner requires extracted PNG/vector
+6. Assign exactly one `SlotOwner` to every visible/style/text slot.
+7. Create `RenderUnit`s for slots whose owner requires extracted PNG/vector
    material.
-7. Derive `ObjectPlan`s from bundle, slot, owner, and RenderUnit records.
-8. Resolve placement from original anchor/page/table/master context.
-9. Resolve visual layer from source role, source layer/z, and the four policy
+8. Derive `ObjectPlan`s from bundle, slot, owner, and RenderUnit records.
+9. Resolve placement from original anchor/page/table/master context.
+10. Resolve visual layer from source role, source layer/z, and the four policy
    layers.
-10. Validate source coverage, slot uniqueness, RenderUnit/ObjectPlan closure,
+11. Validate source coverage, slot uniqueness, RenderUnit/ObjectPlan closure,
     and executor readiness.
+
+Steps 3-8 may query the registry, but they must not rebuild recursive source
+clusters, rescan source subtrees, or create broad candidates that require later
+normalization to become executable. If a slot cannot be closed from the registry
+at creation time, the planner records a defect instead of creating a provisional
+owner and repairing it in a later rebuild pass.
 
 No later stage may create a new owner to compensate for a missing decision.
 
