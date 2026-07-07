@@ -855,6 +855,7 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
     options = options || {};
     var fullDiagnostics = options.fullDiagnostics === true;
     var claimsBySourceId = {};
+    var claimKindsBySourceId = fullDiagnostics ? null : {};
     var childIdsByParentId = {};
     for (var siIndex = 0; sourceItems && siIndex < sourceItems.length; siIndex++) {
         var sourceItem = sourceItems[siIndex];
@@ -883,19 +884,24 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
     function addClaim(sourceId, kind, owner) {
         if (sourceId === null || sourceId === undefined) return;
         var key = String(sourceId);
-        if (!claimsBySourceId[key]) claimsBySourceId[key] = [];
-        claimsBySourceId[key].push({
-            kind: kind,
-            ownerType: owner && owner.ownerType ? owner.ownerType : null,
-            objectPlanId: owner && owner.objectPlanId ? owner.objectPlanId : null,
-            bundleId: owner && owner.bundleId ? owner.bundleId : null,
-            candidateId: owner && owner.candidateId ? owner.candidateId : null,
-            passId: owner && owner.passId ? owner.passId : null,
-            ownershipSlot: owner && owner.ownershipSlot ? owner.ownershipSlot : null,
-            textAction: owner && owner.textAction ? owner.textAction : null,
-            visualAction: owner && owner.visualAction ? owner.visualAction : null,
-            materialization: owner && owner.materialization ? owner.materialization : null
-        });
+        if (fullDiagnostics) {
+            if (!claimsBySourceId[key]) claimsBySourceId[key] = [];
+            claimsBySourceId[key].push({
+                kind: kind,
+                ownerType: owner && owner.ownerType ? owner.ownerType : null,
+                objectPlanId: owner && owner.objectPlanId ? owner.objectPlanId : null,
+                bundleId: owner && owner.bundleId ? owner.bundleId : null,
+                candidateId: owner && owner.candidateId ? owner.candidateId : null,
+                passId: owner && owner.passId ? owner.passId : null,
+                ownershipSlot: owner && owner.ownershipSlot ? owner.ownershipSlot : null,
+                textAction: owner && owner.textAction ? owner.textAction : null,
+                visualAction: owner && owner.visualAction ? owner.visualAction : null,
+                materialization: owner && owner.materialization ? owner.materialization : null
+            });
+        } else {
+            if (!claimKindsBySourceId[key]) claimKindsBySourceId[key] = {};
+            claimKindsBySourceId[key][kind] = true;
+        }
         _incrementSourceCoverageCount(summary.claimKindCounts, kind);
     }
 
@@ -971,9 +977,15 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
     for (var s = 0; sourceItems && s < sourceItems.length; s++) {
         var src = sourceItems[s];
         if (!src || src.id === null || src.id === undefined) continue;
-        var srcClaims = claimsBySourceId[String(src.id)] || [];
-        var status = _sourceCoverageStatusForSource(src, srcClaims);
-        var claimKinds = _sourceCoverageClaimKinds(srcClaims);
+        var sourceKey = String(src.id);
+        var srcClaims = fullDiagnostics ? claimsBySourceId[sourceKey] || [] : [];
+        var srcClaimKindMap = fullDiagnostics ? null : claimKindsBySourceId[sourceKey] || {};
+        var status = fullDiagnostics
+                ? _sourceCoverageStatusForSource(src, srcClaims)
+                : _sourceCoverageStatusForClaimKindMap(src, srcClaimKindMap);
+        var claimKinds = fullDiagnostics
+                ? _sourceCoverageClaimKinds(srcClaims)
+                : _sourceCoverageClaimKindsFromMap(srcClaimKindMap);
         var row = {
             sourceObjectId: src.id,
             coverageStatus: status,
@@ -1078,6 +1090,27 @@ function _sourceCoverageStatusForSource(src, claims) {
     return "PROVENANCE_ONLY";
 }
 
+function _sourceCoverageStatusForClaimKindMap(src, claimKinds) {
+    if (!src) return "UNRESOLVED";
+    claimKinds = claimKinds || {};
+    if (claimKinds.TEXT_OWNER === true) return "TEXT_OWNED";
+    if (claimKinds.STYLE_OWNER === true) return "STYLE_OWNED";
+    if (claimKinds.VISIBLE_VISUAL === true || claimKinds.VISIBLE_EXPORT === true) {
+        return "VISIBLE_OWNED";
+    }
+    if (claimKinds.HIDDEN_BY_OWNER === true || claimKinds.CANDIDATE_HIDDEN === true) {
+        return "HIDDEN_BY_OWNER";
+    }
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) {
+        return "DROPPED_INTENTIONAL";
+    }
+    if (claimKinds.PROVENANCE === true || claimKinds.CANDIDATE_PROVENANCE === true) {
+        return "PROVENANCE_ONLY";
+    }
+    if (_sourceCoverageHasPotentialVisibleMaterial(src)) return "UNRESOLVED";
+    return "PROVENANCE_ONLY";
+}
+
 function _sourceCoverageHasPotentialVisibleMaterial(src) {
     if (!src) return false;
     if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
@@ -1105,6 +1138,16 @@ function _sourceCoverageClaimKinds(claims) {
         var kind = claims[i] && claims[i].kind ? claims[i].kind : "UNKNOWN";
         if (seen[kind]) continue;
         seen[kind] = true;
+        out.push(kind);
+    }
+    return out;
+}
+
+function _sourceCoverageClaimKindsFromMap(claimKinds) {
+    var out = [];
+    for (var kind in claimKinds) {
+        if (!claimKinds.hasOwnProperty(kind)) continue;
+        if (claimKinds[kind] !== true) continue;
         out.push(kind);
     }
     return out;
