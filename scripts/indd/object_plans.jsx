@@ -470,21 +470,15 @@ function _objectPlanIdentityKey(plan) {
 function _attachObjectPlanSourceSetRefs(objectPlans) {
     var interner = _createObjectPlanSourceSetInterner();
     var fields = [
-        { ids: "sourceObjectIds", ref: "sourceSetId" },
         { ids: "sourceRootObjectIds", ref: "sourceRootSetId" },
         { ids: "clusterSourceObjectIds", ref: "clusterSourceSetId" },
-        { ids: "omittedClusterSourceObjectIds", ref: "omittedClusterSourceSetId" },
-        { ids: "visualSourceObjectIds", ref: "visualSourceSetId" },
-        { ids: "styleSourceObjectIds", ref: "styleSourceSetId" },
-        { ids: "ownedTextFrameIds", ref: "ownedTextFrameSetId" },
-        { ids: "exportSourceObjectIds", ref: "exportSourceSetId" },
-        { ids: "hiddenVisualSourceObjectIds", ref: "hiddenVisualSourceSetId" },
-        { ids: "ownedByNativeShellSourceObjectIds", ref: "ownedByNativeShellSourceSetId" }
+        { ids: "omittedClusterSourceObjectIds", ref: "omittedClusterSourceSetId" }
     ];
     var attachedRefCount = 0;
     for (var i = 0; objectPlans && i < objectPlans.length; i++) {
         var plan = objectPlans[i];
         if (!plan) continue;
+        if (!_objectPlanSlimPlanNeedsDiagnosticSourceSets(plan)) continue;
         for (var f = 0; f < fields.length; f++) {
             var field = fields[f];
             var ids = plan[field.ids] || [];
