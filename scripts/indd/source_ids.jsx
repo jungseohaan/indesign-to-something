@@ -87,6 +87,7 @@ function _buildSourceItemIndexes(sourceItems) {
             childIdsByParentId: childIdsByParentId
         };
     }
+    if (sourceItems._sourceItemIndexesCache) return sourceItems._sourceItemIndexesCache;
 
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
@@ -98,10 +99,19 @@ function _buildSourceItemIndexes(sourceItems) {
         childIdsByParentId[parentKey].push(src.id);
     }
 
-    return {
+    var indexes = {
         sourceInfoById: sourceInfoById,
         childIdsByParentId: childIdsByParentId
     };
+    try {
+        Object.defineProperty(sourceItems, "_sourceItemIndexesCache", {
+            value: indexes,
+            enumerable: false
+        });
+    } catch (eSourceItemIndexesCache) {
+        sourceItems._sourceItemIndexesCache = indexes;
+    }
+    return indexes;
 }
 
 function _sourceIdSet(ids) {
