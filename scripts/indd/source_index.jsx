@@ -857,13 +857,22 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
     var claimsBySourceId = {};
     var claimKindsBySourceId = fullDiagnostics ? null : {};
     var childIdsByParentId = {};
-    for (var siIndex = 0; sourceItems && siIndex < sourceItems.length; siIndex++) {
-        var sourceItem = sourceItems[siIndex];
-        if (!sourceItem || sourceItem.id === null || sourceItem.id === undefined) continue;
-        if (sourceItem.parentId !== null && sourceItem.parentId !== undefined) {
-            var parentKey = String(sourceItem.parentId);
-            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
-            childIdsByParentId[parentKey].push(sourceItem.id);
+    if (typeof _buildSourceItemIndexes === "function") {
+        try {
+            childIdsByParentId = _buildSourceItemIndexes(sourceItems || []).childIdsByParentId || {};
+        } catch (eSourceCoverageIndex) {
+            childIdsByParentId = {};
+        }
+    }
+    if (!childIdsByParentId || _sourceModelObjectKeyCount(childIdsByParentId) === 0) {
+        for (var siIndex = 0; sourceItems && siIndex < sourceItems.length; siIndex++) {
+            var sourceItem = sourceItems[siIndex];
+            if (!sourceItem || sourceItem.id === null || sourceItem.id === undefined) continue;
+            if (sourceItem.parentId !== null && sourceItem.parentId !== undefined) {
+                var parentKey = String(sourceItem.parentId);
+                if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+                childIdsByParentId[parentKey].push(sourceItem.id);
+            }
         }
     }
     var plans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans

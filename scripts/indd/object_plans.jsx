@@ -115,6 +115,11 @@ function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
 }
 
 function _objectPlanSourceInfoById(sourceItems) {
+    if (typeof _buildSourceItemIndexes === "function") {
+        try {
+            return _buildSourceItemIndexes(sourceItems || []).sourceInfoById || {};
+        } catch (eObjectPlanSourceInfoIndex) {}
+    }
     var out = {};
     for (var i = 0; sourceItems && i < sourceItems.length; i++) {
         var src = sourceItems[i];
