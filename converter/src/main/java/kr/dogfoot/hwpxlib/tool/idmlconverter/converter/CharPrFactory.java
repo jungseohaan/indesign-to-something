@@ -136,7 +136,7 @@ final class CharPrFactory {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
                 textRun.letterSpacing(),
-                effectiveBoldStyle(fontStyleStr, textRun.fontFamily()),
+                effectiveBoldStyle(fontStyleStr, textRun.fontFamily(), textRun.characterStyleRef()),
                 isItalicStyle(fontStyleStr),
                 textRun.superscript(), textRun.subscript(),
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
@@ -262,7 +262,7 @@ final class CharPrFactory {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 fontFamilyToUse, textRun.fontStyle(), ctx.fontRegistry,
                 letterSpacingToUse,
-                effectiveBoldStyle(fontStyle, textRun.fontFamily()),
+                effectiveBoldStyle(fontStyle, textRun.fontFamily(), textRun.characterStyleRef()),
                 isItalicStyle(fontStyle),
                 textRun.superscript(), textRun.subscript(),
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
@@ -290,8 +290,12 @@ final class CharPrFactory {
      * IDML CharStyle 에서 fontStyle="Bold" 라고 지정해도, AppliedFont 가 실제로 Bold 변종이 없는 경우
      * InDesign 은 Medium/Regular 로 대체 렌더한다 (예: "DIN Next LT Pro (TT)" + Bold → Medium).
      * resolved.json fontMetrics 의 실제 weight 가 600 미만이면 Bold 로 강조 표시하지 않는다.
+     *
+     * 단, CharacterStyle 자체가 "강조"/emphasis/strong 의미를 갖는 경우는 원본의 semantic emphasis가
+     * 이미 확정된 상태이므로 실제 weight guard보다 우선한다.
      */
-    boolean effectiveBoldStyle(String fontStyle, String fontFamily) {
+    boolean effectiveBoldStyle(String fontStyle, String fontFamily, String characterStyleRef) {
+        if (isEmphasisStyle(characterStyleRef)) return true;
         if (!isBoldStyle(fontStyle)) return false;
         try {
             kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fm = ctx.fontRegistry.fontMapper();
@@ -301,6 +305,14 @@ final class CharPrFactory {
             }
         } catch (Exception e) {}
         return true;
+    }
+
+    static boolean isEmphasisStyle(String styleRef) {
+        if (styleRef == null || styleRef.isEmpty()) return false;
+        String lower = styleRef.toLowerCase();
+        return styleRef.contains("강조")
+                || lower.contains("emphasis")
+                || lower.contains("strong");
     }
 
     /**
@@ -377,7 +389,7 @@ final class CharPrFactory {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
                 textRun.letterSpacing(),
-                effectiveBoldStyle(fontStyle, textRun.fontFamily()),
+                effectiveBoldStyle(fontStyle, textRun.fontFamily(), textRun.characterStyleRef()),
                 isItalicStyle(fontStyle),
                 textRun.superscript(), textRun.subscript(),
                 UnderlineType.NONE, textColor,

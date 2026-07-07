@@ -233,7 +233,10 @@ final class ParaPrFactory {
         if (dominantFont <= 0) return false;
         int textLength = meaningfulTextLength(para);
         if (textLength < 20) return false;
-        return fixedLeading >= Math.round(dominantFont * 1.75f);
+        // Keep ordinary source leading even when it is visually roomy. This
+        // fallback exists only for pathological fixed spacing introduced by
+        // oversized inline artifacts, not for body text leading from IDML/resolved.
+        return fixedLeading >= Math.round(dominantFont * 2.5f);
     }
 
     private static int dominantTextFontSize(ASTParagraph para) {

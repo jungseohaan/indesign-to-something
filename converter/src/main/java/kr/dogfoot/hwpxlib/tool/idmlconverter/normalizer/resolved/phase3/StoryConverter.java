@@ -2665,7 +2665,8 @@ public final class StoryConverter {
         // 중복 단락 제거: InDesign의 overset/threaded frame에서
         // story.paragraphs가 중복 텍스트를 가진 단락을 반환하는 경우 감지
         String prevParaText = "";
-        for (ResolvedParagraph rp : story.paragraphs()) {
+        for (int paragraphIndex = 0; paragraphIndex < story.paragraphs().size(); paragraphIndex++) {
+            ResolvedParagraph rp = story.paragraphs().get(paragraphIndex);
             // 현재 단락 텍스트 추출
             // ExtendScript에서 paragraph.textStyleRanges[k].contents가 단락 경계를
             // 넘어 다음 단락 내용까지 포함한 경우를 대비: \r 이후 내용은 다음 단락 소속이므로 잘라냄
@@ -2721,6 +2722,7 @@ public final class StoryConverter {
                 para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
                 para.lineSpacingType("fixed");
             }
+            StoryLoader.applyComposedLinePitchFallback(para, ctx, story, paragraphIndex);
             if (rp.spaceBefore() != null && rp.spaceBefore() > 0) {
                 para.spaceBefore(CoordinateConverter.pointsToHwpunits(rp.spaceBefore()));
             }

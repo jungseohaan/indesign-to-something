@@ -16,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Phase 3 런 빌드 + 매칭 + 스타일 헬퍼 (W3 Step F).
@@ -82,6 +83,10 @@ class RunBuilder {
             text = EHFontGlyphMap.applyEHGrepAsciiGlyphMap(text);
         }
         tr.text(text);
+        String characterStyleRef = resolvedCharacterStyleRef(rr, cr);
+        if (characterStyleRef != null) {
+            tr.characterStyleRef(characterStyleRef);
+        }
 
         // fontFamily / fontSize / textColor: 헬퍼로 단일 우선순위 적용
         // SPEC-016: 매칭 신뢰도(confidence)에 따라 resolved 오버라이드 여부 결정
@@ -160,13 +165,18 @@ class RunBuilder {
             // HWPX fonts do not enlarge the symbol relative to the source.
             applyMarkerScaleFromResolved(tr, rr);
         }
+        // IDML Position/Resolved position is the authoritative source for
+        // chemical-formula subscripts and mathematical superscripts. Some
+        // sources encode this as Position=SUBSCRIPT without a baselineShift,
+        // so the baselineShift heuristic below is not sufficient on its own.
+        applyPositionStyle(tr, rr, cr);
         // baselineShift: InDesign에서 작은 글자 + 양수 baselineShift = 위첨자,
         // 작은 글자 + 음수 baselineShift = 아래첨자 패턴을 감지하여 sup/subscript로 변환
         // resolved 우선, IDML CR fallback
         Double bsVal = (rr != null && rr.baselineShift() != null && rr.baselineShift() != 0)
                 ? rr.baselineShift()
                 : (cr.baselineShift() != null && cr.baselineShift() != 0 ? cr.baselineShift() : null);
-        if (bsVal != null) {
+        if (bsVal != null && !tr.subscript() && !tr.superscript()) {
             double bsPt = bsVal;
             // 인접 런의 fontSize 비교: 현재 런이 주변보다 작으면 첨자로 판별
             double curFs = (rr != null && rr.fontSize() != null && rr.fontSize() > 0) ? rr.fontSize()
@@ -255,6 +265,36 @@ class RunBuilder {
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
+    }
+
+    private static void applyPositionStyle(ASTTextRun target, ResolvedRun rr, IDMLCharacterRun cr) {
+        String position = rr != null && rr.position() != null ? rr.position() : cr.position();
+        if (position == null) return;
+        String p = position.toLowerCase(Locale.ROOT);
+        if (p.contains("superscript")) {
+            target.superscript(true);
+            target.subscript(false);
+        } else if (p.contains("subscript")) {
+            target.subscript(true);
+            target.superscript(false);
+        }
+    }
+
+    private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr) {
+        String style = rr != null ? rr.charStyle() : null;
+        if (isUsableCharacterStyleRef(style)) return style;
+        style = cr != null ? cr.appliedCharacterStyle() : null;
+        if (isUsableCharacterStyleRef(style)) return style;
+        return null;
+    }
+
+    private static boolean isUsableCharacterStyleRef(String style) {
+        if (style == null) return false;
+        String trimmed = style.trim();
+        return !trimmed.isEmpty()
+                && !"[None]".equals(trimmed)
+                && !"[없음]".equals(trimmed)
+                && !"CharacterStyle/$ID/[No character style]".equals(trimmed);
     }
 
     private static String normalizeComparableText(String text) {

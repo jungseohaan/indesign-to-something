@@ -142,6 +142,7 @@ public class StoryLoader {
 
             // 단락 속성(정렬/줄간격/간격/들여쓰기/탭): 셀 안/밖 공용 루틴 사용
             ParagraphPropertyResolver.apply(para, ip, resolvedParagraph, ctx, styleAlignCache);
+            applyComposedLinePitchFallback(para, ctx, resolvedStory, i);
 
             // resolved 런 (스타일 상속 보강용)
             List<ResolvedRun> resolvedRuns = null;
@@ -779,6 +780,45 @@ public class StoryLoader {
             paraIndex++;
         }
         return result;
+    }
+
+    static void applyComposedLinePitchFallback(ASTParagraph para,
+                                               ResolvedBuildContext ctx,
+                                               ResolvedStory resolvedStory,
+                                               int paragraphIndex) {
+        if (para == null || para.lineSpacing() != null) return;
+        if (ctx == null || ctx.resolvedData == null || resolvedStory == null || resolvedStory.id() == null) return;
+
+        List<Double> tops = new ArrayList<>();
+        for (ResolvedTextFrame tf : ctx.resolvedData.getTextFramesForStory(resolvedStory.id())) {
+            if (tf == null || tf.composedLines() == null) continue;
+            for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+                if (line == null || line.paraIndex() != paragraphIndex) continue;
+                double[] b = line.bounds();
+                if (b == null || b.length < 4) continue;
+                tops.add(b[0]);
+            }
+        }
+        if (tops.size() < 2) return;
+        tops.sort(Double::compareTo);
+
+        List<Double> deltas = new ArrayList<>();
+        Double prev = null;
+        for (Double top : tops) {
+            if (top == null) continue;
+            if (prev != null) {
+                double delta = top - prev;
+                if (delta >= 4.0 && delta <= 50.0) {
+                    deltas.add(delta);
+                }
+            }
+            prev = top;
+        }
+        if (deltas.isEmpty()) return;
+        deltas.sort(Double::compareTo);
+        double pitch = deltas.get(deltas.size() / 2);
+        para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(pitch));
+        para.lineSpacingType("fixed");
     }
 
     private static ResolvedTable.Cell findResolvedCell(
