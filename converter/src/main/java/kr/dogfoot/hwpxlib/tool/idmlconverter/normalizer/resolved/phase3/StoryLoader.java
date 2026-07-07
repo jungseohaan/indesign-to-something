@@ -750,6 +750,7 @@ public class StoryLoader {
                 || !resolvedCellHasInlineAnchors(resolvedCell)) {
             return result;
         }
+        boolean includeResolvedText = hasDirectVisibleCellText(idmlCell);
 
         int paraIndex = 0;
         for (ResolvedParagraph resolvedParagraph : resolvedCell.paragraphs()) {
@@ -767,12 +768,14 @@ public class StoryLoader {
             } else {
                 applyResolvedParagraphPropertiesOnly(para, resolvedParagraph);
             }
-            appendResolvedRunsInOrder(ctx, resolvedParagraph, para);
+            appendResolvedRunsInOrder(ctx, resolvedParagraph, para, includeResolvedText);
             RunPostProcessor.splitOverlineRuns(para);
             RunPostProcessor.convertItalicRunsToEquations(para);
             RunBuilder.resetBulletParagraphColors(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
-            result.add(para);
+            if (para.items() != null && !para.items().isEmpty()) {
+                result.add(para);
+            }
             paraIndex++;
         }
         return result;
@@ -807,9 +810,12 @@ public class StoryLoader {
     private static void appendResolvedRunsInOrder(
             ResolvedBuildContext ctx,
             ResolvedParagraph resolvedParagraph,
-            ASTParagraph para) {
+            ASTParagraph para,
+            boolean includeTextRuns) {
         if (ctx == null || resolvedParagraph == null || resolvedParagraph.runs() == null || para == null) return;
-        appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
+        if (includeTextRuns) {
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
+        }
         ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
                 .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
                 .truncateAtParagraphBreak(true);
@@ -840,6 +846,7 @@ public class StoryLoader {
                 continue;
             }
 
+            if (!includeTextRuns) continue;
             String text = run.text();
             if (text == null) continue;
             for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(text, run, para, options)) {

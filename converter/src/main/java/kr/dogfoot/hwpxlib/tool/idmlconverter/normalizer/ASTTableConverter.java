@@ -69,6 +69,7 @@ public class ASTTableConverter {
         // 행 변환
         long totalHeight = 0;
         int rowIdx = 0;
+        boolean[][] occupied = tableCellOccupancy(idmlTable);
         for (IDMLTableRow idmlRow : idmlTable.rows()) {
             ASTTableRow row = new ASTTableRow();
             row.rowIndex(rowIdx);
@@ -78,10 +79,12 @@ public class ASTTableConverter {
 
             // 셀 변환
             for (IDMLTableCell idmlCell : idmlRow.cells()) {
+                if (isCoveredTableCell(occupied, idmlCell)) continue;
                 int colIdx = idmlCell.columnIndex();
                 ASTTableCell cell = convertTableCell(idmlCell, rowIdx, colIdx,
                         idmlDoc, colorResolver, imageLoader, resolvedData);
                 row.addCell(cell);
+                markTableCellOccupied(occupied, idmlCell);
             }
 
             table.addRow(row);
@@ -287,6 +290,7 @@ public class ASTTableConverter {
         boolean useFullConvert = (idmlDoc != null && colorResolver != null);
         long totalHeight = 0;
         int rowIdx = 0;
+        boolean[][] occupied = tableCellOccupancy(idmlTable);
         for (IDMLTableRow idmlRow : idmlTable.rows()) {
             ASTTableRow row = new ASTTableRow();
             row.rowIndex(rowIdx);
@@ -295,6 +299,7 @@ public class ASTTableConverter {
             totalHeight += row.rowHeight();
 
             for (IDMLTableCell idmlCell : idmlRow.cells()) {
+                if (isCoveredTableCell(occupied, idmlCell)) continue;
                 ASTTableCell cell;
                 if (useFullConvert) {
                     cell = convertTableCell(idmlCell, rowIdx, idmlCell.columnIndex(),
@@ -305,6 +310,7 @@ public class ASTTableConverter {
                             cellParagraphBuilder);
                 }
                 row.addCell(cell);
+                markTableCellOccupied(occupied, idmlCell);
             }
 
             table.addRow(row);
@@ -352,6 +358,36 @@ public class ASTTableConverter {
             ensureRowsFitVisibleCellContent(table);
         }
         return table;
+    }
+
+    private static boolean[][] tableCellOccupancy(IDMLTable table) {
+        int rows = table != null && table.rows() != null ? table.rows().size() : 0;
+        int cols = table != null && table.columnWidths() != null ? table.columnWidths().size() : 0;
+        if (rows <= 0 || cols <= 0) return new boolean[0][0];
+        return new boolean[rows][cols];
+    }
+
+    private static boolean isCoveredTableCell(boolean[][] occupied, IDMLTableCell cell) {
+        if (occupied == null || occupied.length == 0 || cell == null) return false;
+        int row = cell.rowIndex();
+        int col = cell.columnIndex();
+        if (row < 0 || row >= occupied.length) return false;
+        if (col < 0 || col >= occupied[row].length) return false;
+        return occupied[row][col];
+    }
+
+    private static void markTableCellOccupied(boolean[][] occupied, IDMLTableCell cell) {
+        if (occupied == null || occupied.length == 0 || cell == null) return;
+        int row0 = Math.max(0, cell.rowIndex());
+        int col0 = Math.max(0, cell.columnIndex());
+        int row1 = Math.min(occupied.length, row0 + Math.max(1, cell.rowSpan()));
+        for (int r = row0; r < row1; r++) {
+            if (occupied[r] == null || occupied[r].length == 0) continue;
+            int col1 = Math.min(occupied[r].length, col0 + Math.max(1, cell.columnSpan()));
+            for (int c = col0; c < col1; c++) {
+                occupied[r][c] = true;
+            }
+        }
     }
 
     private static boolean hasValidBounds(double[] bounds) {

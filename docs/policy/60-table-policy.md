@@ -11,6 +11,22 @@ appearance into HWPX table style.
 - IDML table structure belongs to the table structure slot: table object,
   rows, columns, merged cells, fixed outer bounds, row/column geometry, and
   editable cell text.
+- A merged/covered table grid coordinate is not a second editable cell owner.
+  If an IDML table exposes both the spanning source cell and placeholder cells
+  whose start grid coordinate is already covered by that span, Stage 2/3 must
+  materialize only the spanning cell. Covered placeholders may be kept only as
+  provenance; they must not receive a duplicate HWPX cell, duplicate text
+  paragraphs, or a second table-structure owner.
+- Resolved table-cell data may be used to rescue inline anchors that are lost
+  from IDML story XML, but it must not create editable text in an IDML cell
+  that has no direct visible source text. The source cell that owns the text is
+  the IDML cell containing that text; empty spacer/placeholder cells are not
+  text owners merely because resolved row/column lookup returns nearby text.
+- When a clean `ASTTable` already owns an IDML table source, a table-only
+  carrier TextFrame plan for the same table is the same table-structure slot.
+  Executors must not emit another HWPX table/text owner for that carrier. The
+  carrier may remain as provenance for placement, but not as a second visible
+  `TEXT_SLOT` or table-structure owner.
 - During migration the implementation value `TABLE_STYLE_SLOT` /
   `PLACE_TABLE_STYLE` / `HWPX_TABLE_STYLE` may still name this slot. In this
   policy, that legacy name means table structure only.

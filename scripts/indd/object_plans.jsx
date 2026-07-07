@@ -1243,6 +1243,10 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     var ownedTextFrameIds = _sortedNumericIds(bundle.ownedTextFrameIds || []);
     var visualSourceObjectIds = _objectPlanPolicyVisualSourceIds(
             bundle.visualSourceObjectIds || [], ownedTextFrameIds, textAction, visualAction);
+    if (visualSourceObjectIds.length === 0) {
+        visualSourceObjectIds = _objectPlanFallbackVisualSourceIds(
+                bundle, ownedTextFrameIds, textAction, visualAction, sourceById);
+    }
     var styleSourceObjectIds = _objectPlanStyleSourceObjectIds(bundle, visualAction);
     if (visualAction === "ABSORB_TEXT_STYLE") {
         visualSourceObjectIds = [];
@@ -1325,6 +1329,47 @@ function _objectPlanPolicyVisualSourceIds(visualSourceIds, ownedTextFrameIds, te
         if (!owned[String(visualIds[i])]) out.push(visualIds[i]);
     }
     return out;
+}
+
+function _objectPlanFallbackVisualSourceIds(bundle, ownedTextFrameIds, textAction, visualAction, sourceById) {
+    if (!bundle) return [];
+    if (textAction === "OWNED_BY_PNG") return [];
+    if (visualAction !== "PLACE_INLINE_PNG"
+            && visualAction !== "PLACE_FLOATING_PNG"
+            && visualAction !== "PLACE_TEXT_SHELL") {
+        return [];
+    }
+    if (!ownedTextFrameIds || ownedTextFrameIds.length === 0) return [];
+    var candidates = [];
+    candidates = candidates.concat(bundle.sourceRootObjectIds || []);
+    candidates = candidates.concat(bundle.visualSourceObjectIds || []);
+    candidates = candidates.concat(bundle.exportSourceObjectIds || []);
+    candidates = candidates.concat(bundle.sourceObjectIds || []);
+    return _objectPlanNonTextVisualSourceIds(candidates, ownedTextFrameIds, sourceById);
+}
+
+function _objectPlanNonTextVisualSourceIds(ids, ownedTextFrameIds, sourceById) {
+    var owned = _sourceIdSet(ownedTextFrameIds || []);
+    var out = [];
+    var seen = {};
+    for (var i = 0; ids && i < ids.length; i++) {
+        var id = Number(ids[i]);
+        if (isNaN(id)) continue;
+        if (owned[String(id)]) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        if (src && _objectPlanSourceKindIsTextOnly(src.kind)) continue;
+        _pushUniqueId(out, seen, id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanSourceKindIsTextOnly(kind) {
+    kind = String(kind || "");
+    return kind === "TextFrame"
+            || kind === "Story"
+            || kind === "Character"
+            || kind === "InsertionPoint"
+            || kind === "Cell";
 }
 
 function _objectPlanStyleSourceObjectIds(bundle, visualAction) {
