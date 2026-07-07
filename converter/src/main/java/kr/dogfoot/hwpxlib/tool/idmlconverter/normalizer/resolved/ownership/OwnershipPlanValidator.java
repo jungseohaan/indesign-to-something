@@ -61,6 +61,7 @@ public final class OwnershipPlanValidator {
         v.validateRenderedPlanExactArtifactMatchPreferred();
         v.validateVisibleVisualSourcesArePageLocal();
         v.validateTextlessVisualFragmentsArePageLocal();
+        v.validateInlinePngHasExplicitInlineEvidence();
         v.validateDirectInlineAnchoredTextShellsStayInline();
         v.validateVisibleInlineSourceTextShellsStayInline();
         v.validateRenderedGraphicFrameIsNotAlternatePassOwner();
@@ -742,6 +743,20 @@ public final class OwnershipPlanValidator {
             if (boundsOverlap(targetPage, boundsOf(item))) return true;
         }
         return false;
+    }
+
+    private void validateInlinePngHasExplicitInlineEvidence() {
+        if (ctx.resolvedData == null) return;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) continue;
+            InlineSourceEvidence evidence = inlineSourceEvidence(plan);
+            if (!evidence.checked || evidence.inline) continue;
+            warn("STAGE4_INLINE_PNG_WITHOUT_INLINE_SOURCE_EVIDENCE",
+                    "plan=" + planRef(plan)
+                            + " checkedSourceIds=" + evidence.checkedIds);
+        }
     }
 
     private void validateDirectInlineAnchoredTextShellsStayInline() {
@@ -1525,6 +1540,51 @@ public final class OwnershipPlanValidator {
             return plan.visualSourceObjectIds;
         }
         return plan.sourceObjectIds != null ? plan.sourceObjectIds : new int[0];
+    }
+
+    private InlineSourceEvidence inlineSourceEvidence(ObjectPlan plan) {
+        InlineSourceEvidence evidence = new InlineSourceEvidence();
+        if (plan == null || ctx.resolvedData == null) return evidence;
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        addAll(ids, plan.sourceObjectIds);
+        addAll(ids, plan.sourceRootObjectIds);
+        addAll(ids, plan.visualSourceObjectIds);
+        addAll(ids, plan.exportSourceObjectIds);
+        for (int sourceId : ids) {
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (item == null) continue;
+            evidence.checked = true;
+            if (evidence.checkedIds.length() > 0) evidence.checkedIds.append(',');
+            evidence.checkedIds.append(sourceId);
+            if (isExplicitInlineSource(item)) {
+                evidence.inline = true;
+            }
+        }
+        return evidence;
+    }
+
+    private static void addAll(LinkedHashSet<Integer> out, int[] ids) {
+        if (out == null || ids == null) return;
+        for (int id : ids) out.add(id);
+    }
+
+    private static boolean isExplicitInlineSource(ResolvedPageItem item) {
+        if (item == null) return false;
+        String storyAnchorPlacement = safe(item.storyAnchorPlacement()).toUpperCase(java.util.Locale.ROOT);
+        String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(java.util.Locale.ROOT);
+        if ("FLOATING_ANCHORED".equals(storyAnchorPlacement)
+                || "ANCHORED".equals(anchoredPosition)) {
+            return false;
+        }
+        return "INLINE".equals(storyAnchorPlacement)
+                || "INLINE_POSITION".equals(anchoredPosition)
+                || "INLINEPOSITION".equals(anchoredPosition);
+    }
+
+    private static final class InlineSourceEvidence {
+        boolean checked;
+        boolean inline;
+        final StringBuilder checkedIds = new StringBuilder();
     }
 
     private static int[] sourceRootIds(ObjectPlan plan) {

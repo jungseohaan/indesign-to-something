@@ -165,11 +165,14 @@ function _storyAnchorPlacementForItem(doc, item, parentStory) {
 
 function _isInlineFlowItemBySourceInfo(sourceInfo) {
     if (!sourceInfo) return false;
-    var parentKind = String(sourceInfo.parentKind || "");
-    if (parentKind === "Character" || parentKind === "InsertionPoint") return true;
     var placement = String(sourceInfo.storyAnchorPlacement || "").toUpperCase();
     var anchoredPosition = String(sourceInfo.anchoredPosition || "").toUpperCase();
-    return placement === "INLINE" || anchoredPosition === "INLINE_POSITION";
+    if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
+        return false;
+    }
+    return placement === "INLINE"
+            || anchoredPosition === "INLINE_POSITION"
+            || anchoredPosition === "INLINEPOSITION";
 }
 
 function _isClipCarryingShapeKind(kind) {
@@ -342,6 +345,59 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return null;
     }
 
+    function canIndexMissingSourceParent(item) {
+        var kind = "";
+        try { kind = item && item.constructor ? String(item.constructor.name || "") : ""; } catch (eKind) {}
+        return kind === "Group"
+                || kind === "Rectangle"
+                || kind === "Oval"
+                || kind === "Polygon"
+                || kind === "GraphicLine"
+                || kind === "TextFrame";
+    }
+
+    function _rangeTargetPageIndexesForId(id) {
+        if (id === null || id === undefined) return [];
+        var map = ctx && ctx.rangeTargetPageIndexesBySourceId
+                ? ctx.rangeTargetPageIndexesBySourceId[String(id)]
+                : null;
+        if (!map) return [];
+        var pages = [];
+        var seen = {};
+        if (map.length !== undefined && typeof map !== "string") {
+            for (var ai = 0; ai < map.length; ai++) {
+                var pageValue = Number(map[ai]);
+                if (isNaN(pageValue) || seen[String(pageValue)]) continue;
+                pages.push(pageValue);
+                seen[String(pageValue)] = true;
+            }
+        } else {
+            for (var key in map) {
+                if (!map.hasOwnProperty(key) || map[key] !== true) continue;
+                var pageIndex = Number(key);
+                if (isNaN(pageIndex) || seen[String(pageIndex)]) continue;
+                pages.push(pageIndex);
+                seen[String(pageIndex)] = true;
+            }
+        }
+        pages.sort(function(a, b) { return a - b; });
+        return pages;
+    }
+
+    function _candidateRangePagesForInfo(info) {
+        if (!info || !info.rangeTargetPageIndexes || info.rangeTargetPageIndexes.length === 0) return [];
+        var pages = [];
+        var seen = {};
+        for (var i = 0; i < info.rangeTargetPageIndexes.length; i++) {
+            var pageIndex = Number(info.rangeTargetPageIndexes[i]);
+            if (isNaN(pageIndex) || seen[String(pageIndex)]) continue;
+            if (!_candidatePageInRange(pageIndex, ctx)) continue;
+            pages.push(pageIndex);
+            seen[String(pageIndex)] = true;
+        }
+        return pages;
+    }
+
     function parentStoryOfItem(item) {
         try {
             if (item && item.parentStory) return item.parentStory;
@@ -460,7 +516,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             strokeWeight: null,
             cornerRadius: null,
             anchoredPosition: _itemAnchoredPosition(item),
-            storyAnchorPlacement: _storyAnchorPlacementForItem(doc, item, parentStory)
+            storyAnchorPlacement: _storyAnchorPlacementForItem(doc, item, parentStory),
+            recoveredMissingParent: false,
+            rangeTargetPageIndexes: _rangeTargetPageIndexesForId(id)
         };
 
         try { info.hiddenLayer = isOnHiddenLayer(item); } catch (eHidden) {}
@@ -502,6 +560,58 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
 
     for (var i = 0; allItems && i < allItems.length; i++) {
         try { readItemInfo(allItems[i]); } catch (eReadInfo) {}
+    }
+    for (var parentPass = 0; parentPass < 8; parentPass++) {
+        var appendedParent = false;
+        var snapshotCount = sourceItems.length;
+        for (var spi = 0; spi < snapshotCount; spi++) {
+            var childInfo = sourceItems[spi];
+            if (!childInfo || childInfo.parentId === null || childInfo.parentId === undefined) continue;
+            if (sourceInfoById[String(childInfo.parentId)]) continue;
+            var childDom = domById[String(childInfo.id)];
+            var parentDom = null;
+            try { parentDom = childDom ? childDom.parent : null; } catch (eParentDom) {}
+            if (!parentDom || !canIndexMissingSourceParent(parentDom)) continue;
+            var parentId = itemId(parentDom);
+            if (parentId === null || parentId === undefined) continue;
+            if (String(parentId) !== String(childInfo.parentId)) continue;
+            try {
+                var parentInfo = readItemInfo(parentDom);
+                if (parentInfo) {
+                    parentInfo.recoveredMissingParent = true;
+                    if ((!parentInfo.rangeTargetPageIndexes || parentInfo.rangeTargetPageIndexes.length === 0)
+                            && childInfo.rangeTargetPageIndexes && childInfo.rangeTargetPageIndexes.length > 0) {
+                        parentInfo.rangeTargetPageIndexes = childInfo.rangeTargetPageIndexes.slice(0);
+                    }
+                    appendedParent = true;
+                }
+            } catch (eReadMissingParent) {}
+        }
+        if (!appendedParent) break;
+    }
+    var startRangePageIndex = Math.max(0, Number(ctx && ctx.startPage || 1) - 1);
+    var endRangePageIndex = Math.max(startRangePageIndex, Number(ctx && (ctx.endPage || ctx.startPage) || 1) - 1);
+    for (var rpi = 0; rpi < sourceItems.length; rpi++) {
+        var rangeInfo = sourceItems[rpi];
+        if (!rangeInfo) continue;
+        var explicitRangePages = _candidateRangePagesForInfo(rangeInfo);
+        if (explicitRangePages.length > 0
+                && (rangeInfo.pageIndex < startRangePageIndex || rangeInfo.pageIndex > endRangePageIndex)) {
+            rangeInfo.originalPageIndex = rangeInfo.pageIndex;
+            rangeInfo.pageIndex = explicitRangePages[0];
+            rangeInfo.reprojectedToRangePage = true;
+            continue;
+        }
+        if (!rangeInfo.bounds || rangeInfo.bounds.length < 4) continue;
+        if (rangeInfo.pageIndex >= startRangePageIndex && rangeInfo.pageIndex <= endRangePageIndex) continue;
+        for (var targetPageIndex = startRangePageIndex; targetPageIndex <= endRangePageIndex; targetPageIndex++) {
+            var targetBounds = pageBounds(targetPageIndex);
+            if (!_boundsOverlap(targetBounds, rangeInfo.bounds)) continue;
+            rangeInfo.originalPageIndex = rangeInfo.pageIndex;
+            rangeInfo.pageIndex = targetPageIndex;
+            rangeInfo.reprojectedToRangePage = true;
+            break;
+        }
     }
     normalizeSourceItemZOrder(sourceItems, ctx);
     stats.sourceZOrderSummary = ctx && ctx.sourceZOrderSummary
@@ -595,8 +705,16 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
 
     function includeSourceOnPage(info, pageIndex) {
         if (!info) return false;
+        var rangePages = _candidateRangePagesForInfo(info);
+        if (rangePages.length > 0) {
+            for (var rpi = 0; rpi < rangePages.length; rpi++) {
+                if (rangePages[rpi] === pageIndex) return true;
+            }
+            return false;
+        }
         if (info.pageIndex < 0) return true;
         if (info.pageIndex === pageIndex) return true;
+        if (info.recoveredMissingParent === true && _boundsOverlap(pageBounds(pageIndex), info.bounds)) return true;
         if (sameSpread(info.pageIndex, pageIndex) && _boundsOverlap(pageBounds(pageIndex), info.bounds)) return true;
         return false;
     }
@@ -753,6 +871,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         if (candidatePageIndexesById[candidateKey]) return candidatePageIndexesById[candidateKey].slice(0);
         var info = sourceInfo(sourceId);
         if (!info) return [];
+        var rangePages = _candidateRangePagesForInfo(info);
+        if (rangePages.length > 0) {
+            candidatePageIndexesById[candidateKey] = rangePages.slice(0);
+            return rangePages;
+        }
         var sourcePageIndex = info.pageIndex;
         if (info.kind === "TextFrame") {
             var textPages = _candidatePageInRange(sourcePageIndex, ctx) ? [sourcePageIndex] : [];
@@ -767,7 +890,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var pages = [];
         var seen = {};
         for (var pageIndex = ctx.startPage - 1; pageIndex <= ctx.endPage - 1; pageIndex++) {
-            if (sourcePageIndex >= 0 && !sameSpread(sourcePageIndex, pageIndex)) continue;
+            if (sourcePageIndex >= 0 && info.recoveredMissingParent !== true
+                    && !sameSpread(sourcePageIndex, pageIndex)) continue;
             if (_boundsOverlap(pageBounds(pageIndex), info.bounds) && !seen[pageIndex]) {
                 pages.push(pageIndex);
                 seen[pageIndex] = true;

@@ -74,6 +74,9 @@ public class HwpxParagraphBuilder {
     String createOverrideParaPr(ASTParagraph astPara, String baseParaPrId) {
         return paraPrFactory.createOverrideParaPr(astPara, baseParaPrId);
     }
+    String createOverrideParaPr(ASTParagraph astPara, String baseParaPrId, boolean preserveSourceFixedLeading) {
+        return paraPrFactory.createOverrideParaPr(astPara, baseParaPrId, preserveSourceFixedLeading);
+    }
     boolean isHangingIndentParagraph(ASTParagraph astPara) {
         return paraPrFactory.isHangingIndentParagraph(astPara);
     }
@@ -114,6 +117,13 @@ public class HwpxParagraphBuilder {
     }
 
     void addParagraphToSubList(SubList subList, ASTParagraph astPara, long cellHeight) {
+        addParagraphToSubList(subList, astPara, cellHeight, false);
+    }
+
+    void addParagraphToSubList(SubList subList,
+                               ASTParagraph astPara,
+                               long cellHeight,
+                               boolean preserveSourceFixedLeading) {
         String paraPrId = "3";
         String styleId = "0";
         String paraCharPrId = "0";
@@ -143,7 +153,7 @@ public class HwpxParagraphBuilder {
         boolean hasDslParaRules = kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry
                 .hasParaRule(astPara.paragraphStyleRef());
         if (hasParagraphOverrides(astPara) || hasDslParaRules) {
-            paraPrId = createOverrideParaPr(astPara, paraPrId);
+            paraPrId = createOverrideParaPr(astPara, paraPrId, preserveSourceFixedLeading);
         }
 
         // SPEC-031: CharPrFactory에 현재 단락 스타일 전달 (char DSL rule 참조용)
@@ -291,12 +301,20 @@ public class HwpxParagraphBuilder {
                             java.util.List<ASTParagraph> paragraphs,
                             java.util.List<ASTTable> extraInlineTables,
                             long cellHeight) {
+        fillSubListContent(subList, paragraphs, extraInlineTables, cellHeight, false);
+    }
+
+    void fillSubListContent(SubList subList,
+                            java.util.List<ASTParagraph> paragraphs,
+                            java.util.List<ASTTable> extraInlineTables,
+                            long cellHeight,
+                            boolean preserveSourceFixedLeading) {
         if (paragraphs != null) {
             for (ASTParagraph para : paragraphs) {
                 if (para != null && para.inlineTable() != null && ctx.tableBuilderRef != null) {
                     ctx.tableBuilderRef.addInlineTableToSubList(subList, para.inlineTable());
                 } else {
-                    addParagraphToSubList(subList, para, cellHeight);
+                    addParagraphToSubList(subList, para, cellHeight, preserveSourceFixedLeading);
                 }
             }
         }

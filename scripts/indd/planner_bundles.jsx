@@ -1091,8 +1091,9 @@ function _plannerBundleSourceHasInlineAnchorAncestor(sourceId, clusterIndex) {
     for (var depth = 0; depth < 200 && current; depth++) {
         if (typeof _isInlineFlowItemBySourceInfo === "function"
                 ? _isInlineFlowItemBySourceInfo(current)
-                : (String(current.parentKind || "") === "Character"
-                    || String(current.parentKind || "") === "InsertionPoint")) {
+                : (String(current.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(current.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(current.anchoredPosition || "").toUpperCase() === "INLINEPOSITION")) {
             cache[cacheKey] = true;
             return true;
         }

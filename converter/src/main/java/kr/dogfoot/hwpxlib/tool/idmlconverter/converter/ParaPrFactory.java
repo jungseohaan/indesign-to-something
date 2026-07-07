@@ -60,6 +60,10 @@ final class ParaPrFactory {
     }
 
     String createOverrideParaPr(ASTParagraph astPara, String baseParaPrId) {
+        return createOverrideParaPr(astPara, baseParaPrId, false);
+    }
+
+    String createOverrideParaPr(ASTParagraph astPara, String baseParaPrId, boolean preserveSourceFixedLeading) {
         // 기본 스타일에서 값 상속
         ASTStyleDef baseStyle = findParagraphStyle(astPara.paragraphStyleRef());
 
@@ -170,16 +174,36 @@ final class ParaPrFactory {
         paraPr.createLineSpacing();
         Integer lsValue = astPara.lineSpacing();
         String lsType = astPara.lineSpacingType();
-        if (lsValue == null && baseStyle != null && baseStyle.lineSpacing() != null) {
+        if (preserveSourceFixedLeading
+                && baseStyle != null
+                && "fixed".equals(baseStyle.lineSpacingType())
+                && baseStyle.lineSpacing() != null
+                && baseStyle.lineSpacing() > 0) {
+            lsValue = baseStyle.lineSpacing();
+            lsType = baseStyle.lineSpacingType();
+        } else if (preserveSourceFixedLeading) {
+            ParaPr basePr = findParaPrById(baseParaPrId);
+            if (basePr != null
+                    && basePr.lineSpacing() != null
+                    && basePr.lineSpacing().type() == LineSpacingType.FIXED
+                    && basePr.lineSpacing().value() != null
+                    && basePr.lineSpacing().value() > 0) {
+                lsValue = basePr.lineSpacing().value();
+                lsType = "fixed";
+            }
+        } else if (lsValue == null && baseStyle != null && baseStyle.lineSpacing() != null) {
             lsValue = baseStyle.lineSpacing();
             lsType = baseStyle.lineSpacingType();
         }
+        boolean hasSourceFixedLeading = "fixed".equals(lsType) && lsValue != null && lsValue > 0;
         // SPEC-031: DSL para rule — 줄간격 오버라이드 (dslCtx는 위에서 이미 applyParaRule 호출됨)
-        if (dslCtx.targetLineSpacingPct != null) {
+        if (dslCtx.targetLineSpacingPct != null
+                && !(preserveSourceFixedLeading && hasSourceFixedLeading)) {
             lsValue = dslCtx.targetLineSpacingPct;
             lsType = "percent";
         }
-        if ("fixed".equals(lsType)
+        if (!preserveSourceFixedLeading
+                && "fixed".equals(lsType)
                 && shouldPreferAutoLeadingPercent(astPara, lsValue)) {
             lsValue = astPara.autoLeadingPercent();
             lsType = "percent";

@@ -3410,6 +3410,9 @@ public class InlineFrameHandler {
                 if (placeInlineTextShell) {
                     return null;
                 }
+                if (placeInlinePng && !hasExplicitInlineSourceEvidence(ctx, plan, rg, anchoredObjectId)) {
+                    return null;
+                }
                 if (isInlineTextShellCompanionForEditableText(ctx, anchoredObjectId)) {
                     return null;
                 }
@@ -3417,7 +3420,10 @@ public class InlineFrameHandler {
                 // inline_object PNG를 그대로 사용 (tryInlineGroupAsSingleBadge가 먼저 INLINE_TEXT_FRAME을 시도했으므로
                 // 여기 도달했다면 구조 조건 미충족 → PNG fallback이 가장 정확한 표현).
                 String effectiveFile = plan.file != null && !plan.file.isEmpty() ? plan.file : rg.file();
-                double[] effectiveBounds = plan.bounds != null ? plan.bounds : rg.bounds();
+                // For inline PNGs, the physical size must follow the rendered material.
+                // ObjectPlan bounds can include HWPX-owned child text used for ownership,
+                // which would inflate or shift the image in story flow.
+                double[] effectiveBounds = rg.bounds() != null ? rg.bounds() : plan.bounds;
                 if (effectiveFile == null) return null;
                 File pngFile = new File(ctx.basePath, effectiveFile);
                 if (!pngFile.exists()) return null;
@@ -3532,6 +3538,79 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static boolean hasExplicitInlineSourceEvidence(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null) return true;
+        boolean checked = false;
+        boolean foundInline = false;
+        if (isExplicitInlineSource(ctx, anchoredObjectId)) foundInline = true;
+        checked |= sourceMetadataExists(ctx, anchoredObjectId);
+        if (plan != null) {
+            InlineEvidence evidence = inlineEvidenceForIds(ctx, plan.sourceObjectIds);
+            checked |= evidence.checked;
+            foundInline |= evidence.inline;
+            evidence = inlineEvidenceForIds(ctx, plan.visualSourceObjectIds);
+            checked |= evidence.checked;
+            foundInline |= evidence.inline;
+            evidence = inlineEvidenceForIds(ctx, plan.exportSourceObjectIds);
+            checked |= evidence.checked;
+            foundInline |= evidence.inline;
+        }
+        if (rg != null) {
+            InlineEvidence evidence = inlineEvidenceForIds(ctx, rg.sourceObjectIds());
+            checked |= evidence.checked;
+            foundInline |= evidence.inline;
+            evidence = inlineEvidenceForIds(ctx, rg.exportSourceObjectIds());
+            checked |= evidence.checked;
+            foundInline |= evidence.inline;
+        }
+        // Legacy extraction outputs may lack source metadata. Do not drop those blindly.
+        return !checked || foundInline;
+    }
+
+    private static InlineEvidence inlineEvidenceForIds(ResolvedBuildContext ctx, int[] ids) {
+        InlineEvidence evidence = new InlineEvidence();
+        if (ctx == null || ids == null) return evidence;
+        for (int id : ids) {
+            if (!sourceMetadataExists(ctx, id)) continue;
+            evidence.checked = true;
+            if (isExplicitInlineSource(ctx, id)) evidence.inline = true;
+        }
+        return evidence;
+    }
+
+    private static boolean sourceMetadataExists(ResolvedBuildContext ctx, int sourceId) {
+        return ctx != null
+                && ctx.resolvedData != null
+                && ctx.resolvedData.getPageItem(String.valueOf(sourceId)) != null;
+    }
+
+    private static boolean isExplicitInlineSource(ResolvedBuildContext ctx, int sourceId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+        if (item == null) return false;
+        String storyAnchorPlacement = upper(item.storyAnchorPlacement());
+        String anchoredPosition = upper(item.anchoredPosition());
+        if ("FLOATING_ANCHORED".equals(storyAnchorPlacement) || "ANCHORED".equals(anchoredPosition)) {
+            return false;
+        }
+        return "INLINE".equals(storyAnchorPlacement)
+                || "INLINE_POSITION".equals(anchoredPosition)
+                || "INLINEPOSITION".equals(anchoredPosition);
+    }
+
+    private static String upper(String value) {
+        return value == null ? "" : value.toUpperCase(Locale.ROOT);
+    }
+
+    private static final class InlineEvidence {
+        boolean checked;
+        boolean inline;
     }
 
     /**

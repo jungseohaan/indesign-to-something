@@ -390,6 +390,7 @@ public class HwpxTableBuilder {
         long rowYOffset = 0;
         java.util.List<ASTTableRow> physicalRows = physicalRows(astTable);
         java.util.Map<Integer, Integer> rowIndexMap = physicalRowIndexMap(physicalRows);
+        boolean singleCellTable = isSingleCellTable(astTable, physicalRows);
 
         for (ASTTableRow astRow : physicalRows) {
             Tr tr = table.addNewTr();
@@ -484,7 +485,7 @@ public class HwpxTableBuilder {
                 HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(astCell.paragraphs(), cellContentWidth);
 
                 // 셀 내용 (단락) 추가 — drawText/단일컬럼과 동일한 공용 루틴
-                paragraphBuilder.fillSubListContent(subList, astCell.paragraphs(), null, astCell.height());
+                paragraphBuilder.fillSubListContent(subList, astCell.paragraphs(), null, astCell.height(), singleCellTable);
             }
 
             rowYOffset += astRow.rowHeight();
@@ -524,6 +525,18 @@ public class HwpxTableBuilder {
             rows.add(row);
         }
         return rows;
+    }
+
+    private static boolean isSingleCellTable(ASTTable table, java.util.List<ASTTableRow> physicalRows) {
+        if (table == null) return false;
+        int colCount = table.columnWidths() != null && !table.columnWidths().isEmpty()
+                ? table.columnWidths().size()
+                : table.colCount();
+        if (colCount != 1) return false;
+        java.util.List<ASTTableRow> rows = physicalRows != null ? physicalRows : table.rows();
+        if (rows == null || rows.size() != 1) return false;
+        ASTTableRow row = rows.get(0);
+        return row != null && row.cells() != null && row.cells().size() == 1;
     }
 
     private static java.util.Map<Integer, Integer> physicalRowIndexMap(java.util.List<ASTTableRow> rows) {

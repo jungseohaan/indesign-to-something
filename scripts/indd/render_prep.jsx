@@ -1407,13 +1407,19 @@ function collectRangePageItems(doc, startPage, endPage) {
     var allItems = [];
     var seen = {};
     var targetSpreads = {};
-    function addItem(item) {
+    var targetPageIndexesByItemId = {};
+    function addItem(item, targetPageIndex) {
         try {
             if (!item) return;
             var key = String(item.id);
-            if (seen[key]) return;
-            seen[key] = true;
-            allItems.push(item);
+            if (targetPageIndex !== null && targetPageIndex !== undefined) {
+                if (!targetPageIndexesByItemId[key]) targetPageIndexesByItemId[key] = {};
+                targetPageIndexesByItemId[key][String(targetPageIndex)] = true;
+            }
+            if (!seen[key]) {
+                seen[key] = true;
+                allItems.push(item);
+            }
         } catch (e) {}
     }
     function isSpreadOffCanvasTextFrame(tf) {
@@ -1471,13 +1477,13 @@ function collectRangePageItems(doc, startPage, endPage) {
                 var item = pageItems[ii];
                 var ownerIdx = _pageIndexOfItem(doc, item);
                 if (ownerIdx === targetIdx) {
-                    addItem(item);
+                    addItem(item, targetIdx);
                     continue;
                 }
                 if (!_sameSpreadPageIndex(doc, ownerIdx, targetIdx)) continue;
                 var b = null;
                 try { b = _itemBounds(item); } catch (eItemBounds) { b = null; }
-                if (targetBounds && b && _boundsOverlap(targetBounds, b)) addItem(item);
+                if (targetBounds && b && _boundsOverlap(targetBounds, b)) addItem(item, targetIdx);
             }
         }
     }
@@ -1491,15 +1497,16 @@ function collectRangePageItems(doc, startPage, endPage) {
             if (!isSpreadOffCanvasTextFrame(tf)) continue;
             if (!hasMeaningfulStoryText(tf)) continue;
             try { if (isOnHiddenLayer(tf)) continue; } catch (eHidden) {}
-            addItem(tf);
+            addItem(tf, null);
             try {
                 var storyItems = tf.parentStory.allPageItems;
                 for (var sii = 0; sii < storyItems.length; sii++) {
-                    addItem(storyItems[sii]);
+                    addItem(storyItems[sii], null);
                 }
             } catch (eStoryItems) {}
         }
     }
+    collectRangePageItems.lastTargetPageIndexesByItemId = targetPageIndexesByItemId;
     return allItems;
 }
 

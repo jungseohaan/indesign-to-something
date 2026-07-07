@@ -121,8 +121,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     function sourceInfoHasStoryFlowAnchorForBase(info) {
         if (!info) return false;
         var parentKind = String(info.parentKind || "");
-        if (parentKind === "Character" || parentKind === "InsertionPoint"
-                || parentKind === "Cell" || parentKind === "Story") {
+        if (parentKind === "Cell" || parentKind === "Story") {
             return true;
         }
         return _isInlineFlowItemBySourceInfo(info);
@@ -1398,7 +1397,12 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 if (sourceIndex.hasPlacedVisual(id) && !ownedByClipParentShellForRect()) {
                     item = item || domItemForBase(id);
                     if (!item) continue;
+                    var placedFrameSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
                     pushBaseExtractionCandidate("pass.image_placed_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
+                        sourceObjectIds: placedFrameSourceIds,
+                        visualSourceObjectIds: placedFrameSourceIds,
+                        exportSourceObjectIds: placedFrameSourceIds,
+                        exportTargetObjectId: id,
                         pageIndex: extractionPageIndex,
                         unit: "ITEM",
                         mode: "ORIGINAL_VISUAL",

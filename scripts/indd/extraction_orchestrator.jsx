@@ -597,6 +597,7 @@ function main(args) {
             // doc.allPageItems는 문서 전체를 로드하므로 26p 문서에서 10p 청크도 전체 메모리 점유 → -609
             _marker(ctx.outputDir, "03_allPageItems");
             var allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
+            ctx.rangeTargetPageIndexesBySourceId = collectRangePageItems.lastTargetPageIndexesByItemId || {};
 
             // SPEC-030 B.2: 페이지 해시 + 아이템 맵 → page_hashes.json / page_item_map.json (캐시 저장용)
             _marker(ctx.outputDir, "03b_pageHashes_start");

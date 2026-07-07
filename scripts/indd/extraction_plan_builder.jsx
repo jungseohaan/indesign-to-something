@@ -1171,10 +1171,11 @@ function _absorbInlineDecorationDescendantsIntoTextShellCandidates(candidates, s
 
     function isInlineRoot(src) {
         if (!src) return false;
-        var parentKind = String(src.parentKind || "");
-        if (parentKind === "Character" || parentKind === "InsertionPoint") return true;
-        if (String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION") return true;
-        return String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE";
+        return typeof _isInlineFlowItemBySourceInfo === "function"
+                ? _isInlineFlowItemBySourceInfo(src)
+                : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
 
     function isDescendantOfSource(childId, ancestorId) {
@@ -1844,21 +1845,6 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 && _isInlineFlowItemBySourceInfo(src)) {
             return true;
         }
-        var cur = src;
-        var guard = 0;
-        while (cur && guard++ < 64) {
-            var kind = String(cur.kind || "");
-            var parentKind = String(cur.parentKind || "");
-            if (parentKind === "Character" || parentKind === "InsertionPoint") {
-                return true;
-            }
-            if (kind === "Character" || kind === "InsertionPoint" || kind === "Cell"
-                    || kind === "Story") {
-                return true;
-            }
-            if (cur.parentId === null || cur.parentId === undefined) break;
-            cur = info(cur.parentId);
-        }
         return false;
     }
 
@@ -2249,8 +2235,11 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
 
     function isInlineTextFrameSource(src) {
         if (!src) return false;
-        var placement = String(src.storyAnchorPlacement || src.anchoredPosition || "");
-        return placement.indexOf("INLINE") >= 0 || String(src.parentKind || "") === "Character";
+        return typeof _isInlineFlowItemBySourceInfo === "function"
+                ? _isInlineFlowItemBySourceInfo(src)
+                : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
 
     function splitTextFrameIdsForPageTextlessGroup(sourceIds) {
@@ -2662,8 +2651,11 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
     function sourceIsInlineFlow(id) {
         var src = info(id);
         if (!src) return false;
-        var placement = String(src.storyAnchorPlacement || src.anchoredPosition || "").toUpperCase();
-        return placement.indexOf("INLINE") >= 0 || String(src.parentKind || "") === "Character";
+        return typeof _isInlineFlowItemBySourceInfo === "function"
+                ? _isInlineFlowItemBySourceInfo(src)
+                : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
 
     function sourceIsStoryAnchoredMaterial(id) {
@@ -2721,8 +2713,11 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
 
     function isInlineTextFrameSource(src) {
         if (!src) return false;
-        var placement = String(src.storyAnchorPlacement || src.anchoredPosition || "");
-        return placement.indexOf("INLINE") >= 0 || String(src.parentKind || "") === "Character";
+        return typeof _isInlineFlowItemBySourceInfo === "function"
+                ? _isInlineFlowItemBySourceInfo(src)
+                : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
 
     function unionSourceIds(a, b) {
@@ -3312,8 +3307,9 @@ function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
         if (!src) return false;
         var anchor = String(src.storyAnchorPlacement || "").toUpperCase();
         var anchored = String(src.anchoredPosition || "").toUpperCase();
-        if (anchor !== "INLINE" && anchored !== "INLINE_POSITION"
-                && String(src.parentKind || "") !== "Character") {
+        if (anchor !== "INLINE"
+                && anchored !== "INLINE_POSITION"
+                && anchored !== "INLINEPOSITION") {
             return false;
         }
         if (String(src.kind || "") === "TextFrame") return false;
@@ -3335,10 +3331,11 @@ function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
     }
     function isInlineFlow(src) {
         if (!src) return false;
-        var anchor = String(src.storyAnchorPlacement || "").toUpperCase();
-        var anchored = String(src.anchoredPosition || "").toUpperCase();
-        return anchor === "INLINE" || anchored === "INLINE_POSITION"
-                || String(src.parentKind || "") === "Character";
+        return typeof _isInlineFlowItemBySourceInfo === "function"
+                ? _isInlineFlowItemBySourceInfo(src)
+                : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
     function sourceHasPlacedVisual(id, visiting) {
         var cacheKey = String(id);
@@ -3723,7 +3720,7 @@ function _normalizePageCoordinateCandidateBounds(candidates, sourceIndex) {
     return candidates;
 }
 
-function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItems) {
+function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItems, sourceIndex) {
     if (!candidates || !sourceItems || sourceItems.length === 0) {
         return { warningCount: 0, warnings: [] };
     }
@@ -3903,7 +3900,7 @@ function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItem
     return { warningCount: warnings.length, warnings: warnings };
 }
 
-function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen) {
+function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen, sourceIndex) {
     if (!candidates || !sourceItems || sourceItems.length === 0) {
         return { appendedCount: 0, appended: [] };
     }
@@ -3955,9 +3952,11 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
     function sourceIsInlineFlow(sourceId) {
         var src = infoById[String(sourceId)];
         if (!src) return false;
-        return src.storyAnchorPlacement === "INLINE"
-                || src.parentKind === "Character"
-                || src.parentKind === "InsertionPoint";
+        return typeof _isInlineFlowItemBySourceInfo === "function"
+                ? _isInlineFlowItemBySourceInfo(src)
+                : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
 
     function sourceHasEditableTextDescendant(sourceId, pageIndex, visiting) {
@@ -4040,6 +4039,33 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
         return false;
     }
 
+    function candidatePagesForSource(src) {
+        var pages = [];
+        try {
+            if (sourceIndex && sourceIndex.candidatePageIndexes) {
+                pages = sourceIndex.candidatePageIndexes(src.id) || [];
+            }
+        } catch (ePages) {
+            pages = [];
+        }
+        if ((!pages || pages.length === 0) && src && src.pageIndex !== null && src.pageIndex !== undefined) {
+            pages = [src.pageIndex];
+        }
+        return pages || [];
+    }
+
+    function pageLocalSourceIdsForFallback(src, pageIndex, fallbackIds) {
+        var ids = null;
+        try {
+            if (sourceIndex && sourceIndex.pageLocalSourceObjectIds) {
+                ids = sourceIndex.pageLocalSourceObjectIds(src.id, pageIndex);
+            }
+        } catch (ePageLocal) {
+            ids = null;
+        }
+        return _sortedNumericIds(ids && ids.length > 0 ? ids : fallbackIds);
+    }
+
     function sourceLooksLikeVectorShellMaterial(src) {
         if (!src) return false;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
@@ -4116,102 +4142,107 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
         }
         if (sourceIsInlineFlow(src.id)) continue;
 
-        var sourceIds = [];
-        var seen = {};
-        var hasEditableTextDescendant = sourceHasEditableTextDescendant(src.id, src.pageIndex);
-        if (hasEditableTextDescendant) {
-            collectUnclaimedVectorShellSubtree(src.id, src.pageIndex, claimed, seen, sourceIds, true);
-        } else {
-            collectSamePageSubtree(src.id, src.pageIndex, seen, sourceIds);
+        var targetPages = candidatePagesForSource(src);
+        for (var pi = 0; pi < targetPages.length; pi++) {
+            var targetPageIndex = targetPages[pi];
+            var sourceIds = [];
+            var seen = {};
+            var hasEditableTextDescendant = sourceHasEditableTextDescendant(src.id, targetPageIndex);
+            if (hasEditableTextDescendant) {
+                collectUnclaimedVectorShellSubtree(src.id, targetPageIndex, claimed, seen, sourceIds, true);
+            } else {
+                collectSamePageSubtree(src.id, targetPageIndex, seen, sourceIds);
+            }
+            sourceIds = pageLocalSourceIdsForFallback(
+                    src, targetPageIndex, sourceIds.length > 0 ? sourceIds : [src.id]);
+            var hasPlacedVisualTree = hasEditableTextDescendant ? false : sourceTreeHasPlacedVisual(sourceIds);
+            var sourceKind = String(src.kind || "");
+            var candidatePassId = hasPlacedVisualTree
+                    ? (sourceKind === "Group" ? "pass.image_textless_groups" : "pass.image_placed_frames")
+                    : "pass.decoration_groups";
+            var candidateUnit = hasPlacedVisualTree
+                    ? (candidatePassId === "pass.image_textless_groups" ? "GROUP" : "ITEM")
+                    : (sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM");
+            var candidateId = sourceIds.length > 1
+                    ? _candidateCompositeId(candidatePassId, targetPageIndex, sourceIds,
+                            "unclaimed_visible_vector_source")
+                    : _candidateId(candidatePassId, src.id, targetPageIndex);
+            var seenKey = candidatePassId + "|page:" + String(targetPageIndex)
+                    + "|src:" + _sourceSetKey(sourceIds);
+            if (candidateSeen) candidateSeen[seenKey] = true;
+            var ownershipSlot = hasPlacedVisualTree ? "CONTENT_VISUAL_SLOT" : "SHELL_SLOT";
+            var visualLayer = hasPlacedVisualTree ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
+            var visualAction = hasPlacedVisualTree ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
+            var candidatePurpose = hasPlacedVisualTree ? "CONTENT_CANDIDATE" : "SHELL_CANDIDATE";
+            var slotRole = hasPlacedVisualTree ? "content_visual_slot" : "shell_slot_only";
+            var candidateMode = candidatePassId === "pass.image_placed_frames"
+                    ? "ORIGINAL_VISUAL"
+                    : "TEXTLESS_CANDIDATE";
+            var compositeRole = hasPlacedVisualTree
+                    ? "source_required_content_visual_set"
+                    : "source_required_visible_vector_shell_set";
+            var singleRole = hasPlacedVisualTree
+                    ? "source_required_content_visual"
+                    : "source_required_visible_vector_shell";
+            var candidate = {
+                candidateId: candidateId,
+                passId: candidatePassId,
+                sourceObjectIds: sourceIds,
+                executionSourceObjectIds: sourceIds.slice(0),
+                primarySourceObjectId: src.id,
+                pageIndex: targetPageIndex,
+                kind: src.kind || "VectorSource",
+                unit: candidateUnit,
+                mode: candidateMode,
+                candidatePurpose: candidatePurpose,
+                bounds: src.bounds || null,
+                parentId: src.parentId,
+                parentKind: src.parentKind || null,
+                anchoredPosition: src.anchoredPosition,
+                storyAnchorPlacement: src.storyAnchorPlacement,
+                composite: sourceIds.length > 1,
+                compositeRole: sourceIds.length > 1 ? compositeRole : singleRole,
+                slotRole: slotRole,
+                exportSourceObjectIds: sourceIds.slice(0),
+                exportTargetObjectId: src.id,
+                hiddenVisualSourceObjectIds: [],
+                visualSourceObjectIds: sourceIds.slice(0),
+                styleSourceObjectIds: [],
+                ownedTextFrameIds: [],
+                editableTextFrameIds: [],
+                hiddenTextFrameIds: [],
+                requiresTextHidden: false,
+                textOwner: "none",
+                containsEditableText: false,
+                completePngTextAllowed: false,
+                ownershipSlot: ownershipSlot,
+                materialization: "EXTRACTED_PNG_VECTOR",
+                textAction: "DROP_TEXT",
+                visualAction: visualAction,
+                visualLayer: visualLayer,
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                zOrder: src.zOrder !== undefined ? src.zOrder : 0,
+                required: true,
+                requiredSlot: ownershipSlot,
+                requiredSlotReason: hasPlacedVisualTree
+                        ? "visible_placed_material_tree"
+                        : "visible_vector_material",
+                reason: "source_required_visible_vector_shell"
+            };
+            candidate.slotRole = slotRole;
+            candidates.push(candidate);
+            appended.push({
+                candidateId: candidateId,
+                sourceObjectIds: sourceIds,
+                primarySourceObjectId: src.id,
+                pageIndex: targetPageIndex,
+                requiredSlot: ownershipSlot,
+                requiredSlotReason: candidate.requiredSlotReason,
+                reason: "source_required_visible_vector_shell"
+            });
+            mark(sourceIds, claimed);
         }
-        sourceIds = _sortedNumericIds(sourceIds.length > 0 ? sourceIds : [src.id]);
-        var hasPlacedVisualTree = hasEditableTextDescendant ? false : sourceTreeHasPlacedVisual(sourceIds);
-        var sourceKind = String(src.kind || "");
-        var candidatePassId = hasPlacedVisualTree
-                ? (sourceKind === "Group" ? "pass.image_textless_groups" : "pass.image_placed_frames")
-                : "pass.decoration_groups";
-        var candidateUnit = hasPlacedVisualTree
-                ? (candidatePassId === "pass.image_textless_groups" ? "GROUP" : "ITEM")
-                : (sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM");
-        var candidateId = sourceIds.length > 1
-                ? _candidateCompositeId(candidatePassId, src.pageIndex, sourceIds,
-                        "unclaimed_visible_vector_source")
-                : _candidateId(candidatePassId, src.id, src.pageIndex);
-        var seenKey = candidatePassId + "|page:" + String(src.pageIndex)
-                + "|src:" + _sourceSetKey(sourceIds);
-        if (candidateSeen) candidateSeen[seenKey] = true;
-        var ownershipSlot = hasPlacedVisualTree ? "CONTENT_VISUAL_SLOT" : "SHELL_SLOT";
-        var visualLayer = hasPlacedVisualTree ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
-        var visualAction = hasPlacedVisualTree ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
-        var candidatePurpose = hasPlacedVisualTree ? "CONTENT_CANDIDATE" : "SHELL_CANDIDATE";
-        var slotRole = hasPlacedVisualTree ? "content_visual_slot" : "shell_slot_only";
-        var candidateMode = candidatePassId === "pass.image_placed_frames"
-                ? "ORIGINAL_VISUAL"
-                : "TEXTLESS_CANDIDATE";
-        var compositeRole = hasPlacedVisualTree
-                ? "source_required_content_visual_set"
-                : "source_required_visible_vector_shell_set";
-        var singleRole = hasPlacedVisualTree
-                ? "source_required_content_visual"
-                : "source_required_visible_vector_shell";
-        var candidate = {
-            candidateId: candidateId,
-            passId: candidatePassId,
-            sourceObjectIds: sourceIds,
-            executionSourceObjectIds: sourceIds.slice(0),
-            primarySourceObjectId: src.id,
-            pageIndex: src.pageIndex,
-            kind: src.kind || "VectorSource",
-            unit: candidateUnit,
-            mode: candidateMode,
-            candidatePurpose: candidatePurpose,
-            bounds: src.bounds || null,
-            parentId: src.parentId,
-            parentKind: src.parentKind || null,
-            anchoredPosition: src.anchoredPosition,
-            storyAnchorPlacement: src.storyAnchorPlacement,
-            composite: sourceIds.length > 1,
-            compositeRole: sourceIds.length > 1 ? compositeRole : singleRole,
-            slotRole: slotRole,
-            exportSourceObjectIds: sourceIds.slice(0),
-            exportTargetObjectId: src.id,
-            hiddenVisualSourceObjectIds: [],
-            visualSourceObjectIds: sourceIds.slice(0),
-            styleSourceObjectIds: [],
-            ownedTextFrameIds: [],
-            editableTextFrameIds: [],
-            hiddenTextFrameIds: [],
-            requiresTextHidden: false,
-            textOwner: "none",
-            containsEditableText: false,
-            completePngTextAllowed: false,
-            ownershipSlot: ownershipSlot,
-            materialization: "EXTRACTED_PNG_VECTOR",
-            textAction: "DROP_TEXT",
-            visualAction: visualAction,
-            visualLayer: visualLayer,
-            placement: "FLOATING",
-            coordinateSpace: "PAGE",
-            zOrder: src.zOrder !== undefined ? src.zOrder : 0,
-            required: true,
-            requiredSlot: ownershipSlot,
-            requiredSlotReason: hasPlacedVisualTree
-                    ? "visible_placed_material_tree"
-                    : "visible_vector_material",
-            reason: "source_required_visible_vector_shell"
-        };
-        candidate.slotRole = slotRole;
-        candidates.push(candidate);
-        appended.push({
-            candidateId: candidateId,
-            sourceObjectIds: sourceIds,
-            primarySourceObjectId: src.id,
-            pageIndex: src.pageIndex,
-            requiredSlot: ownershipSlot,
-            requiredSlotReason: candidate.requiredSlotReason,
-            reason: "source_required_visible_vector_shell"
-        });
-        mark(sourceIds, claimed);
     }
     return { appendedCount: appended.length, appended: appended };
 }
@@ -4379,10 +4410,11 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
     }
     function isInlineFlow(src) {
         if (!src) return false;
-        var anchor = String(src.storyAnchorPlacement || "").toUpperCase();
-        var anchored = String(src.anchoredPosition || "").toUpperCase();
-        return anchor === "INLINE" || anchored === "INLINE_POSITION"
-                || String(src.parentKind || "") === "Character";
+        return typeof _isInlineFlowItemBySourceInfo === "function"
+                ? _isInlineFlowItemBySourceInfo(src)
+                : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                    || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
     function canBeInlineVisualContainer(src, child) {
         if (!src || isTextLike(src)) return false;
@@ -4784,7 +4816,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     candidates = preObjectPlanTextlessShellSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12a_plan_suppressTextlessGroupChildrenBeforeObjectPlans");
     var unclaimedVisibleVectorOwnershipDiagnostics =
-            _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen);
+            _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
     _marker(ctx.outputDir, "03d12d_plan_unclaimedVisibleVectorOwnership");
     var sourceClusterQueryDiagnostics = _buildSourceClusterQueryDiagnostics(sourceClusterIndex, candidates);
     _marker(ctx.outputDir, "03d13_plan_clusterQueries");
@@ -4876,7 +4908,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     executionCandidates = _backfillVisibleCandidateVisualSources(executionCandidates, sourceItems);
     _marker(ctx.outputDir, "03d16g0b_plan_backfillExecutionVisualSources");
     var unclaimedVisibleVectorFallbackDiagnostics =
-            _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems);
+            _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems, sourceIndex);
     _marker(ctx.outputDir, "03d16g1_plan_warnUnclaimedVisibleVectors");
     var sourceCoverageOptions = {
         fullDiagnostics: ctx.writePlannerDiagnostics === true
