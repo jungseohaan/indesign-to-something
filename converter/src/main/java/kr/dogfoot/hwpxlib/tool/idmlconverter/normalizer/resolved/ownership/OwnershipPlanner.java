@@ -229,6 +229,8 @@ public final class OwnershipPlanner {
         timed("completeRenderedExtractionSourceContracts", this::completeRenderedExtractionSourceContracts);
         timed("normalizeTextShellsWithMaterializedTextOwners", this::normalizeTextShellsWithMaterializedTextOwners);
         timed("restoreInlineCarrierVisualContracts", this::restoreInlineCarrierVisualContracts);
+        timed("normalizePlannerDeclaredInlineCompletePngWithoutTextOwner",
+                this::normalizePlannerDeclaredInlineCompletePngWithoutTextOwner);
         timed("completeSourceTreeDiagnostics", this::completeSourceTreeDiagnostics);
         timed("restoreDroppedRenderedTextShellSourceContracts",
                 this::restoreDroppedRenderedTextShellSourceContracts);
@@ -9672,6 +9674,35 @@ public final class OwnershipPlanner {
                         .withTextAction(TextAction.DROP_TEXT)
                         .withVisualAction(VisualAction.DROP_VISUAL, "owned_by_inline_complete_png"));
             }
+        }
+    }
+
+    private void normalizePlannerDeclaredInlineCompletePngWithoutTextOwner() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (!safe(plan.kind).startsWith("planner_declared_rendered:pass.inline_objects:")) continue;
+            if (!"planner_declared_object_plan".equals(safe(plan.reason))) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.textAction != TextAction.OWNED_BY_PNG
+                    && plan.materialization != Materialization.COMPLETE_PNG) {
+                continue;
+            }
+            if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) continue;
+            RenderedGroup rendered = renderedGroupForPlan(plan);
+            if (rendered == null) continue;
+            if ("indesign_png".equals(safe(rendered.textOwner()))) continue;
+            if (Boolean.TRUE.equals(rendered.containsEditableText())) continue;
+            if (hasEditableTextFrameIds(rendered)) continue;
+            VisualAction visualAction = plan.visualAction == VisualAction.PLACE_FLOATING_PNG
+                    ? VisualAction.PLACE_FLOATING_PNG
+                    : VisualAction.PLACE_INLINE_PNG;
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(visualAction, "planner_declared_inline_graphic_visual_only")
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR)
+                    .withOwnedTextFrameIds(new int[0])
+                    .withDescendantVisualObjectIds(new int[0]));
         }
     }
 

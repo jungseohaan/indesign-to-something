@@ -856,18 +856,10 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates,
                     try {
                         inlineEditableTextFrameIds = planCache ? planCache.textFrameIds(inItem, true, true) : _collectTextFrameIds(inItem, true, true);
                     } catch (eInlineEditableIds) {}
-                    var inlineCompleteMarkerOwnsText =
-                            typeof _inlineCompositeCompletePngDecisionForOwnership === "function"
-                                    ? _inlineCompositeCompletePngDecisionForOwnership(
-                                            inItem, inlineEditableTextFrameIds, inlineItemById)
-                                    : _inlineCompleteMarkerDecisionForOwnership(
-                                            inItem, inlineEditableTextFrameIds, inlineItemById);
-                    var inlineVisualSourceIds = inlineCompleteMarkerOwnsText
-                            ? _sortedNumericIds(inlineSourceIds || [])
-                            : (inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0
-                                    ? []
-                                    : _inlineCarrierVisualSourceObjectIds(inItem, inItemInfo, inlineSourceIds));
-                    var inlineRequiresTextHidden = inlineEditableTextFrameIds.length > 0 && !inlineCompleteMarkerOwnsText;
+                    var inlineVisualSourceIds = (inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0)
+                            ? []
+                            : _inlineCarrierVisualSourceObjectIds(inItem, inItemInfo, inlineSourceIds);
+                    var inlineRequiresTextHidden = inlineEditableTextFrameIds.length > 0;
                     _pushExtractionCandidate(candidates, seen, "pass.inline_objects", inItem, {
                         sourceObjectIds: inlineSourceIds,
                         exportSourceObjectIds: inlineVisualSourceIds,
@@ -879,11 +871,11 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates,
                         editableTextFrameIds: inlineEditableTextFrameIds,
                         hiddenTextFrameIds: inlineRequiresTextHidden ? inlineEditableTextFrameIds : [],
                         requiresTextHidden: inlineRequiresTextHidden,
-                        textOwner: inlineCompleteMarkerOwnsText ? "indesign_png" : (inlineRequiresTextHidden ? "hwpx_tf" : "none"),
-                        containsEditableText: inlineCompleteMarkerOwnsText,
-                        completePngTextAllowed: inlineCompleteMarkerOwnsText,
-                        materialization: inlineCompleteMarkerOwnsText ? "COMPLETE_PNG" : null,
-                        textAction: inlineCompleteMarkerOwnsText ? "OWNED_BY_PNG" : null
+                        textOwner: inlineRequiresTextHidden ? "hwpx_tf" : "none",
+                        containsEditableText: false,
+                        completePngTextAllowed: false,
+                        materialization: null,
+                        textAction: inlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null
                     });
                 } catch (eInlineCandidate) {}
             }
@@ -955,17 +947,8 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates,
                     });
                     continue;
                 }
-                var nativeInlineCompleteMarkerOwnsText =
-                        typeof _inlineCompositeCompletePngDecisionForOwnership === "function"
-                                ? _inlineCompositeCompletePngDecisionForOwnership(
-                                        nativeInlineShell, nativeInlineEditableTextFrameIds, inlineItemById)
-                                : _inlineCompleteMarkerDecisionForOwnership(
-                                        nativeInlineShell, nativeInlineEditableTextFrameIds, inlineItemById);
-                var nativeInlineCompleteVisualSourceIds = nativeInlineCompleteMarkerOwnsText
-                        ? _sortedNumericIds(nativeInlineSourceIds || [])
-                        : [];
-                var nativeInlineRequiresTextHidden =
-                        nativeInlineEditableTextFrameIds.length > 0 && !nativeInlineCompleteMarkerOwnsText;
+                var nativeInlineCompleteVisualSourceIds = [];
+                var nativeInlineRequiresTextHidden = nativeInlineEditableTextFrameIds.length > 0;
                 _pushExtractionCandidate(candidates, seen, "pass.inline_objects", nativeInlineShell, {
                     sourceObjectIds: nativeInlineSourceIds,
                     exportSourceObjectIds: nativeInlineCompleteVisualSourceIds,
@@ -975,16 +958,14 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates,
                     mode: "TEXTLESS_CANDIDATE",
                     candidatePurpose: "INLINE_CANDIDATE",
                     editableTextFrameIds: nativeInlineEditableTextFrameIds,
-                    ownedTextFrameIds: nativeInlineCompleteMarkerOwnsText ? nativeInlineEditableTextFrameIds : [],
+                    ownedTextFrameIds: [],
                     hiddenTextFrameIds: nativeInlineRequiresTextHidden ? nativeInlineEditableTextFrameIds : [],
                     requiresTextHidden: nativeInlineRequiresTextHidden,
-                    textOwner: nativeInlineCompleteMarkerOwnsText
-                            ? "indesign_png"
-                            : (nativeInlineRequiresTextHidden ? "hwpx_tf" : "none"),
-                    containsEditableText: nativeInlineCompleteMarkerOwnsText,
-                    completePngTextAllowed: nativeInlineCompleteMarkerOwnsText,
-                    materialization: nativeInlineCompleteMarkerOwnsText ? "COMPLETE_PNG" : null,
-                    textAction: nativeInlineCompleteMarkerOwnsText ? "OWNED_BY_PNG" : null
+                    textOwner: nativeInlineRequiresTextHidden ? "hwpx_tf" : "none",
+                    containsEditableText: false,
+                    completePngTextAllowed: false,
+                    materialization: null,
+                    textAction: nativeInlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null
                 });
             } catch (eNativeInlineCandidate) {}
         }
@@ -2570,15 +2551,11 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(allSourceIds);
             var hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
             var pngOwnedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
-            var pngOwnedAncestorIds = pngOwnedTextAncestorSourceIds(allSourceIds, pngOwnedTextFrameIds);
-            exportIds = subtractSourceIds(exportIds, hiddenTextFrameIds);
+            var excludedTextFrameIds = unionSourceIds(hiddenTextFrameIds, pngOwnedTextFrameIds);
+            exportIds = subtractSourceIds(exportIds, excludedTextFrameIds);
             exportIds = unionSourceIds(exportIds, visiblePaintSourceIds(allSourceIds, Number(pageKey)));
-            exportIds = unionSourceIds(exportIds, pngOwnedAncestorIds);
             var visualSourceIds = exportIds.slice(0);
-            exportIds = unionSourceIds(exportIds, pngOwnedTextFrameIds);
-            var executionSourceIds = subtractSourceIds(allSourceIds, hiddenTextFrameIds);
-            executionSourceIds = unionSourceIds(executionSourceIds, pngOwnedAncestorIds);
-            executionSourceIds = unionSourceIds(executionSourceIds, pngOwnedTextFrameIds);
+            var executionSourceIds = subtractSourceIds(allSourceIds, excludedTextFrameIds);
             if (exportIds.length < 2 || allSourceIds.length < 2) continue;
             var candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
@@ -2610,19 +2587,19 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 slotRole: "page_textless_graphic_group",
                 exportSourceObjectIds: exportIds,
                 exportTargetObjectId: null,
-                hiddenVisualSourceObjectIds: hiddenTextFrameIds,
+                hiddenVisualSourceObjectIds: excludedTextFrameIds,
                 visualSourceObjectIds: visualSourceIds,
                 styleSourceObjectIds: [],
-                ownedTextFrameIds: pngOwnedTextFrameIds,
-                editableTextFrameIds: hiddenTextFrameIds,
-                hiddenTextFrameIds: hiddenTextFrameIds,
-                requiresTextHidden: hiddenTextFrameIds.length > 0,
-                textOwner: pngOwnedTextFrameIds.length > 0 ? "indesign_png" : "none",
-                containsEditableText: pngOwnedTextFrameIds.length > 0,
-                completePngTextAllowed: pngOwnedTextFrameIds.length > 0,
+                ownedTextFrameIds: [],
+                editableTextFrameIds: excludedTextFrameIds,
+                hiddenTextFrameIds: excludedTextFrameIds,
+                requiresTextHidden: excludedTextFrameIds.length > 0,
+                textOwner: "none",
+                containsEditableText: false,
+                completePngTextAllowed: false,
                 ownershipSlot: "CONTENT_VISUAL_SLOT",
                 materialization: "EXTRACTED_PNG_VECTOR",
-                textAction: pngOwnedTextFrameIds.length > 0 ? "OWNED_BY_PNG" : "DROP_TEXT",
+                textAction: "DROP_TEXT",
                 visualAction: "PLACE_FLOATING_PNG",
                 visualLayer: "CONTENT_VISUAL",
                 placement: "FLOATING",
@@ -2639,8 +2616,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 coveredCandidateCount: coveredCandidateIds.length,
                 sourceObjectCount: allSourceIds.length,
                 exportSourceObjectCount: exportIds.length,
-                hiddenTextFrameCount: hiddenTextFrameIds.length,
-                pngOwnedTextFrameCount: pngOwnedTextFrameIds.length,
+                hiddenTextFrameCount: excludedTextFrameIds.length,
+                pngOwnedTextFrameCount: 0,
                 bounds: b
             });
             appended++;
@@ -3220,12 +3197,28 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             }
             merged.zOrder = minZ(component);
             merged.primarySourceObjectId = merged.sourceObjectIds.length > 0 ? merged.sourceObjectIds[0] : null;
+            if (merged.ownedTextFrameIds && merged.ownedTextFrameIds.length > 0) {
+                merged.hiddenTextFrameIds = unionSourceIds(
+                        merged.hiddenTextFrameIds || [], merged.ownedTextFrameIds || []);
+                merged.editableTextFrameIds = unionSourceIds(
+                        merged.editableTextFrameIds || [], merged.ownedTextFrameIds || []);
+            }
+            merged.ownedTextFrameIds = [];
+            merged.hiddenVisualSourceObjectIds = unionSourceIds(
+                    merged.hiddenVisualSourceObjectIds || [], merged.hiddenTextFrameIds || []);
+            merged.visualSourceObjectIds = subtractSourceIds(
+                    merged.visualSourceObjectIds || [], merged.hiddenTextFrameIds || []);
+            merged.exportSourceObjectIds = subtractSourceIds(
+                    merged.exportSourceObjectIds || [], merged.hiddenTextFrameIds || []);
+            merged.executionSourceObjectIds = subtractSourceIds(
+                    merged.executionSourceObjectIds || [], merged.hiddenTextFrameIds || []);
             merged.requiresTextHidden = merged.hiddenTextFrameIds.length > 0
                     || merged.editableTextFrameIds.length > 0;
-            merged.textOwner = merged.ownedTextFrameIds.length > 0 ? "indesign_png" : "none";
-            merged.containsEditableText = merged.ownedTextFrameIds.length > 0;
-            merged.completePngTextAllowed = merged.ownedTextFrameIds.length > 0;
-            merged.textAction = merged.ownedTextFrameIds.length > 0 ? "OWNED_BY_PNG" : "DROP_TEXT";
+            merged.textOwner = merged.requiresTextHidden ? "hwpx_tf" : "none";
+            merged.containsEditableText = false;
+            merged.completePngTextAllowed = false;
+            merged.materialization = "EXTRACTED_PNG_VECTOR";
+            merged.textAction = merged.requiresTextHidden ? "OWNED_BY_HWPX_TEXT" : "DROP_TEXT";
             merged.reason = "merged_visual_adjacency_page_textless_graphic_group_candidates";
             merged.candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
@@ -5494,21 +5487,21 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             composite: subtreeIds.length > 1,
             compositeRole: "inline_flow_visual_root",
             slotRole: "inline_flow_visual_root",
-            exportSourceObjectIds: hiddenTextIds.length > 0 ? subtreeIds.slice(0) : exportIds.slice(0),
+            exportSourceObjectIds: exportIds.slice(0),
             exportTargetObjectId: root.id,
             hiddenVisualSourceObjectIds: [],
-            visualSourceObjectIds: hiddenTextIds.length > 0 ? subtreeIds.slice(0) : exportIds.slice(0),
+            visualSourceObjectIds: exportIds.slice(0),
             styleSourceObjectIds: [],
             ownedTextFrameIds: hiddenTextIds.slice(0),
             editableTextFrameIds: hiddenTextIds.slice(0),
-            hiddenTextFrameIds: [],
-            requiresTextHidden: false,
-            textOwner: hiddenTextIds.length > 0 ? "indesign_png" : "none",
-            containsEditableText: hiddenTextIds.length > 0,
-            completePngTextAllowed: hiddenTextIds.length > 0,
+            hiddenTextFrameIds: hiddenTextIds.slice(0),
+            requiresTextHidden: hiddenTextIds.length > 0,
+            textOwner: hiddenTextIds.length > 0 ? "hwpx_tf" : "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
             ownershipSlot: "CONTENT_VISUAL_SLOT",
-            materialization: hiddenTextIds.length > 0 ? "COMPLETE_PNG" : "EXTRACTED_PNG_VECTOR",
-            textAction: hiddenTextIds.length > 0 ? "OWNED_BY_PNG" : "DROP_TEXT",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: hiddenTextIds.length > 0 ? "OWNED_BY_HWPX_TEXT" : "DROP_TEXT",
             visualAction: "PLACE_INLINE_PNG",
             visualLayer: "CONTENT_VISUAL",
             placement: "INLINE",

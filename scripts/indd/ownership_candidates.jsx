@@ -170,26 +170,10 @@ function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds, i
 }
 
 function _inlineCompositeCompletePngDecisionForOwnership(item, editableTextFrameIds, itemById) {
-    var ids = editableTextFrameIds || [];
-    if (_inlineCompleteMarkerDecisionForOwnership(item, ids, itemById)) return true;
-    if (!item || ids.length === 0) return false;
-    var kind = _itemKind(item);
-    if (kind !== "Group") return false;
-    var visualChildCount = 0;
-    try {
-        var children = item.allPageItems;
-        for (var i = 0; children && i < children.length; i++) {
-            var childKind = _itemKind(children[i]);
-            if (childKind === "TextFrame") continue;
-            if (childKind === "Rectangle" || childKind === "Oval"
-                    || childKind === "Polygon" || childKind === "GraphicLine"
-                    || childKind === "Image" || childKind === "PDF"
-                    || childKind === "Group") {
-                visualChildCount++;
-            }
-        }
-    } catch (eInlineCompositeChildren) {}
-    return visualChildCount > 0;
+    // Inline composite groups never own editable text via COMPLETE_PNG.
+    // Even simple marker/label composites must flow through HWPX text ownership
+    // plus separate shell/content channels to avoid text-bearing group rasterization.
+    return false;
 }
 
 function _createExtractionPlanSourceIndexCache(doc, sourceIndex) {

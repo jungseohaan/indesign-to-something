@@ -748,6 +748,8 @@ public class ASTSerializer {
         first = writeStringField(sb, "hwpScript", eq.hwpScript(), first);
         first = writeStringField(sb, "sourceType", eq.sourceType(), first);
         first = writeStringField(sb, "textColor", eq.textColor(), first);
+        first = writeBoxedIntField(sb, "preferredBaseUnit", eq.preferredBaseUnit(), first);
+        first = writeStringField(sb, "preferredFontFamily", eq.preferredFontFamily(), first);
         sb.append('}');
     }
 

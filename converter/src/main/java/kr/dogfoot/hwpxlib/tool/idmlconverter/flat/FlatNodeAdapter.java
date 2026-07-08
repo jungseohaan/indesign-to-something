@@ -390,6 +390,8 @@ public class FlatNodeAdapter {
     private ASTEquation convertEquation(FlatInlineItem item) {
         ASTEquation eq = new ASTEquation(item.hwpScript(), item.equationSourceType());
         eq.textColor(item.equationTextColor());
+        eq.preferredBaseUnit(item.equationPreferredBaseUnit());
+        eq.preferredFontFamily(item.equationPreferredFontFamily());
         return eq;
     }
 

@@ -264,6 +264,8 @@ class MathProcessor {
         boolean hasPositioned = false;
         boolean hasChemicalSymbol = false;
         String color = null;
+        Integer preferredBaseUnit = null;
+        String preferredFontFamily = null;
         char previousVisible = 0;
         int end = start;
 
@@ -275,6 +277,12 @@ class MathProcessor {
                 String text = tr.text();
                 if (text == null || text.isEmpty() || !isFormulaClusterText(text)) break;
                 if (color == null) color = tr.textColor();
+                if (preferredBaseUnit == null && tr.fontSizeHwpunits() != null && tr.fontSizeHwpunits() > 0) {
+                    preferredBaseUnit = tr.fontSizeHwpunits();
+                }
+                if (preferredFontFamily == null && tr.fontFamily() != null && !tr.fontFamily().isEmpty()) {
+                    preferredFontFamily = tr.fontFamily();
+                }
                 ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
                 if (!result.accepted) break;
                 previousVisible = result.previousVisible;
@@ -306,6 +314,12 @@ class MathProcessor {
                 hasEquation = true;
                 previousVisible = result.previousVisible;
                 if (color == null) color = eq.textColor();
+                if (preferredBaseUnit == null && eq.preferredBaseUnit() != null && eq.preferredBaseUnit() > 0) {
+                    preferredBaseUnit = eq.preferredBaseUnit();
+                }
+                if (preferredFontFamily == null && eq.preferredFontFamily() != null && !eq.preferredFontFamily().isEmpty()) {
+                    preferredFontFamily = eq.preferredFontFamily();
+                }
                 end = i + 1;
                 continue;
             }
@@ -331,6 +345,7 @@ class MathProcessor {
 
         ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
         if (color != null) eq.textColor(color);
+        applyBodyTextEquationHints(eq, preferredBaseUnit, preferredFontFamily);
         return new FormulaCluster(eq, end);
     }
 
@@ -656,6 +671,8 @@ class MathProcessor {
         boolean hasPositioned = false;
         boolean hasChemicalSymbol = false;
         String color = null;
+        Integer preferredBaseUnit = null;
+        String preferredFontFamily = null;
         char previousVisible = 0;
         int end = start;
 
@@ -669,6 +686,12 @@ class MathProcessor {
             if (!isFormulaClusterText(text)) break;
 
             if (color == null) color = tr.textColor();
+            if (preferredBaseUnit == null && tr.fontSizeHwpunits() != null && tr.fontSizeHwpunits() > 0) {
+                preferredBaseUnit = tr.fontSizeHwpunits();
+            }
+            if (preferredFontFamily == null && tr.fontFamily() != null && !tr.fontFamily().isEmpty()) {
+                preferredFontFamily = tr.fontFamily();
+            }
             ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
             if (!result.accepted) break;
             previousVisible = result.previousVisible;
@@ -691,7 +714,18 @@ class MathProcessor {
 
         ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
         if (color != null) eq.textColor(color);
+        applyBodyTextEquationHints(eq, preferredBaseUnit, preferredFontFamily);
         return new FormulaCluster(eq, end);
+    }
+
+    static void applyBodyTextEquationHints(ASTEquation equation, Integer preferredBaseUnit, String preferredFontFamily) {
+        if (equation == null) return;
+        if (preferredBaseUnit != null && preferredBaseUnit > 0) {
+            equation.preferredBaseUnit(preferredBaseUnit);
+        }
+        if (preferredFontFamily != null && !preferredFontFamily.isEmpty()) {
+            equation.preferredFontFamily(preferredFontFamily);
+        }
     }
 
     private static class ScriptAppendResult {

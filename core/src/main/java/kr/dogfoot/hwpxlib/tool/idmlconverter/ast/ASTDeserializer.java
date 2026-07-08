@@ -487,6 +487,8 @@ public class ASTDeserializer {
         eq.hwpScript(getString(o, "hwpScript"));
         eq.sourceType(getString(o, "sourceType"));
         eq.textColor(getString(o, "textColor"));
+        eq.preferredBaseUnit(getBoxedInt(o, "preferredBaseUnit"));
+        eq.preferredFontFamily(getString(o, "preferredFontFamily"));
         return eq;
     }
 

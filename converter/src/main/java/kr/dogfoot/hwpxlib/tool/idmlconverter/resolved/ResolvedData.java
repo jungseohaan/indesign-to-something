@@ -990,28 +990,9 @@ public class ResolvedData {
      * 결정하고, 이 메서드는 그 bundle을 PNG 한 장이 텍스트까지 소유해도 되는지만 본다.
      */
     public boolean shouldUseCompletePngForSimpleButtonLabel(RenderedGroup item) {
-        if (item == null) return false;
-        if (hasAtomicObjectKind(item)
-                && !ATOMIC_COMPLETE_PNG.equals(item.atomicObjectKind())) {
-            return false;
-        }
-        if (!"indesign_png".equals(item.visualOwner())) return false;
-        if (ATOMIC_COMPLETE_PNG.equals(item.atomicObjectKind())) {
-            if (!"indesign_png".equals(item.textOwner())) return false;
-            if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
-        } else if ("visual_marker_label_indesign_png".equals(item.reason())) {
-            if (!"indesign_png".equals(item.textOwner())) return false;
-            if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
-        } else if (!isInlineCompleteSimpleButtonLabelCandidate(item)) {
-            return false;
-        }
-        String[] ids = simpleButtonLabelTextFrameIds(item);
-        if (ids == null || ids.length == 0 || ids.length > 2) return false;
-        for (String id : ids) {
-            ResolvedTextFrame tf = getTextFrame(id);
-            if (!isSimpleButtonLabelText(tf)) return false;
-        }
-        return isCanonicalAtomicMarkerRender(item, ids);
+        // Text-bearing marker/label groups no longer materialize as COMPLETE_PNG.
+        // The canonical route is always textless shell visual + HWPX text.
+        return false;
     }
 
     /**

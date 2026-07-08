@@ -295,7 +295,7 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
         // stroke-only TF는 이전 정책처럼 비직사각형/대형 윤곽선만 보존한다.
         // fill이 있는 TF는 배경/말풍선/라벨로 쓰이는 경우가 많아 형태와 관계없이 보존한다.
         var isNonRect = hasNonRectangularPath(item);
-        if (!hasFill && !isNonRect) {
+        if (!hasFill && !isNonRect && !explicitDirectTextFrameShellCandidate) {
             // 직사각 stroke-only TF도 라운드 코너/내부 semantic TF가 있으면
             // 레이아웃 shell로 보존한다. 50pt 절대 문턱은 페이지별로 쉽게 흔들린다.
             if (!shouldExportRectStrokeTextFrameShell(item, allItemsForShellHeuristics || [])) continue;

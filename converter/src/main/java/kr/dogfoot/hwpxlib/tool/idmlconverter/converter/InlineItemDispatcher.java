@@ -300,13 +300,15 @@ final class InlineItemDispatcher {
         try {
             Equation template = EquationBuilder.fromHwpScript(eq.hwpScript());
             Equation hwpxEq = run.addNewEquation();
+            int resolvedBaseUnit = resolveEquationBaseUnit(eq, template);
+            String resolvedFont = resolveEquationFont(eq, template);
             // 수식 색상: AST에서 전달된 색상이 있으면 사용, 없으면 기본 검정
             String eqColor = eq.textColor() != null ? eq.textColor() : template.textColor();
             hwpxEq.versionAnd(template.version())
                     .textColorAnd(eqColor)
-                    .baseUnitAnd(template.baseUnit())
+                    .baseUnitAnd(resolvedBaseUnit)
                     .lineModeAnd(template.lineMode())
-                    .fontAnd(template.font());
+                    .fontAnd(resolvedFont);
 
             // ShapeObject 기본 속성
             hwpxEq.numberingTypeAnd(NumberingType.EQUATION)
@@ -315,7 +317,7 @@ final class InlineItemDispatcher {
                     .lockAnd(false);
 
             // ShapeSize — 한글이 열 때 자동 계산하지만 초기값 필요
-            int baseUnit = template.baseUnit() != null ? template.baseUnit() : 1100;
+            int baseUnit = resolvedBaseUnit;
             String script = eq.hwpScript();
             long estW = (long) (script.length() * baseUnit * 0.7);
             // 분수(over) 수식은 분자+분수선+분모로 높이가 크므로 별도 추정
@@ -358,5 +360,31 @@ final class InlineItemDispatcher {
             ctx.addWarning("Equation", "수식 변환 실패: " + eq.hwpScript());
             run.addNewT().addText("[수식: " + eq.hwpScript() + "]");
         }
+    }
+
+    private int resolveEquationBaseUnit(ASTEquation eq, Equation template) {
+        if (usesBodyTextEquationStyle(eq)
+                && eq != null
+                && eq.preferredBaseUnit() != null
+                && eq.preferredBaseUnit() > 0) {
+            return eq.preferredBaseUnit();
+        }
+        return template.baseUnit() != null ? template.baseUnit() : 1100;
+    }
+
+    private String resolveEquationFont(ASTEquation eq, Equation template) {
+        if (usesBodyTextEquationStyle(eq)) {
+            String sourceFont = eq != null ? eq.preferredFontFamily() : null;
+            if (sourceFont != null && !sourceFont.isEmpty()) {
+                return FontMapper.mapToHwpxFont(sourceFont);
+            }
+            return "함초롬바탕";
+        }
+        return template.font();
+    }
+
+    private boolean usesBodyTextEquationStyle(ASTEquation eq) {
+        if (eq == null || eq.sourceType() == null) return false;
+        return "CHEM_FORMULA".equals(eq.sourceType());
     }
 }

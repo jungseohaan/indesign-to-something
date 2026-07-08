@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
@@ -536,8 +537,37 @@ public class ASTMathGrouper {
         if (!canEmitPositionedFormulaEquation(mathRuns)) return false;
         String script = buildPositionedFormulaScript(mathRuns);
         if (script == null || script.trim().isEmpty()) return false;
-        para.addItem(new ASTEquation(script.trim(), sourceType));
+        ASTEquation eq = new ASTEquation(script.trim(), sourceType);
+        applyTextDerivedEquationHints(eq, mathRuns);
+        para.addItem(eq);
         return true;
+    }
+
+    private static void applyTextDerivedEquationHints(ASTEquation equation, List<IDMLCharacterRun> mathRuns) {
+        if (equation == null || mathRuns == null || mathRuns.isEmpty()) return;
+        Integer preferredBaseUnit = null;
+        String preferredFontFamily = null;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) continue;
+            if (preferredBaseUnit == null && run.fontSize() != null && run.fontSize() > 0.0) {
+                preferredBaseUnit = (int) Math.round(run.fontSize() * 100.0);
+            }
+            if (preferredFontFamily == null
+                    && run.fontFamily() != null
+                    && !run.fontFamily().isEmpty()
+                    && !EHFontGlyphMap.isEHFontFamily(run.fontFamily())
+                    && !BTFontGlyphMap.isBTFontFamily(run.fontFamily())
+                    && !NPFontGlyphMap.isNPFont(run.fontFamily())) {
+                preferredFontFamily = run.fontFamily();
+            }
+            if (preferredBaseUnit != null && preferredFontFamily != null) break;
+        }
+        if (preferredBaseUnit != null && preferredBaseUnit > 0) {
+            equation.preferredBaseUnit(preferredBaseUnit);
+        }
+        if (preferredFontFamily != null && !preferredFontFamily.isEmpty()) {
+            equation.preferredFontFamily(preferredFontFamily);
+        }
     }
 
     private static boolean canEmitPositionedFormulaEquation(List<IDMLCharacterRun> mathRuns) {

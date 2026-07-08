@@ -580,34 +580,6 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             editableIds = textFrameIdsInSourceSet(ownershipSourceIds, candidate.pageIndex);
         }
         if (!editableIds || editableIds.length === 0) return false;
-        var isExplicitShellSlot = candidate.slotRole === "direct_child_shell_slot"
-                || candidate.compositeRole === "direct_child_shell_slot";
-        if (!isExplicitShellSlot && allTextFramesAreSimpleMarkers(editableIds)) {
-            var beforeMarkerOwner = String(candidate.textOwner || "");
-            var beforeMarkerHidden = _sourceSetKey(candidate.hiddenTextFrameIds || []);
-            candidate.sourceObjectIds = ownershipSourceIds;
-            candidate.exportSourceObjectIds = [];
-            candidate.exportTargetObjectId = inlineRootId;
-            candidate.visualSourceObjectIds = ownershipSourceIds;
-            candidate.hiddenVisualSourceObjectIds = [];
-            candidate.editableTextFrameIds = _sourceIdsUnion(
-                    candidate.editableTextFrameIds || [], editableIds);
-            candidate.hiddenTextFrameIds = [];
-            candidate.requiresTextHidden = false;
-            candidate.textOwner = "indesign_png";
-            candidate.containsEditableText = true;
-            candidate.completePngTextAllowed = true;
-            candidate.materialization = candidate.materialization || "COMPLETE_PNG";
-            candidate.textAction = "OWNED_BY_PNG";
-            candidate.visualAction = candidate.visualAction || "PLACE_INLINE_PNG";
-            candidate.ownershipSlot = candidate.ownershipSlot || "CONTENT_VISUAL_SLOT";
-            candidate.mode = candidate.mode || "TEXTLESS_CANDIDATE";
-            var markerChanged = beforeMarkerOwner !== String(candidate.textOwner || "")
-                    || beforeMarkerHidden !== _sourceSetKey(candidate.hiddenTextFrameIds || []);
-            if (markerChanged) refreshCandidateIdentity(candidate);
-            return markerChanged;
-        }
-
         // Inline TF+shell groups are native inline carriers.  Preserve the
         // carrier as the shell export target and hide editable child TFs during
         // export; reducing the contract to leaf shapes drops clipping/effects

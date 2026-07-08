@@ -221,8 +221,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 var inlineHiddenTextFrameIds = [];
                 var savedInlineOutOfScopeItems = [];
                 var inlineCompleteMarkerEditableIds = [];
-                var inlineCompleteMarker = inlineCandidate.textOwner === "indesign_png"
-                        && inlineCandidate.completePngTextAllowed === true;
+                var inlineCompleteMarker = false;
                 try {
                     inlineCompleteMarkerEditableIds = inlineCandidate.editableTextFrameIds || [];
                     // Stage 1 contract: the planner decides whether inline text is
@@ -300,13 +299,11 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             type: "inline_object",
                             placementRole: "inline_object",
                             visualOwner: "indesign_png",
-                            textOwner: inlineCompleteMarker ? "indesign_png" : (_inlineHasHiddenText ? "hwpx_tf" : "none"),
-                            containsText: inlineCompleteMarker ? true : false,
-                            containsEditableText: inlineCompleteMarker ? true : false,
+                            textOwner: _inlineHasHiddenText ? "hwpx_tf" : "none",
+                            containsText: false,
+                            containsEditableText: false,
                             placementAllowed: true,
-                            reason: inlineCompleteMarker
-                                    ? "visual_marker_label_indesign_png"
-                                    : (_inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only"),
+                            reason: _inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only",
                             sourceObjectIds: _inlineEntrySourceIds,
                             childIds: inlineHiddenTextFrameIds,
                             exportSanity: {
@@ -327,7 +324,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 containsText: _inlineBaseEntry.containsText,
                                 containsEditableText: _inlineBaseEntry.containsEditableText,
                                 placementAllowed: true,
-                                editableTextFrameIds: inlineCompleteMarker ? inlineCompleteMarkerEditableIds : inlineHiddenTextFrameIds,
+                                editableTextFrameIds: inlineHiddenTextFrameIds,
                                 sourceObjectIds: _inlineEntrySourceIds,
                                 exportSourceObjectIds: inlineCandidate.exportSourceObjectIds || [],
                                 hiddenVisualSourceObjectIds: inlineCandidate.hiddenVisualSourceObjectIds || [],

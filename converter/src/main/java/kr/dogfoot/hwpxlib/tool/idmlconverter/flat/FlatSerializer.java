@@ -789,6 +789,8 @@ public class FlatSerializer {
         first = writeStringField(sb, "hwpScript", item.hwpScript(), first);
         first = writeStringField(sb, "equationSourceType", item.equationSourceType(), first);
         first = writeStringField(sb, "equationTextColor", item.equationTextColor(), first);
+        first = writeBoxedIntField(sb, "equationPreferredBaseUnit", item.equationPreferredBaseUnit(), first);
+        first = writeStringField(sb, "equationPreferredFontFamily", item.equationPreferredFontFamily(), first);
         sb.append('}');
     }
 

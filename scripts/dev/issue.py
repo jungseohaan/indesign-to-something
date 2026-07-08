@@ -540,7 +540,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         validate_extraction_success(extract_dir)
         validate_extraction_page_range(extract_dir, extract_range)
 
-    hwpx_path = converted_dir / f"{args.case}-{page_label(args.page, args.end_page)}.hwpx"
+    case_file_label = args.case.replace("/", "-").replace(":", "-")
+    hwpx_path = converted_dir / f"{case_file_label}-{page_label(args.page, args.end_page)}.hwpx"
     ensure_converter_built(args.dry_run)
     convert_cmd = [
         java_command(),

@@ -2976,21 +2976,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 var editableIds = [];
                 try { editableIds = _decoCollectTextFrameIds(child, true, true); } catch (eIds) {}
                 var completeDecision = _completePngMarkerDecision(child, editableIds);
-                if (completeDecision.marker) {
-                    _decoRender(child, page, null, {
-                        textOwner: "indesign_png",
-                        containsText: true,
-                        containsEditableText: completeDecision.containsEditableText,
-                        placementAllowed: true,
-                        editableTextFrameIds: completeDecision.editableTextFrameIds,
-                        reason: "visual_marker_label_indesign_png"
-                    });
-                } else {
-                    var shellReason = _isEditableCompositeTextHiddenShellGroup(child)
-                            ? "editable_composite_text_hidden_shell"
-                            : "visual_label_text_hidden_shell";
-                    _renderEditableVisualLabelShell(child, page, shellReason);
-                }
+                var shellReason = _isEditableCompositeTextHiddenShellGroup(child)
+                        ? "editable_composite_text_hidden_shell"
+                        : "visual_label_text_hidden_shell";
+                _renderEditableVisualLabelShell(child, page, shellReason);
                 rendered++;
             }
         } catch (e) {}
@@ -3365,21 +3354,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             } else if ((kind === "mixedGroup" || kind === "textComposite") && _isShortVisualLabelGroup(grp)) {
                 var _labelEditableIds = [];
                 try { _labelEditableIds = _decoCollectTextFrameIds(grp, true, true); } catch (e) {}
-                if (_isVisualMarkerLabelGroup(grp)) {
-                    _decoRender(grp, grpPage, null, {
-                        textOwner: "indesign_png",
-                        containsText: true,
-                        containsEditableText: true,
-                        placementAllowed: true,
-                        editableTextFrameIds: _labelEditableIds,
-                        reason: "visual_marker_label_indesign_png"
-                    });
-                } else {
-                    var _shellReason = _isEditableCompositeTextHiddenShellGroup(grp)
-                            ? "editable_composite_text_hidden_shell"
-                            : "visual_label_text_hidden_shell";
-                    _renderEditableVisualLabelShell(grp, grpPage, _shellReason);
-                }
+                var _shellReason = _isEditableCompositeTextHiddenShellGroup(grp)
+                        ? "editable_composite_text_hidden_shell"
+                        : "visual_label_text_hidden_shell";
+                _renderEditableVisualLabelShell(grp, grpPage, _shellReason);
             } else if (kind === "mixedGroup" && _isLargeMixedParentGroup(grp)) {
                 _renderAtomicVisualClusters(grp, grpPage);
                 // 큰 부모 mixedGroup은 통 이미지로 만들지 않는다. 자식 atomic cluster와
@@ -3429,15 +3407,14 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 // Color/Paper (흰색) 획 도형은 투명배경 PNG에서 소실 → 검은색으로 임시 변환 후 개별 추출
                 _exportPaperStrokeShapes(grp, grpPage);
             } else {
-                _decoRender(grp, grpPage, null, kind === "textComposite" ? {
-                    textOwner: "indesign_png",
-                    containsText: true,
-                    placementAllowed: true,
-                    reason: "text_composite_indesign_png"
-                } : {
-                    textOwner: "none",
-                    reason: "pure_decoration_group"
-                });
+                if (kind === "textComposite") {
+                    _renderEditableVisualLabelShell(grp, grpPage, "text_composite_fallback_text_hidden_shell");
+                } else {
+                    _decoRender(grp, grpPage, null, {
+                        textOwner: "none",
+                        reason: "pure_decoration_group"
+                    });
+                }
             }
         } catch (e) {
             // outer catch: 예외가 발생해도 숨겼던 TF/도형 복원

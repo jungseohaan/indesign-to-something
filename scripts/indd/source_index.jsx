@@ -1247,6 +1247,10 @@ function _sourceCoverageStatusForClaimKindMap(src, claimKinds) {
 function _sourceCoverageHasPotentialVisibleMaterial(src) {
     if (!src) return false;
     if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.pageIndex !== undefined && src.pageIndex !== null
+            && Number(src.pageIndex) < 0) {
+        return false;
+    }
     var kind = String(src.kind || "");
     if (kind === "TextFrame" && src.hasText === true) return true;
     if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;

@@ -444,7 +444,7 @@ public class StoryLoader {
                                             System.nanoTime() - createStart);
                                     if (!RunBuilder.splitBulletRun(ctx, tr, para)) {
                                         long splitLatinStart = System.nanoTime();
-                                        RunBuilder.splitLatinVarsInMixedText(ctx, tr, para);
+                                        RunBuilder.splitChemicalFormulasAndLatinVarsInMixedText(ctx, tr, para);
                                         ConversionTiming.addCounter(perfPrefix + ".splitLatinVarsNanos",
                                                 System.nanoTime() - splitLatinStart);
                                     }
@@ -646,7 +646,7 @@ public class StoryLoader {
                                     MathProcessor.splitFractionPatternInText(ctx, text, tr, para);
                                 } else {
                                     long splitLatinStart = System.nanoTime();
-                                    RunBuilder.splitLatinVarsInMixedText(ctx, tr, para);
+                                    RunBuilder.splitChemicalFormulasAndLatinVarsInMixedText(ctx, tr, para);
                                     ConversionTiming.addCounter(perfPrefix + ".splitLatinVarsNanos",
                                             System.nanoTime() - splitLatinStart);
                                 }

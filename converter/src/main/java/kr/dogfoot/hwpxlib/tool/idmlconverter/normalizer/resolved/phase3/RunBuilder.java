@@ -15,8 +15,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildCo
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Phase 3 런 빌드 + 매칭 + 스타일 헬퍼 (W3 Step F).
@@ -24,6 +27,21 @@ import java.util.Locale;
  */
 class RunBuilder {
     private RunBuilder() {}
+
+    private static final Set<String> CHEMICAL_ELEMENT_SYMBOLS = new HashSet<>(Arrays.asList(
+            "H","He","Li","Be","B","C","N","O","F","Ne",
+            "Na","Mg","Al","Si","P","S","Cl","Ar","K","Ca",
+            "Sc","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn",
+            "Ga","Ge","As","Se","Br","Kr","Rb","Sr","Y","Zr",
+            "Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn",
+            "Sb","Te","I","Xe","Cs","Ba","La","Ce","Pr","Nd",
+            "Pm","Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb",
+            "Lu","Hf","Ta","W","Re","Os","Ir","Pt","Au","Hg",
+            "Tl","Pb","Bi","Po","At","Rn","Fr","Ra","Ac","Th",
+            "Pa","U","Np","Pu","Am","Cm","Bk","Cf","Es","Fm",
+            "Md","No","Lr","Rf","Db","Sg","Bh","Hs","Mt","Ds",
+            "Rg","Cn","Nh","Fl","Mc","Lv","Ts","Og"
+    ));
 
     /** 기본 매칭 신뢰도(LOW)로 createRunFromIDML 호출 — 호환용 래퍼. */
     static ASTTextRun createRunFromIDML(ResolvedBuildContext ctx, IDMLCharacterRun cr, String text, ResolvedRun rr, StoryConverter.StyleContext sc) {
@@ -622,6 +640,120 @@ class RunBuilder {
         }
     }
 
+    static void splitChemicalFormulasAndLatinVarsInMixedText(ResolvedBuildContext ctx,
+                                                              ASTTextRun originalRun,
+                                                              ASTParagraph para) {
+        String text = originalRun.text();
+        if (text == null || text.isEmpty()) {
+            para.addItem(originalRun);
+            return;
+        }
+
+        int cursor = 0;
+        boolean emitted = false;
+        while (cursor < text.length()) {
+            FormulaTokenMatch match = findNextChemicalFormulaToken(text, cursor);
+            if (match == null) break;
+
+            if (match.start > cursor) {
+                ASTTextRun before = cloneRunWithText(ctx, originalRun, text.substring(cursor, match.start));
+                splitLatinVarsInMixedText(ctx, before, para);
+            }
+
+            emitChemicalFormulaToken(ctx, originalRun, para, match.token);
+            emitted = true;
+            cursor = match.endExclusive;
+        }
+
+        if (!emitted) {
+            splitLatinVarsInMixedText(ctx, originalRun, para);
+            return;
+        }
+
+        if (cursor < text.length()) {
+            ASTTextRun after = cloneRunWithText(ctx, originalRun, text.substring(cursor));
+            splitLatinVarsInMixedText(ctx, after, para);
+        }
+    }
+
+    private static void emitChemicalFormulaToken(ResolvedBuildContext ctx,
+                                                 ASTTextRun templateRun,
+                                                 ASTParagraph para,
+                                                 String token) {
+        StringBuilder letters = new StringBuilder();
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (Character.isDigit(c)) {
+                if (letters.length() > 0) {
+                    para.addItem(cloneRunWithText(ctx, templateRun, letters.toString()));
+                    letters.setLength(0);
+                }
+                ASTTextRun digitRun = cloneRunWithText(ctx, templateRun, String.valueOf(c));
+                digitRun.subscript(true);
+                digitRun.superscript(false);
+                digitRun.baselineShift(null);
+                para.addItem(digitRun);
+            } else {
+                letters.append(c);
+            }
+        }
+        if (letters.length() > 0) {
+            para.addItem(cloneRunWithText(ctx, templateRun, letters.toString()));
+        }
+    }
+
+    private static FormulaTokenMatch findNextChemicalFormulaToken(String text, int fromIndex) {
+        for (int i = Math.max(0, fromIndex); i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (!Character.isUpperCase(ch)) continue;
+            FormulaTokenMatch match = tryParseChemicalFormulaToken(text, i);
+            if (match != null) return match;
+        }
+        return null;
+    }
+
+    private static FormulaTokenMatch tryParseChemicalFormulaToken(String text, int start) {
+        if (start < 0 || start >= text.length()) return null;
+        if (!Character.isUpperCase(text.charAt(start))) return null;
+        if (start > 0 && Character.isLetterOrDigit(text.charAt(start - 1))) return null;
+
+        int i = start;
+        boolean hasDigit = false;
+        boolean parsedAnyElement = false;
+        while (i < text.length()) {
+            int elementEnd = i + 1;
+            if (elementEnd < text.length() && Character.isLowerCase(text.charAt(elementEnd))) {
+                elementEnd++;
+            }
+            String symbol = text.substring(i, elementEnd);
+            if (!CHEMICAL_ELEMENT_SYMBOLS.contains(symbol)) break;
+            parsedAnyElement = true;
+            i = elementEnd;
+
+            int digitStart = i;
+            while (i < text.length() && Character.isDigit(text.charAt(i))) {
+                i++;
+            }
+            if (i > digitStart) hasDigit = true;
+        }
+
+        if (!parsedAnyElement || !hasDigit) return null;
+        if (i < text.length() && Character.isLetterOrDigit(text.charAt(i))) return null;
+        return new FormulaTokenMatch(start, i, text.substring(start, i));
+    }
+
+    private static final class FormulaTokenMatch {
+        final int start;
+        final int endExclusive;
+        final String token;
+
+        FormulaTokenMatch(int start, int endExclusive, String token) {
+            this.start = start;
+            this.endExclusive = endExclusive;
+            this.token = token;
+        }
+    }
+
     static ASTTextRun cloneRunWithText(ResolvedBuildContext ctx, ASTTextRun src, String text) {
         ASTTextRun tr = new ASTTextRun();
         tr.text(text);
@@ -887,7 +1019,7 @@ class RunBuilder {
 
             ASTTextRun tr = createRunFromIDML(ctx, cr, seg.text, effectiveRr, sc, effConf);
             if (!splitBulletRun(ctx, tr, para)) {
-                splitLatinVarsInMixedText(ctx, tr, para);
+                splitChemicalFormulasAndLatinVarsInMixedText(ctx, tr, para);
             }
         }
         return true;
