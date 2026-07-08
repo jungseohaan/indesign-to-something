@@ -485,7 +485,9 @@ function classifyTextFrameCached(item) {
 
 // --- 렌더링 시 TextFrame 텍스트 제거 헬퍼 ---
 
-function hideOneTextFrameContent(tf) {
+function hideOneTextFrameContent(tf, opts) {
+    opts = opts || {};
+    var preferTextPaintOnly = opts.preferTextPaintOnly === true;
     var doc = null;
     try { doc = app.activeDocument; } catch (eDoc) {}
     var noneSwatch = null;
@@ -496,12 +498,14 @@ function hideOneTextFrameContent(tf) {
         }
     }
 
-    try {
-        var contentBlend = tf.contentTransparencySettings.blendingSettings;
-        var oldOpacity = contentBlend.opacity;
-        contentBlend.opacity = 0;
-        return { tf: tf, mode: "contentOpacity", opacity: oldOpacity };
-    } catch (eContentOpacityFirst) {}
+    if (!preferTextPaintOnly) {
+        try {
+            var contentBlend = tf.contentTransparencySettings.blendingSettings;
+            var oldOpacity = contentBlend.opacity;
+            contentBlend.opacity = 0;
+            return { tf: tf, mode: "contentOpacity", opacity: oldOpacity };
+        } catch (eContentOpacityFirst) {}
+    }
 
     function hideTextPaintTarget(target) {
         var state = { target: target };
@@ -556,7 +560,7 @@ function hideOneTextFrameContent(tf) {
     return null;
 }
 
-function hideTextFrames(renderTarget) {
+function hideTextFrames(renderTarget, opts) {
     // TextFrame 자체를 숨기면 fill/stroke로 만든 박스 그래픽까지 사라진다.
     // content opacity만 0으로 낮춰 텍스트 픽셀만 제거하고 프레임 그래픽은 보존한다.
     var saved = [];
@@ -564,7 +568,7 @@ function hideTextFrames(renderTarget) {
     try {
         if (renderTarget && renderTarget.constructor.name === "TextFrame") {
             rootTextFrameId = renderTarget.id;
-            var rootSaved = hideOneTextFrameContent(renderTarget);
+            var rootSaved = hideOneTextFrameContent(renderTarget, opts);
             if (rootSaved) saved.push(rootSaved);
         }
     } catch (eRoot) {}
@@ -575,7 +579,7 @@ function hideTextFrames(renderTarget) {
                 try {
                     var tf = nested[hi];
                     if (rootTextFrameId !== null && tf.id === rootTextFrameId) continue;
-                    var itemSaved = hideOneTextFrameContent(tf);
+                    var itemSaved = hideOneTextFrameContent(tf, opts);
                     if (itemSaved) saved.push(itemSaved);
                 } catch (eOne) {}
             }
@@ -584,13 +588,13 @@ function hideTextFrames(renderTarget) {
     return saved;
 }
 
-function hideTextFramesFromNestedItems(nested) {
+function hideTextFramesFromNestedItems(nested, opts) {
     var saved = [];
     if (!nested) return saved;
     for (var hi = 0; hi < nested.length; hi++) {
         try {
             if (nested[hi].constructor.name !== "TextFrame") continue;
-            var itemSaved = hideOneTextFrameContent(nested[hi]);
+            var itemSaved = hideOneTextFrameContent(nested[hi], opts);
             if (itemSaved) saved.push(itemSaved);
         } catch (eOpacity) {}
     }
@@ -978,15 +982,15 @@ function hideTextFrameOwnedInlineVisualsFromNestedItems(nested, ids) {
     return saved;
 }
 
-function hideTextFramesAndOwnedInlineVisuals(renderTarget) {
-    var saved = hideTextFrames(renderTarget);
+function hideTextFramesAndOwnedInlineVisuals(renderTarget, opts) {
+    var saved = hideTextFrames(renderTarget, opts);
     var savedInline = hideTextFrameOwnedInlineVisuals(renderTarget);
     for (var i = 0; i < savedInline.length; i++) saved.push(savedInline[i]);
     return saved;
 }
 
-function hideTextFramesAndOwnedInlineVisualsFromNestedItems(nested, inlineVisualIds) {
-    var saved = hideTextFramesFromNestedItems(nested);
+function hideTextFramesAndOwnedInlineVisualsFromNestedItems(nested, inlineVisualIds, opts) {
+    var saved = hideTextFramesFromNestedItems(nested, opts);
     var savedInline = hideTextFrameOwnedInlineVisualsFromNestedItems(nested, inlineVisualIds);
     for (var i = 0; i < savedInline.length; i++) saved.push(savedInline[i]);
     return saved;

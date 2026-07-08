@@ -1160,6 +1160,7 @@ public final class TableBuilder {
                     ASTInlineObject nested = firstNestedTextFrame(paragraphs.get(i));
                     if (nested == null || nested.paragraphs() == null || nested.paragraphs().isEmpty()) continue;
                     if (isPlannedInlineTextShellObject(ctx, nested)) continue;
+                    if (hasDrawableNestedTextFrameShell(nested)) continue;
                     List<ASTParagraph> authoritative = authoritativeParagraphsForNestedTextFrame(ctx, nested);
                     List<ASTParagraph> sourceParagraphs =
                             authoritative != null && !authoritative.isEmpty() ? authoritative : nested.paragraphs();
@@ -1173,6 +1174,16 @@ public final class TableBuilder {
                 }
             }
         }
+    }
+
+    private static boolean hasDrawableNestedTextFrameShell(ASTInlineObject obj) {
+        if (obj == null) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return true;
+        String fill = obj.fillColor();
+        if (fill != null && fill.startsWith("#")) return true;
+        String stroke = obj.strokeColor();
+        if (stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0) return true;
+        return obj.cornerRadius() > 0.01;
     }
 
     private static boolean isPlannedInlineTextShellObject(ResolvedBuildContext ctx, ASTInlineObject obj) {
@@ -1484,7 +1495,8 @@ public final class TableBuilder {
         int tfId = parseId(ownerTextFrame.id());
         if (tfId < 0) return ids;
         for (ObjectPlan plan : ctx.ownershipPlans) {
-            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
             if (plan.domId != tfId
                     && !containsInt(plan.ownedTextFrameIds, tfId)
                     && !containsInt(plan.sourceObjectIds, tfId)) {

@@ -736,6 +736,7 @@ public class StoryLoader {
             return result;
         }
         if (hasTextFrameStoryOwnedByPlacedTextFrame(ctx, idmlCell)
+                && !hasCellOwnedNestedStoryRef(ctx, idmlCell)
                 && !hasPlannedInlineAtomicCellContent(ctx, idmlCell)
                 && !hasDirectVisibleCellText(idmlCell)) {
             return result;
@@ -771,7 +772,40 @@ public class StoryLoader {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
         }
+        if (!hasMeaningfulCellParagraphContent(result)
+                && idmlCell.textFrameStoryRefs() != null
+                && !idmlCell.textFrameStoryRefs().isEmpty()) {
+            return new ArrayList<>();
+        }
         return result;
+    }
+
+    private static boolean hasMeaningfulCellParagraphContent(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return false;
+        for (ASTParagraph para : paragraphs) {
+            if (paragraphHasMeaningfulCellContent(para)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean paragraphHasMeaningfulCellContent(ASTParagraph para) {
+        if (para == null) return false;
+        if (para.inlineTable() != null) return true;
+        if (para.items() == null || para.items().isEmpty()) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (item == null) continue;
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !normalizeCellOwnershipText(text).isEmpty()) {
+                    return true;
+                }
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -1783,9 +1817,27 @@ public class StoryLoader {
             return false;
         }
         for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            if (hasCellOwnedNestedStoryRef(ctx, idmlCell, storyRef)) continue;
             if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)) return true;
         }
         return false;
+    }
+
+    private static boolean hasCellOwnedNestedStoryRef(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (idmlCell == null || idmlCell.textFrameStoryRefs() == null) return false;
+        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            if (hasCellOwnedNestedStoryRef(ctx, idmlCell, storyRef)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasCellOwnedNestedStoryRef(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+            String storyRef) {
+        return StoryFlowAssembler.shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef);
     }
 
     private static boolean hasDirectVisibleCellText(

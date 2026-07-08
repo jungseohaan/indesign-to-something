@@ -450,8 +450,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         jarPath,
       });
       set({ result, isConverting: false, lastOutputPath: outputPath });
-      const semanticBlocksPath = outputPath.replace(/\.[^.]+$/, ".semantic-blocks.json");
-      useAstStore.getState().loadSemanticBlocks(semanticBlocksPath);
 
       // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
       const { previewPdfPath } = get();
@@ -743,7 +741,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             if (extractResult.resolved_json_path) {
               useAstStore.getState().loadResolved(extractResult.resolved_json_path);
             }
-            useAstStore.getState().loadSemanticBlocks(batchOutputPath.replace(/\.[^.]+$/, ".semantic-blocks.json"));
             set({
               idmlPath: extractResult.idml_path,
               resolvedJsonPath: extractResult.resolved_json_path ?? null,

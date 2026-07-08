@@ -905,6 +905,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
         }
         var _autoHiddenTFs = null;
+        var _preferTextPaintOnlyHide = false;
         var _perfAutoHideStartedAt = _decoPerfNow();
         try {
             // A decoration render target may contain editable TextFrames whose
@@ -915,9 +916,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             var _editableForDeco = _decoCollectTextFrameIds(_exportTargetSource, true, false);
             var _textOwnerForDeco = resolvedOwnershipOpts.textOwner;
             if (!_textOwnerForDeco && _editableForDeco.length > 0) _textOwnerForDeco = "hwpx_tf";
+            _preferTextPaintOnlyHide = _hasTableOnlyCarrierTextFrame(_exportTargetSource);
             if (_editableForDeco.length > 0
                     && _textOwnerForDeco !== "indesign_png") {
-                _autoHiddenTFs = hideTextFramesAndOwnedInlineVisuals(_exportTargetSource);
+                _autoHiddenTFs = hideTextFramesAndOwnedInlineVisuals(_exportTargetSource, {
+                    preferTextPaintOnly: _preferTextPaintOnlyHide
+                });
                 var _copiedOwnershipOpts = {};
                 for (var _copyKey in resolvedOwnershipOpts) {
                     if (resolvedOwnershipOpts.hasOwnProperty(_copyKey)) {
@@ -936,11 +940,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         var _exportOk = false;
         var _exportDup = null;
         var _savedOutOfScopeChildren = null;
-        var _clearTableOnlyCarrierForExport = false;
-        try {
-            _clearTableOnlyCarrierForExport = resolvedOwnershipOpts.textHiddenBeforeExport === true
-                    && _hasTableOnlyCarrierTextFrame(_exportTarget);
-        } catch (eClearCheck) {}
         var _exportError = null;
         var _perfExportStartedAt = _decoPerfNow();
         try {
@@ -956,12 +955,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 var _outOfScopeChildren = _collectOutOfScopeChildrenForOwnership(_exportTargetSource, _outOfScopeOwnershipOpts);
                 if (_outOfScopeChildren.length > 0) {
                     _savedOutOfScopeChildren = _hideItemsForExport(_outOfScopeChildren);
-                }
-            }
-            if (_clearTableOnlyCarrierForExport) {
-                _exportDup = _exportTarget.duplicate();
-                if (_clearTableOnlyCarrierForExport && _exportDup) {
-                    _clearTableOnlyCarrierTextFrames(_exportDup);
                 }
             }
             if (_exportDup) _exportTarget = _exportDup;

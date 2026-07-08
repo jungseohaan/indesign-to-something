@@ -2250,7 +2250,8 @@ public class InlineFrameHandler {
                 return;
             }
         }
-        String text = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
+        String text = normalizeInlineShellText(childTf != null ? childTf.frameVisibleText() : null);
+        if (text.isEmpty()) return;
         ASTParagraph paraInner = new ASTParagraph();
         paraInner.alignment(shellTextAlignment(ctx, childTf));
         addSyntheticRunsFromTextFrame(ctx, paraInner, childTf, text);
@@ -3684,6 +3685,13 @@ public class InlineFrameHandler {
             return items;
         }
 
+        ASTInlineObject nativeOwnedTextFrameShell =
+                loadNativeInlineOwnedTextFrameSourceShell(ctx, anchoredObjectId);
+        if (nativeOwnedTextFrameShell != null) {
+            items.add(nativeOwnedTextFrameShell);
+            return items;
+        }
+
         if (hasDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId)) {
             ASTInlineObject spacer = createLayoutOnlyInlineSpacer(ctx, anchoredObjectId);
             if (spacer != null) {
@@ -4556,6 +4564,64 @@ public class InlineFrameHandler {
         if (shell == null) return null;
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
         return buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell);
+    }
+
+    private static ASTInlineObject loadNativeInlineOwnedTextFrameSourceShell(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameDomId < 0) {
+            return null;
+        }
+        if (!ctx.ownershipPlanPlacesInlineHwpxText(textFrameDomId)) return null;
+        if (ctx.isTextDisposed(textFrameDomId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameDomId));
+        if (tf == null || tf.sourceHidden() || !tf.isInline()) return null;
+        ResolvedPageItem shellItem = ctx.resolvedData.getPageItem(String.valueOf(textFrameDomId));
+        if (!hasVisibleOwnedInlineTextFrameShellMaterial(tf, shellItem)) return null;
+
+        double[] shellBounds = shellItem != null ? shellItem.geometricBounds() : null;
+        if (!validBounds(shellBounds)) shellBounds = tf.geometricBounds();
+        if (!validBounds(shellBounds)) return null;
+
+        double w = Math.abs(shellBounds[3] - shellBounds[1]) * ctx.scaleFactor;
+        double h = Math.abs(shellBounds[2] - shellBounds[0]) * ctx.scaleFactor;
+        if (w <= 0 || h <= 0) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.sourceId("u" + Integer.toHexString(textFrameDomId));
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.keepInline(true);
+
+        if (shellItem != null) {
+            applyInlineShellShapeStyle(ctx, shellItem, obj);
+        }
+        List<ResolvedTextFrame> childTfs = new ArrayList<>();
+        childTfs.add(tf);
+        applyOwnedTextFrameShellShapeStyle(ctx, childTfs, obj);
+        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf, true));
+        obj.verticalJustification(inlineTextShellVerticalJustification(ctx, null, shellItem, childTfs));
+        applyInlineShellTextMargins(ctx, obj, null, shellItem, childTfs);
+        buildBadgeParagraph(ctx, tf, obj);
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return null;
+        markInlineShellChildTextPlaced(ctx, tf);
+        return obj;
+    }
+
+    private static boolean hasVisibleOwnedInlineTextFrameShellMaterial(
+            ResolvedTextFrame tf,
+            ResolvedPageItem shellItem) {
+        if (tf == null) return false;
+        if (shellItem != null) {
+            if (!isNoneColor(shellItem.fillColorName())) return true;
+            if (!isNoneColor(shellItem.strokeColorName()) && shellItem.strokeWeight() > 0) return true;
+            if (shellItem.cornerRadius() > 0.01) return true;
+        }
+        if (!isNoneColor(tf.fillColor())) return true;
+        if (!isNoneColor(tf.strokeColor()) && tf.strokeWeight() > 0) return true;
+        return tf.cornerRadius() > 0.01;
     }
 
     public static List<ASTInlineObject> loadPlannedInlineTextShellFragmentsForOwnedTextFrame(

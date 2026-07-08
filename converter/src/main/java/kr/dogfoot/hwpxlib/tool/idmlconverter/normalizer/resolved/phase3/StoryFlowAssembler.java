@@ -297,8 +297,13 @@ public final class StoryFlowAssembler {
                 || idmlCell.textFrameStoryRefs().isEmpty()) {
             return null;
         }
+        List<ASTParagraph> merged = new ArrayList<>();
         for (String storyRef : idmlCell.textFrameStoryRefs()) {
-            if (storyRef == null || isStoryOwnedByPlacedTextFrame(ctx, storyRef)) continue;
+            if (storyRef == null) continue;
+            if (!shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef)
+                    && isStoryOwnedByPlacedTextFrame(ctx, storyRef)) {
+                continue;
+            }
             IDMLStory idmlStory = ctx.loadIDMLStory != null ? ctx.loadIDMLStory.apply(storyRef) : null;
             if (idmlStory != null && idmlStory.hasTables()) continue;
             ResolvedStory story = ctx.resolvedData.getStory(toDecimalStoryId(storyRef));
@@ -307,9 +312,49 @@ public final class StoryFlowAssembler {
             }
             if (!hasAuthoritativeResolvedStructure(story)) continue;
             List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story);
-            if (paragraphs != null && !paragraphs.isEmpty()) return paragraphs;
+            if (paragraphs != null && !paragraphs.isEmpty()) {
+                merged.addAll(paragraphs);
+            }
         }
-        return null;
+        return merged.isEmpty() ? null : merged;
+    }
+
+    public static boolean shouldCellConsumeNestedStoryRef(
+            ResolvedBuildContext ctx,
+            IDMLTableCell idmlCell,
+            String storyRef) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null
+                || storyRef == null
+                || idmlCell.textFrameStoryRefs() == null
+                || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return false;
+        }
+        boolean referencedByCell = false;
+        for (String ref : idmlCell.textFrameStoryRefs()) {
+            if (ref == null) continue;
+            if (ref.equals(storyRef) || toDecimalStoryId(ref).equals(toDecimalStoryId(storyRef))) {
+                referencedByCell = true;
+                break;
+            }
+        }
+        if (!referencedByCell) return false;
+
+        String storyId = toDecimalStoryId(storyRef);
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
+        if ((frames == null || frames.isEmpty()) && !storyRef.equals(storyId)) {
+            frames = ctx.resolvedData.getTextFramesForStory(storyRef);
+        }
+        if (frames == null || frames.isEmpty()) return false;
+
+        boolean sawInlineFrame = false;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null) continue;
+            if (!tf.isInline()) {
+                return false;
+            }
+            sawInlineFrame = true;
+        }
+        return sawInlineFrame;
     }
 
     public static boolean isStoryOwnedByPlacedTextFrame(ResolvedBuildContext ctx, String storyRef) {

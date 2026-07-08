@@ -352,18 +352,20 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         }
         var subsumedByVisualOnlyComposite = false;
         var subsumingComposite = null;
-        for (var coi = 0; coi < compositeOwners.length; coi++) {
-            var compositeOwner = compositeOwners[coi];
-            if (!compositeOwner || compositeOwner.candidate === candidate) continue;
-            if (candidatePlacement(compositeOwner.candidate)
-                    && candidatePlacement(candidate)
-                    && candidatePlacement(compositeOwner.candidate) !== candidatePlacement(candidate)) {
-                continue;
-            }
-            if (properSubset(compositeOwner.sourceIds, candidateVisibleIds)) {
-                subsumedByVisualOnlyComposite = true;
-                subsumingComposite = compositeOwner.candidate;
-                break;
+        if (candidateOwnershipSlot(candidate) !== "SHELL_SLOT") {
+            for (var coi = 0; coi < compositeOwners.length; coi++) {
+                var compositeOwner = compositeOwners[coi];
+                if (!compositeOwner || compositeOwner.candidate === candidate) continue;
+                if (candidatePlacement(compositeOwner.candidate)
+                        && candidatePlacement(candidate)
+                        && candidatePlacement(compositeOwner.candidate) !== candidatePlacement(candidate)) {
+                    continue;
+                }
+                if (properSubset(compositeOwner.sourceIds, candidateVisibleIds)) {
+                    subsumedByVisualOnlyComposite = true;
+                    subsumingComposite = compositeOwner.candidate;
+                    break;
+                }
             }
         }
         if (subsumedByVisualOnlyComposite) {

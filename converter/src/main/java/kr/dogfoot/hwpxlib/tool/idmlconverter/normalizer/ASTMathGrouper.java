@@ -235,6 +235,12 @@ public class ASTMathGrouper {
     public static boolean isMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
+        // 수식 토큰 사이를 잇는 순수 공백 런은 브리지로 인정한다.
+        // InDesign은 BT수식/BT화살표 글리프 앞뒤 공백을 일반 본문 폰트 런으로
+        // 분리하는 경우가 있어, 이 공백을 끊어 버리면 화학식/수식이 둘로 분할된다.
+        if (text.trim().isEmpty()) {
+            return hasFormulaNeighbor(runs, idx);
+        }
         // 한국어 포함 또는 탭 포함 → 브릿지 아님 (탭은 열 구분자)
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
@@ -573,10 +579,11 @@ public class ASTMathGrouper {
             }
         }
         String script = sb.toString();
-        script = script.replace("\u2192", " RIGHT ");
+        script = script.replace("\u2192", " rarrow ");
         script = script.replaceAll("\\s+", " ").trim();
         script = script.replaceAll("\\s*\\+\\s*", "+");
-        script = script.replaceAll("\\s*RIGHT\\s*", " RIGHT ");
+        script = script.replaceAll("(?i)\\s*rarrow\\s*", " rarrow ");
+        script = script.replaceAll("\\s*->\\s*", " rarrow ");
         return script;
     }
 

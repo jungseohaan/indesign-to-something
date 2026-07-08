@@ -83,8 +83,8 @@ public class NPFontGlyphMap {
 
         // NP_SUN/NP_SUNB 특수 글리프 매핑
         Map<String, String> sunMap = new HashMap<String, String>();
-        sunMap.put("!", " -> ");  // → (화살표)
-        sunMap.put("@", " -> ");  // → (화살표 변형)
+        sunMap.put("!", " rarrow ");  // → (화살표)
+        sunMap.put("@", " rarrow ");  // → (화살표 변형)
         sunMap.put("Z", "bar ");  // 선분 기호 (overline)
         GLYPH_MAP.put("NP_SUN", sunMap);
         GLYPH_MAP.put("NP_SUNB", sunMap);

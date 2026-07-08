@@ -204,18 +204,6 @@ public class IDMLToHwpxConverter {
             for (String w : earlyWarnings) { result.addWarning(w); }
             for (String w : astDoc.warnings()) { result.addWarning(w); }
 
-            // Phase 3.4: Semantic Block Discovery (development default: always write)
-            try {
-                reporter.reportProgress(92, 100, "Semantic Block 추출 중...");
-                try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3_4.semanticBlocks.extract")) {
-                    extractSemanticBlocks(astDoc, resolvedData, hwpxPath, result);
-                }
-            } catch (Exception e) {
-                String msg = "[SemanticBlock] 추출 실패 (HWPX 변환은 계속 진행): " + e.getMessage();
-                System.err.println(msg);
-                result.addWarning(msg);
-            }
-
             // Phase 3.5: 시멘틱 레이어 추출 (SPEC-018 M3, 옵션)
             if (options.extractSemantics()) {
                 try {
@@ -1509,39 +1497,6 @@ public class IDMLToHwpxConverter {
                 + layer.relations.size() + " relations → " + outputPath);
         result.addWarning("[Semantic] 추출 완료: " + layer.nodes.size() + " 노드, "
                 + classified + " 분류 → " + outputPath);
-    }
-
-    /**
-     * Semantic Block Discovery JSON을 HWPX 옆에 생성한다.
-     *
-     * <p>개발 중에는 항상 생성하고, 안정화 후 ConvertOptions로 옵션화한다.</p>
-     */
-    private static void extractSemanticBlocks(
-            ASTDocument astDoc,
-            ResolvedData resolvedData,
-            String hwpxPath,
-            ConvertResult result) throws java.io.IOException {
-        String documentName = astDoc != null && astDoc.sourceFile() != null
-                ? astDoc.sourceFile()
-                : (hwpxPath == null ? "out" : new File(hwpxPath).getName());
-        kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockDocument document =
-                kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockDetector.detect(
-                        astDoc, documentName, resolvedData);
-        java.nio.file.Path outPath = java.nio.file.Paths.get(defaultSemanticBlocksOutputPath(hwpxPath));
-        kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockWriter.write(document, outPath);
-        ConversionTiming.metric("semanticBlocks.blocks", document.summary.blocks);
-        ConversionTiming.metric("semanticBlocks.members", document.summary.members);
-        ConversionTiming.metric("semanticBlocks.anchors", document.summary.anchors);
-        result.addWarning("[SemanticBlock] " + outPath + " 생성 완료: "
-                + document.summary.blocks + " blocks, " + document.summary.members + " members");
-    }
-
-    /** hwpx 경로 → 같은 디렉토리의 .semantic-blocks.json. */
-    private static String defaultSemanticBlocksOutputPath(String hwpxPath) {
-        if (hwpxPath == null) return "out.semantic-blocks.json";
-        int dot = hwpxPath.lastIndexOf('.');
-        if (dot < 0) return hwpxPath + ".semantic-blocks.json";
-        return hwpxPath.substring(0, dot) + ".semantic-blocks.json";
     }
 
     /** hwpx 경로 → 같은 디렉토리의 .semantic.json. */

@@ -229,6 +229,9 @@ public final class OwnershipPlanner {
         timed("normalizeTextShellsWithMaterializedTextOwners", this::normalizeTextShellsWithMaterializedTextOwners);
         timed("restoreInlineCarrierVisualContracts", this::restoreInlineCarrierVisualContracts);
         timed("completeSourceTreeDiagnostics", this::completeSourceTreeDiagnostics);
+        timed("restoreDroppedRenderedTextShellSourceContracts",
+                this::restoreDroppedRenderedTextShellSourceContracts);
+        timed("completeTextFrameShellStyleSources.recovered", this::completeTextFrameShellStyleSources);
     }
 
     private void writeAndValidatePlans() {
@@ -5606,15 +5609,12 @@ public final class OwnershipPlanner {
     }
 
     private int[] tableOnlyStyleSourceIds(int textFrameDomId) {
-        // V2 treats table-only TextFrames as editable table structure only.
-        // IDML table/cell decoration source objects are owned by textless visual
-        // shell slots, not by TABLE_STYLE_SLOT.
-        if (textFrameDomId >= 0) return new int[0];
-        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
-        addRenderedTableCarrierStyleSourceIds(textFrameDomId, ids);
-        addParentTableCarrierStyleSourceId(textFrameDomId, ids);
-        addSiblingTableCarrierStyleSourceIds(textFrameDomId, ids);
-        return toIntArray(ids);
+        // Canonical table policy: a table-only carrier owns only editable table
+        // structure. Cell fills, row bands, outlines, and other decoration stay
+        // in separate textless visual slots and must not be claimed here as
+        // table-style provenance, because doing so blocks their Stage 1 native/
+        // extracted visual owners and later causes missing table chrome.
+        return new int[0];
     }
 
     private void addRenderedTableCarrierStyleSourceIds(int textFrameDomId, LinkedHashSet<Integer> ids) {
@@ -7639,6 +7639,84 @@ public final class OwnershipPlanner {
             completed++;
         }
         ConversionTiming.metric("stage1.ownershipPlanner.sourceTreeDiagnostics", completed);
+    }
+
+    private void restoreDroppedRenderedTextShellSourceContracts() {
+        if (data == null) return;
+        int restored = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isDroppedRenderedTextShellWithoutVisibleSource(plan)) continue;
+
+            int[] recoveredVisualSources = recoverDroppedRenderedTextShellVisualSources(plan);
+            if (recoveredVisualSources.length == 0) continue;
+
+            int[] mergedStyleSources = mergeIds(plan.styleSourceObjectIds, recoveredVisualSources);
+            ObjectPlan shellPlan = plan
+                    .withVisualSourceObjectIds(recoveredVisualSources)
+                    .withStyleSourceObjectIds(mergedStyleSources)
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
+                            "recovered_rendered_text_shell_source_contract")
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
+            shellPlan = shellPlan.withVisualLayer(
+                    textShellVisualLayer(shellPlan, shellPlan.ownedTextFrameIds, VisualLayer.CONTAINER_BACKDROP));
+            plans.set(i, shellPlan);
+            restored++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.renderedTextShellSourceContracts.restored",
+                restored);
+    }
+
+    private boolean isDroppedRenderedTextShellWithoutVisibleSource(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.renderId == null) return false;
+        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (!"text_shell_without_visible_visual_source".equals(safe(plan.reason))) return false;
+        if (!safe(plan.kind).startsWith("rendered_")) return false;
+        return plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0;
+    }
+
+    private int[] recoverDroppedRenderedTextShellVisualSources(ObjectPlan plan) {
+        LinkedHashSet<Integer> recovered = new LinkedHashSet<>();
+        if (plan == null) return new int[0];
+
+        collectRecoveredDroppedRenderedTextShellVisualSources(
+                plan,
+                plan.omittedClusterSourceObjectIds,
+                recovered);
+        collectRecoveredDroppedRenderedTextShellVisualSources(
+                plan,
+                plan.sourceObjectIds,
+                recovered);
+
+        return toIntArray(recovered);
+    }
+
+    private void collectRecoveredDroppedRenderedTextShellVisualSources(
+            ObjectPlan plan,
+            int[] sourceIds,
+            LinkedHashSet<Integer> recovered) {
+        if (plan == null || sourceIds == null || recovered == null) return;
+        for (int sourceId : sourceIds) {
+            if (!isRecoverableDroppedRenderedTextShellMaterialSource(plan, sourceId)) continue;
+            recovered.add(sourceId);
+        }
+    }
+
+    private boolean isRecoverableDroppedRenderedTextShellMaterialSource(ObjectPlan plan, int sourceId) {
+        if (sourceId <= 0 || data == null) return false;
+        if (contains(plan.hiddenVisualSourceObjectIds, sourceId)) return false;
+        if (contains(plan.ownedTextFrameIds, sourceId)) return false;
+
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+        if (tf != null) {
+            if (tf.sourceHidden()) return false;
+            if (hasSemanticText(tf)) return false;
+            return sourceIdHasVisibleTextFrameShellMaterial(sourceId);
+        }
+
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        return sourceItemHasVisibleShellMaterial(item);
     }
 
     private int[] sourceRootObjectIds(int[] sourceObjectIds) {
@@ -11799,7 +11877,7 @@ public final class OwnershipPlanner {
     private void ensureTableStyleSourceObjectIds() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
-            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            if (plan == null || !planCarriesTableStyleSourceChannel(plan)) continue;
             int[] canonical = tableStyleSourceIdsForPlan(plan);
             if (canonical.length == 0) continue;
             int[] merged = mergeIds(plan.styleSourceObjectIds, canonical);
@@ -11811,21 +11889,42 @@ public final class OwnershipPlanner {
     private int[] tableStyleSourceIdsForPlan(ObjectPlan plan) {
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
         if (plan == null) return new int[0];
-        addAll(tableOnlyStyleSourceIds(plan.domId), ids);
+        addAll(tableOnlyStyleSourceIds(tableStyleOwnerTextFrameId(plan)), ids);
         addDirectTableStyleSiblingSourceIds(plan, ids);
         return toIntArray(ids);
     }
 
+    private static boolean planCarriesTableStyleSourceChannel(ObjectPlan plan) {
+        if (plan == null) return false;
+        return plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
+    }
+
+    private int tableStyleOwnerTextFrameId(ObjectPlan plan) {
+        if (plan == null) return -1;
+        if ("table_only_text_frame".equals(safe(plan.reason))
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0) {
+            return plan.ownedTextFrameIds[0];
+        }
+        if (plan.domId >= 0) return plan.domId;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) {
+            return plan.ownedTextFrameIds[0];
+        }
+        return -1;
+    }
+
     private void addDirectTableStyleSiblingSourceIds(ObjectPlan plan, LinkedHashSet<Integer> ids) {
         if (data == null || plan == null || ids == null) return;
-        ResolvedPageItem ownerItem = data.getPageItem(String.valueOf(plan.domId));
+        int ownerTextFrameId = tableStyleOwnerTextFrameId(plan);
+        if (ownerTextFrameId < 0) return;
+        ResolvedPageItem ownerItem = data.getPageItem(String.valueOf(ownerTextFrameId));
         if (ownerItem == null || ownerItem.parentId() == null) return;
         ResolvedPageItem parent = data.getPageItem(ownerItem.parentId());
         if (parent == null || parent.childIds() == null) return;
         double[] ownerBounds = boundsOf(ownerItem);
         if (ownerBounds == null || ownerBounds.length < 4) ownerBounds = plan.bounds;
         for (int childId : parent.childIds()) {
-            collectDirectTableStyleSiblingSourceId(childId, plan.domId, ownerBounds, ids);
+            collectDirectTableStyleSiblingSourceId(childId, ownerTextFrameId, ownerBounds, ids);
         }
     }
 
@@ -12141,14 +12240,16 @@ public final class OwnershipPlanner {
         if (tf != null) {
             if (tf.sourceHidden()) return false;
             if (!isNoneColor(tf.fillColor())) return true;
-            return !isNoneColor(tf.strokeColor()) && tf.strokeWeight() > 0.01;
+            if (!isNoneColor(tf.strokeColor()) && tf.strokeWeight() > 0.01) return true;
+            return tf.cornerRadius() > 0.01;
         }
 
         ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
         if (item == null || item.sourceHidden() || item.hiddenByParent() || !item.visible()) return false;
         if (!"TextFrame".equals(safe(item.type()))) return false;
         if (!isNoneColor(item.fillColorName())) return true;
-        return !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+        if (!isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01) return true;
+        return item.cornerRadius() > 0.01;
     }
 
     private boolean sourceIdIsTextlessVisibleTextFrameShellMaterial(int sourceId) {
@@ -13918,6 +14019,7 @@ public final class OwnershipPlanner {
     private static boolean isOwnedTextShellBackPlane(ObjectPlan plan, VisualLayer layer) {
         return plan != null
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && (layer == VisualLayer.CONTAINER_BACKDROP
                 || layer == VisualLayer.LABEL_BACKDROP
                 || layer == VisualLayer.CONTENT_BACKDROP)

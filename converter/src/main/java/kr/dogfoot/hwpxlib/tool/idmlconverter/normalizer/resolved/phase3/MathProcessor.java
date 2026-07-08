@@ -338,11 +338,13 @@ class MathProcessor {
         if (script == null) return "";
         return script
                 .replace('\uFFFC', '\u25A1')
-                .replace("@C", " -> ")
-                .replace("@c", " -> ")
-                .replace("?C", " -> ")
-                .replace("?c", " -> ")
-                .replace("RIGHT", " -> ")
+                .replace("@C", " rarrow ")
+                .replace("@c", " rarrow ")
+                .replace("?C", " rarrow ")
+                .replace("?c", " rarrow ")
+                .replace("RIGHT", " rarrow ")
+                .replace("RARROW", " rarrow ")
+                .replace("->", " rarrow ")
                 .trim();
     }
 
@@ -394,9 +396,9 @@ class MathProcessor {
                 hasFormulaToken = true;
                 continue;
             }
-            if (script.startsWith("->", i)) {
+            if (script.regionMatches(true, i, "rarrow", 0, "rarrow".length())) {
                 hasFormulaToken = true;
-                i += "->".length() - 1;
+                i += "rarrow".length() - 1;
                 continue;
             }
             if (c == '\u25A1' || c == '+' || c == '-' || c == '=' || c == '(' || c == ')') {
@@ -430,11 +432,11 @@ class MathProcessor {
                 stats.hasPositioned = true;
                 continue;
             }
-            if (script.startsWith("->", i)) {
+            if (script.regionMatches(true, i, "rarrow", 0, "rarrow".length())) {
                 stats.hasArrow = true;
                 stats.hasOperator = true;
                 previous = '\u2192';
-                i += "->".length() - 1;
+                i += "rarrow".length() - 1;
                 continue;
             }
             if (c == '\u25A1') {
@@ -727,7 +729,7 @@ class MathProcessor {
                 continue;
             }
             if (c == '\u2192') {
-                out.append(" -> ");
+                out.append(" rarrow ");
                 result.hasArrow = true;
                 result.hasOperator = true;
                 result.previousVisible = c;
@@ -785,13 +787,18 @@ class MathProcessor {
         String normalized = script.replaceAll("\\s+", " ").trim();
         normalized = normalized.replaceAll("\\s*\\+\\s*", "+");
         normalized = normalized.replaceAll("\\s*=\\s*", "=");
-        normalized = normalized.replaceAll("\\s*RIGHT\\s*", " -> ");
-        normalized = normalized.replaceAll("\\s*->\\s*", " -> ");
+        normalized = normalized.replaceAll("(?i)\\s*RIGHT\\s*", " rarrow ");
+        normalized = normalized.replaceAll("(?i)\\s*RARROW\\s*", " rarrow ");
+        normalized = normalized.replaceAll("\\s*->\\s*", " rarrow ");
         return normalized.trim();
     }
 
     private static boolean containsFormulaArrow(String script) {
-        return script != null && (script.contains("->") || script.contains("RIGHT"));
+        return script != null
+                && (script.contains("->")
+                || script.contains("RIGHT")
+                || script.contains("RARROW")
+                || script.contains("rarrow"));
     }
 
     private static boolean isFormulaSpace(char c) {

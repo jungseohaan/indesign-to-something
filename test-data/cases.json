@@ -344,7 +344,30 @@
       "u3-1": {
         "path": "/Users/seohan/Documents/변환작업/고등_문학_지도서/22개정_고등문학_지도서_3단원(298~371)OK/22개정_고등문학_지도서_3단원(298~371)[251113].indd",
         "pages": "298-371",
-        "desc": "3단원(298~371)"
+        "desc": "3단원(298~371)",
+        "perf": {
+          "goal": "full conversion without feature reduction",
+          "baselineRun": "output/issues/고등문학지도서/u3-1/p298-371-20260707-200358",
+          "baselineTotalSeconds": 1102.09,
+          "baselineExtractSeconds": 717.89,
+          "baselineJavaSeconds": 384.20,
+          "targetTotalSeconds": 661.25,
+          "latestRun": "output/perf/full-inline-root-opt-20260707/고등문학지도서/u3-1/p298-371-20260707-220942",
+          "latestTotalSeconds": 638.456,
+          "latestExtractSeconds": 608.859,
+          "latestJavaSeconds": 29.597,
+          "improvementPercent": 42.07,
+          "verifiedAt": "2026-07-07",
+          "verification": {
+            "pages": 74,
+            "pageRange": "298-371",
+            "mavenPackage": "PASS",
+            "regression": "PASS",
+            "ownershipAudit": "PASS",
+            "textCoverageChars": 62240,
+            "textCoverageFoundPercent": 89.5
+          }
+        }
       },
       "u3-2": {
         "path": "/Users/seohan/Documents/변환작업/고등_문학_지도서/22개정_고등문학_지도서_3단원(372~409)OK/22개정_고등문학_지도서_3단원(372~409)[251113].indd",
@@ -360,6 +383,21 @@
         "path": "/Users/seohan/Documents/변환작업/고등_문학_지도서/22개정_고등문학_지도서_5부록(456~472)OK/22개정_고등문학_지도서_5부록(456~472)[251113].indd",
         "pages": "456-472",
         "desc": "5부록"
+      }
+    },
+    "완자화세본책": {
+      "desc": "26 완자 화세 본책",
+      "u1-core": {
+        "path": "/Users/seohan/Documents/변환작업/26_완자 화세_본책(008~031)1단원 핵심/26_완자 화세_본책(008~031)1단원 핵심.indd",
+        "pages": "8-31",
+        "desc": "1단원 핵심"
+      }
+    },
+    "진생_1-2본문만": {
+      "desc": "진생 1-2 본문만",
+      "본문": {
+        "path": "/Users/seohan/Documents/변환작업/진생_1-2본문만/진생_1-2본문만.indd",
+        "desc": "본문만"
       }
     }
   }

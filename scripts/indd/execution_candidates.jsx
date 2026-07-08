@@ -204,11 +204,12 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
         candidate.completePngTextAllowed = false;
     }
     var executionSourceObjectIds = _objectPlanExecutionSourceObjectIds(objectPlan);
+    if (objectPlan.sourceObjectIds) {
+        candidate.sourceObjectIds = _sortedNumericIds(objectPlan.sourceObjectIds);
+    }
     if (executionSourceObjectIds.length > 0) {
         candidate.executionSourceObjectIds = executionSourceObjectIds;
-        candidate.sourceObjectIds = executionSourceObjectIds.slice(0);
-    } else if (objectPlan.sourceObjectIds) {
-        candidate.sourceObjectIds = _sortedNumericIds(objectPlan.sourceObjectIds);
+    } else if (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0) {
         candidate.executionSourceObjectIds = candidate.sourceObjectIds.slice(0);
     }
     if (objectPlan.visualSourceObjectIds) {
@@ -274,8 +275,10 @@ function _objectPlanExecutionSourceObjectIds(objectPlan) {
 function _objectPlanExecutionHiddenVisualSourceObjectIds(objectPlan, executionSourceObjectIds, exportSourceObjectIds) {
     if (!objectPlan) return [];
     if (objectPlan.visualAction === "PLACE_TEXT_SHELL") {
-        return _sortedNumericIds(_executionCandidateIdsMinus(
-                executionSourceObjectIds || [], exportSourceObjectIds || []));
+        return _sortedNumericIds(_executionCandidateIdsUnion(
+                objectPlan.hiddenVisualSourceObjectIds || [],
+                _executionCandidateIdsMinus(
+                        executionSourceObjectIds || [], exportSourceObjectIds || [])));
     }
     return _sortedNumericIds(objectPlan.hiddenVisualSourceObjectIds || []);
 }
