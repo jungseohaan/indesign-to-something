@@ -427,6 +427,7 @@ public class StoryLoader {
                             if (pi < parts.length - 1 && partText.endsWith("  ")) {
                                 partText = partText.replaceAll("\\s+$", " "); // 후행 다중 공백 → 단일 공백
                             }
+                            partText = normalizeLeadingTabAfterLeadingInlineObjects(para, partText);
                             if (!partText.isEmpty()) {
                                 // resolved 런 스타일 차이가 있으면 분할 시도
                                 boolean partSplit = false;
@@ -624,6 +625,7 @@ public class StoryLoader {
                             text = StoryConverter.stripLeadingAnchorLayoutSpaces(text);
                             firstTextRunAfterLeadingAnchor = false;
                         }
+                        text = normalizeLeadingTabAfterLeadingInlineObjects(para, text);
                         // GREP 스타일 분할: IDML 단일 런이 resolved에서 여러 런(다른 색상/폰트)으로 분할된 경우
                         // resolved 런 경계에서 IDML 런을 분할하여 각각의 색상을 적용
                         boolean splitByResolved = false;
@@ -686,6 +688,24 @@ public class StoryLoader {
             if (!hasIdmlInlineAnchors) {
                 ASTTableConverter.reorderInlineObjectsByBoundsX(para);
             }
+    }
+
+    private static String normalizeLeadingTabAfterLeadingInlineObjects(ASTParagraph para, String text) {
+        if (text == null || text.isEmpty() || text.charAt(0) != '\t') return text;
+        if (!paragraphContainsOnlyInlineObjectsSoFar(para)) return text;
+        int offset = 0;
+        while (offset < text.length() && text.charAt(offset) == '\t') {
+            offset++;
+        }
+        return " " + text.substring(offset);
+    }
+
+    private static boolean paragraphContainsOnlyInlineObjectsSoFar(ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().isEmpty()) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTInlineObject)) return false;
+        }
+        return true;
     }
 
     public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,

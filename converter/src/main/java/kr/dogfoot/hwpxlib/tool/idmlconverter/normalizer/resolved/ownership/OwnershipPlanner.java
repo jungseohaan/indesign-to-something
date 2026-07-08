@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import javax.imageio.ImageIO;
@@ -423,6 +424,17 @@ public final class OwnershipPlanner {
                     .withVisualSourceObjectIds(new int[0])
                     .withDescendantVisualObjectIds(new int[0]);
         }
+        if (isImportedStoryFlowInlineVisualWithPagePosition(plan)) {
+            VisualAction action = isShellOnlyVisualSlot(plan)
+                    ? VisualAction.PLACE_TEXT_SHELL
+                    : VisualAction.PLACE_FLOATING_PNG;
+            Materialization materialization = plan.textAction == TextAction.OWNED_BY_PNG
+                    ? Materialization.COMPLETE_PNG
+                    : Materialization.EXTRACTED_PNG_VECTOR;
+            return plan.withVisualAction(action, "anchored_inline_visual_uses_page_position")
+                    .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
+                    .withMaterialization(materialization);
+        }
         if (isClosedInlineCarrierVisualPlan(plan)) {
             return plan
                     .withTextAction(TextAction.DROP_TEXT)
@@ -449,6 +461,17 @@ public final class OwnershipPlanner {
         return plan.withVisualAction(VisualAction.PLACE_INLINE_PNG, plan.reason);
     }
 
+    private boolean isImportedStoryFlowInlineVisualWithPagePosition(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        return hasIdmlAnchoredPagePositionSource(plan);
+    }
+
     private boolean isImportedStoryFlowInlineShellSlotWithPagePosition(ObjectPlan plan) {
         if (plan == null) return false;
         if (!isShellOnlyVisualSlot(plan)) return false;
@@ -464,14 +487,27 @@ public final class OwnershipPlanner {
 
     private boolean hasIdmlAnchoredPagePositionSource(ObjectPlan plan) {
         if (plan == null || data == null) return false;
+        if (plan.domId >= 0 && hasResolvedAnchoredPagePosition(plan.domId)) return true;
         if (plan.domId >= 0 && hasIdmlAnchoredPagePosition(plan.domId)) return true;
         for (int sourceId : plan.sourceObjectIds) {
+            if (hasResolvedAnchoredPagePosition(sourceId)) return true;
             if (hasIdmlAnchoredPagePosition(sourceId)) return true;
         }
         for (int sourceId : visualSourceIds(plan)) {
+            if (hasResolvedAnchoredPagePosition(sourceId)) return true;
             if (hasIdmlAnchoredPagePosition(sourceId)) return true;
         }
         return false;
+    }
+
+    private boolean hasResolvedAnchoredPagePosition(int domId) {
+        if (data == null || domId < 0) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(domId));
+        if (item == null) return false;
+        String storyAnchorPlacement = safe(item.storyAnchorPlacement()).toUpperCase(Locale.ROOT);
+        String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(Locale.ROOT);
+        return "FLOATING_ANCHORED".equals(storyAnchorPlacement)
+                || "ANCHORED".equals(anchoredPosition);
     }
 
     private boolean isPlannerDeclaredStandaloneInlineVisual(ObjectPlan plan) {
@@ -13043,6 +13079,7 @@ public final class OwnershipPlanner {
             if (plan.placement != Placement.FLOATING) continue;
             if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) continue;
             if ("planner_declared_object_plan".equals(safe(plan.reason))) continue;
+            if ("anchored_inline_visual_uses_page_position".equals(safe(plan.reason))) continue;
             RenderedGroup rg = renderedGroupForPlan(plan);
             double[] bounds = plan.bounds != null ? plan.bounds : (rg != null ? rg.bounds() : null);
             if (bounds == null || bounds.length < 4) continue;

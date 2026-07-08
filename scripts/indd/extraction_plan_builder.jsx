@@ -3630,8 +3630,28 @@ function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
         return kind === "TextFrame" || kind === "Story"
                 || kind === "Character" || kind === "InsertionPoint" || kind === "Cell";
     }
+    function isFloatingAnchoredSource(src) {
+        if (!src) return false;
+        var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+        var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+        return placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED";
+    }
+    function hasFloatingAnchoredAncestor(src) {
+        if (!src) return false;
+        var parentId = src.parentId;
+        var guard = 0;
+        while (parentId !== null && parentId !== undefined && guard < 200) {
+            guard++;
+            var parent = source(parentId);
+            if (!parent) return false;
+            if (isFloatingAnchoredSource(parent)) return true;
+            parentId = parent.parentId;
+        }
+        return false;
+    }
     function isInlineFlow(src) {
         if (!src) return false;
+        if (isFloatingAnchoredSource(src) || hasFloatingAnchoredAncestor(src)) return false;
         return typeof _isInlineFlowItemBySourceInfo === "function"
                 ? _isInlineFlowItemBySourceInfo(src)
                 : (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
@@ -4773,6 +4793,7 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
                 && kind !== "Oval" && kind !== "Polygon") {
             return false;
         }
+        if (isFloatingAnchoredSource(src) || hasFloatingAnchoredAncestor(src)) return false;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
         if (child && src.pageIndex !== null && src.pageIndex !== undefined
                 && child.pageIndex !== null && child.pageIndex !== undefined
