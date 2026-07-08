@@ -35,6 +35,9 @@ public class IDMLTableCell {
     // TextFrame Story 참조 (셀 내 인라인 텍스트 프레임)
     private List<String> textFrameStoryRefs;
 
+    // Same-story direct nested tables declared inside this cell's content flow.
+    private List<IDMLTable> directNestedTables;
+
     // Cell padding/insets (points)
     private double topInset;
     private double bottomInset;
@@ -49,6 +52,7 @@ public class IDMLTableCell {
     public IDMLTableCell() {
         this.paragraphs = new ArrayList<>();
         this.textFrameStoryRefs = new ArrayList<>();
+        this.directNestedTables = new ArrayList<>();
         this.rowSpan = 1;
         this.columnSpan = 1;
         this.topInset = 4;
@@ -104,6 +108,14 @@ public class IDMLTableCell {
 
     public List<String> textFrameStoryRefs() { return textFrameStoryRefs; }
     public void addTextFrameStoryRef(String storyId) { textFrameStoryRefs.add(storyId); }
+
+    public List<IDMLTable> directNestedTables() { return directNestedTables; }
+    public void addDirectNestedTable(IDMLTable table) {
+        if (table != null) directNestedTables.add(table);
+    }
+    public boolean hasDirectNestedTables() {
+        return directNestedTables != null && !directNestedTables.isEmpty();
+    }
 
     public CellBorder topBorder() { return topBorder; }
     public void topBorder(CellBorder v) { this.topBorder = v; }

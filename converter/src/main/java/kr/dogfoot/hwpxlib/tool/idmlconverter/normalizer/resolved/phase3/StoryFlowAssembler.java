@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
@@ -44,12 +45,41 @@ public final class StoryFlowAssembler {
         if (cellFlow != null && !cellFlow.isEmpty()) {
             return cellFlow;
         }
+        List<ASTParagraph> directNestedTableFlow = buildDirectNestedTableFlow(ctx, idmlCell);
+        if (directNestedTableFlow != null && !directNestedTableFlow.isEmpty()) {
+            return directNestedTableFlow;
+        }
         List<ASTParagraph> nestedTextFrameFlow = buildNestedTextFrameStoryFlow(ctx, idmlCell);
         if (nestedTextFrameFlow != null && !nestedTextFrameFlow.isEmpty()) {
             return nestedTextFrameFlow;
         }
         List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
         return inlineShellFlow != null ? inlineShellFlow : new ArrayList<ASTParagraph>();
+    }
+
+    private static List<ASTParagraph> buildDirectNestedTableFlow(
+            ResolvedBuildContext ctx,
+            IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || ctx.styleResolver == null
+                || idmlCell == null || !idmlCell.hasDirectNestedTables()) {
+            return null;
+        }
+        List<ASTParagraph> paragraphs = new ArrayList<>();
+        for (IDMLTable nestedTable : idmlCell.directNestedTables()) {
+            if (nestedTable == null) continue;
+            ASTTable nestedAst = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter.convertTableSimple(
+                    nestedTable,
+                    0, 0, 0,
+                    null, null, null,
+                    ctx.resolvedData,
+                    ctx.styleResolver,
+                    (table, nestedCell) -> buildCellFlow(ctx, table, nestedCell));
+            if (nestedAst == null) continue;
+            ASTParagraph paragraph = new ASTParagraph();
+            paragraph.inlineTable(nestedAst);
+            paragraphs.add(paragraph);
+        }
+        return paragraphs;
     }
 
     private static List<ASTParagraph> buildOwnedInlineShellFlow(

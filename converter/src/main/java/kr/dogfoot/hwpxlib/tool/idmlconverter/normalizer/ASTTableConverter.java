@@ -743,7 +743,8 @@ public class ASTTableConverter {
 
         // nested TextFrame/table 콘텐츠가 있는 셀은 직접 텍스트가 비어 있어도
         // 빈 셀(spacer)이 아니다. 콘텐츠 복원은 buildPreparedAstTable에서 이후 단계에 일어난다.
-        if (idmlCell.textFrameStoryRefs() != null && !idmlCell.textFrameStoryRefs().isEmpty()) {
+        if ((idmlCell.textFrameStoryRefs() != null && !idmlCell.textFrameStoryRefs().isEmpty())
+                || idmlCell.hasDirectNestedTables()) {
             cell.reservedForNestedContent(true);
         }
 

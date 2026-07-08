@@ -11,6 +11,20 @@ appearance into HWPX table style.
 - IDML table structure belongs to the table structure slot: table object,
   rows, columns, merged cells, fixed outer bounds, row/column geometry, and
   editable cell text.
+- If an IDML table cell contains another IDML table source, the outer table and
+  the nested table remain one editable table-structure tree. Stage 1 may decide
+  whether that tree is anchored inline or page-local, but it must not split the
+  nested table into a second visible page-level table owner or replace it with a
+  whole-table PNG fallback merely because it is nested.
+- A nested table that lives inside the same source Story as its parent table is
+  owned through the parent cell relationship, not as an independent top-level
+  table placement. Executors may materialize it only inside the owning HWPX
+  cell `SubList`.
+- A nested table that lives in a different source Story but is referenced by a
+  parent table cell is still table structure, not a textless visual recovery
+  case. The wrapper/anchor decision belongs to Stage 1, and later stages may
+  flatten only the wrapper flow around that nested table. They must not emit the
+  nested table again as a separate floating/page-level AST table.
 - A merged/covered table grid coordinate is not a second editable cell owner.
   If an IDML table exposes both the spanning source cell and placeholder cells
   whose start grid coordinate is already covered by that span, Stage 2/3 must

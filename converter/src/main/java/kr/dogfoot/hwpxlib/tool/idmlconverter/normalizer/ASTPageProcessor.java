@@ -701,6 +701,9 @@ public class ASTPageProcessor {
         Map<Integer, List<IDMLTable>> tablesByParaIdx = new HashMap<>();
         if (!story.paragraphs().isEmpty()) {
             for (IDMLTable t : story.tables()) {
+                if (isNestedTableInSameStory(story, t)) {
+                    continue;
+                }
                 if (t.paragraphIndexBefore() >= 0) {
                     List<IDMLTable> list = tablesByParaIdx.get(t.paragraphIndexBefore());
                     if (list == null) {
@@ -803,6 +806,9 @@ public class ASTPageProcessor {
                                              ResolvedData resolvedData) {
         boolean tableOnlyStory = story.paragraphs().isEmpty();
         for (IDMLTable idmlTable : story.tables()) {
+            if (isNestedTableInSameStory(story, idmlTable)) {
+                continue;
+            }
             // 인라인 처리된 테이블은 스킵 — 단, table-only 스토리는 인라인 처리 안 됨
             if (idmlTable.paragraphIndexBefore() >= 0 && !tableOnlyStory) {
                 continue;
@@ -816,6 +822,23 @@ public class ASTPageProcessor {
     }
 
     // ── 헬퍼 메서드 ──────────────────────────────────────
+
+    private static boolean isNestedTableInSameStory(IDMLStory story, IDMLTable table) {
+        if (story == null || table == null || table.selfId() == null) return false;
+        List<IDMLTable> tables = story.tables();
+        if (tables == null || tables.size() < 2) return false;
+        String tableId = table.selfId();
+        for (IDMLTable other : tables) {
+            if (other == null || other == table || other.selfId() == null) continue;
+            String parentId = other.selfId();
+            if (tableId.length() > parentId.length()
+                    && tableId.startsWith(parentId)
+                    && tableId.charAt(parentId.length()) == 'i') {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * 연결 프레임 체인 수집.

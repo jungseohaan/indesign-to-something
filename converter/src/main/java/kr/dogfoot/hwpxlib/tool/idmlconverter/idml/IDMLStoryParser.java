@@ -295,7 +295,42 @@ public class IDMLStoryParser {
             }
         }
 
+        collectDirectNestedTablesInCell(cellElem, doc, cell);
+
         return cell;
+    }
+
+    private static void collectDirectNestedTablesInCell(
+            Element cellElem,
+            IDMLDocument doc,
+            IDMLTableCell cell) {
+        if (cellElem == null || cell == null) return;
+        Set<String> seen = new LinkedHashSet<>();
+        collectDirectNestedTablesInNode(cellElem, doc, cell, seen);
+    }
+
+    private static void collectDirectNestedTablesInNode(
+            Element root,
+            IDMLDocument doc,
+            IDMLTableCell cell,
+            Set<String> seen) {
+        NodeList children = root.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element elem = (Element) child;
+            String tag = elem.getTagName();
+            if ("Table".equals(tag)) {
+                IDMLTable nestedTable = parseTable(elem, doc);
+                if (nestedTable != null
+                        && nestedTable.selfId() != null
+                        && seen.add(nestedTable.selfId())) {
+                    cell.addDirectNestedTable(nestedTable);
+                }
+                continue;
+            }
+            collectDirectNestedTablesInNode(elem, doc, cell, seen);
+        }
     }
 
     private static double parseCellInset(

@@ -105,6 +105,10 @@ function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
             plan.policyLayer = _objectPlanPolicyLayerForVisualLayer(layer);
             layerUpdates++;
         }
+        if (plan.visualLayer === "PAGE_BACKGROUND" && plan.zOrder !== 0) {
+            plan.zOrder = 0;
+            zOrderUpdates++;
+        }
     }
     return {
         summary: {
@@ -238,6 +242,13 @@ function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByP
             && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
         return plan.visualAction === "PLACE_TEXT_SHELL" ? "LABEL_BACKDROP" : "CONTENT_VISUAL";
     }
+    if (plan.visualAction === "PLACE_FLOATING_PNG"
+            && plan.placement === "FLOATING"
+            && plan.visualLayer === "CONTENT_VISUAL"
+            && _objectPlanHasBackgroundLayerSource(plan, sourceById)
+            && _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
+        return "PAGE_BACKGROUND";
+    }
     if (plan.visualAction === "PLACE_TEXT_SHELL"
             && plan.placement === "FLOATING"
             && plan.coordinateSpace === "PAGE"
@@ -253,6 +264,26 @@ function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByP
         return "CONTENT_BACKDROP";
     }
     return plan.visualLayer;
+}
+
+function _objectPlanHasBackgroundLayerSource(plan, sourceById) {
+    if (!plan || !sourceById) return false;
+    var ids = _objectPlanRootCandidateIds(plan);
+    for (var i = 0; ids && i < ids.length; i++) {
+        var src = sourceById[String(ids[i])];
+        if (src && _objectPlanIsBackgroundLayerName(src.layerName)) return true;
+    }
+    return false;
+}
+
+function _objectPlanIsBackgroundLayerName(layerName) {
+    if (!layerName) return false;
+    var lower = String(layerName).toLowerCase();
+    return lower.indexOf("\uBC30\uACBD") >= 0
+            || lower.indexOf("\uBC14\uD0D5") >= 0
+            || lower.indexOf("background") >= 0
+            || lower === "bg"
+            || lower.indexOf("backdrop") >= 0;
 }
 
 function _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder) {
@@ -271,9 +302,7 @@ function _objectPlanHasTextOwnershipSignal(plan) {
 }
 
 function _objectPlanHasPageLevelSourceRoot(plan, sourceById) {
-    var roots = plan ? (plan.sourceRootObjectIds && plan.sourceRootObjectIds.length > 0
-            ? plan.sourceRootObjectIds
-            : plan.sourceObjectIds) : null;
+    var roots = _objectPlanRootCandidateIds(plan);
     if (!roots || roots.length === 0) return false;
     for (var i = 0; i < roots.length; i++) {
         var src = sourceById ? sourceById[String(roots[i])] : null;
@@ -283,6 +312,15 @@ function _objectPlanHasPageLevelSourceRoot(plan, sourceById) {
         }
     }
     return true;
+}
+
+function _objectPlanRootCandidateIds(plan) {
+    if (!plan) return null;
+    if (plan.sourceRootObjectIds && plan.sourceRootObjectIds.length > 0) return plan.sourceRootObjectIds;
+    if (plan.primarySourceObjectId !== null && plan.primarySourceObjectId !== undefined) {
+        return [ plan.primarySourceObjectId ];
+    }
+    return plan.sourceObjectIds || null;
 }
 
 function _objectPlanIsBehindLocalText(bounds, pageIndex, zOrder, editableTextFramesByPage) {

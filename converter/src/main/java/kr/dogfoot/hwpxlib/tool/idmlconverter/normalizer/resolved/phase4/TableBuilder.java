@@ -51,9 +51,8 @@ import java.util.Set;
 /**
  * SPEC-013 Phase 4 + SPEC-017 v2: 테이블 포함 TextFrame → ASTTable / ASTFigure 변환.
  *
- * <p>분기 정책 (SPEC-017):</p>
+ * <p>분기 정책 (SPEC-017 migration bridge):</p>
  * <ul>
- *   <li><b>중첩 테이블</b> + {@code nestedTableForcesPng} → 표 전체 PNG fallback</li>
  *   <li><b>cell-level 모드</b>(기본) → ASTTable로 변환 후 트리거 셀의 인라인 객체만
  *       개별 floating ASTFigure로 추출. 본문 셀은 ASTTable로 유지되어 검색/편집 가능</li>
  *   <li><b>preferCellLevel = false</b>(레거시) → 인라인 감지 시 표 전체 PNG fallback</li>
@@ -206,6 +205,7 @@ public final class TableBuilder {
             long tableYOffset = 0;
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : allTables) {
                 if (ctx.isAnchoredTableSource(idmlTable.selfId())) continue;
+                if (isNestedTableInSameStory(idmlStory, idmlTable)) continue;
                 // 같은 Table이 TF 연결 체인에서 중복 배치되는 것을 방지
                 if (!processedTableIds.add(idmlTable.selfId())) continue;
 
@@ -264,22 +264,7 @@ public final class TableBuilder {
                 ASTSection section = sections.get(tablePageIdx);
                 if (detachedInlineTableFrame) pageLevelTableSourceIds.add(idmlTable.selfId());
 
-                // 분기 1: 중첩 테이블 + 정책상 강제 PNG
-                if (isNested && policy.nestedTableForcesPng) {
-                    ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, tablePageIdx);
-                    if (fig == null && policy.fallbackToBackgroundCrop) {
-                        fig = cropTableFromPageBackground(ctx, idmlTable, thisX, thisY, tf.zOrder(), tablePageIdx);
-                    }
-                    if (fig != null) {
-                        if (ctx.debugAst) fig.debugOrNew().note("nested table forced to PNG");
-                        section.addBlock(fig);
-                        report.wholeTablePngForced++;
-                        continue;
-                    }
-                    System.err.println("[Phase 4] 중첩 테이블이지만 PNG 없음 → ASTTable 폴백, tf=" + tf.id());
-                }
-
-                // 분기 2: 레거시 모드 (preferCellLevel=false) — 표 단위 게이트 + 표 전체 PNG
+                // 분기 1: 레거시 모드 (preferCellLevel=false) — 표 단위 게이트 + 표 전체 PNG
                 if (!policy.preferCellLevel) {
                     if (idmlTableHasInlineWithShortText(idmlTable, policy.maxTextLengthWithInline)) {
                         ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, tablePageIdx);
@@ -303,7 +288,7 @@ public final class TableBuilder {
                     }
                 }
 
-                // 분기 3 (기본): ASTTable로 변환
+                // 분기 2 (기본): ASTTable로 변환
                 long buildStart = System.nanoTime();
                 ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
                 report.buildAstTableNanos += System.nanoTime() - buildStart;
@@ -328,7 +313,7 @@ public final class TableBuilder {
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
                 report.suppressVisualNanos += System.nanoTime() - suppressStart;
 
-                // 분기 3a: cell-level 모드 — 트리거 셀의 인라인 객체를 floating으로 추출
+                // 분기 2a: cell-level 모드 — 트리거 셀의 인라인 객체를 floating으로 추출
                 int extractedInThisTable = 0;
                 int triggerCells = 0;
                 if (policy.preferCellLevel) {
@@ -386,6 +371,9 @@ public final class TableBuilder {
 
             for (IDMLTable idmlTable : idmlStory.tables()) {
                 if (idmlTable == null || idmlTable.selfId() == null) continue;
+                if (isNestedTableInSameStory(idmlStory, idmlTable)) {
+                    continue;
+                }
                 if (ctx.isAnchoredWrapperTableSource(idmlTable.selfId())) {
                     continue;
                 }
@@ -431,6 +419,23 @@ public final class TableBuilder {
                 report.total++;
             }
         }
+    }
+
+    private static boolean isNestedTableInSameStory(IDMLStory story, IDMLTable table) {
+        if (story == null || table == null || table.selfId() == null) return false;
+        String tableId = table.selfId();
+        List<IDMLTable> tables = story.tables();
+        if (tables == null || tables.size() < 2) return false;
+        for (IDMLTable other : tables) {
+            if (other == null || other == table || other.selfId() == null) continue;
+            String parentId = other.selfId();
+            if (tableId.length() > parentId.length()
+                    && tableId.startsWith(parentId)
+                    && tableId.charAt(parentId.length()) == 'i') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void applySourcePageTablePlacementPolicy(
