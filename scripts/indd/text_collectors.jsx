@@ -982,6 +982,101 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                         // 셀 내 단락 수집
                         try {
                             var cellParas = cell.paragraphs.everyItem().getElements();
+                            var previousCellParagraphLastAnchorId = null;
+                            function cellRunHasMeaningfulTextForBoundaryDedupe(run) {
+                                var text = "";
+                                try {
+                                    if (run && run.text) {
+                                        text = String(run.text);
+                                    }
+                                } catch (eText) {}
+                                if (!text) {
+                                    return false;
+                                }
+                                text = text.replace(/[\uFFFC\u0016\r\n\t\b\u00A0\u2000-\u200B\uFEFF ]/g, "");
+                                return text.length > 0;
+                            }
+                            function cellRunsHaveMeaningfulTextForBoundaryDedupe(runs) {
+                                if (!runs) {
+                                    return false;
+                                }
+                                for (var dr = 0; dr < runs.length; dr++) {
+                                    if (runs[dr] && runs[dr].type !== "inline_anchor"
+                                            && cellRunHasMeaningfulTextForBoundaryDedupe(runs[dr])) {
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }
+                            function lastInlineAnchorIdForBoundaryDedupe(runs) {
+                                if (!runs) {
+                                    return null;
+                                }
+                                for (var lr = runs.length - 1; lr >= 0; lr--) {
+                                    if (runs[lr] && runs[lr].type === "inline_anchor"
+                                            && runs[lr].anchoredObjectId !== null
+                                            && runs[lr].anchoredObjectId !== undefined) {
+                                        return runs[lr].anchoredObjectId;
+                                    }
+                                }
+                                return null;
+                            }
+                            function shouldAppendCellInlineAnchorForBoundaryDedupe(cpData, anchorId, prevParagraphLastAnchorId) {
+                                if (anchorId === null || anchorId === undefined) {
+                                    return false;
+                                }
+                                var runs = cpData && cpData.runs ? cpData.runs : [];
+                                if (runs.length > 0) {
+                                    var lastRun = runs[runs.length - 1];
+                                    if (lastRun && lastRun.type === "inline_anchor"
+                                            && String(lastRun.anchoredObjectId) === String(anchorId)) {
+                                        return false;
+                                    }
+                                }
+                                if (!cellRunsHaveMeaningfulTextForBoundaryDedupe(runs)
+                                        && prevParagraphLastAnchorId !== null
+                                        && prevParagraphLastAnchorId !== undefined
+                                        && String(prevParagraphLastAnchorId) === String(anchorId)) {
+                                    return false;
+                                }
+                                return true;
+                            }
+                            function truncateCellParagraphRunsAtFirstHardReturn(runs) {
+                                if (!runs || runs.length === 0) {
+                                    return runs || [];
+                                }
+                                var out = [];
+                                for (var tr = 0; tr < runs.length; tr++) {
+                                    var run = runs[tr];
+                                    if (!run || run.type === "inline_anchor") {
+                                        out.push(run);
+                                        continue;
+                                    }
+                                    var text = "";
+                                    try {
+                                        text = run.text !== null && run.text !== undefined
+                                                ? String(run.text)
+                                                : "";
+                                    } catch (eText) {
+                                        text = "";
+                                    }
+                                    var hardReturn = text.indexOf("\r");
+                                    if (hardReturn < 0) {
+                                        out.push(run);
+                                        continue;
+                                    }
+                                    var copy = {};
+                                    for (var key in run) {
+                                        copy[key] = run[key];
+                                    }
+                                    copy.text = text.substring(0, hardReturn + 1);
+                                    if (copy.text.length > 0) {
+                                        out.push(copy);
+                                    }
+                                    return out;
+                                }
+                                return out;
+                            }
                             for (var cp = 0; cp < cellParas.length; cp++) {
                                 var cellPara = cellParas[cp];
                                 var cpData = { runs: [] };
@@ -1038,7 +1133,12 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                                 if (cpi < cellParts.length - 1) {
                                                     var cellAnchorRecord = cellAnchorIdx < cellAnchoredIds.length ? cellAnchoredIds[cellAnchorIdx] : null;
                                                     if (cellAnchorRecord && cellAnchorRecord.id !== null && cellAnchorRecord.id !== undefined
-                                                            && cellAnchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED") {
+                                                            && cellAnchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED"
+                                                            && shouldAppendCellInlineAnchorForBoundaryDedupe(
+                                                                cpData,
+                                                                cellAnchorRecord.id,
+                                                                previousCellParagraphLastAnchorId
+                                                            )) {
                                                         cpData.runs.push({
                                                             type: "inline_anchor",
                                                             anchoredObjectId: cellAnchorRecord.id,
@@ -1053,6 +1153,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                         }
                                     }
                                 } catch (ec2) {}
+                                cpData.runs = truncateCellParagraphRunsAtFirstHardReturn(cpData.runs);
+                                previousCellParagraphLastAnchorId = lastInlineAnchorIdForBoundaryDedupe(cpData.runs);
                                 cellData.paragraphs.push(cpData);
                             }
                         } catch (ec3) {}

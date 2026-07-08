@@ -219,6 +219,30 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 && Number(sourceBounds[3]) <= Number(pageBounds[3]) + eps;
     }
 
+    function sourceBoundsHasPageAreaForBase(sourceBounds, pageBounds) {
+        if (!sourceBounds || !pageBounds || sourceBounds.length < 4 || pageBounds.length < 4) return true;
+        var eps = 0.001;
+        var top = Math.max(Number(sourceBounds[0]), Number(pageBounds[0]));
+        var left = Math.max(Number(sourceBounds[1]), Number(pageBounds[1]));
+        var bottom = Math.min(Number(sourceBounds[2]), Number(pageBounds[2]));
+        var right = Math.min(Number(sourceBounds[3]), Number(pageBounds[3]));
+        return bottom - top > eps && right - left > eps;
+    }
+
+    function filterCandidatePageIndexesWithAreaForBase(sourceInfo, indexes) {
+        if (!sourceInfo || !sourceInfo.bounds || sourceInfo.bounds.length < 4) {
+            return indexes ? indexes.slice(0) : [];
+        }
+        var out = [];
+        for (var i = 0; indexes && i < indexes.length; i++) {
+            var pageIndex = indexes[i];
+            if (sourceBoundsHasPageAreaForBase(sourceInfo.bounds, pageBoundsForBase(pageIndex))) {
+                out.push(pageIndex);
+            }
+        }
+        return out;
+    }
+
     function candidatePageIndexesForBase(sourceId) {
         var startedAt = basePerfNow();
         var key = String(sourceId);
@@ -240,7 +264,8 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             }
         }
         basePerfCache("candidatePageIndexesForBase.fastPageLocal", false);
-        var indexes = sourceIndex.candidatePageIndexes(sourceId) || [];
+        var indexes = filterCandidatePageIndexesWithAreaForBase(
+                sourceInfo, sourceIndex.candidatePageIndexes(sourceId) || []);
         candidatePageIndexesForBaseById[key] = indexes.slice(0);
         basePerfHotCall("candidatePageIndexesForBase", startedAt);
         return indexes;

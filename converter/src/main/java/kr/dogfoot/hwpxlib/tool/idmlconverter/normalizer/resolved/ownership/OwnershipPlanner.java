@@ -7189,9 +7189,11 @@ public final class OwnershipPlanner {
 
     private boolean hasAnchoredPagePositionSource(RenderedGroup rg) {
         if (rg == null) return false;
+        if (hasResolvedAnchoredPagePosition(rg.id())) return true;
         if (hasIdmlAnchoredPagePosition(rg.id())) return true;
         if (rg.sourceObjectIds() == null) return false;
         for (int sourceId : rg.sourceObjectIds()) {
+            if (hasResolvedAnchoredPagePosition(sourceId)) return true;
             if (hasIdmlAnchoredPagePosition(sourceId)) return true;
         }
         return false;
@@ -7299,6 +7301,8 @@ public final class OwnershipPlanner {
         int declaredAnchorSourceId = rg.inlineAnchorSourceObjectId();
         if (declaredAnchorSourceId > 0) {
             if (hasResolvedInlineAnchor(declaredAnchorSourceId)
+                    && !hasResolvedAnchoredPagePosition(declaredAnchorSourceId)
+                    && !hasIdmlAnchoredPagePosition(declaredAnchorSourceId)
                     && rg.inlineSourceTreeClosed()) {
                 return declaredAnchorSourceId;
             }
@@ -7308,6 +7312,7 @@ public final class OwnershipPlanner {
         for (int sourceId : sourceIds) {
             if (sourceId <= 0) continue;
             if (!hasResolvedInlineAnchor(sourceId)) continue;
+            if (hasResolvedAnchoredPagePosition(sourceId)) continue;
             if (hasIdmlAnchoredPagePosition(sourceId)) continue;
             if (!allSourcesBelongToInlineAnchorTree(sourceId, sourceIds)) continue;
             int[] exportSourceIds = rg.exportSourceObjectIds();
@@ -7353,9 +7358,13 @@ public final class OwnershipPlanner {
         if (data == null || domId < 0) return false;
         ResolvedPageItem item = data.getPageItem(String.valueOf(domId));
         if (item == null) return false;
-        if (item.isInline()) return true;
         String anchoredPosition = safe(item.anchoredPosition());
         String storyAnchorPlacement = safe(item.storyAnchorPlacement());
+        if ("ANCHORED".equals(anchoredPosition)
+                || "FLOATING_ANCHORED".equals(storyAnchorPlacement)) {
+            return false;
+        }
+        if (item.isInline()) return true;
         return "INLINE_POSITION".equals(anchoredPosition)
                 || "INLINE".equals(storyAnchorPlacement);
     }

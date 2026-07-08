@@ -4773,6 +4773,25 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
         if (id === null || id === undefined) return null;
         return sourceInfoById[String(id)] || null;
     }
+    function isFloatingAnchoredSource(src) {
+        if (!src) return false;
+        var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+        var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+        return placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED";
+    }
+    function hasFloatingAnchoredAncestor(src) {
+        if (!src) return false;
+        var parentId = src.parentId;
+        var guard = 0;
+        while (parentId !== null && parentId !== undefined && guard < 200) {
+            guard++;
+            var parent = source(parentId);
+            if (!parent) return false;
+            if (isFloatingAnchoredSource(parent)) return true;
+            parentId = parent.parentId;
+        }
+        return false;
+    }
     function isTextLike(src) {
         var kind = String(src && src.kind || "");
         return kind === "TextFrame" || kind === "Story"
@@ -4959,6 +4978,10 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
                 hiddenLayer: item.hiddenLayer,
                 nonprinting: item.nonprinting
             });
+            continue;
+        }
+        if (hasFloatingAnchoredAncestor(item)) {
+            noteSkip("floating_anchored_ancestor_owns_visual_tree", item, null, null);
             continue;
         }
         var root = topInlineVisualRoot(item);
