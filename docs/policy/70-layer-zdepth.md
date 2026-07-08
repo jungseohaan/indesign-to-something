@@ -330,6 +330,18 @@ Default HWPX strata:
   vector visual so execution can place that source material in z-depth order.
   Missing extracted material is an extraction defect, not a reason for Java
   native fallback drawing.
+- `PAGE_BACKGROUND` is a source-depth role, not a synonym for "one big fill
+  rectangle". A page-local background may be authored as a composite subtree:
+  container root, descendant fill polygon, and optional placed image or mask.
+  When source metadata says those descendants belong to the same lowest-z page
+  backdrop and there is no editable text in that slot, Stage 1 keeps the whole
+  page-local visual subtree in the background bundle.
+- A sibling page-wide fill does not outrank that composite backdrop merely
+  because it is simpler or individually page-wide. If two background bundles are
+  both valid, their source bundles remain distinct and source z-depth decides
+  paint order. Stage 1 must not drop the composite subtree by shrinking it to a
+  root-only shell or by preferring a single fill source as the sole background
+  winner.
 - A cross-page text shell whose owned editable text belongs to another applied
   page must not be dropped wholesale when the same source bundle contains
   non-text visual children on the current page. Stage 1 must split ownership:

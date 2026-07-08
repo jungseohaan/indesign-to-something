@@ -474,7 +474,10 @@ function _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources) {
 
 function _plannerBundleWithoutPlacedContentBranches(candidate, slot, slotSources, clusterIndex) {
     if (slot !== "SHELL_SLOT" || !slotSources) return slotSources;
-    if (_plannerBundleAllowsClosedShellPlacedContentOwnership(candidate)) return slotSources;
+    if (_plannerBundleAllowsClosedShellPlacedContentOwnership(candidate)
+            || _plannerBundleKeepsClosedBackgroundPlacedContent(candidate)) {
+        return slotSources;
+    }
     var copy = {
         visualSourceObjectIds: _plannerBundlePrunePlacedContentBranches(
                 candidate, slot, slotSources.visualSourceObjectIds || [], clusterIndex),
@@ -515,6 +518,16 @@ function _plannerBundleAllowsClosedShellPlacedContentOwnership(candidate) {
             && candidate.slotRole !== "textless_group_visual_slot") return false;
     if (candidate.textOwner && candidate.textOwner !== "hwpx_tf") return false;
     return candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 1;
+}
+
+function _plannerBundleKeepsClosedBackgroundPlacedContent(candidate) {
+    if (!candidate) return false;
+    if (candidate.compositeRole !== "background_vector_source") return false;
+    if (candidate.textOwner && candidate.textOwner !== "none") return false;
+    if (candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0) return false;
+    if (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0) return false;
+    if (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0) return false;
+    return true;
 }
 
 function _plannerBundleSourceIsInsidePlacedContentBranch(sourceId, rootSourceId, clusterIndex) {

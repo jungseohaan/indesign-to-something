@@ -333,6 +333,24 @@ Slot ownership rules:
   scanning every page whose bounds happen to overlap repeated spread
   coordinates. Later stages must only execute those plans and must not resurrect
   or drop the background from rendered PNG symptoms.
+- A page-local `BACKGROUND` owner is not limited to a single leaf fill source.
+  When the lowest-z background subtree on a page uses a container root plus
+  descendant fill/polygon/placed-image material to render one authored page
+  backdrop, Stage 1 keeps that subtree as one closed visual bundle for the
+  background slot. The planner must not collapse that bundle to only the root
+  container or to one sibling page-wide fill source, because that drops authored
+  descendant background material before execution.
+- A page-wide single-color fill may coexist with a lower-z background composite
+  subtree on the same page. The fill source must not suppress, replace, or make
+  non-executable the sibling/ancestor background subtree when the subtree is the
+  actual owner of additional background pixels. Duplicate suppression for
+  `BACKGROUND` uses the declared visible slot/source bundle, not a heuristic
+  preference for one leaf fill.
+- A closed page background bundle may include placed-content descendants when
+  those descendants are part of the authored background subtree and no editable
+  text descendants are owned by the same slot. Pruning placed-content branches
+  from such a background bundle is an ownership defect: it turns a real
+  background visual into a root-only empty shell.
 - `NATIVE_SOURCE_SHAPE` is a fallback materialization for explicit shell plans
   whose executor is guaranteed by Stage 1. It is not allowed for
   `pass.vector_shape_frames`; visible vector source material must have an
