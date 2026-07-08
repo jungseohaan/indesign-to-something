@@ -270,22 +270,20 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
         var _tfHasContent = false;
         try { _tfHasContent = item.contents.replace(/[\s﻿]/g, "").length > 0; } catch (e) {}
         var _tfIsEditable = editableIds && editableIds[domId];
-        var explicitDirectTextFrameShellCandidate = false;
+        var explicitPlannedTextFrameShellCandidate = false;
         try {
-            explicitDirectTextFrameShellCandidate = candidate.sourceObjectIds
-                    && candidate.sourceObjectIds.length === 1
-                    && Number(candidate.sourceObjectIds[0]) === Number(domId)
-                    && candidate.primarySourceObjectId !== null
-                    && candidate.primarySourceObjectId !== undefined
-                    && Number(candidate.primarySourceObjectId) === Number(domId);
-        } catch (eDirectTextFrameShellCandidate) {
-            explicitDirectTextFrameShellCandidate = false;
+            explicitPlannedTextFrameShellCandidate = candidate.passId === "pass.editable_textframe_visual_shells"
+                    && sourceId !== null
+                    && sourceId !== undefined
+                    && Number(sourceId) === Number(domId);
+        } catch (ePlannedTextFrameShellCandidate) {
+            explicitPlannedTextFrameShellCandidate = false;
         }
-        if (decoChildIds && decoChildIds[domId] && !explicitDirectTextFrameShellCandidate) continue;
+        if (decoChildIds && decoChildIds[domId] && !explicitPlannedTextFrameShellCandidate) continue;
         // editable TF이거나 빈 TF(텍스트 없음)인 경우 처리.
         // 내용 있는 비-편집 TF는 exportRenderedTextFrames에서 이미 처리됨.
         if (!_tfIsEditable) {
-            if (_tfHasContent) continue;
+            if (_tfHasContent && !explicitPlannedTextFrameShellCandidate) continue;
         }
 
         var hasFill = hasVisibleFill(item);
@@ -295,7 +293,7 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
         // stroke-only TF는 이전 정책처럼 비직사각형/대형 윤곽선만 보존한다.
         // fill이 있는 TF는 배경/말풍선/라벨로 쓰이는 경우가 많아 형태와 관계없이 보존한다.
         var isNonRect = hasNonRectangularPath(item);
-        if (!hasFill && !isNonRect && !explicitDirectTextFrameShellCandidate) {
+        if (!hasFill && !isNonRect && !explicitPlannedTextFrameShellCandidate) {
             // 직사각 stroke-only TF도 라운드 코너/내부 semantic TF가 있으면
             // 레이아웃 shell로 보존한다. 50pt 절대 문턱은 페이지별로 쉽게 흔들린다.
             if (!shouldExportRectStrokeTextFrameShell(item, allItemsForShellHeuristics || [])) continue;

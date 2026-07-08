@@ -189,7 +189,7 @@ def write_applescript(
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            Do Script POSIX file "{EXTRACT_JSX}" language «constant ScLgJSLg» with arguments {{{quoted_args}}}
+            do script POSIX file "{EXTRACT_JSX}" language «constant ScLgJSLg» with arguments {{{quoted_args}}}
         end timeout
     end tell
 end using terms from
