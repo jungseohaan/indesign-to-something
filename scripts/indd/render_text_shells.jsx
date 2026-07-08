@@ -1326,7 +1326,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     }
                 }
                 var dup = ordered[i].duplicate();
-                _clearTextFramesInRenderDuplicate(dup);
+                if (slotPlan.textAction !== "OWNED_BY_PNG"
+                        && slotPlan.completePngTextAllowed !== true) {
+                    _clearTextFramesInRenderDuplicate(dup);
+                }
                 dups.push(dup);
             }
             if (dups.length === 1) {
@@ -1341,10 +1344,27 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     try { if (!parentItems[key]) parentItems[key] = dups[dbi].parent; } catch (eParentBucket) {}
                 }
                 var bucketGroups = [];
+                var bucketGroupRows = [];
                 for (var bucketKey in parentBuckets) {
                     if (parentBuckets.hasOwnProperty && !parentBuckets.hasOwnProperty(bucketKey)) continue;
                     var bucketGroup = groupItemsInParent(parentBuckets[bucketKey], parentItems[bucketKey]);
-                    if (bucketGroup) bucketGroups.push(bucketGroup);
+                    if (bucketGroup) {
+                        var bucketMinZ = null;
+                        for (var bzi = 0; bzi < parentBuckets[bucketKey].length; bzi++) {
+                            var bzInfo = sourceOrderInfoForItem(parentBuckets[bucketKey][bzi]);
+                            if (bucketMinZ === null || bzInfo.z < bucketMinZ) bucketMinZ = bzInfo.z;
+                        }
+                        bucketGroupRows.push({
+                            group: bucketGroup,
+                            z: bucketMinZ === null ? 0 : bucketMinZ
+                        });
+                    }
+                }
+                bucketGroupRows.sort(function(a, b) {
+                    return a.z - b.z;
+                });
+                for (var bgi = 0; bgi < bucketGroupRows.length; bgi++) {
+                    bucketGroups.push(bucketGroupRows[bgi].group);
                 }
                 if (bucketGroups.length === 1) {
                     tempGroup = bucketGroups[0];
@@ -1768,9 +1788,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 slotOwnershipOpts.reason = "planned_text_shell_composite";
             }
             if (isPageTextlessGraphicGroup) {
-                slotOwnershipOpts.textOwner = "none";
-                slotOwnershipOpts.containsText = false;
-                slotOwnershipOpts.containsEditableText = false;
+                var pageGroupOwnsText = slotPlan.textAction === "OWNED_BY_PNG"
+                        || slotPlan.completePngTextAllowed === true
+                        || (slotPlan.ownedTextFrameIds && slotPlan.ownedTextFrameIds.length > 0
+                            && slotPlan.textOwner === "indesign_png");
+                slotOwnershipOpts.textOwner = pageGroupOwnsText ? "indesign_png" : "none";
+                slotOwnershipOpts.editableTextFrameIds = pageGroupOwnsText
+                        ? _sortedNumericIds(slotPlan.ownedTextFrameIds || [])
+                        : [];
+                slotOwnershipOpts.containsText = pageGroupOwnsText;
+                slotOwnershipOpts.containsEditableText = pageGroupOwnsText;
                 slotOwnershipOpts.reason = "planned_page_textless_graphic_group";
             }
             if (isExplicitSlotOnly) {

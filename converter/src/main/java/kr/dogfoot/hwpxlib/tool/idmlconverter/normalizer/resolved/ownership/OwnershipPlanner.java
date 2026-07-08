@@ -9119,8 +9119,11 @@ public final class OwnershipPlanner {
         if (plan.placement != Placement.FLOATING) return false;
         if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (isPageTextlessGraphicGroupPlan(plan)) return false;
-        if (isTextShellWithSeparatedHiddenTextChannel(plan)) return true;
+        // A rendered textless shell already has an extractor-declared display
+        // extent.  Narrowing it to a concrete child source breaks the shell/TF
+        // slot contract and reintroduces split or clipped composite shells.
         if (hasExtractedTextlessShellVisual(plan)) return false;
+        if (isTextShellWithSeparatedHiddenTextChannel(plan)) return true;
         String reason = safe(plan.reason);
         return "sibling_group_text_shell".equals(reason)
                 || "story_flow_inline_shell_visual_only".equals(reason);

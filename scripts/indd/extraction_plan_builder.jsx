@@ -2001,6 +2001,70 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 && a[3] >= b[1] - pad && a[1] <= b[3] + pad;
     }
 
+    function boundsAreaValue(b) {
+        if (!boundsHasArea(b)) return 0;
+        return Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    }
+
+    function boundsIntersectionArea(a, b) {
+        if (!a || !b) return 0;
+        var top = Math.max(a[0], b[0]);
+        var left = Math.max(a[1], b[1]);
+        var bottom = Math.min(a[2], b[2]);
+        var right = Math.min(a[3], b[3]);
+        if (bottom <= top || right <= left) return 0;
+        return (bottom - top) * (right - left);
+    }
+
+    function boundsBroadlyContains(a, b) {
+        var aArea = boundsAreaValue(a);
+        var bArea = boundsAreaValue(b);
+        if (aArea <= 0 || bArea <= 0) return false;
+        var small = Math.min(aArea, bArea);
+        var large = Math.max(aArea, bArea);
+        if (large < small * 4.0) return false;
+        var intersection = boundsIntersectionArea(a, b);
+        return intersection >= small * 0.92;
+    }
+
+    function boundsMostlyContains(container, child) {
+        var childArea = boundsAreaValue(child);
+        if (childArea <= 0) return false;
+        return boundsIntersectionArea(container, child) >= childArea * 0.92;
+    }
+
+    function axisOverlapRatio(aMin, aMax, bMin, bMax) {
+        var overlap = Math.min(aMax, bMax) - Math.max(aMin, bMin);
+        if (overlap <= 0) return 0;
+        var minLen = Math.min(Math.max(0, aMax - aMin), Math.max(0, bMax - bMin));
+        return minLen > 0 ? overlap / minLen : 0;
+    }
+
+    function axisGap(aMin, aMax, bMin, bMax) {
+        if (aMax < bMin) return bMin - aMax;
+        if (bMax < aMin) return aMin - bMax;
+        return 0;
+    }
+
+    function boundsVisuallyAdjacent(a, b) {
+        if (!boundsHasArea(a) || !boundsHasArea(b)) return false;
+        if (boundsBroadlyContains(a, b)) return false;
+        var minArea = Math.min(boundsAreaValue(a), boundsAreaValue(b));
+        if (minArea > 0 && boundsIntersectionArea(a, b) >= minArea * 0.03) return true;
+        var aHeight = Math.max(0, a[2] - a[0]);
+        var bHeight = Math.max(0, b[2] - b[0]);
+        var aWidth = Math.max(0, a[3] - a[1]);
+        var bWidth = Math.max(0, b[3] - b[1]);
+        var yOverlap = axisOverlapRatio(a[0], a[2], b[0], b[2]);
+        var xGap = axisGap(a[1], a[3], b[1], b[3]);
+        var rowGapLimit = Math.max(3.0, Math.min(6.0, Math.min(aHeight, bHeight) * 0.35));
+        if (yOverlap >= 0.35 && xGap <= rowGapLimit) return true;
+        var xOverlap = axisOverlapRatio(a[1], a[3], b[1], b[3]);
+        var yGap = axisGap(a[0], a[2], b[0], b[2]);
+        var columnGapLimit = Math.max(3.0, Math.min(6.0, Math.min(aHeight, bHeight) * 0.15));
+        return xOverlap >= 0.65 && yGap > 0.1 && yGap <= columnGapLimit;
+    }
+
     function unionBounds(a, b) {
         if (!a) return b ? b.slice(0) : null;
         if (!b) return a.slice(0);
@@ -2084,6 +2148,39 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             for (var bai = 0; bai < ba.length; bai++) {
                 if (aAncestors[String(ba[bai])]) return true;
             }
+        }
+        return false;
+    }
+
+    function entryLooksConcreteVisualContainer(entry) {
+        if (!entry) return false;
+        var idsToCheck = (entry.exportIds || []).concat(entry.sourceIds || []);
+        var seen = {};
+        for (var i = 0; i < idsToCheck.length; i++) {
+            var id = idsToCheck[i];
+            if (seen[String(id)]) continue;
+            seen[String(id)] = true;
+            var src = info(id);
+            if (!src) continue;
+            if (sourceIsTextlessTextFrameShellMaterial(src)) return true;
+            var kind = String(src.kind || "");
+            if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") continue;
+            if (src.hasPlacedVisual === true || src.hasPlacedVisualInSubtree === true) continue;
+            if (src.hasVisibleFill === true || src.hasVisibleStroke === true
+                    || src.hasCandidateVectorPaint === true) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function entriesContainmentConnected(a, b, structurallyConnected) {
+        if (!a || !b) return false;
+        if (boundsMostlyContains(a.bounds, b.bounds)) {
+            return structurallyConnected || entryLooksConcreteVisualContainer(a);
+        }
+        if (boundsMostlyContains(b.bounds, a.bounds)) {
+            return structurallyConnected || entryLooksConcreteVisualContainer(b);
         }
         return false;
     }
@@ -2194,8 +2291,11 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         function entriesAreConnected(aIndex, bIndex) {
             var key = aIndex < bIndex ? String(aIndex) + "|" + String(bIndex) : String(bIndex) + "|" + String(aIndex);
             if (structuralRelationCache.hasOwnProperty(key)) return structuralRelationCache[key];
-            var connected = boundsOverlapWithPad(entries[aIndex].bounds, entries[bIndex].bounds, pad)
+            var structurallyConnected = boundsOverlapWithPad(entries[aIndex].bounds, entries[bIndex].bounds, pad)
                     && entriesShareStructuralRoot(entries[aIndex], entries[bIndex]);
+            var connected = structurallyConnected
+                    || entriesContainmentConnected(entries[aIndex], entries[bIndex], structurallyConnected)
+                    || boundsVisuallyAdjacent(entries[aIndex].bounds, entries[bIndex].bounds);
             structuralRelationCache[key] = connected;
             return connected;
         }
@@ -2281,6 +2381,38 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             hiddenTextFrameIds: _sortedNumericIds(hidden),
             pngOwnedTextFrameIds: _sortedNumericIds(pngOwned)
         };
+    }
+
+    function pngOwnedTextAncestorSourceIds(sourceIds, textFrameIds) {
+        var sourceSet = {};
+        var out = [];
+        var seen = {};
+        for (var si = 0; sourceIds && si < sourceIds.length; si++) {
+            sourceSet[String(sourceIds[si])] = true;
+        }
+        for (var ti = 0; textFrameIds && ti < textFrameIds.length; ti++) {
+            var cur = info(textFrameIds[ti]);
+            var lastNonTextAncestorId = null;
+            var guard = 0;
+            while (cur && cur.parentId !== null && cur.parentId !== undefined && guard++ < 64) {
+                var parentId = cur.parentId;
+                if (!sourceSet[String(parentId)]) break;
+                var parent = info(parentId);
+                if (!parent) break;
+                var parentKind = String(parent.kind || "");
+                if (parentKind !== "TextFrame" && parentKind !== "Story"
+                        && parentKind !== "Character" && parentKind !== "InsertionPoint"
+                        && parentKind !== "Cell") {
+                    lastNonTextAncestorId = parentId;
+                }
+                cur = parent;
+            }
+            if (lastNonTextAncestorId !== null && !seen[String(lastNonTextAncestorId)]) {
+                seen[String(lastNonTextAncestorId)] = true;
+                out.push(lastNonTextAncestorId);
+            }
+        }
+        return _sortedNumericIds(out);
     }
 
     function unionSourceIds(a, b) {
@@ -2376,18 +2508,21 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(allSourceIds);
             var hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
             var pngOwnedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
+            var pngOwnedAncestorIds = pngOwnedTextAncestorSourceIds(allSourceIds, pngOwnedTextFrameIds);
             exportIds = subtractSourceIds(exportIds, hiddenTextFrameIds);
             exportIds = unionSourceIds(exportIds, visiblePaintSourceIds(allSourceIds, Number(pageKey)));
+            exportIds = unionSourceIds(exportIds, pngOwnedAncestorIds);
             var visualSourceIds = exportIds.slice(0);
             exportIds = unionSourceIds(exportIds, pngOwnedTextFrameIds);
             var executionSourceIds = subtractSourceIds(allSourceIds, hiddenTextFrameIds);
+            executionSourceIds = unionSourceIds(executionSourceIds, pngOwnedAncestorIds);
             executionSourceIds = unionSourceIds(executionSourceIds, pngOwnedTextFrameIds);
             if (exportIds.length < 2 || allSourceIds.length < 2) continue;
             var candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
                     Number(pageKey),
                     allSourceIds,
-                    "overlap");
+                    "visual_adjacency");
             var seenKey = "pass.page_textless_graphic_groups|page:" + pageKey
                     + "|src:" + _sourceSetKey(allSourceIds);
             if (candidateSeen && candidateSeen[seenKey]) continue;
@@ -2425,7 +2560,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 completePngTextAllowed: pngOwnedTextFrameIds.length > 0,
                 ownershipSlot: "CONTENT_VISUAL_SLOT",
                 materialization: "EXTRACTED_PNG_VECTOR",
-                textAction: "DROP_TEXT",
+                textAction: pngOwnedTextFrameIds.length > 0 ? "OWNED_BY_PNG" : "DROP_TEXT",
                 visualAction: "PLACE_FLOATING_PNG",
                 visualLayer: "CONTENT_VISUAL",
                 placement: "FLOATING",
@@ -2433,7 +2568,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 zOrder: minZ !== null ? minZ : 0,
                 coveredCandidateIds: coveredCandidateIds,
                 required: false,
-                reason: "page_textless_graphic_group_from_overlapping_source_candidates"
+                reason: "page_textless_graphic_group_from_visual_adjacency"
             });
             diagnostics.push({
                 candidateId: candidateId,
@@ -2482,6 +2617,70 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         if (!a || !b) return false;
         return a[2] >= b[0] - pad && a[0] <= b[2] + pad
                 && a[3] >= b[1] - pad && a[1] <= b[3] + pad;
+    }
+
+    function boundsAreaValue(b) {
+        if (!boundsHasArea(b)) return 0;
+        return Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    }
+
+    function boundsIntersectionArea(a, b) {
+        if (!a || !b) return 0;
+        var top = Math.max(a[0], b[0]);
+        var left = Math.max(a[1], b[1]);
+        var bottom = Math.min(a[2], b[2]);
+        var right = Math.min(a[3], b[3]);
+        if (bottom <= top || right <= left) return 0;
+        return (bottom - top) * (right - left);
+    }
+
+    function boundsBroadlyContains(a, b) {
+        var aArea = boundsAreaValue(a);
+        var bArea = boundsAreaValue(b);
+        if (aArea <= 0 || bArea <= 0) return false;
+        var small = Math.min(aArea, bArea);
+        var large = Math.max(aArea, bArea);
+        if (large < small * 4.0) return false;
+        var intersection = boundsIntersectionArea(a, b);
+        return intersection >= small * 0.92;
+    }
+
+    function boundsMostlyContains(container, child) {
+        var childArea = boundsAreaValue(child);
+        if (childArea <= 0) return false;
+        return boundsIntersectionArea(container, child) >= childArea * 0.92;
+    }
+
+    function axisOverlapRatio(aMin, aMax, bMin, bMax) {
+        var overlap = Math.min(aMax, bMax) - Math.max(aMin, bMin);
+        if (overlap <= 0) return 0;
+        var minLen = Math.min(Math.max(0, aMax - aMin), Math.max(0, bMax - bMin));
+        return minLen > 0 ? overlap / minLen : 0;
+    }
+
+    function axisGap(aMin, aMax, bMin, bMax) {
+        if (aMax < bMin) return bMin - aMax;
+        if (bMax < aMin) return aMin - bMax;
+        return 0;
+    }
+
+    function boundsVisuallyAdjacent(a, b) {
+        if (!boundsHasArea(a) || !boundsHasArea(b)) return false;
+        if (boundsBroadlyContains(a, b)) return false;
+        var minArea = Math.min(boundsAreaValue(a), boundsAreaValue(b));
+        if (minArea > 0 && boundsIntersectionArea(a, b) >= minArea * 0.03) return true;
+        var aHeight = Math.max(0, a[2] - a[0]);
+        var bHeight = Math.max(0, b[2] - b[0]);
+        var aWidth = Math.max(0, a[3] - a[1]);
+        var bWidth = Math.max(0, b[3] - b[1]);
+        var yOverlap = axisOverlapRatio(a[0], a[2], b[0], b[2]);
+        var xGap = axisGap(a[1], a[3], b[1], b[3]);
+        var rowGapLimit = Math.max(3.0, Math.min(6.0, Math.min(aHeight, bHeight) * 0.35));
+        if (yOverlap >= 0.35 && xGap <= rowGapLimit) return true;
+        var xOverlap = axisOverlapRatio(a[1], a[3], b[1], b[3]);
+        var yGap = axisGap(a[0], a[2], b[0], b[2]);
+        var columnGapLimit = Math.max(3.0, Math.min(6.0, Math.min(aHeight, bHeight) * 0.15));
+        return xOverlap >= 0.65 && yGap > 0.1 && yGap <= columnGapLimit;
     }
 
     function unionBounds(a, b) {
@@ -2633,6 +2832,45 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         return false;
     }
 
+    function entrySourceIds(entry) {
+        if (!entry || !entry.candidate) return [];
+        return (entry.candidate.exportSourceObjectIds || [])
+                .concat(entry.candidate.visualSourceObjectIds || [])
+                .concat(entry.candidate.sourceObjectIds || []);
+    }
+
+    function entryLooksConcreteVisualContainer(entry) {
+        var idsToCheck = entrySourceIds(entry);
+        var seen = {};
+        for (var i = 0; i < idsToCheck.length; i++) {
+            var id = idsToCheck[i];
+            if (seen[String(id)]) continue;
+            seen[String(id)] = true;
+            var src = info(id);
+            if (!src) continue;
+            if (sourceIsTextlessTextFrameShellMaterial(src)) return true;
+            var kind = String(src.kind || "");
+            if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") continue;
+            if (src.hasPlacedVisual === true || src.hasPlacedVisualInSubtree === true) continue;
+            if (src.hasVisibleFill === true || src.hasVisibleStroke === true
+                    || src.hasCandidateVectorPaint === true) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function entriesContainmentConnected(a, b, structurallyConnected) {
+        if (!a || !b) return false;
+        if (boundsMostlyContains(a.bounds, b.bounds)) {
+            return structurallyConnected || entryLooksConcreteVisualContainer(a);
+        }
+        if (boundsMostlyContains(b.bounds, a.bounds)) {
+            return structurallyConnected || entryLooksConcreteVisualContainer(b);
+        }
+        return false;
+    }
+
     function mergedIds(component, field) {
         var out = [];
         var seen = {};
@@ -2723,6 +2961,38 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         };
     }
 
+    function pngOwnedTextAncestorSourceIds(sourceIds, textFrameIds) {
+        var sourceSet = {};
+        var out = [];
+        var seen = {};
+        for (var si = 0; sourceIds && si < sourceIds.length; si++) {
+            sourceSet[String(sourceIds[si])] = true;
+        }
+        for (var ti = 0; textFrameIds && ti < textFrameIds.length; ti++) {
+            var cur = info(textFrameIds[ti]);
+            var lastNonTextAncestorId = null;
+            var guard = 0;
+            while (cur && cur.parentId !== null && cur.parentId !== undefined && guard++ < 64) {
+                var parentId = cur.parentId;
+                if (!sourceSet[String(parentId)]) break;
+                var parent = info(parentId);
+                if (!parent) break;
+                var parentKind = String(parent.kind || "");
+                if (parentKind !== "TextFrame" && parentKind !== "Story"
+                        && parentKind !== "Character" && parentKind !== "InsertionPoint"
+                        && parentKind !== "Cell") {
+                    lastNonTextAncestorId = parentId;
+                }
+                cur = parent;
+            }
+            if (lastNonTextAncestorId !== null && !seen[String(lastNonTextAncestorId)]) {
+                seen[String(lastNonTextAncestorId)] = true;
+                out.push(lastNonTextAncestorId);
+            }
+        }
+        return _sortedNumericIds(out);
+    }
+
     function isEditableTextFrameSource(src) {
         if (!src || String(src.kind || "") !== "TextFrame") return false;
         if (src.textFrameClass === "editable") return true;
@@ -2796,8 +3066,11 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         function entriesAreConnected(aIndex, bIndex) {
             var key = aIndex < bIndex ? String(aIndex) + "|" + String(bIndex) : String(bIndex) + "|" + String(aIndex);
             if (structuralRelationCache.hasOwnProperty(key)) return structuralRelationCache[key];
-            var connected = boundsOverlapWithPad(entries[aIndex].bounds, entries[bIndex].bounds, pad)
+            var structurallyConnected = boundsOverlapWithPad(entries[aIndex].bounds, entries[bIndex].bounds, pad)
                     && entriesShareStructuralRoot(entries[aIndex], entries[bIndex]);
+            var connected = structurallyConnected
+                    || entriesContainmentConnected(entries[aIndex], entries[bIndex], structurallyConnected)
+                    || boundsVisuallyAdjacent(entries[aIndex].bounds, entries[bIndex].bounds);
             structuralRelationCache[key] = connected;
             return connected;
         }
@@ -2857,10 +3130,16 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             merged.hiddenVisualSourceObjectIds = textFrameSplit.hiddenTextFrameIds;
             merged.ownedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
             var visiblePagePaintIds = visiblePaintSourceIds(merged.sourceObjectIds || [], Number(pageKey));
+            var pngOwnedAncestorIds = pngOwnedTextAncestorSourceIds(
+                    merged.sourceObjectIds || [], merged.ownedTextFrameIds || []);
             merged.visualSourceObjectIds = unionSourceIds(
                     merged.visualSourceObjectIds || [], visiblePagePaintIds);
             merged.exportSourceObjectIds = unionSourceIds(
                     merged.exportSourceObjectIds || [], visiblePagePaintIds);
+            merged.visualSourceObjectIds = unionSourceIds(
+                    merged.visualSourceObjectIds || [], pngOwnedAncestorIds);
+            merged.exportSourceObjectIds = unionSourceIds(
+                    merged.exportSourceObjectIds || [], pngOwnedAncestorIds);
             merged.visualSourceObjectIds = subtractSourceIds(
                     merged.visualSourceObjectIds || [], merged.hiddenTextFrameIds || []);
             merged.exportSourceObjectIds = subtractSourceIds(
@@ -2869,6 +3148,8 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
                     merged.exportSourceObjectIds || [], merged.ownedTextFrameIds || []);
             merged.executionSourceObjectIds = subtractSourceIds(
                     merged.sourceObjectIds || [], merged.hiddenTextFrameIds || []);
+            merged.executionSourceObjectIds = unionSourceIds(
+                    merged.executionSourceObjectIds || [], pngOwnedAncestorIds);
             merged.executionSourceObjectIds = unionSourceIds(
                     merged.executionSourceObjectIds || [], merged.ownedTextFrameIds || []);
             merged.bounds = null;
@@ -2882,12 +3163,13 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             merged.textOwner = merged.ownedTextFrameIds.length > 0 ? "indesign_png" : "none";
             merged.containsEditableText = merged.ownedTextFrameIds.length > 0;
             merged.completePngTextAllowed = merged.ownedTextFrameIds.length > 0;
-            merged.reason = "merged_overlapping_page_textless_graphic_group_candidates";
+            merged.textAction = merged.ownedTextFrameIds.length > 0 ? "OWNED_BY_PNG" : "DROP_TEXT";
+            merged.reason = "merged_visual_adjacency_page_textless_graphic_group_candidates";
             merged.candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
                     Number(pageKey),
                     merged.sourceObjectIds,
-                    "merged_overlap");
+                    "merged_visual_adjacency");
 
             replacementByIndex[String(component[0].index)] = merged;
             var mergedCandidateIds = [];

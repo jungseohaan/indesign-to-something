@@ -35,8 +35,9 @@ ordinary page-local textless image grouping described below. Within
 `TEXTLESS_IMAGE_GROUP`, Stage 1 groups visible non-text source material into
 page-local textless graphic groups. The target grouping is the maximum set of
 non-master, non-background graphic source bundles whose visible page-local
-bounds overlap or are connected by the same source group/clip/mask parent, after
-editable text and table structure sources are hidden. A page may therefore have
+bounds overlap, touch, or are visually adjacent within the same local row/column,
+or are connected by the same source group/clip/mask parent, after editable text
+and table structure sources are hidden. A page may therefore have
 one or more background graphics plus one ordinary full-page graphic image or
 several non-overlapping ordinary graphic images. Master-page graphics are
 excluded from these ordinary page graphic groups and keep separate
@@ -56,9 +57,17 @@ Graphic grouping rules:
 - Grouping uses source metadata: source ids, parentage, group membership,
   clipping/pasted-inside relation, page/spread intersection, visibility, bounds,
   and normalized source z-order.
-- Bounds overlap may connect graphic sources into one group, but it is not a
-  license to decide text ownership, promote a role, or repair an output
-  occlusion symptom.
+- Bounds overlap/touch/adjacency may connect graphic sources into one group, but
+  it is not a license to decide text ownership, promote a role, or repair an
+  output occlusion symptom. Adjacency is measured only from source metadata
+  bounds in page coordinate space: same-row/same-column overlap plus a small
+  local gap relative to the neighboring source size. Pixel color, rendered alpha,
+  page text, and observed output occlusion are not adjacency inputs.
+- A broad enclosing source does not become adjacent to every source it contains.
+  If one bounds mostly contains the other and their area ratio is broad, source
+  structure or background policy must justify grouping; visual adjacency alone
+  must not connect them. This prevents local graphics from being swallowed by a
+  broad page/container backdrop.
 - Source parentage, group membership, clip parentage, or mask parentage may
   connect graphic sources only when they describe the same local visual
   component. A shared parent or sibling relation by itself is not a page-wide
