@@ -203,26 +203,44 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
         function getCharProps(absIdx) {
             if (propsCache[absIdx]) return propsCache[absIdx];
             var color = null, size = null, font = null, style = null;
+            var baselineShift = null, position = null, charStyle = null;
             color = getCharColor(absIdx);
             try { size = para.characters[absIdx].pointSize; } catch (e) {}
             try { font = para.characters[absIdx].appliedFont.fontFamily; } catch (e) {}
             try { style = para.characters[absIdx].fontStyle; } catch (e) {}
+            try { baselineShift = para.characters[absIdx].baselineShift; } catch (e) {}
+            try { position = para.characters[absIdx].position ? para.characters[absIdx].position.toString() : null; } catch (e) {}
+            try { charStyle = para.characters[absIdx].appliedCharacterStyle ? para.characters[absIdx].appliedCharacterStyle.name : null; } catch (e) {}
             // GREP 스타일로 적용된 이탤릭 감지: fontStyle이 숫자(가변 폰트 웨이트)인데
             // appliedCharacterStyle에 "이탤릭" 또는 "Italic"이 포함되면 fontStyle을 "Italic"으로 보정
             if (style && /^\d+$/.test(style)) {
                 try {
-                    var csName = para.characters[absIdx].appliedCharacterStyle.name;
+                    var csName = charStyle;
                     if (csName && (csName.indexOf("이탤릭") >= 0 || csName.toLowerCase().indexOf("italic") >= 0)) {
                         style = "Italic";
                     }
                 } catch (e2) {}
             }
-            var p = { color: color, size: size, font: font, style: style };
+            var p = {
+                color: color,
+                size: size,
+                font: font,
+                style: style,
+                baselineShift: baselineShift,
+                position: position,
+                charStyle: charStyle
+            };
             propsCache[absIdx] = p;
             return p;
         }
         function propsEqual(a, b) {
-            return a.color === b.color && a.size === b.size && a.font === b.font && a.style === b.style;
+            return a.color === b.color
+                    && a.size === b.size
+                    && a.font === b.font
+                    && a.style === b.style
+                    && a.baselineShift === b.baselineShift
+                    && a.position === b.position
+                    && a.charStyle === b.charStyle;
         }
         function addBoundary(boundaries, offset) {
             if (offset <= 0 || offset >= rngLen) return;
@@ -275,6 +293,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                     if (propsForBuild.size) builtRun.fontSize = propsForBuild.size;
                     if (propsForBuild.font) builtRun.fontFamily = propsForBuild.font;
                     if (propsForBuild.style) builtRun.fontStyle = propsForBuild.style;
+                    builtRun.baselineShift = propsForBuild.baselineShift;
+                    builtRun.position = propsForBuild.position;
+                    builtRun.charStyle = propsForBuild.charStyle;
                     builtRuns.push(builtRun);
                 }
             }
@@ -289,6 +310,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
             if (firstProps.size) runData.fontSize = firstProps.size;
             if (firstProps.font) runData.fontFamily = firstProps.font;
             if (firstProps.style) runData.fontStyle = firstProps.style;
+            runData.baselineShift = firstProps.baselineShift;
+            runData.position = firstProps.position;
+            runData.charStyle = firstProps.charStyle;
             return [runData];
         }
         var allSame = false;
@@ -344,6 +368,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                 if (firstProps.size) runData.fontSize = firstProps.size;
                 if (firstProps.font) runData.fontFamily = firstProps.font;
                 if (firstProps.style) runData.fontStyle = firstProps.style;
+                runData.baselineShift = firstProps.baselineShift;
+                runData.position = firstProps.position;
+                runData.charStyle = firstProps.charStyle;
                 return [runData];
             }
             var sampleMismatch = false;
@@ -367,6 +394,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                 if (firstProps.size) runData.fontSize = firstProps.size;
                 if (firstProps.font) runData.fontFamily = firstProps.font;
                 if (firstProps.style) runData.fontStyle = firstProps.style;
+                runData.baselineShift = firstProps.baselineShift;
+                runData.position = firstProps.position;
+                runData.charStyle = firstProps.charStyle;
                 return [runData];
             }
         }
@@ -379,6 +409,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
             if (firstProps.size) runData.fontSize = firstProps.size;
             if (firstProps.font) runData.fontFamily = firstProps.font;
             if (firstProps.style) runData.fontStyle = firstProps.style;
+            runData.baselineShift = firstProps.baselineShift;
+            runData.position = firstProps.position;
+            runData.charStyle = firstProps.charStyle;
             return [runData];
         }
 
@@ -443,6 +476,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                 if (segProps.size) splitRun.fontSize = segProps.size;
                 if (segProps.font) splitRun.fontFamily = segProps.font;
                 if (segProps.style) splitRun.fontStyle = segProps.style;
+                splitRun.baselineShift = segProps.baselineShift;
+                splitRun.position = segProps.position;
+                splitRun.charStyle = segProps.charStyle;
                 result.push(splitRun);
             }
         }

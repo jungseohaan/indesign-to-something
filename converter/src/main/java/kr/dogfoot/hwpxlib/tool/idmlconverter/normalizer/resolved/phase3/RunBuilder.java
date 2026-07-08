@@ -680,26 +680,7 @@ class RunBuilder {
                                                  ASTTextRun templateRun,
                                                  ASTParagraph para,
                                                  String token) {
-        StringBuilder letters = new StringBuilder();
-        for (int i = 0; i < token.length(); i++) {
-            char c = token.charAt(i);
-            if (Character.isDigit(c)) {
-                if (letters.length() > 0) {
-                    para.addItem(cloneRunWithText(ctx, templateRun, letters.toString()));
-                    letters.setLength(0);
-                }
-                ASTTextRun digitRun = cloneRunWithText(ctx, templateRun, String.valueOf(c));
-                digitRun.subscript(true);
-                digitRun.superscript(false);
-                digitRun.baselineShift(null);
-                para.addItem(digitRun);
-            } else {
-                letters.append(c);
-            }
-        }
-        if (letters.length() > 0) {
-            para.addItem(cloneRunWithText(ctx, templateRun, letters.toString()));
-        }
+        para.addItem(cloneRunWithText(ctx, templateRun, token));
     }
 
     private static FormulaTokenMatch findNextChemicalFormulaToken(String text, int fromIndex) {

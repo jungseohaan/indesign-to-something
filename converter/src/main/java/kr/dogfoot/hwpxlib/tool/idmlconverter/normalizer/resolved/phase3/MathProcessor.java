@@ -291,7 +291,7 @@ class MathProcessor {
                 hasOperator |= result.hasOperator;
                 hasBox |= result.hasBox;
                 hasArrow |= result.hasArrow;
-                hasPositioned |= tr.subscript() || tr.superscript() || result.hasImplicitSubscript;
+                hasPositioned |= tr.subscript() || tr.superscript();
                 hasChemicalSymbol |= result.hasChemicalSymbol;
                 end = i + 1;
                 continue;
@@ -700,7 +700,7 @@ class MathProcessor {
             hasOperator |= result.hasOperator;
             hasBox |= result.hasBox;
             hasArrow |= result.hasArrow;
-            hasPositioned |= tr.subscript() || tr.superscript() || result.hasImplicitSubscript;
+            hasPositioned |= tr.subscript() || tr.superscript();
             hasChemicalSymbol |= result.hasChemicalSymbol;
             end = i + 1;
         }
@@ -784,11 +784,10 @@ class MathProcessor {
             }
             if (Character.isDigit(c)) {
                 result.hasDigit = true;
-                boolean subscript = runSubscript || (!runSuperscript && isAsciiLetter(result.previousVisible));
+                boolean subscript = runSubscript;
                 boolean superscript = runSuperscript;
                 if (subscript) {
                     out.append("_{").append(c).append("}");
-                    result.hasImplicitSubscript = true;
                 } else if (superscript) {
                     out.append("^{").append(c).append("}");
                 } else {
