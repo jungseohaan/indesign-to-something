@@ -202,6 +202,7 @@ public final class OwnershipPlanner {
         timed("resolveCompositeBakedChildVisuals.2", this::resolveCompositeBakedChildVisuals);
         timed("dropNonCanonicalRenderedGraphicFrameSlots", this::dropNonCanonicalRenderedGraphicFrameSlots);
         timed("normalizeVisualSlotsExcludeTableStyleSources", this::normalizeVisualSlotsExcludeTableStyleSources);
+        timed("dropTableOnlyCarrierTextShellVisualOwners", this::dropTableOnlyCarrierTextShellVisualOwners);
         timed("normalizeDuplicateVisibleSourceSlots", this::normalizeDuplicateVisibleSourceSlots);
         timed("normalizeStoryFlowInlineVisualMaterialSlots", this::normalizeStoryFlowInlineVisualMaterialSlots);
         timed("bindPaperInlineAnchorsToPageMaterialSlots", this::bindPaperInlineAnchorsToPageMaterialSlots);
@@ -12002,6 +12003,51 @@ public final class OwnershipPlanner {
         return plan != null
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && plan.materialization == Materialization.EXTRACTED_PNG_VECTOR;
+    }
+
+    private void dropTableOnlyCarrierTextShellVisualOwners() {
+        Map<Integer, List<ObjectPlan>> tableOnlyPlansByPage = new HashMap<>();
+        for (ObjectPlan plan : plans) {
+            if (!isTableOnlyTextFramePlan(plan)) continue;
+            tableOnlyPlansByPage
+                    .computeIfAbsent(plan.pageIndex, k -> new ArrayList<>())
+                    .add(plan);
+        }
+        if (tableOnlyPlansByPage.isEmpty()) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isExtractedTextShellOwner(plan)) continue;
+            List<ObjectPlan> tableOnlyPlans = tableOnlyPlansByPage.get(plan.pageIndex);
+            if (tableOnlyPlans == null || tableOnlyPlans.isEmpty()) continue;
+            if (!isTableOnlyCarrierVisualDuplicate(plan, tableOnlyPlans)) continue;
+            plans.set(i, plan.withVisualAction(
+                    VisualAction.DROP_VISUAL,
+                    "table_only_text_frame_visual_owned_by_hwpx_table"));
+        }
+    }
+
+    private boolean isTableOnlyCarrierVisualDuplicate(ObjectPlan visualPlan, List<ObjectPlan> tableOnlyPlans) {
+        if (visualPlan == null || tableOnlyPlans == null || tableOnlyPlans.isEmpty()) return false;
+        int[] visualPlanSources = mergeIds(visualPlan.sourceObjectIds, visualPlan.styleSourceObjectIds);
+        int[] visualRoots = mergeIds(visualPlan.sourceRootObjectIds, visualPlan.styleSourceObjectIds);
+        for (ObjectPlan tableOnlyPlan : tableOnlyPlans) {
+            if (tableOnlyPlan == null) continue;
+            int[] tableSources = mergeIds(tableOnlyPlan.sourceObjectIds, tableOnlyPlan.styleSourceObjectIds);
+            if (sameIntSet(visualPlanSources, tableSources)) return true;
+            if (sameIntSet(visualRoots, tableSources)) return true;
+            if (containsAny(visualPlan.ownedTextFrameIds, tableOnlyPlan.ownedTextFrameIds)
+                    && containsAll(tableSources, visualPlanSources)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isTableOnlyTextFramePlan(ObjectPlan plan) {
+        return plan != null
+                && "text_frame:table_only".equals(safe(plan.kind))
+                && plan.materialization == Materialization.HWPX_TEXT
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT;
     }
 
     private int[] duplicateVisibleSourceIds(ObjectPlan plan) {
