@@ -834,7 +834,7 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
     }
 
     var allowInlineAnchorStyleSource = _plannerBundleAllowsInlineAnchorStyleSource(
-            candidate, slot);
+            candidate, slot, clusterIndex);
     if (explicitStyleIds && explicitStyleIds.length > 0) {
         styleSourceObjectIds = allowInlineAnchorStyleSource
                 ? _sortedNumericIds(explicitStyleIds)
@@ -1061,8 +1061,35 @@ function _plannerBundleTextFrameStyleSourceIds(sourceIds, clusterIndex, allowInl
     return _sortedNumericIds(ids);
 }
 
-function _plannerBundleAllowsInlineAnchorStyleSource(candidate, slot) {
+function _plannerBundleSourceHasInlineAnchorAncestorExcludingSelf(sourceId, clusterIndex) {
+    if (sourceId === null || sourceId === undefined || !clusterIndex || !clusterIndex.sourceInfo) {
+        return false;
+    }
+    var src = clusterIndex.sourceInfo(sourceId);
+    if (!src || src.parentId === null || src.parentId === undefined) return false;
+    return _plannerBundleSourceHasInlineAnchorAncestor(src.parentId, clusterIndex);
+}
+
+function _plannerBundleIsSelfInlineTextFrameShellCandidate(candidate, slot, clusterIndex) {
     if (!candidate || slot !== "SHELL_SLOT") return false;
+    if (candidate.passId !== "pass.editable_textframe_visual_shells") return false;
+    var ids = candidate.styleSourceObjectIds && candidate.styleSourceObjectIds.length > 0
+            ? candidate.styleSourceObjectIds
+            : candidate.sourceObjectIds;
+    if (!ids || ids.length !== 1) return false;
+    var sourceId = ids[0];
+    var src = clusterIndex && clusterIndex.sourceInfo ? clusterIndex.sourceInfo(sourceId) : null;
+    if (!src || src.kind !== "TextFrame") return false;
+    if (_plannerBundleHasTextFrameShellStyle(src) !== true) return false;
+    return _plannerBundleSourceHasInlineAnchorAncestorExcludingSelf(sourceId, clusterIndex) !== true
+            && _plannerBundleSourceHasInlineAnchorAncestor(sourceId, clusterIndex) === true;
+}
+
+function _plannerBundleAllowsInlineAnchorStyleSource(candidate, slot, clusterIndex) {
+    if (!candidate || slot !== "SHELL_SLOT") return false;
+    if (_plannerBundleIsSelfInlineTextFrameShellCandidate(candidate, slot, clusterIndex)) {
+        return true;
+    }
     if (candidate.passId !== "pass.inline_objects") return false;
     return _plannerBundleInlineObjectIsTextShell(candidate);
 }

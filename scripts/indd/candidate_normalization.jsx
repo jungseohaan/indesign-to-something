@@ -760,7 +760,10 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         for (var i = 0; i < candidate.sourceObjectIds.length; i++) {
             var sourceId = candidate.sourceObjectIds[i];
             if (hiddenSet[String(sourceId)] && !isExportableTextFrameShellStyleSource(sourceId)) continue;
-            if (sourceHasInlineAnchorAncestor(sourceId)) continue;
+            if (sourceHasInlineAnchorAncestor(sourceId)
+                    && !isSelfInlineTextFrameShellSlotSource(candidate, sourceId)) {
+                continue;
+            }
             if (isExecutableResidualShellExportSource(candidate, sourceId)) {
                 _pushUniqueId(ids, seen, sourceId);
             }
@@ -815,12 +818,13 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             var sourceId = candidate.sourceObjectIds[i];
             var src = sourceInfoById[String(sourceId)];
             if (!src || String(src.kind || "") !== "TextFrame") continue;
+            var allowSelfInlineShell = isSelfInlineTextFrameShellSlotSource(candidate, sourceId);
             if (candidate.passId !== "pass.editable_textframe_visual_shells"
                     && independentTextFrameStyleShellIds[String(sourceId)]) {
                 continue;
             }
-            if (sourceHasInlineAnchorAncestor(sourceId)) continue;
-            if (inlineCandidateSourceIdSet[String(sourceId)]) continue;
+            if (sourceHasInlineAnchorAncestor(sourceId) && !allowSelfInlineShell) continue;
+            if (inlineCandidateSourceIdSet[String(sourceId)] && !allowSelfInlineShell) continue;
             if (isInsideHiddenVisualSubtree(sourceId)) continue;
             if (textFrameStyleSourceBelongsToDirectChildShellSlot(candidate, sourceId)) continue;
             if (!hiddenSet[String(sourceId)] && !sourceHasTextFrameShellStyle(sourceId)) continue;
@@ -997,6 +1001,20 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
 
     function sourceHasInlineAnchorAncestor(sourceId) {
         return sourceContext.sourceHasInlineAnchorAncestor(sourceId);
+    }
+
+    function sourceHasInlineAnchorAncestorExcludingSelf(sourceId) {
+        var src = sourceInfoById[String(sourceId)];
+        if (!src) return false;
+        var parentId = src.parentId;
+        if (parentId === null || parentId === undefined) return false;
+        return sourceHasInlineAnchorAncestor(parentId);
+    }
+
+    function isSelfInlineTextFrameShellSlotSource(candidate, sourceId) {
+        if (!candidate || candidate.passId !== "pass.editable_textframe_visual_shells") return false;
+        if (!candidate.sourceObjectIds || candidate.sourceObjectIds.length !== 1) return false;
+        return String(candidate.sourceObjectIds[0]) === String(sourceId);
     }
 
     function sourceBoundsArea(sourceId) {
@@ -1397,7 +1415,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (!src || String(src.kind || "") !== "TextFrame") return null;
         if (src.textFrameClass !== "editable") return null;
         if (!sourceHasTextFrameShellStyle(textFrameId)) return null;
-        if (sourceHasInlineAnchorAncestor(textFrameId)) return null;
+        if (sourceHasInlineAnchorAncestorExcludingSelf(textFrameId)) return null;
         if (textFrameStyleShellCoveredByInlineDirectChildShell(textFrameId, parentCandidate.pageIndex)) return null;
         if (options.skipCoveredByExistingCandidate !== false
                 && textFrameStyleShellCoveredByExistingCandidate(textFrameId, parentCandidate.pageIndex)) {

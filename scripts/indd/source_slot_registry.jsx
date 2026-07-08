@@ -375,6 +375,12 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         if (candidate && candidate.passId === "pass.editable_textframe_visual_shells"
                 && candidate.sourceObjectIds && candidate.sourceObjectIds.length === 1) {
             var textFrameId = candidate.sourceObjectIds[0];
+            var textFrameSource = sourceInfoById[String(textFrameId)];
+            var selfInlineTextFrameShell =
+                    !!textFrameSource
+                    && String(textFrameSource.kind || "") === "TextFrame"
+                    && textFrameSource.isInline === true
+                    && containsId(candidate.styleSourceObjectIds, textFrameId);
             var owners = shellOwnersByPage[String(candidate.pageIndex)] || [];
             var subsumed = false;
             var subsumingShell = null;
@@ -385,6 +391,9 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
                         || containsId(shell.visualSourceObjectIds, textFrameId)
                         || containsId(shell.styleSourceObjectIds, textFrameId);
                 if (shellVisiblyOwnsTextFrameStyle) {
+                    if (selfInlineTextFrameShell) {
+                        continue;
+                    }
                     subsumed = true;
                     subsumingShell = shell;
                     break;
