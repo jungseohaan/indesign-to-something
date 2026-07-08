@@ -707,6 +707,12 @@ public class BTFontEquationConverter {
      * 폰트별 특수 글리프 변환.
      */
     private static String convertGlyphs(String text) {
+        // InDesign 화살표 글리프(CharacterStyle 기반 @C/?C)는 HWP 수식 토큰으로 정규화.
+        text = text.replace("@C", " RIGHT ")
+                .replace("@c", " RIGHT ")
+                .replace("?C", " RIGHT ")
+                .replace("?c", " RIGHT ")
+                .replace("\u2192", " RIGHT ");
         // \ → TIMES (곱셈)
         text = text.replace("\\", " TIMES ");
         // … (U+2026) → CDOTS (가운데점)

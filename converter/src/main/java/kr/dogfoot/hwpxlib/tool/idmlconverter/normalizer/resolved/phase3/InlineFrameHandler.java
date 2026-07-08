@@ -3388,7 +3388,8 @@ public class InlineFrameHandler {
             ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
             boolean plannedAnchorMaterial = plan != null
                     && plan.placement == Placement.INLINE
-                    && plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                    && (plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                    || plan.visualAction == VisualAction.PLACE_TEXT_SHELL)
                     && (isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)
                     || isClosedRenderedMaterialForInlineAnchor(rg, anchoredObjectId));
             if (rg.id() != anchoredObjectId && !plannedAnchorMaterial) continue;
@@ -3405,9 +3406,6 @@ public class InlineFrameHandler {
                 boolean placeInlineTextShell = plannedVisualAction == VisualAction.PLACE_TEXT_SHELL
                         && plannedPlacement == Placement.INLINE;
                 if (plan == null || (!placeInlinePng && !placeInlineTextShell)) {
-                    return null;
-                }
-                if (placeInlineTextShell) {
                     return null;
                 }
                 if (placeInlinePng && !hasExplicitInlineSourceEvidence(ctx, plan, rg, anchoredObjectId)) {

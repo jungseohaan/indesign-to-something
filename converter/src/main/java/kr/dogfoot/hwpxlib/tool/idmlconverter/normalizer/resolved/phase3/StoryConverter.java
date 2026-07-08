@@ -3103,9 +3103,10 @@ public final class StoryConverter {
             if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
             if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) return;
 
-            String text = ((ASTTextRun) item).text();
+            ASTTextRun textRun = (ASTTextRun) item;
+            String text = textRun.text();
             if (text == null || text.trim().isEmpty()) continue;
-            if (!isPageNumberText(text)) return;
+            if (!isPageNumberTextRun(textRun)) return;
             if (TextFlowTabPolicy.hasTabImmediatelyBefore(items, i)) return;
             if (!enableRightmostDotLeader(para, rp)) return;
 
@@ -3148,6 +3149,23 @@ public final class StoryConverter {
         if (text == null) return false;
         String cleaned = text.replace("\r", "").replace("\n", "").trim();
         return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean isPageNumberTextRun(ASTTextRun run) {
+        if (run == null || !isPageNumberText(run.text())) return false;
+        if (run.subscript() || run.superscript()) return false;
+        String style = run.characterStyleRef();
+        if (style != null) {
+            String lower = style.toLowerCase(java.util.Locale.ROOT)
+                    .replace("%3a", ":")
+                    .replace("%25", "%");
+            if (lower.contains("subscript") || lower.contains("superscript")
+                    || lower.contains("하부자") || lower.contains("상부자")
+                    || lower.contains("아래첨자") || lower.contains("위첨자")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void appendGeneratedParagraphPrefix(

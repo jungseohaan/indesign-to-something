@@ -326,6 +326,20 @@ public class StoryLoader {
                 String _runTxt = run.content();
                 boolean _orcOnly = _runTxt != null && !_runTxt.isEmpty()
                         && _runTxt.replace("￼", "").isEmpty();
+                boolean formulaClusterRun =
+                        ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+
+                if (_orcOnly && formulaClusterRun) {
+                    MathProcessor.flushMathGroups(ctx, null, npMathGroup, ehMathGroup, para);
+                    mathGroup.add(ASTMathGrouper.formulaAnswerBoxRun(run));
+                    continue;
+                }
+
+                if (isStandaloneBtArrowGlyphRun(run) && !formulaClusterRun) {
+                    MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
+                    para.addItem(createStandaloneArrowRun(ctx, run, defaultRR, sc));
+                    continue;
+                }
 
                 // EH 수식 그룹 진입
                 boolean enterEH = !_orcOnly && (run.isEHFont()
@@ -351,7 +365,8 @@ public class StoryLoader {
                     enterBT = (run.isBTFont()
                                 && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
-                            || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()));
+                            || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()))
+                            || formulaClusterRun;
                 }
 
                 if (enterEH) {
@@ -724,12 +739,14 @@ public class StoryLoader {
             StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
             sc.hasTabStops = para.hasTabStops();
             buildParagraphContent(ctx, ip, null, null, cellStoryId, paraIndex, sc, para);
+            MathProcessor.convertMathRunsInParagraph(ctx, para);
             result.add(para);
             ConversionTiming.addCounter("phase3.storyLoader.cell.paragraphs", 1);
             paraIndex++;
         }
         applyResolvedCellInlineGraphicRescueAnchors(ctx, resolvedCell, result);
         for (ASTParagraph para : result) {
+            MathProcessor.convertMathRunsInParagraph(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
         }
         return result;
@@ -771,6 +788,7 @@ public class StoryLoader {
                 applyResolvedParagraphPropertiesOnly(para, resolvedParagraph);
             }
             appendResolvedRunsInOrder(ctx, resolvedParagraph, para, includeResolvedText);
+            MathProcessor.convertMathRunsInParagraph(ctx, para);
             RunPostProcessor.splitOverlineRuns(para);
             RunPostProcessor.convertItalicRunsToEquations(para);
             RunBuilder.resetBulletParagraphColors(ctx, para);
@@ -914,6 +932,35 @@ public class StoryLoader {
         }
     }
 
+    private static boolean isStandaloneBtArrowGlyphRun(IDMLCharacterRun run) {
+        if (run == null) return false;
+        String style = run.appliedCharacterStyle();
+        String text = run.content();
+        if (style == null || text == null) return false;
+        String normalizedStyle = style.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%ed%99%94%ec%82%b4%ed%91%9c", "화살표");
+        String cleaned = text.trim();
+        return normalizedStyle.contains("화살표")
+                && ("@C".equals(cleaned) || "@c".equals(cleaned)
+                    || "?C".equals(cleaned) || "?c".equals(cleaned));
+    }
+
+    private static ASTTextRun createStandaloneArrowRun(
+            ResolvedBuildContext ctx,
+            IDMLCharacterRun source,
+            ResolvedRun resolvedRun,
+            StoryConverter.StyleContext sc) {
+        ASTTextRun arrow = RunBuilder.createRunFromIDML(ctx, source, "\u2192", resolvedRun, sc);
+        arrow.fontFamily(null);
+        arrow.fontStyle(null);
+        arrow.characterStyleRef(null);
+        arrow.grepMathFont(false);
+        arrow.subscript(false);
+        arrow.superscript(false);
+        return arrow;
+    }
+
     private static boolean isResolvedCellInlineGraphicRescueAnchor(
             ResolvedBuildContext ctx,
             int anchoredId) {
@@ -921,9 +968,11 @@ public class StoryLoader {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || plan.domId != anchoredId) continue;
             if (plan.placement != Placement.INLINE) return false;
-            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) return false;
-            if (plan.reason == null || !"inline_graphic_only".equals(plan.reason)) return false;
-            return plan.sourceObjectIds != null && plan.sourceObjectIds.length == 1;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+                return false;
+            }
+            return plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0;
         }
         return false;
     }
@@ -991,7 +1040,8 @@ public class StoryLoader {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || plan.domId != anchoredId) continue;
             if (plan.placement != Placement.INLINE) return null;
-            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) return null;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return null;
             return plan;
         }
         return null;
@@ -1237,9 +1287,10 @@ public class StoryLoader {
             ASTInlineItem item = items.get(i);
             if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
             if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                String text = ((ASTTextRun) item).text();
+                ASTTextRun textRun = (ASTTextRun) item;
+                String text = textRun.text();
                 if (text == null || text.trim().isEmpty()) continue;
-                if (isPageNumberText(text)) {
+                if (isPageNumberTextRun(textRun)) {
                     if (TextFlowTabPolicy.hasTabImmediatelyBefore(items, i)) return;
                     if (!enableRightmostDotLeader(ctx, paragraph, para)) return;
 
@@ -1271,6 +1322,23 @@ public class StoryLoader {
         if (text == null) return false;
         String cleaned = text.replace("\r", "").replace("\n", "").trim();
         return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean isPageNumberTextRun(ASTTextRun run) {
+        if (run == null || !isPageNumberText(run.text())) return false;
+        if (run.subscript() || run.superscript()) return false;
+        String style = run.characterStyleRef();
+        if (style != null) {
+            String lower = style.toLowerCase(java.util.Locale.ROOT)
+                    .replace("%3a", ":")
+                    .replace("%25", "%");
+            if (lower.contains("subscript") || lower.contains("superscript")
+                    || lower.contains("하부자") || lower.contains("상부자")
+                    || lower.contains("아래첨자") || lower.contains("위첨자")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isPageNumberInlineObject(ASTInlineObject obj) {

@@ -8,6 +8,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +51,7 @@ class MathProcessor {
             }
         }
         if (hasEquation) {
+            collapseMixedFormulaEquationClusters(ctx, para);
             if (hasEHRun) {
                 // 수식과 EH TextRun이 공존: EH TextRun은 수식 변환 잔여물 → 제거
                 items.removeIf(it -> it instanceof ASTTextRun
@@ -77,6 +83,16 @@ class MathProcessor {
                 if (EHFontGlyphMap.isEHFontFamily(ff)) currentType = "EH";
                 else if (BTFontGlyphMap.isBTFontFamily(ff)) currentType = "BT";
                 else if (NPFontGlyphMap.isNPFont(ff)) currentType = "NP";
+            }
+
+            FormulaCluster formulaCluster = collectFormulaEquationCluster(items, i);
+            if (formulaCluster != null) {
+                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                mathGroup.clear();
+                mathType = null;
+                newItems.add(formulaCluster.equation);
+                i = formulaCluster.endExclusive - 1;
+                continue;
             }
 
             if (currentType != null && isSimplePositionedTextRun(tr)) {
@@ -150,6 +166,733 @@ class MathProcessor {
             items.clear();
             items.addAll(newItems);
         }
+        collapseMixedFormulaEquationClusters(ctx, para);
+    }
+
+    private static void collapseMixedFormulaEquationClusters(ResolvedBuildContext ctx, ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+
+        List<ASTInlineItem> out = new ArrayList<>();
+        boolean changed = false;
+        for (int i = 0; i < items.size(); i++) {
+            int duplicatePrefixEnd = duplicatePlaceholderPrefixBeforeBoxEquation(ctx, items, i);
+            if (duplicatePrefixEnd > i) {
+                out.add(items.get(duplicatePrefixEnd));
+                i = duplicatePrefixEnd;
+                changed = true;
+                continue;
+            }
+            FormulaCluster cluster = collectMixedFormulaEquationCluster(ctx, items, i);
+            if (cluster != null) {
+                removeTrailingFormulaPlaceholdersAlreadyInEquation(ctx, out, cluster.equation);
+                out.add(cluster.equation);
+                i = cluster.endExclusive - 1;
+                changed = true;
+            } else {
+                out.add(items.get(i));
+            }
+        }
+        if (changed) {
+            items.clear();
+            items.addAll(out);
+        }
+    }
+
+    private static int duplicatePlaceholderPrefixBeforeBoxEquation(
+            ResolvedBuildContext ctx,
+            List<ASTInlineItem> items,
+            int start) {
+        if (ctx == null || items == null || start < 0 || start >= items.size()) return -1;
+        int i = start;
+        int placeholders = 0;
+        while (i < items.size()
+                && items.get(i) instanceof ASTInlineObject
+                && isFormulaAnswerPlaceholder(ctx, (ASTInlineObject) items.get(i))) {
+            placeholders++;
+            i++;
+        }
+        if (placeholders == 0 || i >= items.size() || !(items.get(i) instanceof ASTEquation)) {
+            return -1;
+        }
+        ASTEquation equation = (ASTEquation) items.get(i);
+        return countFormulaBoxes(equation.hwpScript()) >= placeholders ? i : -1;
+    }
+
+    private static void removeTrailingFormulaPlaceholdersAlreadyInEquation(
+            ResolvedBuildContext ctx,
+            List<ASTInlineItem> out,
+            ASTEquation equation) {
+        if (ctx == null || out == null || out.isEmpty() || equation == null) return;
+        int remainingBoxes = countFormulaBoxes(equation.hwpScript());
+        while (remainingBoxes > 0 && !out.isEmpty()) {
+            ASTInlineItem last = out.get(out.size() - 1);
+            if (!(last instanceof ASTInlineObject)
+                    || !isFormulaAnswerPlaceholder(ctx, (ASTInlineObject) last)) {
+                return;
+            }
+            out.remove(out.size() - 1);
+            remainingBoxes--;
+        }
+    }
+
+    private static int countFormulaBoxes(String script) {
+        if (script == null || script.isEmpty()) return 0;
+        int count = 0;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (c == '\u25A1' || c == '\uFFFC') count++;
+        }
+        return count;
+    }
+
+    private static FormulaCluster collectMixedFormulaEquationCluster(
+            ResolvedBuildContext ctx,
+            List<ASTInlineItem> items,
+            int start) {
+        if (items == null || start < 0 || start >= items.size()) return null;
+
+        StringBuilder script = new StringBuilder();
+        boolean hasLetter = false;
+        boolean hasDigit = false;
+        boolean hasOperator = false;
+        boolean hasBox = false;
+        boolean hasArrow = false;
+        boolean hasEquation = false;
+        boolean hasPositioned = false;
+        boolean hasChemicalSymbol = false;
+        String color = null;
+        char previousVisible = 0;
+        int end = start;
+
+        for (int i = start; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (item instanceof ASTTextRun) {
+                ASTTextRun tr = (ASTTextRun) item;
+                applyPositionFromCharacterStyle(tr);
+                String text = tr.text();
+                if (text == null || text.isEmpty() || !isFormulaClusterText(text)) break;
+                if (color == null) color = tr.textColor();
+                ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
+                if (!result.accepted) break;
+                previousVisible = result.previousVisible;
+                hasLetter |= result.hasLetter;
+                hasDigit |= result.hasDigit;
+                hasOperator |= result.hasOperator;
+                hasBox |= result.hasBox;
+                hasArrow |= result.hasArrow;
+                hasPositioned |= tr.subscript() || tr.superscript() || result.hasImplicitSubscript;
+                hasChemicalSymbol |= result.hasChemicalSymbol;
+                end = i + 1;
+                continue;
+            }
+
+            if (item instanceof ASTEquation) {
+                ASTEquation eq = (ASTEquation) item;
+                String eqScript = normalizeExistingFormulaEquationScript(eq.hwpScript());
+                if (eqScript.isEmpty() || !isFormulaEquationScript(eqScript)) break;
+                ScriptAppendResult result =
+                        appendExistingFormulaEquationScript(script, eqScript, previousVisible);
+                if (!result.accepted) break;
+                hasLetter |= result.hasLetter;
+                hasDigit |= result.hasDigit;
+                hasOperator |= result.hasOperator;
+                hasBox |= result.hasBox;
+                hasArrow |= result.hasArrow;
+                hasPositioned |= result.hasImplicitSubscript || eqScript.indexOf('_') >= 0 || eqScript.indexOf('^') >= 0;
+                hasChemicalSymbol |= result.hasChemicalSymbol;
+                hasEquation = true;
+                previousVisible = result.previousVisible;
+                if (color == null) color = eq.textColor();
+                end = i + 1;
+                continue;
+            }
+
+            if (item instanceof ASTInlineObject && isFormulaAnswerPlaceholder(ctx, (ASTInlineObject) item)) {
+                script.append('\u25A1');
+                hasBox = true;
+                previousVisible = '\u25A1';
+                end = i + 1;
+                continue;
+            }
+
+            break;
+        }
+
+        if (end - start < 2) return null;
+        String hwpScript = normalizeFormulaScript(script.toString());
+        if (hwpScript.isEmpty() || hwpScript.length() > 160) return null;
+        if (!hasLetter) return null;
+        if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
+        if (!hasEquation && !hasBox) return null;
+        if (!hasDigit && !hasOperator && !hasBox && !hasArrow && !hasPositioned) return null;
+
+        ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
+        if (color != null) eq.textColor(color);
+        return new FormulaCluster(eq, end);
+    }
+
+    private static String normalizeExistingFormulaEquationScript(String script) {
+        if (script == null) return "";
+        return script
+                .replace('\uFFFC', '\u25A1')
+                .replace("@C", " -> ")
+                .replace("@c", " -> ")
+                .replace("?C", " -> ")
+                .replace("?c", " -> ")
+                .replace("RIGHT", " -> ")
+                .trim();
+    }
+
+    private static boolean needsFormulaSpaceBefore(StringBuilder script, String next) {
+        if (script == null || script.length() == 0 || next == null || next.isEmpty()) return false;
+        char prev = script.charAt(script.length() - 1);
+        char first = next.charAt(0);
+        return Character.isLetterOrDigit(prev) && Character.isLetterOrDigit(first);
+    }
+
+    private static ScriptAppendResult appendExistingFormulaEquationScript(
+            StringBuilder out,
+            String script,
+            char previousVisible) {
+        if (script == null || script.isEmpty()) {
+            ScriptAppendResult empty = new ScriptAppendResult();
+            empty.previousVisible = previousVisible;
+            return empty;
+        }
+        if (script.indexOf('_') < 0 && script.indexOf('^') < 0 && !containsFormulaArrow(script)) {
+            ASTTextRun run = new ASTTextRun();
+            run.text(script);
+            return appendFormulaScript(out, script, run, previousVisible);
+        }
+
+        ScriptAppendResult result = new ScriptAppendResult();
+        result.previousVisible = previousVisible;
+        if (out.length() > 0 && needsFormulaSpaceBefore(out, script)) out.append(' ');
+        out.append(script);
+        FormulaScriptStats stats = statsForFormulaScript(script);
+        result.hasLetter = stats.hasLetter;
+        result.hasDigit = stats.hasDigit;
+        result.hasOperator = stats.hasOperator;
+        result.hasBox = stats.hasBox;
+        result.hasArrow = stats.hasArrow;
+        result.hasImplicitSubscript = stats.hasPositioned;
+        result.hasChemicalSymbol = stats.hasChemicalSymbol;
+        result.previousVisible = stats.previousVisible != 0 ? stats.previousVisible : previousVisible;
+        return result;
+    }
+
+    private static boolean isFormulaEquationScript(String script) {
+        if (script == null || script.isEmpty()) return false;
+        boolean hasFormulaToken = false;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (isFormulaSpace(c) || c == '_' || c == '^' || c == '{' || c == '}') continue;
+            if (isAsciiLetter(c) || Character.isDigit(c)) {
+                hasFormulaToken = true;
+                continue;
+            }
+            if (script.startsWith("->", i)) {
+                hasFormulaToken = true;
+                i += "->".length() - 1;
+                continue;
+            }
+            if (c == '\u25A1' || c == '+' || c == '-' || c == '=' || c == '(' || c == ')') {
+                hasFormulaToken = true;
+                continue;
+            }
+            return false;
+        }
+        return hasFormulaToken;
+    }
+
+    private static final class FormulaScriptStats {
+        boolean hasLetter;
+        boolean hasDigit;
+        boolean hasOperator;
+        boolean hasBox;
+        boolean hasArrow;
+        boolean hasPositioned;
+        boolean hasChemicalSymbol;
+        char previousVisible;
+    }
+
+    private static FormulaScriptStats statsForFormulaScript(String script) {
+        FormulaScriptStats stats = new FormulaScriptStats();
+        if (script == null) return stats;
+        char previous = 0;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (isFormulaSpace(c) || c == '{' || c == '}') continue;
+            if (c == '_' || c == '^') {
+                stats.hasPositioned = true;
+                continue;
+            }
+            if (script.startsWith("->", i)) {
+                stats.hasArrow = true;
+                stats.hasOperator = true;
+                previous = '\u2192';
+                i += "->".length() - 1;
+                continue;
+            }
+            if (c == '\u25A1') {
+                stats.hasBox = true;
+                previous = c;
+                continue;
+            }
+            if (c == '+' || c == '-' || c == '=') {
+                stats.hasOperator = true;
+                previous = c;
+                continue;
+            }
+            if (isAsciiLetter(c)) {
+                stats.hasLetter = true;
+                stats.hasChemicalSymbol |= isLikelyChemicalElementAt(script, i);
+                previous = c;
+                continue;
+            }
+            if (Character.isDigit(c)) {
+                stats.hasDigit = true;
+                previous = c;
+            }
+        }
+        stats.previousVisible = previous;
+        return stats;
+    }
+
+    private static boolean isFormulaAnswerPlaceholder(ResolvedBuildContext ctx, ASTInlineObject obj) {
+        if (ctx == null || obj == null || obj.sourceId() == null) return false;
+        Integer sourceId = sourceIdToDomId(obj.sourceId());
+        if (sourceId == null) return false;
+        ObjectPlan plan = findInlinePlaceholderPlan(ctx, sourceId);
+        if (plan == null) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+            return false;
+        }
+        if (isEmptyShellTextFrame(ctx, sourceId)) return true;
+        if (plan.visualSourceObjectIds != null) {
+            for (int id : plan.visualSourceObjectIds) {
+                if (isEmptyShellTextFrame(ctx, id) || isInlineAnswerBoxShape(ctx, id)) return true;
+            }
+        }
+        if (plan.sourceObjectIds != null) {
+            for (int id : plan.sourceObjectIds) {
+                if (isEmptyShellTextFrame(ctx, id) || isInlineAnswerBoxShape(ctx, id)) return true;
+            }
+        }
+        return isInlineAnswerBoxShape(ctx, sourceId);
+    }
+
+    private static ObjectPlan findInlinePlaceholderPlan(ResolvedBuildContext ctx, int sourceId) {
+        if (ctx == null || ctx.ownershipPlans == null) return null;
+        ObjectPlan fallback = null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (planContainsSource(plan, sourceId)) {
+                if (plan.placement == Placement.INLINE
+                        && (plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                        || plan.visualAction == VisualAction.PLACE_TEXT_SHELL)) {
+                    return plan;
+                }
+                if (fallback == null) fallback = plan;
+            }
+        }
+        return fallback;
+    }
+
+    private static boolean planContainsSource(ObjectPlan plan, int sourceId) {
+        return plan.domId == sourceId
+                || contains(plan.sourceObjectIds, sourceId)
+                || contains(plan.visualSourceObjectIds, sourceId)
+                || contains(plan.exportSourceObjectIds, sourceId)
+                || contains(plan.ownedTextFrameIds, sourceId);
+    }
+
+    private static boolean isEmptyShellTextFrame(ResolvedBuildContext ctx, int sourceId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(sourceId));
+        if (tf == null) return false;
+        String text = tf.frameVisibleText();
+        boolean emptyText = text == null || text.replace("\uFFFC", "").trim().isEmpty();
+        if (!emptyText) return false;
+        return visibleStroke(tf.strokeColor(), tf.strokeWeight()) || visibleFill(tf.fillColor());
+    }
+
+    private static boolean isInlineAnswerBoxShape(ResolvedBuildContext ctx, int sourceId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+        if (item == null) return false;
+        String type = item.type();
+        if (!"Rectangle".equals(type) && !"Polygon".equals(type) && !"Oval".equals(type)) return false;
+        String storyAnchorPlacement = upper(item.storyAnchorPlacement());
+        String anchoredPosition = upper(item.anchoredPosition());
+        boolean inline = "INLINE".equals(storyAnchorPlacement)
+                || "INLINE_POSITION".equals(anchoredPosition)
+                || "INLINEPOSITION".equals(anchoredPosition);
+        if (!inline) return false;
+        return visibleStroke(item.strokeColorName(), item.strokeWeight()) || visibleFill(item.fillColorName());
+    }
+
+    private static boolean visibleStroke(String color, double weight) {
+        return color != null && !color.isEmpty() && !"None".equals(color) && weight > 0.0;
+    }
+
+    private static boolean visibleFill(String color) {
+        return color != null && !color.isEmpty() && !"None".equals(color);
+    }
+
+    private static String upper(String value) {
+        return value == null ? "" : value.toUpperCase(Locale.ROOT);
+    }
+
+    private static Integer sourceIdToDomId(String sourceId) {
+        if (sourceId == null || sourceId.isEmpty()) return null;
+        String s = sourceId;
+        if (s.startsWith("child_")) s = s.substring("child_".length());
+        int suffix = s.indexOf('_');
+        if (suffix > 0) s = s.substring(0, suffix);
+        if (s.startsWith("u") || s.startsWith("U")) {
+            try {
+                return Integer.parseInt(s.substring(1), 16);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean contains(int[] ids, int value) {
+        if (ids == null) return false;
+        for (int id : ids) if (id == value) return true;
+        return false;
+    }
+
+    private static class FormulaCluster {
+        final ASTEquation equation;
+        final int endExclusive;
+
+        FormulaCluster(ASTEquation equation, int endExclusive) {
+            this.equation = equation;
+            this.endExclusive = endExclusive;
+        }
+    }
+
+    private static FormulaCluster collectFormulaEquationCluster(List<ASTInlineItem> items, int start) {
+        if (items == null || start < 0 || start >= items.size()) return null;
+        StringBuilder script = new StringBuilder();
+        boolean hasLetter = false;
+        boolean hasDigit = false;
+        boolean hasOperator = false;
+        boolean hasBox = false;
+        boolean hasArrow = false;
+        boolean hasPositioned = false;
+        boolean hasChemicalSymbol = false;
+        String color = null;
+        char previousVisible = 0;
+        int end = start;
+
+        for (int i = start; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) break;
+            ASTTextRun tr = (ASTTextRun) item;
+            applyPositionFromCharacterStyle(tr);
+            String text = tr.text();
+            if (text == null || text.isEmpty()) break;
+            if (!isFormulaClusterText(text)) break;
+
+            if (color == null) color = tr.textColor();
+            ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
+            if (!result.accepted) break;
+            previousVisible = result.previousVisible;
+            hasLetter |= result.hasLetter;
+            hasDigit |= result.hasDigit;
+            hasOperator |= result.hasOperator;
+            hasBox |= result.hasBox;
+            hasArrow |= result.hasArrow;
+            hasPositioned |= tr.subscript() || tr.superscript() || result.hasImplicitSubscript;
+            hasChemicalSymbol |= result.hasChemicalSymbol;
+            end = i + 1;
+        }
+
+        if (end == start) return null;
+        String hwpScript = normalizeFormulaScript(script.toString());
+        if (hwpScript.isEmpty() || hwpScript.length() > 128) return null;
+        if (!hasLetter) return null;
+        if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
+        if (!hasDigit && !hasOperator && !hasBox && !hasArrow && !hasPositioned) return null;
+
+        ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
+        if (color != null) eq.textColor(color);
+        return new FormulaCluster(eq, end);
+    }
+
+    private static class ScriptAppendResult {
+        boolean accepted = true;
+        boolean hasLetter;
+        boolean hasDigit;
+        boolean hasOperator;
+        boolean hasBox;
+        boolean hasArrow;
+        boolean hasImplicitSubscript;
+        boolean hasChemicalSymbol;
+        char previousVisible;
+    }
+
+    private static ScriptAppendResult appendFormulaScript(
+            StringBuilder out,
+            String text,
+            ASTTextRun run,
+            char previousVisible) {
+        ScriptAppendResult result = new ScriptAppendResult();
+        result.previousVisible = previousVisible;
+        boolean runSubscript = run.subscript();
+        boolean runSuperscript = run.superscript();
+
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isFormulaSpace(c)) {
+                if (out.length() > 0 && out.charAt(out.length() - 1) != ' ') out.append(' ');
+                continue;
+            }
+            if (c == '\uFFFC' || c == '\u25A1') {
+                out.append('\u25A1');
+                result.hasBox = true;
+                result.previousVisible = '\u25A1';
+                continue;
+            }
+            if (c == '\u2192') {
+                out.append(" -> ");
+                result.hasArrow = true;
+                result.hasOperator = true;
+                result.previousVisible = c;
+                continue;
+            }
+            if (c == '+' || c == '-' || c == '=') {
+                out.append(c);
+                result.hasOperator = true;
+                result.previousVisible = c;
+                continue;
+            }
+            if (isAsciiLetter(c)) {
+                out.append(c);
+                result.hasLetter = true;
+                result.hasChemicalSymbol |= isLikelyChemicalElementAt(text, i);
+                result.previousVisible = c;
+                continue;
+            }
+            if (Character.isDigit(c)) {
+                result.hasDigit = true;
+                boolean subscript = runSubscript || (!runSuperscript && isAsciiLetter(result.previousVisible));
+                boolean superscript = runSuperscript;
+                if (subscript) {
+                    out.append("_{").append(c).append("}");
+                    result.hasImplicitSubscript = true;
+                } else if (superscript) {
+                    out.append("^{").append(c).append("}");
+                } else {
+                    out.append(c);
+                }
+                result.previousVisible = c;
+                continue;
+            }
+            result.accepted = false;
+            return result;
+        }
+        return result;
+    }
+
+    private static boolean isFormulaClusterText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isFormulaSpace(c)) continue;
+            if (isAsciiLetter(c) || Character.isDigit(c)) continue;
+            if (c == '\uFFFC' || c == '\u25A1' || c == '\u2192') continue;
+            if (c == '+' || c == '-' || c == '=') continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static String normalizeFormulaScript(String script) {
+        if (script == null) return "";
+        String normalized = script.replaceAll("\\s+", " ").trim();
+        normalized = normalized.replaceAll("\\s*\\+\\s*", "+");
+        normalized = normalized.replaceAll("\\s*=\\s*", "=");
+        normalized = normalized.replaceAll("\\s*RIGHT\\s*", " -> ");
+        normalized = normalized.replaceAll("\\s*->\\s*", " -> ");
+        return normalized.trim();
+    }
+
+    private static boolean containsFormulaArrow(String script) {
+        return script != null && (script.contains("->") || script.contains("RIGHT"));
+    }
+
+    private static boolean isFormulaSpace(char c) {
+        return Character.isWhitespace(c)
+                || c == '\u2005' || c == '\u2007' || c == '\u2009' || c == '\u200A';
+    }
+
+    private static boolean isLikelyChemicalElementAt(String text, int index) {
+        if (text == null || index < 0 || index >= text.length()) return false;
+        char first = text.charAt(index);
+        if (first < 'A' || first > 'Z') return false;
+        String one = String.valueOf(first);
+        String two = one;
+        if (index + 1 < text.length()) {
+            char second = text.charAt(index + 1);
+            if (second >= 'a' && second <= 'z') {
+                two = "" + first + second;
+            }
+        }
+        return isChemicalElement(one) || isChemicalElement(two);
+    }
+
+    private static boolean isChemicalElement(String symbol) {
+        if (symbol == null) return false;
+        switch (symbol) {
+            case "H": case "He": case "Li": case "Be": case "B": case "C":
+            case "N": case "O": case "F": case "Ne": case "Na": case "Mg":
+            case "Al": case "Si": case "P": case "S": case "Cl": case "Ar":
+            case "K": case "Ca": case "Fe": case "Cu": case "Zn": case "Ag":
+            case "I": case "Ba": case "Pt": case "Au": case "Hg": case "Pb":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static boolean isChemicalFormulaTextRun(
+            List<ASTInlineItem> items,
+            int index,
+            ASTTextRun run,
+            String currentMathType) {
+        if (run == null) return false;
+        String text = run.text();
+        if (text == null || text.trim().isEmpty()) return false;
+        if (!isFormulaAlphabetDigitText(text)) return false;
+        if (currentMathType != null || run.grepMathFont()) return true;
+        char prev = previousVisibleChar(items, index);
+        return containsChemicalSubscriptDigit(text, prev);
+    }
+
+    private static boolean isFormulaAlphabetDigitText(String text) {
+        if (text == null) return false;
+        boolean hasAsciiLetter = false;
+        boolean hasDigit = false;
+        int visible = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c) || c == '\u2005' || c == '\u2007'
+                    || c == '\u2009' || c == '\u200A') {
+                continue;
+            }
+            visible++;
+            if (isAsciiLetter(c)) {
+                hasAsciiLetter = true;
+                continue;
+            }
+            if (Character.isDigit(c)) {
+                hasDigit = true;
+                continue;
+            }
+            if (c == '+' || c == '-' || c == '\u2192') continue;
+            return false;
+        }
+        return hasAsciiLetter && hasDigit && visible <= 32;
+    }
+
+    private static boolean containsChemicalSubscriptDigit(String text, char previous) {
+        char prev = previous;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c) || c == '\u2005' || c == '\u2007'
+                    || c == '\u2009' || c == '\u200A') {
+                continue;
+            }
+            if (Character.isDigit(c) && isAsciiLetter(prev)) return true;
+            prev = c;
+        }
+        return false;
+    }
+
+    private static void addChemicalFormulaTextRuns(List<ASTInlineItem> out, ASTTextRun source) {
+        String text = source.text();
+        if (text == null || text.isEmpty()) return;
+
+        StringBuilder buf = new StringBuilder();
+        boolean bufSubscript = false;
+        char prev = previousVisibleChar(out, out.size());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            boolean subscriptDigit = Character.isDigit(c) && isAsciiLetter(prev);
+            if (buf.length() > 0 && bufSubscript != subscriptDigit) {
+                out.add(copyTextRun(source, buf.toString(), bufSubscript));
+                buf.setLength(0);
+            }
+            buf.append(c);
+            if (!Character.isWhitespace(c) && c != '\u2005' && c != '\u2007'
+                    && c != '\u2009' && c != '\u200A') {
+                prev = c;
+            }
+            bufSubscript = subscriptDigit;
+        }
+        if (buf.length() > 0) {
+            out.add(copyTextRun(source, buf.toString(), bufSubscript));
+        }
+    }
+
+    private static ASTTextRun copyTextRun(ASTTextRun source, String text, boolean subscript) {
+        ASTTextRun copy = new ASTTextRun();
+        copy.characterStyleRef(source.characterStyleRef());
+        copy.text(text);
+        copy.fontFamily(source.fontFamily());
+        copy.fontStyle(source.fontStyle());
+        copy.fontSizeHwpunits(source.fontSizeHwpunits());
+        copy.textColor(source.textColor());
+        copy.shadeColor(source.shadeColor());
+        copy.letterSpacing(source.letterSpacing());
+        copy.subscript(subscript || source.subscript());
+        copy.superscript(!subscript && source.superscript());
+        copy.grepMathFont(source.grepMathFont());
+        copy.underline(source.underline());
+        copy.underlineColor(source.underlineColor());
+        copy.underlineShape(source.underlineShape());
+        copy.strikeThrough(source.strikeThrough());
+        copy.horizontalScale(source.horizontalScale());
+        copy.verticalScale(source.verticalScale());
+        copy.baselineShift(source.baselineShift());
+        copy.grepStyleApplied(source.grepStyleApplied());
+        return copy;
+    }
+
+    private static char previousVisibleChar(List<ASTInlineItem> items, int beforeIndex) {
+        if (items == null) return 0;
+        int start = Math.min(beforeIndex - 1, items.size() - 1);
+        for (int i = start; i >= 0; i--) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text == null) continue;
+            for (int j = text.length() - 1; j >= 0; j--) {
+                char c = text.charAt(j);
+                if (!Character.isWhitespace(c) && c != '\u2005' && c != '\u2007'
+                        && c != '\u2009' && c != '\u200A') {
+                    return c;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static boolean isAsciiLetter(char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
     }
 
     private static IDMLCharacterRun mathRunFromTextRun(ASTTextRun tr, String fontFamily) {
