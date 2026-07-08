@@ -329,7 +329,8 @@ public class StoryLoader {
                 boolean formulaClusterRun =
                         ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
 
-                if (_orcOnly && formulaClusterRun) {
+                if (_orcOnly && formulaClusterRun
+                        && MathProcessor.isFormulaAnswerPlaceholderRun(ctx, run)) {
                     MathProcessor.flushMathGroups(ctx, null, npMathGroup, ehMathGroup, para);
                     mathGroup.add(ASTMathGrouper.formulaAnswerBoxRun(run));
                     continue;

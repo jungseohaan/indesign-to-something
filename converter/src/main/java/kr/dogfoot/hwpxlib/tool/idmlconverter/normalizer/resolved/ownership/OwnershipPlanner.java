@@ -507,6 +507,7 @@ public final class OwnershipPlanner {
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         int[] visualIds = visualSourceIds(plan);
         if (visualIds.length == 0) return false;
+        if (!hasVisibleFillStyleMarkerSource(visualIds)) return false;
         if (isThinInlineTextStyleMarkerPlanBounds(plan, visualIds)) return true;
         for (int visualId : visualIds) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(visualId));
@@ -526,6 +527,18 @@ public final class OwnershipPlanner {
             return false;
         }
         return true;
+    }
+
+    private boolean hasVisibleFillStyleMarkerSource(int[] sourceIds) {
+        if (sourceIds == null || data == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null) continue;
+            if (!isNoneColor(item.fillColorName()) && !isPaperColor(item.fillColorName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isThinInlineTextStyleMarkerPlanBounds(ObjectPlan plan, int[] visualIds) {
@@ -552,6 +565,7 @@ public final class OwnershipPlanner {
     private boolean isInlineTextStyleMarkerVector(ResolvedPageItem item, double[] fallbackBounds) {
         if (item == null) return false;
         if (!item.isInline()) return false;
+        if (isNoneColor(item.fillColorName()) || isPaperColor(item.fillColorName())) return false;
         String type = safe(item.type());
         if (!"GraphicLine".equals(type)
                 && !"Polygon".equals(type)

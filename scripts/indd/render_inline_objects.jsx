@@ -116,6 +116,22 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
         return null;
     }
 
+    function _plannedInlineCandidateHasVisibleCarrierContent(candidate, itemId) {
+        if (!candidate) return false;
+        var sourceIds = candidate.sourceObjectIds || [];
+        var visualIds = candidate.visualSourceObjectIds || [];
+        var exportIds = candidate.exportSourceObjectIds || [];
+        if (sourceIds.length > 1) return true;
+        if (visualIds.length > 1 || exportIds.length > 1) return true;
+        for (var vi = 0; vi < visualIds.length; vi++) {
+            if (String(visualIds[vi]) !== String(itemId)) return true;
+        }
+        for (var ei = 0; ei < exportIds.length; ei++) {
+            if (String(exportIds[ei]) !== String(itemId)) return true;
+        }
+        return false;
+    }
+
     try {
 
     // 인라인 객체 추출: ExtractionPlan의 inline 후보만 개별 PNG로 렌더
@@ -167,10 +183,12 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         if (!plannedPageVisual &&
                             (inFill === "None" || inFill === "[None]") &&
                             ((inStroke === "None" || inStroke === "[None]") || inSW === 0)) {
+                            var hasPlannedCarrierContent =
+                                    _plannedInlineCandidateHasVisibleCarrierContent(inlineCandidate, inItem.id);
                             // allGraphics 확인 — 이미지가 있으면 건너뛰지 않음
                             var hasGraphic = false;
                             try { hasGraphic = inItem.allGraphics && inItem.allGraphics.length > 0; } catch(eg) {}
-                            if (!hasGraphic) {
+                            if (!hasPlannedCarrierContent && !hasGraphic) {
                                 inlineStats.spacerSkipped++;
                                 continue;
                             }

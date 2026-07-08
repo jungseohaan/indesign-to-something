@@ -6,11 +6,13 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHGrepFractionConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
@@ -464,9 +466,50 @@ class MathProcessor {
         if (ctx == null || obj == null || obj.sourceId() == null) return false;
         Integer sourceId = sourceIdToDomId(obj.sourceId());
         if (sourceId == null) return false;
+        return isFormulaAnswerPlaceholderSource(ctx, sourceId);
+    }
+
+    static boolean isFormulaAnswerPlaceholderRun(ResolvedBuildContext ctx, IDMLCharacterRun run) {
+        if (run == null) return false;
+        boolean sawAnchor = false;
+        if (run.inlineAnchors() != null) {
+            for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                Integer id = inlineAnchorDomId(run, anchor);
+                if (id == null) continue;
+                sawAnchor = true;
+                if (!isFormulaAnswerPlaceholderSource(ctx, id)) return false;
+            }
+        }
+        if (sawAnchor) return true;
+        String text = run.content();
+        return text != null && !text.isEmpty() && text.replace("\uFFFC", "").isEmpty();
+    }
+
+    private static Integer inlineAnchorDomId(IDMLCharacterRun run, IDMLCharacterRun.InlineAnchor anchor) {
+        if (run == null || anchor == null) return null;
+        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                && run.inlineFrames() != null
+                && anchor.index() >= 0
+                && anchor.index() < run.inlineFrames().size()) {
+            IDMLTextFrame tf = run.inlineFrames().get(anchor.index());
+            return tf != null ? sourceIdToDomId(tf.selfId()) : null;
+        }
+        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                && run.inlineGraphics() != null
+                && anchor.index() >= 0
+                && anchor.index() < run.inlineGraphics().size()) {
+            IDMLCharacterRun.InlineGraphic graphic = run.inlineGraphics().get(anchor.index());
+            return graphic != null ? sourceIdToDomId(graphic.selfId()) : null;
+        }
+        return null;
+    }
+
+    static boolean isFormulaAnswerPlaceholderSource(ResolvedBuildContext ctx, int sourceId) {
+        if (ctx == null) return false;
         ObjectPlan plan = findInlinePlaceholderPlan(ctx, sourceId);
         if (plan == null) return false;
         if (plan.placement != Placement.INLINE) return false;
+        if (isContentInlineVisualPlan(plan)) return false;
         if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
                 && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
             return false;
@@ -483,6 +526,15 @@ class MathProcessor {
             }
         }
         return isInlineAnswerBoxShape(ctx, sourceId);
+    }
+
+    private static boolean isContentInlineVisualPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        String slotRole = plan.slotRole != null ? plan.slotRole : "";
+        if ("CONTENT_VISUAL_SLOT".equals(slotRole)) return true;
+        if ("COMPLETE_PNG_SLOT".equals(slotRole)) return true;
+        return plan.visualLayer == VisualLayer.CONTENT_VISUAL
+                && plan.visualAction == VisualAction.PLACE_INLINE_PNG;
     }
 
     private static ObjectPlan findInlinePlaceholderPlan(ResolvedBuildContext ctx, int sourceId) {
@@ -526,6 +578,14 @@ class MathProcessor {
         if (item == null) return false;
         String type = item.type();
         if (!"Rectangle".equals(type) && !"Polygon".equals(type) && !"Oval".equals(type)) return false;
+        double[] b = item.visibleBounds();
+        if (b == null || b.length < 4) b = item.geometricBounds();
+        if (b == null || b.length < 4) return false;
+        double width = Math.abs(b[3] - b[1]);
+        double height = Math.abs(b[2] - b[0]);
+        if (width <= 0.0 || height <= 0.0) return false;
+        double ratio = Math.max(width / height, height / width);
+        if (ratio > 6.0) return false;
         String storyAnchorPlacement = upper(item.storyAnchorPlacement());
         String anchoredPosition = upper(item.anchoredPosition());
         boolean inline = "INLINE".equals(storyAnchorPlacement)
