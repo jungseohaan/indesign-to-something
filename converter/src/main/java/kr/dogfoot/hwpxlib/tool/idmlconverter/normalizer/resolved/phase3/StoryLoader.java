@@ -742,7 +742,8 @@ public class StoryLoader {
         }
         ResolvedTable.Cell resolvedCell = findResolvedCell(ctx, idmlTable, idmlCell);
         if ((idmlCell.paragraphs() == null || idmlCell.paragraphs().isEmpty())
-                && resolvedCell != null) {
+                && resolvedCell != null
+                && hasDirectCellTextOrInlineObject(idmlCell)) {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
             if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
@@ -765,7 +766,7 @@ public class StoryLoader {
             ConversionTiming.addCounter("phase3.storyLoader.cell.paragraphs", 1);
             paraIndex++;
         }
-        applyResolvedCellInlineGraphicRescueAnchors(ctx, resolvedCell, result);
+        applyResolvedCellInlineGraphicRescueAnchors(ctx, idmlCell, resolvedCell, result);
         for (ASTParagraph para : result) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
@@ -1000,6 +1001,7 @@ public class StoryLoader {
 
     private static void applyResolvedCellInlineGraphicRescueAnchors(
             ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
             ResolvedTable.Cell resolvedCell,
             List<ASTParagraph> paragraphs) {
         if (ctx == null || resolvedCell == null || resolvedCell.paragraphs() == null
@@ -1017,6 +1019,7 @@ public class StoryLoader {
                 if (run == null || !run.isInlineAnchor()) continue;
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
+                if (!cellContainsInlineAnchor(idmlCell, anchoredId)) continue;
                 if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)
                         && !isResolvedCellInlineGraphicPrefixMarkerAnchor(ctx, anchoredId)) {
                     continue;
@@ -1042,6 +1045,87 @@ public class StoryLoader {
                 int insertAt = leadingWhitespaceItemCount(target);
                 target.items().addAll(insertAt, plannedItems);
             }
+        }
+    }
+
+    private static boolean cellContainsInlineAnchor(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+            int anchorId) {
+        if (idmlCell == null || idmlCell.paragraphs() == null || anchorId <= 0) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null) continue;
+                if (containsInlineAnchorDomId(run, anchorId)) return true;
+                if (containsInlineGraphicDomId(run.inlineGraphics(), anchorId)) return true;
+                if (containsInlineFrameDomId(run.inlineFrames(), anchorId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsInlineAnchorDomId(IDMLCharacterRun run, int anchorId) {
+        if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) return false;
+        for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+            if (anchor == null) continue;
+            if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+                List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame> frames = run.inlineFrames();
+                int index = anchor.index();
+                if (frames != null && index >= 0 && index < frames.size()
+                        && idMatches(frames.get(index).selfId(), anchorId)) {
+                    return true;
+                }
+            } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC) {
+                List<IDMLCharacterRun.InlineGraphic> graphics = run.inlineGraphics();
+                int index = anchor.index();
+                if (graphics != null && index >= 0 && index < graphics.size()
+                        && inlineGraphicContainsDomId(graphics.get(index), anchorId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsInlineGraphicDomId(
+            List<IDMLCharacterRun.InlineGraphic> graphics,
+            int anchorId) {
+        if (graphics == null || graphics.isEmpty()) return false;
+        for (IDMLCharacterRun.InlineGraphic graphic : graphics) {
+            if (inlineGraphicContainsDomId(graphic, anchorId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean inlineGraphicContainsDomId(
+            IDMLCharacterRun.InlineGraphic graphic,
+            int anchorId) {
+        if (graphic == null) return false;
+        if (idMatches(graphic.selfId(), anchorId)) return true;
+        if (containsInlineGraphicDomId(graphic.childGraphics(), anchorId)) return true;
+        return containsInlineFrameDomId(graphic.childTextFrames(), anchorId);
+    }
+
+    private static boolean containsInlineFrameDomId(
+            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame> frames,
+            int anchorId) {
+        if (frames == null || frames.isEmpty()) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame : frames) {
+            if (frame == null) continue;
+            if (idMatches(frame.selfId(), anchorId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean idMatches(String sourceId, int domId) {
+        if (sourceId == null || sourceId.isEmpty() || domId <= 0) return false;
+        try {
+            if (sourceId.charAt(0) == 'u' || sourceId.charAt(0) == 'U') {
+                return Integer.parseInt(sourceId.substring(1), 16) == domId;
+            }
+            return Integer.parseInt(sourceId) == domId;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 
@@ -1713,6 +1797,22 @@ public class StoryLoader {
                 if (run == null || run.content() == null) continue;
                 String normalized = normalizeCellOwnershipText(run.content());
                 if (!normalized.isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasDirectCellTextOrInlineObject(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (hasDirectVisibleCellText(idmlCell)) return true;
+        if (idmlCell == null || idmlCell.paragraphs() == null) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null) continue;
+                if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) return true;
+                if (run.inlineFrames() != null && !run.inlineFrames().isEmpty()) return true;
+                if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) return true;
             }
         }
         return false;

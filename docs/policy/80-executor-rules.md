@@ -56,10 +56,10 @@ Text Builder:
   and reported by validation when required material is missing.
 - Tables, TextFrames, and other containers consume the prepared flow; they do
   not recover missing inline objects by matching visible strings after layout.
-- Structural bridges such as side-head table normalization may execute only
-  when Stage 1 has already marked the source table with an explicit plan. If a
-  bridge recognizes an unplanned structural candidate, it records a validation
-  warning and leaves the AST unchanged.
+- Structural table bridges must not create or relocate ownership. If Stage 1
+  did not produce executable table/cell flow for a source cell, the executor
+  leaves that cell empty and reports missing required material through
+  validation instead of synthesizing structural or rescue content.
 - Executors must not synthesize a new inline text-shell `ObjectPlan` from
   resolved/page-item metadata. If Stage 1 did not plan an inline text shell, the
   executor leaves that anchor to the already planned text/visual owner.

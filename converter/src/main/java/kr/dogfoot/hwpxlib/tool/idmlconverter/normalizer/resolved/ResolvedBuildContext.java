@@ -11,7 +11,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Objec
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.PolicyLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SideHeadFlowPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
@@ -425,10 +424,6 @@ public final class ResolvedBuildContext {
     private final java.util.Set<String> anchoredNestedTableSourceIds =
             new java.util.HashSet<>();
 
-    /** Stage 1 side-head flow table plans. Key: IDML table source id. */
-    private final java.util.Map<String, SideHeadFlowPlan> sideHeadFlowPlansByTableSourceId =
-            new java.util.LinkedHashMap<>();
-
     public void addSimpleButtonLabelPlan(SimpleButtonLabelPlan plan) {
         if (plan == null) return;
         simpleButtonLabelPlans.put(plan.anchorDomId, plan);
@@ -479,24 +474,6 @@ public final class ResolvedBuildContext {
 
     public boolean isAnchoredNestedTableSource(String tableSourceId) {
         return tableSourceId != null && anchoredNestedTableSourceIds.contains(tableSourceId);
-    }
-
-    public void addSideHeadFlowPlan(SideHeadFlowPlan plan) {
-        if (plan == null || plan.tableSourceId == null || plan.tableSourceId.isEmpty()) return;
-        sideHeadFlowPlansByTableSourceId.put(plan.tableSourceId, plan);
-    }
-
-    public SideHeadFlowPlan sideHeadFlowPlanForTable(String tableSourceId) {
-        if (tableSourceId == null || tableSourceId.isEmpty()) return null;
-        return sideHeadFlowPlansByTableSourceId.get(tableSourceId);
-    }
-
-    public boolean isSideHeadFlowTableSource(String tableSourceId) {
-        return sideHeadFlowPlanForTable(tableSourceId) != null;
-    }
-
-    public boolean hasSideHeadFlowPlans() {
-        return !sideHeadFlowPlansByTableSourceId.isEmpty();
     }
 
     private void addAnchoredTableSourceId(String tableSourceId) {
@@ -553,9 +530,6 @@ public final class ResolvedBuildContext {
             for (AnchoredTablePlan plan : grouped) {
                 if (plan != null) ownershipPlanLines.add(plan.toJson());
             }
-        }
-        for (SideHeadFlowPlan plan : sideHeadFlowPlansByTableSourceId.values()) {
-            if (plan != null) ownershipPlanLines.add(plan.toJson());
         }
         for (ObjectPlan plan : ownershipPlans) {
             if (plan != null) ownershipPlanLines.add(plan.toJson());

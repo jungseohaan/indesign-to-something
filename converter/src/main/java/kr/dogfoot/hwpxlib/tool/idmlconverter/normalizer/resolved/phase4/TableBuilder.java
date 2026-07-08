@@ -30,7 +30,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Table
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -588,9 +587,6 @@ public final class TableBuilder {
         inlineNestedTextFrameParagraphsInCells(ctx, astTable);
 
         ASTTable result = astTable;
-        if (NumberedSideHeadTableNormalizer.normalizePlanned(ctx, result) && ctx != null && ctx.debugAst) {
-            result.debugOrNew().note("side-head flow table normalized from Stage 1 plan");
-        }
         stripTableCellDecoration(result);
         return result;
     }

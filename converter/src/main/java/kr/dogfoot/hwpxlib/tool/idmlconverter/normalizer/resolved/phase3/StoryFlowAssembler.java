@@ -128,6 +128,8 @@ public final class StoryFlowAssembler {
         ASTParagraph paragraph = new ASTParagraph();
         for (Integer anchorId : resolvedCell.inlineAnchorIds()) {
             if (anchorId == null || anchorId < 0) continue;
+            if (!cellContainsInlineAnchor(idmlCell, anchorId)) continue;
+            if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, anchorId)) continue;
             List<ASTInlineItem> plannedItems =
                     InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchorId, null, null);
             if (plannedItems != null) {
@@ -144,6 +146,19 @@ public final class StoryFlowAssembler {
         if (paragraph.items() != null && !paragraph.items().isEmpty()) {
             paragraphs.add(paragraph);
         }
+    }
+
+    private static boolean cellContainsInlineAnchor(IDMLTableCell idmlCell, int anchorId) {
+        if (idmlCell == null || idmlCell.paragraphs() == null || anchorId < 0) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                for (String inlineId : inlineGraphicIdsInRunOrder(run)) {
+                    if (parseInlineObjectDomId(inlineId) == anchorId) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void appendPlannedInlineTextShellsFromCellAnchors(

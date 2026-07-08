@@ -10,7 +10,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePla
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_5.BulletInserter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanValidator;
@@ -18,7 +17,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Ancho
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SideHeadFlowPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
@@ -254,7 +252,6 @@ public class ResolvedToASTBuilder {
     private void planOwnership() {
         importPlannerDeclaredObjectPlans();
         AnchoredTablePlanner.plan(this.ctx);
-        SideHeadFlowPlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
         OwnershipPlanner.runObservation(this.ctx);
         if (this.resolvedData != null) {
@@ -1111,11 +1108,6 @@ public class ResolvedToASTBuilder {
      * 새 visible 객체를 만들거나 ownership을 뒤집는 로직을 추가하지 않는다.</p>
      */
     private void postprocessLayout(List<ASTSection> sections) {
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.numberedSideHeadTablesBridge")) {
-            NumberedSideHeadTableNormalizer.run(this.ctx, sections);
-        }
-        tagPhase(sections, "Stage4.LayoutPostprocess.numberedSideHeadTablesBridge");
-
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.bulletInserter")) {
             BulletInserter.run(this.ctx, sections);
         }
