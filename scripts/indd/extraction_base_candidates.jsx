@@ -90,7 +90,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         basePerfRole("consideredByRole", role, 1);
         var before = candidates ? candidates.length : 0;
         var startedAt = basePerfNow();
-        _pushExtractionCandidate(candidates, candidateSeen, passId, item, attrs);
+        _pushExtractionCandidate(candidates, candidateSeen, passId, item, cloneBaseCandidateAttrs(attrs));
         basePerfHotCall("pushBaseExtractionCandidate", startedAt);
         var after = candidates ? candidates.length : 0;
         if (after > before) {
@@ -98,6 +98,23 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         } else {
             basePerfRole("duplicateSkippedByRole", role, 1);
         }
+    }
+
+    function cloneBaseCandidateAttrs(attrs) {
+        if (!attrs) return attrs;
+        var out = {};
+        for (var key in attrs) {
+            if (!attrs.hasOwnProperty(key)) continue;
+            var value = attrs[key];
+            if (value && typeof value !== "string"
+                    && value.length !== undefined
+                    && value.slice) {
+                out[key] = value.slice(0);
+            } else {
+                out[key] = value;
+            }
+        }
+        return out;
     }
 
     function basePerfMarker(name) {
@@ -275,7 +292,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         var key = String(sourceId) + "|" + String(pageIndex);
         if (pageLocalSourceObjectIdsForBaseByKey.hasOwnProperty(key)) {
             basePerfCache("pageLocalSourceObjectIdsForBase", true);
-            return pageLocalSourceObjectIdsForBaseByKey[key].slice(0);
+            return pageLocalSourceObjectIdsForBaseByKey[key];
         }
         basePerfCache("pageLocalSourceObjectIdsForBase", false);
         var startedAt = basePerfNow();
@@ -287,7 +304,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         }
         basePerfHotCall("pageLocalSourceObjectIdsForBase", startedAt);
         ids = ids || [sourceId];
-        pageLocalSourceObjectIdsForBaseByKey[key] = ids.slice(0);
+        pageLocalSourceObjectIdsForBaseByKey[key] = ids;
         return ids;
     }
 
@@ -665,9 +682,19 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     function sourceSetKeyInGivenOrder(ids) {
         if (!ids || ids.length === 0) return "";
+        if (ids._baseSourceSetKey !== undefined) return ids._baseSourceSetKey;
         var out = [];
         for (var i = 0; i < ids.length; i++) out.push(String(Number(ids[i])));
-        return out.join(",");
+        var key = out.join(",");
+        try {
+            Object.defineProperty(ids, "_baseSourceSetKey", {
+                value: key,
+                enumerable: false
+            });
+        } catch (eBaseSourceSetKey) {
+            ids._baseSourceSetKey = key;
+        }
+        return key;
     }
 
     function cachedSourceSetContainsAll(ownerIds, memberIds) {
@@ -754,6 +781,18 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         }
         broaderDecorationSourceSetByKey[cacheKey] = false;
         basePerfCall("hasBroaderDecorationSourceSet", startedAt);
+        return false;
+    }
+
+    function sourceCoveredByBroaderDecorationSourceSet(pageIndex, sourceId) {
+        if (sourceId === null || sourceId === undefined) return false;
+        var pageKey = String(pageIndex);
+        var memberKey = pageKey + "|" + String(sourceId);
+        var pageSets = broaderDecorationSourceSetsByPageMember[memberKey] || [];
+        for (var i = 0; i < pageSets.length; i++) {
+            var ownerIds = pageSets[i];
+            if (ownerIds && ownerIds.length > 1) return true;
+        }
         return false;
     }
 
@@ -1365,6 +1404,12 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
         if (itemInfo.hiddenLayer === true) continue;
         if (!sourceKindCanEmitBaseCandidate(kind)) continue;
+        if (kind !== "TextFrame"
+                && itemInfo.pageIndex !== null && itemInfo.pageIndex !== undefined
+                && pageIndexInBaseRange(itemInfo.pageIndex)
+                && sourceCoveredByBroaderDecorationSourceSet(itemInfo.pageIndex, id)) {
+            continue;
+        }
         if (kind !== "TextFrame" && sourceHasStoryFlowAnchor(id)) continue;
         if (kind === "TextFrame" && !textFrameMayHaveStyleShellForBase(itemInfo)) continue;
         var extractionPageIndexes = candidatePageIndexesForBase(id);

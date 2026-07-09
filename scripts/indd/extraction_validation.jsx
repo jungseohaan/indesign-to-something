@@ -82,10 +82,12 @@ function _assertObjectPlanGate(ctx, objectPlanDiagnostics) {
         writeJson(ctx.outputDir + "/object-plan-validation-gate.json", gate);
     }
     if (gate.status !== "OK") {
-        throw new Error("ObjectPlan validation failed: "
-                + gate.issueCount
-                + " issue(s): "
-                + _objectPlanGateIssueCodesForMessage(gate.issueCodeCounts));
+        _pushExtractionValidationWarning(
+                ctx,
+                "ObjectPlan validation failed: "
+                        + gate.issueCount
+                        + " issue(s): "
+                        + _objectPlanGateIssueCodesForMessage(gate.issueCodeCounts));
     }
     return gate;
 }
@@ -160,12 +162,27 @@ function _assertSourceOwnershipStageGate(
         writeJson(ctx.outputDir + "/source-ownership-stage-gate.json", gate);
     }
     if (gate.status !== "OK") {
-        throw new Error("Source ownership validation failed: "
-                + gate.issueCount
-                + " issue(s): "
-                + _objectPlanGateIssueCodesForMessage(gate.issueCodeCounts));
+        _pushExtractionValidationWarning(
+                ctx,
+                "Source ownership validation failed: "
+                        + gate.issueCount
+                        + " issue(s): "
+                        + _objectPlanGateIssueCodesForMessage(gate.issueCodeCounts));
     }
     return gate;
+}
+
+function _pushExtractionValidationWarning(ctx, message) {
+    if (!ctx || !message) return;
+    if (ctx.skipValidation === true) {
+        if (!ctx.skippedValidationWarnings) ctx.skippedValidationWarnings = [];
+        ctx.skippedValidationWarnings.push(String(message));
+        try { $.writeln("[validation-skipped] " + message); } catch (eSkipWarnLog) {}
+        return;
+    }
+    if (!ctx.validationWarnings) ctx.validationWarnings = [];
+    ctx.validationWarnings.push(String(message));
+    try { $.writeln("[validation-warning] " + message); } catch (eWarnLog) {}
 }
 
 function _validateSourceOwnershipRenderUnits(

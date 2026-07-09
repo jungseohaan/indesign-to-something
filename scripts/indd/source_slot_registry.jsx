@@ -72,11 +72,11 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         }
         var ids = [];
         if (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0) {
-            ids = _sortedNumericIds(candidate.visualSourceObjectIds);
+            ids = _internSourceSetIds(candidate.visualSourceObjectIds);
         } else if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0) {
-            ids = _sortedNumericIds(candidate.exportSourceObjectIds);
+            ids = _internSourceSetIds(candidate.exportSourceObjectIds);
         } else {
-            ids = _sortedNumericIds(candidate.sourceObjectIds || []);
+            ids = _internSourceSetIds(candidate.sourceObjectIds || []);
         }
         visibleCandidateSourceIdsCache[cacheKey] = ids;
         return ids;
@@ -149,14 +149,18 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
             ownershipSlot: candidate ? candidateOwnershipSlot(candidate) : null,
             visualAction: candidate ? candidate.visualAction || null : null,
             reason: reason,
-            sourceObjectIds: candidate ? _sortedNumericIds(candidate.sourceObjectIds || []) : [],
+            sourceSetId: candidate ? _sourceSetId(candidate.sourceObjectIds || []) : "",
+            visibleSourceSetId: _sourceSetId(visibleCandidateSourceIds(candidate)),
+            sourceObjectIds: candidate ? _internSourceSetIds(candidate.sourceObjectIds || []) : [],
             visibleSourceObjectIds: visibleCandidateSourceIds(candidate),
             ownerCandidateId: ownerCandidate ? ownerCandidate.candidateId || null : null,
             ownerPassId: ownerCandidate ? ownerCandidate.passId || null : null,
             ownerPlacement: ownerCandidate ? ownerCandidate.placement || null : null,
             ownerOwnershipSlot: ownerCandidate ? candidateOwnershipSlot(ownerCandidate) : null,
             ownerVisualAction: ownerCandidate ? ownerCandidate.visualAction || null : null,
-            ownerSourceObjectIds: ownerCandidate ? _sortedNumericIds(ownerCandidate.sourceObjectIds || []) : [],
+            ownerSourceSetId: ownerCandidate ? _sourceSetId(ownerCandidate.sourceObjectIds || []) : "",
+            ownerVisibleSourceSetId: _sourceSetId(visibleCandidateSourceIds(ownerCandidate)),
+            ownerSourceObjectIds: ownerCandidate ? _internSourceSetIds(ownerCandidate.sourceObjectIds || []) : [],
             ownerVisibleSourceObjectIds: visibleCandidateSourceIds(ownerCandidate)
         });
     }
@@ -487,12 +491,16 @@ function _buildSourceSlotRegistryDiagnostics(plannerBundles, objectPlanDiagnosti
                 placement: _sourceSlotRegistryPlacementFromBundle(bundle),
                 coordinateSpace: _sourceSlotRegistryCoordinateSpaceFromBundle(bundle),
                 ownershipSlot: bundle.ownershipSlot || "UNKNOWN_SLOT",
-                sourceObjectIds: _sortedNumericIds(bundle.sourceObjectIds || []),
-                visualSourceObjectIds: _sortedNumericIds(bundle.visualSourceObjectIds || []),
-                styleSourceObjectIds: _sortedNumericIds(bundle.styleSourceObjectIds || []),
-                ownedTextFrameIds: _sortedNumericIds(bundle.ownedTextFrameIds || []),
-                exportSourceObjectIds: _sortedNumericIds(bundle.exportSourceObjectIds || []),
-                hiddenVisualSourceObjectIds: _sortedNumericIds(bundle.hiddenVisualSourceObjectIds || []),
+                sourceSetId: bundle.sourceSetId || _sourceSetId(bundle.sourceObjectIds || []),
+                visualSourceSetId: bundle.visualSourceSetId || _sourceSetId(bundle.visualSourceObjectIds || []),
+                exportSourceSetId: bundle.exportSourceSetId || _sourceSetId(bundle.exportSourceObjectIds || []),
+                hiddenSourceSetId: bundle.hiddenSourceSetId || _sourceSetId(bundle.hiddenVisualSourceObjectIds || []),
+                sourceObjectIds: _internSourceSetIds(bundle.sourceObjectIds || []),
+                visualSourceObjectIds: _internSourceSetIds(bundle.visualSourceObjectIds || []),
+                styleSourceObjectIds: _internSourceSetIds(bundle.styleSourceObjectIds || []),
+                ownedTextFrameIds: _internSourceSetIds(bundle.ownedTextFrameIds || []),
+                exportSourceObjectIds: _internSourceSetIds(bundle.exportSourceObjectIds || []),
+                hiddenVisualSourceObjectIds: _internSourceSetIds(bundle.hiddenVisualSourceObjectIds || []),
                 candidateCount: 0,
                 executableCandidateCount: 0,
                 canonicalBundleId: null,
@@ -535,8 +543,10 @@ function _buildSourceSlotRegistryDiagnostics(plannerBundles, objectPlanDiagnosti
                 pageIndex: bundle.pageIndex,
                 placement: _sourceSlotRegistryPlacementFromBundle(bundle),
                 ownershipSlot: bundle.ownershipSlot || "UNKNOWN_SLOT",
-                sourceRootObjectIds: _sortedNumericIds(bundle.sourceRootObjectIds || []),
-                clusterSourceObjectIds: _sortedNumericIds(bundle.clusterSourceObjectIds || []),
+                sourceRootSetId: bundle.sourceRootSetId || _sourceSetId(bundle.sourceRootObjectIds || []),
+                clusterSourceSetId: bundle.clusterSourceSetId || _sourceSetId(bundle.clusterSourceObjectIds || []),
+                sourceRootObjectIds: _internSourceSetIds(bundle.sourceRootObjectIds || []),
+                clusterSourceObjectIds: _internSourceSetIds(bundle.clusterSourceObjectIds || []),
                 candidateCount: 0,
                 executableCandidateCount: 0,
                 canonicalBundleId: null,
@@ -692,20 +702,20 @@ function _sourceSlotRegistryVisibleIds(bundle) {
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT"
             && bundle.styleSourceObjectIds
             && bundle.styleSourceObjectIds.length > 0) {
-        return _sortedNumericIds(bundle.styleSourceObjectIds);
+        return _internSourceSetIds(bundle.styleSourceObjectIds);
     }
     if (bundle.ownershipSlot === "TEXT_SLOT"
             && bundle.ownedTextFrameIds
             && bundle.ownedTextFrameIds.length > 0) {
-        return _sortedNumericIds(bundle.ownedTextFrameIds);
+        return _internSourceSetIds(bundle.ownedTextFrameIds);
     }
     if (bundle.visualSourceObjectIds && bundle.visualSourceObjectIds.length > 0) {
-        return _sortedNumericIds(bundle.visualSourceObjectIds);
+        return _internSourceSetIds(bundle.visualSourceObjectIds);
     }
     if (bundle.exportSourceObjectIds && bundle.exportSourceObjectIds.length > 0) {
-        return _sortedNumericIds(bundle.exportSourceObjectIds);
+        return _internSourceSetIds(bundle.exportSourceObjectIds);
     }
-    return _sortedNumericIds(bundle.sourceObjectIds || []);
+    return _internSourceSetIds(bundle.sourceObjectIds || []);
 }
 
 function _sourceSlotRegistryPlacementFromBundle(bundle) {

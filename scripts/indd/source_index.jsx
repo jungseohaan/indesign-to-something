@@ -335,9 +335,14 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var textFrameIdsByKey = {};
     var editableTextOutsideByKey = {};
     var candidateVectorPaintById = {};
+    var cachedSourceInfoById = ctx && ctx.spreadChunkSourceInfoById
+            ? ctx.spreadChunkSourceInfoById
+            : null;
     var stats = {
         itemCount: allItems ? allItems.length : 0,
-        kindCounts: {}
+        kindCounts: {},
+        sourceInfoCacheHits: 0,
+        sourceInfoCacheMisses: 0
     };
 
     function itemId(item) {
@@ -420,11 +425,56 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return null;
     }
 
+    function cloneCachedSourceInfo(cached, id) {
+        if (!cached) return null;
+        var info = {};
+        for (var prop in cached) {
+            if (!cached.hasOwnProperty(prop)) continue;
+            var value = cached[prop];
+            if (value && typeof value !== "string"
+                    && value.length !== undefined
+                    && value.slice) {
+                info[prop] = value.slice(0);
+            } else {
+                info[prop] = value;
+            }
+        }
+        info.id = id;
+        info.sourceOrder = sourceItems.length;
+        var basePageIndex = null;
+        if (cached.sourcePageIndex !== null && cached.sourcePageIndex !== undefined) {
+            basePageIndex = Number(cached.sourcePageIndex);
+        } else if (cached.originalPageIndex !== null && cached.originalPageIndex !== undefined) {
+            basePageIndex = Number(cached.originalPageIndex);
+        } else {
+            basePageIndex = Number(cached.pageIndex);
+        }
+        info.sourcePageIndex = isNaN(basePageIndex) ? cached.pageIndex : basePageIndex;
+        info.pageIndex = info.sourcePageIndex;
+        try { delete info.originalPageIndex; } catch (eDeleteOriginalPageIndex) { info.originalPageIndex = undefined; }
+        try { delete info.reprojectedToRangePage; } catch (eDeleteReprojected) { info.reprojectedToRangePage = false; }
+        info.rangeTargetPageIndexes = _rangeTargetPageIndexesForId(id);
+        return info;
+    }
+
     function readItemInfo(item) {
         var id = itemId(item);
         if (id === null || id === undefined) return null;
         var key = String(id);
         if (sourceInfoById[key]) return sourceInfoById[key];
+        if (cachedSourceInfoById && cachedSourceInfoById[key]) {
+            var cachedInfo = cloneCachedSourceInfo(cachedSourceInfoById[key], id);
+            if (cachedInfo) {
+                var cachedKind = cachedInfo.kind || "Unknown";
+                stats.kindCounts[cachedKind] = (stats.kindCounts[cachedKind] || 0) + 1;
+                stats.sourceInfoCacheHits++;
+                sourceInfoById[key] = cachedInfo;
+                domById[key] = item;
+                sourceItems.push(cachedInfo);
+                return cachedInfo;
+            }
+        }
+        stats.sourceInfoCacheMisses++;
 
         var kind = _itemKind(item);
         stats.kindCounts[kind || "Unknown"] = (stats.kindCounts[kind || "Unknown"] || 0) + 1;
@@ -476,10 +526,12 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         : storyHasVisibleTableCellText;
             }
         }
+        var sourcePageIndex = _pageIndexOfItem(doc, item);
 
         var info = {
             id: id,
-            pageIndex: _pageIndexOfItem(doc, item),
+            sourcePageIndex: sourcePageIndex,
+            pageIndex: sourcePageIndex,
             kind: kind,
             parentId: _itemParentId(item),
             parentKind: _itemParentKind(item),
@@ -1456,9 +1508,12 @@ function _sourceModelBundleFromObjectPlan(plan) {
         passId: plan.passId || null,
         pageIndex: plan.pageIndex,
         bundleType: _sourceModelBundleType(plan),
-        sourceObjectIds: _sortedNumericIds(plan.sourceObjectIds || []),
-        sourceRootObjectIds: _sortedNumericIds(plan.sourceRootObjectIds || []),
-        clusterSourceObjectIds: _sortedNumericIds(plan.clusterSourceObjectIds || []),
+        sourceSetId: plan.sourceSetId || _sourceSetId(plan.sourceObjectIds || []),
+        sourceRootSetId: plan.sourceRootSetId || _sourceSetId(plan.sourceRootObjectIds || []),
+        clusterSourceSetId: plan.clusterSourceSetId || _sourceSetId(plan.clusterSourceObjectIds || []),
+        sourceObjectIds: _internSourceSetIds(plan.sourceObjectIds || []),
+        sourceRootObjectIds: _internSourceSetIds(plan.sourceRootObjectIds || []),
+        clusterSourceObjectIds: _internSourceSetIds(plan.clusterSourceObjectIds || []),
         primarySourceObjectId: plan.primarySourceObjectId !== undefined ? plan.primarySourceObjectId : null,
         clusterRelation: plan.clusterRelation || null,
         placement: plan.placement || null,
@@ -1507,7 +1562,7 @@ function _sourceModelSlotsFromObjectPlan(plan) {
 }
 
 function _sourceModelSlotFromObjectPlan(plan, ownershipSlot, owner, slotSourceObjectIds) {
-    var ids = _sortedNumericIds(slotSourceObjectIds || []);
+    var ids = _internSourceSetIds(slotSourceObjectIds || []);
     var slotIdentityKey = String(plan.pageIndex) + "|"
             + String(plan.placement || "NONE") + "|"
             + ownershipSlot + "|"
@@ -1524,13 +1579,18 @@ function _sourceModelSlotFromObjectPlan(plan, ownershipSlot, owner, slotSourceOb
         pageIndex: plan.pageIndex,
         ownershipSlot: ownershipSlot,
         owner: owner,
+        slotSourceSetId: _sourceSetId(ids),
+        sourceSetId: plan.sourceSetId || _sourceSetId(plan.sourceObjectIds || []),
+        visualSourceSetId: plan.visualSourceSetId || _sourceSetId(plan.visualSourceObjectIds || []),
+        exportSourceSetId: plan.exportSourceSetId || _sourceSetId(plan.exportSourceObjectIds || []),
+        hiddenSourceSetId: plan.hiddenSourceSetId || _sourceSetId(plan.hiddenVisualSourceObjectIds || []),
         slotSourceObjectIds: ids,
-        sourceObjectIds: _sortedNumericIds(plan.sourceObjectIds || []),
-        visualSourceObjectIds: _sortedNumericIds(plan.visualSourceObjectIds || []),
-        styleSourceObjectIds: _sortedNumericIds(plan.styleSourceObjectIds || []),
-        ownedTextFrameIds: _sortedNumericIds(plan.ownedTextFrameIds || []),
-        exportSourceObjectIds: _sortedNumericIds(plan.exportSourceObjectIds || []),
-        hiddenVisualSourceObjectIds: _sortedNumericIds(plan.hiddenVisualSourceObjectIds || []),
+        sourceObjectIds: _internSourceSetIds(plan.sourceObjectIds || []),
+        visualSourceObjectIds: _internSourceSetIds(plan.visualSourceObjectIds || []),
+        styleSourceObjectIds: _internSourceSetIds(plan.styleSourceObjectIds || []),
+        ownedTextFrameIds: _internSourceSetIds(plan.ownedTextFrameIds || []),
+        exportSourceObjectIds: _internSourceSetIds(plan.exportSourceObjectIds || []),
+        hiddenVisualSourceObjectIds: _internSourceSetIds(plan.hiddenVisualSourceObjectIds || []),
         placement: plan.placement || null,
         coordinateSpace: plan.coordinateSpace || null,
         visualLayer: plan.visualLayer || null,

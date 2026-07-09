@@ -106,6 +106,10 @@ function _executionCandidateContractFields() {
         "editableTextFrameIds",
         "hiddenTextFrameIds",
         "exportTargetObjectId",
+        "atomicExportTargetObjectId",
+        "atomicExportTargetObjectIds",
+        "atomicTextlessVectorContent",
+        "atomicContentVisualSlot",
         "materialization",
         "textAction",
         "visualAction",
@@ -235,6 +239,17 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     if (objectPlan.exportSourceObjectIds) {
         candidate.exportSourceObjectIds = _sortedNumericIds(objectPlan.exportSourceObjectIds);
     }
+    if (objectPlan.exportTargetObjectId !== undefined) {
+        candidate.exportTargetObjectId = objectPlan.exportTargetObjectId;
+    }
+    if (objectPlan.atomicExportTargetObjectId !== undefined) {
+        candidate.atomicExportTargetObjectId = objectPlan.atomicExportTargetObjectId;
+    }
+    if (objectPlan.atomicExportTargetObjectIds) {
+        candidate.atomicExportTargetObjectIds = _sortedNumericIds(objectPlan.atomicExportTargetObjectIds);
+    }
+    candidate.atomicTextlessVectorContent = objectPlan.atomicTextlessVectorContent === true;
+    candidate.atomicContentVisualSlot = objectPlan.atomicContentVisualSlot === true;
     candidate.hiddenVisualSourceObjectIds = _objectPlanExecutionHiddenVisualSourceObjectIds(
             objectPlan,
             candidate.executionSourceObjectIds || candidate.sourceObjectIds || [],

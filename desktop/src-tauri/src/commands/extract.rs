@@ -26,6 +26,8 @@ pub async fn extract_indd(
     // skip_pdf = preview.pdf 생성 스킵. 기본 false이며 fast도 PDF는 생성/캐시한다.
     perf_mode: Option<String>,
     skip_pdf: Option<bool>,
+    // extractor mode. 기본은 spread_chunks이며, 필요 시 "full"로 legacy 단일 범위 추출을 강제할 수 있다.
+    extract_mode: Option<String>,
     // 분할 추출: chunk_size > 0 이면 해당 페이지 수 단위로 청크 추출.
     // debug page range(start_page/end_page)가 지정된 경우 무시.
     chunk_size: Option<i32>,
@@ -39,6 +41,9 @@ pub async fn extract_indd(
     let pm = perf_mode.unwrap_or_else(|| "standard".to_string());
     let pm_normalized = pm.to_lowercase();
     let sk = skip_pdf.unwrap_or(false);
+    let extract_mode_normalized = extract_mode
+        .unwrap_or_else(|| "spread_chunks".to_string())
+        .to_lowercase();
 
     // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵 (기존 동작 유지)
     //    단, 디버그 페이지 범위가 지정되면 항상 신규 추출.
@@ -97,6 +102,7 @@ pub async fn extract_indd(
         sm,
         &pm_normalized,
         sk,
+        &extract_mode_normalized,
     );
 
     if !debug_range {
@@ -125,7 +131,7 @@ pub async fn extract_indd(
     let output_dir = crate::indesign::create_extraction_temp_dir()?;
 
     // B.2: 같은 INDD 경로의 이전 캐시 엔트리를 찾고 page hash 비교
-    let partial_result = if !debug_range {
+    let partial_result = if !debug_range && extract_mode_normalized != "spread_chunks" {
         try_partial_extraction(
             &app,
             &indd_path,
@@ -146,9 +152,10 @@ pub async fn extract_indd(
     let result = if let Some(r) = partial_result {
         r
     } else {
-        // 분할 추출 모드: chunk_size > 0 이고 debug page range 없으면 청크 추출
+        // 분할 추출 모드: chunk_size > 0 이고 debug page range 없으면 legacy 청크 추출.
+        // spread_chunks는 JSX 내부에서 같은 InDesign 세션으로 chunk-local Stage 0~4를 실행한다.
         let cs = chunk_size.unwrap_or(0);
-        if !debug_range && cs > 0 {
+        if !debug_range && cs > 0 && extract_mode_normalized != "spread_chunks" {
             crate::indesign::run_extraction_chunked(
                 &app,
                 &indd_path,
@@ -177,6 +184,7 @@ pub async fn extract_indd(
                 sm,
                 &pm_normalized,
                 sk,
+                &extract_mode_normalized,
                 debug_range,
             )
             .await

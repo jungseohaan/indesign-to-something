@@ -292,6 +292,7 @@ pub async fn run_extraction(
     spread_mode: bool,
     perf_mode: &str,
     skip_pdf: bool,
+    extract_mode: &str,
     physical_range: bool,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
@@ -313,16 +314,23 @@ pub async fn run_extraction(
     // - arguments[6] = configPath (conversion-config.json 경로, 빈 문자열이면 기본값)
     // - arguments[7] = perfMode ("fast"|"standard"|"high", SPEC-030)
     // - arguments[8] = skipPdf ("0"|"1", SPEC-030)
+    // - arguments[14] = skipValidation ("1": desktop extraction does not fail on validation warnings)
     let spread_flag = if spread_mode { "1" } else { "0" };
     let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
+    let skip_validation_flag = "1";
+    let extract_mode = if extract_mode.trim().is_empty() {
+        "full"
+    } else {
+        extract_mode
+    };
     // config 파일: 번들 리소스에서 찾거나 빈 문자열
     let config_path = find_bundled_config(&app);
     // 디버그 로그: config 경로를 추출 디렉토리에 기록
     let _ = std::fs::write(
         output_dir.join("_config_debug.log"),
         format!(
-            "config_path={}\nperfMode={}\nskipPdf={}\n",
-            config_path, perf_mode, skip_pdf
+            "config_path={}\nperfMode={}\nskipPdf={}\nextractMode={}\nskipValidation={}\n",
+            config_path, perf_mode, skip_pdf, extract_mode, skip_validation_flag
         ),
     );
     let applescript = format!(
@@ -330,7 +338,7 @@ pub async fn run_extraction(
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "", "{physical_range_flag}"}}
+            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "{extract_mode}", "", "{physical_range_flag}", "", "{skip_validation_flag}"}}
         end timeout
     end tell
 end using terms from"#,
@@ -344,7 +352,9 @@ end using terms from"#,
         config_path = config_path,
         perf_mode = perf_mode,
         skip_pdf_flag = skip_pdf_flag,
+        extract_mode = extract_mode,
         physical_range_flag = if physical_range { "1" } else { "" },
+        skip_validation_flag = skip_validation_flag,
     );
 
     // 진행률: 추출 실행 중
@@ -494,8 +504,9 @@ end using terms from"#,
                         "open" => 250,
                         "idml" => {
                             let pages = if total > 0 { total as u64 } else { 1 };
-                            (pages * 15).clamp(300, 1800)
+                            (pages * 45).clamp(900, 3300)
                         }
+                        "planning" => 1800,
                         // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
                         "pdf" => 600,
                         "rendered_frames" | "render_badge" | "render_frame" => 1800,
@@ -508,6 +519,7 @@ end using terms from"#,
                         "open" => "문서 열기 중...".to_string(),
                         "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
                         "idml" => "IDML 내보내기 중...".to_string(),
+                        "planning" => "추출 계획 생성 중...".to_string(),
                         "resolved" if total > 0 => format!("resolved 수집 중... ({}페이지)", total),
                         "resolved" => "resolved 수집 중...".to_string(),
                         "resolved_styles" if total > 0 => {
@@ -625,6 +637,14 @@ end using terms from"#,
                 .message
                 .unwrap_or_else(|| "알 수 없는 오류".to_string());
             return Err(format!("InDesign 추출 오류: {}", msg));
+        } else if done_signal.status == "warning" {
+            emit_extract_warning_log(
+                app,
+                done_signal
+                    .message
+                    .as_deref()
+                    .unwrap_or("InDesign 추출 validation warning"),
+            );
         }
     } else {
         for _ in 0..10 {
@@ -644,6 +664,14 @@ end using terms from"#,
                     .message
                     .unwrap_or_else(|| "알 수 없는 오류".to_string());
                 return Err(format!("InDesign 추출 오류: {}", msg));
+            } else if done_signal.status == "warning" {
+                emit_extract_warning_log(
+                    app,
+                    done_signal
+                        .message
+                        .as_deref()
+                        .unwrap_or("InDesign 추출 validation warning"),
+                );
             }
         }
     }
@@ -718,14 +746,15 @@ pub async fn run_extraction_with_skip(
     let output_dir_str = output_dir.to_string_lossy().to_string();
     let spread_flag = if spread_mode { "1" } else { "0" };
     let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
+    let skip_validation_flag = "1";
     let config_path = find_bundled_config(app);
-    // arguments[9] = skipRenderPages JSON, arguments[10] = mode "full"
+    // arguments[9] = skipRenderPages JSON, arguments[10] = mode "full", arguments[14] = skipValidation
     let applescript = format!(
         r#"using terms from application "{app_name}"
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full"}}
+            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full", "", "", "", "{skip_validation_flag}"}}
         end timeout
     end tell
 end using terms from"#,
@@ -740,6 +769,7 @@ end using terms from"#,
         perf_mode = perf_mode,
         skip_pdf_flag = skip_pdf_flag,
         skip_render_pages = skip_render_pages_json,
+        skip_validation_flag = skip_validation_flag,
     );
     emit_progress(app, "exporting", "부분 재추출 중 (변경 페이지만)...");
     let script_file = output_dir.join("_extract.applescript");
@@ -831,6 +861,13 @@ end using terms from"#,
                     "부분 추출 오류: {}",
                     sig.message.unwrap_or_default()
                 ));
+            } else if sig.status == "warning" {
+                emit_extract_warning_log(
+                    app,
+                    sig.message
+                        .as_deref()
+                        .unwrap_or("부분 추출 validation warning"),
+                );
             }
         }
     }
@@ -1106,6 +1143,7 @@ pub async fn run_extraction_chunked(
         spread_mode,
         perf_mode,
         skip_pdf,
+        "full",
         true,
     )
     .await?;
@@ -1215,14 +1253,15 @@ async fn run_extraction_followup_chunk(
     let output_dir_str = output_dir.to_string_lossy().to_string();
     let spread_flag = if spread_mode { "1" } else { "0" };
     let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
+    let skip_validation_flag = "1";
     let config_path = find_bundled_config(app);
-    // args[9]="" (no skip pages), args[10]="full", args[11]="1" (chunkMode), args[12]="1" (physicalRange)
+    // args[9]="" (no skip pages), args[10]="full", args[11]="1" (chunkMode), args[12]="1" (physicalRange), args[14]="1" (skipValidation)
     let applescript = format!(
         r#"using terms from application "{app_name}"
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "1", "1"}}
+            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "1", "1", "", "{skip_validation_flag}"}}
         end timeout
     end tell
 end using terms from"#,
@@ -1236,6 +1275,7 @@ end using terms from"#,
         config_path = config_path,
         perf_mode = perf_mode,
         skip_pdf_flag = skip_pdf_flag,
+        skip_validation_flag = skip_validation_flag,
     );
     let script_file = output_dir.join(format!(
         "_extract_chunk_{}_{}.applescript",
@@ -1306,6 +1346,13 @@ end using terms from"#,
                     end_page,
                     sig.message.unwrap_or_else(|| "알 수 없는 오류".to_string())
                 ));
+            } else if sig.status == "warning" {
+                emit_extract_warning_log(
+                    app,
+                    sig.message
+                        .as_deref()
+                        .unwrap_or("청크 추출 validation warning"),
+                );
             }
         }
     }
@@ -1320,6 +1367,20 @@ fn emit_progress(app: &AppHandle, phase: &str, message: &str) {
         ExtractionProgress {
             phase: phase.to_string(),
             message: message.to_string(),
+        },
+    );
+}
+
+fn emit_extract_warning_log(app: &AppHandle, message: &str) {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let _ = app.emit(
+        "conversion-log",
+        crate::commands::LogEvent {
+            message: format!("[InDesign validation warning] {}", message),
+            timestamp,
         },
     );
 }

@@ -259,6 +259,7 @@ export function TeachingPage() {
         endPage: null,
         perfMode: "fast",
         skipPdf: true,
+        extractMode: "spread_chunks",
         chunkSize: null,
       });
       setIsExtracting(false);

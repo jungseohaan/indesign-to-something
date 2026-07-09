@@ -141,6 +141,7 @@ pub fn compute_cache_key(
     // 서로 다른 캐시 엔트리로 분리.
     perf_mode: &str,
     skip_pdf: bool,
+    extract_mode: &str,
 ) -> String {
     let mut hasher = Sha256::new();
 
@@ -174,6 +175,9 @@ pub fn compute_cache_key(
     hasher.update(perf_mode.as_bytes());
     hasher.update(b"|skipPdf:");
     hasher.update(if skip_pdf { b"1|" } else { b"0|" });
+    hasher.update(b"|extractMode:");
+    hasher.update(extract_mode.as_bytes());
+    hasher.update(b"|");
 
     let digest = hasher.finalize();
     format!("{:x}", digest)

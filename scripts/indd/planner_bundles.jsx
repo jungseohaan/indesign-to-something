@@ -65,7 +65,7 @@ function _plannerBundleDocument(bundles, summary) {
 }
 
 function _plannerBundleFromCandidate(candidate, clusterIndex) {
-    var sourceIds = _sortedNumericIds(candidate.sourceObjectIds || []);
+    var sourceIds = _internSourceSetIds(candidate.sourceObjectIds || []);
     var primarySourceObjectId = candidate.primarySourceObjectId !== undefined
             ? candidate.primarySourceObjectId
             : (sourceIds.length > 0 ? sourceIds[0] : null);
@@ -91,14 +91,14 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     slotSources = _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources);
     slotSources = _plannerBundleWithoutPlacedContentBranches(
             declaredCandidate, slot, slotSources, clusterIndex);
-    var exportSourceObjectIds = _sortedNumericIds(declaredCandidate.exportSourceObjectIds || []);
+    var exportSourceObjectIds = _internSourceSetIds(declaredCandidate.exportSourceObjectIds || []);
     if (_plannerBundleShouldExportInlineSimpleMarkerCompletePng(
             declaredCandidate, slot, slotSources, sourceIds, exportSourceObjectIds, clusterIndex)) {
-        exportSourceObjectIds = _sortedNumericIds(sourceIds || []);
+        exportSourceObjectIds = _internSourceSetIds(sourceIds || []);
     }
     if (_plannerBundleShouldFillMissingSlotOnlyExport(
             declaredCandidate, exportSourceObjectIds, slotSources)) {
-        exportSourceObjectIds = _sortedNumericIds(slotSources.visualSourceObjectIds || []);
+        exportSourceObjectIds = _internSourceSetIds(slotSources.visualSourceObjectIds || []);
     }
     if (_plannerBundleShouldKeepShellVisualExportSources(
             slot, exportSourceObjectIds, slotSources)) {
@@ -107,7 +107,7 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     }
     if (_plannerBundleShouldUseAppliedMasterVisualSourcesAsExport(
             declaredCandidate, slot, exportSourceObjectIds, slotSources)) {
-        exportSourceObjectIds = _sortedNumericIds(slotSources.visualSourceObjectIds || []);
+        exportSourceObjectIds = _internSourceSetIds(slotSources.visualSourceObjectIds || []);
     }
     if (slot === "SHELL_SLOT" && slotSources.styleSourceObjectIds
             && slotSources.styleSourceObjectIds.length > 0) {
@@ -120,11 +120,16 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     if (slot === "CONTENT_VISUAL_SLOT"
             && (!slotSources.visualSourceObjectIds || slotSources.visualSourceObjectIds.length === 0)
             && exportSourceObjectIds && exportSourceObjectIds.length > 0) {
-        slotSources.visualSourceObjectIds = _sortedNumericIds(exportSourceObjectIds);
+        slotSources.visualSourceObjectIds = _internSourceSetIds(exportSourceObjectIds);
     }
     var hiddenVisualSourceObjectIds = _plannerBundleSourceIdsMinus(
             declaredCandidate.hiddenVisualSourceObjectIds || [], exportSourceObjectIds);
-    hiddenVisualSourceObjectIds = _plannerBundleSourceIdsIntersect(hiddenVisualSourceObjectIds, sourceIds);
+    var hiddenScopeSourceIds = declaredCandidate.mode === "SLOT_ONLY"
+            && clusterRelation === "BUNDLE_NARROWER_THAN_CLUSTER"
+            ? clusterSourceObjectIds
+            : sourceIds;
+    hiddenVisualSourceObjectIds = _plannerBundleSourceIdsIntersect(
+            hiddenVisualSourceObjectIds, hiddenScopeSourceIds);
     var materialization = _plannerBundleMaterialization(
             declaredCandidate, slot, slotSources, exportSourceObjectIds,
             hiddenVisualSourceObjectIds, clusterIndex);
@@ -168,7 +173,21 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         clusterHasTextFrame: clusterProfile.clusterHasTextFrame,
         clusterHasPlacedContent: clusterProfile.clusterHasPlacedContent,
         clusterHasVisualSource: clusterProfile.clusterHasVisualSource,
-        exportSourceObjectIds: exportSourceObjectIds,
+            sourceSetId: _sourceSetId(sourceIds),
+            clusterSourceSetId: _sourceSetId(clusterSourceObjectIds),
+            exportSourceSetId: _sourceSetId(exportSourceObjectIds),
+            hiddenSourceSetId: _sourceSetId(hiddenVisualSourceObjectIds),
+            exportSourceObjectIds: exportSourceObjectIds,
+        exportTargetObjectId: declaredCandidate.exportTargetObjectId !== undefined
+                ? declaredCandidate.exportTargetObjectId
+                : null,
+        atomicExportTargetObjectId: declaredCandidate.atomicExportTargetObjectId !== undefined
+                ? declaredCandidate.atomicExportTargetObjectId
+                : null,
+        atomicExportTargetObjectIds: _internSourceSetIds(
+                declaredCandidate.atomicExportTargetObjectIds || []),
+        atomicTextlessVectorContent: declaredCandidate.atomicTextlessVectorContent === true,
+        atomicContentVisualSlot: declaredCandidate.atomicContentVisualSlot === true,
         hiddenVisualSourceObjectIds: hiddenVisualSourceObjectIds,
         visualSourceObjectIds: slotSources.visualSourceObjectIds,
         styleSourceObjectIds: slotSources.styleSourceObjectIds,
@@ -616,7 +635,10 @@ function _plannerBundleWithCompletedVisibleFragmentContract(candidate, slot, clu
     for (var key in candidate) {
         if (candidate.hasOwnProperty(key)) copy[key] = candidate[key];
     }
-    copy.exportSourceObjectIds = _sortedNumericIds(slotSources.visualSourceObjectIds || []);
+    copy.exportSourceObjectIds = candidate.exportSourceObjectIds
+            && candidate.exportSourceObjectIds.length > 0
+            ? _sortedNumericIds(candidate.exportSourceObjectIds || [])
+            : _sortedNumericIds(slotSources.visualSourceObjectIds || []);
     copy.hiddenVisualSourceObjectIds = _sortedNumericIds(clusterProfile.omittedClusterSourceObjectIds || []);
     copy.mode = "SLOT_ONLY";
     if (slot === "SHELL_SLOT") copy.slotRole = copy.slotRole || "shell_slot_only";
@@ -627,12 +649,18 @@ function _plannerBundleShouldCompleteVisibleFragmentContract(candidate, slot, cl
     if (!candidate) return false;
     if (clusterRelation !== "BUNDLE_NARROWER_THAN_CLUSTER") return false;
     if (slot !== "SHELL_SLOT" && slot !== "CONTENT_VISUAL_SLOT") return false;
-    if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0) return false;
     if (candidate.hiddenVisualSourceObjectIds && candidate.hiddenVisualSourceObjectIds.length > 0) return false;
     if (!clusterProfile || !clusterProfile.omittedClusterSourceObjectIds
             || clusterProfile.omittedClusterSourceObjectIds.length === 0) return false;
     if (!slotSources || !slotSources.visualSourceObjectIds
             || slotSources.visualSourceObjectIds.length === 0) return false;
+    if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0
+            && !_plannerBundleSourceSetContainsAll(
+                    candidate.exportSourceObjectIds || [],
+                    slotSources.visualSourceObjectIds || [],
+                    null)) {
+        return false;
+    }
     if (slot === "SHELL_SLOT") {
         if (clusterProfile.clusterHasEditableText === true
                 && (!slotSources.ownedTextFrameIds || slotSources.ownedTextFrameIds.length === 0)) {

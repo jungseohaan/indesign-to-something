@@ -184,6 +184,20 @@ when no editable TextFrame/text carrier is omitted from the content fragment.
 Text-owning shell fragments use the same fields, but keep the editable
 TextFrame ids in `ownedTextFrameIds`.
 
+A large textless vector group may be finalized early as an atomic
+`CONTENT_VISUAL_SLOT` when source metadata proves that one closed Group root, or
+a small closed set of sibling Group roots, contains the executable visual source
+set. Editable TextFrames inside those roots remain HWPX-owned text when they
+are explicitly listed in the hidden/omitted source set; they are not absorbed
+into the visual slot. Stage 1 records broad provenance in `sourceObjectIds`, the
+executable visual closure in `exportSourceObjectIds`, any hidden text/style
+descendants in `hiddenVisualSourceObjectIds`, and the closed render root or
+root set in `exportTargetObjectId`/`atomicExportTargetObjectIds` or an
+equivalent atomic target reference. Later stages must not re-own or re-export
+internal polygon/vector children as independent visible candidates. They may
+use the atomic root set for PNG export while keeping the expanded source set as
+proof metadata.
+
 When a page item source tree contains placed content, Stage 1 must not also
 emit a partial `NATIVE_SOURCE_SHAPE`/vector owner for the ancestor shape. The
 placed-content frame is the closed `CONTENT_VISUAL_SLOT` owner for that source
@@ -625,6 +639,14 @@ Performance invariants:
 - Page-spanning source material emits explicit page-local slot plans before
   export, so no adjacent-page overflow copy or post-export ownership repair is
   needed.
+- Chunked extraction may reuse immutable document-level Stage 0 facts such as
+  IDML, z-order maps, resolved source metadata, and interned source-set indexes.
+  Each chunk still runs Stage 1 with its own page/placement context, and chunk
+  merge is a result merge only; it never reassigns source ownership.
+- A performance optimization is policy-compatible only when it preserves the
+  same source-slot registry and proof refs. Skipping repeated traversal,
+  copying, serialization, or diagnostic expansion is encouraged; skipping
+  ownership planning or validation is not.
 
 Migration milestones for performance work:
 

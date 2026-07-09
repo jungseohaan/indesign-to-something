@@ -1065,6 +1065,18 @@ function _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems,
     if (!indexes) return candidates;
     var sourceInfoById = indexes.sourceInfoById || {};
     var childIdsByParentId = indexes.childIdsByParentId || {};
+    var sourceOrderById = {};
+    var subtreeByRootId = {};
+    var inlineAnchorById = {};
+    var visibleVisualById = {};
+    var depthById = {};
+    var coveredDescendantGroupRoots = {};
+
+    for (var sourceOrderIndex = 0; sourceOrderIndex < sourceItems.length; sourceOrderIndex++) {
+        var orderedSource = sourceItems[sourceOrderIndex];
+        if (!orderedSource || orderedSource.id === null || orderedSource.id === undefined) continue;
+        sourceOrderById[String(orderedSource.id)] = sourceOrderIndex;
+    }
 
     function info(id) {
         return sourceInfoById ? sourceInfoById[String(id)] : null;
@@ -1072,14 +1084,20 @@ function _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems,
 
     function hasInlineAnchorMetadata(src) {
         if (!src) return false;
+        var cacheKey = String(src.id);
+        if (inlineAnchorById.hasOwnProperty(cacheKey)) return inlineAnchorById[cacheKey];
         var ap = String(src.anchoredPosition || "");
         var sp = String(src.storyAnchorPlacement || "");
-        if (ap.length > 0 && ap !== "PAGE") return true;
-        if (sp.length > 0 && sp !== "PAGE") return true;
-        return false;
+        var result = false;
+        if (ap.length > 0 && ap !== "PAGE") result = true;
+        if (sp.length > 0 && sp !== "PAGE") result = true;
+        inlineAnchorById[cacheKey] = result;
+        return result;
     }
 
     function collectSubtree(rootId) {
+        var rootKey = String(rootId);
+        if (subtreeByRootId.hasOwnProperty(rootKey)) return subtreeByRootId[rootKey];
         var ids = [], seen = {};
         function visit(id) {
             if (id === null || id === undefined || seen[String(id)]) return;
@@ -1089,18 +1107,54 @@ function _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems,
             for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
         }
         visit(rootId);
-        return _sortedNumericIds(ids);
+        subtreeByRootId[rootKey] = _sortedNumericIds(ids);
+        return subtreeByRootId[rootKey];
     }
 
     function sourceHasVisibleVisual(src) {
         if (!src) return false;
+        var cacheKey = String(src.id);
+        if (visibleVisualById.hasOwnProperty(cacheKey)) return visibleVisualById[cacheKey];
+        var result = false;
         if (String(src.kind || "") === "TextFrame") return false;
         if (src.visible === false || src.hiddenLayer === true) return false;
-        return src.hasPlacedVisual === true
+        result = src.hasPlacedVisual === true
                 || src.hasVisibleFill === true
                 || src.hasVisibleStroke === true
                 || src.hasCandidateVectorPaint === true
                 || String(src.kind || "") === "Group";
+        visibleVisualById[cacheKey] = result;
+        return result;
+    }
+
+    function sourceTreeDepth(src) {
+        if (!src || src.id === null || src.id === undefined) return 0;
+        var key = String(src.id);
+        if (depthById.hasOwnProperty(key)) return depthById[key];
+        var depth = 0;
+        var current = src;
+        var seen = {};
+        while (current && current.parentId !== null && current.parentId !== undefined) {
+            var parentKey = String(current.parentId);
+            if (seen[parentKey]) break;
+            seen[parentKey] = true;
+            var parent = info(current.parentId);
+            if (!parent) break;
+            depth++;
+            current = parent;
+        }
+        depthById[key] = depth;
+        return depth;
+    }
+
+    function markDescendantGroupRootsCovered(subtree, rootId) {
+        for (var i = 0; subtree && i < subtree.length; i++) {
+            var id = subtree[i];
+            if (String(id) === String(rootId)) continue;
+            var src = info(id);
+            if (!src || String(src.kind || "") !== "Group") continue;
+            coveredDescendantGroupRoots[String(id)] = true;
+        }
     }
 
     function pushCandidate(candidate) {
@@ -1111,9 +1165,24 @@ function _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems,
         candidates.push(candidate);
     }
 
-    for (var i = 0; i < sourceItems.length; i++) {
-        var root = sourceItems[i];
+    var groupRoots = [];
+    for (var gi = 0; gi < sourceItems.length; gi++) {
+        var groupRoot = sourceItems[gi];
+        if (!groupRoot || String(groupRoot.kind || "") !== "Group") continue;
+        groupRoots.push(groupRoot);
+    }
+    groupRoots.sort(function(a, b) {
+        var depthDelta = sourceTreeDepth(a) - sourceTreeDepth(b);
+        if (depthDelta !== 0) return depthDelta;
+        var ai = sourceOrderById[String(a.id)];
+        var bi = sourceOrderById[String(b.id)];
+        return Number(ai || 0) - Number(bi || 0);
+    });
+
+    for (var i = 0; i < groupRoots.length; i++) {
+        var root = groupRoots[i];
         if (!root || String(root.kind || "") !== "Group") continue;
+        if (coveredDescendantGroupRoots[String(root.id)]) continue;
         if (root.visible === false || root.hiddenLayer === true) continue;
         if (hasInlineAnchorMetadata(root)) continue;
         var subtree = collectSubtree(root.id);
@@ -1192,6 +1261,7 @@ function _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems,
             zOrder: root.zOrder !== undefined ? root.zOrder : 0,
             required: false
         });
+        markDescendantGroupRootsCovered(subtree, root.id);
     }
     return candidates;
 }
@@ -1482,10 +1552,21 @@ function _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourc
         if (!childIds || childIds.length === 0) return false;
         var set = {};
         for (var i = 0; ownerIds && i < ownerIds.length; i++) set[String(ownerIds[i])] = true;
+        return containsAllInSet(set, childIds);
+    }
+
+    function containsAllInSet(ownerSet, childIds) {
+        if (!childIds || childIds.length === 0) return false;
         for (var ci = 0; ci < childIds.length; ci++) {
-            if (!set[String(childIds[ci])]) return false;
+            if (!ownerSet || !ownerSet[String(childIds[ci])]) return false;
         }
         return true;
+    }
+
+    function idSet(ids) {
+        var set = {};
+        for (var i = 0; ids && i < ids.length; i++) set[String(ids[i])] = true;
+        return set;
     }
 
     function primaryId(candidate) {
@@ -1754,6 +1835,11 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     var sourceInfoById = indexes ? indexes.sourceInfoById || {} : {};
     var childIdsByParentId = indexes ? indexes.childIdsByParentId || {} : {};
     var pageWideBackgroundMinZByPage = {};
+    var descendantIdsBySourceId = {};
+    var clipCarryingParentIdBySourceId = {};
+    var nonPageAncestorIdsBySourceId = {};
+    var selfAndAncestorIdsBySourceId = {};
+    var sourceExpansionByKey = {};
 
     function ids(candidate, field) {
         return _sortedNumericIds(candidate && candidate[field] || []);
@@ -1852,6 +1938,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     }
 
     function descendantIds(sourceId) {
+        var cacheKey = String(sourceId);
+        if (descendantIdsBySourceId[cacheKey]) return descendantIdsBySourceId[cacheKey];
         var out = [];
         var seen = {};
         function visit(id) {
@@ -1862,25 +1950,41 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
         }
         visit(sourceId);
-        return _sortedNumericIds(out);
+        out = _sortedNumericIds(out);
+        descendantIdsBySourceId[cacheKey] = out;
+        return out;
     }
 
     function clipCarryingParentId(id) {
+        var key = String(id);
+        if (clipCarryingParentIdBySourceId.hasOwnProperty(key)) {
+            return clipCarryingParentIdBySourceId[key];
+        }
+        var out = null;
         try {
             if (sourceIndex && sourceIndex.clipCarryingParentIdOfSource) {
-                return sourceIndex.clipCarryingParentIdOfSource(id);
+                out = sourceIndex.clipCarryingParentIdOfSource(id);
             }
         } catch (eClipParent) {}
-        return null;
+        clipCarryingParentIdBySourceId[key] = out;
+        return out;
     }
 
     function expandSourceIds(sourceIds, includeTextLike, includeInlineFlow) {
+        var expansionRoots = sourceIds;
+        if (sourceIds && sourceIds.length > 128) {
+            expansionRoots = topLevelStructuralIds(sourceIds);
+        }
+        var cacheKey = _sourceSetKey(_sortedNumericIds(expansionRoots || []))
+                + "|text:" + (includeTextLike ? "1" : "0")
+                + "|inline:" + (includeInlineFlow ? "1" : "0");
+        if (sourceExpansionByKey[cacheKey]) return sourceExpansionByKey[cacheKey];
         var out = [];
         var seen = {};
         var expanded = [];
         var expandedSet = {};
-        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
-            var descendants = descendantIds(sourceIds[i]);
+        for (var i = 0; expansionRoots && i < expansionRoots.length; i++) {
+            var descendants = descendantIds(expansionRoots[i]);
             for (var di = 0; di < descendants.length; di++) {
                 _pushUniqueId(expanded, expandedSet, descendants[di]);
             }
@@ -1897,7 +2001,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             if (sourceIsStoryAnchoredMaterial(id)) continue;
             _pushUniqueId(out, seen, id);
         }
-        return _sortedNumericIds(out);
+        out = _sortedNumericIds(out);
+        sourceExpansionByKey[cacheKey] = out;
+        return out;
     }
 
     function sourceIsInlineFlow(id) {
@@ -2140,6 +2246,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     }
 
     function nonPageAncestorIds(id) {
+        var key = String(id);
+        if (nonPageAncestorIdsBySourceId[key]) return nonPageAncestorIdsBySourceId[key];
         var out = [];
         var seen = {};
         var cur = info(id);
@@ -2157,7 +2265,88 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             if (cur.parentId === null || cur.parentId === undefined) break;
             cur = info(cur.parentId);
         }
+        nonPageAncestorIdsBySourceId[key] = out;
         return out;
+    }
+
+    function idSetFromIds(ids) {
+        var set = {};
+        var count = 0;
+        for (var i = 0; ids && i < ids.length; i++) {
+            if (ids[i] === null || ids[i] === undefined) continue;
+            var key = String(ids[i]);
+            if (set[key]) continue;
+            set[key] = true;
+            count++;
+        }
+        set.__count = count;
+        return set;
+    }
+
+    function setsIntersect(a, b) {
+        if (!a || !b) return false;
+        var left = a;
+        var right = b;
+        if (a.__count !== undefined && b.__count !== undefined && Number(a.__count) > Number(b.__count)) {
+            left = b;
+            right = a;
+        }
+        for (var key in left) {
+            if (!left.hasOwnProperty(key) || key === "__count") continue;
+            if (right[key]) return true;
+        }
+        return false;
+    }
+
+    function selfAndAncestorIds(id) {
+        var key = String(id);
+        if (selfAndAncestorIdsBySourceId[key]) return selfAndAncestorIdsBySourceId[key];
+        var out = [];
+        var seen = {};
+        var cur = info(id);
+        var guard = 0;
+        while (cur && guard++ < 64) {
+            if (cur.id !== null && cur.id !== undefined && !seen[String(cur.id)]) {
+                seen[String(cur.id)] = true;
+                out.push(cur.id);
+            }
+            if (cur.parentId === null || cur.parentId === undefined) break;
+            cur = info(cur.parentId);
+        }
+        selfAndAncestorIdsBySourceId[key] = out;
+        return out;
+    }
+
+    function selfAndAncestorSet(ids) {
+        var set = {};
+        var count = 0;
+        for (var i = 0; ids && i < ids.length; i++) {
+            var lineage = selfAndAncestorIds(ids[i]);
+            for (var li = 0; li < lineage.length; li++) {
+                var key = String(lineage[li]);
+                if (set[key]) continue;
+                set[key] = true;
+                count++;
+            }
+        }
+        set.__count = count;
+        return set;
+    }
+
+    function nonPageAncestorSetForIds(ids) {
+        var set = {};
+        var count = 0;
+        for (var i = 0; ids && i < ids.length; i++) {
+            var ancestors = nonPageAncestorIds(ids[i]);
+            for (var ai = 0; ai < ancestors.length; ai++) {
+                var key = String(ancestors[ai]);
+                if (set[key]) continue;
+                set[key] = true;
+                count++;
+            }
+        }
+        set.__count = count;
+        return set;
     }
 
     function sourceIdsHaveAncestorRelation(aIds, bIds) {
@@ -2177,6 +2366,15 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
 
     function entriesShareStructuralRoot(a, b) {
         if (!a || !b) return false;
+        if (a._sourceIdSet && b._sourceIdSet
+                && a._selfAndAncestorSet && b._selfAndAncestorSet
+                && a._nonPageAncestorSet && b._nonPageAncestorSet) {
+            if (setsIntersect(a._selfAndAncestorSet, b._sourceIdSet)
+                    || setsIntersect(b._selfAndAncestorSet, a._sourceIdSet)) {
+                return true;
+            }
+            return setsIntersect(a._nonPageAncestorSet, b._nonPageAncestorSet);
+        }
         var aIds = (a.sourceIds || []).concat(a.exportIds || []);
         var bIds = (b.sourceIds || []).concat(b.exportIds || []);
         if (sourceIdsHaveAncestorRelation(aIds, bIds)) return true;
@@ -2245,6 +2443,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         var idsForBounds = visibleExportIds(candidate);
         if (!idsForBounds || idsForBounds.length === 0) idsForBounds = sourceIds(candidate);
         if (!idsForBounds || idsForBounds.length === 0) return candidateBounds;
+        if (idsForBounds.length > 256 && boundsHasArea(candidateBounds)) {
+            return candidateBounds;
+        }
 
         var sourceSet = {};
         for (var i = 0; i < idsForBounds.length; i++) sourceSet[String(idsForBounds[i])] = true;
@@ -2262,6 +2463,21 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             b = unionBounds(b, sb);
         }
         return boundsHasArea(b) ? b : candidateBounds;
+    }
+
+    function topLevelStructuralIds(ids) {
+        ids = _sortedNumericIds(ids || []);
+        if (ids.length <= 128) return ids;
+        var sourceSet = {};
+        for (var i = 0; i < ids.length; i++) sourceSet[String(ids[i])] = true;
+        var out = [];
+        var seen = {};
+        for (var ii = 0; ii < ids.length; ii++) {
+            var id = ids[ii];
+            if (sourceHasAncestorInSet(id, sourceSet)) continue;
+            _pushUniqueId(out, seen, id);
+        }
+        return out.length > 0 && out.length < ids.length ? _sortedNumericIds(out) : ids;
     }
 
     function isEligible(candidate) {
@@ -2300,14 +2516,23 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     }
 
     function candidateEntry(candidate, index) {
+        var entrySourceIds = sourceIds(candidate);
+        var entryExportIds = visibleExportIds(candidate);
+        var structuralIds = unionSourceIds(entrySourceIds, entryExportIds || []);
+        var compactStructuralIds = topLevelStructuralIds(structuralIds);
         return {
             candidate: candidate,
             index: index,
             pageIndex: Number(candidate.pageIndex),
             bounds: effectiveCandidateBounds(candidate),
-            sourceIds: sourceIds(candidate),
-            exportIds: visibleExportIds(candidate),
-            zOrder: zOrderOfCandidate(candidate)
+            sourceIds: entrySourceIds,
+            exportIds: entryExportIds,
+            zOrder: zOrderOfCandidate(candidate),
+            _sourceIdSet: idSetFromIds(compactStructuralIds),
+            _selfAndAncestorSet: selfAndAncestorSet(compactStructuralIds),
+            _nonPageAncestorSet: nonPageAncestorSetForIds(compactStructuralIds),
+            _structuralSourceCount: structuralIds.length,
+            _compactStructuralSourceCount: compactStructuralIds.length
         };
     }
 
@@ -2524,6 +2749,94 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         return sourceHasCrossPageClipParent(id, pageIndex);
     }
 
+    function sourceIsDescendantOf(sourceId, rootId) {
+        if (sourceId === null || sourceId === undefined || rootId === null || rootId === undefined) return false;
+        if (String(sourceId) === String(rootId)) return true;
+        var cur = info(sourceId);
+        var guard = 0;
+        while (cur && cur.parentId !== null && cur.parentId !== undefined && guard++ < 128) {
+            if (String(cur.parentId) === String(rootId)) return true;
+            cur = info(cur.parentId);
+        }
+        return false;
+    }
+
+    function nearestClosedGroupRootForExportIds(sourceIds, exportIds, pageIndex, excludedTextFrameIds) {
+        if (!sourceIds || !exportIds || exportIds.length < 128) return null;
+        var sourceSet = {};
+        for (var si = 0; si < sourceIds.length; si++) sourceSet[String(sourceIds[si])] = true;
+        var first = info(exportIds[0]);
+        var roots = [];
+        var guard = 0;
+        while (first && guard++ < 128) {
+            var firstKind = String(first.kind || "");
+            if (sourceSet[String(first.id)] && firstKind === "Group"
+                    && sourceBelongsToPageTextlessGroupPage(first.id, pageIndex)) {
+                roots.push(first.id);
+            }
+            if (first.parentId === null || first.parentId === undefined) break;
+            first = info(first.parentId);
+        }
+        for (var ri = 0; ri < roots.length; ri++) {
+            var rootId = roots[ri];
+            var containsAll = true;
+            for (var ei = 0; ei < exportIds.length; ei++) {
+                if (!sourceIsDescendantOf(exportIds[ei], rootId)) {
+                    containsAll = false;
+                    break;
+                }
+            }
+            if (containsAll) return rootId;
+        }
+        return null;
+    }
+
+    function sourceHasAncestorInIdSet(id, idSet) {
+        var cur = info(id);
+        var guard = 0;
+        while (cur && cur.parentId !== null && cur.parentId !== undefined && guard++ < 128) {
+            if (idSet[String(cur.parentId)]) return true;
+            cur = info(cur.parentId);
+        }
+        return false;
+    }
+
+    function atomicExportTargetIdsForExportIds(sourceIds, exportIds, pageIndex, excludedTextFrameIds) {
+        if (exportIds && exportIds.length >= 128) {
+            var topExportIds = topLevelStructuralIds(exportIds);
+            if (topExportIds.length > 0 && topExportIds.length < exportIds.length) {
+                var topOut = [];
+                var topSeen = {};
+                for (var ti = 0; ti < topExportIds.length; ti++) {
+                    var topId = topExportIds[ti];
+                    if (!sourceBelongsToPageTextlessGroupPage(topId, pageIndex)) continue;
+                    var topSrc = info(topId);
+                    if (!topSrc || sourceIsTextLike(topId)) continue;
+                    _pushUniqueId(topOut, topSeen, topId);
+                }
+                if (topOut.length > 0) return _sortedNumericIds(topOut);
+            }
+        }
+        var rootId = nearestClosedGroupRootForExportIds(
+                sourceIds, exportIds, pageIndex, excludedTextFrameIds);
+        if (rootId !== null && rootId !== undefined) return [rootId];
+        if (!exportIds || exportIds.length < 128) return [];
+        var exportSet = {};
+        for (var ei = 0; ei < exportIds.length; ei++) exportSet[String(exportIds[ei])] = true;
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < exportIds.length; i++) {
+            var id = exportIds[i];
+            if (sourceHasAncestorInIdSet(id, exportSet)) continue;
+            if (!sourceBelongsToPageTextlessGroupPage(id, pageIndex)) continue;
+            var src = info(id);
+            if (!src || sourceIsTextLike(id)) continue;
+            _pushUniqueId(out, seen, id);
+        }
+        out = _sortedNumericIds(out);
+        return out.length > 0 && out.length < exportIds.length ? out : [];
+    }
+
     var appended = 0;
     var diagnostics = [];
     for (var pageKey in byPage) {
@@ -2557,6 +2870,10 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             var visualSourceIds = exportIds.slice(0);
             var executionSourceIds = subtractSourceIds(allSourceIds, excludedTextFrameIds);
             if (exportIds.length < 2 || allSourceIds.length < 2) continue;
+            var atomicTargetIds = atomicExportTargetIdsForExportIds(
+                    allSourceIds, exportIds, Number(pageKey), excludedTextFrameIds);
+            var atomicRootId = atomicTargetIds.length === 1 ? atomicTargetIds[0] : null;
+            var atomic = atomicTargetIds.length > 0;
             var candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
                     Number(pageKey),
@@ -2586,7 +2903,11 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 compositeRole: "page_textless_graphic_group",
                 slotRole: "page_textless_graphic_group",
                 exportSourceObjectIds: exportIds,
-                exportTargetObjectId: null,
+                exportTargetObjectId: atomicRootId,
+                atomicExportTargetObjectId: atomicRootId,
+                atomicExportTargetObjectIds: atomicTargetIds,
+                atomicTextlessVectorContent: atomic,
+                atomicContentVisualSlot: atomic,
                 hiddenVisualSourceObjectIds: excludedTextFrameIds,
                 visualSourceObjectIds: visualSourceIds,
                 styleSourceObjectIds: [],
@@ -2607,7 +2928,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 zOrder: minZ !== null ? minZ : 0,
                 coveredCandidateIds: coveredCandidateIds,
                 required: false,
-                reason: "page_textless_graphic_group_from_visual_adjacency"
+                reason: atomic
+                        ? "atomic_page_textless_vector_content_from_visual_adjacency"
+                        : "page_textless_graphic_group_from_visual_adjacency"
             });
             diagnostics.push({
                 candidateId: candidateId,
@@ -2616,6 +2939,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 coveredCandidateCount: coveredCandidateIds.length,
                 sourceObjectCount: allSourceIds.length,
                 exportSourceObjectCount: exportIds.length,
+                atomicTextlessVectorContent: atomic,
+                atomicExportTargetObjectId: atomicRootId,
+                atomicExportTargetObjectIds: atomicTargetIds,
                 hiddenTextFrameCount: excludedTextFrameIds.length,
                 pngOwnedTextFrameCount: 0,
                 bounds: b
@@ -2791,6 +3117,79 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         if (pi === null || pi === undefined || pageIndex === null || pageIndex === undefined) return true;
         if (Number(pi) === Number(pageIndex)) return true;
         return sourceHasCrossPageClipParent(id, pageIndex);
+    }
+
+    function sourceIsDescendantOf(sourceId, rootId) {
+        if (sourceId === null || sourceId === undefined || rootId === null || rootId === undefined) return false;
+        if (String(sourceId) === String(rootId)) return true;
+        var cur = info(sourceId);
+        var guard = 0;
+        while (cur && cur.parentId !== null && cur.parentId !== undefined && guard++ < 128) {
+            if (String(cur.parentId) === String(rootId)) return true;
+            cur = info(cur.parentId);
+        }
+        return false;
+    }
+
+    function nearestClosedGroupRootForExportIds(sourceIds, exportIds, pageIndex, hiddenTextFrameIds) {
+        if (!sourceIds || !exportIds || exportIds.length < 128) return null;
+        var sourceSet = {};
+        for (var si = 0; si < sourceIds.length; si++) sourceSet[String(sourceIds[si])] = true;
+        var first = info(exportIds[0]);
+        var roots = [];
+        var guard = 0;
+        while (first && guard++ < 128) {
+            var firstKind = String(first.kind || "");
+            if (sourceSet[String(first.id)] && firstKind === "Group"
+                    && sourceBelongsToPageTextlessGroupPage(first.id, pageIndex)) {
+                roots.push(first.id);
+            }
+            if (first.parentId === null || first.parentId === undefined) break;
+            first = info(first.parentId);
+        }
+        for (var ri = 0; ri < roots.length; ri++) {
+            var rootId = roots[ri];
+            var containsAll = true;
+            for (var ei = 0; ei < exportIds.length; ei++) {
+                if (!sourceIsDescendantOf(exportIds[ei], rootId)) {
+                    containsAll = false;
+                    break;
+                }
+            }
+            if (containsAll) return rootId;
+        }
+        return null;
+    }
+
+    function sourceHasAncestorInIdSet(id, idSet) {
+        var cur = info(id);
+        var guard = 0;
+        while (cur && cur.parentId !== null && cur.parentId !== undefined && guard++ < 128) {
+            if (idSet[String(cur.parentId)]) return true;
+            cur = info(cur.parentId);
+        }
+        return false;
+    }
+
+    function atomicExportTargetIdsForExportIds(sourceIds, exportIds, pageIndex, hiddenTextFrameIds) {
+        var rootId = nearestClosedGroupRootForExportIds(
+                sourceIds, exportIds, pageIndex, hiddenTextFrameIds);
+        if (rootId !== null && rootId !== undefined) return [rootId];
+        if (!exportIds || exportIds.length < 128) return [];
+        var exportSet = {};
+        for (var ei = 0; ei < exportIds.length; ei++) exportSet[String(exportIds[ei])] = true;
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < exportIds.length; i++) {
+            var id = exportIds[i];
+            if (sourceHasAncestorInIdSet(id, exportSet)) continue;
+            if (!sourceBelongsToPageTextlessGroupPage(id, pageIndex)) continue;
+            var src = info(id);
+            if (!src || sourceIsTextLike(id)) continue;
+            _pushUniqueId(out, seen, id);
+        }
+        out = _sortedNumericIds(out);
+        return out.length > 0 && out.length < exportIds.length ? out : [];
     }
 
     function filterPageTextlessGroupSourceIds(sourceIds, pageIndex) {
@@ -3219,7 +3618,22 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
             merged.completePngTextAllowed = false;
             merged.materialization = "EXTRACTED_PNG_VECTOR";
             merged.textAction = merged.requiresTextHidden ? "OWNED_BY_HWPX_TEXT" : "DROP_TEXT";
+            var atomicTargetIds = atomicExportTargetIdsForExportIds(
+                    merged.sourceObjectIds || [],
+                    merged.exportSourceObjectIds || [],
+                    Number(pageKey),
+                    merged.hiddenTextFrameIds || []);
+            var atomicRootId = atomicTargetIds.length === 1 ? atomicTargetIds[0] : null;
+            var atomic = atomicTargetIds.length > 0;
+            merged.exportTargetObjectId = atomicRootId;
+            merged.atomicExportTargetObjectId = atomicRootId;
+            merged.atomicExportTargetObjectIds = atomicTargetIds;
+            merged.atomicTextlessVectorContent = atomic;
+            merged.atomicContentVisualSlot = atomic;
             merged.reason = "merged_visual_adjacency_page_textless_graphic_group_candidates";
+            if (atomic) {
+                merged.reason = "merged_atomic_page_textless_vector_content";
+            }
             merged.candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
                     Number(pageKey),
@@ -3238,6 +3652,9 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
                 mergedCandidateIds: mergedCandidateIds,
                 sourceObjectCount: merged.sourceObjectIds.length,
                 exportSourceObjectCount: merged.exportSourceObjectIds.length,
+                atomicTextlessVectorContent: atomic,
+                atomicExportTargetObjectId: atomicRootId,
+                atomicExportTargetObjectIds: atomicTargetIds,
                 hiddenTextFrameCount: merged.hiddenTextFrameIds.length,
                 pngOwnedTextFrameCount: merged.ownedTextFrameIds.length,
                 bounds: merged.bounds
@@ -3430,6 +3847,20 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
         return true;
     }
 
+    function pageTextlessSuppressIdSet(ids) {
+        var set = {};
+        for (var i = 0; ids && i < ids.length; i++) set[String(ids[i])] = true;
+        return set;
+    }
+
+    function pageTextlessSuppressContainsAll(ownerSet, childIds) {
+        if (!childIds || childIds.length === 0) return false;
+        for (var i = 0; i < childIds.length; i++) {
+            if (!ownerSet || !ownerSet[String(childIds[i])]) return false;
+        }
+        return true;
+    }
+
     function isPageGroup(candidate) {
         return candidate && candidate.passId === "pass.page_textless_graphic_groups";
     }
@@ -3464,6 +3895,8 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
             sourceIds: ids(group, "sourceObjectIds"),
             exportIds: visibleExportIds(group)
         });
+        groups[groups.length - 1].sourceSet = pageTextlessSuppressIdSet(groups[groups.length - 1].sourceIds);
+        groups[groups.length - 1].exportSet = pageTextlessSuppressIdSet(groups[groups.length - 1].exportIds);
     }
     if (groups.length === 0) return { candidates: candidates, suppressedCount: 0, suppressed: [] };
 
@@ -3480,8 +3913,8 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
         for (var gg = 0; gg < groups.length; gg++) {
             var owner = groups[gg];
             if (String(candidate.pageIndex) !== String(owner.candidate.pageIndex)) continue;
-            if (!containsAll(owner.exportIds, childVisibleIds)
-                    && !containsAll(owner.sourceIds, ids(candidate, "sourceObjectIds"))) {
+            if (!pageTextlessSuppressContainsAll(owner.exportSet, childVisibleIds)
+                    && !pageTextlessSuppressContainsAll(owner.sourceSet, ids(candidate, "sourceObjectIds"))) {
                 continue;
             }
             coveredBy = owner.candidate;
@@ -5563,6 +5996,21 @@ function _inlineFlowVisualRootCandidateSnapshot(candidates, label) {
     return out;
 }
 
+function _candidateListHasObjectPlanLikeExecutionFields(candidates) {
+    if (!candidates || candidates.length === 0) return false;
+    var checked = 0;
+    for (var i = 0; i < candidates.length; i++) {
+        var candidate = candidates[i];
+        if (!candidate || candidate.disabled === true) continue;
+        if (candidate.passId === "pass.master_page_graphics") continue;
+        checked++;
+        if (!candidate.visualAction || !candidate.placement || !candidate.ownershipSlot) {
+            return false;
+        }
+    }
+    return checked > 0;
+}
+
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
     var candidates = [];
@@ -5673,6 +6121,14 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
     candidates = _normalizePageCoordinateCandidateBounds(candidates, sourceIndex);
     _marker(ctx.outputDir, "03d13b_plan_normalizePageCoordinateBounds");
+    var preObjectPlanSourceSlotCanonicalizationDiagnostics = null;
+    if (_candidateListHasObjectPlanLikeExecutionFields(candidates)) {
+        preObjectPlanSourceSlotCanonicalizationDiagnostics =
+                _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(
+                        candidates, sourceItems);
+        candidates = preObjectPlanSourceSlotCanonicalizationDiagnostics.candidates;
+    }
+    _marker(ctx.outputDir, "03d13c_plan_preObjectPlanCanonicalizeSourceSlots");
     if (ctx.writePlannerDiagnostics === true) {
         try {
             writeJson(ctx.outputDir + "/inline-flow-root-before-planner-bundles.json",
@@ -5699,6 +6155,12 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     var sourceSlotCanonicalizationDiagnostics = _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(
             executionCandidates, sourceItems);
     executionCandidates = sourceSlotCanonicalizationDiagnostics.candidates;
+    if (preObjectPlanSourceSlotCanonicalizationDiagnostics) {
+        try {
+            sourceSlotCanonicalizationDiagnostics.preObjectPlanDiagnostics =
+                    preObjectPlanSourceSlotCanonicalizationDiagnostics.diagnostics;
+        } catch (ePreObjectPlanCanonicalizationAttach) {}
+    }
     if (ctx.writePlannerDiagnostics === true) {
         try {
             writeJson(ctx.outputDir + "/source-slot-canonicalization-diagnostics.json",

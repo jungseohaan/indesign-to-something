@@ -676,6 +676,11 @@ function _slimObjectPlanForWrite(plan) {
         "ownedTextFrameSetId",
         "exportSourceObjectIds",
         "exportSourceSetId",
+        "exportTargetObjectId",
+        "atomicExportTargetObjectId",
+        "atomicExportTargetObjectIds",
+        "atomicTextlessVectorContent",
+        "atomicContentVisualSlot",
         "hiddenVisualSourceObjectIds",
         "hiddenVisualSourceSetId",
         "materialization",
@@ -1312,13 +1317,19 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         primarySourceObjectId: bundle.primarySourceObjectId !== undefined
                 ? bundle.primarySourceObjectId
                 : null,
-        ownedByNativeShellSourceObjectIds: _sortedNumericIds(
+        sourceSetId: bundle.sourceSetId || _sourceSetId(bundle.sourceObjectIds || []),
+        sourceRootSetId: bundle.sourceRootSetId || _sourceSetId(bundle.sourceRootObjectIds || []),
+        clusterSourceSetId: bundle.clusterSourceSetId || _sourceSetId(bundle.clusterSourceObjectIds || []),
+        visualSourceSetId: bundle.visualSourceSetId || _sourceSetId(bundle.visualSourceObjectIds || []),
+        exportSourceSetId: bundle.exportSourceSetId || _sourceSetId(bundle.exportSourceObjectIds || []),
+        hiddenSourceSetId: bundle.hiddenSourceSetId || _sourceSetId(bundle.hiddenVisualSourceObjectIds || []),
+        ownedByNativeShellSourceObjectIds: _internSourceSetIds(
                 bundle.ownedByNativeShellSourceObjectIds || []),
-        sourceObjectIds: _sortedNumericIds(bundle.sourceObjectIds || []),
-        sourceRootObjectIds: _sortedNumericIds(bundle.sourceRootObjectIds || []),
-        clusterSourceObjectIds: _sortedNumericIds(bundle.clusterSourceObjectIds || []),
+        sourceObjectIds: _internSourceSetIds(bundle.sourceObjectIds || []),
+        sourceRootObjectIds: _internSourceSetIds(bundle.sourceRootObjectIds || []),
+        clusterSourceObjectIds: _internSourceSetIds(bundle.clusterSourceObjectIds || []),
         clusterKindCounts: bundle.clusterKindCounts || {},
-        omittedClusterSourceObjectIds: _sortedNumericIds(bundle.omittedClusterSourceObjectIds || []),
+        omittedClusterSourceObjectIds: _internSourceSetIds(bundle.omittedClusterSourceObjectIds || []),
         omittedClusterKindCounts: bundle.omittedClusterKindCounts || {},
         clusterHasEditableText: bundle.clusterHasEditableText === true,
         clusterHasTextFrame: bundle.clusterHasTextFrame === true,
@@ -1327,8 +1338,18 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         visualSourceObjectIds: visualSourceObjectIds,
         styleSourceObjectIds: styleSourceObjectIds,
         ownedTextFrameIds: ownedTextFrameIds,
-        exportSourceObjectIds: _sortedNumericIds(bundle.exportSourceObjectIds || []),
-        hiddenVisualSourceObjectIds: _sortedNumericIds(bundle.hiddenVisualSourceObjectIds || []),
+        exportSourceObjectIds: _internSourceSetIds(bundle.exportSourceObjectIds || []),
+        exportTargetObjectId: bundle.exportTargetObjectId !== undefined
+                ? bundle.exportTargetObjectId
+                : null,
+        atomicExportTargetObjectId: bundle.atomicExportTargetObjectId !== undefined
+                ? bundle.atomicExportTargetObjectId
+                : null,
+        atomicExportTargetObjectIds: _internSourceSetIds(
+                bundle.atomicExportTargetObjectIds || []),
+        atomicTextlessVectorContent: bundle.atomicTextlessVectorContent === true,
+        atomicContentVisualSlot: bundle.atomicContentVisualSlot === true,
+        hiddenVisualSourceObjectIds: _internSourceSetIds(bundle.hiddenVisualSourceObjectIds || []),
         materialization: materialization,
         textAction: textAction,
         visualAction: visualAction,

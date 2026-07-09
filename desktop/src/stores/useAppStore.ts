@@ -655,6 +655,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             endPage: debugEndPage,
             perfMode,
             skipPdf: false,
+            extractMode: "spread_chunks",
             chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
           });
 

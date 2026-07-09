@@ -264,6 +264,12 @@ function _parseArgs(args) {
             || args[13] === "diagnostics"
             || ctx.perfMode === "diagnostics"
             || ctx.perfMode === "debug";
+    ctx.skipValidation = args[14] === "1"
+            || args[14] === "--skip-validation"
+            || args[14] === "skip-validation";
+    ctx.reuseExistingIdml = args[15] === "1"
+            || args[15] === "--reuse-idml"
+            || args[15] === "reuse-idml";
     ctx.requestedStartPage = ctx.startPage;
     ctx.requestedEndPage = ctx.endPage;
     ctx.rangeInputMode = ctx.physicalRange ? "physical" : "auto";
@@ -290,6 +296,8 @@ function _parseArgs(args) {
         cfgLog.writeln("perfMode=" + ctx.perfMode);
         cfgLog.writeln("skipPdf=" + ctx.skipPdf);
         cfgLog.writeln("writePlannerDiagnostics=" + ctx.writePlannerDiagnostics);
+        cfgLog.writeln("skipValidation=" + ctx.skipValidation);
+        cfgLog.writeln("reuseExistingIdml=" + ctx.reuseExistingIdml);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
         try { cfgLog.writeln("moduleLoadDebug=" + _EXTRACT_MODULE_LOAD_DEBUG); } catch (eModuleDebugLog) {}
         cfgLog.close();

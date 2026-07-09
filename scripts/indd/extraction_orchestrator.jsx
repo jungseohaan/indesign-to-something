@@ -52,6 +52,21 @@ function _loadIdmlZOrderMap(ctx) {
         count: 0
     };
     try {
+        var existingMapFile = File(mapPath);
+        if (existingMapFile.exists) {
+            var existingDoc = readJson(mapPath);
+            var existingMap = existingDoc && existingDoc.zOrderBySourceObjectId
+                    ? existingDoc.zOrderBySourceObjectId
+                    : null;
+            if (existingMap) {
+                ctx.idmlZOrderBySourceObjectId = existingMap;
+                summary.status = "ok";
+                summary.reason = "reused_existing_map";
+                summary.count = existingDoc.count || 0;
+                writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
+                return existingMap;
+            }
+        }
         var repoRoot = _repoRootFromConfigPath(ctx.configPath);
         if (!repoRoot) {
             summary.reason = "missing_repo_root";
@@ -96,6 +111,355 @@ function _loadIdmlZOrderMap(ctx) {
     return null;
 }
 
+function _spreadChunkSafeName(value) {
+    return String(value === null || value === undefined ? "unknown" : value)
+            .replace(/[^A-Za-z0-9_.-]/g, "_");
+}
+
+function _ensureFolder(path) {
+    var folder = Folder(path);
+    if (!folder.exists) folder.create();
+    return folder;
+}
+
+function _selectedSpreadChunks(doc, ctx) {
+    var chunks = [];
+    var bySpread = {};
+    var order = [];
+    for (var pi = 0; pi < doc.pages.length; pi++) {
+        var page = doc.pages[pi];
+        var pageNumber = page.documentOffset + 1;
+        if (pageNumber < ctx.startPage || pageNumber > ctx.endPage) continue;
+        var spreadId = null;
+        try { spreadId = _pageSpreadIdForIndex(doc, pi); } catch (eSpreadId) {}
+        var spreadKey = spreadId !== null && spreadId !== undefined
+                ? String(spreadId)
+                : "page_" + String(pageNumber);
+        if (!bySpread[spreadKey]) {
+            bySpread[spreadKey] = {
+                spreadId: spreadId,
+                spreadKey: spreadKey,
+                pageIndexes: [],
+                startPage: pageNumber,
+                endPage: pageNumber
+            };
+            order.push(spreadKey);
+        }
+        bySpread[spreadKey].pageIndexes.push(pi);
+        bySpread[spreadKey].startPage = Math.min(bySpread[spreadKey].startPage, pageNumber);
+        bySpread[spreadKey].endPage = Math.max(bySpread[spreadKey].endPage, pageNumber);
+    }
+    for (var oi = 0; oi < order.length; oi++) {
+        var chunk = bySpread[order[oi]];
+        chunk.chunkIndex = chunks.length + 1;
+        chunk.pageCount = chunk.pageIndexes.length;
+        chunks.push(chunk);
+    }
+    return chunks;
+}
+
+function _cloneContextForSpreadChunk(ctx, chunk, chunkDir) {
+    var out = {};
+    for (var key in ctx) {
+        if (ctx.hasOwnProperty && !ctx.hasOwnProperty(key)) continue;
+        out[key] = ctx[key];
+    }
+    out.rootOutputDir = ctx.outputDir;
+    out.outputDir = chunkDir;
+    out.startPage = chunk.startPage;
+    out.endPage = chunk.endPage;
+    out.requestedStartPage = chunk.startPage;
+    out.requestedEndPage = chunk.endPage;
+    out.rangePageCount = chunk.pageCount;
+    out.rangeInputMode = "spread_chunk";
+    out.resolvedRangeMode = "spread_chunk";
+    out.chunkMode = false;
+    out.spreadChunkMode = true;
+    out.spreadChunkIndex = chunk.chunkIndex;
+    out.spreadChunkKey = chunk.spreadKey;
+    out.spreadChunkPageIndexes = chunk.pageIndexes.slice(0);
+    out.validationWarnings = [];
+    out.skippedValidationWarnings = [];
+    return out;
+}
+
+function _copyAndRewriteChunkFilePath(row, field, rootOutputDir, chunkDir, chunkLabel) {
+    if (!row || !row[field]) return;
+    var rel = String(row[field]);
+    if (rel.indexOf("rendered_frames/") !== 0) return;
+    var slash = rel.lastIndexOf("/");
+    var fileName = slash >= 0 ? rel.substring(slash + 1) : rel;
+    var prefixedName = chunkLabel + "__" + fileName;
+    var src = File(chunkDir + "/" + rel);
+    var destDir = _ensureFolder(rootOutputDir + "/rendered_frames");
+    var dest = File(destDir.fsName + "/" + prefixedName);
+    try {
+        if (src.exists && !dest.exists) src.copy(dest.fsName);
+    } catch (eCopyRendered) {}
+    row[field] = "rendered_frames/" + prefixedName;
+}
+
+function _rewriteChunkRenderedPathsInArray(rows, rootOutputDir, chunkDir, chunkLabel) {
+    for (var i = 0; rows && i < rows.length; i++) {
+        _copyAndRewriteChunkFilePath(rows[i], "file", rootOutputDir, chunkDir, chunkLabel);
+        _copyAndRewriteChunkFilePath(rows[i], "relPath", rootOutputDir, chunkDir, chunkLabel);
+        if (rows[i] && rows[i].files) {
+            for (var fi = 0; fi < rows[i].files.length; fi++) {
+                var wrapper = { file: rows[i].files[fi] };
+                _copyAndRewriteChunkFilePath(wrapper, "file", rootOutputDir, chunkDir, chunkLabel);
+                rows[i].files[fi] = wrapper.file;
+            }
+        }
+    }
+}
+
+function _mergeArrayUnique(target, rows, keyPrefix) {
+    if (!rows) return;
+    if (!target._seen) target._seen = {};
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var key = null;
+        try {
+            if (row && row.id !== null && row.id !== undefined) key = "id:" + row.id;
+            else if (row && row.self) key = "self:" + row.self;
+            else if (row && row.name) key = "name:" + row.name;
+            else if (row && row.pageIndex !== null && row.pageIndex !== undefined) key = "page:" + row.pageIndex;
+            else if (row && row.exportId) key = "export:" + row.exportId;
+        } catch (eKey) {}
+        if (!key) key = keyPrefix + ":" + i + ":" + target.length;
+        if (target._seen[key]) continue;
+        target._seen[key] = true;
+        target.push(row);
+    }
+}
+
+function _stripMergeSeenArrays(obj) {
+    for (var key in obj) {
+        if (!obj.hasOwnProperty(key)) continue;
+        if (obj[key] && obj[key]._seen) {
+            try { delete obj[key]._seen; } catch (eDeleteSeen) { obj[key]._seen = undefined; }
+        }
+    }
+}
+
+function _mergeObjectMap(target, source) {
+    for (var key in source) {
+        if (!source.hasOwnProperty(key)) continue;
+        target[key] = source[key];
+    }
+}
+
+function _mergeSpreadChunkOutputs(ctx, chunks) {
+    var resolved = {};
+    var resolvedArrayKeys = [
+        "paragraphStyles", "colors", "fonts", "stories", "textFrames", "pages",
+        "pageItems", "fontMetrics", "renderedTextFrames", "renderedPdfFrames",
+        "renderedGraphicFrames", "renderedImageFrames", "renderedFloatingItems",
+        "editableTextFrameIds", "textlessShellDiagnostics"
+    ];
+    for (var rk = 0; rk < resolvedArrayKeys.length; rk++) resolved[resolvedArrayKeys[rk]] = [];
+    var extractionResults = {
+        schemaVersion: 1,
+        policy: "POLICY-extraction-planning",
+        scriptVersion: EXTRACT_SCRIPT_VERSION,
+        mode: "spread-chunk-results",
+        sourceDocument: ctx.inddPath,
+        outputDir: ctx.outputDir,
+        pageRange: {
+            requestedStartPage: ctx.requestedStartPage,
+            requestedEndPage: ctx.requestedEndPage,
+            startPage: ctx.startPage,
+            endPage: ctx.endPage,
+            pageCount: ctx.pageCount,
+            rangePageCount: ctx.rangePageCount,
+            rangeInputMode: ctx.rangeInputMode,
+            resolvedRangeMode: "spread_chunks"
+        },
+        counts: {},
+        results: [],
+        diagnostics: [],
+        validation: { status: "OK", issueCount: 0, issues: [] }
+    };
+    var pageHashes = {};
+    var pageItemMap = {};
+    var chunkSummaries = [];
+    var atomicTextlessVectorCollectionSummary = {
+        enabled: false,
+        groupCount: 0,
+        coveredSourceObjectCount: 0,
+        targetRootCount: 0,
+        hiddenSourceObjectCount: 0,
+        skippedPageItemCount: 0,
+        compactRootCount: 0
+    };
+    for (var ci = 0; ci < chunks.length; ci++) {
+        var chunk = chunks[ci];
+        var chunkLabel = "spread_" + _spreadChunkSafeName(chunk.spreadKey);
+        var chunkDir = ctx.outputDir + "/chunks/" + chunkLabel;
+        var chunkResolved = readJson(chunkDir + "/resolved.json") || {};
+        var chunkResults = readJson(chunkDir + "/extraction-results.json") || {};
+        var chunkHashes = readJson(chunkDir + "/page_hashes.json") || {};
+        var chunkItemMap = readJson(chunkDir + "/page_item_map.json") || {};
+
+        if (!resolved.documentInfo && chunkResolved.documentInfo) resolved.documentInfo = chunkResolved.documentInfo;
+        for (var ar = 0; ar < resolvedArrayKeys.length; ar++) {
+            var arrayKey = resolvedArrayKeys[ar];
+            var rows = chunkResolved[arrayKey] || [];
+            _rewriteChunkRenderedPathsInArray(rows, ctx.outputDir, chunkDir, chunkLabel);
+            _mergeArrayUnique(resolved[arrayKey], rows, arrayKey);
+        }
+        var chunkAtomicSummary = chunkResolved.atomicTextlessVectorCollectionSummary || null;
+        if (chunkAtomicSummary && chunkAtomicSummary.enabled) {
+            atomicTextlessVectorCollectionSummary.enabled = true;
+            atomicTextlessVectorCollectionSummary.groupCount += Number(chunkAtomicSummary.groupCount || 0);
+            atomicTextlessVectorCollectionSummary.coveredSourceObjectCount += Number(chunkAtomicSummary.coveredSourceObjectCount || 0);
+            atomicTextlessVectorCollectionSummary.targetRootCount += Number(chunkAtomicSummary.targetRootCount || 0);
+            atomicTextlessVectorCollectionSummary.hiddenSourceObjectCount += Number(chunkAtomicSummary.hiddenSourceObjectCount || 0);
+            atomicTextlessVectorCollectionSummary.skippedPageItemCount += Number(chunkAtomicSummary.skippedPageItemCount || 0);
+            atomicTextlessVectorCollectionSummary.compactRootCount += Number(chunkAtomicSummary.compactRootCount || 0);
+        }
+        _rewriteChunkRenderedPathsInArray(chunkResults.results || [], ctx.outputDir, chunkDir, chunkLabel);
+        _mergeArrayUnique(extractionResults.results, chunkResults.results || [], "result");
+        _mergeArrayUnique(extractionResults.diagnostics, chunkResults.diagnostics || [], "diagnostic");
+        _mergeObjectMap(pageHashes, chunkHashes);
+        _mergeObjectMap(pageItemMap, chunkItemMap);
+        chunkSummaries.push({
+            chunkIndex: chunk.chunkIndex,
+            spreadKey: chunk.spreadKey,
+            startPage: chunk.startPage,
+            endPage: chunk.endPage,
+            pageCount: chunk.pageCount,
+            resultCount: chunkResults.results ? chunkResults.results.length : 0
+        });
+    }
+    _stripMergeSeenArrays(resolved);
+    _stripMergeSeenArrays(extractionResults);
+    if (atomicTextlessVectorCollectionSummary.enabled) {
+        resolved.atomicTextlessVectorCollectionSummary = atomicTextlessVectorCollectionSummary;
+    }
+    extractionResults.counts.renderedFloatingItems = resolved.renderedFloatingItems.length;
+    extractionResults.counts.renderedImageFrames = resolved.renderedImageFrames.length;
+    extractionResults.counts.renderedGraphicFrames = resolved.renderedGraphicFrames.length;
+    extractionResults.counts.renderedVectorFrames = 0;
+    extractionResults.counts.renderedMasterGraphics = 0;
+    extractionResults.counts.textFrameShellFrames = 0;
+    extractionResults.exportUnits = _buildExportUnitsFromExtractionResults(extractionResults);
+    writeResolvedJson(ctx.outputDir + "/resolved.json", resolved, ctx.outputDir);
+    writeJson(ctx.outputDir + "/extraction-results.json", extractionResults);
+    writeJson(ctx.outputDir + "/export-units.json", extractionResults.exportUnits);
+    writeJson(ctx.outputDir + "/page_hashes.json", pageHashes);
+    writeJson(ctx.outputDir + "/page_item_map.json", pageItemMap);
+    writeJson(ctx.outputDir + "/spread-chunks.json", {
+        schemaVersion: 1,
+        mode: "spread_chunks",
+        chunkCount: chunks.length,
+        chunks: chunkSummaries
+    });
+    writeJson(ctx.outputDir + "/extraction-plan.json", {
+        schemaVersion: 1,
+        policy: "POLICY-extraction-planning",
+        scriptVersion: EXTRACT_SCRIPT_VERSION,
+        mode: "spread-chunks-merged-plan",
+        sourceDocument: ctx.inddPath,
+        outputDir: ctx.outputDir,
+        pageRange: extractionResults.pageRange,
+        spreadChunks: chunkSummaries
+    });
+    writeJson(ctx.outputDir + "/_extract_stats.json", {
+        elapsed_ms: _phaseTimingState ? (new Date()).getTime() - _phaseTimingState.startTime : null,
+        total_page_count: ctx.pageCount,
+        requested_start_page: ctx.requestedStartPage,
+        requested_end_page: ctx.requestedEndPage,
+        start_page: ctx.startPage,
+        end_page: ctx.endPage,
+        page_count: ctx.rangePageCount,
+        spread_chunk_count: chunks.length
+    });
+}
+
+function _prepareSpreadChunkSourceInfoCache(doc, ctx) {
+    if (!ctx || ctx.spreadChunkSourceInfoById) return;
+    var startedAt = (new Date()).getTime();
+    var previousRangeTargetPageIndexesBySourceId = ctx.rangeTargetPageIndexesBySourceId;
+    var allItems = null;
+    var summary = {
+        schemaVersion: 1,
+        mode: "spread_chunks_source_info_cache",
+        status: "skipped",
+        itemCount: 0,
+        sourceObjectCount: 0,
+        elapsedMs: null,
+        sourceIndexStats: null
+    };
+    try {
+        _marker(ctx.outputDir, "03a_spreadChunkSourceInfoCache_start");
+        allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
+        ctx.rangeTargetPageIndexesBySourceId =
+                collectRangePageItems.lastTargetPageIndexesByItemId || {};
+        var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
+        ctx.spreadChunkSourceInfoById = sourceIndex && sourceIndex.sourceInfoById
+                ? sourceIndex.sourceInfoById
+                : {};
+        summary.status = "ok";
+        summary.itemCount = allItems ? allItems.length : 0;
+        summary.sourceObjectCount = sourceIndex && sourceIndex.sourceItems
+                ? sourceIndex.sourceItems.length
+                : 0;
+        summary.sourceIndexStats = sourceIndex ? (sourceIndex.stats || null) : null;
+        _marker(ctx.outputDir, "03a_spreadChunkSourceInfoCache_done");
+    } catch (eSpreadChunkSourceCache) {
+        ctx.spreadChunkSourceInfoById = null;
+        summary.status = "fallback";
+        summary.error = String(eSpreadChunkSourceCache);
+        try { _marker(ctx.outputDir, "03a_spreadChunkSourceInfoCache_fallback"); } catch (eMarker) {}
+    } finally {
+        summary.elapsedMs = (new Date()).getTime() - startedAt;
+        try { writeJson(ctx.outputDir + "/spread-chunk-source-info-cache.json", summary); } catch (eWriteSpreadCache) {}
+        ctx.rangeTargetPageIndexesBySourceId = previousRangeTargetPageIndexesBySourceId;
+        allItems = null;
+        try { $.gc(); } catch (eGc) {}
+    }
+}
+
+function _runSpreadChunkExtraction(doc, ctx) {
+    var chunks = _selectedSpreadChunks(doc, ctx);
+    if (!chunks || chunks.length === 0) {
+        throw new Error("spread_chunks mode found no selected spreads");
+    }
+    _ensureFolder(ctx.outputDir + "/chunks");
+    _prepareSpreadChunkSourceInfoCache(doc, ctx);
+    for (var ci = 0; ci < chunks.length; ci++) {
+        var chunk = chunks[ci];
+        var chunkLabel = "spread_" + _spreadChunkSafeName(chunk.spreadKey);
+        var chunkDir = ctx.outputDir + "/chunks/" + chunkLabel;
+        _ensureFolder(chunkDir);
+        writeProgress(ctx.outputDir, "spread_chunk", chunk.chunkIndex, chunks.length,
+                "spread " + chunk.spreadKey + " pages " + chunk.startPage + ".." + chunk.endPage);
+        var chunkCtx = _cloneContextForSpreadChunk(ctx, chunk, chunkDir);
+        var savedPhaseTiming = _phaseTimingState;
+        _phaseTimingState = null;
+        try {
+            var allItems = collectRangePageItems(doc, chunk.startPage, chunk.endPage);
+            chunkCtx.rangeTargetPageIndexesBySourceId = collectRangePageItems.lastTargetPageIndexesByItemId || {};
+            _marker(chunkCtx.outputDir, "03b_pageHashes_start");
+            try {
+                var pageData = buildPageData(doc, chunk.startPage, chunk.endPage, allItems);
+                writeJson(chunkCtx.outputDir + "/page_hashes.json", pageData.hashes);
+                writeJson(chunkCtx.outputDir + "/page_item_map.json", pageData.itemMap);
+            } catch (eChunkHash) {
+                $.writeln("[spread_chunks pageHash] error: " + eChunkHash);
+            }
+            _marker(chunkCtx.outputDir, "03b_pageHashes_done");
+            _runRenderPhases(doc, chunkCtx, allItems);
+            allItems = null;
+            try { $.gc(); } catch (eGc) {}
+        } finally {
+            _phaseTimingState = savedPhaseTiming;
+        }
+    }
+    _mergeSpreadChunkOutputs(ctx, chunks);
+}
+
 function _runRenderPhases(doc, ctx, allItems) {
     // 03c. allItems 전체 분류 캐시 — classifyTextFrame의 중복 DOM 호출 제거
     _ctfCache = {};
@@ -109,6 +473,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     try { writeJson(ctx.outputDir + "/_preclassify_stats.json", _preClassifyStats); } catch (ePreClassifyStats) {}
     _marker(ctx.outputDir, "03c_preClassify");
 
+    writeProgress(ctx.outputDir, "planning", 0, ctx.rangePageCount);
     _marker(ctx.outputDir, "03d_buildExtractionPlan_start");
     ctx.extractionPlan = _buildExtractionPlan(doc, ctx, allItems);
     _marker(ctx.outputDir, "03d_buildExtractionPlan_done");
@@ -398,7 +763,14 @@ function _runRenderPhases(doc, ctx, allItems) {
         writeJson(ctx.outputDir + "/extraction-results.json", extractionResults);
         writeJson(ctx.outputDir + "/export-units.json", extractionResults.exportUnits);
         if (extractionResults.validation && extractionResults.validation.status !== "OK") {
-            throw new Error("Extraction plan validation failed: " + extractionResults.validation.issueCount + " issue(s)");
+            _pushExtractionValidationWarning(
+                    ctx,
+                    "Extraction plan validation failed: "
+                            + extractionResults.validation.issueCount
+                            + " issue(s): "
+                            + _objectPlanGateIssueCodesForMessage(
+                                    _objectPlanGateIssueCodeCounts(
+                                            extractionResults.validation.issues || [])));
         }
     } catch (eExtractionResults) {
         try {
@@ -444,7 +816,19 @@ function _runRenderPhases(doc, ctx, allItems) {
     // 3. resolved 속성 수집
     _marker(ctx.outputDir, "10_collectResolved");
     writeProgress(ctx.outputDir, "resolved", 0, ctx.rangePageCount);
-    var resolved = collectResolved(doc, ctx.outputDir, ctx.rangePageCount, ctx.startPage, ctx.endPage, editableFrameIds, ctx.skipRenderPagesMap, allItems);
+    var resolvedOptions = {
+        extractionCandidates: ctx.extractionPlan && ctx.extractionPlan.candidates
+                ? ctx.extractionPlan.candidates
+                : [],
+        objectPlans: ctx.extractionPlan && ctx.extractionPlan.objectPlans
+                ? ctx.extractionPlan.objectPlans
+                : [],
+        executionCandidates: ctx.extractionPlan && ctx.extractionPlan.executionCandidates
+                ? ctx.extractionPlan.executionCandidates
+                : [],
+        renderedFloatingItems: renderedFloatingItems
+    };
+    var resolved = collectResolved(doc, ctx.outputDir, ctx.rangePageCount, ctx.startPage, ctx.endPage, editableFrameIds, ctx.skipRenderPagesMap, allItems, resolvedOptions);
     resolved.renderedTextFrames    = [];
     resolved.renderedPdfFrames     = [];
     resolved.renderedGraphicFrames = renderedGraphicFrames;
@@ -585,12 +969,21 @@ function main(args) {
             // chunkMode=true(후속 청크)면 이미 청크1에서 IDML이 생성되었으므로 생략
             _marker(ctx.outputDir, "02_idml_export");
             if (!ctx.chunkMode) {
-                writeProgress(ctx.outputDir, "idml", 0, ctx.pageCount);
-                doc.exportFile(ExportFormat.INDESIGN_MARKUP, File(ctx.outputDir + "/output.idml"));
+                var reusableIdml = File(ctx.outputDir + "/output.idml");
+                if (ctx.reuseExistingIdml === true && reusableIdml.exists) {
+                    writeProgress(ctx.outputDir, "idml_reuse", 0, ctx.pageCount);
+                    _marker(ctx.outputDir, "02_idml_reuse");
+                } else {
+                    writeProgress(ctx.outputDir, "idml", 0, ctx.pageCount);
+                    doc.exportFile(ExportFormat.INDESIGN_MARKUP, reusableIdml);
+                }
                 _marker(ctx.outputDir, "02b_idml_zorder_map");
                 _loadIdmlZOrderMap(ctx);
             }
 
+            if (ctx.extractMode === "spread_chunks") {
+                _runSpreadChunkExtraction(doc, ctx);
+            } else {
             // 2.5. allPageItems 수집 — 청크 범위(startPage..endPage)와
             // 같은 스프레드에서 범위 페이지를 실제로 침범하는 sibling-page 객체만 포함한다.
             // pageIndex는 source anchor일 뿐 visible-page ownership 경계가 아니다.
@@ -612,6 +1005,7 @@ function main(args) {
 
             _runRenderPhases(doc, ctx, allItems);
             allItems = null; try { $.gc(); } catch (e) {}
+            }
             } // end else (not pre_scan)
         }
 
@@ -625,7 +1019,19 @@ function main(args) {
         _marker(ctx.outputDir, "13_done");
 
         doc.close(SaveOptions.NO); doc = null;
-        writeDone(ctx.outputDir, "ok", null);
+        if (ctx.skippedValidationWarnings && ctx.skippedValidationWarnings.length > 0) {
+            writeJson(ctx.outputDir + "/validation-skipped-warnings.json", {
+                schemaVersion: 1,
+                reason: "skipValidation",
+                warningCount: ctx.skippedValidationWarnings.length,
+                warnings: ctx.skippedValidationWarnings
+            });
+        }
+        if (ctx.validationWarnings && ctx.validationWarnings.length > 0) {
+            writeDone(ctx.outputDir, "warning", ctx.validationWarnings.join("\n"));
+        } else {
+            writeDone(ctx.outputDir, "ok", null);
+        }
     } catch (e) {
         var errorMessage = "";
         try { errorMessage = e && e.message ? String(e.message) : String(e); } catch (eMsg) { errorMessage = "unknown error"; }

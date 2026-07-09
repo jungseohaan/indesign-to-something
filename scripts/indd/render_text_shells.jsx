@@ -1188,10 +1188,48 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             exportSourceObjectIds: exportIds
         });
 
-        var sourceItems = _itemsForSourceSet(exportIds);
+        var atomicTargetItem = null;
+        var atomicTargetId = null;
+        var atomicTargetIds = [];
+        var useAtomicTextlessVectorTarget = false;
+        if (isPageTextlessGraphicGroup && slotPlan.atomicTextlessVectorContent === true) {
+            atomicTargetIds = _sortedNumericIds(slotPlan.atomicExportTargetObjectIds || []);
+            atomicTargetId = slotPlan.atomicExportTargetObjectId !== undefined
+                    && slotPlan.atomicExportTargetObjectId !== null
+                    ? slotPlan.atomicExportTargetObjectId
+                    : slotPlan.exportTargetObjectId;
+            if (atomicTargetIds.length === 0
+                    && atomicTargetId !== null && atomicTargetId !== undefined) {
+                atomicTargetIds = [atomicTargetId];
+            }
+            if (atomicTargetId !== null && atomicTargetId !== undefined) {
+                try { atomicTargetItem = itemById ? itemById[String(atomicTargetId)] : null; } catch (eAtomicLookup) {}
+                if (!atomicTargetItem) {
+                    try {
+                        var fallbackDiagId = slotPlan.primarySourceObjectId;
+                        var fallbackDiagItem = fallbackDiagId !== null && fallbackDiagId !== undefined && itemById
+                                ? itemById[String(fallbackDiagId)]
+                                : null;
+                        atomicTargetItem = _findNestedPageItemById(fallbackDiagItem, atomicTargetId);
+                    } catch (eAtomicNestedLookup) {}
+                }
+            }
+            if (atomicTargetIds.length > 1) {
+                useAtomicTextlessVectorTarget = true;
+            } else {
+                useAtomicTextlessVectorTarget = atomicTargetItem !== null && atomicTargetItem !== undefined;
+            }
+        }
+
+        var sourceItems = useAtomicTextlessVectorTarget
+                ? (atomicTargetIds.length > 1 ? _itemsForSourceSet(atomicTargetIds) : [atomicTargetItem])
+                : _itemsForSourceSet(exportIds);
         if (sourceItems.length < 1) {
             return fail("planned_source_set_render_no_source_items", {
-                exportSourceObjectIds: exportIds
+                exportSourceObjectIds: exportIds,
+                atomicTextlessVectorContent: slotPlan.atomicTextlessVectorContent === true,
+                atomicExportTargetObjectId: atomicTargetId,
+                atomicExportTargetObjectIds: atomicTargetIds
             });
         }
 
@@ -1304,7 +1342,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     });
                 } catch (eSourceItemDebug) {}
                 var hiddenForItem = [];
-                try { hiddenForItem = _collectOutOfScopeChildrenForSourceIds(ordered[i], exportIds); } catch (eOutOfScope) {}
+                if (!useAtomicTextlessVectorTarget) {
+                    try { hiddenForItem = _collectOutOfScopeChildrenForSourceIds(ordered[i], exportIds); } catch (eOutOfScope) {}
+                }
                 try {
                     var hiddenSeen = {};
                     for (var hfi = 0; hfi < hiddenForItem.length; hfi++) {
@@ -1502,6 +1542,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 sourceItemCount: sourceItems.length,
                 duplicateCount: dups.length,
                 exportSourceObjectCount: exportIds.length,
+                atomicTextlessVectorContent: useAtomicTextlessVectorTarget,
+                atomicExportTargetObjectId: atomicTargetId,
+                atomicExportTargetObjectIds: atomicTargetIds,
                 fileName: fileName
             });
             return true;

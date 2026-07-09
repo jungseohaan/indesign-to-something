@@ -357,8 +357,173 @@ function collectComposedLines(tf) {
     return result;
 }
 
-function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems) {
+function _resolvedIdList(values) {
+    var out = [];
+    var seen = {};
+    if (!values || typeof values.length !== "number") return out;
+    for (var i = 0; i < values.length; i++) {
+        if (values[i] === null || values[i] === undefined) continue;
+        var key = String(values[i]);
+        if (seen[key]) continue;
+        seen[key] = true;
+        var num = Number(values[i]);
+        out.push(isFinite(num) ? num : values[i]);
+    }
+    out.sort(function(a, b) {
+        var na = Number(a);
+        var nb = Number(b);
+        if (isFinite(na) && isFinite(nb)) return na - nb;
+        return String(a) < String(b) ? -1 : (String(a) > String(b) ? 1 : 0);
+    });
+    return out;
+}
+
+function _resolvedAtomicRowsFromOptions(resolvedOptions) {
+    var rows = [];
+    if (!resolvedOptions) return rows;
+    var sources = [
+        resolvedOptions.executionCandidates || [],
+        resolvedOptions.renderedFloatingItems || [],
+        resolvedOptions.objectPlans || [],
+        resolvedOptions.extractionCandidates || []
+    ];
+    var seen = {};
+    for (var si = 0; si < sources.length; si++) {
+        var list = sources[si];
+        for (var i = 0; list && i < list.length; i++) {
+            var c = list[i];
+            if (!c || c.atomicTextlessVectorContent !== true) continue;
+            var targetIds = _resolvedIdList(c.atomicExportTargetObjectIds || []);
+            if (targetIds.length === 0 && c.atomicExportTargetObjectId !== null
+                    && c.atomicExportTargetObjectId !== undefined) {
+                targetIds = _resolvedIdList([c.atomicExportTargetObjectId]);
+            }
+            if (targetIds.length === 0 && c.exportTargetObjectId !== null
+                    && c.exportTargetObjectId !== undefined) {
+                targetIds = _resolvedIdList([c.exportTargetObjectId]);
+            }
+            if (targetIds.length === 0) continue;
+            var sourceIds = _resolvedIdList(c.sourceObjectIds || c.executionSourceObjectIds || []);
+            var exportIds = _resolvedIdList(c.exportSourceObjectIds || sourceIds);
+            if (sourceIds.length === 0) sourceIds = exportIds.slice(0);
+            if (sourceIds.length <= targetIds.length) continue;
+            var hiddenIds = _resolvedIdList(c.hiddenVisualSourceObjectIds
+                    || c.hiddenTextFrameIds
+                    || c.editableTextFrameIds
+                    || []);
+            var pageIndex = c.pageIndex !== undefined ? c.pageIndex : null;
+            var key = String(pageIndex) + "|" + targetIds.join(",") + "|"
+                    + sourceIds.length + "|" + sourceIds[0];
+            if (seen[key]) continue;
+            seen[key] = true;
+            rows.push({
+                candidateId: c.candidateId || c.objectPlanId || c.id || null,
+                passId: c.passId || null,
+                pageIndex: pageIndex,
+                sourceObjectIds: sourceIds,
+                exportSourceObjectIds: exportIds,
+                hiddenVisualSourceObjectIds: hiddenIds,
+                atomicExportTargetObjectIds: targetIds
+            });
+        }
+        if (rows.length > 0) break;
+    }
+    return rows;
+}
+
+function _buildResolvedAtomicCollectionIndex(resolvedOptions) {
+    var rows = _resolvedAtomicRowsFromOptions(resolvedOptions);
+    var index = {
+        rows: rows,
+        covered: {},
+        root: {},
+        hidden: {},
+        rootInfo: {},
+        summary: {
+            enabled: rows.length > 0,
+            groupCount: rows.length,
+            coveredSourceObjectCount: 0,
+            targetRootCount: 0,
+            hiddenSourceObjectCount: 0,
+            skippedPageItemCount: 0,
+            compactRootCount: 0
+        }
+    };
+    var coveredSeen = {};
+    var rootSeen = {};
+    var hiddenSeen = {};
+    for (var ri = 0; ri < rows.length; ri++) {
+        var row = rows[ri];
+        for (var si = 0; si < row.sourceObjectIds.length; si++) {
+            var sid = String(row.sourceObjectIds[si]);
+            index.covered[sid] = true;
+            if (!coveredSeen[sid]) {
+                coveredSeen[sid] = true;
+                index.summary.coveredSourceObjectCount++;
+            }
+        }
+        for (var hi = 0; hi < row.hiddenVisualSourceObjectIds.length; hi++) {
+            var hid = String(row.hiddenVisualSourceObjectIds[hi]);
+            index.hidden[hid] = true;
+            if (!hiddenSeen[hid]) {
+                hiddenSeen[hid] = true;
+                index.summary.hiddenSourceObjectCount++;
+            }
+        }
+        for (var ti = 0; ti < row.atomicExportTargetObjectIds.length; ti++) {
+            var tid = String(row.atomicExportTargetObjectIds[ti]);
+            index.root[tid] = true;
+            if (!rootSeen[tid]) {
+                rootSeen[tid] = true;
+                index.summary.targetRootCount++;
+            }
+            index.rootInfo[tid] = {
+                candidateId: row.candidateId,
+                passId: row.passId,
+                pageIndex: row.pageIndex,
+                sourceObjectCount: row.sourceObjectIds.length,
+                exportSourceObjectCount: row.exportSourceObjectIds.length,
+                hiddenSourceObjectCount: row.hiddenVisualSourceObjectIds.length,
+                atomicExportTargetObjectIds: row.atomicExportTargetObjectIds.slice(0)
+            };
+        }
+    }
+    return index;
+}
+
+function _resolvedAtomicShouldSkipPageItem(pi, data, atomicIndex) {
+    if (!atomicIndex || !atomicIndex.summary || !atomicIndex.summary.enabled) return false;
+    if (!data || data.id === null || data.id === undefined) return false;
+    var id = String(data.id);
+    if (!atomicIndex.covered[id]) return false;
+    if (atomicIndex.root[id]) return false;
+    if (atomicIndex.hidden[id]) return false;
+    try {
+        if (pi && pi.constructor && pi.constructor.name === "TextFrame") return false;
+    } catch (e) {}
+    return true;
+}
+
+function _resolvedAtomicShouldSkipRawPageItem(pi, atomicIndex) {
+    if (!atomicIndex || !atomicIndex.summary || !atomicIndex.summary.enabled) return false;
+    var id = null;
+    try { id = pi.id; } catch (eId) {}
+    if (id === null || id === undefined) return false;
+    var key = String(id);
+    if (!atomicIndex.covered[key]) return false;
+    if (atomicIndex.root[key]) return false;
+    if (atomicIndex.hidden[key]) return false;
+    try {
+        if (pi && pi.constructor && pi.constructor.name === "TextFrame") return false;
+    } catch (eType) {}
+    return true;
+}
+
+function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems, resolvedOptions) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
+    if (!resolvedOptions) resolvedOptions = {};
+    var atomicCollectionIndex = _buildResolvedAtomicCollectionIndex(resolvedOptions);
+    resolvedOptions.atomicCollectionIndex = atomicCollectionIndex;
 
     writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
     _marker(outputDir, "10a_documentInfo");
@@ -506,7 +671,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     var pages = collectPages(doc, startPage, endPage, skipRenderPagesMap);
     _marker(outputDir, "10l_collectPages_done");
     _marker(outputDir, "10m_collectPageItems");
-    var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems);
+    var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems, resolvedOptions);
     _marker(outputDir, "10m_collectPageItems_done");
     var nativeParentTextShellCandidates = collectNativeParentTextShellCandidates(textFrames, pageItems);
 
@@ -526,6 +691,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
         textFrames: textFrames,
         pages: pages,
         pageItems: pageItems,
+        atomicTextlessVectorCollectionSummary: atomicCollectionIndex.summary,
         nativeParentTextShellCandidates: nativeParentTextShellCandidates,
         fontMetrics: fontMetrics
     };
@@ -1055,12 +1221,17 @@ function collectPages(doc, startPage, endPage, skipRenderPagesMap) {
 }
 
 
-function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems) {
+function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems, resolvedOptions) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var items = [];
+    var atomicIndex = resolvedOptions ? resolvedOptions.atomicCollectionIndex : null;
     var allItems = cachedAllItems || doc.allPageItems;
     for (var i = 0; i < allItems.length; i++) {
         var pi = allItems[i];
+        if (_resolvedAtomicShouldSkipRawPageItem(pi, atomicIndex)) {
+            atomicIndex.summary.skippedPageItemCount++;
+            continue;
+        }
 
         // 페이지 범위 필터
         var piPageIdx = -1;
@@ -1158,15 +1329,34 @@ function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAll
         // anchored visual은 page-space floating source로 보존한다.
         data.isInline = isInlineItem(pi) && data.storyAnchorPlacement !== "FLOATING_ANCHORED";
 
+        if (_resolvedAtomicShouldSkipPageItem(pi, data, atomicIndex)) {
+            atomicIndex.summary.skippedPageItemCount++;
+            continue;
+        }
+
         // NEW: Group 자식 ID
         if (pi.constructor.name === "Group") {
             try {
-                var grpChildren = pi.allPageItems;
-                var childIds = [];
-                for (var gc = 0; gc < grpChildren.length; gc++) {
-                    childIds.push(grpChildren[gc].id);
+                var rootInfo = atomicIndex && atomicIndex.rootInfo
+                        ? atomicIndex.rootInfo[String(data.id)]
+                        : null;
+                if (rootInfo) {
+                    data.atomicTextlessVectorContent = true;
+                    data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
+                    data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
+                    data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
+                    data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
+                    data.childIds = [];
+                    data.childIdsOmittedByAtomicContent = true;
+                    atomicIndex.summary.compactRootCount++;
+                } else {
+                    var grpChildren = pi.allPageItems;
+                    var childIds = [];
+                    for (var gc = 0; gc < grpChildren.length; gc++) {
+                        childIds.push(grpChildren[gc].id);
+                    }
+                    data.childIds = childIds;
                 }
-                data.childIds = childIds;
             } catch (e) {}
             // SPEC-030: clipContent 제거 — 신 파이프라인 미사용
         }

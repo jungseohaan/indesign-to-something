@@ -95,6 +95,17 @@ When a page issue is reported, use this lookup first:
   graphic stratum.
 - Visual material must come from IDML source material or extractor metadata.
 - One source bundle slot has exactly one visible owner.
+- Performance is an ownership property. Stage 1 must avoid creating
+  non-executable visual candidates and then relying on later normalize,
+  suppression, deduplication, or validation passes to repair ownership.
+- Complete source coverage means every selected source object has a decided
+  owner/status. It does not require copying every recursive source-id set into
+  every candidate, bundle, `ObjectPlan`, registry row, coverage row, or
+  validation row on the normal conversion path.
+- Stage 0/1 must intern repeated source-id sets and expose stable proof
+  references for coverage, slot closure, export closure, hidden children, and
+  page-local fragments. Expanded recursive arrays are trace/debug evidence,
+  not the normal executor contract.
 - Original IDML source metadata is the source of truth: source ids, parentage,
   group membership, story/thread, anchor, table/cell structure, visibility,
   layer, z-order, bounds, and style.
@@ -136,16 +147,22 @@ they are not allowed to become a second policy layer.
 
 | Stage | Owner | May Decide | Must Not Decide |
 |---|---|---|---|
-| 0 Input Prepare | IDML/resolved/extractor import | source indexes, resolved metadata, extractor candidates | ownership, placement, layer, materialization |
-| 1 Ownership Planner | `OwnershipPlanner` / `ObjectPlan` | text/visual/table-structure/graphic slot owner, placement, coordinate space, HWPX plane contract, z-order contract | AST construction or HWPX emission |
+| 0 Input Prepare | IDML/resolved/extractor import | source indexes, resolved metadata, immutable source facts, interned source-set/proof indexes | ownership, placement, layer, materialization |
+| 1 Ownership Planner | `OwnershipPlanner` / `ObjectPlan` | text/visual/table-structure/graphic slot owner, source-slot registry, compact proof refs, placement, coordinate space, HWPX plane contract, z-order contract | AST construction or HWPX emission |
 | 2 Text Builder | text executor | HWPX text emitted from `textAction` and `ownedTextFrameIds` | PNG placement, shell ownership, inline/floating conversion |
 | 3 Visual Builder | visual executor | PNG/vector/native/table structure emitted from `visualAction` and materialization | text ownership, slot reassignment, fallback visual owner creation, visual layer repair |
-| 4 Validate | validator | invariant checks and diagnostics | new ownership, new visible material, late mutation of `ObjectPlan` |
+| 4 Validate | validator | invariant checks, proof-ref/indexed membership checks, diagnostics | new ownership, new visible material, late mutation of `ObjectPlan` |
 
 Any code path outside Stage 1 that needs page number, literal text, coordinates,
 color, pixel/alpha analysis, occlusion, or an `alreadyHandled` set to decide
 whether a source is visible is evidence that the required source-slot fact is
 missing from Stage 1.
+
+Normal-path validation must validate the compact ownership proof:
+`coverageClaimRef`, `slotClosureRef`, `exportClosureRef`, `hiddenChildrenRef`,
+and interned source-set refs. Validators may expand recursive source trees for
+trace/dev diagnostics and failing records, but they must not require every
+successful plan to duplicate full descendant arrays.
 
 ## Code Mapping
 

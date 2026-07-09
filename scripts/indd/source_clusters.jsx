@@ -272,6 +272,9 @@ function _buildSourceCluster(root, sourceInfoById, childIdsByParentId) {
     var textFrameIds = [];
     var editableTextFrameIds = [];
     var visualSourceObjectIds = [];
+    var textFrameSeen = {};
+    var editableTextFrameSeen = {};
+    var visualSourceSeen = {};
     var hasText = false;
     var hasEditableText = false;
     var hasVisual = false;
@@ -291,13 +294,13 @@ function _buildSourceCluster(root, sourceInfoById, childIdsByParentId) {
             layers.push(src.layerName);
         }
         if (kind === "TextFrame") {
-            _pushClusterUniqueId(textFrameIds, src.id);
+            _pushClusterUniqueIdWithSeen(textFrameIds, textFrameSeen, src.id);
             if (src.textFrameClass === "editable") {
-                _pushClusterUniqueId(editableTextFrameIds, src.id);
+                _pushClusterUniqueIdWithSeen(editableTextFrameIds, editableTextFrameSeen, src.id);
                 hasEditableText = true;
             }
         } else {
-            _pushClusterUniqueId(visualSourceObjectIds, src.id);
+            _pushClusterUniqueIdWithSeen(visualSourceObjectIds, visualSourceSeen, src.id);
             hasVisual = true;
         }
         if (src.hasText || (src.textLength !== null && src.textLength !== undefined && Number(src.textLength) > 0)) {
@@ -373,5 +376,13 @@ function _pushClusterUniqueId(arr, id) {
     for (var i = 0; i < arr.length; i++) {
         if (String(arr[i]) === key) return;
     }
+    arr.push(id);
+}
+
+function _pushClusterUniqueIdWithSeen(arr, seen, id) {
+    if (id === null || id === undefined) return;
+    var key = String(id);
+    if (seen[key]) return;
+    seen[key] = true;
     arr.push(id);
 }
