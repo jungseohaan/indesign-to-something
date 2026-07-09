@@ -5642,6 +5642,8 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
         var targetPages = candidatePagesForSource(src);
         for (var pi = 0; pi < targetPages.length; pi++) {
             var targetPageIndex = targetPages[pi];
+            targetPageIndex = Number(targetPageIndex);
+            if (isNaN(targetPageIndex) || targetPageIndex < 0) continue;
             var sourceIds = [];
             var seen = {};
             var hasEditableTextDescendant = sourceHasEditableTextDescendant(src.id, targetPageIndex);

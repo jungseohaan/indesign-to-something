@@ -2606,11 +2606,25 @@ public final class OwnershipPlanner {
         if (item == null || item.sourceHidden()) return false;
         if (item.isInline()) return false;
         if (item.parentId() != null) return false;
+        String type = safe(item.type());
+        if (!"Rectangle".equals(type) && !"Oval".equals(type) && !"Polygon".equals(type)) {
+            return false;
+        }
         if (!isNativeSourceShapeMaterializationAllowed(item)) return false;
-        if (!sourceItemHasVisibleShellMaterial(item)) return false;
+        if (!sourceItemHasVisibleBackdropFillMaterial(item)) return false;
         if (hasTextFrameDescendant(item)) return false;
         int sourceId = parseInt(item.id(), -1);
         return sourceId < 0 || !hasPlacedContentSourceTree(sourceId);
+    }
+
+    private static boolean sourceItemHasVisibleBackdropFillMaterial(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden() || item.hiddenByParent() || !item.visible()) return false;
+        String type = safe(item.type());
+        if (!"Rectangle".equals(type) && !"Oval".equals(type) && !"Polygon".equals(type)) {
+            return false;
+        }
+        if (isNoneColor(item.fillColorName())) return false;
+        return true;
     }
 
     private int sourceDepthOrderOrItemZOrder(int sourceId, int fallbackZOrder) {

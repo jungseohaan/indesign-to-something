@@ -1782,10 +1782,70 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
 }
 
 function _normalizeObjectPlanBundle(bundle) {
+    if (_objectPlanBundleIsClosedBackgroundVisibleCarrier(bundle)) {
+        return _closedBackgroundVisibleCarrierBundle(bundle);
+    }
     if (_objectPlanBundleIsClosedPlacedContentCarrier(bundle)) {
         return _closedPlacedContentCarrierBundle(bundle);
     }
     return bundle || {};
+}
+
+function _objectPlanSourceSetMembership(ids) {
+    var out = {};
+    for (var i = 0; ids && i < ids.length; i++) {
+        out[String(ids[i])] = true;
+    }
+    return out;
+}
+
+function _objectPlanSourceSetContainsAll(containerIds, memberIds) {
+    var container = _objectPlanSourceSetMembership(containerIds || []);
+    for (var i = 0; memberIds && i < memberIds.length; i++) {
+        if (!container[String(memberIds[i])]) return false;
+    }
+    return true;
+}
+
+function _objectPlanSourceSetsEqual(a, b) {
+    var aa = _sortedNumericIds(a || []);
+    var bb = _sortedNumericIds(b || []);
+    if (aa.length !== bb.length) return false;
+    for (var i = 0; i < aa.length; i++) {
+        if (String(aa[i]) !== String(bb[i])) return false;
+    }
+    return true;
+}
+
+function _objectPlanSourceIdsMinus(sourceIds, removedIds) {
+    var removed = _objectPlanSourceSetMembership(removedIds || []);
+    var out = [];
+    var seen = {};
+    for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+        var id = Number(sourceIds[i]);
+        if (isNaN(id)) continue;
+        if (removed[String(id)]) continue;
+        if (seen[String(id)]) continue;
+        seen[String(id)] = true;
+        out.push(id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanSourceIdsUnion(a, b) {
+    var out = [];
+    var seen = {};
+    var lists = [a || [], b || []];
+    for (var li = 0; li < lists.length; li++) {
+        for (var i = 0; i < lists[li].length; i++) {
+            var id = Number(lists[li][i]);
+            if (isNaN(id)) continue;
+            if (seen[String(id)]) continue;
+            seen[String(id)] = true;
+            out.push(id);
+        }
+    }
+    return _sortedNumericIds(out);
 }
 
 function _objectPlanInlineFlowSourceObjectIds(bundle) {
@@ -1884,6 +1944,21 @@ function _objectPlanBundleIsClosedPlacedContentCarrier(bundle) {
     return true;
 }
 
+function _objectPlanBundleIsClosedBackgroundVisibleCarrier(bundle) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.complex_graphic_frames") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (bundle.slotRole !== "background_shell_slot"
+            && bundle.compositeRole !== "background_vector_source") return false;
+    if (bundle.clusterHasEditableText === true || bundle.clusterHasTextFrame === true) return false;
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return false;
+    if (!bundle.sourceObjectIds || bundle.sourceObjectIds.length < 2) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    if (!_objectPlanSourceSetContainsAll(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    if (_objectPlanSourceSetsEqual(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    return true;
+}
+
 function _objectPlanOmittedClusterSourcesArePlacedMedia(bundle) {
     if (!bundle || !bundle.omittedClusterKindCounts) return false;
     var omittedCount = 0;
@@ -1911,6 +1986,30 @@ function _closedPlacedContentCarrierBundle(bundle) {
     closed.omittedClusterKindCounts = {};
     closed.clusterRelation = "EXACT_SOURCE_CLUSTER";
     closed.closedPlacedContentCarrier = true;
+    return closed;
+}
+
+function _closedBackgroundVisibleCarrierBundle(bundle) {
+    var closed = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) closed[key] = bundle[key];
+    }
+    var originalSourceIds = _sortedNumericIds(bundle.sourceObjectIds || []);
+    var visibleIds = _sortedNumericIds(bundle.visualSourceObjectIds || []);
+    var omittedIds = _sortedNumericIds(
+            _objectPlanSourceIdsMinus(originalSourceIds, visibleIds));
+    closed.sourceObjectIds = visibleIds;
+    closed.clusterSourceObjectIds = visibleIds.slice(0);
+    closed.visualSourceObjectIds = visibleIds.slice(0);
+    if (!closed.exportSourceObjectIds || closed.exportSourceObjectIds.length === 0) {
+        closed.exportSourceObjectIds = visibleIds.slice(0);
+    }
+    closed.omittedClusterSourceObjectIds = _sortedNumericIds(
+            _objectPlanSourceIdsUnion(
+                    bundle.omittedClusterSourceObjectIds || [],
+                    omittedIds));
+    closed.clusterRelation = "EXACT_SOURCE_CLUSTER";
+    closed.closedBackgroundVisibleCarrier = true;
     return closed;
 }
 
