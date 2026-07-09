@@ -282,8 +282,8 @@ public final class OwnershipPlanValidator {
     private void validateParentTextShellOwnedTextFrames() {
         for (ObjectPlan parent : ctx.ownershipPlans) {
             if (!ShellRole.isTextShell(parent)) continue;
+            if (parent.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (parent.ownedTextFrameIds == null || parent.ownedTextFrameIds.length == 0) continue;
-            if (parent.textAction == TextAction.OWNED_BY_HWPX_TEXT) continue;
             for (int textFrameId : parent.ownedTextFrameIds) {
                 ObjectPlan textPlan = findHwpxTextOwnerPlan(textFrameId, parent.pageIndex);
                 if (!isTextFrameAccountedForByShell(textPlan)) {
@@ -1402,16 +1402,15 @@ public final class OwnershipPlanValidator {
             if (plan.placement == null && plan.hasVisibleVisual()) {
                 warn("STAGE4_PLAN_MISSING_PLACEMENT", "plan=" + planRef(plan));
             }
-            if (plan.materialization == null) {
+            if (requiresMaterializationContract(plan) && plan.materialization == null) {
                 warn("STAGE4_PLAN_MISSING_MATERIALIZATION", "plan=" + planRef(plan));
             }
             if (plan.coordinateSpace == null) {
                 warn("STAGE4_PLAN_MISSING_COORDINATE_SPACE", "plan=" + planRef(plan));
             }
             if (ShellRole.isTextShell(plan)) {
-                boolean visualOnlyTextShell = isVisualOnlyTextShellWithSeparateTextOwner(plan);
                 if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT
-                        && !visualOnlyTextShell) {
+                        && plan.textAction != TextAction.DROP_TEXT) {
                     warn("STAGE4_TEXT_SHELL_WITHOUT_HWPX_TEXT",
                             "plan=" + planRef(plan));
                 }
@@ -1422,8 +1421,8 @@ public final class OwnershipPlanValidator {
                             "plan=" + planRef(plan)
                                     + " materialization=" + plan.materialization);
                 }
-                if ((plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)
-                        && !visualOnlyTextShell) {
+                if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                        && (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)) {
                     warn("STAGE4_TEXT_SHELL_MISSING_OWNED_TEXT",
                             "plan=" + planRef(plan));
                 }
@@ -1442,6 +1441,14 @@ public final class OwnershipPlanValidator {
                                 + " materialization=" + plan.materialization);
             }
         }
+    }
+
+    private static boolean requiresMaterializationContract(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.hasVisibleVisual()) return true;
+        if (plan.hasVisibleText()) return true;
+        return plan.visualAction == VisualAction.PLACE_TABLE_STYLE
+                || plan.visualAction == VisualAction.ABSORB_TEXT_STYLE;
     }
 
     private boolean isTextSlotCoveredByCompletePngOwner(ObjectPlan plan) {
@@ -1491,7 +1498,6 @@ public final class OwnershipPlanValidator {
         if (plan == null) return false;
         if (!ShellRole.isTextShell(plan)) return false;
         if (plan.textAction != TextAction.DROP_TEXT) return false;
-        if (isVisualOnlyTextShellReason(plan.reason)) return true;
         int[] textFrameIds = textFrameSourceIds(plan);
         if (textFrameIds.length == 0) return true;
         for (int textFrameId : textFrameIds) {
@@ -1501,14 +1507,6 @@ public final class OwnershipPlanValidator {
             }
         }
         return true;
-    }
-
-    private static boolean isVisualOnlyTextShellReason(String reason) {
-        if (reason == null || reason.isEmpty()) return false;
-        return reason.contains("visual_only")
-                || "story_flow_inline_shell_visual_only".equals(reason)
-                || "composite_carrier_visual_only".equals(reason)
-                || "cross_page_text_shell_visual_fragment".equals(reason);
     }
 
     private boolean hasVisibleVisualSlot(ObjectPlan plan) {

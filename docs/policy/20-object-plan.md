@@ -24,6 +24,18 @@ Required executor identity fields:
 - `renderSourceBounds`: optional extractor/source provenance bounds for a
   page-local fragment. It explains what broader source area produced the
   fragment, but `bounds` remains the only visible placement bounds.
+- `cropSourceBounds`: optional extractor-authored pixel-preparation contract
+  for a page-local visual fragment when the rendered PNG still contains a
+  broader physical page/spread source. It is executable crop metadata, not
+  ownership provenance, and must never be derived from `renderSourceBounds`.
+  Stage 1 may compute both fields from the same source-extent analysis, but it
+  must write the executable crop extent explicitly to `cropSourceBounds`.
+- `inlineSourceTreeClosed` and `inlineFlowSourceObjectIds`: optional Stage 1
+  execution contract for closed inline shell/carrier plans whose source children
+  must be emitted as source-ordered inline fragments. When hidden visual children
+  contain HWPX-owned TextFrames, Stage 1 must provide the complete source order
+  here. Executors must not reconstruct the order from TextFrame bounds,
+  rendered bounds, overlap, or DOM probing.
 
 Normal executor-facing ObjectPlans must stay small. They may carry explicit
 slot source ids and stable proof references, but they must not carry expanded
@@ -141,6 +153,13 @@ valid `visualSourceObjectIds` even though they are inline-anchor descendants.
 The inline plan owns the shell PNG and the child TextFrame ids become
 `ownedTextFrameIds`; later stages must not replace that shell with a generated
 shape or drop it as layout-only text.
+
+For a closed inline text shell that is materialized as source-ordered fragments,
+`inlineFlowSourceObjectIds` is the only legal order source. It may include both
+exported visual leaf ids and hidden child TextFrame ids. If this array is
+missing while `hiddenVisualSourceObjectIds` names HWPX-owned child TextFrames,
+the plan is incomplete and execution must report a planning defect instead of
+sorting child frames by geometry.
 
 For a `PLACE_TEXT_SHELL` plan, executor-visible source is the union of
 `visualSourceObjectIds`, `styleSourceObjectIds`, and `ownedTextFrameIds`, after

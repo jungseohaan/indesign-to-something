@@ -507,6 +507,7 @@ end using terms from"#,
                             (pages * 45).clamp(900, 3300)
                         }
                         "planning" => 1800,
+                        "spread_chunk" => 1800,
                         // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
                         "pdf" => 600,
                         "rendered_frames" | "render_badge" | "render_frame" => 1800,
@@ -520,6 +521,13 @@ end using terms from"#,
                         "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
                         "idml" => "IDML 내보내기 중...".to_string(),
                         "planning" => "추출 계획 생성 중...".to_string(),
+                        "spread_chunk" if current > 0 && total > 0 && !desc.is_empty() => {
+                            format!("스프레드 청크 추출 중... ({}/{}) {}", current, total, desc)
+                        }
+                        "spread_chunk" if current > 0 && total > 0 => {
+                            format!("스프레드 청크 추출 중... ({}/{})", current, total)
+                        }
+                        "spread_chunk" => "스프레드 청크 추출 중...".to_string(),
                         "resolved" if total > 0 => format!("resolved 수집 중... ({}페이지)", total),
                         "resolved" => "resolved 수집 중...".to_string(),
                         "resolved_styles" if total > 0 => {
@@ -562,7 +570,7 @@ end using terms from"#,
                             _ => "exporting",
                         };
                         emit_progress(app, phase, &display);
-                    } else if matches!(step, "pdf" | "idml" | "open" | "close_docs")
+                    } else if matches!(step, "pdf" | "idml" | "open" | "close_docs" | "spread_chunk")
                         && last_heartbeat_at.elapsed().as_secs() >= 10
                     {
                         let stale = last_progress_at.elapsed().as_secs();
@@ -571,6 +579,7 @@ end using terms from"#,
                             "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
                             "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
                             "open" => format!("문서 열기 중... ({}초 경과)", stale),
+                            "spread_chunk" => format!("스프레드 청크 추출 중... ({}초 경과)", stale),
                             _ => display.clone(),
                         };
                         last_heartbeat_at = std::time::Instant::now();

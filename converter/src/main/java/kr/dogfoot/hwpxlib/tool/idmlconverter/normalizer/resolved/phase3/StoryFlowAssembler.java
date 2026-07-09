@@ -108,20 +108,6 @@ public final class StoryFlowAssembler {
             for (ResolvedTextFrame tf : frames) {
                 int tfDomId = parseDomId(tf);
                 if (tfDomId < 0) continue;
-                List<ASTInlineObject> fragments =
-                        InlineFrameHandler.loadPlannedInlineTextShellFragmentsForOwnedTextFrame(ctx, tfDomId);
-                if (fragments != null && !fragments.isEmpty()) {
-                    ASTParagraph paragraph = new ASTParagraph();
-                    for (ASTInlineObject fragment : fragments) {
-                        if (fragment == null) continue;
-                        fragment.keepInline(true);
-                        paragraph.addItem(fragment);
-                    }
-                    if (paragraph.items() != null && !paragraph.items().isEmpty()) {
-                        paragraphs.add(paragraph);
-                    }
-                    continue;
-                }
                 ASTInlineObject inlineShell =
                         InlineFrameHandler.loadPlannedInlineTextShellForOwnedTextFrame(ctx, tfDomId);
                 if (inlineShell == null) continue;
@@ -165,13 +151,7 @@ public final class StoryFlowAssembler {
             if (plannedItems != null) {
                 InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchorId, paragraph);
                 appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
-                continue;
             }
-            ASTInlineObject inline = InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchorId);
-            if (inline == null) inline = InlineFrameHandler.loadInlineObject(ctx, anchorId);
-            if (inline == null) continue;
-            inline.keepInline(true);
-            paragraph.addItem(inline);
         }
         if (paragraph.items() != null && !paragraph.items().isEmpty()) {
             paragraphs.add(paragraph);
@@ -218,11 +198,7 @@ public final class StoryFlowAssembler {
                     if (plannedItems != null) {
                         InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, paragraph);
                         appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
-                        continue;
                     }
-                    ASTInlineObject inlineShell =
-                            InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
-                    if (inlineShell != null) paragraph.addItem(inlineShell);
                 }
             }
             if (paragraph != null && paragraph.items() != null && !paragraph.items().isEmpty()) {

@@ -63,14 +63,23 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     _appendTextFrameCleanupObjectPlans(objectPlans, sourceItems);
     var pngOwnedTextFrameCleanup = _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems);
     var textOwnershipResolution = _resolveObjectPlanDuplicateTextOwners(objectPlans);
+    var visibleVisualSourceResolution = _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans);
+    var pageLocalVisibleSourceResolution = _resolveObjectPlanPageLocalVisibleSources(objectPlans, sourceById);
+    var rawClippedImageVisualSourceResolution =
+            _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById);
     var depthFinalization = _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems);
+    var inlineFlowContractFinalization = _finalizeObjectPlanInlineFlowContracts(objectPlans);
     var validation = _validateObjectPlanDiagnostics(objectPlans);
     var sourceSetRefs = _attachObjectPlanSourceSetRefs(objectPlans);
     summary = _summarizeObjectPlans(objectPlans, validation);
     summary.objectPlanDeduplication = deduplication.summary;
     summary.pngOwnedTextFrameCleanup = pngOwnedTextFrameCleanup.summary;
     summary.textOwnershipResolution = textOwnershipResolution.summary;
+    summary.visibleVisualSourceResolution = visibleVisualSourceResolution.summary;
+    summary.pageLocalVisibleSourceResolution = pageLocalVisibleSourceResolution.summary;
+    summary.rawClippedImageVisualSourceResolution = rawClippedImageVisualSourceResolution.summary;
     summary.visualDepthFinalization = depthFinalization.summary;
+    summary.inlineFlowContractFinalization = inlineFlowContractFinalization.summary;
     summary.sourceSetInterning = sourceSetRefs.summary;
 
     return {
@@ -81,6 +90,26 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         validation: validation,
         sourceSetRefs: sourceSetRefs,
         objectPlans: objectPlans
+    };
+}
+
+function _finalizeObjectPlanInlineFlowContracts(objectPlans) {
+    var clearedPlanCount = 0;
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan) continue;
+        if (plan.placement === "INLINE") continue;
+        if (plan.inlineSourceTreeClosed === true
+                || (plan.inlineFlowSourceObjectIds && plan.inlineFlowSourceObjectIds.length > 0)) {
+            plan.inlineSourceTreeClosed = false;
+            plan.inlineFlowSourceObjectIds = [];
+            clearedPlanCount++;
+        }
+    }
+    return {
+        summary: {
+            clearedPlanCount: clearedPlanCount
+        }
     };
 }
 
@@ -256,12 +285,6 @@ function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByP
             && plan.visualLayer === "LABEL_BACKDROP"
             && _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
         return "CONTAINER_BACKDROP";
-    }
-    if (plan.visualAction === "PLACE_FLOATING_PNG"
-            && plan.placement === "FLOATING"
-            && plan.visualLayer === "CONTENT_VISUAL"
-            && _objectPlanIsBehindLocalText(plan.bounds, plan.pageIndex, zOrder, editableTextFramesByPage)) {
-        return "CONTENT_BACKDROP";
     }
     return plan.visualLayer;
 }
@@ -465,16 +488,25 @@ function _deduplicateObjectPlansByIdentity(objectPlans) {
     var summary = { removedPlanCount: 0 };
     if (!objectPlans || objectPlans.length < 2) return { summary: summary };
     var seen = {};
+    var keptIndexByKey = {};
     var kept = [];
     for (var i = 0; i < objectPlans.length; i++) {
         var plan = objectPlans[i];
         if (!plan) continue;
-        var key = _objectPlanIdentityKey(plan);
+        var key = plan.objectPlanId
+                ? ("objectPlanId:" + String(plan.objectPlanId))
+                : _objectPlanIdentityKey(plan);
         if (seen[key] === true) {
+            var keptIndex = keptIndexByKey[key];
+            if (keptIndex !== undefined
+                    && _compareObjectPlanIdentityPriority(plan, kept[keptIndex]) < 0) {
+                kept[keptIndex] = plan;
+            }
             summary.removedPlanCount++;
             continue;
         }
         seen[key] = true;
+        keptIndexByKey[key] = kept.length;
         kept.push(plan);
     }
     objectPlans.length = 0;
@@ -482,6 +514,30 @@ function _deduplicateObjectPlansByIdentity(objectPlans) {
         objectPlans.push(kept[k]);
     }
     return { summary: summary };
+}
+
+function _compareObjectPlanIdentityPriority(a, b) {
+    var scoreA = _objectPlanIdentityPriority(a);
+    var scoreB = _objectPlanIdentityPriority(b);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    var aId = a && a.candidateId ? String(a.candidateId) : "";
+    var bId = b && b.candidateId ? String(b.candidateId) : "";
+    if (aId < bId) return -1;
+    if (aId > bId) return 1;
+    return 0;
+}
+
+function _objectPlanIdentityPriority(plan) {
+    if (!plan) return 0;
+    var score = 0;
+    if (plan.executable === true) score += 1000;
+    if (_objectPlanHasVisibleVisual(plan)) score += 100;
+    if (plan.slotRole === "direct_child_shell_slot") score += 60;
+    if (plan.compositeRole === "direct_child_shell_slot") score += 50;
+    if (plan.slotRole === "shell_slot_only" || plan.mode === "SLOT_ONLY") score += 30;
+    if (plan.visualAction === "PLACE_TEXT_SHELL") score += 20;
+    if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) score += 10;
+    return score;
 }
 
 function _objectPlanIdentityKey(plan) {
@@ -655,6 +711,7 @@ function _slimObjectPlanForWrite(plan) {
         "inlineCompositeLayoutDescendant",
         "inlineAnchorSourceObjectId",
         "inlineSourceTreeClosed",
+        "inlineFlowSourceObjectIds",
         "connectorDecorationVisual",
         "primarySourceObjectId",
         "ownedByNativeShellSourceObjectIds",
@@ -692,6 +749,8 @@ function _slimObjectPlanForWrite(plan) {
         "zOrder",
         "reason",
         "bounds",
+        "renderSourceBounds",
+        "cropSourceBounds",
         "ownershipSlot",
         "policyLayer",
         "clusterRelation",
@@ -1256,6 +1315,351 @@ function _compareObjectPlanTextOwnerPriority(a, b) {
     return 0;
 }
 
+function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
+    var plans = objectPlans || [];
+    var ownersByPageSource = {};
+    for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        if (!_objectPlanHasVisibleVisual(plan)) continue;
+        if (plan.visualAction === "PLACE_TABLE_STYLE") continue;
+        if (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0) continue;
+        var pageKey = String(plan.pageIndex);
+        for (var vi = 0; vi < plan.visualSourceObjectIds.length; vi++) {
+            var sourceId = plan.visualSourceObjectIds[vi];
+            var key = pageKey + "|" + String(sourceId);
+            if (!ownersByPageSource[key]) ownersByPageSource[key] = [];
+            ownersByPageSource[key].push(plan);
+        }
+    }
+
+    var canonicalByPageSource = {};
+    var duplicateSourceCount = 0;
+    for (var sourceKey in ownersByPageSource) {
+        if (!ownersByPageSource.hasOwnProperty(sourceKey)) continue;
+        var owners = ownersByPageSource[sourceKey];
+        if (!owners || owners.length < 2) continue;
+        duplicateSourceCount++;
+        var canonical = owners[0];
+        for (var oi = 1; oi < owners.length; oi++) {
+            if (_compareObjectPlanVisibleVisualSourcePriority(owners[oi], canonical) < 0) {
+                canonical = owners[oi];
+            }
+        }
+        canonicalByPageSource[sourceKey] = canonical;
+    }
+
+    var mutatedPlanCount = 0;
+    var droppedPlanCount = 0;
+    var removedSourceCount = 0;
+    var mutatedPlanIds = [];
+    for (var pi = 0; pi < plans.length; pi++) {
+        var candidate = plans[pi];
+        if (!_objectPlanHasVisibleVisual(candidate)) continue;
+        if (candidate.visualAction === "PLACE_TABLE_STYLE") continue;
+        if (!candidate.visualSourceObjectIds || candidate.visualSourceObjectIds.length === 0) continue;
+        var retainedVisualIds = [];
+        var removedVisualIds = [];
+        var seenRetained = {};
+        var seenRemoved = {};
+        var candidatePageKey = String(candidate.pageIndex);
+        for (var ci = 0; ci < candidate.visualSourceObjectIds.length; ci++) {
+            var originalSourceId = candidate.visualSourceObjectIds[ci];
+            var ownerKey = candidatePageKey + "|" + String(originalSourceId);
+            var canonicalPlan = canonicalByPageSource[ownerKey];
+            if (!canonicalPlan || canonicalPlan === candidate) {
+                _pushUniqueId(retainedVisualIds, seenRetained, originalSourceId);
+            } else {
+                _pushUniqueId(removedVisualIds, seenRemoved, originalSourceId);
+            }
+        }
+        if (removedVisualIds.length === 0) continue;
+        removedSourceCount += removedVisualIds.length;
+        candidate.hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                candidate.hiddenVisualSourceObjectIds || [], removedVisualIds);
+        candidate.exportSourceObjectIds = _sourceIdsMinus(
+                candidate.exportSourceObjectIds || [], removedVisualIds);
+        candidate.visualSourceObjectIds = _sortedNumericIds(retainedVisualIds);
+        candidate.visibleVisualOwnershipResolution =
+                retainedVisualIds.length > 0
+                        ? "PARTIAL_DUPLICATE_VISIBLE_SOURCE_RESOLVED"
+                        : "DROPPED_DUPLICATE_VISIBLE_SOURCE_OWNER";
+        candidate.visibleVisualOwnershipResolutionReason =
+                "kept_only_visual_sources_for_which_this_plan_is_canonical_on_the_page";
+        candidate.reason = String(candidate.reason || "")
+                + ":duplicate_visible_visual_source_resolved";
+        mutatedPlanCount++;
+        mutatedPlanIds.push(candidate.objectPlanId || candidate.bundleId || candidate.candidateId || ("plan.index." + pi));
+        if (retainedVisualIds.length === 0) {
+            candidate.visualAction = "DROP_VISUAL";
+            candidate.materialization = "HWPX_TEXT";
+            droppedPlanCount++;
+        }
+    }
+
+    return {
+        summary: {
+            duplicateSourceCount: duplicateSourceCount,
+            mutatedPlanCount: mutatedPlanCount,
+            droppedPlanCount: droppedPlanCount,
+            removedSourceCount: removedSourceCount,
+            mutatedObjectPlanIds: mutatedPlanIds
+        }
+    };
+}
+
+function _compareObjectPlanVisibleVisualSourcePriority(a, b) {
+    var scoreA = _objectPlanVisibleVisualSourcePriority(a);
+    var scoreB = _objectPlanVisibleVisualSourcePriority(b);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+
+    var aVisualCount = a && a.visualSourceObjectIds ? a.visualSourceObjectIds.length : 0;
+    var bVisualCount = b && b.visualSourceObjectIds ? b.visualSourceObjectIds.length : 0;
+    if (aVisualCount !== bVisualCount) return aVisualCount - bVisualCount;
+
+    var aSourceCount = a && a.sourceObjectIds ? a.sourceObjectIds.length : 0;
+    var bSourceCount = b && b.sourceObjectIds ? b.sourceObjectIds.length : 0;
+    if (aSourceCount !== bSourceCount) return aSourceCount - bSourceCount;
+
+    var aId = a && a.objectPlanId ? String(a.objectPlanId) : "";
+    var bId = b && b.objectPlanId ? String(b.objectPlanId) : "";
+    if (aId < bId) return -1;
+    if (aId > bId) return 1;
+    return 0;
+}
+
+function _objectPlanVisibleVisualSourcePriority(plan) {
+    if (!plan) return 0;
+    var score = 0;
+    if (plan.visualAction === "PLACE_TEXT_SHELL") score += 220;
+    if (plan.ownershipSlot === "SHELL_SLOT") score += 160;
+    if (plan.slotRole === "shell_slot_only" || plan.mode === "SLOT_ONLY") score += 80;
+    if (plan.slotRole === "direct_child_shell_slot") score += 70;
+    if (plan.compositeRole === "direct_child_shell_slot") score += 60;
+    if (plan.passId === "pass.image_placed_frames") score += 120;
+    if (plan.passId === "pass.inline_objects") score += 100;
+    if (plan.passId === "pass.decoration_groups") score += 50;
+    if (plan.passId === "pass.page_textless_graphic_groups") score += 20;
+    if (plan.passId === "pass.master_page_graphics") score += 15;
+    if (plan.materialization === "COMPLETE_PNG") score += 40;
+    if (plan.materialization === "EXTRACTED_PNG_VECTOR") score += 20;
+    if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) score += 10;
+    return score;
+}
+
+function _resolveObjectPlanPageLocalVisibleSources(objectPlans, sourceById) {
+    var plans = objectPlans || [];
+    var mutatedPlanCount = 0;
+    var droppedPlanCount = 0;
+    var removedSourceCount = 0;
+    var retainedCrossPageFragmentCount = 0;
+    var mutatedPlanIds = [];
+
+    function sourceBelongsToPlanPage(sourceId, plan) {
+        if (sourceId === null || sourceId === undefined || !plan) return true;
+        if (plan.pageIndex === null || plan.pageIndex === undefined || Number(plan.pageIndex) < 0) return true;
+        var src = sourceById ? sourceById[String(sourceId)] : null;
+        if (!src) return true;
+        if (src.pageIndex === null || src.pageIndex === undefined || Number(src.pageIndex) < 0) return true;
+        return Number(src.pageIndex) === Number(plan.pageIndex);
+    }
+
+    function retainPageLocal(ids, plan) {
+        var retained = [];
+        var removed = [];
+        var seenRetained = {};
+        var seenRemoved = {};
+        for (var i = 0; ids && i < ids.length; i++) {
+            var id = ids[i];
+            if (sourceBelongsToPlanPage(id, plan)) {
+                _pushUniqueId(retained, seenRetained, id);
+            } else {
+                _pushUniqueId(removed, seenRemoved, id);
+            }
+        }
+        return {
+            retained: _sortedNumericIds(retained),
+            removed: _sortedNumericIds(removed)
+        };
+    }
+
+    function sameIds(a, b) {
+        a = _sortedNumericIds(a || []);
+        b = _sortedNumericIds(b || []);
+        if (a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++) {
+            if (String(a[i]) !== String(b[i])) return false;
+        }
+        return true;
+    }
+
+    function boundsHasArea(bounds) {
+        return bounds && bounds.length >= 4
+                && Number(bounds[2]) > Number(bounds[0])
+                && Number(bounds[3]) > Number(bounds[1]);
+    }
+
+    function shouldRetainCrossPageFragment(plan, visual, exported, descendants) {
+        if (!plan || !boundsHasArea(plan.bounds)) return false;
+        if (String(plan.coordinateSpace || "") !== "PAGE") return false;
+        if (String(plan.placement || "") !== "FLOATING") return false;
+        var retainedAny = (visual.retained && visual.retained.length > 0)
+                || (exported.retained && exported.retained.length > 0)
+                || (descendants.retained && descendants.retained.length > 0);
+        if (retainedAny) return false;
+        var removedAny = (visual.removed && visual.removed.length > 0)
+                || (exported.removed && exported.removed.length > 0)
+                || (descendants.removed && descendants.removed.length > 0);
+        if (!removedAny) return false;
+        var passId = String(plan.planPassId || plan.passId || "");
+        return passId === "pass.image_placed_frames"
+                || passId === "pass.image_textless_groups"
+                || passId === "pass.page_textless_graphic_groups"
+                || passId === "pass.master_page_graphics";
+    }
+
+    for (var pi = 0; pi < plans.length; pi++) {
+        var plan = plans[pi];
+        if (!_objectPlanHasVisibleVisual(plan)) continue;
+        if (plan.visualAction === "PLACE_TABLE_STYLE") continue;
+
+        var visual = retainPageLocal(plan.visualSourceObjectIds || [], plan);
+        var exported = retainPageLocal(plan.exportSourceObjectIds || [], plan);
+        var descendants = retainPageLocal(plan.descendantVisualObjectIds || [], plan);
+        var removed = _sourceIdsUnion(
+                _sourceIdsUnion(visual.removed, exported.removed),
+                descendants.removed);
+        if (removed.length === 0) continue;
+
+        if (shouldRetainCrossPageFragment(plan, visual, exported, descendants)) {
+            plan.visibleVisualPageLocalResolution = "RETAINED_CROSS_PAGE_FRAGMENT_VISIBLE_SOURCES";
+            plan.visibleVisualPageLocalResolutionReason =
+                    "source geometry may live on a spread sibling while ObjectPlan PAGE bounds declare the visible fragment";
+            plan.reason = String(plan.reason || "") + ":cross_page_visible_source_retained";
+            retainedCrossPageFragmentCount++;
+            continue;
+        }
+
+        plan.hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                plan.hiddenVisualSourceObjectIds || [], removed);
+        if (!sameIds(visual.retained, plan.visualSourceObjectIds || [])) {
+            plan.visualSourceObjectIds = visual.retained;
+        }
+        if (!sameIds(exported.retained, plan.exportSourceObjectIds || [])) {
+            plan.exportSourceObjectIds = exported.retained;
+        }
+        if (!sameIds(descendants.retained, plan.descendantVisualObjectIds || [])) {
+            plan.descendantVisualObjectIds = descendants.retained;
+        }
+        removedSourceCount += removed.length;
+        mutatedPlanCount++;
+        mutatedPlanIds.push(plan.objectPlanId || plan.bundleId || plan.candidateId || ("plan.index." + pi));
+
+        if ((!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0)
+                && (!plan.exportSourceObjectIds || plan.exportSourceObjectIds.length === 0)) {
+            plan.visualAction = "DROP_VISUAL";
+            plan.materialization = "HWPX_TEXT";
+            plan.visibleVisualPageLocalResolution = "DROPPED_NON_PAGE_LOCAL_VISIBLE_SOURCE_OWNER";
+            droppedPlanCount++;
+        } else {
+            plan.visibleVisualPageLocalResolution = "PRUNED_NON_PAGE_LOCAL_VISIBLE_SOURCES";
+        }
+        plan.visibleVisualPageLocalResolutionReason =
+                "visible/export sources must belong to the ObjectPlan page before Stage 2 execution";
+        plan.reason = String(plan.reason || "") + ":page_local_visible_source_resolved";
+    }
+
+    return {
+        summary: {
+            mutatedPlanCount: mutatedPlanCount,
+            droppedPlanCount: droppedPlanCount,
+            removedSourceCount: removedSourceCount,
+            retainedCrossPageFragmentCount: retainedCrossPageFragmentCount,
+            mutatedObjectPlanIds: mutatedPlanIds
+        }
+    };
+}
+
+function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById) {
+    var plans = objectPlans || [];
+    var mutatedPlanCount = 0;
+    var replacedSourceCount = 0;
+    var mutatedPlanIds = [];
+
+    function sourceType(src) {
+        return String((src && (src.type || src.kind || src.itemType)) || "");
+    }
+
+    function boundsContains(outer, inner, tolerance) {
+        if (!outer || !inner || outer.length < 4 || inner.length < 4) return false;
+        tolerance = tolerance || 0;
+        return Number(outer[0]) <= Number(inner[0]) + tolerance
+                && Number(outer[1]) <= Number(inner[1]) + tolerance
+                && Number(outer[2]) >= Number(inner[2]) - tolerance
+                && Number(outer[3]) >= Number(inner[3]) - tolerance;
+    }
+
+    function clippedParentIdForImageSource(sourceId) {
+        var image = sourceById ? sourceById[String(sourceId)] : null;
+        if (!image || sourceType(image) !== "Image") return null;
+        if (image.parentId === null || image.parentId === undefined) return null;
+        var parent = sourceById[String(image.parentId)];
+        if (!parent) return null;
+        var parentType = sourceType(parent);
+        if (parentType !== "Oval" && parentType !== "Polygon" && parentType !== "Rectangle") {
+            return null;
+        }
+        if (parentType === "Oval" || parentType === "Polygon" || parent.clipContent === true) {
+            return parent.id;
+        }
+        if (!boundsContains(parent.bounds || parent.geometricBounds,
+                image.bounds || image.geometricBounds, 0.25)) {
+            return parent.id;
+        }
+        return null;
+    }
+
+    for (var pi = 0; pi < plans.length; pi++) {
+        var plan = plans[pi];
+        if (!_objectPlanHasVisibleVisual(plan)) continue;
+        if (plan.visualAction !== "PLACE_FLOATING_PNG"
+                && plan.visualAction !== "PLACE_INLINE_PNG") {
+            continue;
+        }
+        if (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0) continue;
+        var retained = [];
+        var seen = {};
+        var changed = false;
+        for (var vi = 0; vi < plan.visualSourceObjectIds.length; vi++) {
+            var sourceId = plan.visualSourceObjectIds[vi];
+            var clipParentId = clippedParentIdForImageSource(sourceId);
+            if (clipParentId !== null && clipParentId !== undefined) {
+                _pushUniqueId(retained, seen, clipParentId);
+                changed = true;
+                replacedSourceCount++;
+            } else {
+                _pushUniqueId(retained, seen, sourceId);
+            }
+        }
+        if (!changed) continue;
+        plan.visualSourceObjectIds = _sortedNumericIds(retained);
+        plan.rawClippedImageVisualSourceResolution =
+                "REPLACED_RAW_IMAGE_VISUAL_SOURCE_WITH_CLIP_PARENT";
+        plan.rawClippedImageVisualSourceResolutionReason =
+                "clipped Image leaf ids are provenance; the clip-carrying frame owns visible CONTENT_VISUAL_SLOT material";
+        plan.reason = String(plan.reason || "") + ":raw_clipped_image_visual_source_resolved";
+        mutatedPlanCount++;
+        mutatedPlanIds.push(plan.objectPlanId || plan.bundleId || plan.candidateId || ("plan.index." + pi));
+    }
+
+    return {
+        summary: {
+            mutatedPlanCount: mutatedPlanCount,
+            replacedSourceCount: replacedSourceCount,
+            mutatedObjectPlanIds: mutatedPlanIds
+        }
+    };
+}
+
 function _objectPlanTextOwnerPriority(plan) {
     if (!plan) return 0;
     var score = 0;
@@ -1294,6 +1698,10 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     if (visualAction === "ABSORB_TEXT_STYLE") {
         visualSourceObjectIds = [];
     }
+    var inlineSourceTreeClosed = placement === "INLINE" && bundle.inlineSourceTreeClosed === true;
+    var inlineFlowSourceObjectIds = inlineSourceTreeClosed
+            ? _objectPlanInlineFlowSourceObjectIds(bundle)
+            : [];
 
     return {
         objectPlanId: _objectPlanId(bundle, index),
@@ -1312,7 +1720,8 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         inlineAnchorSourceObjectId: bundle.sourceInlineFlow === true
                 ? (bundle.inlineAnchorSourceObjectId || null)
                 : null,
-        inlineSourceTreeClosed: bundle.inlineSourceTreeClosed === true,
+        inlineSourceTreeClosed: inlineSourceTreeClosed,
+        inlineFlowSourceObjectIds: inlineFlowSourceObjectIds,
         connectorDecorationVisual: bundle.connectorDecorationVisual === true,
         primarySourceObjectId: bundle.primarySourceObjectId !== undefined
                 ? bundle.primarySourceObjectId
@@ -1359,6 +1768,8 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         zOrder: bundle.zOrder !== undefined ? bundle.zOrder : null,
         reason: _objectPlanReason(bundle, migrationStatus),
         bounds: bundle.bounds || null,
+        renderSourceBounds: bundle.renderSourceBounds || null,
+        cropSourceBounds: bundle.cropSourceBounds || null,
         ownershipSlot: bundle.ownershipSlot || null,
         policyLayer: bundle.policyLayer || null,
         clusterRelation: bundle.clusterRelation || null,
@@ -1375,6 +1786,22 @@ function _normalizeObjectPlanBundle(bundle) {
         return _closedPlacedContentCarrierBundle(bundle);
     }
     return bundle || {};
+}
+
+function _objectPlanInlineFlowSourceObjectIds(bundle) {
+    if (!bundle || bundle.inlineSourceTreeClosed !== true) return [];
+    var ids = bundle.inlineFlowSourceObjectIds || [];
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < ids.length; i++) {
+        var id = Number(ids[i]);
+        if (isNaN(id)) continue;
+        var key = String(id);
+        if (seen[key]) continue;
+        seen[key] = true;
+        out.push(id);
+    }
+    return out;
 }
 
 function _objectPlanPolicyVisualSourceIds(visualSourceIds, ownedTextFrameIds, textAction, visualAction) {
@@ -1820,8 +2247,22 @@ function _objectPlanHasExplicitSlotOnlyContract(bundle) {
     if (!bundle.hiddenVisualSourceObjectIds || bundle.hiddenVisualSourceObjectIds.length === 0) return false;
     if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
     if (!_sourceSetContainsAll(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
-    if (!_sourceSetContainsAll(bundle.exportSourceObjectIds || [], bundle.visualSourceObjectIds || [])) return false;
+    if (!_sourceSetContainsAll(bundle.exportSourceObjectIds || [], bundle.visualSourceObjectIds || [])
+            && !_objectPlanAllowsRootExportVisibleFragmentContract(bundle)) return false;
     if (_sourceSetsIntersect(bundle.visualSourceObjectIds || [], bundle.hiddenVisualSourceObjectIds || [])) return false;
+    return true;
+}
+
+function _objectPlanAllowsRootExportVisibleFragmentContract(bundle) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.complex_graphic_frames") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (bundle.slotRole !== "background_shell_slot"
+            && bundle.compositeRole !== "background_vector_source"
+            && bundle.compositeRole !== "complex_graphic_source_set") return false;
+    if (bundle.exportTargetObjectId === null || bundle.exportTargetObjectId === undefined) return false;
+    if (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0) return false;
+    if (bundle.clusterHasEditableText === true || bundle.clusterHasTextFrame === true) return false;
     return true;
 }
 
@@ -1934,6 +2375,7 @@ function _validateObjectPlanDiagnostics(objectPlans) {
     var issueCodeCounts = {};
     var issuePlanIds = {};
     var visibleSlotOwners = {};
+    var visibleVisualSourceOwners = {};
     var textOwners = {};
     var placementBySlot = {};
     var importReadyPlanCount = 0;
@@ -1954,6 +2396,7 @@ function _validateObjectPlanDiagnostics(objectPlans) {
                 if (!placementBySlot[slotKey]) placementBySlot[slotKey] = {};
                 placementBySlot[slotKey][plan.placement || "UNKNOWN"] = true;
             }
+            _collectObjectPlanVisibleVisualSourceOwners(visibleVisualSourceOwners, plan);
         }
         if (plan.textAction === "OWNED_BY_HWPX_TEXT" && plan.ownedTextFrameIds) {
             for (var t = 0; t < plan.ownedTextFrameIds.length; t++) {
@@ -1975,6 +2418,19 @@ function _validateObjectPlanDiagnostics(objectPlans) {
             _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
                     "inline_floating_visible_slot_conflict", visibleSlotOwners[key],
                     { slotKey: key });
+        }
+    }
+
+    for (var sourceKey in visibleVisualSourceOwners) {
+        if (!visibleVisualSourceOwners.hasOwnProperty(sourceKey)) continue;
+        if (visibleVisualSourceOwners[sourceKey].length > 1) {
+            var sourceKeyParts = String(sourceKey).split("|");
+            _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                    "duplicate_visible_visual_source", visibleVisualSourceOwners[sourceKey],
+                    {
+                        pageIndex: sourceKeyParts.length > 1 ? sourceKeyParts[0] : null,
+                        sourceObjectId: sourceKeyParts.length > 1 ? sourceKeyParts[1] : sourceKey
+                    });
         }
     }
 
@@ -2007,6 +2463,20 @@ function _validateObjectPlanDiagnostics(objectPlans) {
         issueCodeCounts: issueCodeCounts,
         issues: issues
     };
+}
+
+function _collectObjectPlanVisibleVisualSourceOwners(ownersBySourceId, plan) {
+    if (!ownersBySourceId || !plan) return;
+    if (plan.visualAction === "PLACE_TABLE_STYLE") return;
+    if (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0) return;
+    var pageKey = String(plan.pageIndex);
+    for (var i = 0; i < plan.visualSourceObjectIds.length; i++) {
+        var sourceId = plan.visualSourceObjectIds[i];
+        if (sourceId === null || sourceId === undefined) continue;
+        var key = pageKey + "|" + String(sourceId);
+        if (!ownersBySourceId[key]) ownersBySourceId[key] = [];
+        ownersBySourceId[key].push(plan);
+    }
 }
 
 function _validateObjectPlanRequiredFields(plan, issues, issueCodeCounts, issuePlanIds) {

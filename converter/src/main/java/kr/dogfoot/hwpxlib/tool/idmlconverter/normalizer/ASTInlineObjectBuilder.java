@@ -265,6 +265,7 @@ class ASTInlineObjectBuilder {
         String domId = ParagraphTextHelpers.domIdFromSourceId(tf.selfId());
         if (domId == null) return false;
         if (resolvedData.isHwpxOwnedTextFrame(domId)) return true;
+        if (hasStage1ObjectPlans(resolvedData)) return false;
         if (resolvedData.allRenderedFloatingItems() == null) return false;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
                 : resolvedData.allRenderedFloatingItems()) {
@@ -276,6 +277,12 @@ class ASTInlineObjectBuilder {
             }
         }
         return false;
+    }
+
+    private static boolean hasStage1ObjectPlans(ResolvedData resolvedData) {
+        return resolvedData != null
+                && resolvedData.ownershipPlans() != null
+                && !resolvedData.ownershipPlans().isEmpty();
     }
 
     /**

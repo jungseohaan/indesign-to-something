@@ -556,7 +556,6 @@ class MathProcessor {
 
     private static ObjectPlan findInlinePlaceholderPlan(ResolvedBuildContext ctx, int sourceId) {
         if (ctx == null || ctx.ownershipPlans == null) return null;
-        ObjectPlan fallback = null;
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null) continue;
             if (planContainsSource(plan, sourceId)) {
@@ -565,10 +564,9 @@ class MathProcessor {
                         || plan.visualAction == VisualAction.PLACE_TEXT_SHELL)) {
                     return plan;
                 }
-                if (fallback == null) fallback = plan;
             }
         }
-        return fallback;
+        return null;
     }
 
     private static boolean planContainsSource(ObjectPlan plan, int sourceId) {

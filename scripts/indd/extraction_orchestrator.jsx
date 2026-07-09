@@ -220,7 +220,9 @@ function _mergeArrayUnique(target, rows, keyPrefix) {
         var row = rows[i];
         var key = null;
         try {
-            if (row && row.id !== null && row.id !== undefined) key = "id:" + row.id;
+            if (_mergeKeyPrefersRenderUnit(keyPrefix, row)) key = _renderedRowMergeKey(row);
+            else if (keyPrefix === "result" && row && row.exportId) key = "export:" + row.exportId;
+            else if (row && row.id !== null && row.id !== undefined) key = "id:" + row.id;
             else if (row && row.self) key = "self:" + row.self;
             else if (row && row.name) key = "name:" + row.name;
             else if (row && row.pageIndex !== null && row.pageIndex !== undefined) key = "page:" + row.pageIndex;
@@ -231,6 +233,85 @@ function _mergeArrayUnique(target, rows, keyPrefix) {
         target._seen[key] = true;
         target.push(row);
     }
+}
+
+function _mergeKeyPrefersRenderUnit(keyPrefix, row) {
+    if (!row) return false;
+    if (keyPrefix === "result") return !!row.exportId || !!row.renderUnitId || !!row.file;
+    if (keyPrefix === "renderedFloatingItems"
+            || keyPrefix === "renderedImageFrames"
+            || keyPrefix === "renderedGraphicFrames"
+            || keyPrefix === "renderedPdfFrames"
+            || keyPrefix === "renderedTextFrames") {
+        return !!row.renderUnitId || !!row.file || row.pageIndex !== null && row.pageIndex !== undefined;
+    }
+    return false;
+}
+
+function _renderedRowMergeKey(row) {
+    if (!row) return null;
+    if (row.exportId) return "export:" + row.exportId;
+    if (row.renderUnitId) return "renderUnit:" + row.renderUnitId;
+    var page = row.pageIndex !== null && row.pageIndex !== undefined ? String(row.pageIndex) : "none";
+    var id = row.id !== null && row.id !== undefined ? String(row.id) : "none";
+    var file = row.file ? String(row.file) : "";
+    return "rendered:" + page + ":" + id + ":" + file;
+}
+
+function _mergeObjectPlansUnique(target, rows, rootOutputDir, chunkDir, chunkLabel) {
+    if (!rows) return;
+    if (!target._seen) target._seen = {};
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (!row) continue;
+        _copyAndRewriteChunkFilePath(row, "file", rootOutputDir, chunkDir, chunkLabel);
+        var key = row.objectPlanId
+                ? "objectPlanId:" + String(row.objectPlanId)
+                : (row.candidateId
+                        ? "candidateId:" + String(row.candidateId)
+                        : "objectPlan:" + i + ":" + target.length);
+        if (target._seen[key]) continue;
+        target._seen[key] = true;
+        target.push(row);
+    }
+}
+
+function _mergedObjectPlanSummary(objectPlans) {
+    var summary = {
+        planCount: 0,
+        executablePlanCount: 0,
+        textActionCounts: {},
+        visualActionCounts: {},
+        materializationCounts: {},
+        placementCounts: {},
+        coordinateSpaceCounts: {},
+        visualLayerCounts: {},
+        plansWithVisualSources: 0,
+        plansWithStyleSources: 0,
+        plansWithOwnedTextFrames: 0,
+        importReadyPlanCount: 0,
+        contractStatusCounts: {}
+    };
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan) continue;
+        summary.planCount++;
+        if (plan.executable === true) summary.executablePlanCount++;
+        _incrementObjectPlanSummary(summary.textActionCounts, plan.textAction);
+        _incrementObjectPlanSummary(summary.visualActionCounts, plan.visualAction);
+        _incrementObjectPlanSummary(summary.materializationCounts, plan.materialization);
+        _incrementObjectPlanSummary(summary.placementCounts, plan.placement);
+        _incrementObjectPlanSummary(summary.coordinateSpaceCounts, plan.coordinateSpace);
+        _incrementObjectPlanSummary(summary.visualLayerCounts, plan.visualLayer);
+        if (plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0) summary.plansWithVisualSources++;
+        if (plan.styleSourceObjectIds && plan.styleSourceObjectIds.length > 0) summary.plansWithStyleSources++;
+        if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) summary.plansWithOwnedTextFrames++;
+        if (plan.contractStatus === "READY_FOR_STAGE1_IMPORT") summary.importReadyPlanCount++;
+        _incrementObjectPlanSummary(
+                summary.contractStatusCounts,
+                plan.contractStatus || "UNKNOWN");
+    }
+    return summary;
 }
 
 function _stripMergeSeenArrays(obj) {
@@ -282,6 +363,7 @@ function _mergeSpreadChunkOutputs(ctx, chunks) {
     };
     var pageHashes = {};
     var pageItemMap = {};
+    var objectPlans = [];
     var chunkSummaries = [];
     var atomicTextlessVectorCollectionSummary = {
         enabled: false,
@@ -300,6 +382,7 @@ function _mergeSpreadChunkOutputs(ctx, chunks) {
         var chunkResults = readJson(chunkDir + "/extraction-results.json") || {};
         var chunkHashes = readJson(chunkDir + "/page_hashes.json") || {};
         var chunkItemMap = readJson(chunkDir + "/page_item_map.json") || {};
+        var chunkObjectPlans = readJson(chunkDir + "/object-plans.json") || {};
 
         if (!resolved.documentInfo && chunkResolved.documentInfo) resolved.documentInfo = chunkResolved.documentInfo;
         for (var ar = 0; ar < resolvedArrayKeys.length; ar++) {
@@ -321,6 +404,12 @@ function _mergeSpreadChunkOutputs(ctx, chunks) {
         _rewriteChunkRenderedPathsInArray(chunkResults.results || [], ctx.outputDir, chunkDir, chunkLabel);
         _mergeArrayUnique(extractionResults.results, chunkResults.results || [], "result");
         _mergeArrayUnique(extractionResults.diagnostics, chunkResults.diagnostics || [], "diagnostic");
+        _mergeObjectPlansUnique(
+                objectPlans,
+                chunkObjectPlans.objectPlans || [],
+                ctx.outputDir,
+                chunkDir,
+                chunkLabel);
         _mergeObjectMap(pageHashes, chunkHashes);
         _mergeObjectMap(pageItemMap, chunkItemMap);
         chunkSummaries.push({
@@ -334,6 +423,9 @@ function _mergeSpreadChunkOutputs(ctx, chunks) {
     }
     _stripMergeSeenArrays(resolved);
     _stripMergeSeenArrays(extractionResults);
+    if (objectPlans._seen) {
+        try { delete objectPlans._seen; } catch (eObjectPlanSeen) { objectPlans._seen = undefined; }
+    }
     if (atomicTextlessVectorCollectionSummary.enabled) {
         resolved.atomicTextlessVectorCollectionSummary = atomicTextlessVectorCollectionSummary;
     }
@@ -347,6 +439,23 @@ function _mergeSpreadChunkOutputs(ctx, chunks) {
     writeResolvedJson(ctx.outputDir + "/resolved.json", resolved, ctx.outputDir);
     writeJson(ctx.outputDir + "/extraction-results.json", extractionResults);
     writeJson(ctx.outputDir + "/export-units.json", extractionResults.exportUnits);
+    var mergedObjectPlanSummary = _mergedObjectPlanSummary(objectPlans);
+    writeJson(ctx.outputDir + "/object-plans.json", {
+        schemaVersion: 1,
+        policy: "POLICY-source-ownership",
+        mode: "object-plan-diagnostics-slim",
+        summary: mergedObjectPlanSummary,
+        validation: {
+            issueCount: 0,
+            importReadyPlanCount: mergedObjectPlanSummary.importReadyPlanCount,
+            contractStatusCounts: mergedObjectPlanSummary.contractStatusCounts,
+            issueCodeCounts: {},
+            issuesOmitted: true,
+            issuePreview: []
+        },
+        fullDiagnosticsSkipped: true,
+        objectPlans: objectPlans
+    });
     writeJson(ctx.outputDir + "/page_hashes.json", pageHashes);
     writeJson(ctx.outputDir + "/page_item_map.json", pageItemMap);
     writeJson(ctx.outputDir + "/spread-chunks.json", {
@@ -614,6 +723,12 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "04a_pageBackgrounds");
 
     var editableFrameIds = collectEditableFrameIds(allItems);
+    var editableTextPaintSnapshot = [];
+    try {
+        editableTextPaintSnapshot = snapshotEditableTextFramePaintState(allItems, editableFrameIds);
+    } catch (eTextPaintSnapshot) {
+        editableTextPaintSnapshot = [];
+    }
     _marker(ctx.outputDir, "04b_collectEditableFrameIds");
 
     _requireExtractionPass(ctx, "pass.inline_objects");
@@ -814,6 +929,12 @@ function _runRenderPhases(doc, ctx, allItems) {
     } catch (eStats) {}
 
     // 3. resolved 속성 수집
+    // Render/export phases hide HWPX-owned TF paint while producing shell PNGs.
+    // Restore from the source snapshot before resolved/preview so temporary
+    // extraction state cannot leak into later stages.
+    try {
+        restoreEditableTextFramePaintState(editableTextPaintSnapshot);
+    } catch (eTextPaintRestoreBeforeResolved) {}
     _marker(ctx.outputDir, "10_collectResolved");
     writeProgress(ctx.outputDir, "resolved", 0, ctx.rangePageCount);
     var resolvedOptions = {
@@ -883,6 +1004,9 @@ function _runRenderPhases(doc, ctx, allItems) {
             }
         } catch (e) {}
     }
+    try {
+        restoreEditableTextFramePaintState(editableTextPaintSnapshot);
+    } catch (eTextPaintRestoreAfterResolved) {}
 
     _marker(ctx.outputDir, "10_collectResolved_done");
     _marker(ctx.outputDir, "11_writeJson");

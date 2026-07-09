@@ -473,144 +473,7 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    List<ASTInlineObject> plannedAnchorTextShellFragments =
-                                            InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
-                                    if (plannedAnchorTextShellFragments != null && !plannedAnchorTextShellFragments.isEmpty()) {
-                                        for (ASTInlineObject fragment : plannedAnchorTextShellFragments) para.addItem(fragment);
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    ASTInlineObject plannedAnchorTextShell =
-                                            InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
-                                    if (plannedAnchorTextShell != null) {
-                                        para.addItem(plannedAnchorTextShell);
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    ASTInlineObject groupShell =
-                                            InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, domId);
-                                    if (groupShell != null) {
-                                        para.addItem(groupShell);
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    if (InlineFrameHandler.hasTextBlockPlacedDescendant(ctx, domId)
-                                            || InlineFrameHandler.hasPlannedFloatingHwpxTextDescendant(ctx, domId)) {
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
-                                    if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)
-                                            && storyId != null
-                                            && InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    // source ownership policy: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
-                                    // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
-                                    java.util.List<ASTInlineObject> boxList =
-                                            InlineFrameHandler.tryInlineGroupAsBoxList(ctx, domId);
-                                    if (boxList != null && !boxList.isEmpty()) {
-                                        for (ASTInlineObject box : boxList) para.addItem(box);
-                                    } else {
-                                        ASTInlineObject shapeShell =
-                                                InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, domId);
-                                        if (shapeShell != null) {
-                                            para.addItem(shapeShell);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        List<ASTInlineObject> plannedAnchorTextShellFragments2 =
-                                                InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
-                                        if (plannedAnchorTextShellFragments2 != null && !plannedAnchorTextShellFragments2.isEmpty()) {
-                                            for (ASTInlineObject fragment : plannedAnchorTextShellFragments2) para.addItem(fragment);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        ASTInlineObject plannedAnchorTextShell2 =
-                                                InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
-                                        if (plannedAnchorTextShell2 != null) {
-                                            para.addItem(plannedAnchorTextShell2);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        if (InlineFrameHandler.hasDirectDropOnlyInlinePlanForAnchor(ctx, domId)) {
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        // 분수 구조 인라인 TextFrame(2단락) → 수식으로 변환
-                                        ASTEquation fracEq = InlineFrameHandler.tryInlineFractionAsEquation(ctx, domId);
-                                        if (fracEq != null) {
-                                            para.addItem(fracEq);
-                                        } else {
-                                            if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, domId)) {
-                                                ASTInlineObject inlineObj =
-                                                        SimpleButtonLabelInlineFactory.create(ctx, domId);
-                                                if (inlineObj != null) {
-                                                    para.addItem(inlineObj);
-                                                    anchorIdx++;
-                                                    continue;
-                                                }
-                                            }
-                                            // 배경 도형 + 단일 짧은 텍스트프레임 (예: 페이지 39 "가" / "나" 캡슐 배지)
-                                            // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
-                                            ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, domId);
-                                            if (singleBadge != null) {
-                                                para.addItem(singleBadge);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-                                            ASTInlineObject plannedTextShell =
-                                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, domId);
-                                            if (plannedTextShell != null) {
-                                                para.addItem(plannedTextShell);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-                                            // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
-                                            // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
-                                            ASTInlineObject inlineTableFrame =
-                                                    InlineFrameHandler.tryInlineTextFrameWithTables(ctx, domId);
-                                            if (inlineTableFrame != null) {
-                                                para.addItem(inlineTableFrame);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-
-                                            List<ASTInlineItem> nestedItems =
-                                                    InlineFrameHandler.tryInlineTextFrameAsItems(ctx, domId,
-                                                            partText, nextPartText);
-                                            if (nestedItems != null && !nestedItems.isEmpty()) {
-                                                for (ASTInlineItem item : nestedItems) para.addItem(item);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-                                            // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환
-                                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, domId,
-                                                    partText, nextPartText);
-                                            if (textRun != null) {
-                                                if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, domId, partText, nextPartText)) {
-                                                    maybeInsertDecorativeLeaderTab(ctx, ip, run, inlineHexId, partText, para);
-                                                }
-                                                para.addItem(textRun);
-                                            } else {
-                                                // source ownership policy: 빈 inline TextFrame 이지만 fillColor 가 있으면 데코 박스 (예: 본문 빈칸 강조 박스)
-                                                ASTInlineObject emptyBox = InlineFrameHandler.tryInlineEmptyFilledBoxAsFrame(ctx, domId);
-                                                if (emptyBox != null) {
-                                                    para.addItem(emptyBox);
-                                                } else {
-                                                    if (InlineFrameHandler.isInlineTextShellCompanionForEditableText(ctx, domId)) {
-                                                        anchorIdx++;
-                                                        continue;
-                                                    }
-                                                    ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
-                                                    if (inlineObj != null) {
-                                                        para.addItem(inlineObj);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    warnUnplannedInlineAnchorSkipped(ctx, storyId, domId);
                                 } catch (Exception e) { /* skip */ }
                                 if (!hasVisibleText(para)) {
                                     firstTextRunAfterLeadingAnchor = true;
@@ -683,11 +546,14 @@ public class StoryLoader {
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             RunBuilder.resetBulletParagraphColors(ctx, para);
 
-            // 인라인 객체 boundsX 기반 재정렬: FFFC 앵커 순서가 없는 경우에만
-            // (IDML 경로에서 FFFC 분할 후 앵커 순서로 삽입된 경우 재정렬하면 순서 깨짐)
-            if (!hasIdmlInlineAnchors) {
+            // Legacy-only: Stage 1 ObjectPlan이 있으면 source/story order가 실행 계약이다.
+            if (!hasIdmlInlineAnchors && !hasStage1ObjectPlans(ctx)) {
                 ASTTableConverter.reorderInlineObjectsByBoundsX(para);
             }
+    }
+
+    private static boolean hasStage1ObjectPlans(ResolvedBuildContext ctx) {
+        return ctx != null && ctx.ownershipPlans != null && !ctx.ownershipPlans.isEmpty();
     }
 
     private static String normalizeLeadingTabAfterLeadingInlineObjects(ASTParagraph para, String text) {
@@ -698,6 +564,17 @@ public class StoryLoader {
             offset++;
         }
         return " " + text.substring(offset);
+    }
+
+    private static void warnUnplannedInlineAnchorSkipped(
+            ResolvedBuildContext ctx,
+            String storyId,
+            int anchoredId) {
+        if (ctx == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_UNPLANNED_INLINE_ANCHOR_SKIPPED\""
+                + ",\"storyId\":\"" + ObjectPlan.escape(storyId) + "\""
+                + ",\"anchoredObjectId\":" + anchoredId
+                + ",\"detail\":\"StoryLoader did not synthesize inline material without a Stage 1 ObjectPlan\"}");
     }
 
     private static boolean paragraphContainsOnlyInlineObjectsSoFar(ASTParagraph para) {
@@ -953,11 +830,6 @@ public class StoryLoader {
                     appendInlineItemsKeepingObjectsInline(para, plannedItems);
                     continue;
                 }
-                ASTInlineObject inline = InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
-                if (inline == null) inline = InlineFrameHandler.loadInlineObject(ctx, anchoredId);
-                if (inline == null) continue;
-                inline.keepInline(true);
-                para.addItem(inline);
                 continue;
             }
 
@@ -1054,13 +926,10 @@ public class StoryLoader {
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
                 if (!cellContainsInlineAnchor(idmlCell, anchoredId)) continue;
-                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)
-                        && !isResolvedCellInlineGraphicPrefixMarkerAnchor(ctx, anchoredId)) {
+                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
                     continue;
                 }
-                int targetIndex = isResolvedCellInlineGraphicPrefixMarkerAnchor(ctx, anchoredId)
-                        ? nearestParagraphIndexByInlineVisualY(ctx, resolvedCell, anchoredId, paraIndex, paragraphs.size())
-                        : paraIndex;
+                int targetIndex = paraIndex;
                 if (targetIndex < 0 || targetIndex >= paragraphs.size()) continue;
 
                 ASTParagraph target = paragraphs.get(targetIndex);
@@ -1163,17 +1032,6 @@ public class StoryLoader {
         }
     }
 
-    private static boolean isResolvedCellInlineGraphicPrefixMarkerAnchor(
-            ResolvedBuildContext ctx,
-            int anchoredId) {
-        ObjectPlan plan = inlineGraphicPlanFor(ctx, anchoredId);
-        if (plan == null) return false;
-        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
-        String reason = plan.reason != null ? plan.reason : "";
-        return "inline_graphic_only".equals(reason)
-                || "paper_inline_anchor_uses_page_material_slot".equals(reason);
-    }
-
     private static ObjectPlan inlineGraphicPlanFor(ResolvedBuildContext ctx, int anchoredId) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return null;
         for (ObjectPlan plan : ctx.ownershipPlans) {
@@ -1181,72 +1039,6 @@ public class StoryLoader {
             if (plan.placement != Placement.INLINE) return null;
             if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
                     && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return null;
-            return plan;
-        }
-        return null;
-    }
-
-    private static int nearestParagraphIndexByInlineVisualY(
-            ResolvedBuildContext ctx,
-            ResolvedTable.Cell resolvedCell,
-            int anchoredId,
-            int fallbackIndex,
-            int paragraphCount) {
-        ObjectPlan targetPlan = inlineGraphicPlanFor(ctx, anchoredId);
-        if (targetPlan == null || targetPlan.bounds == null || targetPlan.bounds.length < 4) {
-            return clampParagraphIndex(fallbackIndex, paragraphCount);
-        }
-        double targetCenterY = (targetPlan.bounds[0] + targetPlan.bounds[2]) / 2.0;
-        double bestDistance = Double.MAX_VALUE;
-        int bestIndex = -1;
-        List<ResolvedParagraph> resolvedParagraphs = resolvedCell != null ? resolvedCell.paragraphs() : null;
-        if (resolvedParagraphs != null) {
-            for (int p = 0; p < resolvedParagraphs.size() && p < paragraphCount; p++) {
-                Double paraY = representativeInlineVisualCenterY(ctx, resolvedParagraphs.get(p), anchoredId);
-                if (paraY == null) continue;
-                double distance = Math.abs(paraY - targetCenterY);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    bestIndex = p;
-                }
-            }
-        }
-        if (bestIndex >= 0) return bestIndex;
-        return clampParagraphIndex(fallbackIndex, paragraphCount);
-    }
-
-    private static int clampParagraphIndex(int index, int paragraphCount) {
-        if (paragraphCount <= 0) return -1;
-        if (index < 0) return 0;
-        if (index >= paragraphCount) return paragraphCount - 1;
-        return index;
-    }
-
-    private static Double representativeInlineVisualCenterY(
-            ResolvedBuildContext ctx,
-            ResolvedParagraph paragraph,
-            int excludeAnchoredId) {
-        if (paragraph == null || paragraph.runs() == null) return null;
-        double sum = 0.0;
-        int count = 0;
-        for (ResolvedRun run : paragraph.runs()) {
-            if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
-            int anchoredId = run.anchoredObjectId();
-            if (anchoredId == excludeAnchoredId) continue;
-            ObjectPlan plan = inlinePlanWithBoundsFor(ctx, anchoredId);
-            if (plan == null) continue;
-            sum += (plan.bounds[0] + plan.bounds[2]) / 2.0;
-            count++;
-        }
-        return count > 0 ? sum / count : null;
-    }
-
-    private static ObjectPlan inlinePlanWithBoundsFor(ResolvedBuildContext ctx, int anchoredId) {
-        if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return null;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
-            if (plan == null || plan.domId != anchoredId) continue;
-            if (plan.placement != Placement.INLINE) return null;
-            if (plan.bounds == null || plan.bounds.length < 4) return null;
             return plan;
         }
         return null;
@@ -1682,26 +1474,12 @@ public class StoryLoader {
             if (run.isInlineAnchor()) {
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
-                List<ASTInlineObject> fragments =
-                        InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, anchoredId);
-                if (fragments != null && !fragments.isEmpty()) {
-                    for (ASTInlineObject fragment : fragments) {
-                        if (fragment == null) continue;
-                        fragment.keepInline(true);
-                        para.addItem(fragment);
-                    }
+                List<ASTInlineItem> plannedItems =
+                        InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, null, null);
+                if (plannedItems != null && !plannedItems.isEmpty()) {
+                    appendInlineItemsKeepingObjectsInline(para, plannedItems);
                     inserted = true;
-                    continue;
                 }
-                ASTInlineObject inline =
-                        InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
-                if (inline == null) {
-                    inline = InlineFrameHandler.loadInlineObject(ctx, anchoredId);
-                }
-                if (inline == null) continue;
-                inline.keepInline(true);
-                para.addItem(inline);
-                inserted = true;
                 continue;
             }
             String text = run.text();
@@ -1756,6 +1534,20 @@ public class StoryLoader {
         }
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(domId));
         if (tf == null) return false;
+        if (hasStage1ObjectPlans(ctx)) {
+            if (hasSourceAutoPageNumberMarker(ctx, tf)) return true;
+            if (legacyLooksLikeInlinePageNumberFrame(ctx, tf)) {
+                warnPageNumberRoleHeuristicSuppressed(ctx, domId, "idml_story");
+            }
+            return false;
+        }
+        return legacyLooksLikeInlinePageNumberFrame(ctx, tf);
+    }
+
+    private static boolean legacyLooksLikeInlinePageNumberFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || tf == null) return false;
         String text = tf.frameVisibleText();
         if ((text == null || text.trim().isEmpty()) && tf.storyId() != null) {
             ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
@@ -1778,6 +1570,36 @@ public class StoryLoader {
         double w = Math.abs(gb[3] - gb[1]);
         double h = Math.abs(gb[2] - gb[0]);
         return w <= 40.0 && h <= 25.0;
+    }
+
+    private static boolean hasSourceAutoPageNumberMarker(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        if (containsAutoPageNumberMarker(tf.frameVisibleText())) return true;
+        if (ctx == null || ctx.resolvedData == null || tf.storyId() == null) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph rp : story.paragraphs()) {
+            if (rp == null || rp.runs() == null) continue;
+            for (ResolvedRun run : rp.runs()) {
+                if (run != null && containsAutoPageNumberMarker(run.text())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsAutoPageNumberMarker(String text) {
+        return text != null && text.indexOf('\u0018') >= 0;
+    }
+
+    private static void warnPageNumberRoleHeuristicSuppressed(
+            ResolvedBuildContext ctx,
+            int anchoredId,
+            String surface) {
+        if (ctx == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_PAGE_NUMBER_ROLE_HEURISTIC_SUPPRESSED\""
+                + ",\"anchoredObjectId\":" + anchoredId
+                + ",\"surface\":\"" + ObjectPlan.escape(surface) + "\""
+                + ",\"detail\":\"Stage 1 ObjectPlans are present; page-number role must come from source metadata, not digit text or frame bounds\"}");
     }
 
     private static IDMLTextFrame findInlineFrame(IDMLCharacterRun run, String inlineHexId) {

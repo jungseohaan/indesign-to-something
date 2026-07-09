@@ -54,10 +54,6 @@ public final class VisualPlacementPlanBuilder {
         long y = CoordinateConverter.pointsToHwpunits(visTop * ctx.scaleFactor);
         long w = CoordinateConverter.pointsToHwpunits((visRight - visLeft) * ctx.scaleFactor);
         long h = CoordinateConverter.pointsToHwpunits((visBottom - visTop) * ctx.scaleFactor);
-        if (prepared.hasStripCropOverride()) {
-            x = CoordinateConverter.pointsToHwpunits(prepared.stripCropLeftOverride * ctx.scaleFactor);
-            w = CoordinateConverter.pointsToHwpunits(prepared.stripCropWidthOverride * ctx.scaleFactor);
-        }
         if (w <= 0 || h <= 0) {
             return null;
         }

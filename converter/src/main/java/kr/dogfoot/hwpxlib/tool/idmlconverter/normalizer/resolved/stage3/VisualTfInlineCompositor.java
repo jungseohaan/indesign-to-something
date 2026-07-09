@@ -20,15 +20,18 @@ public final class VisualTfInlineCompositor {
 
     private VisualTfInlineCompositor() {}
 
-    private static final double TF_INLINE_VISUAL_UNION_MAX_RATIO = 1.25;
     private static final int TF_INLINE_VISUAL_MAX_CANVAS_PIXELS = 25_000_000;
 
-    public static BufferedImage loadImageForPlacement(ResolvedBuildContext ctx, RenderedGroup rg, byte[] pngData) {
+    public static BufferedImage loadImageForPlacement(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            ObjectPlan plan,
+            byte[] pngData) {
         if (ctx == null || rg == null || rg.file() == null) return null;
         try {
             BufferedImage base = VisualCropper.decodePngBytes(pngData);
             if (base == null || !shouldCompositeTfInlineVisuals(ctx, rg)) return base;
-            BufferedImage merged = compositeTfInlineVisuals(ctx, rg, base);
+            BufferedImage merged = compositeTfInlineVisuals(ctx, rg, plan, base);
             return merged != null ? merged : base;
         } catch (Exception e) {
             System.err.println("[VisualTfInlineCompositor] PNG 합성 실패: " + e.getMessage());
@@ -46,50 +49,25 @@ public final class VisualTfInlineCompositor {
         if (plan == null || !plan.hasVisibleVisual()) return false;
         if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return false;
         for (int id : rg.tfInlineVisualIds()) {
-            if (isEligibleInlineVisualForParentComposite(ctx, rg, id)) return true;
+            if (isEligibleInlineVisualForParentComposite(ctx, rg, plan, id)) return true;
         }
         return false;
     }
 
-    public static double[] boundsWithTfInlineVisuals(
-            ResolvedBuildContext ctx, RenderedGroup rg, double[] fallback) {
-        if (!hasTfInlineVisuals(rg) || fallback == null || fallback.length < 4) return fallback;
-        double[] union = new double[] { fallback[0], fallback[1], fallback[2], fallback[3] };
-        for (int id : rg.tfInlineVisualIds()) {
-            if (!isEligibleInlineVisualForParentComposite(ctx, rg, id)) continue;
-            RenderedGroup child = findRenderedGroup(ctx, id);
-            if (child == null || child.bounds() == null || child.bounds().length < 4) continue;
-            double[] b = child.bounds();
-            union[0] = Math.min(union[0], b[0]);
-            union[1] = Math.min(union[1], b[1]);
-            union[2] = Math.max(union[2], b[2]);
-            union[3] = Math.max(union[3], b[3]);
-        }
-        double parentW = fallback[3] - fallback[1];
-        double parentH = fallback[2] - fallback[0];
-        double unionW = union[3] - union[1];
-        double unionH = union[2] - union[0];
-        if (parentW <= 0 || parentH <= 0 || unionW <= 0 || unionH <= 0) return fallback;
-        double maxRatio = Math.max(unionW / parentW, unionH / parentH);
-        if (maxRatio > TF_INLINE_VISUAL_UNION_MAX_RATIO) return fallback;
-        return union;
-    }
-
     private static BufferedImage compositeTfInlineVisuals(
-            ResolvedBuildContext ctx, RenderedGroup parent, BufferedImage base) {
-        if (ctx == null || parent == null || base == null || parent.bounds() == null
-                || parent.bounds().length < 4 || !hasTfInlineVisuals(parent)) {
+            ResolvedBuildContext ctx, RenderedGroup parent, ObjectPlan parentPlan, BufferedImage base) {
+        if (ctx == null || parent == null || parentPlan == null || base == null
+                || parentPlan.bounds == null || parentPlan.bounds.length < 4
+                || !hasTfInlineVisuals(parent)) {
             return null;
         }
-        double[] parentBounds = parent.bounds();
-        double[] union = boundsWithTfInlineVisuals(ctx, parent, parentBounds);
-        double unionW = union[3] - union[1];
-        double unionH = union[2] - union[0];
+        double[] parentBounds = parentPlan.bounds;
+        double[] union = parentBounds;
+        double unionW = parentBounds[3] - parentBounds[1];
+        double unionH = parentBounds[2] - parentBounds[0];
         double parentW = parentBounds[3] - parentBounds[1];
         double parentH = parentBounds[2] - parentBounds[0];
         if (unionW <= 0 || unionH <= 0 || parentW <= 0 || parentH <= 0) return null;
-        double maxRatio = Math.max(unionW / parentW, unionH / parentH);
-        if (maxRatio > TF_INLINE_VISUAL_UNION_MAX_RATIO) return null;
 
         int canvasW = Math.max(1, (int) Math.round(base.getWidth() * unionW / parentW));
         int canvasH = Math.max(1, (int) Math.round(base.getHeight() * unionH / parentH));
@@ -98,7 +76,7 @@ public final class VisualTfInlineCompositor {
         drawAtBounds(canvas, base, parentBounds, union);
 
         for (int id : parent.tfInlineVisualIds()) {
-            if (!isEligibleInlineVisualForParentComposite(ctx, parent, id)) continue;
+            if (!isEligibleInlineVisualForParentComposite(ctx, parent, parentPlan, id)) continue;
             RenderedGroup child = findRenderedGroup(ctx, id);
             if (child == null || child.file() == null || child.bounds() == null
                     || child.bounds().length < 4) {
@@ -117,8 +95,17 @@ public final class VisualTfInlineCompositor {
         return canvas;
     }
 
-    private static boolean isEligibleInlineVisualForParentComposite(ResolvedBuildContext ctx, RenderedGroup parent, int id) {
+    private static boolean isEligibleInlineVisualForParentComposite(
+            ResolvedBuildContext ctx,
+            RenderedGroup parent,
+            ObjectPlan parentPlan,
+            int id) {
         if (ctx == null || ctx.ownershipPlans == null) return false;
+        if (parentPlan == null
+                || (!contains(parentPlan.sourceObjectIds, id)
+                && !contains(parentPlan.visualSourceObjectIds, id))) {
+            return false;
+        }
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || !plan.hasVisibleVisual()) continue;
             if (isParentPlan(plan, parent)) continue;

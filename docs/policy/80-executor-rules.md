@@ -89,6 +89,11 @@ Text Builder:
   and after editable TextFrames, the executor materializes that same plan as
   source-ordered inline fragments: visual leaf, HWPX text, visual leaf. This is
   execution of source child order, not a new ownership or placement decision.
+- The source child order for that fragment materialization comes only from
+  `ObjectPlan.inlineFlowSourceObjectIds`. If the plan has hidden child visual
+  sources but lacks this array, execution reports a Stage 1 planning defect and
+  leaves the carrier unexpanded. The executor must not infer before/after order
+  from source bounds, rendered bounds, text content, or overlap.
 - If that inline shell has extracted PNG material, the executor uses the
   extracted image as the shell carrier fill before native vector
   reconstruction. The owned text uses the source TextFrame story paragraphs,

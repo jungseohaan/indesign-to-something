@@ -195,9 +195,11 @@ public class ASTTableConverter {
             }
         }
 
-        // 인라인 객체 boundsX 기반 재정렬
-        for (ASTParagraph p : cell.paragraphs()) {
-            reorderInlineObjectsByBoundsX(p);
+        // Legacy-only: ObjectPlan이 없는 변환면에서만 rendered X 기반 보정 허용.
+        if (allowsLegacyBoundsXInlineReorder(resolvedData)) {
+            for (ASTParagraph p : cell.paragraphs()) {
+                reorderInlineObjectsByBoundsX(p);
+            }
         }
 
         // 마지막 빈 단락 제거
@@ -827,6 +829,14 @@ public class ASTTableConverter {
         if (resolvedData == null || textFrameDomId == null) return null;
         ResolvedTextFrame textFrame = resolvedData.getTextFrame(textFrameDomId);
         if (textFrame == null || !textFrame.isInline()) return null;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                tableBridgeContext(resolvedData);
+        boolean hasStage1ObjectPlans = ctx.ownershipPlans != null && !ctx.ownershipPlans.isEmpty();
+        int tfDomId = parseDomIdOrNeg(textFrameDomId);
+        if (hasStage1ObjectPlans) {
+            return findPlannedTextHiddenShellForInlineTextFrame(ctx, resolvedData, tfDomId);
+        }
+        if (resolvedData.allRenderedFloatingItems() == null) return null;
         for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
             if (!isTextHiddenShellForInlineTextFrame(rg)) continue;
             String[] ids = rg.editableTextFrameIds();
@@ -836,6 +846,79 @@ public class ASTTableConverter {
             }
         }
         return null;
+    }
+
+    private static RenderedGroup findPlannedTextHiddenShellForInlineTextFrame(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx,
+            ResolvedData resolvedData,
+            int textFrameDomId) {
+        if (ctx == null || resolvedData == null || textFrameDomId < 0) return null;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan
+                : ctx.ownershipPlans) {
+            if (!isPlannedTextHiddenShellForInlineTextFrame(plan, textFrameDomId)) continue;
+            RenderedGroup rg = renderedGroupByPlannedFile(resolvedData, plan.file);
+            if (rg != null) return rg;
+        }
+        return null;
+    }
+
+    private static boolean isPlannedTextHiddenShellForInlineTextFrame(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan,
+            int textFrameDomId) {
+        if (plan == null || textFrameDomId < 0) return false;
+        if (plan.textAction
+                != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction.OWNED_BY_HWPX_TEXT) {
+            return false;
+        }
+        if (!kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole.isTextShell(plan)) {
+            return false;
+        }
+        if (!containsInt(plan.ownedTextFrameIds, textFrameDomId)) return false;
+        return plan.file != null && !plan.file.isEmpty();
+    }
+
+    private static RenderedGroup renderedGroupByPlannedFile(ResolvedData resolvedData, String plannedFile) {
+        if (resolvedData == null || plannedFile == null || plannedFile.isEmpty()
+                || resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (plannedFile.equals(rg.file())) return rg;
+        }
+        return null;
+    }
+
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tableBridgeContext(
+            ResolvedData resolvedData) {
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
+        if (resolvedData != null) {
+            ctx.resolvedData = resolvedData;
+            ctx.basePath = resolvedData.basePath();
+            ctx.scaleFactor = resolvedData.scaleFactor();
+            if (resolvedData.ownershipPlans() != null) {
+                ctx.ownershipPlans.addAll(resolvedData.ownershipPlans());
+            }
+        }
+        return ctx;
+    }
+
+    private static int parseDomIdOrNeg(String id) {
+        if (id == null) return -1;
+        try {
+            return Integer.parseInt(id);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static boolean containsInt(int[] ids, int target) {
+        if (ids == null) return false;
+        for (int id : ids) {
+            if (id == target) return true;
+        }
+        return false;
     }
 
     private static boolean isTextHiddenShellForInlineTextFrame(RenderedGroup rg) {
@@ -1434,7 +1517,12 @@ public class ASTTableConverter {
     }
 
     /**
-     * 인라인 객체를 boundsX 기반으로 재정렬.
+     * Legacy-only 인라인 객체 boundsX 기반 재정렬.
+     *
+     * Stage 1 ObjectPlan이 있는 변환 경로에서는 source story/anchor order가
+     * 실행 계약이다. 이 메서드는 rendered bounds X로 paragraph item 순서를
+     * 다시 쓰므로 ObjectPlan 경로에서 호출하면 안 된다.
+     *
      * IDML에서 인라인 객체 순서(FFFC 순서)가 시각적 배치 순서와 다를 때,
      * rendered bounds의 X 좌표로 올바른 위치에 재배치한다.
      * 예: [IMG(01,x=359) IMG(풍선,x=419) TEXT] → [IMG(01,x=359) TEXT IMG(풍선,x=419)]
@@ -1497,5 +1585,11 @@ public class ASTTableConverter {
             items.clear();
             items.addAll(reordered);
         }
+    }
+
+    public static boolean allowsLegacyBoundsXInlineReorder(ResolvedData resolvedData) {
+        return resolvedData == null
+                || resolvedData.ownershipPlans() == null
+                || resolvedData.ownershipPlans().isEmpty();
     }
 }

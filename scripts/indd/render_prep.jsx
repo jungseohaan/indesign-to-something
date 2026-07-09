@@ -1022,6 +1022,105 @@ function restoreTextFrames(saved) {
     }
 }
 
+function snapshotEditableTextFramePaintState(allItems, editableFrameIds) {
+    var snapshots = [];
+    if (!allItems || !editableFrameIds) return snapshots;
+
+    function snapshotTarget(target) {
+        var state = { target: target };
+        var captured = false;
+        try { state.fillColor = target.fillColor; captured = true; } catch (eFill) {}
+        try { state.fillTint = target.fillTint; captured = true; } catch (eFillTint) {}
+        try { state.strokeColor = target.strokeColor; captured = true; } catch (eStroke) {}
+        try { state.strokeTint = target.strokeTint; captured = true; } catch (eStrokeTint) {}
+        try { state.underline = target.underline; captured = true; } catch (eUnderline) {}
+        try { state.underlineColor = target.underlineColor; captured = true; } catch (eUnderlineColor) {}
+        try { state.underlineTint = target.underlineTint; captured = true; } catch (eUnderlineTint) {}
+        try { state.strikeThru = target.strikeThru; captured = true; } catch (eStrike) {}
+        try { state.strikeThroughColor = target.strikeThroughColor; captured = true; } catch (eStrikeColor) {}
+        try { state.strikeThroughTint = target.strikeThroughTint; captured = true; } catch (eStrikeTint) {}
+        return captured ? state : null;
+    }
+
+    for (var i = 0; i < allItems.length; i++) {
+        try {
+            var tf = allItems[i];
+            if (!tf || !tf.constructor || tf.constructor.name !== "TextFrame") continue;
+            if (!editableFrameIds[tf.id]) continue;
+
+            var entry = {
+                tf: tf,
+                targets: []
+            };
+            try { entry.visible = tf.visible; } catch (eVisible) {}
+            try {
+                entry.contentOpacity =
+                        tf.contentTransparencySettings.blendingSettings.opacity;
+            } catch (eContentOpacity) {}
+            try {
+                entry.frameOpacity =
+                        tf.transparencySettings.blendingSettings.opacity;
+            } catch (eFrameOpacity) {}
+            try {
+                if (tf.texts && tf.texts.length > 0) {
+                    var textState = snapshotTarget(tf.texts[0]);
+                    if (textState) entry.targets.push(textState);
+                }
+            } catch (eTextTarget) {}
+            try {
+                var ranges = tf.textStyleRanges.everyItem().getElements();
+                for (var ri = 0; ri < ranges.length; ri++) {
+                    var rangeState = snapshotTarget(ranges[ri]);
+                    if (rangeState) entry.targets.push(rangeState);
+                }
+            } catch (eRanges) {}
+
+            snapshots.push(entry);
+        } catch (eSnapshot) {}
+    }
+    return snapshots;
+}
+
+function restoreEditableTextFramePaintState(snapshots) {
+    if (!snapshots) return;
+    for (var i = snapshots.length - 1; i >= 0; i--) {
+        try {
+            var entry = snapshots[i];
+            var tf = entry.tf;
+            if (entry.visible !== undefined) {
+                try { tf.visible = entry.visible; } catch (eVisible) {}
+            }
+            if (entry.contentOpacity !== undefined) {
+                try {
+                    tf.contentTransparencySettings.blendingSettings.opacity =
+                            entry.contentOpacity;
+                } catch (eContentOpacity) {}
+            }
+            if (entry.frameOpacity !== undefined) {
+                try {
+                    tf.transparencySettings.blendingSettings.opacity =
+                            entry.frameOpacity;
+                } catch (eFrameOpacity) {}
+            }
+            var targets = entry.targets || [];
+            for (var r = targets.length - 1; r >= 0; r--) {
+                var state = targets[r];
+                var target = state.target;
+                try { if (state.fillColor !== undefined) target.fillColor = state.fillColor; } catch (eFill) {}
+                try { if (state.fillTint !== undefined) target.fillTint = state.fillTint; } catch (eFillTint) {}
+                try { if (state.strokeColor !== undefined) target.strokeColor = state.strokeColor; } catch (eStroke) {}
+                try { if (state.strokeTint !== undefined) target.strokeTint = state.strokeTint; } catch (eStrokeTint) {}
+                try { if (state.underline !== undefined) target.underline = state.underline; } catch (eUnderline) {}
+                try { if (state.underlineColor !== undefined) target.underlineColor = state.underlineColor; } catch (eUnderlineColor) {}
+                try { if (state.underlineTint !== undefined) target.underlineTint = state.underlineTint; } catch (eUnderlineTint) {}
+                try { if (state.strikeThru !== undefined) target.strikeThru = state.strikeThru; } catch (eStrike) {}
+                try { if (state.strikeThroughColor !== undefined) target.strikeThroughColor = state.strikeThroughColor; } catch (eStrikeColor) {}
+                try { if (state.strikeThroughTint !== undefined) target.strikeThroughTint = state.strikeThroughTint; } catch (eStrikeTint) {}
+            }
+        } catch (eRestoreSnapshot) {}
+    }
+}
+
 function _pushUniqueId(arr, seen, id) {
     if (id === undefined || id === null) return;
     var key = id.toString();

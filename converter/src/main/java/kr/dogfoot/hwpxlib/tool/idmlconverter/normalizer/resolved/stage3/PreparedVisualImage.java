@@ -11,15 +11,10 @@ public final class PreparedVisualImage {
     public byte[] imageData;
     public int pixelW;
     public int pixelH;
-    public Double stripCropLeftOverride;
-    public Double stripCropWidthOverride;
     public boolean pageAnchoredStripCrop;
 
     public PreparedVisualImage(byte[] imageData) {
         this.imageData = imageData;
     }
 
-    public boolean hasStripCropOverride() {
-        return stripCropLeftOverride != null && stripCropWidthOverride != null;
-    }
 }

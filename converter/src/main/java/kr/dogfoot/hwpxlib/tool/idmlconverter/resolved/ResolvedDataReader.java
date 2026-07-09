@@ -19,13 +19,14 @@ public class ResolvedDataReader {
      * resolved.json 파일을 읽어 ResolvedData로 변환한다.
      */
     public static ResolvedData read(String filePath) throws IOException {
+        boolean preserveRenderedMaterialForObjectPlans = hasSiblingObjectPlans(filePath);
         // 파일을 직접 스트리밍 파싱 (String 중간 변환 없이 메모리 절감)
         JsonReader reader = new JsonReader(new BufferedReader(new InputStreamReader(
                 new FileInputStream(filePath), "UTF-8"), 65536));
         try {
             reader.setLenient(true);
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-            return fromJsonObject(root);
+            return fromJsonObject(root, preserveRenderedMaterialForObjectPlans);
         } finally {
             reader.close();
         }
@@ -37,7 +38,7 @@ public class ResolvedDataReader {
         try {
         reader.setLenient(true);
         JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-        return fromJsonObject(root);
+        return fromJsonObject(root, false);
         } finally {
             try { reader.close(); } catch (IOException e) {
                 System.err.println("[ResolvedDataReader] JSON reader close 실패: " + e.getMessage());
@@ -46,7 +47,14 @@ public class ResolvedDataReader {
     }
 
     private static ResolvedData fromJsonObject(JsonObject root) {
+        return fromJsonObject(root, false);
+    }
+
+    private static ResolvedData fromJsonObject(
+            JsonObject root,
+            boolean preserveRenderedMaterialForObjectPlans) {
         ResolvedData data = new ResolvedData();
+        data.preserveRenderedFloatingItemsForObjectPlans(preserveRenderedMaterialForObjectPlans);
 
         // colors → colorHexMap.
         // CMYK 스와치는 추출 시점의 naive 수식 hex 대신 ICC 프로파일 변환으로 재계산한다
@@ -187,6 +195,13 @@ public class ResolvedDataReader {
         }
 
         return data;
+    }
+
+    private static boolean hasSiblingObjectPlans(String filePath) {
+        if (filePath == null || filePath.isEmpty()) return false;
+        File resolved = new File(filePath);
+        File parent = resolved.getParentFile();
+        return parent != null && new File(parent, "object-plans.json").isFile();
     }
 
     private static ResolvedTextFrame parseTextFrame(JsonObject o) {

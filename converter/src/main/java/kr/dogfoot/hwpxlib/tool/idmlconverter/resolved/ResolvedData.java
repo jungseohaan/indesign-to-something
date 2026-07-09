@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Set;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualLayeringRules;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 /**
@@ -42,9 +44,9 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> renderedFloatingItemMap = new LinkedHashMap<>();
     private final Set<String> indesignPngTextOwnerFrameIds = new HashSet<>();
     private final Set<String> atomicIndesignPngTextOwnerFrameIds = new HashSet<>();
-    private Map<String, AtomicMarkerBundle> atomicMarkerBundleByLabelFrameId;
     private Set<String> editableTextFrameIds;  // 배경에서 숨겨진 TextFrame DOM ID
     private List<ObjectPlan> ownershipPlans = new ArrayList<>();
+    private boolean preserveRenderedFloatingItemsForObjectPlans;
     private String basePath;  // resolved.json 부모 디렉토리 경로
     private final Map<String, String> paragraphStyleJustMap = new HashMap<>();  // styleName → justification (top-level paragraphStyles)
 
@@ -72,6 +74,12 @@ public class ResolvedData {
     public void ownershipPlans(List<ObjectPlan> plans) {
         ownershipPlans = plans != null ? new ArrayList<>(plans) : new ArrayList<>();
     }
+    public boolean preserveRenderedFloatingItemsForObjectPlans() {
+        return preserveRenderedFloatingItemsForObjectPlans;
+    }
+    public void preserveRenderedFloatingItemsForObjectPlans(boolean value) {
+        preserveRenderedFloatingItemsForObjectPlans = value;
+    }
     public boolean isEditableTextFrame(String domId) {
         return editableTextFrameIds != null && editableTextFrameIds.contains(domId);
     }
@@ -79,12 +87,14 @@ public class ResolvedData {
     /**
      * PNG export에서 텍스트를 숨기고 HWPX TF가 텍스트를 소유하도록 선언된 프레임.
      *
-     * 일부 inline child TF는 resolved.json 최상위 editableTextFrameIds에는 빠지지만,
-     * renderedFloatingItems[].editableTextFrameIds + textOwner=hwpx_tf에는 정확히 기록된다.
-     * 이 경우 최상위 editable 목록보다 textOwner 계약을 우선해야 PNG/TF 양쪽에서 모두
-     * 텍스트가 사라지는 일을 막을 수 있다.
+     * Stage 1 ObjectPlan이 있으면 text-slot ownership은 plan만 진실로 삼는다.
+     * renderedFloatingItems[].editableTextFrameIds + textOwner=hwpx_tf는 legacy resolved
+     * 입력에서만 HWPX text ownership을 보강한다.
      */
     public boolean isHwpxOwnedTextFrame(String domId) {
+        if (hasStage1ObjectPlans()) {
+            return hasHwpxTextOwnerPlanForFrame(domId);
+        }
         return hasHwpxTextOwnerRenderForFrame(domId);
     }
 
@@ -232,7 +242,6 @@ public class ResolvedData {
 
     public void addTextFrame(ResolvedTextFrame frame) {
         textFrames.add(frame);
-        atomicMarkerBundleByLabelFrameId = null;
     }
 
     /**
@@ -560,7 +569,6 @@ public class ResolvedData {
         if (item.id() != null) {
             pageItemMap.put(item.id(), item);
         }
-        atomicMarkerBundleByLabelFrameId = null;
     }
 
     public List<ResolvedPageItem> pageItems() { return pageItems; }
@@ -670,18 +678,20 @@ public class ResolvedData {
     // --- RenderedFloatingItem (통합 플로팅 그래픽) ---
 
     public void addRenderedFloatingItem(RenderedGroup item) {
-        if (isMalformedLabelBackdropGroup(item)) {
-            return;
-        }
-        normalizeLabelBackdropGroupBounds(item);
-        if (isExactRenderedItemDuplicate(item)) {
-            return;
-        }
-        if (isLiveTitleDecorationDuplicate(item)) {
-            return;
-        }
-        if (isDuplicateVisualPageObject(item)) {
-            return;
+        if (!preserveRenderedFloatingItemsForObjectPlans) {
+            if (isMalformedLabelBackdropGroup(item)) {
+                return;
+            }
+            normalizeLabelBackdropGroupBounds(item);
+            if (isExactRenderedItemDuplicate(item)) {
+                return;
+            }
+            if (isLiveTitleDecorationDuplicate(item)) {
+                return;
+            }
+            if (isDuplicateVisualPageObject(item)) {
+                return;
+            }
         }
         String key = String.valueOf(item.id());
         RenderedGroup existing = renderedFloatingItemMap.get(key);
@@ -944,17 +954,34 @@ public class ResolvedData {
             }
             return;
         }
-        if (item == null || !"indesign_png".equals(item.textOwner())) return;
-        String[] ids = item.editableTextFrameIds();
+        if (!isAtomicCompletePngTextOwner(item)) return;
+        String[] ids = atomicOwnedTextFrameIds(item);
         if (ids == null) return;
-        if ("visual_marker_label_indesign_png".equals(item.reason())) return;
-        if (shouldKeepVisualLabelTextEditable(item)) return;
-        if (!allEditableTextFramesAreAtomicMarkers(ids)) return;
         for (String id : ids) {
             if (id != null && !id.isEmpty()) {
+                atomicIndesignPngTextOwnerFrameIds.add(id);
                 indesignPngTextOwnerFrameIds.add(id);
             }
         }
+    }
+
+    private static boolean isAtomicCompletePngTextOwner(RenderedGroup item) {
+        return item != null
+                && ATOMIC_COMPLETE_PNG.equals(item.atomicObjectKind())
+                && "indesign_png".equals(item.textOwner());
+    }
+
+    private static String[] atomicOwnedTextFrameIds(RenderedGroup item) {
+        if (item == null) return null;
+        String[] direct = item.editableTextFrameIds();
+        if (direct != null && direct.length > 0) return direct;
+        int[] owned = item.atomicOwnedTextFrameIds();
+        if (owned == null || owned.length == 0) return null;
+        String[] out = new String[owned.length];
+        for (int i = 0; i < owned.length; i++) {
+            out[i] = String.valueOf(owned[i]);
+        }
+        return out;
     }
 
     /**
@@ -962,6 +989,9 @@ public class ResolvedData {
      * 이런 TF는 HWPX 글상자로 다시 배치하면 같은 라벨 텍스트가 중복된다.
      */
     public boolean isTextOwnedByIndesignPng(String domId) {
+        if (hasStage1ObjectPlans()) {
+            return hasPngTextOwnerPlanForFrame(domId);
+        }
         if (domId != null && atomicIndesignPngTextOwnerFrameIds.contains(domId)) {
             return true;
         }
@@ -971,6 +1001,31 @@ public class ResolvedData {
         return domId != null
                 && indesignPngTextOwnerFrameIds.contains(domId)
                 && !hasHwpxTextOwnerRenderForFrame(domId);
+    }
+
+    private boolean hasStage1ObjectPlans() {
+        return ownershipPlans != null && !ownershipPlans.isEmpty();
+    }
+
+    private boolean hasHwpxTextOwnerPlanForFrame(String textFrameId) {
+        return hasTextOwnerPlanForFrame(textFrameId, TextAction.OWNED_BY_HWPX_TEXT);
+    }
+
+    private boolean hasPngTextOwnerPlanForFrame(String textFrameId) {
+        return hasTextOwnerPlanForFrame(textFrameId, TextAction.OWNED_BY_PNG);
+    }
+
+    private boolean hasTextOwnerPlanForFrame(String textFrameId, TextAction textAction) {
+        Integer parsed = parseDecimalId(textFrameId);
+        if (parsed == null || textAction == null || ownershipPlans == null) return false;
+        int target = parsed;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null || plan.textAction != textAction) continue;
+            if (plan.domId == target || containsId(plan.ownedTextFrameIds, target)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean hasCompletePngForSimpleButtonLabelTextFrame(String textFrameId) {
@@ -1002,13 +1057,9 @@ public class ResolvedData {
      */
     public boolean shouldUseTextlessShellForAtomicMarkerLabel(RenderedGroup item) {
         if (item == null) return false;
-        if (hasAtomicObjectKind(item)
-                && !ATOMIC_TEXTLESS_SHELL_WITH_TF.equals(item.atomicObjectKind())) {
-            return false;
-        }
+        if (!ATOMIC_TEXTLESS_SHELL_WITH_TF.equals(item.atomicObjectKind())) return false;
         if (!"indesign_png".equals(item.visualOwner())) return false;
         if (!"hwpx_tf".equals(item.textOwner())) return false;
-        if (!hasAtomicObjectKind(item) && !isAtomicTextlessShellReason(item.reason())) return false;
         if (!item.hasEditableTextHiddenFromPng()) return false;
         if (Boolean.TRUE.equals(item.containsEditableText())) return false;
         String[] ids = simpleButtonLabelTextFrameIds(item);
@@ -1035,23 +1086,7 @@ public class ResolvedData {
 
     private boolean isAtomicObjectRenderCandidate(RenderedGroup item) {
         if (item == null) return false;
-        if (hasAtomicObjectKind(item)) return true;
-        if ("visual_marker_label_indesign_png".equals(item.reason())) {
-            return "indesign_png".equals(item.textOwner());
-        }
-        if (isInlineCompleteSimpleButtonLabelCandidate(item)) {
-            return "indesign_png".equals(item.textOwner());
-        }
-        if (isAtomicTextlessShellReason(item.reason())) {
-            return "hwpx_tf".equals(item.textOwner());
-        }
-        return false;
-    }
-
-    private static boolean isAtomicTextlessShellReason(String reason) {
-        return "visual_label_text_hidden_shell".equals(reason)
-                || "leaf_group_text_hidden_shell".equals(reason)
-                || "editable_composite_text_hidden_shell".equals(reason);
+        return hasAtomicObjectKind(item);
     }
 
     private boolean isCanonicalAtomicMarkerRender(RenderedGroup item, String[] labelTextFrameIds) {
@@ -1059,36 +1094,19 @@ public class ResolvedData {
         int[] sourceIds = item.sourceObjectIds();
         if (sourceIds == null || sourceIds.length == 0) return false;
 
-        if (hasAtomicObjectKind(item)) {
-            int[] atomicSourceIds = item.atomicSourceObjectIds();
-            if (atomicSourceIds == null || atomicSourceIds.length == 0) return false;
-            Set<String> allowed = intArrayToStringSet(atomicSourceIds);
-            if (!containsAllSourceIds(allowed, sourceIds)) return false;
+        int[] atomicSourceIds = item.atomicSourceObjectIds();
+        if (atomicSourceIds == null || atomicSourceIds.length == 0) return false;
+        Set<String> allowed = intArrayToStringSet(atomicSourceIds);
+        if (!containsAllSourceIds(allowed, sourceIds)) return false;
 
-            int[] ownedTextFrameIds = item.atomicOwnedTextFrameIds();
-            Set<String> owned = ownedTextFrameIds != null && ownedTextFrameIds.length > 0
-                    ? intArrayToStringSet(ownedTextFrameIds)
-                    : allowed;
-            for (String labelId : labelTextFrameIds) {
-                if (labelId == null || labelId.isEmpty() || !owned.contains(labelId)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        Set<String> allowed = new HashSet<>();
+        int[] ownedTextFrameIds = item.atomicOwnedTextFrameIds();
+        Set<String> owned = ownedTextFrameIds != null && ownedTextFrameIds.length > 0
+                ? intArrayToStringSet(ownedTextFrameIds)
+                : allowed;
         for (String labelId : labelTextFrameIds) {
-            if (labelId == null || labelId.isEmpty()) continue;
-            AtomicMarkerBundle bundle = atomicMarkerBundleForLabel(labelId);
-            if (bundle == null) return false;
-            allowed.addAll(bundle.sourceIds);
-        }
-        if (allowed.isEmpty()) return false;
-
-        for (int sourceId : sourceIds) {
-            String id = String.valueOf(sourceId);
-            if (!allowed.contains(id)) return false;
+            if (labelId == null || labelId.isEmpty() || !owned.contains(labelId)) {
+                return false;
+            }
         }
         return true;
     }
@@ -1111,77 +1129,6 @@ public class ResolvedData {
             if (!allowed.contains(String.valueOf(sourceId))) return false;
         }
         return true;
-    }
-
-    private AtomicMarkerBundle atomicMarkerBundleForLabel(String labelTextFrameId) {
-        if (labelTextFrameId == null) return null;
-        return atomicMarkerBundles().get(labelTextFrameId);
-    }
-
-    private Map<String, AtomicMarkerBundle> atomicMarkerBundles() {
-        if (atomicMarkerBundleByLabelFrameId == null) {
-            atomicMarkerBundleByLabelFrameId = buildAtomicMarkerBundles();
-        }
-        return atomicMarkerBundleByLabelFrameId;
-    }
-
-    private Map<String, AtomicMarkerBundle> buildAtomicMarkerBundles() {
-        Map<String, AtomicMarkerBundle> result = new HashMap<>();
-        for (ResolvedTextFrame tf : textFrames) {
-            if (!isSimpleButtonLabelText(tf)) continue;
-            String labelId = tf.id();
-            if (labelId == null || labelId.isEmpty()) continue;
-            ResolvedPageItem labelItem = pageItemMap.get(labelId);
-            String rootId = atomicMarkerRootForLabelItem(labelItem);
-            if (rootId == null) continue;
-            Set<String> sourceIds = new HashSet<>();
-            sourceIds.add(labelId);
-            sourceIds.add(rootId);
-            sourceIds.addAll(buildDescendantSet(rootId, 8));
-            result.put(labelId, new AtomicMarkerBundle(sourceIds));
-        }
-        return result;
-    }
-
-    private String atomicMarkerRootForLabelItem(ResolvedPageItem labelItem) {
-        String parentId = labelItem != null ? labelItem.parentId() : null;
-        for (int depth = 0; depth < 8 && parentId != null; depth++) {
-            ResolvedPageItem parent = pageItemMap.get(parentId);
-            if (parent == null) break;
-            if (isAtomicMarkerShellRoot(parent)) return parentId;
-            parentId = parent.parentId();
-        }
-        return null;
-    }
-
-    private boolean isAtomicMarkerShellRoot(ResolvedPageItem item) {
-        if (item == null) return false;
-        String type = item.type();
-        if (!("Oval".equals(type) || "Rectangle".equals(type) || "Polygon".equals(type) || "Group".equals(type))) {
-            return false;
-        }
-        if ("Group".equals(type)) return true;
-        String fill = item.fillColorName();
-        String stroke = item.strokeColorName();
-        return (fill != null && !"None".equals(fill) && !"[None]".equals(fill))
-                || (stroke != null && !"None".equals(stroke) && !"[None]".equals(stroke)
-                && item.strokeWeight() > 0);
-    }
-
-    private static final class AtomicMarkerBundle {
-        private final Set<String> sourceIds;
-
-        private AtomicMarkerBundle(Set<String> sourceIds) {
-            this.sourceIds = sourceIds;
-        }
-    }
-
-    private static boolean isInlineCompleteSimpleButtonLabelCandidate(RenderedGroup item) {
-        if (item == null) return false;
-        if (!"inline_object".equals(item.type()) && !"inline_object".equals(item.itemType())) return false;
-        if (!"inline_graphic_only".equals(item.reason())) return false;
-        String file = item.file();
-        return file != null && !file.isEmpty();
     }
 
     private String[] simpleButtonLabelTextFrameIds(RenderedGroup item) {
@@ -1240,6 +1187,7 @@ public class ResolvedData {
      * guard also repairs older cached resolved.json files.
      */
     public boolean shouldKeepVisualLabelTextEditable(RenderedGroup item) {
+        if (hasStage1ObjectPlans()) return false;
         if (item == null) return false;
         if (!"visual_label_indesign_png".equals(item.reason())) return false;
         if (!"indesign_png".equals(item.textOwner())) return false;
@@ -1256,15 +1204,6 @@ public class ResolvedData {
             }
         }
         return false;
-    }
-
-    private boolean allEditableTextFramesAreAtomicMarkers(String[] ids) {
-        if (ids == null || ids.length == 0) return false;
-        for (String id : ids) {
-            if (id == null || id.isEmpty()) return false;
-            if (!isSimpleButtonLabelText(getTextFrame(id))) return false;
-        }
-        return true;
     }
 
     private static String firstParagraphStyleName(ResolvedStory story) {
@@ -1299,6 +1238,7 @@ public class ResolvedData {
     }
 
     private void unregisterEditableLabelTextOwnersCoveredByShell(RenderedGroup shell) {
+        if (hasStage1ObjectPlans()) return;
         if (!isEditableLabelShellCandidate(shell)) return;
         for (RenderedGroup item : renderedFloatingItems) {
             if (item == null || item == shell) continue;
@@ -1335,24 +1275,11 @@ public class ResolvedData {
             if (!"indesign_png".equals(item.visualOwner())) continue;
             if (!"hwpx_tf".equals(item.textOwner())) continue;
             if (!containsString(item.editableTextFrameIds(), textFrameId)) continue;
-            String reason = item.reason();
-            if (!isTextOwnedShellReason(reason)) continue;
+            if (!VisualLayeringRules.isStructuredTextShellCandidate(item)) continue;
             if (!overlapsTextFrame(item.bounds(), tf, 0.75)) continue;
             return true;
         }
         return false;
-    }
-
-    private static boolean isTextOwnedShellReason(String reason) {
-        if (reason == null) return false;
-        return reason.contains("text_hidden")
-                || reason.contains("visual_shell")
-                || reason.contains("editable_textframe_visual_shell")
-                || reason.contains("image_group")
-                || reason.contains("decoration_group")
-                || reason.contains("mixed_group_text_hidden")
-                || reason.contains("complex_graphic_text_hidden")
-                || reason.contains("label_backdrop_group");
     }
 
     private static boolean isEditableLabelShellCandidate(RenderedGroup item) {
@@ -1360,14 +1287,7 @@ public class ResolvedData {
         if (!"indesign_png".equals(item.visualOwner())) return false;
         if (Boolean.TRUE.equals(item.containsText()) || Boolean.TRUE.equals(item.containsEditableText())) return false;
         if ("indesign_png".equals(item.textOwner())) return false;
-        String reason = item.reason();
-        if (reason == null || !(reason.contains("decoration")
-                || reason.contains("visual_shell")
-                || reason.contains("text_hidden")
-                || reason.contains("complex_graphic"))) {
-            return false;
-        }
-        return true;
+        return VisualLayeringRules.isStructuredTextShellCandidate(item);
     }
 
     private static String normalizedText(String text) {

@@ -41,11 +41,12 @@ public final class VisualTextEmphasisAbsorber {
             RenderedGroup rg,
             double[] rbRaw) {
         if (ctx == null || ctx.resolvedData == null || sections == null || rg == null) return false;
-        if (!isAbsorbableTextEmphasisBackdrop(ctx, rg, rbRaw)) {
+        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+        if (!isAbsorbableTextEmphasisBackdrop(ctx, rg, rbRaw, plan)) {
             return false;
         }
 
-        TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw);
+        TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw, plan);
         if (match == null || match.tf == null || match.line == null) {
             return false;
         }
@@ -228,16 +229,22 @@ public final class VisualTextEmphasisAbsorber {
     private static boolean isAbsorbableTextEmphasisBackdrop(
             ResolvedBuildContext ctx,
             RenderedGroup rg,
-            double[] rbRaw) {
+            double[] rbRaw,
+            ObjectPlan plan) {
         if (rbRaw == null || rbRaw.length < 4) return false;
-        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
         if (plan == null || plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+            ctx.recordRenderedDecision(rg, plan, "Stage3.VisualTextEmphasisAbsorber",
+                    "SKIP_ABSORB_TEXT_STYLE_MISSING_OWNED_TEXT_FRAME",
+                    "ABSORB_TEXT_STYLE execution requires Stage 1 ownedTextFrameIds");
+            return false;
+        }
 
         double w = rbRaw[3] - rbRaw[1];
         double h = rbRaw[2] - rbRaw[0];
         if (w < 25.0 || h < 2.5 || h > 18.0 || w / h < 3.0) return false;
 
-        TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw);
+        TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw, plan);
         if (match == null || match.line == null || match.line.bounds() == null) return false;
         double[] lb = match.line.bounds();
         double lineH = Math.max(0.1, lb[2] - lb[0]);
@@ -299,7 +306,8 @@ public final class VisualTextEmphasisAbsorber {
     private static TextLineMatch findBestTextLineMatch(
             ResolvedBuildContext ctx,
             RenderedGroup rg,
-            double[] rbRaw) {
+            double[] rbRaw,
+            ObjectPlan plan) {
         if (ctx == null || ctx.resolvedData == null || rg == null || rbRaw == null) return null;
         TextLineMatch best = null;
         double[] scaledRb = new double[] {
@@ -310,6 +318,7 @@ public final class VisualTextEmphasisAbsorber {
         };
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (tf == null || tf.pageIndex() != rg.pageIndex()) continue;
+            if (!isPlannedOwnedTextFrame(plan, tf)) continue;
             if (!BackgroundInjector.hasSemanticText(tf)) continue;
             List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
             if (lines == null || lines.isEmpty()) continue;
@@ -375,6 +384,7 @@ public final class VisualTextEmphasisAbsorber {
                     return paras.get(Math.min(paras.size() - 1, 0));
                 }
             }
+            return null;
         }
 
         for (ASTBlock block : section.blocks()) {
@@ -413,6 +423,28 @@ public final class VisualTextEmphasisAbsorber {
             }
         }
         return null;
+    }
+
+    private static boolean isPlannedOwnedTextFrame(ObjectPlan plan, ResolvedTextFrame tf) {
+        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0
+                || tf == null || tf.id() == null) {
+            return false;
+        }
+        int tfId = parseInt(tf.id(), Integer.MIN_VALUE);
+        if (tfId == Integer.MIN_VALUE) return false;
+        for (int id : plan.ownedTextFrameIds) {
+            if (id == tfId) return true;
+        }
+        return false;
+    }
+
+    private static int parseInt(String value, int fallback) {
+        if (value == null) return fallback;
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private static boolean paragraphContainsCompactLine(ASTParagraph para, String lineCompact) {

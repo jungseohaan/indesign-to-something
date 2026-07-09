@@ -39,6 +39,12 @@ public final class VisualPlacementExecutor {
                 || !plan.hasPositiveSize()) {
             return PlacementResult.notPlaced();
         }
+        if (!hasExecutableVisualContract(ownershipPlan)) {
+            ctx.recordRenderedDecision(rg, ownershipPlan, "Stage3.VisualBuilder.Phase6",
+                    "SKIP_INCOMPLETE_OBJECT_PLAN",
+                    "visible visual execution requires complete ObjectPlan fields");
+            return PlacementResult.notPlaced();
+        }
 
         ShellRole shellRole = ShellRole.from(ownershipPlan);
         if (shellRole != ShellRole.NONE) {
@@ -83,21 +89,21 @@ public final class VisualPlacementExecutor {
         fig.sourceLayerIndex(plan.sourceLayerIndex);
         fig.fromGroup(plan.fromGroup);
         fig.sourceId("page_obj_" + rg.id());
-        fig.extractionCandidateId(firstNonEmpty(
-                ownershipPlan != null ? ownershipPlan.candidateId : null,
-                rg.candidateId()));
-        fig.extractionPlanPassId(firstNonEmpty(
-                ownershipPlan != null ? ownershipPlan.planPassId : null,
-                rg.planPassId()));
-        fig.extractionSlotRole(firstNonEmpty(
-                ownershipPlan != null ? ownershipPlan.slotRole : null,
-                rg.slotRole()));
+        fig.extractionCandidateId(ownershipPlan != null ? ownershipPlan.candidateId : null);
+        fig.extractionPlanPassId(ownershipPlan != null ? ownershipPlan.planPassId : null);
+        fig.extractionSlotRole(ownershipPlan != null ? ownershipPlan.slotRole : null);
         return fig;
     }
 
-    private static String firstNonEmpty(String preferred, String fallback) {
-        if (preferred != null && !preferred.isEmpty()) return preferred;
-        return fallback;
+    private static boolean hasExecutableVisualContract(ObjectPlan plan) {
+        return plan != null
+                && plan.hasVisibleVisual()
+                && plan.textAction != null
+                && plan.visualAction != null
+                && plan.visualLayer != null
+                && plan.placement != null
+                && plan.materialization != null
+                && plan.coordinateSpace != null;
     }
 
     private static void addVisualByPlannedOrder(ASTSection section, ASTFigure fig) {

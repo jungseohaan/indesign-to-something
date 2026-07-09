@@ -38,10 +38,8 @@ public final class SimpleButtonLabelPlanner {
             RenderedGroup textlessShellRender = findTextlessShellRender(data, anchor, labelTf);
             if (textlessShellRender == null) continue;
             SimpleButtonLabelPlan.Mode mode = SimpleButtonLabelPlan.Mode.TEXT_SHELL;
-            RenderedGroup visualRender = textlessShellRender;
             LabelStyle labelStyle = labelStyle(ctx, labelTf, labelText);
             int[] sources = sourceIds(anchor, labelTf, shell);
-            int[] visualSources = visualSourceIds(anchor, shell);
             SimpleButtonLabelPlan plan = new SimpleButtonLabelPlan(
                     parseInt(anchor.id()),
                     parseInt(labelTf.id()),
@@ -58,32 +56,6 @@ public final class SimpleButtonLabelPlanner {
                     sources,
                     "simple_button_label_text_shell");
             ctx.addSimpleButtonLabelPlan(plan);
-            int labelTfId = parseInt(labelTf.id());
-            int[] ownedTextFrameIds = new int[] { labelTfId };
-            ObjectPlan objectPlan = new ObjectPlan(
-                    plan.anchorDomId,
-                    "simple_button_label:" + safe(anchor.type()),
-                    plan.pageIndex,
-                    TextAction.OWNED_BY_HWPX_TEXT,
-                    VisualAction.PLACE_TEXT_SHELL,
-                    VisualLayer.LABEL_BACKDROP,
-                    Placement.INLINE,
-                    visualRender != null ? visualRender.id() : null,
-                    sources,
-                    visualSources,
-                    ownedTextFrameIds,
-                    new int[0],
-                    "simple_button_label:" + plan.anchorDomId,
-                    visualRender != null ? visualRender.zOrder() : anchor.zOrder(),
-                    plan.reason,
-                    visualRender != null ? visualRender.file() : null,
-                    visualRender != null && visualRender.bounds() != null
-                            ? visualRender.bounds()
-                            : (anchor.pageRelativeBounds() != null ? anchor.pageRelativeBounds() : anchor.geometricBounds()),
-                    null,
-                    null,
-                    -1);
-            ctx.addOwnershipPlan(objectPlan);
         }
     }
 

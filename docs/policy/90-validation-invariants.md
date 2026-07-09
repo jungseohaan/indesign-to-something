@@ -122,6 +122,11 @@
   `Rectangle` must not be visible `CONTENT_VISUAL_SLOT` owners. Validation
   checks the source parent relation and clipping bounds, and Stage 1 must expose
   the clip-carrying frame/group/page-local fragment instead.
+- A visible visual ObjectPlan or render decision whose `renderSourceBounds`
+  extends beyond its placement `bounds` must carry an explicit
+  `cropSourceBounds` contract. `renderSourceBounds` is provenance only; missing
+  crop metadata is a Stage 1 validation defect, not permission for Stage 3 to
+  infer a crop from page overflow or rendered geometry.
 - Every background/spread source child whose bounds intersect an applied page
   must have exactly one visible page-local owner for that page, unless a visible
   parent plan's rendered file is explicitly the clipped/textless owner for that
@@ -131,6 +136,15 @@
   visible text/shell/table/content slot owned by another plan must either prove
   that the descendant is absent from its rendered file or be `DROP_VISUAL`.
   Source ancestry narrowing is not enough.
+- A concrete source id in `visualSourceObjectIds` must have at most one visible
+  visual owner across all import-ready ObjectPlans. Exact slot-key checks are
+  not sufficient: a broader composite cannot keep a source id that a shell or
+  narrower content plan also claims as visible material.
+- A concrete source id in `visualSourceObjectIds` or `exportSourceObjectIds`
+  must be page-local to the ObjectPlan page before execution. If a spread-cross
+  object needs material on both pages, Stage 1 must create page-local fragment
+  owners; later executors must not reuse the neighboring page's rendered file as
+  a substitute owner.
 - Conversely, an `editable_textframe_visual_shell` fallback may be dropped only
   when a visible composite proves executable ownership of that TextFrame's shell
   style source through `exportSourceObjectIds`, `styleSourceObjectIds`, or an

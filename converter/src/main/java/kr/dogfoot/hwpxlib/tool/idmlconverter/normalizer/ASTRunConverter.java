@@ -193,16 +193,25 @@ public class ASTRunConverter {
         String domId = ParagraphTextHelpers.domIdFromSourceId(inlineTf.selfId());
         return domId != null
                 && (resolvedData.isHwpxOwnedTextFrame(domId)
-                || isTextFrameOwnedByRenderedTextlessShell(domId, resolvedData));
+                || isTextFrameOwnedByRenderedTextlessShell(domId, resolvedData,
+                inlineBridgeContext(resolvedData)));
     }
 
     private static boolean isTextFrameOwnedByRenderedTextlessShell(
             String textFrameDomId,
-            ResolvedData resolvedData) {
-        if (textFrameDomId == null || resolvedData == null
-                || resolvedData.allRenderedFloatingItems() == null) {
+            ResolvedData resolvedData,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx) {
+        if (textFrameDomId == null || resolvedData == null) {
             return false;
         }
+        int tfDomId = parseInlineGraphicDomId(textFrameDomId);
+        boolean hasStage1ObjectPlans = ctx != null
+                && ctx.ownershipPlans != null
+                && !ctx.ownershipPlans.isEmpty();
+        if (hasStage1ObjectPlans) {
+            return isTextFrameOwnedByPlannedTextShell(tfDomId, ctx);
+        }
+        if (resolvedData.allRenderedFloatingItems() == null) return false;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
                 : resolvedData.allRenderedFloatingItems()) {
             if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
@@ -213,6 +222,33 @@ public class ASTRunConverter {
             for (int id : owned) {
                 if (textFrameDomId.equals(String.valueOf(id))) return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean isTextFrameOwnedByPlannedTextShell(
+            int textFrameDomId,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx) {
+        if (textFrameDomId < 0 || ctx == null || ctx.ownershipPlans == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan
+                : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.textAction
+                    != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction.OWNED_BY_HWPX_TEXT) {
+                continue;
+            }
+            if (!kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole.isTextShell(plan)) {
+                continue;
+            }
+            if (containsInt(plan.ownedTextFrameIds, textFrameDomId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsInt(int[] ids, int target) {
+        if (ids == null) return false;
+        for (int id : ids) {
+            if (id == target) return true;
         }
         return false;
     }
@@ -237,6 +273,7 @@ public class ASTRunConverter {
         int domId = domIdFromInlineGraphic(ig);
         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
                 inlineBridgeContext(resolvedData);
+        boolean hasStage1ObjectPlans = tmpCtx.ownershipPlans != null && !tmpCtx.ownershipPlans.isEmpty();
         if (domId > 0) {
             List<ASTInlineItem> plannedItems =
                     kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
@@ -252,13 +289,7 @@ public class ASTRunConverter {
                 return;
             }
         }
-        if (domId > 0
-                && kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
-                .hasDirectDropOnlyInlinePlanForAnchor(tmpCtx, domId)) {
-            ASTInlineObject spacer = createLayoutOnlyInlineSpacer(ig);
-            if (spacer != null) {
-                para.addItem(spacer);
-            }
+        if (hasStage1ObjectPlans) {
             return;
         }
 
@@ -274,12 +305,6 @@ public class ASTRunConverter {
             boxDomId = parseInlineGraphicDomId(ig.selfId());
             if (boxDomId > 0) {
                 if (isDoviraSubunitMarkerObject(boxDomId, resolvedData)) {
-                    return;
-                }
-                tmpCtx.conceptDiagramTextFrameIds.addAll(
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePlacer
-                                .collectConceptDiagramTextFrameIds(tmpCtx, resolvedData.textFrames()));
-                if (anchorContainsConceptDiagramTextFrame(tmpCtx, String.valueOf(boxDomId))) {
                     return;
                 }
                 if (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
@@ -514,27 +539,6 @@ public class ASTRunConverter {
                 return -1;
             }
         }
-    }
-
-    private static ASTInlineObject createLayoutOnlyInlineSpacer(IDMLCharacterRun.InlineGraphic ig) {
-        if (ig == null) return null;
-        double w = ig.widthPoints();
-        double h = ig.heightPoints();
-        if ((w <= 0 || h <= 0) && ig.geometricBounds() != null && ig.geometricBounds().length >= 4) {
-            double[] gb = ig.geometricBounds();
-            if (w <= 0) w = Math.abs(gb[3] - gb[1]);
-            if (h <= 0) h = Math.abs(gb[2] - gb[0]);
-        }
-        if (w <= 0 && h <= 0) return null;
-        ASTInlineObject obj = new ASTInlineObject();
-        obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
-        obj.sourceId(ig.selfId());
-        obj.width(CoordinateConverter.pointsToHwpunits(Math.max(0.1, w)));
-        obj.height(CoordinateConverter.pointsToHwpunits(Math.max(0.1, h)));
-        obj.anchoredPosition(ig.anchoredPosition());
-        obj.textWrapMode(ig.textWrapMode());
-        obj.keepInline(true);
-        return obj;
     }
 
     private static kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext inlineBridgeContext(
@@ -1211,27 +1215,6 @@ public class ASTRunConverter {
         }
 
         return textRun;
-    }
-
-    private static boolean anchorContainsConceptDiagramTextFrame(
-            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx,
-            String anchorId) {
-        if (ctx == null || ctx.resolvedData == null || anchorId == null) return false;
-        if (ctx.conceptDiagramTextFrameIds == null || ctx.conceptDiagramTextFrameIds.isEmpty()) return false;
-        if (ctx.conceptDiagramTextFrameIds.contains(anchorId)) return true;
-        java.util.Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 5);
-        for (String tfId : ctx.conceptDiagramTextFrameIds) {
-            if (tfId == null) continue;
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem pi =
-                    ctx.resolvedData.getPageItem(tfId);
-            if (pi == null) continue;
-            String parentId = pi.parentId();
-            if (anchorId.equals(parentId) || descendants.contains(tfId)
-                    || (parentId != null && descendants.contains(parentId))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

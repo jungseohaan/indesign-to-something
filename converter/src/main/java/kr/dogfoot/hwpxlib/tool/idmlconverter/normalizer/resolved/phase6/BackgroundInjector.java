@@ -15,13 +15,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualSh
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualSyntheticLinePlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTextEmphasisAbsorber;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTfInlineCompositor;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.awt.image.BufferedImage;
@@ -56,6 +54,11 @@ public final class BackgroundInjector {
             if (ownershipPlan.placement != Placement.FLOATING) {
                 continue;
             }
+            if (ownershipPlan.coordinateSpace != CoordinateSpace.PAGE) {
+                ctx.recordRenderedDecision(rg, ownershipPlan, "Phase6", "SKIP_OBJECT_PLAN_NON_PAGE_COORDINATES",
+                        "floating visual ObjectPlan must provide PAGE coordinateSpace");
+                continue;
+            }
             VisualPlacementResolver.PlanRejection planRej =
                     VisualPlacementResolver.planRejection(ctx, rg);
             if (planRej != null) {
@@ -70,17 +73,12 @@ public final class BackgroundInjector {
                 continue;
             }
 
-            double[] bounds = ownershipPlan != null && ownershipPlan.bounds != null && ownershipPlan.bounds.length >= 4
-                    ? ownershipPlan.bounds
-                    : rg.bounds();
+            double[] bounds = ownershipPlan.bounds;
             if (bounds == null || bounds.length < 4) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NO_BOUNDS", "rendered item has no bounds");
+                ctx.recordRenderedDecision(rg, ownershipPlan, "Phase6", "SKIP_OBJECT_PLAN_NO_BOUNDS",
+                        "visible ObjectPlan has no executable bounds");
                 continue;
             }
-            bounds = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(ctx, rg)
-                    ? VisualTfInlineCompositor.boundsWithTfInlineVisuals(ctx, rg, bounds)
-                    : bounds;
-            bounds = normalizeSpreadBoundsToPage(ctx, pageIdx, rg, bounds);
 
             if (VisualTextEmphasisAbsorber.tryAbsorbTextEmphasisBackdrop(ctx, sections, rg, bounds)) {
                 ctx.recordRenderedDecision(rg, "Phase6", "ABSORB_TEXT_EMPHASIS_BACKDROP",
@@ -100,25 +98,10 @@ public final class BackgroundInjector {
             double rawRight = bounds[3], rawBottom = bounds[2];
             double fullW = rawRight - rawLeft;
             double fullH = rawBottom - rawTop;
-            if (isPlannerDeclaredLineVisual(ownershipPlan) && (fullW <= 0.0 || fullH <= 0.0)) {
-                double minExtent = sourceStrokeExtentMm(ctx, ownershipPlan);
-                if (fullW <= 0.0) {
-                    double cx = (rawLeft + rawRight) / 2.0;
-                    rawLeft = cx - minExtent / 2.0;
-                    rawRight = cx + minExtent / 2.0;
-                    fullW = rawRight - rawLeft;
-                }
-                if (fullH <= 0.0) {
-                    double cy = (rawTop + rawBottom) / 2.0;
-                    rawTop = cy - minExtent / 2.0;
-                    rawBottom = cy + minExtent / 2.0;
-                    fullH = rawBottom - rawTop;
-                }
-            }
-            String visualLayer = ctx.visualLayerByOwnershipPlan(rg);
+            String visualLayer = ownershipPlan.visualLayer != null ? ownershipPlan.visualLayer.name() : null;
             double cropRefLeft = rawLeft, cropRefTop = rawTop;
             double cropRefRight = rawRight, cropRefBottom = rawBottom;
-            double[] cropSourceBounds = cropSourceBounds(rg);
+            double[] cropSourceBounds = cropSourceBounds(ownershipPlan, rg);
             boolean hasCropSourceBounds = hasUsableCropSourceBounds(cropSourceBounds, bounds);
             if (hasCropSourceBounds) {
                 cropRefLeft = cropSourceBounds[1];
@@ -151,8 +134,7 @@ public final class BackgroundInjector {
             boolean shouldCompositeTfInlineVisuals = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(ctx, rg);
             boolean keepPlannedContainerBackdropFill =
                     VisualShellPreparationRules.isPaperFilledContainerBackdrop(ctx, rg, visualLayer);
-            boolean isPlannedTextShell =
-                    ShellRole.isTextShell(ctx.findOwnershipPlanForRendered(rg));
+            boolean isPlannedTextShell = ShellRole.isTextShell(ownershipPlan);
             boolean needsContainerShellKnockout = VisualShellPreparationRules.shouldKnockOutContainerShell(
                     ctx, rg, visualLayer, rawLeft, rawTop, rawRight, rawBottom, pageWidthMm, pageHeightMm);
             boolean needsIntersectionCrop = fullW > 1.0 && fullH > 1.0
@@ -165,7 +147,9 @@ public final class BackgroundInjector {
                     || rg.isWhiteStroke()
                     || needsPageCrop;
             try {
-                BufferedImage img = needsFullImageDecode ? VisualTfInlineCompositor.loadImageForPlacement(ctx, rg, prepared.imageData) : null;
+                BufferedImage img = needsFullImageDecode
+                        ? VisualTfInlineCompositor.loadImageForPlacement(ctx, rg, ownershipPlan, prepared.imageData)
+                        : null;
                 if (img == null && !needsFullImageDecode) {
                     int[] dims = VisualPngHeader.readDimensions(prepared.imageData);
                     if (dims != null) {
@@ -211,8 +195,6 @@ public final class BackgroundInjector {
                                 visLeft, visTop, visRight, visBottom,
                                 fullW, pageWidthMm, pageHeightMm);
                         prepared.pageAnchoredStripCrop = cropPlan.pageAnchoredStripCrop;
-                        prepared.stripCropLeftOverride = cropPlan.stripCropLeftOverride;
-                        prepared.stripCropWidthOverride = cropPlan.stripCropWidthOverride;
                         VisualCropper.PageCropResult pageCrop = VisualCropper.pageCrop(
                                 img, cropPlan.pxX, cropPlan.pxY, cropPlan.pxW, cropPlan.pxH);
                         if (pageCrop != null) {
@@ -229,45 +211,6 @@ public final class BackgroundInjector {
                     img.flush();
                 }
             } catch (Exception ignored) {}
-
-            // whiteStroke PNG는 exportFile이 visibleBounds보다 큰 영역을 내보낼 수 있음.
-            // arc 스트로크는 PNG 중앙에 위치하므로 중앙 기준으로 bounds를 확장.
-            if (rg.isWhiteStroke() && !((fullW > 1.0 && fullH > 1.0)
-                    && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
-                        || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
-                    && prepared.pixelW > 0 && prepared.pixelH > 0) {
-                double pngWidthMm = prepared.pixelW * 25.4 / 220.0;
-                double pngHeightMm = prepared.pixelH * 25.4 / 220.0;
-                double storedW = visRight - visLeft;
-                double storedH = visBottom - visTop;
-                if (pngWidthMm > storedW + 1.0) {
-                    double extraX = (pngWidthMm - storedW) / 2.0;
-                    visLeft -= extraX;
-                    visRight += extraX;
-                }
-                if (pngHeightMm > storedH + 1.0) {
-                    double extraY = (pngHeightMm - storedH) / 2.0;
-                    visTop -= extraY;
-                    visBottom += extraY;
-                }
-            }
-
-            if (shouldPreserveCompletePngAspect(ctx, rg, prepared.pixelW, prepared.pixelH)) {
-                double storedW = visRight - visLeft;
-                double storedH = visBottom - visTop;
-                double imageRatio = (double) prepared.pixelW / (double) prepared.pixelH;
-                double storedRatio = storedW / storedH;
-                if (storedW > 0 && storedH > 0 && imageRatio > 0
-                        && storedRatio > imageRatio * 1.10) {
-                    double targetH = storedW / imageRatio;
-                    double growRatio = targetH / storedH;
-                    if (growRatio > 1.0 && growRatio <= 3.0) {
-                        double cy = (visTop + visBottom) / 2.0;
-                        visTop = cy - targetH / 2.0;
-                        visBottom = cy + targetH / 2.0;
-                    }
-                }
-            }
 
             VisualPlacementPlan placementPlan = VisualPlacementPlanBuilder.build(
                     ctx,
@@ -297,26 +240,10 @@ public final class BackgroundInjector {
         VisualSyntheticLinePlacer.injectSyntheticGraphicLines(ctx, sections);
     }
 
-    private static boolean isPlannerDeclaredLineVisual(ObjectPlan plan) {
-        return plan != null
-                && plan.visualAction == kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction.PLACE_FLOATING_PNG
-                && "planner_declared_object_plan".equals(plan.reason);
-    }
-
-    private static double sourceStrokeExtentMm(ResolvedBuildContext ctx, ObjectPlan plan) {
-        double strokePt = 0.0;
-        if (ctx != null && ctx.resolvedData != null && plan != null && plan.visualSourceObjectIds != null) {
-            for (int sourceId : plan.visualSourceObjectIds) {
-                ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
-                if (item == null) continue;
-                strokePt = Math.max(strokePt, item.strokeWeight());
-            }
+    private static double[] cropSourceBounds(ObjectPlan plan, RenderedGroup rg) {
+        if (plan != null && plan.cropSourceBounds != null && plan.cropSourceBounds.length >= 4) {
+            return plan.cropSourceBounds;
         }
-        double scale = ctx != null && ctx.scaleFactor > 0.0 ? ctx.scaleFactor : 2.834645669291339;
-        return Math.max(0.2, strokePt > 0.0 ? strokePt / scale : 0.0);
-    }
-
-    private static double[] cropSourceBounds(RenderedGroup rg) {
         return rg != null ? rg.cropSourceBounds() : null;
     }
 
@@ -335,112 +262,14 @@ public final class BackgroundInjector {
         return containsBounds && materiallyLarger;
     }
 
-    private static double[] normalizeSpreadBoundsToPage(
-            ResolvedBuildContext ctx, int pageIdx, RenderedGroup rg, double[] bounds) {
-        if (ctx == null || ctx.resolvedData == null || rg == null
-                || bounds == null || bounds.length < 4) {
-            return bounds;
-        }
-        if (ctx.resolvedData.pages() == null || pageIdx < 0 || pageIdx >= ctx.resolvedData.pages().size()) {
-            return bounds;
-        }
-        double[] pb = ctx.resolvedData.pages().get(pageIdx).bounds();
-        if (pb == null || pb.length < 4) return bounds;
-
-        double pageTop = pb[0];
-        double pageLeft = pb[1];
-        double pageBottom = pb[2];
-        double pageRight = pb[3];
-        double pageWidth = pageRight - pageLeft;
-        double pageHeight = pageBottom - pageTop;
-        if (pageWidth <= 0.0 || pageHeight <= 0.0) return bounds;
-
-        // Some extracted visuals are exported in spread coordinates while the
-        // HWPX page expects page-relative coordinates. Fold those into the local
-        // page before visibility/crop/z-order decisions.
-        boolean xInSpreadPage = bounds[1] >= pageLeft - 0.5
-                && bounds[3] <= pageRight + 0.5
-                && pageLeft > 1.0;
-        boolean yInSpreadPage = bounds[0] >= pageTop - 0.5
-                && bounds[2] <= pageBottom + 0.5
-                && pageTop > 1.0;
-        boolean xInRightSpreadPage = !xInSpreadPage
-                && pageLeft <= 1.0
-                && bounds[1] >= pageWidth - 0.5
-                && bounds[3] <= pageWidth * 2.0 + 0.5;
-        boolean yInBottomSpreadPage = !yInSpreadPage
-                && pageTop <= 1.0
-                && bounds[0] >= pageHeight - 0.5
-                && bounds[2] <= pageHeight * 2.0 + 0.5;
-        double scale = ctx.scaleFactor != 0.0 ? ctx.scaleFactor : 1.0;
-        double localPageLeft = pageLeft / scale;
-        double localPageTop = pageTop / scale;
-        double localPageRight = pageRight / scale;
-        double localPageBottom = pageBottom / scale;
-        double localPageWidth = pageWidth / scale;
-        double localPageHeight = pageHeight / scale;
-        boolean xInLocalSpreadPage = !xInSpreadPage
-                && bounds[1] >= localPageLeft - 0.5
-                && bounds[3] <= localPageRight + 0.5
-                && localPageLeft > 1.0;
-        boolean yInLocalSpreadPage = !yInSpreadPage
-                && bounds[0] >= localPageTop - 0.5
-                && bounds[2] <= localPageBottom + 0.5
-                && localPageTop > 1.0;
-        boolean xInRightLocalSpreadPage = !xInSpreadPage
-                && !xInRightSpreadPage
-                && !xInLocalSpreadPage
-                && pageLeft <= 1.0
-                && localPageWidth > 0.0
-                && bounds[1] >= localPageWidth - 0.5
-                && bounds[3] <= localPageWidth * 2.0 + 0.5;
-        boolean yInBottomLocalSpreadPage = !yInSpreadPage
-                && !yInBottomSpreadPage
-                && !yInLocalSpreadPage
-                && pageTop <= 1.0
-                && localPageHeight > 0.0
-                && bounds[0] >= localPageHeight - 0.5
-                && bounds[2] <= localPageHeight * 2.0 + 0.5;
-        if (xInRightSpreadPage) {
-            pageLeft = pageWidth;
-            xInSpreadPage = true;
-        } else if (xInLocalSpreadPage) {
-            pageLeft = localPageLeft;
-            xInSpreadPage = true;
-        } else if (xInRightLocalSpreadPage) {
-            pageLeft = localPageWidth;
-            xInSpreadPage = true;
-        }
-        if (yInBottomSpreadPage) {
-            pageTop = pageHeight;
-            yInSpreadPage = true;
-        } else if (yInLocalSpreadPage) {
-            pageTop = localPageTop;
-            yInSpreadPage = true;
-        } else if (yInBottomLocalSpreadPage) {
-            pageTop = localPageHeight;
-            yInSpreadPage = true;
-        }
-        if (!xInSpreadPage && !yInSpreadPage) return bounds;
-
-        return new double[] {
-                bounds[0] - (yInSpreadPage ? pageTop : 0.0),
-                bounds[1] - (xInSpreadPage ? pageLeft : 0.0),
-                bounds[2] - (yInSpreadPage ? pageTop : 0.0),
-                bounds[3] - (xInSpreadPage ? pageLeft : 0.0)
-        };
-    }
-
     public static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg) {
         ObjectPlan plan = ctx != null && rg != null ? ctx.findOwnershipPlanForRendered(rg) : null;
         return loadPng(ctx, rg, plan);
     }
 
     public static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg, ObjectPlan plan) {
-        String file = plan != null && plan.file != null && !plan.file.isEmpty()
-                ? plan.file
-                : (rg != null ? rg.file() : null);
-        return loadPng(ctx, file);
+        if (plan == null || plan.file == null || plan.file.isEmpty()) return null;
+        return loadPng(ctx, plan.file);
     }
 
     private static byte[] loadPng(ResolvedBuildContext ctx, String file) {
@@ -463,18 +292,6 @@ public final class BackgroundInjector {
             System.err.println("[BackgroundInjector] PNG 로드 실패: " + e.getMessage());
             return null;
         }
-    }
-
-    private static boolean shouldPreserveCompletePngAspect(
-            ResolvedBuildContext ctx,
-            RenderedGroup rg,
-            int pixelW,
-            int pixelH) {
-        if (ctx == null || rg == null || pixelW <= 0 || pixelH <= 0) return false;
-        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-        return plan != null
-                && plan.textAction == TextAction.OWNED_BY_PNG
-                && plan.materialization == Materialization.COMPLETE_PNG;
     }
 
     private static boolean isCompletePngSimpleButtonLabel(ResolvedBuildContext ctx, RenderedGroup rg) {

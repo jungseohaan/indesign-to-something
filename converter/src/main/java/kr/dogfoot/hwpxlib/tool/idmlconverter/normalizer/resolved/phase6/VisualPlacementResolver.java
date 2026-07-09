@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
@@ -35,6 +36,9 @@ public final class VisualPlacementResolver {
      * @return 거부 사유, 또는 plan이 floating을 막지 않으면 null
      */
     public static PlanRejection planRejection(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx.visualActionByOwnershipPlan(rg) == VisualAction.ABSORB_TEXT_STYLE) {
+            return null;
+        }
         if (ctx.shouldDropVisualByOwnershipPlan(rg)) {
             return new PlanRejection("SKIP_OBJECT_PLAN_DROP_VISUAL",
                     "OwnershipPlanner visualAction=DROP_VISUAL");

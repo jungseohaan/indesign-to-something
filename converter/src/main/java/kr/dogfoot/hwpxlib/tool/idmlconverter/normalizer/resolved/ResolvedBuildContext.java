@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.StylePropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
@@ -332,20 +333,6 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> aboveLineAnchoredIds = new java.util.HashSet<>();
 
-    /**
-     * FramePlacer(Phase 2)가 네이티브 fill로 흡수한 배경 도형 DOM ID 집합
-     * (deco PNG가 nativeFillChildIds로 풀어준 대형 배경). 이 도형은 별도 complex_graphic
-     * PNG로도 추출되어 floating 배치될 수 있으므로, Stage 3 visual executor가 floating 배치를 건너뛴다.
-     */
-    public java.util.Set<Integer> nativeFillAbsorbedIds = new java.util.HashSet<>();
-
-    /**
-     * Concept diagram pseudo-table 영역에 속한 TextFrame DOM id.
-     * 이 영역은 실제 IDML Table이 아니라 visual shell + editable TF + 독립 설명 TF
-     * 조합이므로, table/grid/width-expansion/label-centering 보정보다 원본 좌표 보존을 우선한다.
-     */
-    public java.util.Set<String> conceptDiagramTextFrameIds = new java.util.HashSet<>();
-
     /** rendered page_object의 최종 배치/스킵 사유 추적용 JSONL 라인. */
     public java.util.List<String> renderDecisionLines = new java.util.ArrayList<>();
 
@@ -391,6 +378,7 @@ public final class ResolvedBuildContext {
     private java.util.Map<String, ObjectPlan> ownershipPlanByRenderUnitKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByRenderKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByCandidateKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByCandidateId;
     private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
@@ -403,6 +391,10 @@ public final class ResolvedBuildContext {
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByAnyObjectId;
     private final java.util.Map<String, java.util.Set<String>> descendantSetCache = new java.util.HashMap<>();
     private boolean ownershipPlanIndexDirty = true;
+
+    public boolean hasStage1ObjectPlans() {
+        return ownershipPlans != null && !ownershipPlans.isEmpty();
+    }
 
     /** Stage 1 simple marker label plans. Key: inline anchor DOM id. */
     public final java.util.Map<Integer, SimpleButtonLabelPlan> simpleButtonLabelPlans =
@@ -509,8 +501,10 @@ public final class ResolvedBuildContext {
         ownershipPlanRenderedCache.clear();
         descendantSetCache.clear();
         ownershipPlanByRenderFileKey = null;
+        ownershipPlanByRenderUnitKey = null;
         ownershipPlanByRenderKey = null;
         ownershipPlanByCandidateKey = null;
+        ownershipPlanByCandidateId = null;
         ownershipPlanByDomKey = null;
         ownershipPlanByFileBoundsKey = null;
         ownershipPlanByFileKey = null;
@@ -540,6 +534,9 @@ public final class ResolvedBuildContext {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         if (plan != null) {
             return !plan.hasVisibleVisual();
+        }
+        if (hasStage1ObjectPlans()) {
+            return false;
         }
         return isTextFrameOwnedButPlanMissingForRendered(rg);
     }
@@ -601,6 +598,10 @@ public final class ResolvedBuildContext {
     }
 
     public ObjectPlan findTextFrameOwnershipPlan(int domId) {
+        return findHwpxTextFrameOwnershipPlan(domId);
+    }
+
+    public ObjectPlan findAnyTextFrameOwnershipPlan(int domId) {
         if (domId < 0) return null;
         ObjectPlan fallback = null;
         ensureOwnershipPlanIndexes();
@@ -613,6 +614,19 @@ public final class ResolvedBuildContext {
             if (fallback == null) fallback = plan;
         }
         return fallback;
+    }
+
+    public ObjectPlan findHwpxTextFrameOwnershipPlan(int domId) {
+        if (domId < 0) return null;
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> candidates = ownershipPlansByExactDomId.get(domId);
+        if (candidates == null || candidates.isEmpty()) return null;
+        for (ObjectPlan plan : candidates) {
+            if (plan == null) continue;
+            if (!isTextFrameOwnershipPlan(plan, domId)) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return plan;
+        }
+        return null;
     }
 
     private static boolean isTextFrameOwnershipPlan(ObjectPlan plan, int domId) {
@@ -645,7 +659,7 @@ public final class ResolvedBuildContext {
         if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.FLOATING)) {
             return true;
         }
-        ObjectPlan plan = findTextFrameOwnershipPlan(domId);
+        ObjectPlan plan = findHwpxTextFrameOwnershipPlan(domId);
         return plan != null
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.placement == Placement.FLOATING;
@@ -658,7 +672,7 @@ public final class ResolvedBuildContext {
         if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.FLOATING)) {
             return false;
         }
-        ObjectPlan plan = findTextFrameOwnershipPlan(domId);
+        ObjectPlan plan = findHwpxTextFrameOwnershipPlan(domId);
         return plan != null
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.placement == Placement.INLINE;
@@ -755,7 +769,10 @@ public final class ResolvedBuildContext {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         return plan != null
                 && plan.textAction == TextAction.OWNED_BY_PNG
-                && plan.visualAction == VisualAction.PLACE_INLINE_PNG;
+                && plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                && plan.placement == Placement.INLINE
+                && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && plan.materialization == Materialization.COMPLETE_PNG;
     }
 
     public Integer zOrderByOwnershipPlan(RenderedGroup rg) {
@@ -784,21 +801,18 @@ public final class ResolvedBuildContext {
         }
         ensureOwnershipPlanIndexes();
         Placement placement = placementOf(rg);
-        Placement alternatePlacement = placement == Placement.INLINE ? Placement.FLOATING : Placement.INLINE;
         ObjectPlan plan = findRenderedPlanForPlacement(rg, placement, false);
-        ObjectPlan alternatePlan = findRenderedPlanForPlacement(rg, alternatePlacement, false);
-        if (plan == null || (alternatePlan != null && alternatePlan.hasVisibleVisual() && !plan.hasVisibleVisual())) {
-            plan = alternatePlan;
-        }
         if (plan == null) {
             plan = findRenderedPlanForPlacement(rg, placement, true);
-            alternatePlan = findRenderedPlanForPlacement(rg, alternatePlacement, true);
-            if (plan == null || (alternatePlan != null && alternatePlan.hasVisibleVisual() && !plan.hasVisibleVisual())) {
-                plan = alternatePlan;
+        }
+        if (plan == null) {
+            ObjectPlan renderUnitPlan = renderedOnly(ownershipPlanByRenderUnitKey.get(renderUnitKey(rg.renderUnitId())));
+            if (renderUnitPlan != null && renderUnitPlan.placement == placement) {
+                plan = renderUnitPlan;
             }
         }
         if (plan == null) {
-            plan = renderedOnly(ownershipPlanByRenderUnitKey.get(renderUnitKey(rg.renderUnitId())));
+            plan = renderedOnly(ownershipPlanByCandidateId.get(candidateIdKey(rg.candidateId())));
         }
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
@@ -837,7 +851,21 @@ public final class ResolvedBuildContext {
     }
 
     private static ObjectPlan renderedOnly(ObjectPlan plan) {
-        return plan != null && plan.renderId != null ? plan : null;
+        if (plan == null || plan.renderId == null) return null;
+        if (plan.hasVisibleVisual() && !hasExecutableRenderedVisualContract(plan)) {
+            return null;
+        }
+        return plan;
+    }
+
+    private static boolean hasExecutableRenderedVisualContract(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction != null
+                && plan.visualAction != null
+                && plan.visualLayer != null
+                && plan.placement != null
+                && plan.materialization != null
+                && plan.coordinateSpace != null;
     }
 
     private void ensureOwnershipPlanIndexes() {
@@ -846,6 +874,7 @@ public final class ResolvedBuildContext {
         ownershipPlanByRenderUnitKey = new java.util.HashMap<>();
         ownershipPlanByRenderKey = new java.util.HashMap<>();
         ownershipPlanByCandidateKey = new java.util.HashMap<>();
+        ownershipPlanByCandidateId = new java.util.HashMap<>();
         ownershipPlanByDomKey = new java.util.HashMap<>();
         ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
         ownershipPlanByFileKey = new java.util.HashMap<>();
@@ -892,6 +921,9 @@ public final class ResolvedBuildContext {
             }
             putPreferred(ownershipPlanByCandidateKey,
                     candidateKey(plan.pageIndex, plan.placement, plan.candidateId),
+                    plan);
+            putPreferred(ownershipPlanByCandidateId,
+                    candidateIdKey(plan.candidateId),
                     plan);
             putPreferred(ownershipPlanByDomKey, domKey(plan.pageIndex, plan.placement, plan.domId), plan);
             putPreferred(ownershipPlanByFileBoundsKey,
@@ -1047,25 +1079,12 @@ public final class ResolvedBuildContext {
 
     private boolean isTextFrameOwnedButPlanMissingForRendered(RenderedGroup rg) {
         if (rg == null) return false;
+        if (hasStage1ObjectPlans()) return false;
         if (rg.hasEditableTextHiddenFromPng()) return true;
         if (Boolean.TRUE.equals(rg.containsEditableText()) && rg.sourceObjectIds() != null
                 && rg.sourceObjectIds().length > 0
                 && "hwpx_tf".equals(rg.textOwner())) {
             return true;
-        }
-        return hasHwpxOwnedTextSourceId(rg);
-    }
-
-    private boolean appearsToHaveHwpxTextOwnership(RenderedGroup rg) {
-        if (rg == null || resolvedData == null) return false;
-        if (rg.hasEditableTextHiddenFromPng()) return true;
-        if (Boolean.TRUE.equals(rg.containsEditableText())
-                && "hwpx_tf".equals(rg.textOwner())) {
-            return true;
-        }
-        if (resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg)) return false;
-        for (int sourceId : renderedSourceObjectIds(rg)) {
-            if (resolvedData.isEditableTextFrame(String.valueOf(sourceId))) return true;
         }
         return hasHwpxOwnedTextSourceId(rg);
     }
@@ -1118,6 +1137,11 @@ public final class ResolvedBuildContext {
     private static String candidateKey(int pageIndex, Placement placement, String candidateId) {
         if (candidateId == null || candidateId.isEmpty()) return null;
         return pageIndex + "|" + placement + "|" + candidateId;
+    }
+
+    private static String candidateIdKey(String candidateId) {
+        if (candidateId == null || candidateId.isEmpty()) return null;
+        return candidateId;
     }
 
     private java.util.Map<String, RenderedGroup> renderedGroupsByCandidateId() {
@@ -1237,6 +1261,13 @@ public final class ResolvedBuildContext {
                     .append(plan.renderSourceBounds[2]).append(',')
                     .append(plan.renderSourceBounds[3]).append(']');
         }
+        if (plan != null && plan.cropSourceBounds != null && plan.cropSourceBounds.length >= 4) {
+            sb.append(",\"cropSourceBounds\":[")
+                    .append(plan.cropSourceBounds[0]).append(',')
+                    .append(plan.cropSourceBounds[1]).append(',')
+                    .append(plan.cropSourceBounds[2]).append(',')
+                    .append(plan.cropSourceBounds[3]).append(']');
+        }
         sb.append('}');
         renderDecisionLines.add(sb.toString());
         ownershipTraceLines.add(renderedDecisionTraceLine(rg, plan, phase, decision, detail, executedFile));
@@ -1261,15 +1292,19 @@ public final class ResolvedBuildContext {
                 + "\t" + tsv(executedFile)
                 + "\t" + (plan != null ? plan.domId : "")
                 + "\t" + tsv(plan != null ? plan.candidateId : "")
-                + "\t" + tsv(plan != null ? plan.textAction.name() : "")
-                + "\t" + tsv(plan != null ? plan.visualAction.name() : "")
-                + "\t" + tsv(plan != null ? plan.placement.name() : "")
-                + "\t" + tsv(plan != null ? plan.visualLayer.name() : "")
-                + "\t" + tsv(plan != null ? plan.materialization.name() : "")
+                + "\t" + tsv(enumName(plan != null ? plan.textAction : null))
+                + "\t" + tsv(enumName(plan != null ? plan.visualAction : null))
+                + "\t" + tsv(enumName(plan != null ? plan.placement : null))
+                + "\t" + tsv(enumName(plan != null ? plan.visualLayer : null))
+                + "\t" + tsv(enumName(plan != null ? plan.materialization : null))
                 + "\t" + tsv(plan != null ? ObjectPlan.intArrayJson(plan.sourceObjectIds) : "")
                 + "\t" + tsv(plan != null ? ObjectPlan.intArrayJson(plan.exportSourceObjectIds) : "")
                 + "\t" + tsv(plan != null ? ObjectPlan.intArrayJson(plan.hiddenVisualSourceObjectIds) : "")
                 + "\t" + tsv(detail);
+    }
+
+    private static String enumName(Enum<?> value) {
+        return value != null ? value.name() : "";
     }
 
     private static String tsv(String value) {

@@ -91,6 +91,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     slotSources = _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources);
     slotSources = _plannerBundleWithoutPlacedContentBranches(
             declaredCandidate, slot, slotSources, clusterIndex);
+    slotSources = _plannerBundleWithoutClippedPlacedContentLeafSources(
+            declaredCandidate, slot, slotSources, clusterIndex);
     var exportSourceObjectIds = _internSourceSetIds(declaredCandidate.exportSourceObjectIds || []);
     if (_plannerBundleShouldExportInlineSimpleMarkerCompletePng(
             declaredCandidate, slot, slotSources, sourceIds, exportSourceObjectIds, clusterIndex)) {
@@ -116,6 +118,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     }
     exportSourceObjectIds = _plannerBundlePrunePlacedContentBranches(
             declaredCandidate, slot, exportSourceObjectIds, clusterIndex);
+    exportSourceObjectIds = _plannerBundlePruneClippedPlacedContentLeafIds(
+            declaredCandidate, slot, exportSourceObjectIds, clusterIndex);
     exportSourceObjectIds = _plannerBundleSourceIdsIntersect(exportSourceObjectIds, sourceIds);
     if (slot === "CONTENT_VISUAL_SLOT"
             && (!slotSources.visualSourceObjectIds || slotSources.visualSourceObjectIds.length === 0)
@@ -133,6 +137,9 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     var materialization = _plannerBundleMaterialization(
             declaredCandidate, slot, slotSources, exportSourceObjectIds,
             hiddenVisualSourceObjectIds, clusterIndex);
+    var inlineFlowSourceObjectIds = _plannerBundleInlineFlowSourceObjectIds(
+            declaredCandidate, slotSources, exportSourceObjectIds,
+            hiddenVisualSourceObjectIds, clusterIndex);
     var executable = candidate.disabled !== true;
     if (slot === "SHELL_SLOT"
             && !_plannerBundleHasExecutableShellMaterial(slotSources, clusterIndex)) {
@@ -148,6 +155,12 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     var layer = connectorDecorationVisual
             ? "DECORATION"
             : _plannerBundlePolicyLayer(candidate, slot, clusterIndex);
+    var sourceExtentBounds = _plannerBundleSourceExtentBounds(
+            candidate, declaredCandidate, slotSources, sourceIds, clusterIndex);
+    var renderSourceBounds = candidate.renderSourceBounds || sourceExtentBounds;
+    var cropSourceBounds = candidate.cropSourceBounds
+            ? candidate.cropSourceBounds
+            : _plannerBundleCropSourceBounds(candidate, sourceExtentBounds);
 
     return {
         bundleId: _plannerBundleId(candidate, sourceIds, clusterIndex),
@@ -202,10 +215,181 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         inlineCompositeLayoutDescendant: inlineCompositeLayoutDescendant,
         inlineAnchorSourceObjectId: candidate.inlineAnchorSourceObjectId || null,
         inlineSourceTreeClosed: candidate.inlineSourceTreeClosed === true,
+        inlineFlowSourceObjectIds: inlineFlowSourceObjectIds,
         connectorDecorationVisual: connectorDecorationVisual,
         zOrder: zOrder,
-        bounds: candidate.bounds || null
+        bounds: candidate.bounds || null,
+        renderSourceBounds: renderSourceBounds,
+        cropSourceBounds: cropSourceBounds
     };
+}
+
+function _plannerBundleInlineFlowSourceObjectIds(
+        candidate, slotSources, exportSourceObjectIds, hiddenVisualSourceObjectIds,
+        clusterIndex) {
+    if (!candidate || candidate.inlineSourceTreeClosed !== true) return [];
+    if (candidate.passId !== "pass.inline_objects") return [];
+    if (!hiddenVisualSourceObjectIds || hiddenVisualSourceObjectIds.length === 0) return [];
+    var ids = [];
+    var seen = {};
+    function addAll(values) {
+        for (var i = 0; values && i < values.length; i++) {
+            var id = Number(values[i]);
+            if (isNaN(id)) continue;
+            var key = String(id);
+            if (seen[key]) continue;
+            seen[key] = true;
+            ids.push(id);
+        }
+    }
+    addAll(exportSourceObjectIds || []);
+    if (ids.length === 0 && slotSources) addAll(slotSources.visualSourceObjectIds || []);
+    addAll(hiddenVisualSourceObjectIds || []);
+    if (ids.length < 2) return [];
+    ids.sort(function(a, b) {
+        var ao = _plannerBundleSourceOrder(a, clusterIndex);
+        var bo = _plannerBundleSourceOrder(b, clusterIndex);
+        if (ao !== bo) return ao - bo;
+        return a - b;
+    });
+    return ids;
+}
+
+function _plannerBundleSourceOrder(sourceId, clusterIndex) {
+    if (!clusterIndex || !clusterIndex.sourceInfo) return Number(sourceId);
+    var src = clusterIndex.sourceInfo(sourceId);
+    if (src && src.sourceOrder !== undefined && src.sourceOrder !== null) {
+        var order = Number(src.sourceOrder);
+        if (!isNaN(order)) return order;
+    }
+    return Number(sourceId);
+}
+
+function _plannerBundleSourceExtentBounds(
+        candidate, declaredCandidate, slotSources, sourceIds, clusterIndex) {
+    if (!candidate || !candidate.bounds || candidate.bounds.length < 4) return null;
+    if (!clusterIndex || !clusterIndex.sourceInfo) return null;
+    var targetPageIndex = Number(candidate.pageIndex);
+    if (isNaN(targetPageIndex) || targetPageIndex < 0) return null;
+
+    var ids = [];
+    if (declaredCandidate && declaredCandidate.exportSourceObjectIds
+            && declaredCandidate.exportSourceObjectIds.length > 0) {
+        ids = declaredCandidate.exportSourceObjectIds;
+    } else if (slotSources && slotSources.visualSourceObjectIds
+            && slotSources.visualSourceObjectIds.length > 0) {
+        ids = slotSources.visualSourceObjectIds;
+    } else {
+        ids = sourceIds || [];
+    }
+    var union = null;
+    for (var i = 0; ids && i < ids.length; i++) {
+        var src = clusterIndex.sourceInfo(ids[i]);
+        if (!src || !src.bounds || src.bounds.length < 4) continue;
+        var adjusted = _plannerBundleBoundsRelativeToTargetPage(
+                src.bounds, src.pageIndex, targetPageIndex, clusterIndex, candidate.bounds);
+        if (!adjusted) continue;
+        union = union ? _plannerBundleUnionBounds(union, adjusted) : adjusted;
+    }
+    if (!union) return null;
+    if (!_plannerBundleBoundsContains(union, candidate.bounds, 0.05)) return null;
+    if (!_plannerBundleBoundsMateriallyLarger(union, candidate.bounds, 0.5)) return null;
+    return union;
+}
+
+function _plannerBundleCropSourceBounds(candidate, sourceExtentBounds) {
+    if (!candidate || !candidate.bounds || candidate.bounds.length < 4) return null;
+    if (!sourceExtentBounds || sourceExtentBounds.length < 4) return null;
+    if (!_plannerBundleBoundsContains(sourceExtentBounds, candidate.bounds, 0.05)) return null;
+    if (!_plannerBundleBoundsMateriallyLarger(sourceExtentBounds, candidate.bounds, 0.5)) return null;
+    return sourceExtentBounds.slice(0);
+}
+
+function _plannerBundleBoundsRelativeToTargetPage(
+        bounds, sourcePageIndex, targetPageIndex, clusterIndex, targetBounds) {
+    if (!bounds || bounds.length < 4) return null;
+    var out = [
+        Number(bounds[0]),
+        Number(bounds[1]),
+        Number(bounds[2]),
+        Number(bounds[3])
+    ];
+    if (isNaN(out[0]) || isNaN(out[1]) || isNaN(out[2]) || isNaN(out[3])) return null;
+    sourcePageIndex = Number(sourcePageIndex);
+    if (isNaN(sourcePageIndex) || sourcePageIndex < 0 || sourcePageIndex === targetPageIndex) {
+        return out;
+    }
+    if (clusterIndex.sameSpread && clusterIndex.sameSpread(sourcePageIndex, targetPageIndex) !== true) {
+        return out;
+    }
+    if (!clusterIndex.pageBounds) {
+        return _plannerBundleAdjacentPageShift(out, sourcePageIndex, targetPageIndex, targetBounds) || out;
+    }
+    var sourcePageBounds = clusterIndex.pageBounds(sourcePageIndex);
+    var targetPageBounds = clusterIndex.pageBounds(targetPageIndex);
+    if (!sourcePageBounds || !targetPageBounds
+            || sourcePageBounds.length < 4 || targetPageBounds.length < 4) {
+        return _plannerBundleAdjacentPageShift(out, sourcePageIndex, targetPageIndex, targetBounds) || out;
+    }
+    var dTop = Number(sourcePageBounds[0]) - Number(targetPageBounds[0]);
+    var dLeft = Number(sourcePageBounds[1]) - Number(targetPageBounds[1]);
+    if (isNaN(dTop) || isNaN(dLeft)) return out;
+    if (Math.abs(dTop) <= 0.05 && Math.abs(dLeft) <= 0.05) {
+        return _plannerBundleAdjacentPageShift(out, sourcePageIndex, targetPageIndex, targetBounds) || out;
+    }
+    return [
+        out[0] + dTop,
+        out[1] + dLeft,
+        out[2] + dTop,
+        out[3] + dLeft
+    ];
+}
+
+function _plannerBundleAdjacentPageShift(bounds, sourcePageIndex, targetPageIndex, targetBounds) {
+    if (!bounds || !targetBounds || targetBounds.length < 4) return null;
+    var pageDelta = Number(targetPageIndex) - Number(sourcePageIndex);
+    if (isNaN(pageDelta) || Math.abs(pageDelta) !== 1) return null;
+    var targetPageWidth = Number(targetBounds[3]) - Number(targetBounds[1]);
+    if (isNaN(targetPageWidth) || targetPageWidth <= 1.0) return null;
+    var shifted = [
+        bounds[0],
+        bounds[1] - pageDelta * targetPageWidth,
+        bounds[2],
+        bounds[3] - pageDelta * targetPageWidth
+    ];
+    return _plannerBundleBoundsOverlap(shifted, targetBounds, 0.5) ? shifted : null;
+}
+
+function _plannerBundleUnionBounds(a, b) {
+    return [
+        Math.min(a[0], b[0]),
+        Math.min(a[1], b[1]),
+        Math.max(a[2], b[2]),
+        Math.max(a[3], b[3])
+    ];
+}
+
+function _plannerBundleBoundsContains(outer, inner, eps) {
+    if (!outer || !inner || outer.length < 4 || inner.length < 4) return false;
+    eps = eps || 0;
+    return outer[0] <= inner[0] + eps
+            && outer[1] <= inner[1] + eps
+            && outer[2] >= inner[2] - eps
+            && outer[3] >= inner[3] - eps;
+}
+
+function _plannerBundleBoundsMateriallyLarger(outer, inner, eps) {
+    if (!outer || !inner || outer.length < 4 || inner.length < 4) return false;
+    eps = eps || 0;
+    return (outer[3] - outer[1]) > (inner[3] - inner[1]) + eps
+            || (outer[2] - outer[0]) > (inner[2] - inner[0]) + eps;
+}
+
+function _plannerBundleBoundsOverlap(a, b, eps) {
+    if (!a || !b || a.length < 4 || b.length < 4) return false;
+    eps = eps || 0;
+    return Math.min(a[3], b[3]) > Math.max(a[1], b[1]) - eps
+            && Math.min(a[2], b[2]) > Math.max(a[0], b[0]) - eps;
 }
 
 function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
@@ -506,6 +690,17 @@ function _plannerBundleWithoutPlacedContentBranches(candidate, slot, slotSources
     return copy;
 }
 
+function _plannerBundleWithoutClippedPlacedContentLeafSources(candidate, slot, slotSources, clusterIndex) {
+    if (!slotSources) return slotSources;
+    var copy = {
+        visualSourceObjectIds: _plannerBundlePruneClippedPlacedContentLeafIds(
+                candidate, slot, slotSources.visualSourceObjectIds || [], clusterIndex),
+        styleSourceObjectIds: _sortedNumericIds(slotSources.styleSourceObjectIds || []),
+        ownedTextFrameIds: _sortedNumericIds(slotSources.ownedTextFrameIds || [])
+    };
+    return copy;
+}
+
 function _plannerBundlePrunePlacedContentBranches(candidate, slot, ids, clusterIndex) {
     if (slot !== "SHELL_SLOT" || !ids || ids.length === 0
             || !clusterIndex || !clusterIndex.sourceInfo) {
@@ -527,6 +722,48 @@ function _plannerBundlePrunePlacedContentBranches(candidate, slot, ids, clusterI
         _pushUniqueId(out, seen, id);
     }
     return _sortedNumericIds(out);
+}
+
+function _plannerBundlePruneClippedPlacedContentLeafIds(candidate, slot, ids, clusterIndex) {
+    if (slot !== "CONTENT_VISUAL_SLOT" || !candidate || !ids || ids.length === 0
+            || !clusterIndex || !clusterIndex.sourceInfo) {
+        return _sortedNumericIds(ids || []);
+    }
+    if (candidate.passId !== "pass.image_placed_frames") {
+        return _sortedNumericIds(ids || []);
+    }
+    var idSet = _plannerBundleSourceSet(ids, clusterIndex);
+    var out = [];
+    var seen = {};
+    var removed = false;
+    for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        var src = clusterIndex.sourceInfo(id);
+        if (_plannerBundleIsPlacedContentKind(src && src.kind)
+                && _plannerBundleHasNonPlacedAncestorInSet(src, idSet, clusterIndex)) {
+            removed = true;
+            continue;
+        }
+        _pushUniqueId(out, seen, id);
+    }
+    if (!removed || out.length === 0) return _sortedNumericIds(ids || []);
+    return _sortedNumericIds(out);
+}
+
+function _plannerBundleHasNonPlacedAncestorInSet(source, sourceSet, clusterIndex) {
+    if (!source || !sourceSet || !clusterIndex || !clusterIndex.sourceInfo) return false;
+    var current = source;
+    var guard = 0;
+    while (current && current.parentId !== null && current.parentId !== undefined && guard < 200) {
+        var parentId = current.parentId;
+        if (sourceSet[String(parentId)]) {
+            var parent = clusterIndex.sourceInfo(parentId);
+            return parent && !_plannerBundleIsPlacedContentKind(parent.kind);
+        }
+        current = clusterIndex.sourceInfo(parentId);
+        guard++;
+    }
+    return false;
 }
 
 function _plannerBundleAllowsClosedShellPlacedContentOwnership(candidate) {
@@ -658,7 +895,8 @@ function _plannerBundleShouldCompleteVisibleFragmentContract(candidate, slot, cl
             && !_plannerBundleSourceSetContainsAll(
                     candidate.exportSourceObjectIds || [],
                     slotSources.visualSourceObjectIds || [],
-                    null)) {
+                    null)
+            && !_plannerBundleAllowsRootExportVisibleFragmentContract(candidate, slot, clusterProfile)) {
         return false;
     }
     if (slot === "SHELL_SLOT") {
@@ -668,6 +906,20 @@ function _plannerBundleShouldCompleteVisibleFragmentContract(candidate, slot, cl
         }
         return true;
     }
+    if (clusterProfile.clusterHasEditableText === true || clusterProfile.clusterHasTextFrame === true) return false;
+    return true;
+}
+
+function _plannerBundleAllowsRootExportVisibleFragmentContract(candidate, slot, clusterProfile) {
+    if (!candidate) return false;
+    if (candidate.passId !== "pass.complex_graphic_frames") return false;
+    if (slot !== "SHELL_SLOT") return false;
+    if (candidate.slotRole !== "background_shell_slot"
+            && candidate.compositeRole !== "background_vector_source"
+            && candidate.compositeRole !== "complex_graphic_source_set") return false;
+    if (candidate.exportTargetObjectId === null || candidate.exportTargetObjectId === undefined) return false;
+    if (!candidate.exportSourceObjectIds || candidate.exportSourceObjectIds.length === 0) return false;
+    if (!clusterProfile) return false;
     if (clusterProfile.clusterHasEditableText === true || clusterProfile.clusterHasTextFrame === true) return false;
     return true;
 }
@@ -1410,11 +1662,49 @@ function _plannerBundleMaterialization(
         candidate, slot, slotSources, exportSourceObjectIds,
         hiddenVisualSourceObjectIds, clusterIndex) {
     if (!candidate) return "EXTRACTED_PNG_VECTOR";
+    if (_plannerBundleNeedsTextlessVisualFragment(
+            candidate, slot, slotSources, exportSourceObjectIds, clusterIndex)) {
+        return "TEXTLESS_VISUAL_FRAGMENT";
+    }
     if (candidate.compositeRole === "background_vector_source") return "EXTRACTED_PNG_VECTOR";
     if (candidate.passId === "pass.vector_shape_frames") return "EXTRACTED_PNG_VECTOR";
     if (candidate.passId === "pass.page_backgrounds") return "EXTRACTED_PNG_VECTOR";
     if (slot === "SHELL_SLOT") return "EXTRACTED_PNG_VECTOR";
     return "EXTRACTED_PNG_VECTOR";
+}
+
+function _plannerBundleNeedsTextlessVisualFragment(
+        candidate, slot, slotSources, exportSourceObjectIds, clusterIndex) {
+    if (!candidate || !clusterIndex || !clusterIndex.sourceInfo) return false;
+    if (_plannerBundlePolicyLayer(candidate, slot, clusterIndex) !== "BACKGROUND") return false;
+    var targetPageIndex = Number(candidate.pageIndex);
+    if (isNaN(targetPageIndex) || targetPageIndex < 0) return false;
+    var ids = exportSourceObjectIds && exportSourceObjectIds.length > 0
+            ? exportSourceObjectIds
+            : (slotSources && slotSources.visualSourceObjectIds
+                    && slotSources.visualSourceObjectIds.length > 0
+                    ? slotSources.visualSourceObjectIds
+                    : (candidate.sourceObjectIds || []));
+    for (var i = 0; ids && i < ids.length; i++) {
+        var source = clusterIndex.sourceInfo(ids[i]);
+        if (!source) continue;
+        var sourcePageIndex = Number(source.pageIndex);
+        if (isNaN(sourcePageIndex) || sourcePageIndex < 0
+                || sourcePageIndex === targetPageIndex) {
+            continue;
+        }
+        if (clusterIndex.sameSpread
+                && clusterIndex.sameSpread(sourcePageIndex, targetPageIndex) !== true) {
+            continue;
+        }
+        var adjusted = _plannerBundleBoundsRelativeToTargetPage(
+                source.bounds, sourcePageIndex, targetPageIndex,
+                clusterIndex, candidate.bounds);
+        if (_plannerBundleBoundsOverlap(adjusted, candidate.bounds, 0.5)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function _plannerBundleNativeSourceShapeEligible(

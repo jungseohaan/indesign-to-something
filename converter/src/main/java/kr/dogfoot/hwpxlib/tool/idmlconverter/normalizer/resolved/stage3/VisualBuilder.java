@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
@@ -56,6 +57,14 @@ public final class VisualBuilder {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (!isNativeShapeVisualPlan(plan)) continue;
             ConversionTiming.addCounter("stage3.nativeVisualOnlyShapes.candidates", 1);
+            if (plan.coordinateSpace != CoordinateSpace.PAGE) {
+                ConversionTiming.addCounter("stage3.nativeVisualOnlyShapes.skipNonPageCoordinates", 1);
+                continue;
+            }
+            if (plan.bounds == null || plan.bounds.length < 4) {
+                ConversionTiming.addCounter("stage3.nativeVisualOnlyShapes.skipMissingPlanBounds", 1);
+                continue;
+            }
             int pageIdx = ctx.toSectionIndex != null
                     ? ctx.toSectionIndex.applyAsInt(plan.pageIndex)
                     : plan.pageIndex;
@@ -227,22 +236,16 @@ public final class VisualBuilder {
             ResolvedBuildContext ctx,
             ObjectPlan plan,
             ResolvedPageItem item) {
-        boolean usingPlanBounds = plan != null && plan.bounds != null && plan.bounds.length >= 4;
-        double[] sourceBounds = usingPlanBounds ? plan.bounds : (item != null ? item.geometricBounds() : null);
+        if (plan == null || plan.coordinateSpace != CoordinateSpace.PAGE) return null;
+        double[] sourceBounds = plan.bounds;
         if (sourceBounds == null || sourceBounds.length < 4) return null;
 
         double width = sourceBounds[3] - sourceBounds[1];
         double height = sourceBounds[2] - sourceBounds[0];
         if (width <= 0 || height <= 0) return sourceBounds;
 
-        if (item != null && item.pageRelativeBounds() != null
-                && item.pageRelativeBounds().length >= 4) {
-            double[] local = item.pageRelativeBounds();
-            return new double[] { local[0], local[1], local[2], local[3] };
-        }
-
         ResolvedPage page = null;
-        int pageIndex = plan != null ? plan.pageIndex : (item != null ? item.pageIndex() : -1);
+        int pageIndex = plan.pageIndex;
         if (ctx != null && ctx.resolvedData != null && pageIndex >= 0) {
             Integer sectionIndex = ctx.pageDocOffsetToSection != null
                     ? ctx.pageDocOffsetToSection.get(pageIndex)
@@ -256,26 +259,20 @@ public final class VisualBuilder {
         }
         if (page == null) return sourceBounds;
 
-        if (usingPlanBounds) {
-            double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
-            double[] pageBounds = page.bounds();
-            if (pageBounds == null || pageBounds.length < 4) return sourceBounds;
-            double rawPageTop = pageBounds[0] / scale;
-            double rawPageLeft = pageBounds[1] / scale;
-            boolean pageRelativeCoords = rawPageLeft > 1.0 && sourceBounds[1] < rawPageLeft;
-            double left = pageRelativeCoords ? sourceBounds[1] : (sourceBounds[1] - rawPageLeft);
-            double top = pageRelativeCoords ? sourceBounds[0] : (sourceBounds[0] - rawPageTop);
-            return new double[] {
-                    top * scale,
-                    left * scale,
-                    (top + height) * scale,
-                    (left + width) * scale
-            };
-        }
-
-        double[] xy = page.toPageRelative(sourceBounds);
-        if (xy == null || xy.length < 2) return sourceBounds;
-        return new double[] { xy[1], xy[0], xy[1] + height, xy[0] + width };
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double[] pageBounds = page.bounds();
+        if (pageBounds == null || pageBounds.length < 4) return sourceBounds;
+        double rawPageTop = pageBounds[0] / scale;
+        double rawPageLeft = pageBounds[1] / scale;
+        boolean pageRelativeCoords = rawPageLeft > 1.0 && sourceBounds[1] < rawPageLeft;
+        double left = pageRelativeCoords ? sourceBounds[1] : (sourceBounds[1] - rawPageLeft);
+        double top = pageRelativeCoords ? sourceBounds[0] : (sourceBounds[0] - rawPageTop);
+        return new double[] {
+                top * scale,
+                left * scale,
+                (top + height) * scale,
+                (left + width) * scale
+        };
     }
 
     private static boolean isStrokeOnlyNativeShape(ResolvedPageItem item) {

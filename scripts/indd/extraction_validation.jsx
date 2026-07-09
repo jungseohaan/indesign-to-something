@@ -471,6 +471,17 @@ function _isExtractionValidationVisibleCandidate(candidate) {
     return true;
 }
 
+function _isExtractionValidationVisibleVisualCandidate(candidate) {
+    if (!_isExtractionValidationVisibleCandidate(candidate)) return false;
+    if (candidate.disabled === true) return false;
+    if (candidate.visualAction === "DROP_VISUAL") return false;
+    if (candidate.materialization === "HWPX_TEXT"
+            || candidate.materialization === "HWPX_TABLE_STYLE") {
+        return false;
+    }
+    return true;
+}
+
 function _isExtractionValidationSlotOnlyShell(candidate) {
     if (!candidate) return false;
     if (candidate.candidatePurpose !== "SHELL_CANDIDATE") return false;
@@ -541,7 +552,8 @@ function _validateExtractionCandidateOwnershipSlots(plan, issues) {
     for (var ci = 0; ci < plan.candidates.length; ci++) {
         var c = plan.candidates[ci];
         if (!_isExtractionValidationVisibleCandidate(c)) continue;
-        if (_isExtractionValidationSlotOnlyShell(c)) {
+        var visibleVisualCandidate = _isExtractionValidationVisibleVisualCandidate(c);
+        if (visibleVisualCandidate && _isExtractionValidationSlotOnlyShell(c)) {
             if (!c.exportSourceObjectIds || c.exportSourceObjectIds.length === 0) {
                 issues.push({
                     code: "slot_only_shell_missing_export_sources",
@@ -617,7 +629,7 @@ function _validateExtractionCandidateOwnershipSlots(plan, issues) {
                 });
             }
         }
-        if (!_shouldTrackCandidateForInlineShellConflict(c)) continue;
+        if (!visibleVisualCandidate || !_shouldTrackCandidateForInlineShellConflict(c)) continue;
         var effectiveSourceIds = _candidateValidationEffectiveVisualSourceIds(c);
         for (var si = 0; si < effectiveSourceIds.length; si++) {
             var key = String(c.pageIndex) + "|" + String(effectiveSourceIds[si]);

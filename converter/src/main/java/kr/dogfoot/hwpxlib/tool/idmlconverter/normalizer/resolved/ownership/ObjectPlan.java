@@ -34,11 +34,14 @@ public final class ObjectPlan {
     public final String file;
     public final double[] bounds;
     public final double[] renderSourceBounds;
+    public final double[] cropSourceBounds;
     public final String sourceLayerId;
     public final String sourceLayerName;
     public final int sourceLayerIndex;
+    public final boolean inlineSourceTreeClosed;
+    public final int[] inlineFlowSourceObjectIds;
 
-    public ObjectPlan(
+    public static ObjectPlan legacyDefaulted(
             int domId,
             String kind,
             int pageIndex,
@@ -52,33 +55,12 @@ public final class ObjectPlan {
             String reason,
             String file,
             double[] bounds) {
-        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
-                renderId, sourceObjectIds, zOrder, reason, file, bounds, null, null, -1);
+        return legacyDefaulted(domId, kind, pageIndex, textAction, visualAction,
+                visualLayer, placement, renderId, sourceObjectIds, null, null,
+                null, null, zOrder, reason, file, bounds, null, null, -1);
     }
 
-    public ObjectPlan(
-            int domId,
-            String kind,
-            int pageIndex,
-            TextAction textAction,
-            VisualAction visualAction,
-            VisualLayer visualLayer,
-            Placement placement,
-            Integer renderId,
-            int[] sourceObjectIds,
-            int zOrder,
-            String reason,
-            String file,
-            double[] bounds,
-            String sourceLayerId,
-            String sourceLayerName,
-            int sourceLayerIndex) {
-        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
-                renderId, sourceObjectIds, null, null, null, null, zOrder, reason, file, bounds,
-                sourceLayerId, sourceLayerName, sourceLayerIndex);
-    }
-
-    public ObjectPlan(
+    public static ObjectPlan legacyDefaulted(
             int domId,
             String kind,
             int pageIndex,
@@ -99,10 +81,14 @@ public final class ObjectPlan {
             String sourceLayerId,
             String sourceLayerName,
             int sourceLayerIndex) {
-        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
+        return new ObjectPlan(domId, kind, pageIndex, textAction, visualAction,
+                legacyDefaultVisualLayer(visualLayer), placement,
                 renderId, sourceObjectIds, visualSourceObjectIds, null, ownedTextFrameIds,
-                descendantVisualObjectIds, sourceBundleKey, null, null, null, zOrder, reason,
-                file, bounds, null, sourceLayerId, sourceLayerName, sourceLayerIndex);
+                descendantVisualObjectIds, sourceBundleKey,
+                legacyDefaultMaterialization(textAction, visualAction),
+                legacyDefaultCoordinateSpace(placement),
+                null, zOrder, reason, file, bounds, null, sourceLayerId, sourceLayerName,
+                sourceLayerIndex);
     }
 
     public ObjectPlan(
@@ -168,7 +154,7 @@ public final class ObjectPlan {
                 null, null, null, null, null,
                 ownedTextFrameIds, descendantVisualObjectIds, sourceBundleKey,
                 materialization, coordinateSpace, anchorOwner, zOrder, reason, file,
-                bounds, renderSourceBounds, sourceLayerId, sourceLayerName,
+                bounds, renderSourceBounds, null, sourceLayerId, sourceLayerName,
                 sourceLayerIndex);
     }
 
@@ -200,6 +186,7 @@ public final class ObjectPlan {
             String file,
             double[] bounds,
             double[] renderSourceBounds,
+            double[] cropSourceBounds,
             String sourceLayerId,
             String sourceLayerName,
             int sourceLayerIndex) {
@@ -209,7 +196,7 @@ public final class ObjectPlan {
                 sourceRootObjectIds, clusterSourceObjectIds, omittedClusterSourceObjectIds,
                 ownedTextFrameIds, descendantVisualObjectIds, sourceBundleKey,
                 materialization, coordinateSpace, anchorOwner, zOrder, reason, file,
-                bounds, renderSourceBounds, sourceLayerId, sourceLayerName,
+                bounds, renderSourceBounds, cropSourceBounds, sourceLayerId, sourceLayerName,
                 sourceLayerIndex);
     }
 
@@ -244,6 +231,7 @@ public final class ObjectPlan {
             String file,
             double[] bounds,
             double[] renderSourceBounds,
+            double[] cropSourceBounds,
             String sourceLayerId,
             String sourceLayerName,
             int sourceLayerIndex) {
@@ -255,7 +243,7 @@ public final class ObjectPlan {
         this.pageIndex = pageIndex;
         this.textAction = textAction;
         this.visualAction = visualAction;
-        this.visualLayer = visualLayer != null ? visualLayer : VisualLayer.CONTENT_VISUAL;
+        this.visualLayer = visualLayer;
         this.placement = placement;
         this.renderId = renderId;
         this.sourceObjectIds = sourceObjectIds != null ? Arrays.copyOf(sourceObjectIds, sourceObjectIds.length) : new int[0];
@@ -287,12 +275,8 @@ public final class ObjectPlan {
                 ? Arrays.copyOf(descendantVisualObjectIds, descendantVisualObjectIds.length)
                 : new int[0];
         this.sourceBundleKey = sourceBundleKey;
-        this.materialization = materialization != null
-                ? materialization
-                : defaultMaterialization(textAction, visualAction);
-        this.coordinateSpace = coordinateSpace != null
-                ? coordinateSpace
-                : defaultCoordinateSpace(placement);
+        this.materialization = materialization;
+        this.coordinateSpace = coordinateSpace;
         this.anchorOwner = anchorOwner;
         this.zOrder = zOrder;
         this.reason = reason;
@@ -301,12 +285,75 @@ public final class ObjectPlan {
         this.renderSourceBounds = renderSourceBounds != null
                 ? Arrays.copyOf(renderSourceBounds, renderSourceBounds.length)
                 : null;
+        this.cropSourceBounds = cropSourceBounds != null
+                ? Arrays.copyOf(cropSourceBounds, cropSourceBounds.length)
+                : null;
         this.sourceLayerId = sourceLayerId;
         this.sourceLayerName = sourceLayerName;
         this.sourceLayerIndex = sourceLayerIndex;
+        this.inlineSourceTreeClosed = false;
+        this.inlineFlowSourceObjectIds = new int[0];
     }
 
-    private static Materialization defaultMaterialization(TextAction textAction, VisualAction visualAction) {
+    private ObjectPlan(
+            ObjectPlan base,
+            boolean inlineSourceTreeClosed,
+            int[] inlineFlowSourceObjectIds) {
+        this.domId = base.domId;
+        this.kind = base.kind;
+        this.candidateId = base.candidateId;
+        this.planPassId = base.planPassId;
+        this.slotRole = base.slotRole;
+        this.pageIndex = base.pageIndex;
+        this.textAction = base.textAction;
+        this.visualAction = base.visualAction;
+        this.visualLayer = base.visualLayer;
+        this.placement = base.placement;
+        this.renderId = base.renderId;
+        this.sourceObjectIds = Arrays.copyOf(base.sourceObjectIds, base.sourceObjectIds.length);
+        this.sourceRootObjectIds = Arrays.copyOf(base.sourceRootObjectIds, base.sourceRootObjectIds.length);
+        this.clusterSourceObjectIds = Arrays.copyOf(base.clusterSourceObjectIds, base.clusterSourceObjectIds.length);
+        this.omittedClusterSourceObjectIds = Arrays.copyOf(
+                base.omittedClusterSourceObjectIds,
+                base.omittedClusterSourceObjectIds.length);
+        this.visualSourceObjectIds = Arrays.copyOf(base.visualSourceObjectIds, base.visualSourceObjectIds.length);
+        this.styleSourceObjectIds = Arrays.copyOf(base.styleSourceObjectIds, base.styleSourceObjectIds.length);
+        this.exportSourceObjectIds = Arrays.copyOf(base.exportSourceObjectIds, base.exportSourceObjectIds.length);
+        this.hiddenVisualSourceObjectIds = Arrays.copyOf(
+                base.hiddenVisualSourceObjectIds,
+                base.hiddenVisualSourceObjectIds.length);
+        this.ownedTextFrameIds = Arrays.copyOf(base.ownedTextFrameIds, base.ownedTextFrameIds.length);
+        this.descendantVisualObjectIds = Arrays.copyOf(
+                base.descendantVisualObjectIds,
+                base.descendantVisualObjectIds.length);
+        this.sourceBundleKey = base.sourceBundleKey;
+        this.materialization = base.materialization;
+        this.coordinateSpace = base.coordinateSpace;
+        this.anchorOwner = base.anchorOwner;
+        this.zOrder = base.zOrder;
+        this.reason = base.reason;
+        this.file = base.file;
+        this.bounds = base.bounds != null ? Arrays.copyOf(base.bounds, base.bounds.length) : null;
+        this.renderSourceBounds = base.renderSourceBounds != null
+                ? Arrays.copyOf(base.renderSourceBounds, base.renderSourceBounds.length)
+                : null;
+        this.cropSourceBounds = base.cropSourceBounds != null
+                ? Arrays.copyOf(base.cropSourceBounds, base.cropSourceBounds.length)
+                : null;
+        this.sourceLayerId = base.sourceLayerId;
+        this.sourceLayerName = base.sourceLayerName;
+        this.sourceLayerIndex = base.sourceLayerIndex;
+        this.inlineSourceTreeClosed = inlineSourceTreeClosed;
+        this.inlineFlowSourceObjectIds = inlineFlowSourceObjectIds != null
+                ? Arrays.copyOf(inlineFlowSourceObjectIds, inlineFlowSourceObjectIds.length)
+                : new int[0];
+    }
+
+    private static VisualLayer legacyDefaultVisualLayer(VisualLayer visualLayer) {
+        return visualLayer != null ? visualLayer : VisualLayer.CONTENT_VISUAL;
+    }
+
+    private static Materialization legacyDefaultMaterialization(TextAction textAction, VisualAction visualAction) {
         if (visualAction == VisualAction.PLACE_TABLE_STYLE) {
             return Materialization.HWPX_TABLE_STYLE;
         }
@@ -322,7 +369,7 @@ public final class ObjectPlan {
         return Materialization.EXTRACTED_PNG_VECTOR;
     }
 
-    private static CoordinateSpace defaultCoordinateSpace(Placement placement) {
+    private static CoordinateSpace legacyDefaultCoordinateSpace(Placement placement) {
         return placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE;
     }
 
@@ -351,7 +398,6 @@ public final class ObjectPlan {
         if (visualLayer == VisualLayer.TEXT_CARD_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_FACE
-                || visualLayer == VisualLayer.CONTENT_BACKDROP
                 || visualLayer == VisualLayer.LABEL_CONNECTOR_BACKDROP
                 || visualLayer == VisualLayer.LABEL_BACKDROP
                 || visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
@@ -363,7 +409,7 @@ public final class ObjectPlan {
     }
 
     public ObjectPlan withVisualAction(VisualAction newVisualAction, String newReason) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -394,16 +440,17 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withExtractionCandidate(
             String newCandidateId,
             String newPlanPassId,
             String newSlotRole) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 newCandidateId,
@@ -434,13 +481,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withTextAction(TextAction newTextAction) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -471,13 +519,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withVisualLayer(VisualLayer newVisualLayer) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -508,13 +557,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withPlacement(Placement newPlacement) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -545,15 +595,16 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withPlacementAndCoordinateSpace(
             Placement newPlacement,
             CoordinateSpace newCoordinateSpace) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -584,13 +635,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withZOrder(int newZOrder) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -621,13 +673,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withSourceObjectIds(int[] newSourceObjectIds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -658,13 +711,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withVisualSourceObjectIds(int[] newVisualSourceObjectIds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -695,13 +749,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withStyleSourceObjectIds(int[] newStyleSourceObjectIds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -732,13 +787,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withOwnedTextFrameIds(int[] newOwnedTextFrameIds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -769,13 +825,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withDescendantVisualObjectIds(int[] newDescendantVisualObjectIds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -806,13 +863,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withSourceBundleKey(String newSourceBundleKey) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -843,13 +901,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withMaterialization(Materialization newMaterialization) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -880,13 +939,14 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withBounds(double[] newBounds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -917,13 +977,14 @@ public final class ObjectPlan {
                 file,
                 newBounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withRenderSourceBounds(double[] newRenderSourceBounds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -954,15 +1015,54 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 newRenderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
+    }
+
+    public ObjectPlan withCropSourceBounds(double[] newCropSourceBounds) {
+        return withCurrentInlineFlow(new ObjectPlan(
+                domId,
+                kind,
+                candidateId,
+                planPassId,
+                slotRole,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                exportSourceObjectIds,
+                hiddenVisualSourceObjectIds,
+                sourceRootObjectIds,
+                clusterSourceObjectIds,
+                omittedClusterSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                renderSourceBounds,
+                newCropSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex));
     }
 
     public ObjectPlan withExtractionSourceObjectIds(
             int[] newExportSourceObjectIds,
             int[] newHiddenVisualSourceObjectIds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -993,16 +1093,17 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withSourceTreeDiagnostics(
             int[] newSourceRootObjectIds,
             int[] newClusterSourceObjectIds,
             int[] newOmittedClusterSourceObjectIds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -1033,13 +1134,24 @@ public final class ObjectPlan {
                 file,
                 bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
+    }
+
+    public ObjectPlan withInlineFlowContract(
+            boolean newInlineSourceTreeClosed,
+            int[] newInlineFlowSourceObjectIds) {
+        return new ObjectPlan(this, newInlineSourceTreeClosed, newInlineFlowSourceObjectIds);
+    }
+
+    private ObjectPlan withCurrentInlineFlow(ObjectPlan plan) {
+        return plan.withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds);
     }
 
     public ObjectPlan withPageIndexAndBounds(int newPageIndex, double[] newBounds, String newReason) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -1070,9 +1182,10 @@ public final class ObjectPlan {
                 file,
                 newBounds != null ? newBounds : bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withRenderedVisual(
@@ -1082,7 +1195,7 @@ public final class ObjectPlan {
             String newReason,
             String newFile,
             double[] newBounds) {
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -1113,9 +1226,10 @@ public final class ObjectPlan {
                 newFile != null ? newFile : file,
                 newBounds != null ? newBounds : bounds,
                 renderSourceBounds,
+                cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public ObjectPlan withVisibleMaterialFrom(ObjectPlan materialPlan, String newReason) {
@@ -1124,7 +1238,7 @@ public final class ObjectPlan {
                 && materialPlan.visualSourceObjectIds.length > 0
                 ? materialPlan.visualSourceObjectIds
                 : materialPlan.sourceObjectIds;
-        return new ObjectPlan(
+        return withCurrentInlineFlow(new ObjectPlan(
                 domId,
                 kind,
                 candidateId,
@@ -1169,9 +1283,12 @@ public final class ObjectPlan {
                 materialPlan.renderSourceBounds != null
                         ? materialPlan.renderSourceBounds
                         : renderSourceBounds,
+                materialPlan.cropSourceBounds != null
+                        ? materialPlan.cropSourceBounds
+                        : cropSourceBounds,
                 sourceLayerId,
                 sourceLayerName,
-                sourceLayerIndex);
+                sourceLayerIndex));
     }
 
     public String toJson() {
@@ -1197,6 +1314,8 @@ public final class ObjectPlan {
                 .append("\"styleSourceObjectIds\":").append(intArrayJson(styleSourceObjectIds)).append(',')
                 .append("\"exportSourceObjectIds\":").append(intArrayJson(exportSourceObjectIds)).append(',')
                 .append("\"hiddenVisualSourceObjectIds\":").append(intArrayJson(hiddenVisualSourceObjectIds)).append(',')
+                .append("\"inlineSourceTreeClosed\":").append(inlineSourceTreeClosed).append(',')
+                .append("\"inlineFlowSourceObjectIds\":").append(intArrayJson(inlineFlowSourceObjectIds)).append(',')
                 .append("\"ownedTextFrameIds\":").append(intArrayJson(ownedTextFrameIds)).append(',')
                 .append("\"descendantVisualObjectIds\":").append(intArrayJson(descendantVisualObjectIds)).append(',')
                 .append("\"sourceBundleKey\":\"").append(escape(sourceBundleKey)).append("\",")
@@ -1223,6 +1342,13 @@ public final class ObjectPlan {
                     .append(renderSourceBounds[2]).append(',')
                     .append(renderSourceBounds[3]).append(']');
         }
+        if (cropSourceBounds != null && cropSourceBounds.length >= 4) {
+            sb.append(",\"cropSourceBounds\":[")
+                    .append(cropSourceBounds[0]).append(',')
+                    .append(cropSourceBounds[1]).append(',')
+                    .append(cropSourceBounds[2]).append(',')
+                    .append(cropSourceBounds[3]).append(']');
+        }
         sb.append('}');
         return sb.toString();
     }
@@ -1239,7 +1365,7 @@ public final class ObjectPlan {
         return sb.toString();
     }
 
-    static String escape(String value) {
+    public static String escape(String value) {
         if (value == null) return "";
         StringBuilder out = new StringBuilder(value.length() + 16);
         for (int i = 0; i < value.length(); i++) {

@@ -8,17 +8,156 @@ function _buildExecutionCandidatesFromObjectPlans(candidates, objectPlanDiagnost
     var sourceCandidates = candidates || [];
     var byCandidateId = _objectPlansByCandidateId(objectPlanDiagnostics);
     var executionCandidates = [];
+    var skippedWithoutObjectPlan = [];
+    var skippedIncompleteObjectPlan = [];
     for (var ci = 0; ci < sourceCandidates.length; ci++) {
         var candidate = _copyExecutionCandidate(sourceCandidates[ci]);
         var objectPlan = candidate && candidate.candidateId
                 ? byCandidateId[String(candidate.candidateId)]
                 : null;
-        if (objectPlan) {
-            _applyObjectPlanExecutionFields(candidate, objectPlan);
+        if (!objectPlan) {
+            skippedWithoutObjectPlan.push(_executionCandidateBridgeSkipRow(
+                    candidate, "missing_object_plan"));
+            continue;
         }
+        var contractIssue = _objectPlanExecutionContractIssue(objectPlan);
+        if (contractIssue) {
+            _markObjectPlanExecutionBridgeSkipped(
+                    objectPlan,
+                    "EXECUTION_CANDIDATE_CONTRACT_INVALID",
+                    contractIssue);
+            skippedIncompleteObjectPlan.push(_executionCandidateBridgeSkipRow(
+                    candidate, contractIssue, objectPlan));
+            continue;
+        }
+        _applyObjectPlanExecutionFields(candidate, objectPlan);
         executionCandidates.push(candidate);
     }
+    _recordExecutionCandidateBridgeDiagnostics(
+            objectPlanDiagnostics,
+            sourceCandidates.length,
+            executionCandidates.length,
+            skippedWithoutObjectPlan,
+            skippedIncompleteObjectPlan);
+    _refreshObjectPlanExecutionBridgeSummary(objectPlanDiagnostics);
     return executionCandidates;
+}
+
+function _markObjectPlanExecutionBridgeSkipped(objectPlan, blockerCode, reason) {
+    if (!objectPlan) return;
+    objectPlan.executable = false;
+    objectPlan.contractStatus = "NEEDS_MIGRATION_POLICY";
+    objectPlan.migrationBlocker = blockerCode || "EXECUTION_CANDIDATE_BRIDGE_SKIPPED";
+    objectPlan.migrationBlockerDetail = objectPlan.migrationBlockerDetail || {};
+    objectPlan.migrationBlockerDetail.executionBridgeReason = reason || "unknown";
+    objectPlan.migrationBlockerDetail.nextPolicyQuestion =
+            "Stage 1 must not declare a READY ObjectPlan unless it can be bridged to an executable RenderUnit candidate.";
+    objectPlan.reason = (objectPlan.reason || "object_plan")
+            + ":execution_bridge_skipped:" + (reason || "unknown");
+}
+
+function _refreshObjectPlanExecutionBridgeSummary(objectPlanDiagnostics) {
+    if (!objectPlanDiagnostics || !objectPlanDiagnostics.objectPlans) return;
+    var plans = objectPlanDiagnostics.objectPlans || [];
+    var importReadyPlanCount = 0;
+    var contractStatusCounts = {};
+    var executablePlanCount = 0;
+    var migrationBlockerCounts = {};
+    for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        if (!plan) continue;
+        if (plan.executable === true) executablePlanCount++;
+        if (plan.contractStatus === "READY_FOR_STAGE1_IMPORT") importReadyPlanCount++;
+        _incrementExecutionCandidateContractCount(
+                contractStatusCounts,
+                plan.contractStatus || "UNKNOWN");
+        _incrementExecutionCandidateContractCount(
+                migrationBlockerCounts,
+                plan.migrationBlocker || "NONE");
+    }
+    if (objectPlanDiagnostics.summary) {
+        objectPlanDiagnostics.summary.executablePlanCount = executablePlanCount;
+        objectPlanDiagnostics.summary.importReadyPlanCount = importReadyPlanCount;
+        objectPlanDiagnostics.summary.contractStatusCounts = contractStatusCounts;
+        objectPlanDiagnostics.summary.migrationBlockerCounts = migrationBlockerCounts;
+    }
+    if (objectPlanDiagnostics.validation) {
+        objectPlanDiagnostics.validation.importReadyPlanCount = importReadyPlanCount;
+        objectPlanDiagnostics.validation.contractStatusCounts = contractStatusCounts;
+    }
+}
+
+function _objectPlanExecutionContractIssue(objectPlan) {
+    if (!objectPlan) return "missing_object_plan";
+    if (objectPlan.contractStatus !== "READY_FOR_STAGE1_IMPORT") {
+        return "contract_not_ready:" + (objectPlan.contractStatus || "UNKNOWN");
+    }
+    var required = [
+        "objectPlanId",
+        "materialization",
+        "textAction",
+        "visualAction",
+        "placement",
+        "coordinateSpace",
+        "ownershipSlot"
+    ];
+    for (var i = 0; i < required.length; i++) {
+        var field = required[i];
+        var value = objectPlan[field];
+        if (value === null || value === undefined || value === "") {
+            return "missing_" + field;
+        }
+    }
+    return null;
+}
+
+function _executionCandidateBridgeSkipRow(candidate, reason, objectPlan) {
+    candidate = candidate || {};
+    objectPlan = objectPlan || null;
+    return {
+        candidateId: candidate.candidateId || (objectPlan ? objectPlan.candidateId || null : null),
+        objectPlanId: objectPlan ? objectPlan.objectPlanId || null : null,
+        passId: candidate.passId || (objectPlan ? objectPlan.passId || null : null),
+        pageIndex: candidate.pageIndex !== undefined ? candidate.pageIndex
+                : (objectPlan ? objectPlan.pageIndex : null),
+        reason: reason || "unknown",
+        contractStatus: objectPlan ? objectPlan.contractStatus || null : null,
+        migrationStatus: objectPlan ? objectPlan.migrationStatus || null : null,
+        migrationBlocker: objectPlan ? objectPlan.migrationBlocker || null : null,
+        sourceObjectIds: candidate.sourceObjectIds || (objectPlan ? objectPlan.sourceObjectIds || [] : [])
+    };
+}
+
+function _recordExecutionCandidateBridgeDiagnostics(
+        objectPlanDiagnostics,
+        sourceCandidateCount,
+        executionCandidateCount,
+        skippedWithoutObjectPlan,
+        skippedIncompleteObjectPlan) {
+    if (!objectPlanDiagnostics) return;
+    var withoutPlan = skippedWithoutObjectPlan || [];
+    var incomplete = skippedIncompleteObjectPlan || [];
+    objectPlanDiagnostics.executionCandidateBridge = {
+        schemaVersion: 1,
+        policy: "POLICY-source-ownership",
+        mode: "execution-candidate-bridge-diagnostics",
+        summary: {
+            sourceCandidateCount: sourceCandidateCount || 0,
+            executionCandidateCount: executionCandidateCount || 0,
+            skippedWithoutObjectPlanCount: withoutPlan.length,
+            skippedIncompleteObjectPlanCount: incomplete.length
+        },
+        skippedWithoutObjectPlan: withoutPlan.slice(0, 200),
+        skippedIncompleteObjectPlan: incomplete.slice(0, 200)
+    };
+    if (objectPlanDiagnostics.summary) {
+        objectPlanDiagnostics.summary.executionCandidateBridge = {
+            sourceCandidateCount: sourceCandidateCount || 0,
+            executionCandidateCount: executionCandidateCount || 0,
+            skippedWithoutObjectPlanCount: withoutPlan.length,
+            skippedIncompleteObjectPlanCount: incomplete.length
+        };
+    }
 }
 
 function _buildExecutionCandidateContractDiagnostics(executionCandidates) {
@@ -97,6 +236,9 @@ function _executionCandidateContractFields() {
         "pageIndex",
         "primarySourceObjectId",
         "sourceObjectIds",
+        "sourceRootObjectIds",
+        "clusterSourceObjectIds",
+        "omittedClusterSourceObjectIds",
         "executionSourceObjectIds",
         "visualSourceObjectIds",
         "styleSourceObjectIds",
@@ -121,6 +263,11 @@ function _executionCandidateContractFields() {
         "composite",
         "compositeRole",
         "slotRole",
+        "clusterRelation",
+        "clusterHasEditableText",
+        "clusterHasTextFrame",
+        "clusterHasPlacedContent",
+        "clusterHasVisualSource",
         "unit",
         "bounds",
         "zOrder",
@@ -185,6 +332,15 @@ function _copyExecutionCandidate(candidate) {
 
 function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     candidate.objectPlanId = objectPlan.objectPlanId || null;
+    candidate.mode = objectPlan.mode || candidate.mode || null;
+    candidate.candidatePurpose = objectPlan.candidatePurpose || candidate.candidatePurpose || null;
+    candidate.compositeRole = objectPlan.compositeRole || candidate.compositeRole || null;
+    candidate.slotRole = objectPlan.slotRole || candidate.slotRole || null;
+    candidate.clusterRelation = objectPlan.clusterRelation || candidate.clusterRelation || null;
+    candidate.clusterHasEditableText = objectPlan.clusterHasEditableText === true;
+    candidate.clusterHasTextFrame = objectPlan.clusterHasTextFrame === true;
+    candidate.clusterHasPlacedContent = objectPlan.clusterHasPlacedContent === true;
+    candidate.clusterHasVisualSource = objectPlan.clusterHasVisualSource === true;
     candidate.materialization = objectPlan.materialization || null;
     candidate.textAction = objectPlan.textAction || null;
     candidate.visualAction = objectPlan.visualAction || null;
@@ -211,6 +367,15 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     if (objectPlan.sourceObjectIds) {
         candidate.sourceObjectIds = _sortedNumericIds(objectPlan.sourceObjectIds);
     }
+    if (objectPlan.sourceRootObjectIds) {
+        candidate.sourceRootObjectIds = _sortedNumericIds(objectPlan.sourceRootObjectIds);
+    }
+    if (objectPlan.clusterSourceObjectIds) {
+        candidate.clusterSourceObjectIds = _sortedNumericIds(objectPlan.clusterSourceObjectIds);
+    }
+    if (objectPlan.omittedClusterSourceObjectIds) {
+        candidate.omittedClusterSourceObjectIds = _sortedNumericIds(objectPlan.omittedClusterSourceObjectIds);
+    }
     if (executionSourceObjectIds.length > 0) {
         candidate.executionSourceObjectIds = executionSourceObjectIds;
     } else if (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0) {
@@ -232,9 +397,6 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
                 (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0)
                         ? candidate.editableTextFrameIds
                         : (candidate.hiddenTextFrameIds || []));
-    }
-    if (!candidate.coordinateSpace && candidate.placement) {
-        candidate.coordinateSpace = candidate.placement === "INLINE" ? "STORY_FLOW" : "PAGE";
     }
     if (objectPlan.exportSourceObjectIds) {
         candidate.exportSourceObjectIds = _sortedNumericIds(objectPlan.exportSourceObjectIds);

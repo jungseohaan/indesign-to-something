@@ -24,6 +24,9 @@ public final class DoviraSubunitMarkerPolicy {
 
     public static boolean isDuplicateMarkerStory(ResolvedData resolvedData, String storyId) {
         if (resolvedData == null || storyId == null || storyId.isEmpty()) return false;
+        if (resolvedData.ownershipPlans() != null && !resolvedData.ownershipPlans().isEmpty()) {
+            return false;
+        }
         ResolvedStory story = resolvedData.getStory(storyId);
         if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
         if (!isStandaloneMarkerParagraph(story.paragraphs().get(0))) return false;

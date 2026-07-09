@@ -835,12 +835,20 @@ public class ASTStoryConverter {
     }
 
     private static boolean isOwnedByRenderedTextlessShell(IDMLTextFrame tf, ResolvedData resolvedData) {
-        if (tf == null || resolvedData == null || resolvedData.allRenderedFloatingItems() == null) {
+        if (tf == null || resolvedData == null) {
             return false;
         }
         String domId = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers
                 .domIdFromSourceId(tf.selfId());
         if (domId == null) return false;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                storyBridgeContext(resolvedData);
+        boolean hasStage1ObjectPlans = ctx.ownershipPlans != null && !ctx.ownershipPlans.isEmpty();
+        int tfDomId = parseDomIdOrNeg(domId);
+        if (hasStage1ObjectPlans) {
+            return isTextFrameOwnedByPlannedTextShell(tfDomId, ctx);
+        }
+        if (resolvedData.allRenderedFloatingItems() == null) return false;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
                 : resolvedData.allRenderedFloatingItems()) {
             if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
@@ -859,6 +867,57 @@ public class ASTStoryConverter {
                     if (domId.equals(String.valueOf(id))) return true;
                 }
             }
+        }
+        return false;
+    }
+
+    private static boolean isTextFrameOwnedByPlannedTextShell(
+            int textFrameDomId,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx) {
+        if (textFrameDomId < 0 || ctx == null || ctx.ownershipPlans == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan
+                : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.textAction
+                    != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction.OWNED_BY_HWPX_TEXT) {
+                continue;
+            }
+            if (!kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole.isTextShell(plan)) {
+                continue;
+            }
+            if (containsInt(plan.ownedTextFrameIds, textFrameDomId)) return true;
+        }
+        return false;
+    }
+
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext storyBridgeContext(
+            ResolvedData resolvedData) {
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
+        if (resolvedData != null) {
+            ctx.resolvedData = resolvedData;
+            ctx.basePath = resolvedData.basePath();
+            ctx.scaleFactor = resolvedData.scaleFactor();
+            if (resolvedData.ownershipPlans() != null) {
+                ctx.ownershipPlans.addAll(resolvedData.ownershipPlans());
+            }
+        }
+        return ctx;
+    }
+
+    private static int parseDomIdOrNeg(String id) {
+        if (id == null) return -1;
+        try {
+            return Integer.parseInt(id);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static boolean containsInt(int[] ids, int target) {
+        if (ids == null) return false;
+        for (int id : ids) {
+            if (id == target) return true;
         }
         return false;
     }

@@ -270,14 +270,19 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
     }
     for (var i = 0; i < candidates.length; i++) {
         var owner = candidates[i];
-        if (!owner || owner.passId !== "pass.decoration_groups") continue;
-        if (owner.candidatePurpose !== "SHELL_CANDIDATE") continue;
+        if (!owner) continue;
+        var ownerIsVisibleShell = candidateOwnershipSlot(owner) === "SHELL_SLOT"
+                || owner.visualAction === "PLACE_TEXT_SHELL";
+        if (!ownerIsVisibleShell) continue;
         if (owner.materialization === "HWPX_TEXT" || owner.visualAction === "DROP_VISUAL") continue;
         var pageKey = String(owner.pageIndex);
         if (!shellOwnersByPage[pageKey]) shellOwnersByPage[pageKey] = [];
         shellOwnersByPage[pageKey].push(owner);
-        if (!nativeShellOwnersByPage[pageKey]) nativeShellOwnersByPage[pageKey] = [];
-        nativeShellOwnersByPage[pageKey].push(owner);
+        if (owner.passId === "pass.decoration_groups"
+                && owner.candidatePurpose === "SHELL_CANDIDATE") {
+            if (!nativeShellOwnersByPage[pageKey]) nativeShellOwnersByPage[pageKey] = [];
+            nativeShellOwnersByPage[pageKey].push(owner);
+        }
     }
     for (var vi = 0; vi < candidates.length; vi++) {
         var visualOwner = candidates[vi];
@@ -351,6 +356,29 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
             var exactOwner = exactContentOwnersByPageAndVisibleKey[exactVisibleSlotKey(candidate)];
             if (exactOwner && exactOwner !== candidate) {
                 recordSuppressedCandidate(candidate, "SUBSUMED_BY_EXACT_CONTENT_VISUAL_OWNER", exactOwner);
+                continue;
+            }
+        }
+        if (candidate && candidateOwnershipSlot(candidate) !== "SHELL_SLOT") {
+            var shellOwners = shellOwnersByPage[String(candidate.pageIndex)] || [];
+            var shellSubsumingOwner = null;
+            for (var soi = 0; soi < shellOwners.length; soi++) {
+                var shellOwner = shellOwners[soi];
+                if (!shellOwner || shellOwner === candidate) continue;
+                if (candidatePlacement(shellOwner)
+                        && candidatePlacement(candidate)
+                        && candidatePlacement(shellOwner) !== candidatePlacement(candidate)) {
+                    continue;
+                }
+                var shellVisibleIds = visibleCandidateSourceIds(shellOwner);
+                if (!candidateVisibleIds || candidateVisibleIds.length === 0) continue;
+                if (!containsAllIds(shellVisibleIds, candidateVisibleIds)) continue;
+                if (_sourceSetKey(shellVisibleIds || []) === _sourceSetKey(candidateVisibleIds || [])) continue;
+                shellSubsumingOwner = shellOwner;
+                break;
+            }
+            if (shellSubsumingOwner) {
+                recordSuppressedCandidate(candidate, "SUBSUMED_BY_TEXT_SHELL_OWNER", shellSubsumingOwner);
                 continue;
             }
         }
