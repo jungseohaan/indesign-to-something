@@ -744,9 +744,17 @@ public final class ResolvedBuildContext {
     }
 
     private static boolean isTextShellTextPlacementPlan(ObjectPlan plan) {
-        if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
-        if (ShellRole.isTextShell(plan)) return true;
-        return plan.visualAction == VisualAction.DROP_VISUAL
+        if (plan == null) return false;
+        if (ShellRole.isTextShell(plan)
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0
+                && (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                || plan.visualAction == VisualAction.DROP_VISUAL
+                || plan.hasVisibleVisual())) {
+            return true;
+        }
+        return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.DROP_VISUAL
                 && "container_backdrop_absorbed_by_table_style".equals(plan.reason)
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0;
@@ -1452,14 +1460,6 @@ public final class ResolvedBuildContext {
     private static String tsv(String value) {
         if (value == null) return "";
         return value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
-    }
-
-    private static boolean sameBounds(double[] a, double[] b) {
-        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
-        for (int i = 0; i < 4; i++) {
-            if (Math.abs(a[i] - b[i]) > 0.0001) return false;
-        }
-        return true;
     }
 
     private static String jsonEscape(String value) {

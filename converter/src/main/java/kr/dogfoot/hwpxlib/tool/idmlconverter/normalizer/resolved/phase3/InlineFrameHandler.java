@@ -1227,7 +1227,7 @@ public class InlineFrameHandler {
                     && plan != null
                     && plan.placement == Placement.INLINE
                     && ShellRole.isTextShell(plan)
-                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && isShellPlanWithOwnedHwpxText(ctx, plan)
                     && containsInt(plan.ownedTextFrameIds, childDomId)) {
                 return rg;
             }
@@ -1416,8 +1416,9 @@ public class InlineFrameHandler {
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
             imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
+            int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
             boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
-            if (visibleShellTextFrameCount(childTfs) > 1 || separatedHwpxTextChannel) {
+            if (visibleShellTextFrameCount > 1 || separatedHwpxTextChannel) {
                 obj.imageFillData(imageData);
                 obj.forceImageFill(true);
                 attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
@@ -1482,8 +1483,10 @@ public class InlineFrameHandler {
         if (isOrcCarrierTextFrame(childTf)) return null;
         String text = normalizeInlineShellText(childTf.frameVisibleText());
         if (text.isEmpty()) return null;
-        double[] tb = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellBounds);
-        if (!validBounds(tb)) return null;
+        double[] shellPageBounds = normalizeShellBoundsToTextFramePageLocal(ctx, pageIndex, shellBounds, childTf);
+        if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
+        double[] tb = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
+        if (!validBounds(tb) || !validBounds(shellPageBounds)) return null;
 
         double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
         double textW = Math.abs(tb[3] - tb[1]) * scale;
@@ -1503,8 +1506,8 @@ public class InlineFrameHandler {
                 : "CenterAlign");
         applyInlineShellOverlayTextInsets(childTf, overlay);
 
-        long relX = CoordinateConverter.pointsToHwpunits((tb[1] - shellBounds[1]) * scale);
-        long relY = CoordinateConverter.pointsToHwpunits((tb[0] - shellBounds[0]) * scale);
+        long relX = CoordinateConverter.pointsToHwpunits((tb[1] - shellPageBounds[1]) * scale);
+        long relY = CoordinateConverter.pointsToHwpunits((tb[0] - shellPageBounds[0]) * scale);
         overlay.overlayX(relX);
         overlay.overlayY(relY);
         overlay.overlayParentWidth(shellObj.width());
@@ -1550,6 +1553,15 @@ public class InlineFrameHandler {
         if (shell == null) return new String[0];
         ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(shell) : null;
         if (plan != null) {
+            if (ShellRole.isTextShell(plan)
+                    && plan.ownedTextFrameIds != null
+                    && plan.ownedTextFrameIds.length > 0
+                    && (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    || plan.visualAction == VisualAction.DROP_VISUAL
+                    || plan.hasVisibleVisual())
+                    && hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan)) {
+                return ownedTextFrameIds(plan);
+            }
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
                 return new String[0];
             }
@@ -1818,7 +1830,12 @@ public class InlineFrameHandler {
 
     private static boolean isOrcCarrierTextFrame(ResolvedTextFrame tf) {
         if (tf == null) return false;
-        return hasObjectReplacementText(tf.frameVisibleText());
+        String visibleText = tf.frameVisibleText();
+        if (!hasObjectReplacementText(visibleText)) return false;
+        // A child text frame inside an inline shell may legitimately contain ORC markers
+        // between visible text runs. Only treat the frame as a pure ORC carrier when,
+        // after removing ORCs and whitespace controls, nothing meaningful remains.
+        return normalizeInlineShellText(visibleText).isEmpty();
     }
 
     private static ObjectPlan findInlineTextShellOwnerPlan(
@@ -1986,6 +2003,16 @@ public class InlineFrameHandler {
             if (!hasHwpxTextOwnershipForTextFrame(ctx, textFrameDomId)) return false;
         }
         return true;
+    }
+
+    private static boolean isShellPlanWithOwnedHwpxText(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan) {
+        return plan != null
+                && ShellRole.isTextShell(plan)
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0
+                && hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan);
     }
 
     private static boolean hasHwpxTextOwnershipForTextFrame(ResolvedBuildContext ctx, int textFrameDomId) {
@@ -2171,7 +2198,7 @@ public class InlineFrameHandler {
                     && plan != null
                     && plan.placement == Placement.INLINE
                     && ShellRole.isTextShell(plan)
-                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && isShellPlanWithOwnedHwpxText(ctx, plan)
                     && containsInt(plan.ownedTextFrameIds, childDomId)) {
                 return rg;
             }
@@ -2218,7 +2245,8 @@ public class InlineFrameHandler {
         ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(matched) : null;
         if (plan != null) {
             if (plan.textAction == TextAction.OWNED_BY_PNG) return false;
-            return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT;
+            return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    || isShellPlanWithOwnedHwpxText(ctx, plan);
         }
         return false;
     }
@@ -2255,7 +2283,11 @@ public class InlineFrameHandler {
 
     /** 배지/셸 텍스트 단락 빌드. 원본 story 문단이 있으면 짧은 라벨도 그 정렬/런 속성을 그대로 쓴다. */
     private static void buildBadgeParagraph(ResolvedBuildContext ctx, ResolvedTextFrame childTf, ASTInlineObject obj) {
-        if (ctx != null && ctx.resolvedData != null && childTf != null && childTf.storyId() != null) {
+        if (ctx != null
+                && ctx.resolvedData != null
+                && childTf != null
+                && childTf.storyId() != null
+                && canMaterializeShellTextFromWholeStory(ctx, childTf)) {
             List<ASTParagraph> paragraphs = convertShellTextParagraphs(ctx, textFlowUnitForTextFrame(ctx, childTf));
             if ((paragraphs == null || paragraphs.isEmpty())) {
                 ResolvedStory story = ctx.resolvedData.getStory(childTf.storyId());
@@ -2275,6 +2307,34 @@ public class InlineFrameHandler {
         paraInner.alignment(shellTextAlignment(ctx, childTf));
         addSyntheticRunsFromTextFrame(ctx, paraInner, childTf, text);
         obj.addParagraph(paraInner);
+    }
+
+    private static boolean canMaterializeShellTextFromWholeStory(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame textFrame) {
+        if (ctx == null || ctx.resolvedData == null || textFrame == null || textFrame.storyId() == null) {
+            return false;
+        }
+        String frameText = normalizeInlineShellText(textFrame.frameVisibleText());
+        if (frameText.isEmpty()) return false;
+
+        String storyText = normalizeInlineShellStoryText(ctx.resolvedData.getStory(textFrame.storyId()));
+        if (storyText.isEmpty()) return false;
+        return frameText.equals(storyText);
+    }
+
+    private static String normalizeInlineShellStoryText(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+                sb.append(run.text());
+            }
+            sb.append(' ');
+        }
+        return normalizeInlineShellText(sb.toString());
     }
 
     private static String shellTextAlignment(ResolvedBuildContext ctx, ResolvedTextFrame textFrame) {
@@ -3886,7 +3946,9 @@ public class InlineFrameHandler {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
-            if (plan.hasVisibleVisual() || plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+            if (plan.hasVisibleVisual()
+                    || plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    || isShellPlanWithOwnedHwpxText(ctx, plan)) {
                 return null;
             }
             if (plan.visualAction == VisualAction.DROP_VISUAL
@@ -4166,6 +4228,32 @@ public class InlineFrameHandler {
             out[2] -= pageTop;
         }
         return out;
+    }
+
+    private static double[] normalizeShellBoundsToTextFramePageLocal(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] shellBounds,
+            ResolvedTextFrame tf) {
+        if (!validBounds(shellBounds)) return shellBounds;
+        double[] pageRel = tf != null ? tf.pageRelativeBounds() : null;
+        double[] geom = tf != null ? tf.geometricBounds() : null;
+        if (validBounds(pageRel) && validBounds(geom)) {
+            double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+            double geomLeft = scale != 0.0 ? geom[1] / scale : geom[1];
+            double geomTop = scale != 0.0 ? geom[0] / scale : geom[0];
+            double dx = geomLeft - pageRel[1];
+            double dy = geomTop - pageRel[0];
+            if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                return new double[] {
+                        shellBounds[0] - dy,
+                        shellBounds[1] - dx,
+                        shellBounds[2] - dy,
+                        shellBounds[3] - dx
+                };
+            }
+        }
+        return normalizeSpreadBoundsToPageLocal(ctx, pageIndex, shellBounds);
     }
 
     public static boolean hasInlineTextShellForAnchor(
@@ -4984,7 +5072,7 @@ public class InlineFrameHandler {
                     && plan != null
                     && plan.placement == Placement.INLINE
                     && ShellRole.isTextShell(plan)
-                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && isShellPlanWithOwnedHwpxText(ctx, plan)
                     && containsInt(plan.ownedTextFrameIds, tfDomId)) {
                 return rg;
             }
@@ -5000,7 +5088,7 @@ public class InlineFrameHandler {
             if (plan != null
                     && plan.placement == Placement.INLINE
                     && ShellRole.isTextShell(plan)
-                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && isShellPlanWithOwnedHwpxText(ctx, plan)
                     && plan.ownedTextFrameIds != null
                     && plan.ownedTextFrameIds.length > 0) {
                 return rg;
