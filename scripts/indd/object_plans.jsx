@@ -922,6 +922,11 @@ function _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems) {
 
 function _markObjectPlanOwnedByPngCleanup(plan) {
     if (!plan) return;
+    // Cleanup plans suppress duplicate text/shell execution after a COMPLETE_PNG
+    // owner has been chosen. They must not keep the original candidate identity,
+    // or the execution bridge will overwrite the visible owner plan by
+    // candidateId during execution-candidate materialization.
+    plan.candidateId = null;
     plan.passId = "pass.textframe_cleanup";
     plan.textAction = "DROP_TEXT";
     plan.visualAction = "DROP_VISUAL";
@@ -1811,6 +1816,9 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
 }
 
 function _normalizeObjectPlanBundle(bundle) {
+    if (_objectPlanBundleIsDeclaredTextlessShellComposite(bundle)) {
+        return _declaredTextlessShellCompositeBundle(bundle);
+    }
     if (_objectPlanBundleIsClosedBackgroundVisibleCarrier(bundle)) {
         return _closedBackgroundVisibleCarrierBundle(bundle);
     }
@@ -1818,6 +1826,42 @@ function _normalizeObjectPlanBundle(bundle) {
         return _closedPlacedContentCarrierBundle(bundle);
     }
     return bundle || {};
+}
+
+function _objectPlanBundleIsDeclaredTextlessShellComposite(bundle) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.decoration_groups") return false;
+    if (bundle.slotRole !== "textless_group_visual_slot"
+            && bundle.compositeRole !== "textless_group_visual_slot") {
+        return false;
+    }
+    if (bundle.clusterHasPlacedContent === true) return false;
+    if ((!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0)
+            && (!bundle.hiddenVisualSourceObjectIds || bundle.hiddenVisualSourceObjectIds.length === 0)) {
+        return false;
+    }
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    return true;
+}
+
+function _declaredTextlessShellCompositeBundle(bundle) {
+    var normalized = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) normalized[key] = bundle[key];
+    }
+    normalized.ownershipSlot = "SHELL_SLOT";
+    normalized.policyLayer = "DECORATION";
+    if (!normalized.visualLayer || normalized.visualLayer === "CONTENT_VISUAL") {
+        normalized.visualLayer = "LABEL_BACKDROP";
+    }
+    if (!normalized.requiredSlot || normalized.requiredSlot === "CONTENT_VISUAL_SLOT") {
+        normalized.requiredSlot = "SHELL_SLOT";
+    }
+    if (!normalized.requiredSlotReason
+            || normalized.requiredSlotReason === "visible_content_visual_material") {
+        normalized.requiredSlotReason = "declared_textless_shell_composite";
+    }
+    return normalized;
 }
 
 function _objectPlanSourceSetMembership(ids) {

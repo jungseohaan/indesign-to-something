@@ -170,10 +170,51 @@ function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds, i
 }
 
 function _inlineCompositeCompletePngDecisionForOwnership(item, editableTextFrameIds, itemById) {
-    // Inline composite groups never own editable text via COMPLETE_PNG.
-    // Even simple marker/label composites must flow through HWPX text ownership
-    // plus separate shell/content channels to avoid text-bearing group rasterization.
-    return false;
+    var ids = editableTextFrameIds || [];
+    if (!item || ids.length === 0) return false;
+    var markerById = {};
+
+    function maybeReadTextFrame(tf) {
+        if (!tf) return false;
+        try {
+            if (tf.constructor.name !== "TextFrame") return false;
+            var tfId = tf.id !== undefined && tf.id !== null ? String(tf.id) : null;
+            if (!tfId || markerById.hasOwnProperty(tfId)) return false;
+            markerById[tfId] = _isSimpleMarkerLabelTextForOwnership(
+                    _plainTextOfTextFrameForOwnership(tf));
+            return true;
+        } catch (eReadTf) {}
+        return false;
+    }
+
+    try {
+        var nested = item.allPageItems;
+        for (var i = 0; nested && i < nested.length; i++) {
+            maybeReadTextFrame(nested[i]);
+        }
+    } catch (eAll) {}
+    try {
+        var textFrames = item.textFrames;
+        var count = textFrames && textFrames.length !== undefined
+                ? Number(textFrames.length || 0)
+                : 0;
+        for (var ti = 0; ti < count; ti++) {
+            maybeReadTextFrame(textFrames[ti]);
+        }
+    } catch (eTextFrames) {}
+    if (itemById) {
+        for (var ii = 0; ii < ids.length; ii++) {
+            var tf = itemById[String(ids[ii])];
+            if (tf) maybeReadTextFrame(tf);
+        }
+    }
+
+    for (var mi = 0; mi < ids.length; mi++) {
+        if (markerById[String(ids[mi])] !== true) {
+            return false;
+        }
+    }
+    return true;
 }
 
 function _createExtractionPlanSourceIndexCache(doc, sourceIndex) {

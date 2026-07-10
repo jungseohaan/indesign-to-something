@@ -228,6 +228,13 @@ final class InlineFrameBuilder {
             if (ctx.insideTableCell) {
                 d.pageX = ctx.blockPageX + ctx.blockInsetLeft + overlay.overlayX();
                 d.pageY = ctx.blockPageY + ctx.blockInsetTop + ctx.cellContentYCursor + overlay.overlayY();
+            } else if (obj.resolvedPageX() >= 0 && obj.resolvedPageY() >= 0) {
+                // Inline text-shell child text must stay in the parent shell's
+                // local coordinate channel. Using the child frame's own
+                // resolved page box causes drift/duplication when the child
+                // source frame spans more than the actual shell slot.
+                d.pageX = obj.resolvedPageX() + overlay.overlayX();
+                d.pageY = obj.resolvedPageY() + overlay.overlayY();
             } else if (overlay.resolvedPageX() >= 0 && overlay.resolvedPageY() >= 0) {
                 d.pageX = overlay.resolvedPageX();
                 d.pageY = overlay.resolvedPageY();
