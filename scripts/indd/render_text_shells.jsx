@@ -1564,14 +1564,17 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
 
             var boundsInfo = _pageRelativeSourceUnionBoundsInfo(sourceItems, page);
-            // A source-set composite PNG must be placed with the same geometry used
-            // by the actual InDesign export.  The source union can differ from the
-            // duplicated tempGroup's visible bounds because grouping, strokes, masks,
-            // and cleared child text frames affect the rendered canvas.
+            // A source-set composite PNG must be re-placed with the exact page-local
+            // geometry of the exported canvas. If the export canvas is derived from
+            // tempGroup.visibleBounds, cropSourceBounds must keep pointing at that
+            // same canvas. Replacing it with the broader source-union bounds makes
+            // Stage 3 crop the PNG a second time and manifests as enlarged/offset
+            // figures in HWPX. Source-union bounds stay as fallback only when the
+            // export canvas bounds could not be recovered from the rendered group.
             var bounds = exportBounds || (boundsInfo ? boundsInfo.bounds : null);
-            var cropSourceBounds = exportCropSourceBounds || (boundsInfo ? boundsInfo.cropSourceBounds : null);
-            if (_shouldPreferSourceUnionCropBounds(sourceItems, exportCropSourceBounds, boundsInfo)) {
-                cropSourceBounds = boundsInfo ? boundsInfo.cropSourceBounds : cropSourceBounds;
+            var cropSourceBounds = exportCropSourceBounds;
+            if (!cropSourceBounds && !exportBounds && boundsInfo) {
+                cropSourceBounds = boundsInfo.cropSourceBounds || null;
             }
 
             var z = 0;
@@ -1727,60 +1730,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 
     function _isPositiveBounds(bounds) {
         return _boundsWidth(bounds) > 0.01 && _boundsHeight(bounds) > 0.01;
-    }
-
-    function _itemBoundsForClipCarrier(item) {
-        var bounds = null;
-        try { bounds = arrCopy(item.visibleBounds); } catch (eVisible) {}
-        if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (eGeom) {}
-        return bounds;
-    }
-
-    function _itemHasPlacedDescendantBoundsOverflow(item) {
-        if (!item) return false;
-        var carrierBounds = _itemBoundsForClipCarrier(item);
-        if (!_isPositiveBounds(carrierBounds)) return false;
-        var nested = _decoAllPageItems(item);
-        for (var i = 0; nested && i < nested.length; i++) {
-            var child = nested[i];
-            if (!child || child === item) continue;
-            if (!_decoHasPlaced(child)) continue;
-            var childBounds = null;
-            try { childBounds = arrCopy(child.visibleBounds); } catch (eChildVisible) {}
-            if (!childBounds) try { childBounds = arrCopy(child.geometricBounds); } catch (eChildGeom) {}
-            if (!_isPositiveBounds(childBounds)) continue;
-            if (childBounds[0] < carrierBounds[0] - 0.5
-                    || childBounds[1] < carrierBounds[1] - 0.5
-                    || childBounds[2] > carrierBounds[2] + 0.5
-                    || childBounds[3] > carrierBounds[3] + 0.5) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    function _sourceSetHasClipCarrierPlacedOverflow(sourceItems) {
-        for (var i = 0; sourceItems && i < sourceItems.length; i++) {
-            var item = sourceItems[i];
-            if (!item) continue;
-            var cName = "";
-            try { cName = item.constructor ? item.constructor.name : ""; } catch (eName) {}
-            if (cName !== "Rectangle" && cName !== "Oval" && cName !== "Polygon") continue;
-            if (_itemHasPlacedDescendantBoundsOverflow(item)) return true;
-        }
-        return false;
-    }
-
-    function _shouldPreferSourceUnionCropBounds(sourceItems, exportCropSourceBounds, boundsInfo) {
-        if (!exportCropSourceBounds || exportCropSourceBounds.length < 4) return false;
-        if (!boundsInfo || !boundsInfo.cropSourceBounds || boundsInfo.cropSourceBounds.length < 4) return false;
-        if (!_sourceSetHasClipCarrierPlacedOverflow(sourceItems)) return false;
-        var exportW = _boundsWidth(exportCropSourceBounds);
-        var exportH = _boundsHeight(exportCropSourceBounds);
-        var unionW = _boundsWidth(boundsInfo.cropSourceBounds);
-        var unionH = _boundsHeight(boundsInfo.cropSourceBounds);
-        if (exportW <= unionW + 0.5 && exportH <= unionH + 0.5) return false;
-        return exportW >= unionW * 1.1 || exportH >= unionH * 1.1;
     }
 
     function _textStatsOfGroup(grp) {

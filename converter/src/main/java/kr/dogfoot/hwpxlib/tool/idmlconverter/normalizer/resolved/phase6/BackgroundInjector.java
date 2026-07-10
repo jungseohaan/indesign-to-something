@@ -161,6 +161,23 @@ public final class BackgroundInjector {
                 if (img != null && shouldCompositeTfInlineVisuals) {
                     prepared.imageData = VisualCropper.encodePng(img);
                 }
+                if (img != null && hasCropSourceBounds
+                        && shouldIgnoreCropSourceBoundsByImageAspect(
+                        bounds, cropSourceBounds, img.getWidth(), img.getHeight())) {
+                    hasCropSourceBounds = false;
+                    cropRefLeft = rawLeft;
+                    cropRefTop = rawTop;
+                    cropRefRight = rawRight;
+                    cropRefBottom = rawBottom;
+                    cropRefW = fullW;
+                    cropRefH = fullH;
+                    ctx.recordRenderedDecision(
+                            rg,
+                            ownershipPlan,
+                            "Phase6",
+                            "IGNORE_CROP_SOURCE_BOUNDS_ASPECT_MISMATCH",
+                            "rendered png aspect already matches visible bounds; skip secondary crop-source contract");
+                }
                 if (img != null && needsContainerShellKnockout) {
                     BufferedImage transparentShell = VisualCropper.knockOutPaperLikeFill(img);
                     if (transparentShell != img) {
@@ -260,6 +277,33 @@ public final class BackgroundInjector {
                 && crop[3] >= bounds[3] - 0.05;
         boolean materiallyLarger = cropW > boundsW + 0.5 || cropH > boundsH + 0.5;
         return containsBounds && materiallyLarger;
+    }
+
+    private static boolean shouldIgnoreCropSourceBoundsByImageAspect(
+            double[] bounds,
+            double[] cropSourceBounds,
+            int pixelW,
+            int pixelH) {
+        if (!hasUsableCropSourceBounds(cropSourceBounds, bounds)) return false;
+        if (pixelW <= 0 || pixelH <= 0) return false;
+        double visibleW = bounds[3] - bounds[1];
+        double visibleH = bounds[2] - bounds[0];
+        double cropW = cropSourceBounds[3] - cropSourceBounds[1];
+        double cropH = cropSourceBounds[2] - cropSourceBounds[0];
+        if (visibleW <= 1.0 || visibleH <= 1.0 || cropW <= 1.0 || cropH <= 1.0) return false;
+
+        double imageAspect = (double) pixelW / (double) pixelH;
+        double visibleAspect = visibleW / visibleH;
+        double cropAspect = cropW / cropH;
+
+        double visibleDistance = aspectDistance(imageAspect, visibleAspect);
+        double cropDistance = aspectDistance(imageAspect, cropAspect);
+        return cropDistance > visibleDistance + 0.05;
+    }
+
+    private static double aspectDistance(double left, double right) {
+        if (left <= 0.0 || right <= 0.0) return Double.POSITIVE_INFINITY;
+        return Math.abs(Math.log(left / right));
     }
 
     public static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg) {
