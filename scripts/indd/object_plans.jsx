@@ -1583,6 +1583,7 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
     var plans = objectPlans || [];
     var mutatedPlanCount = 0;
     var replacedSourceCount = 0;
+    var prunedSourceCount = 0;
     var mutatedPlanIds = [];
 
     function sourceType(src) {
@@ -1618,6 +1619,14 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
         return null;
     }
 
+    function idSet(ids) {
+        var out = {};
+        for (var i = 0; ids && i < ids.length; i++) {
+            out[String(ids[i])] = true;
+        }
+        return out;
+    }
+
     for (var pi = 0; pi < plans.length; pi++) {
         var plan = plans[pi];
         if (!_objectPlanHasVisibleVisual(plan)) continue;
@@ -1628,11 +1637,19 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
         if (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0) continue;
         var retained = [];
         var seen = {};
+        var hiddenSet = idSet(plan.hiddenVisualSourceObjectIds || []);
         var changed = false;
+        var pruned = false;
         for (var vi = 0; vi < plan.visualSourceObjectIds.length; vi++) {
             var sourceId = plan.visualSourceObjectIds[vi];
             var clipParentId = clippedParentIdForImageSource(sourceId);
             if (clipParentId !== null && clipParentId !== undefined) {
+                if (hiddenSet[String(clipParentId)] === true) {
+                    changed = true;
+                    pruned = true;
+                    prunedSourceCount++;
+                    continue;
+                }
                 _pushUniqueId(retained, seen, clipParentId);
                 changed = true;
                 replacedSourceCount++;
@@ -1642,10 +1659,12 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
         }
         if (!changed) continue;
         plan.visualSourceObjectIds = _sortedNumericIds(retained);
-        plan.rawClippedImageVisualSourceResolution =
-                "REPLACED_RAW_IMAGE_VISUAL_SOURCE_WITH_CLIP_PARENT";
-        plan.rawClippedImageVisualSourceResolutionReason =
-                "clipped Image leaf ids are provenance; the clip-carrying frame owns visible CONTENT_VISUAL_SLOT material";
+        plan.rawClippedImageVisualSourceResolution = pruned === true
+                ? "PRUNED_RAW_IMAGE_VISUAL_SOURCE_WITH_HIDDEN_CLIP_PARENT"
+                : "REPLACED_RAW_IMAGE_VISUAL_SOURCE_WITH_CLIP_PARENT";
+        plan.rawClippedImageVisualSourceResolutionReason = pruned === true
+                ? "clipped Image leaf ids are provenance and the clip-carrying parent was already hidden by slot ownership resolution"
+                : "clipped Image leaf ids are provenance; the clip-carrying frame owns visible CONTENT_VISUAL_SLOT material";
         plan.reason = String(plan.reason || "") + ":raw_clipped_image_visual_source_resolved";
         mutatedPlanCount++;
         mutatedPlanIds.push(plan.objectPlanId || plan.bundleId || plan.candidateId || ("plan.index." + pi));
@@ -1655,6 +1674,7 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
         summary: {
             mutatedPlanCount: mutatedPlanCount,
             replacedSourceCount: replacedSourceCount,
+            prunedSourceCount: prunedSourceCount,
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };

@@ -2432,12 +2432,54 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
     function entriesContainmentConnected(a, b, structurallyConnected) {
         if (!a || !b) return false;
         if (boundsMostlyContains(a.bounds, b.bounds)) {
+            if (!structurallyConnected && entryIsPageSpanningPlacedVisualCarrier(a)) {
+                return false;
+            }
             return structurallyConnected || entryLooksConcreteVisualContainer(a);
         }
         if (boundsMostlyContains(b.bounds, a.bounds)) {
+            if (!structurallyConnected && entryIsPageSpanningPlacedVisualCarrier(b)) {
+                return false;
+            }
             return structurallyConnected || entryLooksConcreteVisualContainer(b);
         }
         return false;
+    }
+
+    function candidateHasSingleTopLevelStructuralRoot(candidate) {
+        if (!candidate) return false;
+        var ids = visibleExportIds(candidate);
+        if (!ids || ids.length === 0) ids = sourceIds(candidate);
+        ids = topLevelStructuralIds(ids || []);
+        return ids.length === 1;
+    }
+
+    function entrySpansPageCarrierBounds(entryBounds, pageIndex) {
+        if (!boundsHasArea(entryBounds)) return false;
+        var pb = pageBounds(pageIndex);
+        if (!pb || pb.length < 4 || !boundsIntersects(entryBounds, pb)) return false;
+        var pageWidth = Math.max(0, Number(pb[3]) - Number(pb[1]));
+        var pageHeight = Math.max(0, Number(pb[2]) - Number(pb[0]));
+        if (pageWidth <= 0 || pageHeight <= 0) return false;
+        var width = Math.max(0, Number(entryBounds[3]) - Number(entryBounds[1]));
+        var height = Math.max(0, Number(entryBounds[2]) - Number(entryBounds[0]));
+        var touchesLeft = Number(entryBounds[1]) <= Number(pb[1]) + 1.0;
+        var touchesRight = Number(entryBounds[3]) >= Number(pb[3]) - 1.0;
+        var touchesTop = Number(entryBounds[0]) <= Number(pb[0]) + 1.0;
+        var touchesBottom = Number(entryBounds[2]) >= Number(pb[2]) - 1.0;
+        var spansWidth = width >= pageWidth * 0.85 && touchesLeft && touchesRight;
+        var spansHeight = height >= pageHeight * 0.85 && touchesTop && touchesBottom;
+        return spansWidth || spansHeight;
+    }
+
+    function entryIsPageSpanningPlacedVisualCarrier(entry) {
+        if (!entry || !entry.candidate) return false;
+        var candidate = entry.candidate;
+        if (!candidateIsPlacedVisualCarrier(candidate)) return false;
+        if (!candidateHasSingleTopLevelStructuralRoot(candidate)) return false;
+        var pageIndex = candidate.pageIndex;
+        if (pageIndex === null || pageIndex === undefined) return false;
+        return entrySpansPageCarrierBounds(entry.bounds, Number(pageIndex));
     }
 
     function visibleBoundsSourceId(id, sourceSet) {
@@ -3513,12 +3555,116 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
     function entriesContainmentConnected(a, b, structurallyConnected) {
         if (!a || !b) return false;
         if (boundsMostlyContains(a.bounds, b.bounds)) {
+            if (!structurallyConnected && entryIsPageSpanningPlacedVisualCarrier(a)) {
+                return false;
+            }
             return structurallyConnected || entryLooksConcreteVisualContainer(a);
         }
         if (boundsMostlyContains(b.bounds, a.bounds)) {
+            if (!structurallyConnected && entryIsPageSpanningPlacedVisualCarrier(b)) {
+                return false;
+            }
             return structurallyConnected || entryLooksConcreteVisualContainer(b);
         }
         return false;
+    }
+
+    function candidateHasSingleTopLevelStructuralRoot(candidate) {
+        if (!candidate) return false;
+        var ids = candidateVisibleExportIdsLocal(candidate);
+        if (!ids || ids.length === 0) ids = candidateSourceIdsLocal(candidate);
+        ids = topLevelStructuralIdsLocal(ids || []);
+        return ids.length === 1;
+    }
+
+    function candidateVisibleExportIdsLocal(candidate) {
+        var ids = candidate && candidate.exportSourceObjectIds
+                ? candidate.exportSourceObjectIds.slice(0)
+                : [];
+        if ((!ids || ids.length === 0) && candidate && candidate.visualSourceObjectIds) {
+            ids = candidate.visualSourceObjectIds.slice(0);
+        }
+        return _sortedNumericIds(ids || []);
+    }
+
+    function candidateSourceIdsLocal(candidate) {
+        return _sortedNumericIds(candidate && candidate.sourceObjectIds
+                ? candidate.sourceObjectIds.slice(0)
+                : []);
+    }
+
+    function topLevelStructuralIdsLocal(ids) {
+        ids = _sortedNumericIds(ids || []);
+        if (ids.length <= 1) return ids;
+        var sourceSet = {};
+        for (var i = 0; i < ids.length; i++) sourceSet[String(ids[i])] = true;
+        var out = [];
+        var seen = {};
+        for (var ii = 0; ii < ids.length; ii++) {
+            var id = ids[ii];
+            if (sourceHasAncestorInSet(id, sourceSet)) continue;
+            _pushUniqueId(out, seen, id);
+        }
+        return out.length > 0 && out.length < ids.length ? _sortedNumericIds(out) : ids;
+    }
+
+    function candidateIsPlacedVisualCarrier(candidate) {
+        if (!candidate) return false;
+        if (candidate.passId === "pass.image_placed_frames"
+                || candidate.passId === "pass.image_textless_groups") {
+            return true;
+        }
+        var exportIds = candidateVisibleExportIdsLocal(candidate);
+        for (var i = 0; i < exportIds.length; i++) {
+            var src = info(exportIds[i]);
+            if (!src) continue;
+            var kind = String(src.kind || "");
+            if (kind === "Image" || kind === "PDF" || kind === "EPS"
+                    || src.hasPlacedVisual === true) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function entrySpansPageCarrierBounds(entryBounds, pageIndex) {
+        if (!entryBounds || entryBounds.length < 4) return false;
+        var pb = pageBoundsLocal(pageIndex);
+        if (!pb || pb.length < 4 || !intersectsLocal(entryBounds, pb)) return false;
+        var pageWidth = Math.max(0, Number(pb[3]) - Number(pb[1]));
+        var pageHeight = Math.max(0, Number(pb[2]) - Number(pb[0]));
+        if (pageWidth <= 0 || pageHeight <= 0) return false;
+        var width = Math.max(0, Number(entryBounds[3]) - Number(entryBounds[1]));
+        var height = Math.max(0, Number(entryBounds[2]) - Number(entryBounds[0]));
+        var touchesLeft = Number(entryBounds[1]) <= Number(pb[1]) + 1.0;
+        var touchesRight = Number(entryBounds[3]) >= Number(pb[3]) - 1.0;
+        var touchesTop = Number(entryBounds[0]) <= Number(pb[0]) + 1.0;
+        var touchesBottom = Number(entryBounds[2]) >= Number(pb[2]) - 1.0;
+        var spansWidth = width >= pageWidth * 0.85 && touchesLeft && touchesRight;
+        var spansHeight = height >= pageHeight * 0.85 && touchesTop && touchesBottom;
+        return spansWidth || spansHeight;
+    }
+
+    function pageBoundsLocal(pageIndex) {
+        try {
+            if (sourceIndex && sourceIndex.pageBounds) return sourceIndex.pageBounds(Number(pageIndex));
+        } catch (ePageBounds) {}
+        return null;
+    }
+
+    function intersectsLocal(a, b) {
+        if (!a || !b || a.length < 4 || b.length < 4) return false;
+        return a[2] > b[0] && a[0] < b[2] && a[3] > b[1] && a[1] < b[3];
+    }
+
+    function entryIsPageSpanningPlacedVisualCarrier(entry) {
+        if (!entry || !entry.candidate) return false;
+        var candidate = entry.candidate;
+        if (!candidateIsPlacedVisualCarrier(candidate)) return false;
+        if (!candidateHasSingleTopLevelStructuralRoot(candidate)) return false;
+        var pageIndex = candidate.pageIndex;
+        if (pageIndex === null || pageIndex === undefined) return false;
+        return entrySpansPageCarrierBounds(entry.bounds, Number(pageIndex));
     }
 
     function mergedIds(component, field) {
@@ -6398,10 +6544,28 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d14_plan_plannerBundles");
     var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
     _marker(ctx.outputDir, "03d15_plan_objectPlans");
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/object-plans-before-execution-bridge.json",
+                    _slimObjectPlanDiagnosticsForWrite(objectPlanDiagnostics));
+        } catch (eObjectPlansBeforeExecutionBridgeWrite) {}
+    }
     var executionCandidates = _buildExecutionCandidatesFromObjectPlans(candidates, objectPlanDiagnostics);
     _marker(ctx.outputDir, "03d16_plan_buildExecutionCandidates");
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/object-plan-execution-bridge-before-source-slot-canonicalization.json",
+                    objectPlanDiagnostics.executionCandidateBridge || {});
+        } catch (eObjectPlanExecutionBridgeBeforeSourceSlotCanonicalizationWrite) {}
+    }
     executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
     _marker(ctx.outputDir, "03d16a_plan_excludeChildShellSourcesFromParentExports");
+    if (ctx.writePlannerDiagnostics === true) {
+        try {
+            writeJson(ctx.outputDir + "/execution-candidates-before-source-slot-canonicalization.json",
+                    executionCandidates || []);
+        } catch (eExecutionCandidatesBeforeSourceSlotCanonicalizationWrite) {}
+    }
     var sourceSlotCanonicalizationDiagnostics = _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(
             executionCandidates, sourceItems);
     executionCandidates = sourceSlotCanonicalizationDiagnostics.candidates;
@@ -6446,6 +6610,12 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         _marker(ctx.outputDir, "03d16e_plan_rebuildExecutionCandidatesAfterSubsumed");
         executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
         _marker(ctx.outputDir, "03d16f_plan_excludeChildShellSourcesFromParentExportsAfterRebuild");
+        if (ctx.writePlannerDiagnostics === true) {
+            try {
+                writeJson(ctx.outputDir + "/execution-candidates-after-rebuild-before-secondary-suppressions.json",
+                        executionCandidates || []);
+            } catch (eExecutionCandidatesAfterRebuildBeforeSecondarySuppressionsWrite) {}
+        }
         multiTextParentSuppressionDiagnostics = _suppressChildExportsCoveredByTextlessGroupCandidates(
                 executionCandidates, sourceItems);
         executionCandidates = multiTextParentSuppressionDiagnostics.candidates;
