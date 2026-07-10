@@ -40,6 +40,57 @@ function _repoRootFromConfigPath(configPath) {
     return null;
 }
 
+function _sourceSiblingIdmlFile(ctx) {
+    var inddFile = File(ctx.inddPath);
+    var name = inddFile.name || "output.indd";
+    var dot = name.lastIndexOf(".");
+    var base = dot >= 0 ? name.substring(0, dot) : name;
+    return File(inddFile.parent.fsName + "/" + base + ".idml");
+}
+
+function _findReusableSiblingIdml(ctx) {
+    var exact = _sourceSiblingIdmlFile(ctx);
+    if (exact.exists) return { file: exact, match: "same_basename" };
+    return { file: exact, match: "export_target" };
+}
+
+function _copyFileReplacing(src, dest) {
+    if (!src || !src.exists) {
+        throw new Error("IDML source file missing: " + (src ? src.fsName : "<null>"));
+    }
+    if (dest.exists) {
+        try { dest.remove(); } catch (eRemove) {}
+    }
+    if (!src.copy(dest.fsName)) {
+        throw new Error("IDML copy failed: " + src.fsName + " -> " + dest.fsName);
+    }
+}
+
+function _prepareExtractionIdml(doc, ctx) {
+    var outputIdml = File(ctx.outputDir + "/output.idml");
+    var sibling = _findReusableSiblingIdml(ctx);
+    var siblingIdml = sibling.file;
+    var mode = "sibling_reuse";
+
+    if (!siblingIdml.exists) {
+        mode = "sibling_export";
+        writeProgress(ctx.outputDir, "idml_export_to_source_folder", 0, ctx.pageCount);
+        doc.exportFile(ExportFormat.INDESIGN_MARKUP, siblingIdml);
+    } else {
+        writeProgress(ctx.outputDir, "idml_sibling_reuse", 0, ctx.pageCount);
+    }
+
+    _copyFileReplacing(siblingIdml, outputIdml);
+    writeJson(ctx.outputDir + "/idml-source.json", {
+        mode: mode,
+        match: sibling.match,
+        sourceINDD: ctx.inddPath,
+        sourceIDML: siblingIdml.fsName,
+        outputIDML: outputIdml.fsName
+    });
+    return outputIdml;
+}
+
 function _loadIdmlZOrderMap(ctx) {
     if (!ctx || ctx.chunkMode) return null;
     var idmlPath = ctx.outputDir + "/output.idml";
@@ -1089,18 +1140,14 @@ function main(args) {
                 doc.close(SaveOptions.NO); doc = null;
                 writeDone(ctx.outputDir, "ok", null); return;
             } else {
-            // 2. IDML 내보내기 (전체 — API 제한으로 범위 지정 불가)
+            // 2. IDML 준비 (전체 — API 제한으로 범위 지정 불가)
+            // 원본 INDD 옆의 같은 basename IDML을 우선 사용한다. 없으면
+            // 원본 폴더에 IDML을 내보낸 뒤 extract/output.idml로 복사한다.
             // chunkMode=true(후속 청크)면 이미 청크1에서 IDML이 생성되었으므로 생략
             _marker(ctx.outputDir, "02_idml_export");
             if (!ctx.chunkMode) {
-                var reusableIdml = File(ctx.outputDir + "/output.idml");
-                if (ctx.reuseExistingIdml === true && reusableIdml.exists) {
-                    writeProgress(ctx.outputDir, "idml_reuse", 0, ctx.pageCount);
-                    _marker(ctx.outputDir, "02_idml_reuse");
-                } else {
-                    writeProgress(ctx.outputDir, "idml", 0, ctx.pageCount);
-                    doc.exportFile(ExportFormat.INDESIGN_MARKUP, reusableIdml);
-                }
+                var preparedIdml = _prepareExtractionIdml(doc, ctx);
+                _marker(ctx.outputDir, "02_idml_" + (preparedIdml.exists ? "ready" : "missing"));
                 _marker(ctx.outputDir, "02b_idml_zorder_map");
                 _loadIdmlZOrderMap(ctx);
             }

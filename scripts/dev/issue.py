@@ -190,13 +190,14 @@ def write_applescript(
         "",
         "",
         "1" if reuse_existing_idml else "0",
+        str(EXTRACT_JSX),
     ]
     quoted_args = ", ".join(json.dumps(a, ensure_ascii=False) for a in args)
     script = f'''using terms from application "{app_name}"
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script (POSIX file "{EXTRACT_JSX}") language «constant ScLgJSLg» with arguments {{{quoted_args}}}
+            do script (read POSIX file "{EXTRACT_JSX}") language javascript with arguments {{{quoted_args}}}
         end timeout
     end tell
 end using terms from
@@ -582,6 +583,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--snippet", default=None, help="Optional text snippet to trace after conversion.")
     parser.add_argument("--skip-pdf", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--margin-guide",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Draw diagnostic margin guide lines into the converted HWPX.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -601,7 +608,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     extract_range = resolve_extract_page_range(unit, args.page, end_page)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    issue_dir = Path(args.output_root) / args.case / f"{page_label(args.page, args.end_page)}-{stamp}"
+    output_root = Path(args.output_root)
+    if not output_root.is_absolute():
+        output_root = REPO_ROOT / output_root
+    issue_dir = output_root / args.case / f"{page_label(args.page, args.end_page)}-{stamp}"
     extract_dir = issue_dir / "extract"
     converted_dir = issue_dir / "converted"
 
@@ -669,8 +679,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "--links-directory",
         str(extract_dir / "Links"),
         "--include-images",
-        "--margin-guide",
     ]
+    if args.margin_guide:
+        convert_cmd.append("--margin-guide")
     if CONVERSION_CONFIG.exists():
         convert_cmd.extend(["--config", str(CONVERSION_CONFIG)])
     run(convert_cmd, dry_run=args.dry_run)

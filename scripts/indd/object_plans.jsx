@@ -1511,6 +1511,15 @@ function _resolveObjectPlanPageLocalVisibleSources(objectPlans, sourceById) {
                 || (descendants.removed && descendants.removed.length > 0);
         if (!removedAny) return false;
         var passId = String(plan.planPassId || plan.passId || "");
+        if (plan.visualLayer === "PAGE_BACKGROUND"
+                || plan.slotRole === "background_shell_slot") {
+            return true;
+        }
+        if (plan.visualAction === "PLACE_TEXT_SHELL"
+                && plan.ownershipSlot === "SHELL_SLOT"
+                && plan.visualLayer === "LABEL_BACKDROP") {
+            return true;
+        }
         return passId === "pass.image_placed_frames"
                 || passId === "pass.image_textless_groups"
                 || passId === "pass.page_textless_graphic_groups"

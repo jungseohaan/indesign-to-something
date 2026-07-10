@@ -4923,6 +4923,168 @@ function _normalizePageCoordinateCandidateBounds(candidates, sourceIndex) {
     return candidates;
 }
 
+function _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex) {
+    if (!candidates || !sourceIndex || !sourceIndex.pageBounds || !sourceIndex.candidatePageIndexes) {
+        return candidates || [];
+    }
+    var out = [];
+    var seen = {};
+    var expanded = 0;
+    var sourceById = {};
+    try {
+        var sourceItems = sourceIndex.sourceItems || [];
+        for (var si = 0; si < sourceItems.length; si++) {
+            var src = sourceItems[si];
+            if (src && src.id !== null && src.id !== undefined) sourceById[String(src.id)] = src;
+        }
+    } catch (eSourceById) {}
+
+    function hasArea(b) {
+        return b && b.length >= 4
+                && Number(b[2]) > Number(b[0])
+                && Number(b[3]) > Number(b[1]);
+    }
+
+    function intersects(a, b) {
+        if (!hasArea(a) || !hasArea(b)) return false;
+        return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
+                && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
+    }
+
+    function pageRelativeIntersection(bounds, pageBounds) {
+        if (!intersects(bounds, pageBounds)) return null;
+        var top = Math.max(Number(bounds[0]), Number(pageBounds[0]));
+        var left = Math.max(Number(bounds[1]), Number(pageBounds[1]));
+        var bottom = Math.min(Number(bounds[2]), Number(pageBounds[2]));
+        var right = Math.min(Number(bounds[3]), Number(pageBounds[3]));
+        if (bottom <= top || right <= left) return null;
+        return [
+            top - Number(pageBounds[0]),
+            left - Number(pageBounds[1]),
+            bottom - Number(pageBounds[0]),
+            right - Number(pageBounds[1])
+        ];
+    }
+
+    function isCrossPageFloatingVisualCandidate(candidate) {
+        if (!candidate || candidate.disabled === true) return false;
+        if (candidate.placement === "INLINE" || candidate.coordinateSpace === "STORY_FLOW") return false;
+        if (String(candidate.placement || "") !== "FLOATING") return false;
+        if (String(candidate.coordinateSpace || "") !== "PAGE") return false;
+        var action = String(candidate.visualAction || "");
+        if (action !== "PLACE_FLOATING_PNG" && action !== "PLACE_TEXT_SHELL") return false;
+        return candidate.slotRole === "background_shell_slot"
+                || candidate.slotRole === "shell_slot_only"
+                || candidate.slotRole === "page_textless_graphic_group"
+                || candidate.visualLayer === "PAGE_BACKGROUND"
+                || candidate.visualLayer === "LABEL_BACKDROP"
+                || candidate.visualLayer === "CONTENT_VISUAL"
+                || candidate.passId === "pass.page_backgrounds";
+    }
+
+    function primaryVisualSourceId(candidate) {
+        var visualIds = candidate && candidate.visualSourceObjectIds || [];
+        if (visualIds.length > 0) return visualIds[0];
+        if (candidate && candidate.primarySourceObjectId !== null
+                && candidate.primarySourceObjectId !== undefined) {
+            return candidate.primarySourceObjectId;
+        }
+        var sourceIds = candidate && candidate.sourceObjectIds || [];
+        return sourceIds.length > 0 ? sourceIds[0] : null;
+    }
+
+    function copyArray(value) {
+        return value && value.slice ? value.slice(0) : value;
+    }
+
+    function copyCandidate(candidate) {
+        var clone = {};
+        for (var key in candidate) {
+            if (!candidate.hasOwnProperty(key)) continue;
+            clone[key] = copyArray(candidate[key]);
+        }
+        return clone;
+    }
+
+    function candidateKey(candidate) {
+        return String(candidate.passId || "")
+                + "|page:" + String(candidate.pageIndex)
+                + "|src:" + _sourceSetKey(candidate.sourceObjectIds || []);
+    }
+
+    function absoluteSourceBoundsForRoot(rootId) {
+        var src = sourceById[String(rootId)];
+        return src && hasArea(src.bounds) ? src.bounds.slice(0) : null;
+    }
+
+    function register(candidate) {
+        if (!candidate) return;
+        seen[candidateKey(candidate)] = true;
+    }
+
+    for (var i = 0; i < candidates.length; i++) register(candidates[i]);
+
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        out.push(candidate);
+        if (!isCrossPageFloatingVisualCandidate(candidate)) continue;
+
+        var rootId = primaryVisualSourceId(candidate);
+        if (rootId === null || rootId === undefined) continue;
+        var pages = [];
+        try { pages = sourceIndex.candidatePageIndexes(rootId) || []; } catch (ePages) { pages = []; }
+        if (!pages || pages.length <= 1) continue;
+
+        var sourceBounds = candidate.sourceBounds && hasArea(candidate.sourceBounds)
+                ? candidate.sourceBounds.slice(0)
+                : absoluteSourceBoundsForRoot(rootId);
+        if (!hasArea(sourceBounds) && candidate.bounds && hasArea(candidate.bounds)) {
+            sourceBounds = candidate.bounds.slice(0);
+        }
+        if (!hasArea(sourceBounds)) continue;
+
+        var currentPage = Number(candidate.pageIndex);
+        for (var pi = 0; pi < pages.length; pi++) {
+            var pageIndex = Number(pages[pi]);
+            if (isNaN(pageIndex) || pageIndex === currentPage) continue;
+            var pb = null;
+            try { pb = sourceIndex.pageBounds(pageIndex); } catch (ePageBounds) { pb = null; }
+            var rel = pageRelativeIntersection(sourceBounds, pb);
+            if (!rel) continue;
+
+            var clone = copyCandidate(candidate);
+            clone.pageIndex = pageIndex;
+            clone.originalPageIndex = currentPage;
+            clone.crossPageFloatingVisualClone = true;
+            clone.crossPageCloneOfCandidateId = candidate.candidateId || null;
+            clone.sourceBounds = sourceBounds.slice(0);
+            clone.bounds = rel;
+            clone.coordinateSpace = candidate.coordinateSpace || "PAGE";
+            clone.placement = candidate.placement || "FLOATING";
+
+            clone.primarySourceObjectId = rootId;
+            if (!clone.visualSourceObjectIds || clone.visualSourceObjectIds.length === 0) {
+                clone.visualSourceObjectIds = [rootId];
+            }
+            clone.candidateId = (clone.sourceObjectIds && clone.sourceObjectIds.length > 1)
+                    ? _candidateCompositeId(clone.passId, pageIndex, clone.sourceObjectIds,
+                            "cross_page_floating_visual")
+                    : _candidateId(clone.passId, rootId, pageIndex);
+            var key = candidateKey(clone);
+            if (seen[key]) continue;
+            seen[key] = true;
+            out.push(clone);
+            expanded++;
+        }
+    }
+    try {
+        if (expanded > 0 && sourceIndex.stats) {
+            sourceIndex.stats.crossPageFloatingVisualCandidatesExpanded = expanded;
+        }
+    } catch (eStats) {}
+    return out;
+}
+
 function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItems, sourceIndex) {
     if (!candidates || !sourceItems || sourceItems.length === 0) {
         return { warningCount: 0, warnings: [] };
@@ -6517,6 +6679,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
     candidates = _normalizePageCoordinateCandidateBounds(candidates, sourceIndex);
     _marker(ctx.outputDir, "03d13b_plan_normalizePageCoordinateBounds");
+    candidates = _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex);
+    _marker(ctx.outputDir, "03d13b1_plan_expandCrossPageFloatingVisuals");
     var preObjectPlanSourceSlotCanonicalizationDiagnostics = null;
     if (_candidateListHasObjectPlanLikeExecutionFields(candidates)) {
         preObjectPlanSourceSlotCanonicalizationDiagnostics =
