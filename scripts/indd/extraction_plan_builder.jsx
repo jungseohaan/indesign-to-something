@@ -2228,6 +2228,74 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         return xOverlap >= 0.65 && yGap > 0.1 && yGap <= columnGapLimit;
     }
 
+    function entryRootZRange(entry) {
+        if (!entry || !entry.candidate) return null;
+        var ids = (entry.candidate.exportSourceObjectIds || [])
+                .concat(entry.candidate.visualSourceObjectIds || [])
+                .concat(entry.candidate.sourceObjectIds || []);
+        if (!ids || ids.length === 0) return null;
+        ids = depthGuardTopLevelStructuralIds(ids);
+        var min = null;
+        var max = null;
+        for (var i = 0; ids && i < ids.length; i++) {
+            var src = info(ids[i]);
+            if (!src || src.zOrder === null || src.zOrder === undefined) continue;
+            var z = Number(src.zOrder);
+            if (isNaN(z)) continue;
+            min = min === null ? z : Math.min(min, z);
+            max = max === null ? z : Math.max(max, z);
+        }
+        if (min === null || max === null) {
+            var fallback = Number(entry.candidate.zOrder || 0);
+            if (isNaN(fallback)) return null;
+            min = fallback;
+            max = fallback;
+        }
+        return { min: min, max: max };
+    }
+
+    function depthGuardTopLevelStructuralIds(ids) {
+        ids = _sortedNumericIds(ids || []);
+        if (ids.length <= 1) return ids;
+        var sourceSet = {};
+        for (var i = 0; i < ids.length; i++) sourceSet[String(ids[i])] = true;
+        var out = [];
+        var seen = {};
+        for (var ii = 0; ii < ids.length; ii++) {
+            var id = ids[ii];
+            var cur = info(id);
+            var hasParentInSet = false;
+            var guard = 0;
+            while (cur && guard++ < 64) {
+                var parentId = cur.parentId;
+                if (parentId === null || parentId === undefined) break;
+                if (sourceSet[String(parentId)]) {
+                    hasParentInSet = true;
+                    break;
+                }
+                cur = info(parentId);
+            }
+            if (!hasParentInSet) _pushUniqueId(out, seen, id);
+        }
+        return out.length > 0 && out.length < ids.length ? _sortedNumericIds(out) : ids;
+    }
+
+    function entriesSourceDepthCompatible(a, b) {
+        var ar = entryRootZRange(a);
+        var br = entryRootZRange(b);
+        if (!ar || !br) return true;
+        var gap = 0;
+        if (ar.max < br.min) {
+            gap = br.min - ar.max;
+        } else if (br.max < ar.min) {
+            gap = ar.min - br.max;
+        }
+        if (gap <= 8) return true;
+        var aSpan = Math.max(0, ar.max - ar.min);
+        var bSpan = Math.max(0, br.max - br.min);
+        return gap <= Math.max(2, Math.min(aSpan, bSpan) * 0.25);
+    }
+
     function unionBounds(a, b) {
         if (!a) return b ? b.slice(0) : null;
         if (!b) return a.slice(0);
@@ -2619,7 +2687,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     && entriesShareStructuralRoot(entries[aIndex], entries[bIndex]);
             var connected = structurallyConnected
                     || entriesContainmentConnected(entries[aIndex], entries[bIndex], structurallyConnected)
-                    || boundsVisuallyAdjacent(entries[aIndex].bounds, entries[bIndex].bounds);
+                    || (entriesSourceDepthCompatible(entries[aIndex], entries[bIndex])
+                            && boundsVisuallyAdjacent(entries[aIndex].bounds, entries[bIndex].bounds));
             structuralRelationCache[key] = connected;
             return connected;
         }
@@ -3302,6 +3371,74 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
         return xOverlap >= 0.65 && yGap > 0.1 && yGap <= columnGapLimit;
     }
 
+    function entryRootZRange(entry) {
+        if (!entry || !entry.candidate) return null;
+        var ids = (entry.candidate.exportSourceObjectIds || [])
+                .concat(entry.candidate.visualSourceObjectIds || [])
+                .concat(entry.candidate.sourceObjectIds || []);
+        if (!ids || ids.length === 0) return null;
+        ids = depthGuardTopLevelStructuralIds(ids);
+        var min = null;
+        var max = null;
+        for (var i = 0; ids && i < ids.length; i++) {
+            var src = info(ids[i]);
+            if (!src || src.zOrder === null || src.zOrder === undefined) continue;
+            var z = Number(src.zOrder);
+            if (isNaN(z)) continue;
+            min = min === null ? z : Math.min(min, z);
+            max = max === null ? z : Math.max(max, z);
+        }
+        if (min === null || max === null) {
+            var fallback = Number(entry.candidate.zOrder || 0);
+            if (isNaN(fallback)) return null;
+            min = fallback;
+            max = fallback;
+        }
+        return { min: min, max: max };
+    }
+
+    function depthGuardTopLevelStructuralIds(ids) {
+        ids = _sortedNumericIds(ids || []);
+        if (ids.length <= 1) return ids;
+        var sourceSet = {};
+        for (var i = 0; i < ids.length; i++) sourceSet[String(ids[i])] = true;
+        var out = [];
+        var seen = {};
+        for (var ii = 0; ii < ids.length; ii++) {
+            var id = ids[ii];
+            var cur = info(id);
+            var hasParentInSet = false;
+            var guard = 0;
+            while (cur && guard++ < 64) {
+                var parentId = cur.parentId;
+                if (parentId === null || parentId === undefined) break;
+                if (sourceSet[String(parentId)]) {
+                    hasParentInSet = true;
+                    break;
+                }
+                cur = info(parentId);
+            }
+            if (!hasParentInSet) _pushUniqueId(out, seen, id);
+        }
+        return out.length > 0 && out.length < ids.length ? _sortedNumericIds(out) : ids;
+    }
+
+    function entriesSourceDepthCompatible(a, b) {
+        var ar = entryRootZRange(a);
+        var br = entryRootZRange(b);
+        if (!ar || !br) return true;
+        var gap = 0;
+        if (ar.max < br.min) {
+            gap = br.min - ar.max;
+        } else if (br.max < ar.min) {
+            gap = ar.min - br.max;
+        }
+        if (gap <= 8) return true;
+        var aSpan = Math.max(0, ar.max - ar.min);
+        var bSpan = Math.max(0, br.max - br.min);
+        return gap <= Math.max(2, Math.min(aSpan, bSpan) * 0.25);
+    }
+
     function unionBounds(a, b) {
         if (!a) return b ? b.slice(0) : null;
         if (!b) return a.slice(0);
@@ -3866,7 +4003,8 @@ function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceI
                     && entriesShareStructuralRoot(entries[aIndex], entries[bIndex]);
             var connected = structurallyConnected
                     || entriesContainmentConnected(entries[aIndex], entries[bIndex], structurallyConnected)
-                    || boundsVisuallyAdjacent(entries[aIndex].bounds, entries[bIndex].bounds);
+                    || (entriesSourceDepthCompatible(entries[aIndex], entries[bIndex])
+                            && boundsVisuallyAdjacent(entries[aIndex].bounds, entries[bIndex].bounds));
             structuralRelationCache[key] = connected;
             return connected;
         }

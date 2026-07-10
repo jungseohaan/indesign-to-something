@@ -223,7 +223,6 @@ function _objectPlanAggregateSourceZOrder(ids, sourceById, useMin, normalizedOnl
 function _objectPlanUsesLowestVisualSourceZOrder(plan) {
     if (!plan) return false;
     if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
-    if (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length <= 1) return false;
     return plan.slotRole === "shell_slot_only"
             || plan.slotRole === "direct_child_shell_slot"
             || plan.compositeRole === "table_carrier_sibling_decoration"
@@ -718,6 +717,7 @@ function _slimObjectPlanForWrite(plan) {
         "ownedByNativeShellSourceSetId",
         "sourceObjectIds",
         "sourceSetId",
+        "sourceRootObjectIds",
         "sourceRootSetId",
         "clusterSourceSetId",
         "omittedClusterSourceSetId",
