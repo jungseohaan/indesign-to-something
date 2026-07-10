@@ -382,6 +382,8 @@ public final class ResolvedBuildContext {
     private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
+    private java.util.Set<String> ambiguousRenderedCandidateIds;
+    private java.util.Set<String> ambiguousRenderedRenderUnitIds;
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByExactDomId;
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByRenderId;
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansBySourceObjectId;
@@ -508,6 +510,8 @@ public final class ResolvedBuildContext {
         ownershipPlanByDomKey = null;
         ownershipPlanByFileBoundsKey = null;
         ownershipPlanByFileKey = null;
+        ambiguousRenderedCandidateIds = null;
+        ambiguousRenderedRenderUnitIds = null;
         ownershipPlansByExactDomId = null;
         ownershipPlansByRenderId = null;
         ownershipPlansBySourceObjectId = null;
@@ -801,19 +805,23 @@ public final class ResolvedBuildContext {
         }
         ensureOwnershipPlanIndexes();
         Placement placement = placementOf(rg);
+        boolean ambiguousCandidate = isAmbiguousRenderedCandidate(rg.candidateId());
+        boolean ambiguousRenderUnit = isAmbiguousRenderedRenderUnit(rg.renderUnitId());
         ObjectPlan plan = findRenderedPlanForPlacement(rg, placement, false);
         if (plan == null) {
-            plan = findRenderedPlanForPlacement(rg, placement, true);
+            plan = findRenderedPlanForPlacement(rg, placement,
+                    !ambiguousCandidate && !ambiguousRenderUnit);
         }
-        if (plan == null) {
+        if (plan == null && !ambiguousRenderUnit && !ambiguousCandidate) {
             ObjectPlan renderUnitPlan = renderedOnly(ownershipPlanByRenderUnitKey.get(renderUnitKey(rg.renderUnitId())));
             if (renderUnitPlan != null && renderUnitPlan.placement == placement) {
                 plan = renderUnitPlan;
             }
         }
-        if (plan == null) {
+        if (plan == null && !ambiguousCandidate) {
             plan = renderedOnly(ownershipPlanByCandidateId.get(candidateIdKey(rg.candidateId())));
         }
+        plan = localizeRenderedPlan(plan, rg, ambiguousCandidate || ambiguousRenderUnit);
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
     }
@@ -878,6 +886,8 @@ public final class ResolvedBuildContext {
         ownershipPlanByDomKey = new java.util.HashMap<>();
         ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
         ownershipPlanByFileKey = new java.util.HashMap<>();
+        ambiguousRenderedCandidateIds = new java.util.HashSet<>();
+        ambiguousRenderedRenderUnitIds = new java.util.HashSet<>();
         ownershipPlansByExactDomId = new java.util.HashMap<>();
         ownershipPlansByRenderId = new java.util.HashMap<>();
         ownershipPlansBySourceObjectId = new java.util.HashMap<>();
@@ -933,6 +943,120 @@ public final class ResolvedBuildContext {
         }
         ownershipPlanIndexDirty = false;
         ownershipPlanRenderedCache.clear();
+    }
+
+    private ObjectPlan localizeRenderedPlan(ObjectPlan plan, RenderedGroup rg, boolean forceExactFragment) {
+        if (plan == null || rg == null || !plan.hasVisibleVisual()) return plan;
+        boolean fileDiffers = !nullSafe(plan.file).equals(nullSafe(rg.file()));
+        boolean boundsDiffer = !sameBounds(plan.bounds, rg.bounds());
+        boolean sourceDiffers = !sameIntArray(normalizedRenderedSourceObjectIds(rg), plan.visualSourceObjectIds)
+                && !sameIntArray(normalizedRenderedSourceObjectIds(rg), plan.sourceObjectIds);
+        if (!forceExactFragment && !fileDiffers && !boundsDiffer && !sourceDiffers) {
+            return plan;
+        }
+        int[] localSourceIds = normalizedRenderedSourceObjectIds(rg);
+        if (localSourceIds == null || localSourceIds.length == 0) {
+            localSourceIds = plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0
+                    ? plan.visualSourceObjectIds
+                    : plan.sourceObjectIds;
+        }
+        int[] localExportSourceIds = rg.exportSourceObjectIds();
+        if (localExportSourceIds == null || localExportSourceIds.length == 0) {
+            localExportSourceIds = localSourceIds;
+        }
+        ObjectPlan localized = plan.withRenderedVisual(
+                plan.visualLayer,
+                localSourceIds,
+                plan.zOrder,
+                appendPlanReason(plan.reason, "localized_render_fragment"),
+                rg.file(),
+                rg.bounds());
+        localized = localized.withExtractionSourceObjectIds(localExportSourceIds, rg.hiddenVisualSourceObjectIds());
+        if (rg.cropSourceBounds() != null && rg.cropSourceBounds().length >= 4) {
+            localized = localized.withCropSourceBounds(rg.cropSourceBounds());
+        }
+        return localized;
+    }
+
+    private void ensureRenderedFallbackAmbiguityIndexes() {
+        if (ambiguousRenderedCandidateIds != null && ambiguousRenderedRenderUnitIds != null) return;
+        ambiguousRenderedCandidateIds = new java.util.HashSet<>();
+        ambiguousRenderedRenderUnitIds = new java.util.HashSet<>();
+        java.util.Map<String, RenderedGroup> candidateRepresentative = new java.util.HashMap<>();
+        java.util.Map<String, RenderedGroup> renderUnitRepresentative = new java.util.HashMap<>();
+        java.util.List<RenderedGroup> groups = resolvedData != null
+                ? resolvedData.allRenderedFloatingItems()
+                : null;
+        if (groups == null) return;
+        for (RenderedGroup rg : groups) {
+            if (rg == null) continue;
+            markRenderedAmbiguity(candidateRepresentative, ambiguousRenderedCandidateIds, rg.candidateId(), rg);
+            markRenderedAmbiguity(renderUnitRepresentative, ambiguousRenderedRenderUnitIds, rg.renderUnitId(), rg);
+        }
+    }
+
+    private boolean isAmbiguousRenderedCandidate(String candidateId) {
+        ensureRenderedFallbackAmbiguityIndexes();
+        return candidateId != null && !candidateId.isEmpty()
+                && ambiguousRenderedCandidateIds.contains(candidateId);
+    }
+
+    private boolean isAmbiguousRenderedRenderUnit(String renderUnitId) {
+        ensureRenderedFallbackAmbiguityIndexes();
+        return renderUnitId != null && !renderUnitId.isEmpty()
+                && ambiguousRenderedRenderUnitIds.contains(renderUnitId);
+    }
+
+    private static void markRenderedAmbiguity(
+            java.util.Map<String, RenderedGroup> representativeByKey,
+            java.util.Set<String> ambiguousKeys,
+            String key,
+            RenderedGroup rg) {
+        if (key == null || key.isEmpty() || ambiguousKeys.contains(key)) return;
+        RenderedGroup existing = representativeByKey.get(key);
+        if (existing == null) {
+            representativeByKey.put(key, rg);
+            return;
+        }
+        if (sameRenderedGroup(existing, rg)) return;
+        ambiguousKeys.add(key);
+        representativeByKey.remove(key);
+    }
+
+    private static int[] normalizedRenderedSourceObjectIds(RenderedGroup rg) {
+        if (rg == null) return null;
+        int[] ids = rg.exportSourceObjectIds();
+        if (ids == null || ids.length == 0) ids = rg.sourceObjectIds();
+        if (ids == null || ids.length == 0) return null;
+        int[] copy = java.util.Arrays.copyOf(ids, ids.length);
+        java.util.Arrays.sort(copy);
+        return copy;
+    }
+
+    private static boolean sameIntArray(int[] a, int[] b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        if (a.length != b.length) return false;
+        int[] aa = java.util.Arrays.copyOf(a, a.length);
+        int[] bb = java.util.Arrays.copyOf(b, b.length);
+        java.util.Arrays.sort(aa);
+        java.util.Arrays.sort(bb);
+        return java.util.Arrays.equals(aa, bb);
+    }
+
+    private static boolean sameBounds(double[] a, double[] b) {
+        if (a == b) return true;
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        for (int i = 0; i < 4; i++) {
+            if (Math.abs(a[i] - b[i]) > 0.01) return false;
+        }
+        return true;
+    }
+
+    private static String appendPlanReason(String reason, String suffix) {
+        if (suffix == null || suffix.isEmpty()) return reason;
+        if (reason == null || reason.isEmpty()) return suffix;
+        return reason.contains(suffix) ? reason : reason + ":" + suffix;
     }
 
     public java.util.List<ObjectPlan> ownershipPlansForObjectId(int objectId) {
@@ -1146,15 +1270,33 @@ public final class ResolvedBuildContext {
 
     private java.util.Map<String, RenderedGroup> renderedGroupsByCandidateId() {
         java.util.Map<String, RenderedGroup> out = new java.util.HashMap<>();
+        java.util.Set<String> ambiguous = new java.util.HashSet<>();
         java.util.List<RenderedGroup> groups = resolvedData != null
                 ? resolvedData.allRenderedFloatingItems()
                 : null;
         if (groups == null) return out;
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.candidateId() == null || rg.candidateId().isEmpty()) continue;
-            out.putIfAbsent(rg.candidateId(), rg);
+            String candidateId = rg.candidateId();
+            if (ambiguous.contains(candidateId)) continue;
+            RenderedGroup existing = out.get(candidateId);
+            if (existing == null) {
+                out.put(candidateId, rg);
+                continue;
+            }
+            if (sameRenderedGroup(existing, rg)) continue;
+            out.remove(candidateId);
+            ambiguous.add(candidateId);
         }
         return out;
+    }
+
+    private static boolean sameRenderedGroup(RenderedGroup a, RenderedGroup b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        if (a.id() != b.id()) return false;
+        if (a.pageIndex() != b.pageIndex()) return false;
+        return nullSafe(a.file()).equals(nullSafe(b.file()));
     }
 
     private static String renderUnitKey(String renderUnitId) {

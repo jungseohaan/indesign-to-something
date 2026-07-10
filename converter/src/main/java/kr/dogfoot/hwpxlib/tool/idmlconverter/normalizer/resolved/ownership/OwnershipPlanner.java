@@ -61,6 +61,7 @@ public final class OwnershipPlanner {
     private Map<Integer, List<ResolvedTextFrame>> visibleEditableTextFramesByPageCache;
     private final Map<String, Boolean> carrierVisibleMaterialOutsideInitialChildShellSlotsCache = new HashMap<>();
     private final Map<Integer, ObjectPlan> plannerDeclaredInlineTextShellContracts = new LinkedHashMap<>();
+    private Map<String, Integer> renderedGroupCountByCandidateIdCache;
     private int importedPreplannedObjectPlanCount;
 
 
@@ -1537,7 +1538,8 @@ public final class OwnershipPlanner {
             if (plan == null) continue;
             if (!safe(plan.kind).startsWith("planner_declared_rendered:")) continue;
             if (!renderedCandidateId.isEmpty()
-                    && renderedCandidateId.equals(safe(plan.candidateId))) {
+                    && renderedCandidateId.equals(safe(plan.candidateId))
+                    && renderedCandidateIdIsUnique(renderedCandidateId)) {
                 return true;
             }
             if (plan.renderId == null) continue;
@@ -1547,6 +1549,20 @@ public final class OwnershipPlanner {
             return true;
         }
         return false;
+    }
+
+    private boolean renderedCandidateIdIsUnique(String candidateId) {
+        String key = safe(candidateId);
+        if (key.isEmpty()) return false;
+        if (renderedGroupCountByCandidateIdCache == null) {
+            renderedGroupCountByCandidateIdCache = new HashMap<>();
+            for (RenderedGroup rendered : allRenderedGroups()) {
+                String renderedCandidateId = safe(rendered != null ? rendered.candidateId() : null);
+                if (renderedCandidateId.isEmpty()) continue;
+                renderedGroupCountByCandidateIdCache.merge(renderedCandidateId, 1, Integer::sum);
+            }
+        }
+        return renderedGroupCountByCandidateIdCache.getOrDefault(key, 0) <= 1;
     }
 
     private void resolveHwpxTextOwnedNonShellVisuals() {

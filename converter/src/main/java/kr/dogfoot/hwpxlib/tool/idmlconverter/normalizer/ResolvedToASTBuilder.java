@@ -542,11 +542,12 @@ public class ResolvedToASTBuilder {
 
     private Map<String, RenderedGroup> renderedGroupsByCandidateId() {
         Map<String, RenderedGroup> out = new HashMap<>();
+        Set<String> ambiguous = new HashSet<>();
         if (resolvedData == null) return out;
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedFloatingItems());
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedGraphicFrames());
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedImageFrames());
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedPdfFrames());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedFloatingItems());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedGraphicFrames());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedImageFrames());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedPdfFrames());
         return out;
     }
 
@@ -572,12 +573,32 @@ public class ResolvedToASTBuilder {
 
     private static void indexRenderedGroupsByCandidateId(
             Map<String, RenderedGroup> out,
+            Set<String> ambiguous,
             Collection<RenderedGroup> renderedGroups) {
-        if (out == null || renderedGroups == null) return;
+        if (out == null || ambiguous == null || renderedGroups == null) return;
         for (RenderedGroup rg : renderedGroups) {
             if (rg == null || rg.candidateId() == null || rg.candidateId().isEmpty()) continue;
-            out.putIfAbsent(rg.candidateId(), rg);
+            String candidateId = rg.candidateId();
+            if (ambiguous.contains(candidateId)) continue;
+            RenderedGroup existing = out.get(candidateId);
+            if (existing == null) {
+                out.put(candidateId, rg);
+                continue;
+            }
+            if (sameRenderedGroup(existing, rg)) continue;
+            out.remove(candidateId);
+            ambiguous.add(candidateId);
         }
+    }
+
+    private static boolean sameRenderedGroup(RenderedGroup a, RenderedGroup b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        if (a.id() != b.id()) return false;
+        if (a.pageIndex() != b.pageIndex()) return false;
+        String aFile = a.file() != null ? a.file() : "";
+        String bFile = b.file() != null ? b.file() : "";
+        return aFile.equals(bFile);
     }
 
     private static void indexRenderedGroupsByObjectPlanId(
