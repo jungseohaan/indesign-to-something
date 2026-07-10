@@ -272,16 +272,8 @@ function _plannerBundleSourceExtentBounds(
     var targetPageIndex = Number(candidate.pageIndex);
     if (isNaN(targetPageIndex) || targetPageIndex < 0) return null;
 
-    var ids = [];
-    if (declaredCandidate && declaredCandidate.exportSourceObjectIds
-            && declaredCandidate.exportSourceObjectIds.length > 0) {
-        ids = declaredCandidate.exportSourceObjectIds;
-    } else if (slotSources && slotSources.visualSourceObjectIds
-            && slotSources.visualSourceObjectIds.length > 0) {
-        ids = slotSources.visualSourceObjectIds;
-    } else {
-        ids = sourceIds || [];
-    }
+    var ids = _plannerBundleExtentSourceIds(
+            candidate, declaredCandidate, slotSources, sourceIds, clusterIndex);
     var union = null;
     for (var i = 0; ids && i < ids.length; i++) {
         var src = clusterIndex.sourceInfo(ids[i]);
@@ -303,6 +295,50 @@ function _plannerBundleCropSourceBounds(candidate, sourceExtentBounds) {
     if (!_plannerBundleBoundsContains(sourceExtentBounds, candidate.bounds, 0.05)) return null;
     if (!_plannerBundleBoundsMateriallyLarger(sourceExtentBounds, candidate.bounds, 0.5)) return null;
     return sourceExtentBounds.slice(0);
+}
+
+function _plannerBundleExtentSourceIds(
+        candidate, declaredCandidate, slotSources, sourceIds, clusterIndex) {
+    var ids = [];
+    if (declaredCandidate && declaredCandidate.exportSourceObjectIds
+            && declaredCandidate.exportSourceObjectIds.length > 0) {
+        ids = declaredCandidate.exportSourceObjectIds;
+    } else if (slotSources && slotSources.visualSourceObjectIds
+            && slotSources.visualSourceObjectIds.length > 0) {
+        ids = slotSources.visualSourceObjectIds;
+    } else {
+        ids = sourceIds || [];
+    }
+    ids = _sortedNumericIds(ids);
+    if (!clusterIndex || !clusterIndex.sourceInfo || ids.length < 2) return ids;
+    var idSet = _sourceIdSet(ids);
+    var pruned = [];
+    for (var i = 0; i < ids.length; i++) {
+        if (_plannerBundleShouldDropPlacedImageExtentSource(ids[i], idSet, clusterIndex)) continue;
+        pruned.push(ids[i]);
+    }
+    return pruned.length > 0 ? pruned : ids;
+}
+
+function _plannerBundleShouldDropPlacedImageExtentSource(sourceId, sourceIdSet, clusterIndex) {
+    if (sourceId === null || sourceId === undefined || !clusterIndex || !clusterIndex.sourceInfo) {
+        return false;
+    }
+    var src = clusterIndex.sourceInfo(sourceId);
+    if (!src || String(src.kind || "") !== "Image") return false;
+    var parentId = src.parentId;
+    if (parentId === null || parentId === undefined) return false;
+    if (!sourceIdSet[String(parentId)]) return false;
+    var parent = clusterIndex.sourceInfo(parentId);
+    if (!parent) return false;
+    var parentKind = String(parent.kind || "");
+    if (parentKind !== "Rectangle" && parentKind !== "Oval" && parentKind !== "Polygon") {
+        return false;
+    }
+    if (!src.bounds || src.bounds.length < 4 || !parent.bounds || parent.bounds.length < 4) {
+        return false;
+    }
+    return true;
 }
 
 function _plannerBundleBoundsRelativeToTargetPage(

@@ -311,6 +311,52 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         return false;
     }
 
+    function _decoTopmostRenderRoots(items) {
+        if (!items || items.length <= 1) return items || [];
+        var idSet = {};
+        for (var i = 0; i < items.length; i++) {
+            try {
+                if (items[i] && items[i].id !== undefined && items[i].id !== null) {
+                    idSet[String(items[i].id)] = true;
+                }
+            } catch (eSet) {}
+        }
+        var roots = [];
+        for (var j = 0; j < items.length; j++) {
+            var item = items[j];
+            if (!item) continue;
+            var drop = false;
+            var parent = null;
+            var visited = {};
+            try { parent = item.parent; } catch (eParent) { parent = null; }
+            while (parent) {
+                try {
+                    if (parent.id !== undefined && parent.id !== null
+                            && idSet[String(parent.id)] === true) {
+                        drop = true;
+                        break;
+                    }
+                } catch (eParentId) {}
+                var name = "";
+                try { name = parent.constructor ? parent.constructor.name : ""; } catch (eParentName) {}
+                if (name === "Page" || name === "Spread" || name === "Document" || name === "Story") {
+                    break;
+                }
+                var parentKey = null;
+                try {
+                    if (parent.id !== undefined && parent.id !== null) parentKey = String(parent.id);
+                } catch (eParentKey) {}
+                if (parentKey !== null) {
+                    if (visited[parentKey] === true) break;
+                    visited[parentKey] = true;
+                }
+                try { parent = parent.parent; } catch (eNextParent) { parent = null; }
+            }
+            if (!drop) roots.push(item);
+        }
+        return roots.length > 0 ? roots : items;
+    }
+
     function _renderPageKey(id, page) {
         var pageIndex = -1;
         try { pageIndex = page && page.documentOffset !== undefined ? page.documentOffset : -1; } catch (e) {}
@@ -373,6 +419,26 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         try { if (item.constructor.name !== "Group") return false; } catch (eKind) { return false; }
         try { if (isOnHiddenLayer(item)) return false; } catch (eHidden) { return false; }
         try { if (_decoHasPlaced(item)) return false; } catch (ePlaced) { return false; }
+        return true;
+    }
+
+    function _isPlannedTextlessGroupVisualSlotCandidate(candidate, item) {
+        if (!candidate || !item) return false;
+        if (candidate.passId !== "pass.decoration_groups") return false;
+        if (candidate.candidatePurpose !== "SHELL_CANDIDATE") return false;
+        if (candidate.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+        if (candidate.compositeRole !== "textless_group_visual_slot"
+                && candidate.slotRole !== "textless_group_visual_slot") {
+            return false;
+        }
+        if (candidate.visualAction !== "PLACE_FLOATING_PNG"
+                && candidate.visualAction !== "PLACE_INLINE_PNG") {
+            return false;
+        }
+        if (!candidate.sourceObjectIds || candidate.sourceObjectIds.length < 2) return false;
+        if (!candidate.exportSourceObjectIds || candidate.exportSourceObjectIds.length < 1) return false;
+        if (!candidate.ownedTextFrameIds || candidate.ownedTextFrameIds.length < 1) return false;
+        try { if (isOnHiddenLayer(item)) return false; } catch (eHidden) { return false; }
         return true;
     }
 
@@ -1177,14 +1243,20 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             return fail("planned_source_set_render_not_png_vector", {});
         }
         var isPageTextlessGraphicGroup = slotPlan.passId === "pass.page_textless_graphic_groups";
+        var isDecorationTextlessGroupVisualSlot =
+                slotPlan.passId === "pass.decoration_groups"
+                && slotPlan.ownershipSlot === "CONTENT_VISUAL_SLOT"
+                && (slotPlan.slotRole === "textless_group_visual_slot"
+                    || slotPlan.compositeRole === "textless_group_visual_slot");
         if (slotPlan.visualAction !== "PLACE_TEXT_SHELL"
-                && !(isPageTextlessGraphicGroup
+                && !((isPageTextlessGraphicGroup || isDecorationTextlessGroupVisualSlot)
                     && (slotPlan.visualAction === "PLACE_FLOATING_PNG"
                         || slotPlan.visualAction === "PLACE_INLINE_PNG"))) {
             return fail("planned_source_set_render_visual_action_not_supported", {});
         }
         var exportIds = _sortedNumericIds(slotPlan.exportSourceObjectIds || []);
-        if (exportIds.length < 2) return fail("planned_source_set_render_not_composite", {
+        var minExportSourceCount = isDecorationTextlessGroupVisualSlot ? 1 : 2;
+        if (exportIds.length < minExportSourceCount) return fail("planned_source_set_render_not_composite", {
             exportSourceObjectIds: exportIds
         });
 
@@ -1278,7 +1350,15 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         var dups = [];
         var tempGroup = null;
         var savedOutOfScope = [];
-        var ordered = sortSourceItemsByPlannedZOrder(sourceItems);
+        // For planner-owned page textless graphic groups, Stage 1 already chose the
+        // exact export source set. Re-collapsing roots here can merge split local
+        // non-shell components back together and send InDesign into unstable
+        // duplicate/group recursion. Decoration-group composites still use the
+        // defensive topmost-root filter.
+        var exportRootSourceItems = isPageTextlessGraphicGroup
+                ? sourceItems
+                : _decoTopmostRenderRoots(sourceItems);
+        var ordered = sortSourceItemsByPlannedZOrder(exportRootSourceItems);
         var groupCreateErrors = [];
         var sourceItemDebug = [];
         var hiddenVisualIds = _sortedNumericIds(slotPlan.hiddenVisualSourceObjectIds || []);
@@ -1426,10 +1506,17 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
             if (!tempGroup) {
                 return fail("planned_source_set_render_group_create_failed", {
-                    exportSourceObjectIds: exportIds,
-                    duplicateCount: dups.length,
-                    groupCreateErrors: groupCreateErrors,
-                    sourceItems: sourceItemDebug
+                        exportSourceObjectIds: exportIds,
+                        exportRootSourceObjectIds: (function() {
+                            var ids = [];
+                            for (var eri = 0; exportRootSourceItems && eri < exportRootSourceItems.length; eri++) {
+                                try { ids.push(exportRootSourceItems[eri].id); } catch (eRootId) {}
+                            }
+                            return ids;
+                        })(),
+                        duplicateCount: dups.length,
+                        groupCreateErrors: groupCreateErrors,
+                        sourceItems: sourceItemDebug
                 });
             }
             try { tempGroup.exportFile(ExportFormat.PNG_FORMAT, outFile); } catch (eExport) {}
@@ -1483,6 +1570,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             // and cleared child text frames affect the rendered canvas.
             var bounds = exportBounds || (boundsInfo ? boundsInfo.bounds : null);
             var cropSourceBounds = exportCropSourceBounds || (boundsInfo ? boundsInfo.cropSourceBounds : null);
+            if (_shouldPreferSourceUnionCropBounds(sourceItems, exportCropSourceBounds, boundsInfo)) {
+                cropSourceBounds = boundsInfo ? boundsInfo.cropSourceBounds : cropSourceBounds;
+            }
 
             var z = 0;
             if (slotPlan.zOrder !== undefined && slotPlan.zOrder !== null) {
@@ -1627,6 +1717,72 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         };
     }
 
+    function _boundsWidth(bounds) {
+        return bounds && bounds.length >= 4 ? (Number(bounds[3]) - Number(bounds[1])) : 0;
+    }
+
+    function _boundsHeight(bounds) {
+        return bounds && bounds.length >= 4 ? (Number(bounds[2]) - Number(bounds[0])) : 0;
+    }
+
+    function _isPositiveBounds(bounds) {
+        return _boundsWidth(bounds) > 0.01 && _boundsHeight(bounds) > 0.01;
+    }
+
+    function _itemBoundsForClipCarrier(item) {
+        var bounds = null;
+        try { bounds = arrCopy(item.visibleBounds); } catch (eVisible) {}
+        if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (eGeom) {}
+        return bounds;
+    }
+
+    function _itemHasPlacedDescendantBoundsOverflow(item) {
+        if (!item) return false;
+        var carrierBounds = _itemBoundsForClipCarrier(item);
+        if (!_isPositiveBounds(carrierBounds)) return false;
+        var nested = _decoAllPageItems(item);
+        for (var i = 0; nested && i < nested.length; i++) {
+            var child = nested[i];
+            if (!child || child === item) continue;
+            if (!_decoHasPlaced(child)) continue;
+            var childBounds = null;
+            try { childBounds = arrCopy(child.visibleBounds); } catch (eChildVisible) {}
+            if (!childBounds) try { childBounds = arrCopy(child.geometricBounds); } catch (eChildGeom) {}
+            if (!_isPositiveBounds(childBounds)) continue;
+            if (childBounds[0] < carrierBounds[0] - 0.5
+                    || childBounds[1] < carrierBounds[1] - 0.5
+                    || childBounds[2] > carrierBounds[2] + 0.5
+                    || childBounds[3] > carrierBounds[3] + 0.5) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _sourceSetHasClipCarrierPlacedOverflow(sourceItems) {
+        for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+            var item = sourceItems[i];
+            if (!item) continue;
+            var cName = "";
+            try { cName = item.constructor ? item.constructor.name : ""; } catch (eName) {}
+            if (cName !== "Rectangle" && cName !== "Oval" && cName !== "Polygon") continue;
+            if (_itemHasPlacedDescendantBoundsOverflow(item)) return true;
+        }
+        return false;
+    }
+
+    function _shouldPreferSourceUnionCropBounds(sourceItems, exportCropSourceBounds, boundsInfo) {
+        if (!exportCropSourceBounds || exportCropSourceBounds.length < 4) return false;
+        if (!boundsInfo || !boundsInfo.cropSourceBounds || boundsInfo.cropSourceBounds.length < 4) return false;
+        if (!_sourceSetHasClipCarrierPlacedOverflow(sourceItems)) return false;
+        var exportW = _boundsWidth(exportCropSourceBounds);
+        var exportH = _boundsHeight(exportCropSourceBounds);
+        var unionW = _boundsWidth(boundsInfo.cropSourceBounds);
+        var unionH = _boundsHeight(boundsInfo.cropSourceBounds);
+        if (exportW <= unionW + 0.5 && exportH <= unionH + 0.5) return false;
+        return exportW >= unionW * 1.1 || exportH >= unionH * 1.1;
+    }
+
     function _textStatsOfGroup(grp) {
         var stats = { count: 0, length: 0, text: "", hasTable: false, titleLabelStyle: false };
         try {
@@ -1765,6 +1921,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 && slotPlan.candidatePurpose === "VECTOR_CANDIDATE";
         var isGraphicOnlyCompositeShell =
                 _isPlannedGraphicOnlyCompositeShellCandidate(slotPlan, slotItem);
+        var isTextlessGroupVisualSlot =
+                _isPlannedTextlessGroupVisualSlotCandidate(slotPlan, slotItem);
         var isTextShellComposite =
                 _isPlannedTextShellCompositeCandidate(slotPlan, slotItem);
         var isPageTextlessGraphicGroup =
@@ -1772,7 +1930,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 && slotPlan.candidatePurpose === "CONTENT_CANDIDATE";
         if (!isExplicitSlotOnly && !isPageLocalBackgroundShape
                 && !isPlannedVectorShape
-                && !isGraphicOnlyCompositeShell && !isTextShellComposite
+                && !isGraphicOnlyCompositeShell && !isTextlessGroupVisualSlot
+                && !isTextShellComposite
                 && !isPageTextlessGraphicGroup) continue;
         var slotPage = null;
         try { slotPage = slotItem.parentPage; } catch (eSlotPage) {}
@@ -1810,6 +1969,13 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 slotOwnershipOpts.containsText = false;
                 slotOwnershipOpts.containsEditableText = false;
                 slotOwnershipOpts.reason = "graphic_ownership_root";
+            }
+            if (isTextlessGroupVisualSlot) {
+                slotOwnershipOpts.textOwner = "none";
+                slotOwnershipOpts.editableTextFrameIds = [];
+                slotOwnershipOpts.containsText = false;
+                slotOwnershipOpts.containsEditableText = false;
+                slotOwnershipOpts.reason = "planned_textless_group_visual_slot";
             }
             if (isPlannedVectorShape) {
                 slotOwnershipOpts.containsText = false;

@@ -275,6 +275,43 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
     }
 }
 
+fn is_recoverable_osascript_connection_error(stderr: &str) -> bool {
+    stderr.contains("-609")
+        || stderr.contains("연결이 유효하지 않습니다")
+        || stderr.contains("Connection is invalid")
+}
+
+async fn rerun_osascript_after_indesign_restart(
+    app: &AppHandle,
+    app_name: &str,
+    output_dir: &Path,
+    script_file: &Path,
+    progress_path: &Path,
+    done_path: &Path,
+    phase_message: &str,
+) -> Result<std::process::Output, String> {
+    emit_progress(app, "launching", "InDesign 연결 재설정 중...");
+    let _ = tokio::process::Command::new("killall")
+        .arg(app_name)
+        .output()
+        .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let _ = std::fs::remove_file(done_path);
+    let _ = std::fs::remove_file(progress_path);
+    ensure_indesign_running(app_name, output_dir).await;
+    emit_progress(app, "exporting", phase_message);
+    let child = Command::new("osascript")
+        .arg(script_file)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("osascript 재시도 실행 실패: {}", e))?;
+    child
+        .wait_with_output()
+        .await
+        .map_err(|e| format!("osascript 재시도 결과 수집 실패: {}", e))
+}
+
 /// osascript를 통해 InDesign ExtendScript를 실행하고 완료를 대기한다.
 ///
 /// 흐름:
@@ -622,6 +659,21 @@ end using terms from"#,
                 .wait_with_output()
                 .await
                 .map_err(|e| format!("osascript 재시도 결과 수집 실패: {}", e))?;
+            if !output2.status.success() {
+                let stderr2 = String::from_utf8_lossy(&output2.stderr);
+                return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr2));
+            }
+        } else if is_recoverable_osascript_connection_error(&stderr) {
+            let output2 = rerun_osascript_after_indesign_restart(
+                app,
+                &app_name,
+                output_dir,
+                &script_file,
+                &progress_path,
+                &done_path,
+                "InDesign 연결 오류 복구 후 추출 재시도 중...",
+            )
+            .await?;
             if !output2.status.success() {
                 let stderr2 = String::from_utf8_lossy(&output2.stderr);
                 return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr2));
@@ -1342,7 +1394,41 @@ end using terms from"#,
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    let _ = child.wait().await;
+    let status = child
+        .wait_with_output()
+        .await
+        .map_err(|e| format!("osascript 결과 수집 실패: {}", e))?;
+
+    if !status.status.success() {
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        if is_recoverable_osascript_connection_error(&stderr) {
+            let retried = rerun_osascript_after_indesign_restart(
+                app,
+                &app_name,
+                output_dir,
+                &script_file,
+                &progress_path,
+                &done_path,
+                &format!(
+                    "청크 추출 재시도 중... (페이지 {}..{})",
+                    start_page, end_page
+                ),
+            )
+            .await?;
+            if !retried.status.success() {
+                let stderr2 = String::from_utf8_lossy(&retried.stderr);
+                return Err(format!(
+                    "청크 추출 osascript 실패 (페이지 {}..{}): {}",
+                    start_page, end_page, stderr2
+                ));
+            }
+        } else {
+            return Err(format!(
+                "청크 추출 osascript 실패 (페이지 {}..{}): {}",
+                start_page, end_page, stderr
+            ));
+        }
+    }
 
     // .done 확인
     if done_path.exists() {

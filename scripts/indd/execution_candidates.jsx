@@ -8,6 +8,7 @@ function _buildExecutionCandidatesFromObjectPlans(candidates, objectPlanDiagnost
     var sourceCandidates = candidates || [];
     var byCandidateId = _objectPlansByCandidateId(objectPlanDiagnostics);
     var executionCandidates = [];
+    var executionCandidateIds = {};
     var skippedWithoutObjectPlan = [];
     var skippedIncompleteObjectPlan = [];
     for (var ci = 0; ci < sourceCandidates.length; ci++) {
@@ -32,13 +33,57 @@ function _buildExecutionCandidatesFromObjectPlans(candidates, objectPlanDiagnost
         }
         _applyObjectPlanExecutionFields(candidate, objectPlan);
         executionCandidates.push(candidate);
+        if (candidate.candidateId) executionCandidateIds[String(candidate.candidateId)] = true;
+    }
+    var objectPlans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans
+            ? objectPlanDiagnostics.objectPlans
+            : [];
+    var synthesizedFromObjectPlans = [];
+    for (var oi = 0; oi < objectPlans.length; oi++) {
+        var plan = objectPlans[oi];
+        if (!_objectPlanNeedsStandaloneExecutionCandidate(plan)) continue;
+        var planCandidateId = plan.candidateId ? String(plan.candidateId) : null;
+        if (planCandidateId && executionCandidateIds[planCandidateId]) continue;
+        var standaloneContractIssue = _objectPlanExecutionContractIssue(plan);
+        if (standaloneContractIssue) {
+            _markObjectPlanExecutionBridgeSkipped(
+                    plan,
+                    "EXECUTION_CANDIDATE_CONTRACT_INVALID",
+                    standaloneContractIssue);
+            skippedIncompleteObjectPlan.push(_executionCandidateBridgeSkipRow(
+                    null, standaloneContractIssue, plan));
+            continue;
+        }
+        var synthesizedCandidate = _createExecutionCandidateFromObjectPlan(plan);
+        if (!synthesizedCandidate || !synthesizedCandidate.candidateId) {
+            _markObjectPlanExecutionBridgeSkipped(
+                    plan,
+                    "EXECUTION_CANDIDATE_SYNTHESIS_FAILED",
+                    "missing_candidate_id_after_synthesis");
+            skippedIncompleteObjectPlan.push(_executionCandidateBridgeSkipRow(
+                    null, "missing_candidate_id_after_synthesis", plan));
+            continue;
+        }
+        executionCandidates.push(synthesizedCandidate);
+        executionCandidateIds[String(synthesizedCandidate.candidateId)] = true;
+        synthesizedFromObjectPlans.push({
+            candidateId: synthesizedCandidate.candidateId,
+            objectPlanId: plan.objectPlanId || null,
+            passId: synthesizedCandidate.passId || null,
+            pageIndex: synthesizedCandidate.pageIndex,
+            sourceObjectIds: synthesizedCandidate.sourceObjectIds || [],
+            ownershipSlot: synthesizedCandidate.ownershipSlot || null,
+            materialization: synthesizedCandidate.materialization || null,
+            visualAction: synthesizedCandidate.visualAction || null
+        });
     }
     _recordExecutionCandidateBridgeDiagnostics(
             objectPlanDiagnostics,
             sourceCandidates.length,
             executionCandidates.length,
             skippedWithoutObjectPlan,
-            skippedIncompleteObjectPlan);
+            skippedIncompleteObjectPlan,
+            synthesizedFromObjectPlans);
     _refreshObjectPlanExecutionBridgeSummary(objectPlanDiagnostics);
     return executionCandidates;
 }
@@ -133,10 +178,12 @@ function _recordExecutionCandidateBridgeDiagnostics(
         sourceCandidateCount,
         executionCandidateCount,
         skippedWithoutObjectPlan,
-        skippedIncompleteObjectPlan) {
+        skippedIncompleteObjectPlan,
+        synthesizedFromObjectPlans) {
     if (!objectPlanDiagnostics) return;
     var withoutPlan = skippedWithoutObjectPlan || [];
     var incomplete = skippedIncompleteObjectPlan || [];
+    var synthesized = synthesizedFromObjectPlans || [];
     objectPlanDiagnostics.executionCandidateBridge = {
         schemaVersion: 1,
         policy: "POLICY-source-ownership",
@@ -144,9 +191,11 @@ function _recordExecutionCandidateBridgeDiagnostics(
         summary: {
             sourceCandidateCount: sourceCandidateCount || 0,
             executionCandidateCount: executionCandidateCount || 0,
+            synthesizedFromObjectPlanCount: synthesized.length,
             skippedWithoutObjectPlanCount: withoutPlan.length,
             skippedIncompleteObjectPlanCount: incomplete.length
         },
+        synthesizedFromObjectPlans: synthesized.slice(0, 200),
         skippedWithoutObjectPlan: withoutPlan.slice(0, 200),
         skippedIncompleteObjectPlan: incomplete.slice(0, 200)
     };
@@ -154,6 +203,7 @@ function _recordExecutionCandidateBridgeDiagnostics(
         objectPlanDiagnostics.summary.executionCandidateBridge = {
             sourceCandidateCount: sourceCandidateCount || 0,
             executionCandidateCount: executionCandidateCount || 0,
+            synthesizedFromObjectPlanCount: synthesized.length,
             skippedWithoutObjectPlanCount: withoutPlan.length,
             skippedIncompleteObjectPlanCount: incomplete.length
         };
@@ -317,6 +367,18 @@ function _objectPlansByCandidateId(objectPlanDiagnostics) {
     return byCandidateId;
 }
 
+function _objectPlanNeedsStandaloneExecutionCandidate(objectPlan) {
+    if (!objectPlan || !objectPlan.candidateId) return false;
+    if (objectPlan.executable !== true) return false;
+    if (objectPlan.visualAction === "DROP_VISUAL") return false;
+    if (objectPlan.materialization === "HWPX_TEXT"
+            || objectPlan.materialization === "HWPX_TABLE_STYLE"
+            || objectPlan.materialization === "NATIVE_SOURCE_SHAPE") {
+        return false;
+    }
+    return true;
+}
+
 function _copyExecutionCandidate(candidate) {
     var copy = {};
     if (!candidate) return copy;
@@ -328,6 +390,36 @@ function _copyExecutionCandidate(candidate) {
         copy[key] = value && value.constructor === Array ? value.slice(0) : value;
     }
     return copy;
+}
+
+function _createExecutionCandidateFromObjectPlan(objectPlan) {
+    if (!objectPlan) return null;
+    var candidate = {
+        candidateId: objectPlan.candidateId || null,
+        passId: objectPlan.passId || null,
+        pageIndex: objectPlan.pageIndex,
+        kind: objectPlan.kind || null,
+        unit: objectPlan.unit || null,
+        mode: objectPlan.mode || null,
+        candidatePurpose: objectPlan.candidatePurpose || null,
+        compositeRole: objectPlan.compositeRole || null,
+        slotRole: objectPlan.slotRole || null,
+        primarySourceObjectId: objectPlan.primarySourceObjectId !== undefined
+                ? objectPlan.primarySourceObjectId
+                : null,
+        bounds: objectPlan.bounds || null,
+        zOrder: objectPlan.zOrder !== undefined ? objectPlan.zOrder : null,
+        required: objectPlan.required === true,
+        requiredSlot: objectPlan.requiredSlot || null,
+        requiredSlotReason: objectPlan.requiredSlotReason || null,
+        disabled: false,
+        reason: objectPlan.reason || null,
+        objectPlanId: objectPlan.objectPlanId || null,
+        id: objectPlan.primarySourceObjectId !== undefined ? objectPlan.primarySourceObjectId : null
+    };
+    _applyObjectPlanExecutionFields(candidate, objectPlan);
+    if (objectPlan.candidateId) candidate.candidateId = objectPlan.candidateId;
+    return candidate;
 }
 
 function _applyObjectPlanExecutionFields(candidate, objectPlan) {
@@ -416,6 +508,13 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
             objectPlan,
             candidate.executionSourceObjectIds || candidate.sourceObjectIds || [],
             candidate.exportSourceObjectIds || []);
+    if (objectPlan.required !== undefined) candidate.required = objectPlan.required === true;
+    if (objectPlan.requiredSlot !== undefined) candidate.requiredSlot = objectPlan.requiredSlot;
+    if (objectPlan.requiredSlotReason !== undefined) {
+        candidate.requiredSlotReason = objectPlan.requiredSlotReason;
+    }
+    if (objectPlan.bounds) candidate.bounds = objectPlan.bounds;
+    if (objectPlan.zOrder !== undefined) candidate.zOrder = objectPlan.zOrder;
     _applyDroppedObjectPlanExecutionShape(candidate, objectPlan);
     candidate.composite = candidate.sourceObjectIds && candidate.sourceObjectIds.length > 1;
     if (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0) {
