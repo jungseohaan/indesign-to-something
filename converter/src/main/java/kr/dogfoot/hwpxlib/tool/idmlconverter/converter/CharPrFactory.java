@@ -104,7 +104,11 @@ final class CharPrFactory {
             }
             String segment = text.substring(start, i);
             Run run = para.addNewRun();
-            run.charPrIDRef(isSpace ? spaceCharPrId : charPrId);
+            // Leading spaces can be source-authored layout, for example a
+            // left-aligned citation pushed right inside an InDesign text frame.
+            // Keep their original advance; only condense inter-word spaces.
+            boolean preserveSourceLeadingSpaces = isSpace && start == 0;
+            run.charPrIDRef(isSpace && !preserveSourceLeadingSpaces ? spaceCharPrId : charPrId);
             run.addNewT().addText(segment);
         }
     }
