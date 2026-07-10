@@ -250,6 +250,7 @@ function _parseArgs(args) {
         configPath:         args[6] || null,
         perfMode:           (args[7] || "standard").toLowerCase(),
         skipRenderPagesMap: {},
+        extractScriptPath:   args[16] || null,
         // SPEC-030 B.2: "pre_scan" 모드 — 해시만 계산하고 렌더링 없이 종료
         extractMode:        (args[10] || "full").toLowerCase(),
         // 분할 추출 모드: IDML 재내보내기 생략, resolved를 resolved_START_END.json에 저장

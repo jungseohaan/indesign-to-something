@@ -571,7 +571,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "issues"))
     parser.add_argument("--app", default="Adobe InDesign 2026")
     parser.add_argument("--perf-mode", default="fast")
-    parser.add_argument("--extract-config", default="", help="Optional extractor config path.")
+    parser.add_argument(
+        "--extract-config",
+        default=str(CONVERSION_CONFIG),
+        help="Optional extractor config path. Defaults to the repo conversion-config.json.",
+    )
     parser.add_argument("--extract-mode", default="full", help="Extractor mode, e.g. full or spread_chunks.")
     parser.add_argument(
         "--reuse-idml",

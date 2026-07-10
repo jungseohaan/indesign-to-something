@@ -22,13 +22,21 @@ function _appleScriptStringLiteral(value) {
     return "\"" + s.replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"";
 }
 
-function _repoRootFromConfigPath(configPath) {
+function _repoRootFromConfigPath(configPath, ctx) {
     try {
         if (configPath) {
             var f = File(String(configPath));
             if (f && f.exists && f.parent) return f.parent.fsName;
         }
     } catch (eConfigRoot) {}
+    try {
+        if (ctx && ctx.extractScriptPath) {
+            var extractScript = File(String(ctx.extractScriptPath));
+            if (extractScript && extractScript.exists && extractScript.parent && extractScript.parent.parent) {
+                return extractScript.parent.parent.fsName;
+            }
+        }
+    } catch (eExtractScriptRoot) {}
     try {
         if (typeof $ !== "undefined" && $.fileName) {
             var scriptFile = File($.fileName);
@@ -118,7 +126,7 @@ function _loadIdmlZOrderMap(ctx) {
                 return existingMap;
             }
         }
-        var repoRoot = _repoRootFromConfigPath(ctx.configPath);
+        var repoRoot = _repoRootFromConfigPath(ctx.configPath, ctx);
         if (!repoRoot) {
             summary.reason = "missing_repo_root";
             writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
