@@ -89,6 +89,11 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
     var appended = 0;
     var sourceById = {};
     var childrenByParent = {};
+    var pageIndexesBySourceId = {};
+    function backgroundCandidateSeenKey(pageIndex, sourceId) {
+        return "pass.decoration_groups|page:" + String(pageIndex)
+                + "|background:" + String(sourceId);
+    }
     function sortedIds(ids) {
         ids = ids || [];
         ids.sort(function(a, b) { return Number(a) - Number(b); });
@@ -166,10 +171,90 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
         }
         return false;
     }
+    function sourceAppearsOnMultiplePages(src) {
+        if (!src || src.id === null || src.id === undefined) return false;
+        var pages = pageIndexesBySourceId[String(src.id)] || {};
+        var count = 0;
+        for (var key in pages) {
+            if (!pages.hasOwnProperty(key)) continue;
+            count++;
+            if (count > 1) return true;
+        }
+        return false;
+    }
+    function isPageWideBackgroundDecorationSibling(src) {
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (String(src.kind || "") === "TextFrame") return false;
+        if (src.hasPlacedVisual === true || src.hasPlacedVisualInSubtree === true) return false;
+        if (src.hasVisibleFill !== true || src.hasVisibleStroke === true) return false;
+        if (typeof _isBackgroundLayerName === "function" && _isBackgroundLayerName(src.layerName)) {
+            return true;
+        }
+        return sourceAppearsOnMultiplePages(src);
+    }
+    function appendPageWideBackgroundDecorationCandidate(src, pageIndex) {
+        if (!src || src.id === null || src.id === undefined) return false;
+        if (pageIndex === null || pageIndex === undefined || Number(pageIndex) < 0) return false;
+        if (!isPageWideBackgroundDecorationSibling(src)) return false;
+        var sourceId = Number(src.id);
+        if (isNaN(sourceId)) return false;
+        if (candidateExists(pageIndex, [sourceId])) return false;
+        var seenKey = backgroundCandidateSeenKey(pageIndex, sourceId);
+        if (candidateSeen && candidateSeen[seenKey]) return false;
+        if (candidateSeen) candidateSeen[seenKey] = true;
+        candidates.push({
+            candidateId: _candidateId("pass.decoration_groups", sourceId, Number(pageIndex)),
+            passId: "pass.decoration_groups",
+            sourceObjectIds: [sourceId],
+            primarySourceObjectId: sourceId,
+            pageIndex: Number(pageIndex),
+            kind: src.kind || "PageWideBackgroundDecoration",
+            unit: "ITEM",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            bounds: src.bounds || null,
+            parentId: src.parentId !== undefined ? src.parentId : null,
+            parentKind: src.parentKind || null,
+            composite: false,
+            compositeRole: "background_vector_source",
+            slotRole: "background_shell_slot",
+            exportSourceObjectIds: [sourceId],
+            exportTargetObjectId: sourceId,
+            hiddenVisualSourceObjectIds: [],
+            visualSourceObjectIds: [sourceId],
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            editableTextFrameIds: [],
+            hiddenTextFrameIds: [],
+            requiresTextHidden: false,
+            textOwner: "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            ownershipSlot: "SHELL_SLOT",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_FLOATING_PNG",
+            visualLayer: "PAGE_BACKGROUND",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            zOrder: src.zOrder !== undefined && src.zOrder !== null ? Number(src.zOrder) : 0,
+            protectFromPageTextlessGroup: true,
+            required: false,
+            reason: "page_wide_background_excluded_from_table_sibling_decoration"
+        });
+        appended++;
+        return true;
+    }
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || src.id === null || src.id === undefined) continue;
         sourceById[String(src.id)] = src;
+        if (src.pageIndex !== null && src.pageIndex !== undefined && Number(src.pageIndex) >= 0) {
+            var sourceKey = String(src.id);
+            if (!pageIndexesBySourceId[sourceKey]) pageIndexesBySourceId[sourceKey] = {};
+            pageIndexesBySourceId[sourceKey][String(src.pageIndex)] = true;
+        }
         if (src.parentId !== null && src.parentId !== undefined) {
             var parentKey = String(src.parentId);
             if (!childrenByParent[parentKey]) childrenByParent[parentKey] = [];
@@ -194,6 +279,10 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
                 continue;
             }
             if (!isVisibleDecorationSibling(child)) continue;
+            if (isPageWideBackgroundDecorationSibling(child)) {
+                appendPageWideBackgroundDecorationCandidate(child, Number(child.pageIndex));
+                continue;
+            }
             visualIds.push({
                 id: child.id,
                 bounds: child.bounds || null,
