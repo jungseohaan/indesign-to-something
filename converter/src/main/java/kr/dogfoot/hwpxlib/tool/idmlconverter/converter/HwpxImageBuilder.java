@@ -676,8 +676,7 @@ public class HwpxImageBuilder {
                 : TextWrapMethod.IN_FRONT_OF_TEXT;
         int outputZOrder = outputZOrderForVisualLayer(
                 figure.visualLayer(),
-                figure.zOrder(),
-                figure.sourceLayerIndex());
+                figure.zOrder());
 
         // ShapeObject
         pic.idAnd(picId)
@@ -774,9 +773,8 @@ public class HwpxImageBuilder {
 
     private static int outputZOrderForVisualLayer(
             String visualLayer,
-            int originalZOrder,
-            int sourceLayerIndex) {
-        return VisualPlanePolicy.textlessGraphicZOrderName(visualLayer, originalZOrder);
+            int originalZOrder) {
+        return originalZOrder;
     }
 
     // ── 배경 PNG ──

@@ -256,6 +256,89 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return union;
     }
 
+    function _copyMasterEntryLayerInfo(target, sourceEntry) {
+        if (!target || !sourceEntry || !sourceEntry.item) return target;
+        try {
+            _copyLayerInfo(target, sourceEntry.item);
+        } catch (e) {}
+        return target;
+    }
+
+    function _copyMasterMatchedCandidateContract(target, candidate) {
+        if (!target || !candidate) return target;
+        if (!_masterCandidateContractCompatible(target, candidate)) {
+            return target;
+        }
+        var fields = [
+            "objectPlanId",
+            "renderUnitId",
+            "renderUnitSlotIdentityKey",
+            "materialization",
+            "textAction",
+            "visualAction",
+            "visualLayer",
+            "ownershipSlot",
+            "slotRole",
+            "contractStatus",
+            "mode",
+            "candidatePurpose",
+            "compositeRole"
+        ];
+        for (var i = 0; i < fields.length; i++) {
+            var key = fields[i];
+            if (!candidate.hasOwnProperty || !candidate.hasOwnProperty(key)) continue;
+            var value = candidate[key];
+            if (value === undefined || value === null || value === "") continue;
+            target[key] = value;
+        }
+        if (candidate.passId) target.planPassId = candidate.passId;
+        if (candidate.mode) target.renderMode = candidate.mode;
+        return target;
+    }
+
+    function _masterSlotChannelOf(entry) {
+        if (!entry) return "UNKNOWN";
+        var slotRole = entry.slotRole ? String(entry.slotRole) : "";
+        if (slotRole === "CONTENT_VISUAL_SLOT") return "CONTENT";
+        if (slotRole === "TEXTLESS_SHELL_SLOT" || slotRole === "SHELL_SLOT") return "SHELL";
+        var ownershipSlot = entry.ownershipSlot ? String(entry.ownershipSlot) : "";
+        if (ownershipSlot === "CONTENT_VISUAL_SLOT") return "CONTENT";
+        if (ownershipSlot === "TEXTLESS_SHELL_SLOT" || ownershipSlot === "SHELL_SLOT") return "SHELL";
+        var textOwner = entry.textOwner ? String(entry.textOwner) : "";
+        if (textOwner === "hwpx_tf") return "SHELL";
+        if (textOwner === "none") return "CONTENT";
+        var visualAction = entry.visualAction ? String(entry.visualAction) : "";
+        if (visualAction === "PLACE_TEXT_SHELL") return "SHELL";
+        if (visualAction === "PLACE_FLOATING_PNG" || visualAction === "PLACE_INLINE_PNG") return "CONTENT";
+        return "UNKNOWN";
+    }
+
+    function _masterCandidateContractCompatible(target, candidate) {
+        var targetChannel = _masterSlotChannelOf(target);
+        var candidateChannel = _masterSlotChannelOf(candidate);
+        if (targetChannel === "UNKNOWN" || candidateChannel === "UNKNOWN") return true;
+        return targetChannel === candidateChannel;
+    }
+
+    function _primaryMasterLayerEntry(entries) {
+        if (!entries || entries.length === 0) return null;
+        var primary = null;
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            if (!entry || !entry.item) continue;
+            if (!primary) {
+                primary = entry;
+                continue;
+            }
+            var primaryDepth = primary.sourceDepthOrder;
+            var entryDepth = entry.sourceDepthOrder;
+            if (primaryDepth === null || primaryDepth === undefined) primaryDepth = Number.MAX_VALUE;
+            if (entryDepth === null || entryDepth === undefined) entryDepth = Number.MAX_VALUE;
+            if (entryDepth < primaryDepth) primary = entry;
+        }
+        return primary;
+    }
+
     function _masterEntrySourceDepth(entries) {
         var maxDepth = null;
         for (var i = 0; entries && i < entries.length; i++) {
@@ -490,28 +573,59 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return _sourceSetKey(a || []) === _sourceSetKey(b || []);
     }
 
-    function _findMasterCandidateForSources(pageIndex, sourceIds) {
+    function _masterCandidateComparableSourceIds(candidate) {
+        if (!candidate) return [];
+        if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0) {
+            return candidate.exportSourceObjectIds;
+        }
+        if (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0) {
+            return candidate.visualSourceObjectIds;
+        }
+        if (candidate.executionSourceObjectIds && candidate.executionSourceObjectIds.length > 0) {
+            return candidate.executionSourceObjectIds;
+        }
+        return candidate.sourceObjectIds || [];
+    }
+
+    function _normalizeMasterClusterMatchSourceIds(sourceIds, hiddenTextSourceIds) {
+        if (!sourceIds || sourceIds.length === 0) return [];
+        var normalized = sourceIds.slice(0);
+        if (hiddenTextSourceIds && hiddenTextSourceIds.length > 0) {
+            normalized = _removeSourceIds(normalized, hiddenTextSourceIds);
+        }
+        return normalized;
+    }
+
+    function _findMasterCandidateForSources(pageIndex, sourceIds, hiddenTextSourceIds, allowSuperset) {
         if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return null;
         if (!sourceIds || sourceIds.length === 0) return null;
+        if (allowSuperset === undefined || allowSuperset === null) allowSuperset = true;
+        var matchSourceIds = _normalizeMasterClusterMatchSourceIds(sourceIds, hiddenTextSourceIds);
+        if (!matchSourceIds || matchSourceIds.length === 0) matchSourceIds = sourceIds;
         var list = masterCandidatesByPage[String(pageIndex)] || [];
         var bestSuperset = null;
         var bestSupersetSize = 999999;
         for (var i = 0; i < list.length; i++) {
             var candidate = list[i];
-            if (!candidate || !candidate.sourceObjectIds || candidate.sourceObjectIds.length === 0) continue;
-            if (_sameSourceSet(candidate.sourceObjectIds, sourceIds)) {
+            var candidateSourceIds = _masterCandidateComparableSourceIds(candidate);
+            if (!candidate || !candidateSourceIds || candidateSourceIds.length === 0) continue;
+            if (_sameSourceSet(candidateSourceIds, sourceIds)) {
                 return _candidateMatch(candidate, "candidate_source_set_direct");
+            }
+            if (_sameSourceSet(candidateSourceIds, matchSourceIds)) {
+                return _candidateMatch(candidate, "candidate_source_set_without_hidden_master_text");
             }
             // Master composite candidates are declared from the applied master
             // source graph. During export, a visible cluster can be a strict
             // subset of that declared graph because only items intersecting
             // the concrete master page side are overridden/exported. This is
             // still an execution of the Stage 1 candidate, not new ownership.
-            if (candidate.composite === true
-                    && _sourceSetContainsAll(candidate.sourceObjectIds, sourceIds)
-                    && candidate.sourceObjectIds.length < bestSupersetSize) {
+            if (allowSuperset
+                    && candidate.composite === true
+                    && _sourceSetContainsAll(candidateSourceIds, matchSourceIds)
+                    && candidateSourceIds.length < bestSupersetSize) {
                 bestSuperset = candidate;
-                bestSupersetSize = candidate.sourceObjectIds.length;
+                bestSupersetSize = candidateSourceIds.length;
             }
         }
         if (bestSuperset) {
@@ -708,11 +822,15 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             for (var ci = 0; ci < clusters.length; ci++) {
                 var clusterItems = clusters[ci];
                 var clusterSourceIds = _collectIdsForMasterItems(clusterItems);
+                var hiddenTextSourceIds = _collectMasterTextlessTextFrameIds(clusterItems);
                 var plannedOnAppliedPage = false;
                 var appliedPages = masterToPages[msId] || [];
                 for (var api = 0; api < appliedPages.length; api++) {
                     if (appliedPages[api].masterPageIdx !== mpIdx) continue;
-                    if (_findMasterCandidateForSources(appliedPages[api].docIdx, clusterSourceIds)) {
+                    if (_findMasterCandidateForSources(
+                            appliedPages[api].docIdx,
+                            clusterSourceIds,
+                            hiddenTextSourceIds)) {
                         plannedOnAppliedPage = true;
                         break;
                     }
@@ -730,7 +848,6 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                 var overriddenSourceEntries = [];
                 var directSourceEntries = [];
                 var hiddenText = [];
-                var hiddenTextSourceIds = _collectMasterTextlessTextFrameIds(clusterItems);
                 var grpBnds = null;
                 var originalClusterBnds = _unionMasterEntryBounds(clusterItems);
                 try {
@@ -825,6 +942,10 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                                 cropSourceBnds[3] - relBase[1]
                             ];
                         }
+                        _copyMasterEntryLayerInfo(
+                            exportedCluster,
+                            _primaryMasterLayerEntry(overriddenSourceEntries)
+                        );
                         exportedClusters.push(exportedCluster);
                         dbg("  relBounds[" + ci + "]: ["+exportedCluster.relTop+","+exportedCluster.relLeft+
                             ","+exportedCluster.relBottom+","+exportedCluster.relRight+"]" +
@@ -887,6 +1008,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                                 directBounds[3] - mpBnds[1]
                             ];
                         }
+                        _copyMasterEntryLayerInfo(directCluster, directEntry);
                         exportedClusters.push(directCluster);
                         dbg("  directMaster[" + ci + "." + foi + "]: " + directName +
                             " rel=[" + directCluster.relTop + "," + directCluster.relLeft +
@@ -922,37 +1044,47 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                         master.relBottom,
                         master.relRight
                     ])) continue;
-                var inlineCandidateMatch = master.masterDirectChildCluster === true
+                var isDirectMasterFragment = master.masterDirectChildCluster === true;
+                var inlineCandidateMatch = isDirectMasterFragment
                         ? _findInlineCandidateForMasterDirectSources(
                                 pgEntry.docIdx,
                                 master.sourceObjectIds || [parseInt(msId2, 10)])
                         : null;
                 var masterCandidateMatch = inlineCandidateMatch || _findMasterCandidateForSources(
                         pgEntry.docIdx,
-                        master.sourceObjectIds || [parseInt(msId2, 10)]);
+                        master.sourceObjectIds || [parseInt(msId2, 10)],
+                        master.hiddenTextFrameIds || [],
+                        true);
                 if (!masterCandidateMatch) {
                     dbg("  SKIP result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
                         " cluster=" + mi + ": no applied-page candidate at result creation");
                     continue;
                 }
-                var matchedCandidate = masterCandidateMatch.candidate || null;
+                var matchedCandidate = masterCandidateMatch ? (masterCandidateMatch.candidate || null) : null;
                 var matchedInline = inlineCandidateMatch && matchedCandidate;
-                var resultSourceObjectIds = matchedInline && matchedCandidate.sourceObjectIds
+                var resultSourceObjectIds = isDirectMasterFragment
+                        ? (master.sourceObjectIds || [parseInt(msId2, 10)])
+                        : (matchedCandidate && matchedCandidate.sourceObjectIds
                         && matchedCandidate.sourceObjectIds.length > 0
                         ? matchedCandidate.sourceObjectIds
-                        : (master.sourceObjectIds || [parseInt(msId2, 10)]);
-                var resultExportSourceObjectIds = matchedInline && matchedCandidate.exportSourceObjectIds
+                        : (master.sourceObjectIds || [parseInt(msId2, 10)]));
+                var resultExportSourceObjectIds = isDirectMasterFragment
+                        ? resultSourceObjectIds
+                        : (matchedCandidate && matchedCandidate.exportSourceObjectIds
                         && matchedCandidate.exportSourceObjectIds.length > 0
                         ? matchedCandidate.exportSourceObjectIds
-                        : resultSourceObjectIds;
+                        : resultSourceObjectIds);
                 dbg("  result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
                     " cluster=" + mi +
                     " rel=["+master.relTop+","+master.relLeft+","+master.relBottom+","+master.relRight+"]");
                 var pageTextFrameIds = _pageCloneTextFrameIds(master.hiddenTextFrameIds, pgEntry.docIdx);
-                results.push(applyRenderOwnership({
+                var localSlotRole = matchedInline
+                        ? (matchedCandidate.slotRole || matchedCandidate.ownershipSlot || "CONTENT_VISUAL_SLOT")
+                        : (pageTextFrameIds.length > 0 ? "TEXTLESS_SHELL_SLOT" : "CONTENT_VISUAL_SLOT");
+                var resultEntry = applyRenderOwnership({
                     id: parseInt(msId2, 10) * 100 + mi,
-                    candidateId: masterCandidateMatch.candidateId,
-                    candidateMatchStrategy: masterCandidateMatch.strategy,
+                    candidateId: masterCandidateMatch ? masterCandidateMatch.candidateId : null,
+                    candidateMatchStrategy: masterCandidateMatch ? masterCandidateMatch.strategy : null,
                     file: master.relPath,
                     bounds: [master.relTop, master.relLeft, master.relBottom, master.relRight],
                     cropSourceBounds: master.cropSourceBounds,
@@ -968,9 +1100,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                     placement: matchedInline ? "INLINE" : "FLOATING",
                     coordinateSpace: matchedInline ? "STORY_FLOW" : "PAGE",
                     planPassId: matchedInline ? "pass.inline_objects" : "pass.master_page_graphics",
-                    slotRole: matchedInline
-                            ? (matchedCandidate.slotRole || matchedCandidate.ownershipSlot || "CONTENT_VISUAL_SLOT")
-                            : null
+                    slotRole: localSlotRole
                 }, null, {
                     sourceObjectIds: resultSourceObjectIds,
                     exportSourceObjectIds: resultExportSourceObjectIds,
@@ -987,7 +1117,14 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                             : (pageTextFrameIds.length > 0
                             ? "master_graphic_textless"
                             : "master_graphic")
-                }));
+                });
+                if (master.layerId !== undefined && master.layerId !== null) resultEntry.layerId = master.layerId;
+                if (master.layerName !== undefined && master.layerName !== null) resultEntry.layerName = master.layerName;
+                if (master.layerIndex !== undefined && master.layerIndex !== null) resultEntry.layerIndex = master.layerIndex;
+                if (matchedCandidate) {
+                    _copyMasterMatchedCandidateContract(resultEntry, matchedCandidate);
+                }
+                results.push(resultEntry);
             }
         }
     }

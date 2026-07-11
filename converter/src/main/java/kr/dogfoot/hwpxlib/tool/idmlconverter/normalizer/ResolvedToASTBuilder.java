@@ -594,8 +594,17 @@ public class ResolvedToASTBuilder {
     private static boolean sameRenderedGroup(RenderedGroup a, RenderedGroup b) {
         if (a == b) return true;
         if (a == null || b == null) return false;
-        if (a.id() != b.id()) return false;
         if (a.pageIndex() != b.pageIndex()) return false;
+        String aRenderUnitId = a.renderUnitId() != null ? a.renderUnitId() : "";
+        String bRenderUnitId = b.renderUnitId() != null ? b.renderUnitId() : "";
+        if (!aRenderUnitId.isEmpty() && aRenderUnitId.equals(bRenderUnitId)) return true;
+        String aSlotIdentity = a.renderUnitSlotIdentityKey() != null ? a.renderUnitSlotIdentityKey() : "";
+        String bSlotIdentity = b.renderUnitSlotIdentityKey() != null ? b.renderUnitSlotIdentityKey() : "";
+        if (!aSlotIdentity.isEmpty() && aSlotIdentity.equals(bSlotIdentity)) return true;
+        String aExportUnitId = a.exportUnitId() != null ? a.exportUnitId() : "";
+        String bExportUnitId = b.exportUnitId() != null ? b.exportUnitId() : "";
+        if (!aExportUnitId.isEmpty() && aExportUnitId.equals(bExportUnitId)) return true;
+        if (a.id() != b.id()) return false;
         String aFile = a.file() != null ? a.file() : "";
         String bFile = b.file() != null ? b.file() : "";
         return aFile.equals(bFile);
@@ -727,7 +736,7 @@ public class ResolvedToASTBuilder {
                 jsonInt(o, "sourceLayerIndex", -1));
     }
 
-    private static ObjectPlan renderedObjectPlanFromJson(
+    private ObjectPlan renderedObjectPlanFromJson(
             JsonObject o,
             Map<String, RenderedGroup> renderedByObjectPlanId,
             Map<String, RenderedGroup> renderedByCandidateId,
@@ -789,6 +798,35 @@ public class ResolvedToASTBuilder {
                 && rg.cropSourceBounds() != null && rg.cropSourceBounds().length >= 4) {
             cropSourceBounds = rg.cropSourceBounds();
         }
+        String sourceLayerId = rg.layerId();
+        String sourceLayerName = rg.layerName();
+        int sourceLayerIndex = rg.layerIndex();
+        if ((sourceLayerId == null || sourceLayerId.isEmpty()
+                || sourceLayerName == null || sourceLayerName.isEmpty()
+                || sourceLayerIndex < 0)
+                && resolvedData != null) {
+            for (int sourceId : sourceIds) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem item =
+                        resolvedData.getPageItem(String.valueOf(sourceId));
+                if (item == null) continue;
+                if ((sourceLayerId == null || sourceLayerId.isEmpty())
+                        && item.layerId() != null && !item.layerId().isEmpty()) {
+                    sourceLayerId = item.layerId();
+                }
+                if ((sourceLayerName == null || sourceLayerName.isEmpty())
+                        && item.layerName() != null && !item.layerName().isEmpty()) {
+                    sourceLayerName = item.layerName();
+                }
+                if (sourceLayerIndex < 0 && item.layerIndex() >= 0) {
+                    sourceLayerIndex = item.layerIndex();
+                }
+                if (sourceLayerId != null && !sourceLayerId.isEmpty()
+                        && sourceLayerName != null && !sourceLayerName.isEmpty()
+                        && sourceLayerIndex >= 0) {
+                    break;
+                }
+            }
+        }
         ObjectPlan plan = new ObjectPlan(
                 rg.id(),
                 "planner_declared_rendered:" + jsonString(o, "passId") + ":" + jsonString(o, "kind"),
@@ -812,9 +850,9 @@ public class ResolvedToASTBuilder {
                 rg.file(),
                 plannedBounds,
                 renderSourceBounds,
-                rg.layerId(),
-                rg.layerName(),
-                rg.layerIndex());
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
         return plan
                 .withCropSourceBounds(cropSourceBounds)
                 .withExtractionCandidate(

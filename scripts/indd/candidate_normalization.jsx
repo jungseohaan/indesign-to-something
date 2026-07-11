@@ -672,6 +672,20 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         return _sourceHasTextFrameShellStyleMetadataInIndex(sourceId, sourceInfoById);
     }
 
+    function sourceHasMeaningfulEditableText(sourceId) {
+        var src = sourceInfoById[String(sourceId)];
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (src.textFrameClass !== "editable") return false;
+        if (src.hasText === true) return true;
+        var visibleText = String(src.frameVisibleText || "");
+        if (visibleText.replace(/\s+/g, "").length > 0) return true;
+        var paraTexts = src.frameParaTexts || [];
+        for (var i = 0; i < paraTexts.length; i++) {
+            if (String(paraTexts[i] || "").replace(/\s+/g, "").length > 0) return true;
+        }
+        return false;
+    }
+
     function isExportableTextFrameShellStyleSource(sourceId) {
         if (!sourceHasTextFrameShellStyle(sourceId)) return false;
         return true;
@@ -1386,6 +1400,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         var src = sourceInfoById[String(textFrameId)];
         if (!src || String(src.kind || "") !== "TextFrame") return null;
         if (src.textFrameClass !== "editable") return null;
+        if (!sourceHasMeaningfulEditableText(textFrameId)) return null;
         if (!sourceHasTextFrameShellStyle(textFrameId)) return null;
         if (sourceHasInlineAnchorAncestorExcludingSelf(textFrameId)) return null;
         if (textFrameStyleShellCoveredByInlineDirectChildShell(textFrameId, parentCandidate.pageIndex)) return null;

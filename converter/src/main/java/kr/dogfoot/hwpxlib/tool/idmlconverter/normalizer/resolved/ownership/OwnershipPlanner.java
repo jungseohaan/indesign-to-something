@@ -13756,7 +13756,7 @@ public final class OwnershipPlanner {
             }
             int sourceZ = canonicalVisualSourceZOrder(plan);
             VisualLayer layer = canonicalVisualPlane(plan, sourceZ);
-            int plannedZ = canonicalVisualDepthZOrder(layer, sourceZ);
+            int plannedZ = canonicalVisualDepthZOrder(layer, plan.sourceLayerIndex, sourceZ);
             ObjectPlan next = plan;
             if (plannedZ != plan.zOrder) {
                 next = next.withZOrder(plannedZ);
@@ -13772,8 +13772,11 @@ public final class OwnershipPlanner {
         finalizeOwnedTextFrameDepthContracts();
     }
 
-    private static int canonicalVisualDepthZOrder(VisualLayer layer, int sourceZ) {
-        return VisualPlanePolicy.textlessGraphicZOrder(layer, sourceZ);
+    private static int canonicalVisualDepthZOrder(
+            VisualLayer layer,
+            int sourceLayerIndex,
+            int sourceZ) {
+        return VisualPlanePolicy.textlessGraphicZOrder(layer, sourceLayerIndex, sourceZ);
     }
 
     private static PolicyLayer policyLayerForVisualDepth(VisualLayer layer) {

@@ -815,7 +815,10 @@ public final class ResolvedBuildContext {
         Placement placement = placementOf(rg);
         boolean ambiguousCandidate = isAmbiguousRenderedCandidate(rg.candidateId());
         boolean ambiguousRenderUnit = isAmbiguousRenderedRenderUnit(rg.renderUnitId());
-        ObjectPlan plan = findRenderedPlanForPlacement(rg, placement, false);
+        ObjectPlan plan = plannerDeclaredCandidatePlanForRendered(rg, placement);
+        if (plan == null) {
+            plan = findRenderedPlanForPlacement(rg, placement, false);
+        }
         if (plan == null) {
             plan = findRenderedPlanForPlacement(rg, placement,
                     !ambiguousCandidate && !ambiguousRenderUnit);
@@ -832,6 +835,102 @@ public final class ResolvedBuildContext {
         plan = localizeRenderedPlan(plan, rg, ambiguousCandidate || ambiguousRenderUnit);
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
+    }
+
+    private ObjectPlan plannerDeclaredCandidatePlanForRendered(RenderedGroup rg, Placement placement) {
+        if (rg == null || placement == null) return null;
+        ObjectPlan plan = renderedOnly(ownershipPlanByCandidateKey.get(
+                candidateKey(rg.pageIndex(), placement, rg.candidateId())));
+        if (isPlannerDeclaredOwnershipPlan(plan)
+                && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
+            return plan;
+        }
+        plan = renderedOnly(ownershipPlanByCandidateId.get(candidateIdKey(rg.candidateId())));
+        if (isPlannerDeclaredOwnershipPlan(plan)
+                && plan.placement == placement
+                && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
+            return plan;
+        }
+        return null;
+    }
+
+    private static boolean plannerDeclaredPlanCompatibleWithRendered(ObjectPlan plan, RenderedGroup rg) {
+        if (plan == null || rg == null) return false;
+        SlotChannel renderedChannel = slotChannelOf(rg);
+        SlotChannel plannedChannel = slotChannelOf(plan);
+        if (renderedChannel != SlotChannel.UNKNOWN
+                && plannedChannel != SlotChannel.UNKNOWN
+                && renderedChannel != plannedChannel) {
+            return false;
+        }
+        if (renderedChannel == SlotChannel.CONTENT
+                && renderedIsStrictSubsetOfPlannedVisualSources(plan, rg)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean renderedIsStrictSubsetOfPlannedVisualSources(ObjectPlan plan, RenderedGroup rg) {
+        if (plan == null || rg == null) return false;
+        int[] renderedSourceIds = normalizedRenderedSourceObjectIds(rg);
+        if (renderedSourceIds == null || renderedSourceIds.length == 0) return false;
+        int[] plannedSourceIds = plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0
+                ? plan.visualSourceObjectIds
+                : plan.sourceObjectIds;
+        if (plannedSourceIds == null || plannedSourceIds.length == 0) return false;
+        if (renderedSourceIds.length >= plannedSourceIds.length) return false;
+        java.util.Set<Integer> planned = new java.util.HashSet<>();
+        for (int id : plannedSourceIds) planned.add(id);
+        boolean strictSubset = false;
+        for (int id : renderedSourceIds) {
+            if (!planned.contains(id)) return false;
+            strictSubset = true;
+        }
+        return strictSubset;
+    }
+
+    private static SlotChannel slotChannelOf(RenderedGroup rg) {
+        if (rg == null) return SlotChannel.UNKNOWN;
+        String slotRole = nullSafe(rg.slotRole());
+        if (slotRole.contains("CONTENT_VISUAL_SLOT")) return SlotChannel.CONTENT;
+        if (slotRole.contains("SHELL_SLOT")
+                || slotRole.contains("TEXTLESS_SHELL_SLOT")
+                || slotRole.contains("shell_slot")) {
+            return SlotChannel.SHELL;
+        }
+        String exportUnitId = nullSafe(rg.exportUnitId());
+        if (exportUnitId.contains(".CONTENT_VISUAL_SLOT.")) return SlotChannel.CONTENT;
+        if (exportUnitId.contains(".SHELL_SLOT.")
+                || exportUnitId.contains(".TEXTLESS_SHELL_SLOT.")) {
+            return SlotChannel.SHELL;
+        }
+        String textOwner = nullSafe(rg.textOwner());
+        if ("hwpx_tf".equals(textOwner)) return SlotChannel.SHELL;
+        if ("none".equals(textOwner)) return SlotChannel.CONTENT;
+        return SlotChannel.UNKNOWN;
+    }
+
+    private static SlotChannel slotChannelOf(ObjectPlan plan) {
+        if (plan == null) return SlotChannel.UNKNOWN;
+        String slotRole = nullSafe(plan.slotRole);
+        if (slotRole.contains("CONTENT_VISUAL_SLOT")) return SlotChannel.CONTENT;
+        if (slotRole.contains("SHELL_SLOT")
+                || slotRole.contains("TEXTLESS_SHELL_SLOT")
+                || slotRole.contains("shell_slot")) {
+            return SlotChannel.SHELL;
+        }
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) return SlotChannel.SHELL;
+        if (plan.visualAction == VisualAction.PLACE_FLOATING_PNG
+                || plan.visualAction == VisualAction.PLACE_INLINE_PNG) {
+            return SlotChannel.CONTENT;
+        }
+        return SlotChannel.UNKNOWN;
+    }
+
+    private enum SlotChannel {
+        UNKNOWN,
+        SHELL,
+        CONTENT
     }
 
     private ObjectPlan findRenderedPlanForPlacement(
@@ -980,6 +1079,48 @@ public final class ResolvedBuildContext {
                 rg.file(),
                 rg.bounds());
         localized = localized.withExtractionSourceObjectIds(localExportSourceIds, rg.hiddenVisualSourceObjectIds());
+        String localizedLayerId = rg.layerId();
+        String localizedLayerName = rg.layerName();
+        int localizedLayerIndex = rg.layerIndex();
+        if (localizedLayerId == null || localizedLayerId.isEmpty()) {
+            localizedLayerId = plan.sourceLayerId;
+        }
+        if (localizedLayerName == null || localizedLayerName.isEmpty()) {
+            localizedLayerName = plan.sourceLayerName;
+        }
+        if (localizedLayerIndex < 0) {
+            localizedLayerIndex = plan.sourceLayerIndex;
+        }
+        if ((localizedLayerId == null || localizedLayerId.isEmpty()
+                || localizedLayerName == null || localizedLayerName.isEmpty()
+                || localizedLayerIndex < 0)
+                && resolvedData != null) {
+            for (int sourceId : localSourceIds) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem item =
+                        resolvedData.getPageItem(String.valueOf(sourceId));
+                if (item == null) continue;
+                if ((localizedLayerId == null || localizedLayerId.isEmpty())
+                        && item.layerId() != null && !item.layerId().isEmpty()) {
+                    localizedLayerId = item.layerId();
+                }
+                if ((localizedLayerName == null || localizedLayerName.isEmpty())
+                        && item.layerName() != null && !item.layerName().isEmpty()) {
+                    localizedLayerName = item.layerName();
+                }
+                if (localizedLayerIndex < 0 && item.layerIndex() >= 0) {
+                    localizedLayerIndex = item.layerIndex();
+                }
+                if (localizedLayerId != null && !localizedLayerId.isEmpty()
+                        && localizedLayerName != null && !localizedLayerName.isEmpty()
+                        && localizedLayerIndex >= 0) {
+                    break;
+                }
+            }
+        }
+        localized = localized.withSourceLayerMetadata(
+                localizedLayerId,
+                localizedLayerName,
+                localizedLayerIndex);
         if (rg.cropSourceBounds() != null && rg.cropSourceBounds().length >= 4) {
             localized = localized.withCropSourceBounds(rg.cropSourceBounds());
         }
@@ -1243,6 +1384,11 @@ public final class ResolvedBuildContext {
     private static boolean shouldPreferOwnershipPlan(ObjectPlan candidate, ObjectPlan existing) {
         if (candidate == null) return false;
         if (existing == null) return true;
+        boolean candidatePlannerDeclared = isPlannerDeclaredOwnershipPlan(candidate);
+        boolean existingPlannerDeclared = isPlannerDeclaredOwnershipPlan(existing);
+        if (candidatePlannerDeclared != existingPlannerDeclared) {
+            return candidatePlannerDeclared;
+        }
         if (candidate.hasVisibleVisual() != existing.hasVisibleVisual()) {
             return candidate.hasVisibleVisual();
         }
@@ -1250,6 +1396,10 @@ public final class ResolvedBuildContext {
         boolean existingSimple = existing.kind != null && existing.kind.startsWith("simple_button_label:");
         if (candidateSimple != existingSimple) return candidateSimple;
         return false;
+    }
+
+    private static boolean isPlannerDeclaredOwnershipPlan(ObjectPlan plan) {
+        return plan != null && "planner_declared_object_plan".equals(plan.reason);
     }
 
     private static String renderedPlanCacheKey(RenderedGroup rg) {
@@ -1302,8 +1452,17 @@ public final class ResolvedBuildContext {
     private static boolean sameRenderedGroup(RenderedGroup a, RenderedGroup b) {
         if (a == b) return true;
         if (a == null || b == null) return false;
-        if (a.id() != b.id()) return false;
         if (a.pageIndex() != b.pageIndex()) return false;
+        String aRenderUnitId = nullSafe(a.renderUnitId());
+        String bRenderUnitId = nullSafe(b.renderUnitId());
+        if (!aRenderUnitId.isEmpty() && aRenderUnitId.equals(bRenderUnitId)) return true;
+        String aSlotIdentity = nullSafe(a.renderUnitSlotIdentityKey());
+        String bSlotIdentity = nullSafe(b.renderUnitSlotIdentityKey());
+        if (!aSlotIdentity.isEmpty() && aSlotIdentity.equals(bSlotIdentity)) return true;
+        String aExportUnitId = nullSafe(a.exportUnitId());
+        String bExportUnitId = nullSafe(b.exportUnitId());
+        if (!aExportUnitId.isEmpty() && aExportUnitId.equals(bExportUnitId)) return true;
+        if (a.id() != b.id()) return false;
         return nullSafe(a.file()).equals(nullSafe(b.file()));
     }
 

@@ -1099,6 +1099,47 @@ public final class ObjectPlan {
                 sourceLayerIndex));
     }
 
+    public ObjectPlan withSourceLayerMetadata(
+            String newSourceLayerId,
+            String newSourceLayerName,
+            int newSourceLayerIndex) {
+        return withCurrentInlineFlow(new ObjectPlan(
+                domId,
+                kind,
+                candidateId,
+                planPassId,
+                slotRole,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                exportSourceObjectIds,
+                hiddenVisualSourceObjectIds,
+                sourceRootObjectIds,
+                clusterSourceObjectIds,
+                omittedClusterSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                renderSourceBounds,
+                cropSourceBounds,
+                newSourceLayerId,
+                newSourceLayerName,
+                newSourceLayerIndex));
+    }
+
     public ObjectPlan withSourceTreeDiagnostics(
             int[] newSourceRootObjectIds,
             int[] newClusterSourceObjectIds,

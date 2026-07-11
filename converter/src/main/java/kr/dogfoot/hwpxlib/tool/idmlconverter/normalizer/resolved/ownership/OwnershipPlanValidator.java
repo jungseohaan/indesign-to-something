@@ -640,7 +640,8 @@ public final class OwnershipPlanValidator {
     private void validateBackgroundDepthBand() {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || !hasVisibleVisualSlot(plan)) continue;
-            if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND && plan.zOrder != 0) {
+            if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND
+                    && !VisualPlanePolicy.isBackgroundZOrder(plan.zOrder)) {
                 warn("STAGE4_PAGE_BACKGROUND_NOT_BOTTOM_Z",
                         "plan=" + planRef(plan)
                                 + " visualLayer=" + plan.visualLayer

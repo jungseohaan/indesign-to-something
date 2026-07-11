@@ -304,9 +304,8 @@ public class ASTToHwpxConverter {
         // 1) BEHIND_TEXT FIGURE: Stage 1 visualLayer가 behind plane으로 정한 그림을 먼저 배치
         //
         // HWPX에서는 같은 BEHIND_TEXT 평면 안에서 XML 출력 순서가 겹침 결과에 영향을 준다.
-        // Stage 1 zOrder is the source stacking contract, and larger values are
-        // visually in front. Emit back-to-front so XML order cannot invert
-        // same-plane source depth.
+        // Stage 1 zOrder is the final source stacking contract, including same-plane
+        // source-layer ordering. Emit back-to-front without rebasing that value.
         List<ASTFigure> behindFigures = new ArrayList<>();
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
@@ -404,7 +403,7 @@ public class ASTToHwpxConverter {
 
     private static int textlessGraphicZOrderOf(ASTFigure fig) {
         if (fig == null) return 0;
-        return VisualPlanePolicy.textlessGraphicZOrderName(fig.visualLayer(), fig.zOrder());
+        return fig.zOrder();
     }
 
     private static boolean isBehindTextPlaneFigure(ASTFigure fig) {

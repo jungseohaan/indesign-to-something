@@ -11,6 +11,11 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
  * foreground graphic plane.</p>
  */
 public final class VisualPlanePolicy {
+    private static final int PLANE_STRIDE = 500_000_000;
+    private static final int LAYER_STRIDE = 100_000;
+    private static final int MAX_SOURCE_LAYER_BUCKET = 4095;
+    private static final int MAX_SOURCE_Z_ORDER = 99_999;
+
     private VisualPlanePolicy() {
     }
 
@@ -39,18 +44,98 @@ public final class VisualPlanePolicy {
     }
 
     public static int textlessGraphicZOrder(VisualLayer layer, int sourceZOrder) {
-        int z = Math.max(0, sourceZOrder);
-        if (isBackgroundMaterialLayer(layer)) {
-            return z;
-        }
-        return 100_000 + z;
+        return textlessGraphicZOrder(layer, -1, sourceZOrder);
+    }
+
+    public static int textlessGraphicZOrder(
+            VisualLayer layer,
+            int sourceLayerIndex,
+            int sourceZOrder) {
+        return planeBandForLayer(layer)
+                + samePlaneSourceLayerBand(sourceLayerIndex)
+                + normalizedSourceZOrder(sourceZOrder);
     }
 
     public static int textlessGraphicZOrderName(String layer, int sourceZOrder) {
-        int z = Math.max(0, sourceZOrder);
-        if (isBackgroundMaterialLayerName(layer)) {
-            return z;
+        return textlessGraphicZOrderName(layer, -1, sourceZOrder);
+    }
+
+    public static int textlessGraphicZOrderName(
+            String layer,
+            int sourceLayerIndex,
+            int sourceZOrder) {
+        return planeBandForLayerName(layer)
+                + samePlaneSourceLayerBand(sourceLayerIndex)
+                + normalizedSourceZOrder(sourceZOrder);
+    }
+
+    public static boolean isBackgroundZOrder(int zOrder) {
+        return zOrder >= planeBandForPolicyPlane(0)
+                && zOrder < planeBandForPolicyPlane(1);
+    }
+
+    public static boolean isDecorationZOrder(int zOrder) {
+        return zOrder >= planeBandForPolicyPlane(1)
+                && zOrder < planeBandForPolicyPlane(2);
+    }
+
+    public static boolean isContentZOrder(int zOrder) {
+        return zOrder >= planeBandForPolicyPlane(2);
+    }
+
+    private static int planeBandForLayer(VisualLayer layer) {
+        return planeBandForPolicyPlane(policyPlaneIndex(layer));
+    }
+
+    private static int planeBandForLayerName(String layer) {
+        return planeBandForPolicyPlane(policyPlaneIndexName(layer));
+    }
+
+    private static int planeBandForPolicyPlane(int planeIndex) {
+        return Math.max(0, planeIndex) * PLANE_STRIDE;
+    }
+
+    private static int policyPlaneIndex(VisualLayer layer) {
+        if (isBackgroundMaterialLayer(layer)) {
+            return 0;
         }
-        return 100_000 + z;
+        if (layer == VisualLayer.TEXT_CARD_BACKDROP
+                || layer == VisualLayer.CONTAINER_BACKDROP
+                || layer == VisualLayer.CONTAINER_FACE
+                || layer == VisualLayer.LABEL_CONNECTOR_BACKDROP
+                || layer == VisualLayer.LABEL_BACKDROP
+                || layer == VisualLayer.LABEL_OVERLAY_BACKDROP
+                || layer == VisualLayer.CONTAINER_OUTLINE
+                || layer == VisualLayer.FOREGROUND_MASK) {
+            return 1;
+        }
+        return 2;
+    }
+
+    private static int policyPlaneIndexName(String layer) {
+        if (isBackgroundMaterialLayerName(layer)) {
+            return 0;
+        }
+        if ("TEXT_CARD_BACKDROP".equals(layer)
+                || "CONTAINER_BACKDROP".equals(layer)
+                || "CONTAINER_FACE".equals(layer)
+                || "LABEL_CONNECTOR_BACKDROP".equals(layer)
+                || "LABEL_BACKDROP".equals(layer)
+                || "LABEL_OVERLAY_BACKDROP".equals(layer)
+                || "CONTAINER_OUTLINE".equals(layer)
+                || "FOREGROUND_MASK".equals(layer)) {
+            return 1;
+        }
+        return 2;
+    }
+
+    private static int samePlaneSourceLayerBand(int sourceLayerIndex) {
+        if (sourceLayerIndex < 0) return 0;
+        int normalized = Math.min(sourceLayerIndex, MAX_SOURCE_LAYER_BUCKET);
+        return (MAX_SOURCE_LAYER_BUCKET - normalized) * LAYER_STRIDE;
+    }
+
+    private static int normalizedSourceZOrder(int sourceZOrder) {
+        return Math.max(0, Math.min(sourceZOrder, MAX_SOURCE_Z_ORDER));
     }
 }
