@@ -67,6 +67,8 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     var pageLocalVisibleSourceResolution = _resolveObjectPlanPageLocalVisibleSources(objectPlans, sourceById);
     var rawClippedImageVisualSourceResolution =
             _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById);
+    var pageBackgroundPlaneMaterialization =
+            _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans);
     var depthFinalization = _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems);
     var inlineFlowContractFinalization = _finalizeObjectPlanInlineFlowContracts(objectPlans);
     var validation = _validateObjectPlanDiagnostics(objectPlans);
@@ -78,6 +80,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     summary.visibleVisualSourceResolution = visibleVisualSourceResolution.summary;
     summary.pageLocalVisibleSourceResolution = pageLocalVisibleSourceResolution.summary;
     summary.rawClippedImageVisualSourceResolution = rawClippedImageVisualSourceResolution.summary;
+    summary.pageBackgroundPlaneMaterialization = pageBackgroundPlaneMaterialization.summary;
     summary.visualDepthFinalization = depthFinalization.summary;
     summary.inlineFlowContractFinalization = inlineFlowContractFinalization.summary;
     summary.sourceSetInterning = sourceSetRefs.summary;
@@ -751,6 +754,8 @@ function _slimObjectPlanForWrite(plan) {
         "bounds",
         "renderSourceBounds",
         "cropSourceBounds",
+        "absorbedByObjectPlanId",
+        "absorbedByMaterialization",
         "ownershipSlot",
         "policyLayer",
         "clusterRelation",
@@ -1694,6 +1699,206 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
     };
 }
 
+function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans) {
+    var plans = objectPlans || [];
+    var byPage = {};
+    var created = [];
+    var absorbed = [];
+
+    for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        if (!_objectPlanEligibleForPageBackgroundPlane(plan)) continue;
+        var pageKey = String(plan.pageIndex);
+        if (!byPage[pageKey]) byPage[pageKey] = [];
+        byPage[pageKey].push(plan);
+    }
+
+    for (var key in byPage) {
+        if (!byPage.hasOwnProperty(key)) continue;
+        var members = byPage[key];
+        if (!members || members.length < 2) continue;
+        members.sort(function(a, b) {
+            var az = a.zOrder !== undefined && a.zOrder !== null ? Number(a.zOrder) : 0;
+            var bz = b.zOrder !== undefined && b.zOrder !== null ? Number(b.zOrder) : 0;
+            if (az !== bz) return az - bz;
+            var ai = a.objectPlanId || a.candidateId || "";
+            var bi = b.objectPlanId || b.candidateId || "";
+            return String(ai) < String(bi) ? -1 : (String(ai) > String(bi) ? 1 : 0);
+        });
+
+        var sourceObjectIds = _objectPlanUnionPlanIds(members, "sourceObjectIds");
+        var sourceRootObjectIds = _objectPlanUnionPlanIds(members, "sourceRootObjectIds");
+        var visualSourceObjectIds = _objectPlanUnionPlanIds(members, "visualSourceObjectIds");
+        var exportSourceObjectIds = _objectPlanUnionPlanIds(members, "exportSourceObjectIds");
+        var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(members, "hiddenVisualSourceObjectIds");
+        if (exportSourceObjectIds.length === 0) exportSourceObjectIds = sourceRootObjectIds.slice(0);
+        if (visualSourceObjectIds.length === 0) visualSourceObjectIds = exportSourceObjectIds.slice(0);
+        if (sourceObjectIds.length === 0) sourceObjectIds = visualSourceObjectIds.slice(0);
+
+        var pageIndex = Number(key);
+        var primarySourceObjectId = members[0].primarySourceObjectId !== undefined
+                && members[0].primarySourceObjectId !== null
+                ? members[0].primarySourceObjectId
+                : (exportSourceObjectIds.length > 0 ? exportSourceObjectIds[0] : null);
+        var objectPlanId = "object-plan.page-background-plane." + String(pageIndex);
+        var candidateId = "cand.pass.decoration_groups.page." + String(pageIndex)
+                + ".page_background_plane.n" + String(exportSourceObjectIds.length)
+                + ".h" + _sourceSetId(exportSourceObjectIds);
+        var plane = {
+            objectPlanId: objectPlanId,
+            bundleId: "bundle.page-background-plane." + String(pageIndex),
+            candidateId: candidateId,
+            passId: "pass.decoration_groups",
+            pageIndex: pageIndex,
+            kind: "PAGE_BACKGROUND_PLANE",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            compositeRole: "page_background_plane",
+            slotRole: "page_background_plane",
+            layoutOnlyInlineSlot: false,
+            sourceInlineFlow: false,
+            inlineCompositeLayoutDescendant: false,
+            inlineAnchorSourceObjectId: null,
+            inlineSourceTreeClosed: false,
+            inlineFlowSourceObjectIds: [],
+            connectorDecorationVisual: false,
+            primarySourceObjectId: primarySourceObjectId,
+            sourceSetId: _sourceSetId(sourceObjectIds),
+            sourceRootSetId: _sourceSetId(sourceRootObjectIds),
+            clusterSourceSetId: _sourceSetId(sourceObjectIds),
+            visualSourceSetId: _sourceSetId(visualSourceObjectIds),
+            exportSourceSetId: _sourceSetId(exportSourceObjectIds),
+            hiddenSourceSetId: _sourceSetId(hiddenVisualSourceObjectIds),
+            ownedByNativeShellSourceObjectIds: [],
+            sourceObjectIds: _internSourceSetIds(sourceObjectIds),
+            sourceRootObjectIds: _internSourceSetIds(sourceRootObjectIds),
+            clusterSourceObjectIds: _internSourceSetIds(sourceObjectIds),
+            clusterKindCounts: {},
+            omittedClusterSourceObjectIds: [],
+            omittedClusterKindCounts: {},
+            clusterHasEditableText: false,
+            clusterHasTextFrame: false,
+            clusterHasPlacedContent: false,
+            clusterHasVisualSource: true,
+            visualSourceObjectIds: _internSourceSetIds(visualSourceObjectIds),
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            exportSourceObjectIds: _internSourceSetIds(exportSourceObjectIds),
+            exportTargetObjectId: null,
+            atomicExportTargetObjectId: null,
+            atomicExportTargetObjectIds: [],
+            atomicTextlessVectorContent: false,
+            atomicContentVisualSlot: false,
+            hiddenVisualSourceObjectIds: _internSourceSetIds(hiddenVisualSourceObjectIds),
+            materialization: "PAGE_PLANE_PNG",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_PAGE_BACKGROUND_PNG",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            visualLayer: "PAGE_BACKGROUND",
+            zOrder: 0,
+            reason: "stage1_page_background_plane_from_background_objectplans",
+            bounds: _objectPlanUnionBounds(members),
+            renderSourceBounds: null,
+            cropSourceBounds: null,
+            ownershipSlot: "SHELL_SLOT",
+            policyLayer: "BACKGROUND",
+            clusterRelation: "PAGE_BACKGROUND_PLANE",
+            migrationStatus: "READY_PAGE_BACKGROUND_PLANE",
+            migrationBlocker: "NONE",
+            migrationBlockerDetail: {
+                absorbedObjectPlanIds: _objectPlanMemberIds(members)
+            },
+            executable: true,
+            required: true
+        };
+        plans.push(plane);
+        created.push(objectPlanId);
+
+        for (var mi = 0; mi < members.length; mi++) {
+            var member = members[mi];
+            member.absorbedByObjectPlanId = objectPlanId;
+            member.absorbedByMaterialization = "PAGE_PLANE_PNG";
+            member.visualAction = "DROP_VISUAL";
+            member.materialization = "HWPX_TEXT";
+            member.executable = false;
+            member.required = false;
+            member.reason = String(member.reason || "") + ":absorbed_by_page_background_plane";
+            absorbed.push(member.objectPlanId || member.candidateId || ("page-background-member." + String(mi)));
+        }
+    }
+
+    return {
+        summary: {
+            createdPlaneCount: created.length,
+            absorbedPlanCount: absorbed.length,
+            createdObjectPlanIds: created,
+            absorbedObjectPlanIds: absorbed
+        }
+    };
+}
+
+function _objectPlanEligibleForPageBackgroundPlane(plan) {
+    if (!plan) return false;
+    if (!_objectPlanHasVisibleVisual(plan)) return false;
+    if (plan.visualLayer !== "PAGE_BACKGROUND") return false;
+    if (plan.ownershipSlot !== "SHELL_SLOT") return false;
+    if (plan.policyLayer !== "BACKGROUND") return false;
+    if (plan.placement !== "FLOATING" || plan.coordinateSpace !== "PAGE") return false;
+    if (plan.textAction !== "DROP_TEXT") return false;
+    if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) return false;
+    if (plan.passId !== "pass.decoration_groups") return false;
+    if (plan.visualAction !== "PLACE_FLOATING_PNG") return false;
+    if (plan.materialization !== "EXTRACTED_PNG_VECTOR"
+            && plan.materialization !== "TEXTLESS_VISUAL_FRAGMENT") return false;
+    if (plan.slotRole !== "background_shell_slot"
+            && plan.compositeRole !== "background_vector_source") return false;
+    if (!plan.exportSourceObjectIds || plan.exportSourceObjectIds.length === 0) return false;
+    return true;
+}
+
+function _objectPlanUnionPlanIds(plans, field) {
+    var ids = [];
+    var seen = {};
+    for (var i = 0; plans && i < plans.length; i++) {
+        var values = plans[i] && plans[i][field] ? plans[i][field] : [];
+        for (var v = 0; v < values.length; v++) {
+            var id = values[v];
+            if (id === null || id === undefined) continue;
+            var key = String(id);
+            if (seen[key]) continue;
+            seen[key] = true;
+            ids.push(id);
+        }
+    }
+    return _sortedNumericIds(ids);
+}
+
+function _objectPlanMemberIds(plans) {
+    var ids = [];
+    for (var i = 0; plans && i < plans.length; i++) {
+        ids.push(plans[i].objectPlanId || plans[i].candidateId || ("member." + String(i)));
+    }
+    return ids;
+}
+
+function _objectPlanUnionBounds(plans) {
+    var union = null;
+    for (var i = 0; plans && i < plans.length; i++) {
+        var b = plans[i] ? plans[i].bounds : null;
+        if (!b || b.length < 4) continue;
+        if (!union) {
+            union = [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
+        } else {
+            union[0] = Math.min(union[0], Number(b[0]));
+            union[1] = Math.min(union[1], Number(b[1]));
+            union[2] = Math.max(union[2], Number(b[2]));
+            union[3] = Math.max(union[3], Number(b[3]));
+        }
+    }
+    return union;
+}
+
 function _objectPlanTextOwnerPriority(plan) {
     if (!plan) return 0;
     var score = 0;
@@ -2505,6 +2710,7 @@ function _objectPlanMigrationStatusIsImportReady(status) {
     return status === "READY_EXACT_CLUSTER"
             || status === "READY_SLOT_ONLY_CLUSTER_FRAGMENT"
             || status === "READY_CLOSED_PLACED_CONTENT_FRAME"
+            || status === "READY_PAGE_BACKGROUND_PLANE"
             || status === "READY_PAGE_TEXTLESS_GRAPHIC_GROUP"
             || status === "READY_TEXTLESS_CONNECTOR_FRAGMENT"
             || status === "READY_INLINE_COMPLETE_PNG_TEXT_OWNER"
@@ -2745,6 +2951,7 @@ function _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, is
 function _objectPlanHasVisibleVisual(plan) {
     return plan && (plan.visualAction === "PLACE_INLINE_PNG"
             || plan.visualAction === "PLACE_FLOATING_PNG"
+            || plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
             || plan.visualAction === "PLACE_TEXT_SHELL"
             || plan.visualAction === "PLACE_TABLE_STYLE");
 }
@@ -2765,6 +2972,7 @@ function _objectPlanVisibleSlotKey(plan) {
 function _objectPlanSlotFromActions(plan) {
     if (!plan) return "UNKNOWN_SLOT";
     if (plan.visualAction === "PLACE_TEXT_SHELL") return "SHELL_SLOT";
+    if (plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG") return "SHELL_SLOT";
     if (plan.visualAction === "PLACE_TABLE_STYLE") return "TABLE_STYLE_SLOT";
     if (plan.textAction === "OWNED_BY_PNG") return "TEXT_SLOT";
     return "CONTENT_VISUAL_SLOT";

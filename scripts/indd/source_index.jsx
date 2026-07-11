@@ -538,7 +538,10 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             bounds: _itemBounds(item),
             sourceOrder: sourceItems.length,
             zOrder: sourceItems.length,
+            name: null,
             layerName: _itemLayerName(item),
+            layerId: null,
+            layerIndex: null,
             visible: _itemVisible(item),
             hiddenLayer: false,
             nonprinting: false,
@@ -566,6 +569,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             strokeColorName: null,
             strokeTint: null,
             strokeWeight: null,
+            strokeAlignment: null,
+            opacity: null,
+            absoluteRotationAngle: null,
             cornerRadius: null,
             anchoredPosition: _itemAnchoredPosition(item),
             storyAnchorPlacement: _storyAnchorPlacementForItem(doc, item, parentStory),
@@ -573,6 +579,15 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             rangeTargetPageIndexes: _rangeTargetPageIndexesForId(id)
         };
 
+        try { info.name = item.name; } catch (eName) {}
+        try {
+            if (item.itemLayer) {
+                info.layerId = item.itemLayer.id;
+                info.layerIndex = item.itemLayer.index;
+            }
+        } catch (eLayerInfo) {}
+        try { info.absoluteRotationAngle = item.absoluteRotationAngle; } catch (eRotation) {}
+        try { info.opacity = item.transparencySettings.blendingSettings.opacity; } catch (eOpacity) {}
         try { info.hiddenLayer = isOnHiddenLayer(item); } catch (eHidden) {}
         try { info.nonprinting = !!item.nonprinting; } catch (eNonprinting) {}
         if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
@@ -597,6 +612,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 info.strokeColorName = item.strokeColor.name;
                 try { info.strokeTint = item.strokeTint; } catch (eStrokeTint) {}
                 try { info.strokeWeight = item.strokeWeight || 0; } catch (eStrokeWeight) {}
+                try { info.strokeAlignment = item.strokeAlignment.toString(); } catch (eStrokeAlignment) {}
                 info.hasVisibleStroke = true;
             }
         } catch (eStroke) {}
@@ -1248,6 +1264,7 @@ function _sourceCoveragePlanHasVisibleVisual(plan) {
     if (!plan) return false;
     return plan.visualAction === "PLACE_INLINE_PNG"
             || plan.visualAction === "PLACE_FLOATING_PNG"
+            || plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
             || plan.visualAction === "PLACE_TEXT_SHELL"
             || plan.visualAction === "PLACE_TABLE_STYLE";
 }
@@ -1628,6 +1645,7 @@ function _sourceModelRenderUnitFromSlot(slot, plan, owner) {
     if (!slot || !plan) return null;
     if (!(slot.owner === "TEXTLESS_PNG"
             || slot.owner === "CONTENT_PNG"
+            || slot.owner === "PAGE_PLANE_PNG"
             || slot.owner === "COMPLETE_PNG")) {
         return null;
     }
@@ -1720,6 +1738,7 @@ function _renderUnitPreviewRow(unit) {
 
 function _sourceModelVisualSlotFromPlan(plan) {
     if (!plan) return "CONTENT_VISUAL_SLOT";
+    if (plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG") return "SHELL_SLOT";
     if (plan.visualAction === "PLACE_TEXT_SHELL") return "SHELL_SLOT";
     if (plan.visualAction === "PLACE_TABLE_STYLE") return "TABLE_STYLE_SLOT";
     return "CONTENT_VISUAL_SLOT";
@@ -1727,6 +1746,7 @@ function _sourceModelVisualSlotFromPlan(plan) {
 
 function _sourceModelVisualOwner(plan) {
     if (!plan) return "CONTENT_PNG";
+    if (plan.materialization === "PAGE_PLANE_PNG") return "PAGE_PLANE_PNG";
     if (plan.materialization === "COMPLETE_PNG") return "COMPLETE_PNG";
     if (plan.materialization === "NATIVE_SOURCE_SHAPE") return "NATIVE_SOURCE_SHAPE";
     if (plan.visualAction === "PLACE_TEXT_SHELL") return "TEXTLESS_PNG";

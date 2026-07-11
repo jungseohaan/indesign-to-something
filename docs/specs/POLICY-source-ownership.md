@@ -171,11 +171,11 @@ The Java ownership enums are policy terms, not legacy SPEC terms:
 - `TextAction`: `OWNED_BY_HWPX_TEXT`, `OWNED_BY_PNG`,
   `HIDDEN_SEMANTIC`, `DROP_TEXT`
 - `VisualAction`: `PLACE_INLINE_PNG`, `PLACE_FLOATING_PNG`,
-  `PLACE_TEXT_SHELL`, `ABSORB_TEXT_STYLE`, `PLACE_TABLE_STYLE`,
-  `DROP_VISUAL`
+  `PLACE_PAGE_BACKGROUND_PNG`, `PLACE_TEXT_SHELL`,
+  `ABSORB_TEXT_STYLE`, `PLACE_TABLE_STYLE`, `DROP_VISUAL`
 - `Materialization`: `HWPX_TEXT`, `HWPX_TABLE_STYLE`,
   `NATIVE_SOURCE_SHAPE`, `EXTRACTED_PNG_VECTOR`,
-  `TEXTLESS_VISUAL_FRAGMENT`, `COMPLETE_PNG`
+  `TEXTLESS_VISUAL_FRAGMENT`, `PAGE_PLANE_PNG`, `COMPLETE_PNG`
 - `Placement`: `INLINE`, `FLOATING`, `TABLE`, `NONE`
 - `CoordinateSpace`: `STORY_FLOW`, `PAGE`, `SOURCE_LOCAL`
 - `VisualLayer`: implementation compatibility label. In V2 policy it must map

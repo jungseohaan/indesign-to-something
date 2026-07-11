@@ -95,7 +95,9 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
             declaredCandidate, slot, slotSources, clusterIndex);
     slotSources = _plannerBundleWithoutClippedPlacedContentLeafSources(
             declaredCandidate, slot, slotSources, clusterIndex);
-    var exportSourceObjectIds = _internSourceSetIds(declaredCandidate.exportSourceObjectIds || []);
+    var declaredExportSourceObjectIds = _internSourceSetIds(
+            declaredCandidate.exportSourceObjectIds || []);
+    var exportSourceObjectIds = _internSourceSetIds(declaredExportSourceObjectIds || []);
     if (_plannerBundleShouldExportInlineSimpleMarkerCompletePng(
             declaredCandidate, slot, slotSources, sourceIds, exportSourceObjectIds, clusterIndex)) {
         exportSourceObjectIds = _internSourceSetIds(sourceIds || []);
@@ -113,6 +115,10 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
             declaredCandidate, slot, exportSourceObjectIds, slotSources)) {
         exportSourceObjectIds = _internSourceSetIds(slotSources.visualSourceObjectIds || []);
     }
+    if (_plannerBundleShouldUseBackgroundShellCompleteSourceSetAsExport(
+            declaredCandidate, slot, slotSources, exportSourceObjectIds, clusterIndex)) {
+        exportSourceObjectIds = _internSourceSetIds(sourceIds || []);
+    }
     if (slot === "SHELL_SLOT" && slotSources.styleSourceObjectIds
             && slotSources.styleSourceObjectIds.length > 0) {
         exportSourceObjectIds = _plannerBundleSourceIdsUnion(
@@ -125,6 +131,10 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     exportSourceObjectIds = _plannerBundlePruneShellOwnedTextAndTableStructureExportSources(
             declaredCandidate, slot, slotSources, exportSourceObjectIds, clusterIndex);
     exportSourceObjectIds = _plannerBundleSourceIdsIntersect(exportSourceObjectIds, sourceIds);
+    if (_plannerBundleShouldRestoreBackgroundShellRootExport(
+            declaredCandidate, slot, exportSourceObjectIds, declaredExportSourceObjectIds)) {
+        exportSourceObjectIds = _internSourceSetIds(declaredExportSourceObjectIds || []);
+    }
     if (slot === "CONTENT_VISUAL_SLOT"
             && (!slotSources.visualSourceObjectIds || slotSources.visualSourceObjectIds.length === 0)
             && exportSourceObjectIds && exportSourceObjectIds.length > 0) {
@@ -1039,6 +1049,35 @@ function _plannerBundleShouldUseAppliedMasterVisualSourcesAsExport(
             && slotSources.visualSourceObjectIds.length > 0;
 }
 
+function _plannerBundleShouldUseBackgroundShellCompleteSourceSetAsExport(
+        candidate, slot, slotSources, exportSourceObjectIds, clusterIndex) {
+    if (!candidate || slot !== "SHELL_SLOT" || !slotSources) return false;
+    if (candidate.passId !== "pass.decoration_groups") return false;
+    if (candidate.slotRole !== "background_shell_slot"
+            && candidate.compositeRole !== "background_vector_source") return false;
+    if (_plannerBundlePolicyLayer(candidate, slot, clusterIndex) !== "BACKGROUND") return false;
+    if (candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0) return false;
+    if (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0) return false;
+    if (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0) return false;
+    if (slotSources.ownedTextFrameIds && slotSources.ownedTextFrameIds.length > 0) return false;
+    if (slotSources.styleSourceObjectIds && slotSources.styleSourceObjectIds.length > 0) return false;
+    if (!slotSources.visualSourceObjectIds || slotSources.visualSourceObjectIds.length < 2) return false;
+    if (exportSourceObjectIds && exportSourceObjectIds.length > 1) return false;
+    var leafIds = _plannerBundleTextlessVectorLeafSourceIds(
+            slotSources.visualSourceObjectIds || [], clusterIndex);
+    return leafIds.length >= 8;
+}
+
+function _plannerBundleShouldRestoreBackgroundShellRootExport(
+        candidate, slot, exportSourceObjectIds, declaredExportSourceObjectIds) {
+    if (!candidate || slot !== "SHELL_SLOT") return false;
+    if (candidate.passId !== "pass.decoration_groups") return false;
+    if (candidate.slotRole !== "background_shell_slot"
+            && candidate.compositeRole !== "background_vector_source") return false;
+    if (exportSourceObjectIds && exportSourceObjectIds.length > 0) return false;
+    return declaredExportSourceObjectIds && declaredExportSourceObjectIds.length > 0;
+}
+
 function _plannerBundleIsExecutableAppliedMasterShell(candidate, slotSources) {
     if (!candidate || candidate.passId !== "pass.master_page_graphics") return false;
     return slotSources && slotSources.visualSourceObjectIds
@@ -1319,6 +1358,36 @@ function _plannerBundleSourceRootObjectIds(sourceIds, clusterIndex) {
     roots = _sortedNumericIds(roots);
     cache[cacheKey] = roots.slice(0);
     return roots;
+}
+
+function _plannerBundleTextlessVectorLeafSourceIds(sourceIds, clusterIndex) {
+    if (!sourceIds || sourceIds.length === 0) return [];
+    if (!clusterIndex || !clusterIndex.sourceInfo) return _sortedNumericIds(sourceIds);
+    var cache = _plannerBundleCache(clusterIndex, "textlessVectorLeafObjectIdsBySourceSet");
+    var cacheKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    if (cache[cacheKey]) return cache[cacheKey].slice(0);
+    var sourceSet = _plannerBundleSourceSet(sourceIds, clusterIndex);
+    var leaves = [];
+    var seen = {};
+    for (var i = 0; i < sourceIds.length; i++) {
+        var id = sourceIds[i];
+        var src = clusterIndex.sourceInfo(id);
+        if (!_plannerBundleSourceIsTextlessVectorDecorationLeaf(src)) continue;
+        var children = clusterIndex.childIdsByParentId
+                ? (clusterIndex.childIdsByParentId[String(id)] || [])
+                : [];
+        var hasChildInSet = false;
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceSet[String(children[ci])]) {
+                hasChildInSet = true;
+                break;
+            }
+        }
+        if (!hasChildInSet) _pushUniqueId(leaves, seen, id);
+    }
+    leaves = _sortedNumericIds(leaves);
+    cache[cacheKey] = leaves.slice(0);
+    return leaves;
 }
 
 function _plannerBundleClusterSourceObjectIds(primarySourceObjectId, sourceRootObjectIds, clusterIndex) {

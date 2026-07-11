@@ -190,9 +190,35 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
         var rngLen = Math.min(runText.length > 0 ? runText.length : rngCharCount, paraCharCount - rngStart);
         if (rngLen <= 1) return [runData];
 
-        // DOM 접근 캐시 (동일 인덱스 재접근 방지)
-        var propsCache = {};
-        var colorCache = {};
+        // DOM 접근 캐시. 같은 문단의 여러 textStyleRange가 같은 character
+        // 속성을 반복 조회하므로, 호출 단위가 아니라 문단 단위로 공유한다.
+        var paraCacheKey = null;
+        try {
+            var storyKey = story && story.id !== undefined ? String(story.id) : "story";
+            var paraKey = para && para.index !== undefined ? String(para.index) : String(para.contents || "").length;
+            paraCacheKey = storyKey + ":" + paraKey + ":" + String(paraCharCount);
+        } catch (eParaCacheKey) {
+            paraCacheKey = null;
+        }
+        if (!splitRunByStoryChars._paraPropsCache) {
+            splitRunByStoryChars._paraPropsCache = {};
+            splitRunByStoryChars._paraPropsCacheKeys = [];
+        }
+        var sharedParaCache = null;
+        if (paraCacheKey) {
+            sharedParaCache = splitRunByStoryChars._paraPropsCache[paraCacheKey];
+            if (!sharedParaCache) {
+                sharedParaCache = { props: {}, colors: {} };
+                splitRunByStoryChars._paraPropsCache[paraCacheKey] = sharedParaCache;
+                splitRunByStoryChars._paraPropsCacheKeys.push(paraCacheKey);
+                if (splitRunByStoryChars._paraPropsCacheKeys.length > 256) {
+                    var oldKey = splitRunByStoryChars._paraPropsCacheKeys.shift();
+                    try { delete splitRunByStoryChars._paraPropsCache[oldKey]; } catch (eDeleteParaCache) {}
+                }
+            }
+        }
+        var propsCache = sharedParaCache ? sharedParaCache.props : {};
+        var colorCache = sharedParaCache ? sharedParaCache.colors : {};
         function getCharColor(absIdx) {
             if (colorCache[absIdx] !== undefined) return colorCache[absIdx];
             var color = null;

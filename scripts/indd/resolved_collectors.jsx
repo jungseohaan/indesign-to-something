@@ -692,6 +692,8 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
         pages: pages,
         pageItems: pageItems,
         atomicTextlessVectorCollectionSummary: atomicCollectionIndex.summary,
+        pageItemCollectionSummary: resolvedOptions ? resolvedOptions.pageItemSnapshot : null,
+        pageItemCollectionWarnings: resolvedOptions ? (resolvedOptions.pageItemCollectionWarnings || []) : [],
         nativeParentTextShellCandidates: nativeParentTextShellCandidates,
         fontMetrics: fontMetrics
     };
@@ -1280,10 +1282,183 @@ function _resolvedSafePageItemSnapshot(doc, cachedAllItems, resolvedOptions) {
     return cachedItems;
 }
 
+function _resolvedSourcePageInRange(src, startPage, endPage, skipRenderPagesMap) {
+    if (!src) return -1;
+    var pageIndex = Number(src.pageIndex);
+    if (isNaN(pageIndex)) pageIndex = Number(src.sourcePageIndex);
+    if (!isNaN(pageIndex) && pageIndex >= 0) {
+        var pageNo = pageIndex + 1;
+        if (pageNo >= startPage && pageNo <= endPage && !skipRenderPagesMap[pageNo]) {
+            return pageIndex;
+        }
+    }
+
+    var rangePages = src.rangeTargetPageIndexes || [];
+    for (var i = 0; i < rangePages.length; i++) {
+        var targetIndex = Number(rangePages[i]);
+        if (isNaN(targetIndex) || targetIndex < 0) continue;
+        var targetNo = targetIndex + 1;
+        if (targetNo < startPage || targetNo > endPage) continue;
+        if (skipRenderPagesMap[targetNo]) continue;
+        return targetIndex;
+    }
+    return -1;
+}
+
+function _resolvedSourceParentId(src) {
+    if (!src || src.parentId === null || src.parentId === undefined) return null;
+    var parentKind = src.parentKind ? String(src.parentKind) : "";
+    if (parentKind === "Spread" || parentKind === "Page" || parentKind === "MasterSpread") return null;
+    return String(src.parentId);
+}
+
+function _resolvedSourceIsInline(src) {
+    if (!src) return false;
+    if (src.storyAnchorPlacement === "FLOATING_ANCHORED") return false;
+    if (src.storyAnchorPlacement === "INLINE" || src.storyAnchorPlacement === "ABOVE_LINE") return true;
+    var anchoredPosition = src.anchoredPosition ? String(src.anchoredPosition) : "";
+    return anchoredPosition === "INLINE_POSITION" || anchoredPosition === "ABOVE_LINE";
+}
+
+function _resolvedDescendantSourceIds(parentId, childIdsByParentId, out, seen) {
+    var children = childIdsByParentId ? childIdsByParentId[String(parentId)] : null;
+    for (var i = 0; children && i < children.length; i++) {
+        var childId = children[i];
+        var key = String(childId);
+        if (seen[key]) continue;
+        seen[key] = true;
+        var num = Number(childId);
+        out.push(isFinite(num) ? num : childId);
+        _resolvedDescendantSourceIds(childId, childIdsByParentId, out, seen);
+    }
+}
+
+function _resolvedDescendantSourceIdList(parentId, childIdsByParentId, memo) {
+    var key = String(parentId);
+    if (memo && memo[key]) return memo[key].slice(0);
+    var out = [];
+    _resolvedDescendantSourceIds(parentId, childIdsByParentId, out, {});
+    if (memo) memo[key] = out.slice(0);
+    return out;
+}
+
+function _collectPageItemsFromSourceItems(startPage, endPage, skipRenderPagesMap, resolvedOptions) {
+    if (!resolvedOptions || resolvedOptions.collectPageItemsFromSource === false) return null;
+    var sourceItems = resolvedOptions.sourceItems || [];
+    if (!sourceItems || sourceItems.length === 0) return null;
+
+    var indexes = null;
+    try {
+        indexes = typeof _buildSourceItemIndexes === "function"
+                ? _buildSourceItemIndexes(sourceItems)
+                : null;
+    } catch (eIndexes) {
+        indexes = null;
+    }
+    var childIdsByParentId = indexes && indexes.childIdsByParentId
+            ? indexes.childIdsByParentId
+            : {};
+    var atomicIndex = resolvedOptions.atomicCollectionIndex;
+    var items = [];
+    var descendantMemo = {};
+    var summary = {
+        strategy: "sourceItems",
+        sourceItemCount: sourceItems.length,
+        collectedCount: 0,
+        skippedAtomicCount: 0,
+        compactRootCount: 0
+    };
+
+    for (var i = 0; i < sourceItems.length; i++) {
+        try {
+            var src = sourceItems[i];
+            if (!src || src.id === null || src.id === undefined) continue;
+            var idKey = String(src.id);
+            if (atomicIndex && atomicIndex.summary && atomicIndex.summary.enabled
+                    && atomicIndex.covered[idKey] && !atomicIndex.root[idKey]
+                    && !atomicIndex.hidden[idKey] && src.kind !== "TextFrame") {
+                atomicIndex.summary.skippedPageItemCount++;
+                summary.skippedAtomicCount++;
+                continue;
+            }
+
+            var pageIndex = _resolvedSourcePageInRange(src, startPage, endPage, skipRenderPagesMap);
+            if (pageIndex < 0) continue;
+
+            var data = {
+                id: idKey,
+                type: src.kind || src.type || null,
+                name: src.name || null,
+                parentId: _resolvedSourceParentId(src),
+                pageIndex: pageIndex,
+                visible: src.visible !== false,
+                hiddenByParent: src.hiddenLayer === true,
+                layerId: src.layerId !== undefined ? src.layerId : null,
+                layerName: src.layerName || null,
+                layerIndex: src.layerIndex !== undefined ? src.layerIndex : null,
+                zOrder: src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : i,
+                anchoredPosition: src.anchoredPosition || null,
+                storyAnchorPlacement: src.storyAnchorPlacement || null,
+                isInline: _resolvedSourceIsInline(src)
+            };
+            if (src.bounds) data.geometricBounds = arrCopy(src.bounds);
+            if (src.absoluteRotationAngle !== null && src.absoluteRotationAngle !== undefined) {
+                data.absoluteRotationAngle = src.absoluteRotationAngle;
+            }
+            if (src.fillColorName) {
+                data.fillColorName = src.fillColorName;
+                data.fillTint = src.fillTint;
+            }
+            if (src.strokeColorName) {
+                data.strokeColorName = src.strokeColorName;
+                data.strokeTint = src.strokeTint;
+                data.strokeWeight = src.strokeWeight;
+                if (src.strokeAlignment !== null && src.strokeAlignment !== undefined) {
+                    data.strokeAlignment = String(src.strokeAlignment);
+                }
+            }
+            if (src.opacity !== null && src.opacity !== undefined) data.opacity = src.opacity;
+            if (src.cornerRadius !== null && src.cornerRadius !== undefined) data.cornerRadius = src.cornerRadius;
+
+            var rootInfo = atomicIndex && atomicIndex.rootInfo ? atomicIndex.rootInfo[idKey] : null;
+            if (rootInfo) {
+                data.atomicTextlessVectorContent = true;
+                data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
+                data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
+                data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
+                data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
+                data.childIds = [];
+                data.childIdsOmittedByAtomicContent = true;
+                atomicIndex.summary.compactRootCount++;
+                summary.compactRootCount++;
+            } else if (data.type === "Group" || src.hasChildren === true) {
+                data.childIds = _resolvedDescendantSourceIdList(src.id, childIdsByParentId, descendantMemo);
+            }
+
+            items.push(data);
+        } catch (eSourceItemCollect) {
+            if (!resolvedOptions.pageItemCollectionWarnings) resolvedOptions.pageItemCollectionWarnings = [];
+            if (resolvedOptions.pageItemCollectionWarnings.length < 50) {
+                resolvedOptions.pageItemCollectionWarnings.push({
+                    index: i,
+                    sourceId: sourceItems[i] && sourceItems[i].id,
+                    message: String(eSourceItemCollect)
+                });
+            }
+        }
+    }
+
+    summary.collectedCount = items.length;
+    resolvedOptions.pageItemSnapshot = summary;
+    return items;
+}
+
 function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems, resolvedOptions) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var items = [];
     var atomicIndex = resolvedOptions ? resolvedOptions.atomicCollectionIndex : null;
+    var sourceItems = _collectPageItemsFromSourceItems(startPage, endPage, skipRenderPagesMap, resolvedOptions);
+    if (sourceItems) return sourceItems;
     var allItems = _resolvedSafePageItemSnapshot(doc, cachedAllItems, resolvedOptions);
     for (var i = 0; i < allItems.length; i++) {
         try {

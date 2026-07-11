@@ -6282,27 +6282,213 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
     return { appendedCount: appended.length, appended: appended };
 }
 
-function _appendUnresolvedVisibleVectorCoverageCandidates(candidates, sourceCoverageDiagnostics, sourceItems) {
+function _appendUnresolvedVisibleVectorCoverageCandidates(
+        candidates, sourceCoverageDiagnostics, sourceItems, objectPlanDiagnostics) {
     if (!candidates || !sourceCoverageDiagnostics || !sourceItems) {
         return { warningCount: 0, warnings: [], appendedCount: 0, appended: [] };
     }
     var infoById = {};
+    var childIdsByParentId = {};
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || src.id === null || src.id === undefined) continue;
         infoById[String(src.id)] = src;
+        if (src.parentId !== null && src.parentId !== undefined) {
+            var parentKey = String(src.parentId);
+            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+            childIdsByParentId[parentKey].push(src.id);
+        }
+    }
+    function sourceHasPlacedVisualInSubtree(sourceId, visiting) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        var key = String(sourceId);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        var kind = String(src.kind || "");
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+        if (src.hasPlacedVisual === true) return true;
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceHasPlacedVisualInSubtree(children[ci], visiting)) return true;
+        }
+        return false;
+    }
+    function collectSamePageSubtree(sourceId, pageIndex, seen, out) {
+        var src = infoById[String(sourceId)];
+        if (!src) return;
+        if (pageIndex !== null && pageIndex !== undefined
+                && src.pageIndex !== null && src.pageIndex !== undefined
+                && Number(src.pageIndex) !== Number(pageIndex)) {
+            return;
+        }
+        _pushUniqueId(out, seen, sourceId);
+        var children = childIdsByParentId[String(sourceId)] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            collectSamePageSubtree(children[ci], pageIndex, seen, out);
+        }
+    }
+    function visibleSourceIdsForCoverageClosure(src) {
+        if (!src) return [];
+        if (sourceHasPlacedVisualInSubtree(src.id)) {
+            var subtree = [];
+            collectSamePageSubtree(src.id, src.pageIndex, {}, subtree);
+            return _sortedNumericIds(subtree.length > 0 ? subtree : [src.id]);
+        }
+        return [src.id];
+    }
+    function appendPlanSummary(plan) {
+        if (!objectPlanDiagnostics || !objectPlanDiagnostics.summary || !plan) return;
+        var summary = objectPlanDiagnostics.summary;
+        function inc(mapName, key) {
+            if (!key) return;
+            if (!summary[mapName]) summary[mapName] = {};
+            if (!summary[mapName][key]) summary[mapName][key] = 0;
+            summary[mapName][key]++;
+        }
+        summary.planCount = Number(summary.planCount || 0) + 1;
+        if (plan.executable === true) summary.executablePlanCount = Number(summary.executablePlanCount || 0) + 1;
+        summary.readyExactClusterCount = Number(summary.readyExactClusterCount || 0) + 1;
+        summary.plansWithVisualSources = Number(summary.plansWithVisualSources || 0) + 1;
+        summary.importReadyPlanCount = Number(summary.importReadyPlanCount || 0) + 1;
+        inc("migrationStatusCounts", plan.migrationStatus || "READY_SOURCE_COVERAGE_CLOSURE");
+        inc("textActionCounts", plan.textAction);
+        inc("visualActionCounts", plan.visualAction);
+        inc("materializationCounts", plan.materialization);
+        inc("placementCounts", plan.placement);
+        inc("coordinateSpaceCounts", plan.coordinateSpace);
+        inc("visualLayerCounts", plan.visualLayer);
+        inc("contractStatusCounts", plan.contractStatus);
+    }
+    function appendCoverageClosureCandidateAndPlan(src, row, sourceIds) {
+        var hasPlacedVisualTree = sourceHasPlacedVisualInSubtree(src.id);
+        var passId = hasPlacedVisualTree
+                ? (String(src.kind || "") === "Group" ? "pass.image_textless_groups" : "pass.image_placed_frames")
+                : "pass.decoration_groups";
+        var ownershipSlot = hasPlacedVisualTree ? "CONTENT_VISUAL_SLOT" : "SHELL_SLOT";
+        var visualAction = hasPlacedVisualTree ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
+        var visualLayer = hasPlacedVisualTree ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
+        var candidatePurpose = hasPlacedVisualTree ? "CONTENT_CANDIDATE" : "SHELL_CANDIDATE";
+        var unit = hasPlacedVisualTree
+                ? (passId === "pass.image_textless_groups" ? "GROUP" : "ITEM")
+                : (sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM");
+        var candidateId = sourceIds.length > 1
+                ? _candidateCompositeId(passId, src.pageIndex, sourceIds,
+                        "source_coverage_closure")
+                : _candidateId(passId, src.id, src.pageIndex);
+        var candidate = {
+            candidateId: candidateId,
+            passId: passId,
+            sourceObjectIds: sourceIds.slice(0),
+            executionSourceObjectIds: sourceIds.slice(0),
+            primarySourceObjectId: src.id,
+            pageIndex: src.pageIndex,
+            kind: src.kind || "VisibleSource",
+            unit: unit,
+            mode: hasPlacedVisualTree ? "ORIGINAL_VISUAL" : "TEXTLESS_CANDIDATE",
+            candidatePurpose: candidatePurpose,
+            bounds: src.bounds || null,
+            parentId: src.parentId,
+            parentKind: src.parentKind || null,
+            composite: sourceIds.length > 1,
+            compositeRole: hasPlacedVisualTree
+                    ? "source_coverage_content_visual_closure"
+                    : "source_coverage_shell_closure",
+            slotRole: hasPlacedVisualTree ? "content_visual_slot" : "shell_slot_only",
+            exportSourceObjectIds: sourceIds.slice(0),
+            exportTargetObjectId: src.id,
+            hiddenVisualSourceObjectIds: [],
+            visualSourceObjectIds: sourceIds.slice(0),
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            editableTextFrameIds: [],
+            hiddenTextFrameIds: [],
+            requiresTextHidden: false,
+            textOwner: "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            ownershipSlot: ownershipSlot,
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: visualAction,
+            visualLayer: visualLayer,
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            zOrder: src.zOrder !== undefined ? src.zOrder : 0,
+            required: true,
+            requiredSlot: ownershipSlot,
+            requiredSlotReason: "source_coverage_closure",
+            reason: "source_coverage_closure"
+        };
+        candidates.push(candidate);
+        var plan = {
+            objectPlanId: "objectPlan.coverageClosure." + candidateId,
+            bundleId: "bundle.coverageClosure." + candidateId,
+            candidateId: candidateId,
+            passId: passId,
+            pageIndex: src.pageIndex,
+            kind: unit,
+            mode: candidate.mode,
+            candidatePurpose: candidatePurpose,
+            compositeRole: candidate.compositeRole,
+            slotRole: candidate.slotRole,
+            primarySourceObjectId: src.id,
+            sourceObjectIds: sourceIds.slice(0),
+            sourceRootObjectIds: [src.id],
+            visualSourceObjectIds: sourceIds.slice(0),
+            exportSourceObjectIds: sourceIds.slice(0),
+            exportTargetObjectId: src.id,
+            hiddenVisualSourceObjectIds: [],
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: visualAction,
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            visualLayer: visualLayer,
+            zOrder: src.zOrder !== undefined ? src.zOrder : 0,
+            reason: "source_coverage_closure:" + String(row.coverageStatus || "UNRESOLVED"),
+            bounds: src.bounds || null,
+            renderSourceBounds: src.bounds || null,
+            cropSourceBounds: src.bounds || null,
+            ownershipSlot: ownershipSlot,
+            migrationStatus: "READY_SOURCE_COVERAGE_CLOSURE",
+            contractStatus: "READY_FOR_STAGE1_IMPORT",
+            executable: true,
+            required: true
+        };
+        if (objectPlanDiagnostics && objectPlanDiagnostics.objectPlans) {
+            objectPlanDiagnostics.objectPlans.push(plan);
+            appendPlanSummary(plan);
+        }
+        return {
+            candidateId: candidateId,
+            objectPlanId: plan.objectPlanId,
+            passId: passId,
+            sourceObjectIds: sourceIds.slice(0),
+            primarySourceObjectId: src.id,
+            pageIndex: src.pageIndex,
+            requiredSlot: ownershipSlot,
+            requiredSlotReason: candidate.requiredSlotReason,
+            reason: candidate.reason
+        };
     }
     function isVisibleVectorSource(src) {
         if (!src) return false;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
         var kind = String(src.kind || "");
         if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval"
-                && kind !== "Polygon" && kind !== "GraphicLine") {
+                && kind !== "Polygon" && kind !== "GraphicLine"
+                && kind !== "Image" && kind !== "PDF" && kind !== "EPS") {
             return false;
         }
         return src.hasVisibleFill === true
                 || src.hasVisibleStroke === true
-                || src.hasCandidateVectorPaint === true;
+                || src.hasCandidateVectorPaint === true
+                || src.hasPlacedVisual === true
+                || kind === "Image" || kind === "PDF" || kind === "EPS";
     }
     var existing = {};
     for (var ci = 0; ci < candidates.length; ci++) {
@@ -6313,20 +6499,52 @@ function _appendUnresolvedVisibleVectorCoverageCandidates(candidates, sourceCove
         existing[key] = true;
     }
     var warnings = [];
+    var appended = [];
+    var claimed = {};
+    for (var ci2 = 0; ci2 < candidates.length; ci2++) {
+        var existingCandidate = candidates[ci2];
+        if (!_candidateCanClaimVisibleSourceSlot(existingCandidate)) continue;
+        var existingIds = [];
+        existingIds = existingIds.concat(existingCandidate.sourceObjectIds || []);
+        existingIds = existingIds.concat(existingCandidate.visualSourceObjectIds || []);
+        existingIds = existingIds.concat(existingCandidate.exportSourceObjectIds || []);
+        existingIds = existingIds.concat(existingCandidate.hiddenVisualSourceObjectIds || []);
+        for (var ei = 0; ei < existingIds.length; ei++) {
+            if (existingIds[ei] !== null && existingIds[ei] !== undefined) {
+                claimed[String(existingIds[ei])] = true;
+            }
+        }
+    }
     var rows = sourceCoverageDiagnostics.sourceObjects || [];
     for (var ri = 0; ri < rows.length; ri++) {
         var row = rows[ri];
         if (!row || row.coverageStatus !== "UNRESOLVED") continue;
         var src = infoById[String(row.sourceObjectId)];
         if (!isVisibleVectorSource(src)) continue;
-        var sourceIds = [src.id];
+        if (claimed[String(src.id)] === true) continue;
+        var sourceIds = visibleSourceIdsForCoverageClosure(src);
+        if (!sourceIds || sourceIds.length === 0) sourceIds = [src.id];
+        var allClaimed = true;
+        for (var si2 = 0; si2 < sourceIds.length; si2++) {
+            if (claimed[String(sourceIds[si2])] !== true) {
+                allClaimed = false;
+                break;
+            }
+        }
+        if (allClaimed) continue;
         var sourceKey = "pass.decoration_groups|" + String(src.pageIndex) + "|" + _sourceSetKey(sourceIds);
         if (existing[sourceKey]) continue;
+        var appendedEntry = appendCoverageClosureCandidateAndPlan(src, row, sourceIds);
+        appended.push(appendedEntry);
+        for (var mi = 0; mi < sourceIds.length; mi++) {
+            claimed[String(sourceIds[mi])] = true;
+        }
         warnings.push({
             code: "source_required_visible_vector_shell",
             severity: "ERROR",
-            candidateId: _candidateId("pass.decoration_groups", src.id, src.pageIndex),
-            passId: "pass.decoration_groups",
+            candidateId: appendedEntry.candidateId,
+            objectPlanId: appendedEntry.objectPlanId,
+            passId: appendedEntry.passId || "pass.decoration_groups",
             sourceObjectIds: sourceIds,
             primarySourceObjectId: src.id,
             pageIndex: src.pageIndex,
@@ -6350,8 +6568,8 @@ function _appendUnresolvedVisibleVectorCoverageCandidates(candidates, sourceCove
     return {
         warningCount: warnings.length,
         warnings: warnings,
-        appendedCount: 0,
-        appended: []
+        appendedCount: appended.length,
+        appended: appended
     };
 }
 
@@ -7039,7 +7257,11 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             sourceItems, executionCandidates, objectPlanDiagnostics, sourceCoverageOptions);
     var unresolvedVisibleVectorCoverageDiagnostics =
             _appendUnresolvedVisibleVectorCoverageCandidates(
-                    executionCandidates, sourceCoverageDiagnostics, sourceItems);
+                    executionCandidates, sourceCoverageDiagnostics, sourceItems, objectPlanDiagnostics);
+    if (unresolvedVisibleVectorCoverageDiagnostics.appendedCount > 0) {
+        sourceCoverageDiagnostics = _buildSourceCoverageDiagnostics(
+                sourceItems, executionCandidates, objectPlanDiagnostics, sourceCoverageOptions);
+    }
     _marker(ctx.outputDir, "03d16g6_plan_warnUnresolvedVisibleVectors");
     _marker(ctx.outputDir, "03d16h0_plan_sourceCoverageBuild");
     try { writeJson(ctx.outputDir + "/source-coverage.json", sourceCoverageDiagnostics); } catch (eSourceCoverageWrite) {}

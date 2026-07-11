@@ -1399,6 +1399,24 @@ function _pageItemContainsAllIds(root, ids) {
 
 function _idArrayContains(ids, id) {
     if (!ids || id === undefined || id === null) return false;
+    if (ids.length > 32) {
+        try {
+            var firstKey = ids.length > 0 && ids[0] !== undefined && ids[0] !== null ? ids[0].toString() : "";
+            var lastKey = ids.length > 0 && ids[ids.length - 1] !== undefined && ids[ids.length - 1] !== null
+                    ? ids[ids.length - 1].toString()
+                    : "";
+            var signature = String(ids.length) + "|" + firstKey + "|" + lastKey;
+            if (!ids._idArrayContainsLookup || ids._idArrayContainsLookupSignature !== signature) {
+                var lookup = {};
+                for (var li = 0; li < ids.length; li++) {
+                    if (ids[li] !== undefined && ids[li] !== null) lookup[ids[li].toString()] = true;
+                }
+                ids._idArrayContainsLookup = lookup;
+                ids._idArrayContainsLookupSignature = signature;
+            }
+            return ids._idArrayContainsLookup[id.toString()] === true;
+        } catch (eLookup) {}
+    }
     var key = id.toString();
     for (var i = 0; i < ids.length; i++) {
         if (ids[i] !== undefined && ids[i] !== null && ids[i].toString() === key) return true;

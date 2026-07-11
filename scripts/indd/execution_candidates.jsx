@@ -517,12 +517,21 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     if (objectPlan.zOrder !== undefined) candidate.zOrder = objectPlan.zOrder;
     _applyDroppedObjectPlanExecutionShape(candidate, objectPlan);
     candidate.composite = candidate.sourceObjectIds && candidate.sourceObjectIds.length > 1;
-    if (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0) {
+    if (!_shouldPreserveObjectPlanCandidateId(objectPlan)
+            && candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0) {
         candidate.candidateId = candidate.composite
                 ? _candidateCompositeId(candidate.passId, candidate.pageIndex,
                         candidate.sourceObjectIds, candidate.slotRole || candidate.suffix)
                 : _candidateId(candidate.passId, candidate.sourceObjectIds[0], candidate.pageIndex);
     }
+}
+
+function _shouldPreserveObjectPlanCandidateId(objectPlan) {
+    if (!objectPlan || !objectPlan.candidateId) return false;
+    return objectPlan.materialization === "PAGE_PLANE_PNG"
+            || objectPlan.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
+            || objectPlan.slotRole === "page_background_plane"
+            || objectPlan.compositeRole === "page_background_plane";
 }
 
 function _applyDroppedObjectPlanExecutionShape(candidate, objectPlan) {

@@ -125,11 +125,13 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         if (!candidate) return 0;
         var score = exactContentOwnerScore(candidate);
         if (candidate.slotRole === "background_shell_slot") score += 35;
+        if (candidate.slotRole === "page_background_plane") score += 45;
         if (candidate.visualLayer === "PAGE_BACKGROUND") score += 30;
         if (candidate.slotRole === "page_textless_graphic_group") score += 25;
         if (candidate.slotRole === "textless_group_visual_slot") score += 20;
         if (candidate.slotRole === "shell_slot_only") score += 10;
         if (candidate.visualAction === "PLACE_FLOATING_PNG") score += 4;
+        if (candidate.visualAction === "PLACE_PAGE_BACKGROUND_PNG") score += 5;
         if (candidate.visualAction === "PLACE_TEXT_SHELL") score += 3;
         return score;
     }

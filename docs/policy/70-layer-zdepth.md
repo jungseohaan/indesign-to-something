@@ -287,6 +287,23 @@ Default HWPX strata:
   current applied page bounds. Intersecting children are part of the same
   `BACKGROUND` slot; non-intersecting children remain source ancestry only and
   must be hidden from the current page-local fragment render.
+- When multiple page-local `BACKGROUND` shell owners on the same page are all
+  behind text, own no editable text, and are already declared as executable
+  `PAGE_BACKGROUND` / `SHELL_SLOT` plans, Stage 1 may fold them into one
+  page-plane owner:
+  `materialization=PAGE_PLANE_PNG`,
+  `visualAction=PLACE_PAGE_BACKGROUND_PNG`,
+  `placement=FLOATING`, `coordinateSpace=PAGE`, and `visualLayer=PAGE_BACKGROUND`.
+  The page-plane plan owns the union of the member plans' visible source ids and
+  explicit hidden child ids. Member plans must be retained only as absorbed
+  provenance with `visualAction=DROP_VISUAL` and an `absorbedByObjectPlanId`
+  pointing to the page-plane plan. Executors must not independently render the
+  absorbed member plans.
+- A page-plane background PNG is an execution grouping, not a new heuristic
+  ownership signal. Stage 1 may create it only from existing source-backed
+  `BACKGROUND` ObjectPlans; it must not include `CONTENT`, `DECORATION`
+  overlays, inline/story-flow material, HWPX-owned text, or complete PNG text
+  owners merely because they visually sit behind other content.
 - A background/decoration object's placement bounds may extend outside the page
   because the source artwork intentionally bleeds or lives partly on the
   pasteboard. Out-of-page bounds alone do not prove that a source fragment is

@@ -1051,6 +1051,10 @@ function _runRenderPhases(doc, ctx, allItems) {
         objectPlans: ctx.extractionPlan && ctx.extractionPlan.objectPlans
                 ? ctx.extractionPlan.objectPlans
                 : [],
+        sourceItems: ctx.extractionPlan && ctx.extractionPlan.sourceItems
+                ? ctx.extractionPlan.sourceItems
+                : [],
+        collectPageItemsFromSource: ctx.perfMode !== "diagnostics" && ctx.perfMode !== "debug",
         executionCandidates: ctx.extractionPlan && ctx.extractionPlan.executionCandidates
                 ? ctx.extractionPlan.executionCandidates
                 : [],
