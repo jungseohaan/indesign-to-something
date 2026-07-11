@@ -801,6 +801,9 @@ pub async fn run_extraction(
                             format!("스타일/색상 수집 중... ({}페이지)", total)
                         }
                         "resolved_styles" => "스타일/색상 수집 중...".to_string(),
+                        "resolved_stories" if current > 0 && total > 0 && !desc.is_empty() => {
+                            format!("스토리 수집 중... ({}/{}) {}", current, total, desc)
+                        }
                         "resolved_stories" if current > 0 && total > 0 => {
                             format!("스토리 수집 중... ({}/{})", current, total)
                         }

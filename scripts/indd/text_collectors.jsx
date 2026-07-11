@@ -623,9 +623,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
         }
         collected++;
         collectStats.stories++;
-        if (collected % 10 === 0) {
-            writeProgress(outputDir, "resolved_stories", collected, totalStories);
-        }
+        writeProgress(outputDir, "resolved_stories", collected, totalStories,
+                "story=" + story.id);
         var storyData = {
             id: story.id.toString(),
             length: story.length,
@@ -652,6 +651,10 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
             var para = paras[p];
             var correctionDescriptor = paragraphCharacterCorrectionDescriptorCached(para);
             var needsCharacterCorrection = !!(correctionDescriptor && correctionDescriptor.needs);
+            if ((p % 25) === 0) {
+                writeProgress(outputDir, "resolved_stories", collected, totalStories,
+                        "story=" + story.id + " para=" + (p + 1) + "/" + paraLimit);
+            }
             collectStats.paragraphs++;
             var paraStyleNameForStats = "[Unknown]";
             try { paraStyleNameForStats = para.appliedParagraphStyle.name; } catch (eStyleStatsName) {}
@@ -788,7 +791,9 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                     try { runData.fontStyle = rng.fontStyle; } catch (e) {}
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
-                    if (needsCharacterCorrection) {
+                    var shouldRunCorrection = needsCharacterCorrection
+                            && correctionDescriptorNeedsRunScan(correctionDescriptor, runData.text || "");
+                    if (shouldRunCorrection) {
                         // GREP/Nested 스타일 색상 감지: 첫 번째 비제어 문자의 fillColor 확인
                         // textStyleRanges는 GREP 색상을 반영하지 않으므로 characters로 보정
                         try {
@@ -848,12 +853,12 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
 	                                var partRun = {};
 	                                for (var rk in runData) { partRun[rk] = runData[rk]; }
 	                                partRun.text = parts[pi2];
-                                if (needsCharacterCorrection) {
+                                if (shouldRunCorrection) {
                                     collectStats.splitCalls++;
                                     collectStats.splitCorrectionCalls++;
                                     collectStats.splitInputChars += partRun.text ? partRun.text.length : 0;
                                     var splitStartMs1 = (new Date()).getTime();
-	                                    var partSplits = splitRunByStoryChars(story, rng, partRun, para, needsCharacterCorrection, correctionDescriptor);
+	                                    var partSplits = splitRunByStoryChars(story, rng, partRun, para, shouldRunCorrection, correctionDescriptor);
                                     collectStats.splitMs += (new Date()).getTime() - splitStartMs1;
                                     collectStats.splitOutputRuns += partSplits.length;
                                     if (collectStats.correctionStyles[paraStyleNameForStats]) {
@@ -888,12 +893,12 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                         }
 	                    } else {
 	                        // GREP/중첩 스타일 보정: story.characters로 문자별 색상/크기 확인
-                        if (needsCharacterCorrection) {
+                        if (shouldRunCorrection) {
                             collectStats.splitCalls++;
                             collectStats.splitCorrectionCalls++;
                             collectStats.splitInputChars += runData.text ? runData.text.length : 0;
                             var splitStartMs2 = (new Date()).getTime();
-	                            var splitRuns = splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrection, correctionDescriptor);
+	                            var splitRuns = splitRunByStoryChars(story, rng, runData, para, shouldRunCorrection, correctionDescriptor);
                             collectStats.splitMs += (new Date()).getTime() - splitStartMs2;
                             collectStats.splitOutputRuns += splitRuns.length;
                             if (collectStats.correctionStyles[paraStyleNameForStats]) {
