@@ -310,6 +310,7 @@ public class ResolvedDataReader {
         tf.hiddenByParent(getBool(o, "hiddenByParent", tf.hiddenByParent()));
         tf.masterSourceId(getString(o, "masterSourceId"));
         tf.isMasterInstance(getBool(o, "isMasterInstance", false));
+        tf.masterSpecialType(getString(o, "masterSpecialType"));
         tf.layerId(getString(o, "layerId"));
         tf.layerName(getString(o, "layerName"));
         tf.layerIndex(getInt(o, "layerIndex", -1));

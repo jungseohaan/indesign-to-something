@@ -15,6 +15,19 @@ function _resultExportId(item) {
     ].join(":");
 }
 
+function _pushUniqueExtractionResultRow(results, seen, row) {
+    if (!row) return;
+    var key = row.exportId || [
+        row.type || "unknown",
+        row.id !== undefined ? row.id : "-",
+        row.pageIndex !== undefined ? row.pageIndex : "-",
+        row.file || "-"
+    ].join(":");
+    if (seen[key]) return;
+    seen[key] = true;
+    results.push(row);
+}
+
 function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames,
                                  renderedGraphicFrames, renderedVectorFrames,
                                  renderedMasterGraphics, tfShellFrames,
@@ -76,9 +89,10 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
         };
     }
     var results = [];
+    var resultSeen = {};
     for (var i = 0; i < renderedFloatingItems.length; i++) {
         var row = summarize(renderedFloatingItems[i]);
-        if (row) results.push(row);
+        _pushUniqueExtractionResultRow(results, resultSeen, row);
     }
     var extractionResults = {
         schemaVersion: 1,

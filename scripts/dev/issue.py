@@ -143,6 +143,16 @@ def run(cmd: List[str], *, cwd: Path = REPO_ROOT, dry_run: bool = False) -> None
     subprocess.run(cmd, cwd=str(cwd), check=True)
 
 
+def try_run(cmd: List[str], *, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def load_module(path: Path, name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -158,6 +168,51 @@ def shell_quote(value: str) -> str:
     if all(ch.isalnum() or ch in "._/-:=+" for ch in value):
         return value
     return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def launch_indesign(app_name: str, issue_dir: Path) -> None:
+    prelaunch = f'tell application "{app_name}" to activate\n'
+    prelaunch_file = issue_dir / "_prelaunch.applescript"
+    prelaunch_file.write_text(prelaunch, encoding="utf-8")
+    try_run(["osascript", str(prelaunch_file)])
+
+
+def ensure_indesign_running(app_name: str, issue_dir: Path, dry_run: bool = False) -> None:
+    if dry_run:
+        return
+
+    already_running = try_run(["pgrep", "-x", app_name]).returncode == 0
+    if not already_running:
+        launch_indesign(app_name, issue_dir)
+        time.sleep(10)
+
+    probe = (
+        f'using terms from application "{app_name}"\n'
+        f'    tell application "{app_name}" to get name\n'
+        f'end using terms from\n'
+    )
+    probe_file = issue_dir / "_probe.applescript"
+    probe_file.write_text(probe, encoding="utf-8")
+
+    for attempt in range(10):
+        result = try_run(["osascript", str(probe_file)])
+        if result.returncode == 0:
+            return
+        if attempt == 5:
+            print("[issue] InDesign SDEF probe 5회 실패 → hung 의심, killall 후 재기동")
+            try_run(["killall", app_name])
+            time.sleep(3)
+            launch_indesign(app_name, issue_dir)
+            time.sleep(15)
+        else:
+            wait = 5 if attempt == 0 else 9
+            time.sleep(wait)
+
+    last = try_run(["osascript", str(probe_file)])
+    stderr = (last.stderr or "").strip()
+    raise SystemExit(
+        f"InDesign AppleScript dictionary probe failed after retries: {stderr or 'unknown error'}"
+    )
 
 
 def write_applescript(
@@ -196,8 +251,18 @@ def write_applescript(
     script = f'''using terms from application "{app_name}"
     tell application "{app_name}"
         activate
+        repeat with _preflightAttempt from 1 to 30
+            try
+                do script "app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT; app.scriptPreferences.enableRedraw = false; 1" language javascript
+                exit repeat
+            on error
+                delay 2
+            end try
+        end repeat
+        set _jsxSource to read POSIX file "{EXTRACT_JSX}"
+        set _jsxArgs to {{{quoted_args}}}
         with timeout of 3600 seconds
-            do script (read POSIX file "{EXTRACT_JSX}") language javascript with arguments {{{quoted_args}}}
+            do script _jsxSource language javascript with arguments _jsxArgs
         end timeout
     end tell
 end using terms from
@@ -650,6 +715,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"[issue] extract-local-page={extract_range['extractStartPage']}..{extract_range['extractEndPage']} mode={extract_range['pageRangeMode']}")
     print(f"[issue] idml-cache={idml_cache_restore.get('reason')} hit={idml_cache_restore.get('hit')} dir={idml_cache_restore.get('cacheDir')}")
     print(f"[issue] output={issue_dir}")
+    ensure_indesign_running(args.app, issue_dir, args.dry_run)
     run(["osascript", str(script_path)], dry_run=args.dry_run)
 
     if not args.dry_run:

@@ -4,6 +4,12 @@ use tokio::process::Command;
 use super::find_java;
 use crate::extract_cache;
 
+fn sibling_idml_path_for_indd(indd: &std::path::Path) -> Option<std::path::PathBuf> {
+    let stem = indd.file_stem()?.to_string_lossy();
+    let parent = indd.parent()?;
+    Some(parent.join(format!("{}.idml", stem)))
+}
+
 // ─────────────────────────────────────────────────────────────────
 // InDesign (.indd) Extraction
 // ─────────────────────────────────────────────────────────────────
@@ -45,30 +51,9 @@ pub async fn extract_indd(
         .unwrap_or_else(|| "spread_chunks".to_string())
         .to_lowercase();
 
-    // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵 (기존 동작 유지)
-    //    단, 디버그 페이지 범위가 지정되면 항상 신규 추출.
+    // 0. INDD 경로 준비. 같은 폴더의 같은 basename IDML은 JSX 단계에서
+    //    IDML export만 대체한다. INDD open/resolved/ObjectPlan 추출은 계속 수행한다.
     let indd = std::path::Path::new(&indd_path);
-    if !debug_range {
-        if let Some(indd_parent) = indd.parent() {
-            let sibling_idml = indd_parent
-                .join(indd.file_stem().unwrap_or_default())
-                .with_extension("idml");
-            let sibling_resolved = indd_parent.join("resolved.json");
-
-            if sibling_idml.exists() && sibling_resolved.exists() {
-                crate::indesign::emit_progress_pub(&app, "cached", "기존 IDML/resolved 사용 중...");
-                return Ok(crate::indesign::InddExtractResult {
-                    idml_path: sibling_idml.to_string_lossy().to_string(),
-                    resolved_json_path: Some(sibling_resolved.to_string_lossy().to_string()),
-                    preview_pdf_path: None,
-                    extraction_plan_path: None,
-                    extraction_results_path: None,
-                    temp_dir: indd_parent.to_string_lossy().to_string(),
-                    extract_stats: None,
-                });
-            }
-        }
-    }
 
     // 1. INDD 파일 존재 확인
     if !std::path::Path::new(&indd_path).exists() {
@@ -103,6 +88,7 @@ pub async fn extract_indd(
         &pm_normalized,
         sk,
         &extract_mode_normalized,
+        sibling_idml_path_for_indd(indd).as_deref(),
     );
 
     if !debug_range {

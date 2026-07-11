@@ -5,8 +5,9 @@
 //
 // 캐시 키:
 //   - INDD 절대경로 + mtime + size
+//   - INDD 옆 같은 basename IDML의 mtime + size (있으면 IDML export를 생략하므로)
 //   - Links 폴더 매니페스트 (파일별 mtime + size)
-//   - extract_indd.jsx 파일의 mtime + size (스크립트 변경 시 자동 무효화)
+//   - extract_indd.jsx + scripts/indd/*.jsx 파일의 mtime + size (스크립트 변경 시 자동 무효화)
 //   - conversion-config.json 의 mtime + size (config 변경 시 자동 무효화)
 // 위 값들을 SHA-256으로 해시한 hex 문자열.
 //
@@ -56,25 +57,69 @@ fn hash_file_meta(hasher: &mut Sha256, label: &str, path: &Path) {
     hasher.update(b"|");
 }
 
-fn file_meta_fingerprint(path: &Path) -> Option<String> {
-    let meta = std::fs::metadata(path).ok()?;
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+fn hash_extractor_module_dir(hasher: &mut Sha256, label: &str, dir: &Path) {
+    hasher.update(label.as_bytes());
+    hasher.update(b":");
+    if !dir.is_dir() {
+        hasher.update(b"missing|");
+        return;
+    }
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().map(|ext| ext == "jsx").unwrap_or(false) {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    for path in files {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        hash_file_meta(hasher, &format!("module:{}", name), &path);
+    }
+    hasher.update(b"//");
+}
+
+fn hash_extractor_sources(hasher: &mut Sha256, jsx_path: &Path) {
+    hash_file_meta(hasher, "jsx", jsx_path);
+    let Some(parent) = jsx_path.parent() else {
+        hasher.update(b"extractor_module_dir:none|");
+        return;
+    };
+
+    let candidates = [
+        parent.join("indd"),
+        parent.join("scripts").join("indd"),
+        parent
+            .parent()
+            .map(|p| p.join("scripts").join("indd"))
+            .unwrap_or_else(|| parent.join("..").join("scripts").join("indd")),
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for dir in candidates {
+        let key = dir.to_string_lossy().to_string();
+        if seen.insert(key) {
+            hash_extractor_module_dir(hasher, "extractor_module_dir", &dir);
+        }
+    }
+}
+
+fn extractor_source_fingerprint(jsx_path: &Path) -> Option<String> {
+    std::fs::metadata(jsx_path).ok()?;
     let mut hasher = Sha256::new();
-    hasher.update(path.to_string_lossy().as_bytes());
+    hasher.update(jsx_path.to_string_lossy().as_bytes());
     hasher.update(b"|");
-    hasher.update(mtime.to_le_bytes());
-    hasher.update(b"|");
-    hasher.update(meta.len().to_le_bytes());
+    hash_extractor_sources(&mut hasher, jsx_path);
     Some(format!("{:x}", hasher.finalize()))
 }
 
 pub fn write_extractor_fingerprint(cache_key: &str, jsx_path: &Path) {
-    let Some(fingerprint) = file_meta_fingerprint(jsx_path) else {
+    let Some(fingerprint) = extractor_source_fingerprint(jsx_path) else {
         return;
     };
     let Ok(dir) = cache_entry_dir(cache_key) else {
@@ -84,7 +129,7 @@ pub fn write_extractor_fingerprint(cache_key: &str, jsx_path: &Path) {
 }
 
 pub fn is_extractor_fingerprint_current(cache_key: &str, jsx_path: &Path) -> bool {
-    let Some(current) = file_meta_fingerprint(jsx_path) else {
+    let Some(current) = extractor_source_fingerprint(jsx_path) else {
         return false;
     };
     let Ok(dir) = cache_entry_dir(cache_key) else {
@@ -142,6 +187,7 @@ pub fn compute_cache_key(
     perf_mode: &str,
     skip_pdf: bool,
     extract_mode: &str,
+    sibling_idml_path: Option<&Path>,
 ) -> String {
     let mut hasher = Sha256::new();
 
@@ -154,7 +200,12 @@ pub fn compute_cache_key(
     hasher.update(b"|");
 
     hash_file_meta(&mut hasher, "indd", indd_path);
-    hash_file_meta(&mut hasher, "jsx", jsx_path);
+    if let Some(idml) = sibling_idml_path {
+        hash_file_meta(&mut hasher, "sibling_idml", idml);
+    } else {
+        hasher.update(b"sibling_idml:none|");
+    }
+    hash_extractor_sources(&mut hasher, jsx_path);
 
     if let Some(cfg) = config_path {
         hash_file_meta(&mut hasher, "config", cfg);

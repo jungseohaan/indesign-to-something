@@ -23,8 +23,10 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     var hasMoreSpecificClosedTextOwningShellCache = {};
     var descendantClosedTextShellRootsCache = {};
     var sourceCanBeDirectSiblingTextShellCache = {};
+    var sourceCanBePageSiblingTextShellCache = {};
     var sourceCanBeNativeParentTextShellCache = {};
     var matchingDirectSiblingTextFrameIdsCache = {};
+    var matchingPageSiblingTextFrameIdsCache = {};
     var matchingDescendantSiblingTextFrameIdsCache = {};
     var matchingDirectSiblingShellSourceIdsCache = {};
     var parentEditableTextDescendantsCache = {};
@@ -813,6 +815,84 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         return matchingDescendantSiblingTextFrameIdsCache[cacheKey];
     }
 
+    function sourceCanBePageSiblingTextShell(shellSourceId) {
+        var cacheKey = String(shellSourceId);
+        if (sourceCanBePageSiblingTextShellCache.hasOwnProperty(cacheKey)) {
+            return sourceCanBePageSiblingTextShellCache[cacheKey];
+        }
+        var src = sourceInfoById[String(shellSourceId)];
+        if (!src) {
+            sourceCanBePageSiblingTextShellCache[cacheKey] = false;
+            return false;
+        }
+        var kind = String(src.kind || "");
+        if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") {
+            sourceCanBePageSiblingTextShellCache[cacheKey] = false;
+            return false;
+        }
+        if (sourceInfoIsInlineFlow(src)
+                || sourceHasInlineAnchorAncestor(shellSourceId)
+                || sourceHasEditableTextDescendant(shellSourceId)
+                || sourceHasPlacedVisualSource(shellSourceId)
+                || !sourceHasVisiblePaint(src)) {
+            sourceCanBePageSiblingTextShellCache[cacheKey] = false;
+            return false;
+        }
+        if (src.parentId !== null && src.parentId !== undefined) {
+            sourceCanBePageSiblingTextShellCache[cacheKey] = false;
+            return false;
+        }
+        sourceCanBePageSiblingTextShellCache[cacheKey] = true;
+        return true;
+    }
+
+    function pageSiblingTextFrameFitScore(shellSourceId, textFrameSourceId) {
+        var shellBounds = sourceBounds(shellSourceId);
+        var tfBounds = sourceBounds(textFrameSourceId);
+        var tfArea = boundsArea(tfBounds);
+        var shellArea = boundsArea(shellBounds);
+        if (!shellBounds || !tfBounds || tfArea <= 0 || shellArea <= 0) return 0;
+        var intersection = boundsOverlapArea(shellBounds, tfBounds);
+        if (intersection <= 0) return 0;
+        var tfCover = intersection / tfArea;
+        var shellCover = intersection / shellArea;
+        if (tfCover < 0.75) return 0;
+        if (shellCover < 0.45) return 0;
+        if (shellArea > tfArea * 6.0) return 0;
+        return Math.min(tfCover, shellCover);
+    }
+
+    function matchingPageSiblingTextFrameIds(shellSourceId, pageIndex) {
+        var cacheKey = String(shellSourceId) + "|" + String(pageIndex);
+        if (matchingPageSiblingTextFrameIdsCache.hasOwnProperty(cacheKey)) {
+            return matchingPageSiblingTextFrameIdsCache[cacheKey];
+        }
+        var shellSource = sourceInfoById[String(shellSourceId)];
+        if (!shellSource || !sourceCanBePageSiblingTextShell(shellSourceId)) {
+            matchingPageSiblingTextFrameIdsCache[cacheKey] = [];
+            return [];
+        }
+        var shellZ = shellSource.zOrder !== null && shellSource.zOrder !== undefined
+                ? Number(shellSource.zOrder)
+                : null;
+        var matchingTextFrameIds = [];
+        for (var ti = 0; ti < sourceBuckets.editableTextFrames.length; ti++) {
+            var textFrame = sourceBuckets.editableTextFrames[ti];
+            if (!textFrame || textFrame.pageIndex !== pageIndex) continue;
+            if (String(textFrame.layerName || "") !== String(shellSource.layerName || "")) continue;
+            var tfZ = textFrame.zOrder !== null && textFrame.zOrder !== undefined
+                    ? Number(textFrame.zOrder)
+                    : null;
+            if (shellZ !== null && tfZ !== null) {
+                if (!(shellZ < tfZ && (tfZ - shellZ) <= 16)) continue;
+            }
+            if (pageSiblingTextFrameFitScore(shellSourceId, textFrame.id) <= 0) continue;
+            matchingTextFrameIds.push(textFrame.id);
+        }
+        matchingPageSiblingTextFrameIdsCache[cacheKey] = _sortedNumericIds(matchingTextFrameIds);
+        return matchingPageSiblingTextFrameIdsCache[cacheKey];
+    }
+
     function editableTextDescendantsUnderParent(parentId, pageIndex) {
         var cacheKey = String(parentId) + "|" + String(pageIndex);
         if (parentEditableTextDescendantsCache.hasOwnProperty(cacheKey)) {
@@ -1175,6 +1255,56 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                     suffix: "direct_sibling_text_shell_slot"
                 });
             }
+        }
+    }
+
+    function appendPageSiblingTextShellCandidates() {
+        var generated = {};
+        var shellSources = sourceBuckets.shellShapes || [];
+        for (var si = 0; si < shellSources.length; si++) {
+            var shellSource = shellSources[si];
+            if (!sourceCanBePageSiblingTextShell(shellSource.id)) continue;
+            var matchingTextFrameIds = matchingPageSiblingTextFrameIds(shellSource.id, shellSource.pageIndex);
+            if (matchingTextFrameIds.length !== 1) continue;
+
+            var siblingId = matchingTextFrameIds[0];
+            var shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, [siblingId]);
+            if (!shellExportIds || shellExportIds.length === 0) continue;
+            var sourceObjectIds = _sortedNumericIds(shellExportIds.concat([siblingId]));
+            var sourceKey = _sourceSetKey(sourceObjectIds);
+            if (generated[sourceKey]) continue;
+            generated[sourceKey] = true;
+
+            var shellItem = planCache && planCache.domItem ? planCache.domItem(shellSource.id) : null;
+            if (!shellItem) shellItem = { id: shellSource.id };
+            upsertDecorationShellCandidate(shellItem, {
+                sourceObjectIds: sourceObjectIds,
+                pageIndex: shellSource.pageIndex,
+                kind: shellSource.kind,
+                unit: "GROUP_OR_ITEM",
+                mode: "TEXTLESS_CANDIDATE",
+                candidatePurpose: "SHELL_CANDIDATE",
+                primarySourceObjectId: shellSource.id,
+                bounds: shellSource.bounds,
+                parentId: shellSource.parentId,
+                parentKind: shellSource.parentKind,
+                composite: true,
+                compositeRole: "page_sibling_text_shell_slot",
+                slotRole: "direct_child_shell_slot",
+                exportSourceObjectIds: shellExportIds,
+                exportTargetObjectId: shellSource.id,
+                hiddenVisualSourceObjectIds: [],
+                visualSourceObjectIds: shellExportIds.slice(0),
+                editableTextFrameIds: [siblingId],
+                hiddenTextFrameIds: [siblingId],
+                requiresTextHidden: true,
+                textOwner: "hwpx_tf",
+                containsEditableText: false,
+                completePngTextAllowed: false,
+                pageSiblingTextShellSlot: true,
+                zOrder: shellSource.zOrder,
+                suffix: "page_sibling_text_shell_slot"
+            });
         }
     }
 
@@ -1600,6 +1730,8 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     markSourceDeclaredShellStep("03d08b_sourceDeclared_nativeParentTextShells");
     appendDirectSiblingTextShellCandidates();
     markSourceDeclaredShellStep("03d08c_sourceDeclared_directSiblingTextShells");
+    appendPageSiblingTextShellCandidates();
+    markSourceDeclaredShellStep("03d08c1_sourceDeclared_pageSiblingTextShells");
     appendDescendantSiblingTextShellCandidates();
     markSourceDeclaredShellStep("03d08d_sourceDeclared_descendantSiblingTextShells");
     appendInlineTextlessSiblingDecorationCandidates();

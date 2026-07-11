@@ -117,6 +117,9 @@ public final class TextFlowDiagnosticsBuilder {
             if (isAbsorbedTextStyleAnchor(ctx, anchoredObjectId)) {
                 return null;
             }
+            if (!isTextFlowInlineSlot(ctx, anchoredObjectId)) {
+                return null;
+            }
             out.kind = "INLINE_SLOT";
             out.anchoredObjectId = anchoredObjectId;
             applySourceMetadata(ctx, out, anchoredObjectId);
@@ -170,6 +173,7 @@ public final class TextFlowDiagnosticsBuilder {
         for (IdmlInlineSlot slot : missing) {
             int index = insertIndexForTextOffset(paragraph.runs, slot.textOffset);
             TextFlowDiagnostics.TextFlowRun run = buildIdmlInlineRun(ctx, slot.anchorObjectId);
+            if (run == null) continue;
             paragraph.runs.add(Math.max(0, Math.min(index + inserted, paragraph.runs.size())), run);
             inserted++;
         }
@@ -220,6 +224,7 @@ public final class TextFlowDiagnosticsBuilder {
 
     private static TextFlowDiagnostics.TextFlowRun buildIdmlInlineRun(ResolvedBuildContext ctx, int anchorObjectId) {
         if (isAbsorbedTextStyleAnchor(ctx, anchorObjectId)) return null;
+        if (!isTextFlowInlineSlot(ctx, anchorObjectId)) return null;
         TextFlowDiagnostics.TextFlowRun out = new TextFlowDiagnostics.TextFlowRun();
         out.kind = "INLINE_SLOT";
         out.anchoredObjectId = anchorObjectId;
@@ -240,6 +245,28 @@ public final class TextFlowDiagnosticsBuilder {
         return plan != null
                 && plan.placement == Placement.INLINE
                 && plan.visualAction == VisualAction.ABSORB_TEXT_STYLE;
+    }
+
+    private static boolean isTextFlowInlineSlot(ResolvedBuildContext ctx, int anchorObjectId) {
+        ObjectPlan plan = findPlanForAnchor(ctx, anchorObjectId);
+        if (plan != null) {
+            return plan.placement == Placement.INLINE;
+        }
+        if (ctx == null || ctx.resolvedData == null) {
+            return true;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(anchorObjectId));
+        if (item == null) {
+            return true;
+        }
+        String placement = safe(item.storyAnchorPlacement()).toUpperCase(java.util.Locale.ROOT);
+        String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(java.util.Locale.ROOT);
+        if ("FLOATING_ANCHORED".equals(placement) || "ANCHORED".equals(anchoredPosition)) {
+            return false;
+        }
+        return "INLINE".equals(placement)
+                || "INLINE_POSITION".equals(anchoredPosition)
+                || "INLINEPOSITION".equals(anchoredPosition);
     }
 
     private static boolean paragraphHasInlineAnchor(TextFlowDiagnostics.TextFlowParagraph paragraph, int anchorObjectId) {

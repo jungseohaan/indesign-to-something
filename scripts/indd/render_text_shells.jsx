@@ -240,6 +240,31 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         } catch (e) {}
     }
 
+    function _decoPerfWriteProgress(index, total, candidate, status) {
+        try {
+            writeJson(outputDir + "/_deco_group_progress_" + _decoPerfSafePassId() + ".json", {
+                schemaVersion: 1,
+                passId: decoPerfStats.passId,
+                status: status || "running",
+                index: index,
+                total: total,
+                candidateId: candidate ? candidate.candidateId || null : null,
+                passCandidateId: candidate ? candidate.passId || null : null,
+                primarySourceObjectId: candidate ? candidate.primarySourceObjectId || null : null,
+                exportTargetObjectId: candidate && candidate.exportTargetObjectId !== undefined
+                        ? candidate.exportTargetObjectId
+                        : null,
+                sourceObjectIds: candidate ? candidate.sourceObjectIds || [] : [],
+                exportSourceObjectIds: candidate ? candidate.exportSourceObjectIds || [] : [],
+                visualAction: candidate ? candidate.visualAction || null : null,
+                materialization: candidate ? candidate.materialization || null : null,
+                ownershipSlot: candidate ? candidate.ownershipSlot || null : null,
+                slotRole: candidate ? candidate.slotRole || null : null,
+                compositeRole: candidate ? candidate.compositeRole || null : null
+            });
+        } catch (e) {}
+    }
+
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────
 
     function _decoSourceSetFileHash(ids) {
@@ -1852,6 +1877,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     for (var soi = 0; soi < plannedItems.length; soi++) {
         var slotPlan = plannedItems[soi].candidate;
         var slotItem = plannedItems[soi].item;
+        _decoPerfWriteProgress(soi + 1, plannedItems.length, slotPlan, "planned_loop_start");
         if (!slotPlan || !slotItem) {
             if (slotPlan) {
                 _recordPlannedShellRenderDiagnosticForCandidate(
@@ -1877,11 +1903,14 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         var isPageTextlessGraphicGroup =
                 slotPlan.passId === "pass.page_textless_graphic_groups"
                 && slotPlan.candidatePurpose === "CONTENT_CANDIDATE";
+        var isGenericPlannedPngCandidate = slotPlan.candidateId !== null
+                && slotPlan.candidateId !== undefined;
         if (!isExplicitSlotOnly && !isPageLocalBackgroundShape
                 && !isPlannedVectorShape
                 && !isGraphicOnlyCompositeShell && !isTextlessGroupVisualSlot
                 && !isTextShellComposite
-                && !isPageTextlessGraphicGroup) continue;
+                && !isPageTextlessGraphicGroup
+                && !isGenericPlannedPngCandidate) continue;
         var slotPage = null;
         try { slotPage = slotItem.parentPage; } catch (eSlotPage) {}
         slotPage = _pageForPlannedItem(plannedItems[soi], slotPage);
@@ -1914,6 +1943,23 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 reason: "decoration_group",
                 textOwner: "none"
             };
+            if (slotPlan.textAction === "OWNED_BY_PNG") {
+                slotOwnershipOpts.textOwner = "indesign_png";
+                slotOwnershipOpts.editableTextFrameIds = _sortedNumericIds(
+                        slotPlan.ownedTextFrameIds || slotPlan.editableTextFrameIds || []);
+                slotOwnershipOpts.containsText = true;
+                slotOwnershipOpts.containsEditableText =
+                        slotOwnershipOpts.editableTextFrameIds.length > 0;
+                slotOwnershipOpts.reason = "planned_png_owned_text_visual";
+            } else if (slotPlan.textAction === "OWNED_BY_HWPX_TEXT"
+                    || slotPlan.visualAction === "PLACE_TEXT_SHELL") {
+                slotOwnershipOpts.textOwner = "hwpx_tf";
+                slotOwnershipOpts.editableTextFrameIds = _sortedNumericIds(
+                        slotPlan.ownedTextFrameIds || slotPlan.editableTextFrameIds || []);
+                slotOwnershipOpts.containsText = false;
+                slotOwnershipOpts.containsEditableText = false;
+                slotOwnershipOpts.reason = "planned_textless_visual";
+            }
             if (isGraphicOnlyCompositeShell) {
                 slotOwnershipOpts.containsText = false;
                 slotOwnershipOpts.containsEditableText = false;
@@ -1959,6 +2005,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 slotOwnershipOpts.reason = "slot_only_textless_shell";
             }
             if (_renderPlannedSourceSetCompositeShell(slotPlan, slotPage, slotOwnershipOpts)) {
+                _decoPerfWriteProgress(soi + 1, plannedItems.length, slotPlan, "planned_loop_done");
                 continue;
             }
             _decoRender(slotItem, slotPage, null, slotOwnershipOpts);
@@ -1970,8 +2017,11 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     "planned_shell_render_exception",
                     { error: String(eSlotOnlyRender) });
         }
+        _decoPerfWriteProgress(soi + 1, plannedItems.length, slotPlan, "planned_loop_done");
     }
     _decoPerfEndPhase("planned_loop", _perfPhaseStartedAt);
+    _decoPerfWrite();
+    return { frames: results, childIds: decoChildIds, textlessShellDiagnostics: textlessShellDiagnostics };
 
     function _hasVisualShapeChild(grp) {
         try {

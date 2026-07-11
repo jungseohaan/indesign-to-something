@@ -101,12 +101,11 @@ function _loadExtractInddModules(scriptArgs, configPath) {
     } catch (eConfigBase) {
         debug.push("configBaseError=" + eConfigBase);
     }
-    try {
-        if (typeof Folder !== "undefined" && Folder.current) {
-            pushBaseFolder(Folder.current);
-            pushBaseFolder(Folder(Folder.current.fsName + "/scripts"));
-        }
-    } catch (eCurrentBase) {}
+    // NOTE:
+    // InDesign desktop `do script ... language javascript` 실행에서는
+    // `Folder.current`가 invalid object(30614)로 깨져 있는 경우가 있다.
+    // 이 fallback은 없어도 `$.fileName` / configPath / scriptArgs 경로로
+    // 모듈 해석이 가능하므로, 여기서는 참조하지 않는다.
 
     var moduleNames = [
         "io_utils.jsx",

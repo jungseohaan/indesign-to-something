@@ -67,6 +67,7 @@ interface AppState {
   lastOutputPath: string | null;
   // SPEC-030: InDesign 추출 성능 모드. fast=150dpi, standard=220dpi, high=300dpi. PDF preview는 캐시 재사용.
   perfMode: "fast" | "standard" | "high";
+  extractMode: "spread_chunks" | "full";
   // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
   debugStartPage: number;
   debugEndPage: number;
@@ -118,6 +119,7 @@ interface AppState {
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
   setPerfMode: (v: "fast" | "standard" | "high") => void;
+  setExtractMode: (v: "spread_chunks" | "full") => void;
   setNoPreview: (v: boolean) => void;
   setDebugPageRange: (start: number, end: number) => void;
   setExtractChunkSize: (v: number) => void;
@@ -167,6 +169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   outputFormat: "hwpx",
   lastOutputPath: null,
   perfMode: (localStorage.getItem("perfMode") as "fast" | "standard" | "high") || "standard",
+  extractMode: (localStorage.getItem("extractMode") as "spread_chunks" | "full") || "spread_chunks",
   noPreview: localStorage.getItem("noPreview") === "true",
   debugStartPage: 0,
   debugEndPage: 0,
@@ -495,6 +498,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem("perfMode", v);
     set({ perfMode: v });
   },
+  setExtractMode: (v) => {
+    localStorage.setItem("extractMode", v);
+    set({ extractMode: v });
+  },
   setNoPreview: (v) => {
     localStorage.setItem("noPreview", String(v));
     set({ noPreview: v });
@@ -645,7 +652,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
 
         try {
-          const { debugStartPage, debugEndPage, perfMode, extractChunkSize } = get();
+          const { debugStartPage, debugEndPage, perfMode, extractMode, extractChunkSize } = get();
           // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
           const extractResult = await invoke<InddExtractResult>("extract_indd", {
             inddPath,
@@ -655,7 +662,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             endPage: debugEndPage,
             perfMode,
             skipPdf: false,
-            extractMode: "spread_chunks",
+            extractMode,
             chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
           });
 

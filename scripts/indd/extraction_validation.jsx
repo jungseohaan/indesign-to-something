@@ -438,9 +438,7 @@ function _validateExtractionCandidatePassContracts(plan, passById, issues) {
         if (!c || !c.candidateId || !c.passId) continue;
         var cp = passById[c.passId];
         if (!cp) continue;
-        var modeCompatible = c.mode && cp.mode && c.mode !== cp.mode
-                && !(c.mode === "SLOT_ONLY" && cp.mode === "TEXTLESS_CANDIDATE");
-        if (modeCompatible) {
+        if (!_isExtractionCandidatePassModeCompatible(c, cp)) {
             issues.push({
                 code: "candidate_mode_mismatch_pass",
                 severity: "ERROR",
@@ -461,6 +459,18 @@ function _validateExtractionCandidatePassContracts(plan, passById, issues) {
             });
         }
     }
+}
+
+function _isExtractionCandidatePassModeCompatible(candidate, exportPass) {
+    if (!candidate || !exportPass) return true;
+    if (!candidate.mode || !exportPass.mode) return true;
+    if (candidate.mode === exportPass.mode) return true;
+    if (candidate.mode !== "SLOT_ONLY") return false;
+    if (exportPass.mode === "TEXTLESS_CANDIDATE") return true;
+    return exportPass.mode === "ORIGINAL_VISUAL"
+            && candidate.passId === "pass.image_placed_frames"
+            && candidate.ownershipSlot === "CONTENT_VISUAL_SLOT"
+            && candidate.candidatePurpose === exportPass.candidatePurpose;
 }
 
 function _isExtractionValidationVisibleCandidate(candidate) {

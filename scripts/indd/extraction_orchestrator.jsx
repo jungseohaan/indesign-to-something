@@ -22,26 +22,63 @@ function _appleScriptStringLiteral(value) {
     return "\"" + s.replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"";
 }
 
+function _converterJarPathForRepoRoot(repoRoot) {
+    if (!repoRoot) return null;
+    var names = [
+        "idml-to-something-1.0.9-cli.jar",
+        "hwpxlib-1.0.9-cli.jar",
+        "hwpxlib-cli.jar",
+        "idml-converter.jar"
+    ];
+    var dirs = [
+        repoRoot,
+        repoRoot + "/converter/target",
+        repoRoot + "/target"
+    ];
+    for (var di = 0; di < dirs.length; di++) {
+        for (var ni = 0; ni < names.length; ni++) {
+            var p = dirs[di] + "/" + names[ni];
+            if (File(p).exists) return p;
+        }
+    }
+    return null;
+}
+
+function _repoRootFromFolder(folder) {
+    if (!folder) return null;
+    var current = Folder(folder.fsName || String(folder));
+    for (var depth = 0; current && depth < 8; depth++) {
+        if (_converterJarPathForRepoRoot(current.fsName)) return current.fsName;
+        current = current.parent;
+    }
+    return null;
+}
+
 function _repoRootFromConfigPath(configPath, ctx) {
     try {
         if (configPath) {
             var f = File(String(configPath));
-            if (f && f.exists && f.parent) return f.parent.fsName;
+            if (f && f.exists && f.parent) {
+                var rootFromConfig = _repoRootFromFolder(f.parent);
+                if (rootFromConfig) return rootFromConfig;
+            }
         }
     } catch (eConfigRoot) {}
     try {
         if (ctx && ctx.extractScriptPath) {
             var extractScript = File(String(ctx.extractScriptPath));
-            if (extractScript && extractScript.exists && extractScript.parent && extractScript.parent.parent) {
-                return extractScript.parent.parent.fsName;
+            if (extractScript && extractScript.exists && extractScript.parent) {
+                var rootFromScript = _repoRootFromFolder(extractScript.parent);
+                if (rootFromScript) return rootFromScript;
             }
         }
     } catch (eExtractScriptRoot) {}
     try {
         if (typeof $ !== "undefined" && $.fileName) {
             var scriptFile = File($.fileName);
-            if (scriptFile && scriptFile.parent && scriptFile.parent.parent) {
-                return scriptFile.parent.parent.fsName;
+            if (scriptFile && scriptFile.parent) {
+                var rootFromDollar = _repoRootFromFolder(scriptFile.parent);
+                if (rootFromDollar) return rootFromDollar;
             }
         }
     } catch (eScriptRoot) {}
@@ -132,10 +169,11 @@ function _loadIdmlZOrderMap(ctx) {
             writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
             return null;
         }
-        var jarPath = repoRoot + "/converter/target/idml-to-something-1.0.9-cli.jar";
-        if (!File(jarPath).exists) {
+        var jarPath = _converterJarPathForRepoRoot(repoRoot);
+        if (!jarPath || !File(jarPath).exists) {
             summary.reason = "converter_jar_missing";
-            summary.jarPath = jarPath;
+            summary.repoRoot = repoRoot;
+            summary.jarPath = jarPath || (repoRoot + "/converter/target/idml-to-something-1.0.9-cli.jar");
             writeJson(ctx.outputDir + "/idml-zorder-map-summary.json", summary);
             return null;
         }
@@ -841,32 +879,39 @@ function _runRenderPhases(doc, ctx, allItems) {
             pageTextlessGroupPngCandidates,
             imgRenderedIds,
             ctx.extractionPlan.sourceItems);
+    _marker(ctx.outputDir, "06b1_pageTextlessGroups_exportDone");
     _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
+    _marker(ctx.outputDir, "06b2_pageTextlessGroups_metaDone");
     for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
         renderedFloatingItems.push(pageTextlessGroupResult.frames[ptgi]);
         imgRenderedIds[pageTextlessGroupResult.frames[ptgi].id] = true;
     }
-    try { $.gc(); } catch (ePageTextlessGc) {}
+    _marker(ctx.outputDir, "06b3_pageTextlessGroups_pushDone");
 
     _marker(ctx.outputDir, "07_decoGroups");
     _requireExtractionPass(ctx, "pass.decoration_groups");
+    _marker(ctx.outputDir, "07a_decoGroups_beforeCandidateFilter");
     var decoPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.decoration_groups");
     var decoNonPngCandidates = _nonPngExtractionCandidatesForPass(ctx.extractionPlan, "pass.decoration_groups");
+    _marker(ctx.outputDir, "07b_decoGroups_afterCandidateFilter");
     try {
         writeJson(ctx.outputDir + "/decoration-non-png-export-skip.json", {
             schemaVersion: 1,
             policy: "POLICY-source-ownership",
             passId: "pass.decoration_groups",
             skippedPngExportCount: decoNonPngCandidates ? decoNonPngCandidates.length : 0,
-            candidates: decoNonPngCandidates || [],
+            candidatePreview: decoNonPngCandidates ? decoNonPngCandidates.slice(0, 20) : [],
+            candidatesOmitted: decoNonPngCandidates && decoNonPngCandidates.length > 20,
             reason: "non_png_materialization_uses_object_plan_source_item"
         });
     } catch (eDecoNonPngStats) {}
+    _marker(ctx.outputDir, "07c_decoGroups_afterNonPngStats");
     var decoResult  = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
             extractionItemById,
             decoPngCandidates,
             imgRenderedIds,
             ctx.extractionPlan.sourceItems);
+    _marker(ctx.outputDir, "07d_decoGroups_exportDone");
     var decoChildIds = decoResult.childIds || {};
     _addRenderMeta(decoResult.frames, "page_object", "pass.decoration_groups");
     for (var di = 0; di < decoResult.frames.length; di++) renderedFloatingItems.push(decoResult.frames[di]);
@@ -875,8 +920,11 @@ function _runRenderPhases(doc, ctx, allItems) {
     // 2.16. 복합 그래픽 프레임 렌더링
     _marker(ctx.outputDir, "08_complexFrames");
     _requireExtractionPass(ctx, "pass.complex_graphic_frames");
-    var renderedGraphicFrames = exportComplexGraphicFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-            extractionItemById, _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.complex_graphic_frames"));
+    var complexPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.complex_graphic_frames");
+    var renderedGraphicFrames = complexPngCandidates && complexPngCandidates.length > 0
+            ? exportComplexGraphicFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+                    extractionItemById, complexPngCandidates)
+            : [];
     _addRenderMeta(renderedGraphicFrames, "page_object", "pass.complex_graphic_frames");
     for (var ci = 0; ci < renderedGraphicFrames.length; ci++) renderedFloatingItems.push(renderedGraphicFrames[ci]);
     try { $.gc(); } catch (e) {}
@@ -1080,10 +1128,14 @@ function main(args) {
     var ctx = _parseArgs(args);
 
     // 환경설정 저장 (finally에서 복원)
-    var savedInteractionLevel = app.scriptPreferences.userInteractionLevel;
-    var savedEnableRedraw     = app.scriptPreferences.enableRedraw;
-    var savedCheckLinks       = app.linkingPreferences.checkLinksAtOpen;
-    var savedFindMissing      = app.linkingPreferences.findMissingLinksAtOpen;
+    var savedInteractionLevel = null;
+    var savedEnableRedraw = null;
+    var savedCheckLinks = null;
+    var savedFindMissing = null;
+    try { savedInteractionLevel = app.scriptPreferences.userInteractionLevel; } catch (eSavedInteraction) {}
+    try { savedEnableRedraw = app.scriptPreferences.enableRedraw; } catch (eSavedRedraw) {}
+    try { savedCheckLinks = app.linkingPreferences.checkLinksAtOpen; } catch (eSavedCheckLinks) {}
+    try { savedFindMissing = app.linkingPreferences.findMissingLinksAtOpen; } catch (eSavedFindMissing) {}
 
     var doc = null;
     try {
@@ -1100,10 +1152,10 @@ function main(args) {
         }
 
         // 다이얼로그 억제 (headless) — 누락 폰트·링크 팝업 자동 dismiss
-        app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;
-        app.scriptPreferences.enableRedraw         = false;
-        app.linkingPreferences.checkLinksAtOpen    = false;
-        app.linkingPreferences.findMissingLinksAtOpen = false;
+        try { app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT; } catch (eNeverInteract) {}
+        try { app.scriptPreferences.enableRedraw = false; } catch (eDisableRedraw) {}
+        try { app.linkingPreferences.checkLinksAtOpen = false; } catch (eCheckLinks) {}
+        try { app.linkingPreferences.findMissingLinksAtOpen = false; } catch (eFindLinks) {}
         try { app.preflightOptions.preflightOn = false; } catch (e) {}   // 대용량 문서 preflight blocking 방지
         try { app.generalPreferences.ungroupRemembersLayers = false; } catch (e) {}
 
@@ -1117,6 +1169,14 @@ function main(args) {
         writeProgress(ctx.outputDir, "open", 0, 0);
         _marker(ctx.outputDir, "01_open");
         var inddFile = File(ctx.inddPath);
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "before_open",
+            inddPath: ctx.inddPath,
+            outputDir: ctx.outputDir,
+            chunkMode: !!ctx.chunkMode,
+            extractMode: ctx.extractMode || null,
+            pdfOnly: !!ctx.pdfOnly
+        });
         if (!inddFile.exists) {
             var parentFolder = inddFile.parent;
             if (!parentFolder || !parentFolder.exists)
@@ -1124,14 +1184,70 @@ function main(args) {
                     + "\nmacOS 설정 > 개인정보 보호 > 파일 및 폴더에서 InDesign의 접근 권한을 확인해주세요.");
             throw new Error("INDD 파일을 찾을 수 없습니다: " + ctx.inddPath);
         }
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "before_open_file_verified",
+            inddPath: inddFile.fsName,
+            parentPath: inddFile.parent ? inddFile.parent.fsName : null,
+            fileExists: true
+        });
         doc = app.open(inddFile, false);
+        _marker(ctx.outputDir, "01a_open_return");
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "after_open_return",
+            inddPath: inddFile.fsName
+        });
+        var docTouch = {
+            event: "after_open_doc_touch",
+            docName: null,
+            pageCount: null,
+            spreadCount: null,
+            linkCount: null,
+            saved: null,
+            modified: null
+        };
+        try { docTouch.docName = String(doc.name); } catch (eDocName) { docTouch.docNameError = String(eDocName); }
+        _marker(ctx.outputDir, "01b_doc_name");
+        try { docTouch.pageCount = doc.pages ? doc.pages.length : null; } catch (eDocPages) { docTouch.pageCountError = String(eDocPages); }
+        _marker(ctx.outputDir, "01c_doc_pages");
+        try { docTouch.spreadCount = doc.spreads ? doc.spreads.length : null; } catch (eDocSpreads) { docTouch.spreadCountError = String(eDocSpreads); }
+        _marker(ctx.outputDir, "01d_doc_spreads");
+        try { docTouch.linkCount = doc.links ? doc.links.length : null; } catch (eDocLinks) { docTouch.linkCountError = String(eDocLinks); }
+        _marker(ctx.outputDir, "01e_doc_links");
+        try { docTouch.saved = !!doc.saved; } catch (eDocSaved) { docTouch.savedError = String(eDocSaved); }
+        _marker(ctx.outputDir, "01f_doc_saved");
+        try { docTouch.modified = !!doc.modified; } catch (eDocModified) { docTouch.modifiedError = String(eDocModified); }
+        _marker(ctx.outputDir, "01g_doc_modified");
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", docTouch);
         // 눈금자 원점을 SPREAD로 고정 (geometricBounds가 스프레드 전역 좌표가 되도록)
         try { doc.viewPreferences.rulerOrigin = RulerOrigin.SPREAD_ORIGIN; } catch (e) {}
+        _marker(ctx.outputDir, "01h_doc_ruler_origin");
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "after_open_ruler_origin"
+        });
 
         // 1.5. 링크 업데이트 (PNG 렌더링 전 — 원본 이미지 연결)
-        _fixLinks(doc, ctx.inddPath);
+        writeProgress(ctx.outputDir, "fix_links", 0, 0);
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "before_fix_links"
+        });
+        _fixLinks(doc, ctx.inddPath, ctx.outputDir, "render_links");
+        _marker(ctx.outputDir, "01i_fix_links_done");
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "after_fix_links"
+        });
 
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "before_compute_page_range"
+        });
         _computePageRange(doc, ctx);
+        _marker(ctx.outputDir, "01j_compute_page_range_done");
+        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+            event: "after_compute_page_range",
+            startPage: ctx.startPage,
+            endPage: ctx.endPage,
+            pageCount: ctx.pageCount,
+            rangePageCount: ctx.rangePageCount
+        });
 
         if (!ctx.pdfOnly) {
             // SPEC-030 B.2: pre_scan 모드 — IDML export/allPageItems 없이 hash만 빠르게 생성
@@ -1191,7 +1307,8 @@ function main(args) {
         writeProgress(ctx.outputDir, "pdf", ctx.rangePageCount, ctx.rangePageCount);
 
         // 4. 링크 업데이트 (PDF 고해상도 이미지용)
-        _fixLinks(doc, ctx.inddPath);
+        writeProgress(ctx.outputDir, "pdf_fix_links", ctx.rangePageCount, ctx.rangePageCount);
+        _fixLinks(doc, ctx.inddPath, ctx.outputDir, "pdf_links");
 
         // 5. PDF 프리뷰
         _exportPdf(doc, ctx);
@@ -1223,10 +1340,10 @@ function main(args) {
         writeDone(ctx.outputDir, "error", errorMessage);
     } finally {
         if (doc) { try { doc.close(SaveOptions.NO); } catch (e2) {} }
-        app.scriptPreferences.userInteractionLevel    = savedInteractionLevel;
-        app.scriptPreferences.enableRedraw            = savedEnableRedraw;
-        app.linkingPreferences.checkLinksAtOpen       = savedCheckLinks;
-        app.linkingPreferences.findMissingLinksAtOpen = savedFindMissing;
+        if (savedInteractionLevel !== null) try { app.scriptPreferences.userInteractionLevel = savedInteractionLevel; } catch (eRestoreInteraction) {}
+        if (savedEnableRedraw !== null) try { app.scriptPreferences.enableRedraw = savedEnableRedraw; } catch (eRestoreRedraw) {}
+        if (savedCheckLinks !== null) try { app.linkingPreferences.checkLinksAtOpen = savedCheckLinks; } catch (eRestoreCheckLinks) {}
+        if (savedFindMissing !== null) try { app.linkingPreferences.findMissingLinksAtOpen = savedFindMissing; } catch (eRestoreFindMissing) {}
         try { app.preflightOptions.preflightOn = true; } catch (e) {}
     }
 }

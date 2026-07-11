@@ -356,29 +356,116 @@ function _computePageRange(doc, ctx) {
     ctx.rangePageCount = ctx.endPage - ctx.startPage + 1;
 }
 
+function _linkStatusLabel(status) {
+    try {
+        if (status === LinkStatus.NORMAL) return "NORMAL";
+        if (status === LinkStatus.LINK_OUT_OF_DATE) return "LINK_OUT_OF_DATE";
+        if (status === LinkStatus.LINK_MISSING) return "LINK_MISSING";
+        if (status === LinkStatus.LINK_INACCESSIBLE) return "LINK_INACCESSIBLE";
+        if (status === LinkStatus.LINK_EMBEDDED) return "LINK_EMBEDDED";
+    } catch (eLinkStatusLabel) {}
+    return String(status);
+}
+
 // 문서의 누락/만료 링크를 갱신한다. 렌더링 전(PNG용)과 PDF 내보내기 전(고해상도용) 2회 호출된다.
-function _fixLinks(doc, inddPath) {
+function _fixLinks(doc, inddPath, outputDir, phaseName) {
     try {
         var inddParent = File(inddPath).parent;
         var linksFolders = [Folder(inddParent + "/Links"), Folder(inddParent)];
         var fixedCount = 0, missingCount = 0;
+        var phase = phaseName || "fix_links";
+        var allowOutOfDateUpdate = phase !== "render_links";
+        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+            event: "fix_links_start",
+            phase: phase,
+            inddPath: inddPath,
+            totalLinks: doc && doc.links ? doc.links.length : null,
+            allowOutOfDateUpdate: allowOutOfDateUpdate
+        });
         for (var li = 0; li < doc.links.length; li++) {
             var lnk = doc.links[li];
             try {
                 if (lnk.status === LinkStatus.NORMAL) continue;
+                appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                    event: "fix_links_candidate",
+                    phase: phase,
+                    index: li,
+                    name: lnk.name || null,
+                    status: _linkStatusLabel(lnk.status)
+                });
                 if (lnk.status === LinkStatus.LINK_OUT_OF_DATE) {
-                    lnk.update(); fixedCount++;
+                    if (allowOutOfDateUpdate) {
+                        lnk.update(); fixedCount++;
+                        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                            event: "fix_links_updated",
+                            phase: phase,
+                            index: li,
+                            name: lnk.name || null,
+                            status: _linkStatusLabel(lnk.status)
+                        });
+                    } else {
+                        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                            event: "fix_links_skip_out_of_date",
+                            phase: phase,
+                            index: li,
+                            name: lnk.name || null,
+                            status: _linkStatusLabel(lnk.status)
+                        });
+                    }
                 } else if (lnk.status === LinkStatus.LINK_MISSING) {
                     var found = false;
                     for (var fi = 0; fi < linksFolders.length; fi++) {
                         if (!linksFolders[fi].exists) continue;
                         var linkFile = File(linksFolders[fi] + "/" + lnk.name);
-                        if (linkFile.exists) { lnk.relink(linkFile); lnk.update(); fixedCount++; found = true; break; }
+                        if (linkFile.exists) {
+                            appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                                event: "fix_links_relink_attempt",
+                                phase: phase,
+                                index: li,
+                                name: lnk.name || null,
+                                targetPath: linkFile.fsName
+                            });
+                            lnk.relink(linkFile);
+                            lnk.update();
+                            fixedCount++;
+                            found = true;
+                            appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                                event: "fix_links_relink_done",
+                                phase: phase,
+                                index: li,
+                                name: lnk.name || null,
+                                targetPath: linkFile.fsName,
+                                status: _linkStatusLabel(lnk.status)
+                            });
+                            break;
+                        }
                     }
-                    if (!found) missingCount++;
+                    if (!found) {
+                        missingCount++;
+                        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                            event: "fix_links_missing_unresolved",
+                            phase: phase,
+                            index: li,
+                            name: lnk.name || null
+                        });
+                    }
                 }
-            } catch (le) {}
+            } catch (le) {
+                appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                    event: "fix_links_error",
+                    phase: phase,
+                    index: li,
+                    name: (lnk && lnk.name) ? lnk.name : null,
+                    message: String(le)
+                });
+            }
         }
+        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+            event: "fix_links_done",
+            phase: phase,
+            fixedCount: fixedCount,
+            missingCount: missingCount
+        });
         if (fixedCount > 0 || missingCount > 0)
             $.writeln("[Links] fixed=" + fixedCount + " missing=" + missingCount);
     } catch (e) {}

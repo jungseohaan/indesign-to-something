@@ -34,7 +34,8 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         broaderDecorationIndexedSetCount: 0,
         lastLabel: "start",
         lastItemIndex: -1,
-        elapsedMs: 0
+        elapsedMs: 0,
+        suppressedPreview: []
     };
 
     function basePerfWallNow() {
@@ -129,6 +130,31 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfStats.elapsedMs = Math.max(0, basePerfWallNow() - basePerfStartedAt);
             writeJson(ctx.outputDir + "/_base_candidate_perf.json", basePerfStats);
         } catch (eBasePerfWrite) {}
+    }
+
+    function baseSuppressedPreview(reason, itemInfo, extra) {
+        try {
+            if (!itemInfo) return;
+            if (basePerfStats.suppressedPreview.length >= 200) return;
+            var row = {
+                reason: reason || "unknown",
+                id: itemInfo.id,
+                kind: itemInfo.kind,
+                pageIndex: itemInfo.pageIndex,
+                parentId: itemInfo.parentId,
+                hasChildren: itemInfo.hasChildren === true,
+                hasPlacedVisual: itemInfo.hasPlacedVisual === true,
+                hasVisibleFill: itemInfo.hasVisibleFill === true,
+                hasVisibleStroke: itemInfo.hasVisibleStroke === true
+            };
+            if (extra) {
+                for (var key in extra) {
+                    if (!extra.hasOwnProperty(key)) continue;
+                    row[key] = extra[key];
+                }
+            }
+            basePerfStats.suppressedPreview.push(row);
+        } catch (eBaseSuppressedPreview) {}
     }
 
     basePerfMarker("03d05a_base_enter");
@@ -478,6 +504,22 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         }
         return itemInfo.hasChildren === true
                 || clipCarryingParentIdForBase(itemInfo.id) !== null;
+    }
+
+    function sourceMayEmitClipParentShellCandidate(itemInfo, pageIndex) {
+        if (!itemInfo) return false;
+        var kindName = String(itemInfo.kind || "");
+        if (!sourceKindCanCarryClipForBase(kindName)) return false;
+        if (itemInfo.hasChildren !== true) return false;
+        if (sourceIndex.hasPlacedVisual(itemInfo.id) === true) return false;
+        if (sourceHasClipParentShellOwner(itemInfo.id, pageIndex)) return false;
+        if (!shouldEmitDecorationSourceCandidate(itemInfo)) return false;
+
+        var sourceIds = pageLocalSourceObjectIdsForBase(itemInfo.id, pageIndex);
+        if (!sourceIds || sourceIds.length === 0) return false;
+        var exportIds = shellExportSourceIdsForSourceSet(itemInfo.id, sourceIds);
+        if (!exportIds || exportIds.length === 0) return false;
+        return sourceSetHasExecutableShellMaterial(exportIds);
     }
 
     function shouldRasterizeLeafVectorShell(itemInfo) {
@@ -1402,18 +1444,34 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         if (id === null) continue;
         var item = null;
 
-        if (itemInfo.hiddenLayer === true) continue;
-        if (!sourceKindCanEmitBaseCandidate(kind)) continue;
+        if (itemInfo.hiddenLayer === true) {
+            baseSuppressedPreview("hidden_layer", itemInfo);
+            continue;
+        }
+        if (!sourceKindCanEmitBaseCandidate(kind)) {
+            baseSuppressedPreview("source_kind_cannot_emit_base_candidate", itemInfo);
+            continue;
+        }
         if (kind !== "TextFrame"
                 && itemInfo.pageIndex !== null && itemInfo.pageIndex !== undefined
                 && pageIndexInBaseRange(itemInfo.pageIndex)
                 && sourceCoveredByBroaderDecorationSourceSet(itemInfo.pageIndex, id)) {
+            baseSuppressedPreview("covered_by_broader_decoration_source_set", itemInfo);
             continue;
         }
-        if (kind !== "TextFrame" && sourceHasStoryFlowAnchor(id)) continue;
-        if (kind === "TextFrame" && !textFrameMayHaveStyleShellForBase(itemInfo)) continue;
+        if (kind !== "TextFrame" && sourceHasStoryFlowAnchor(id)) {
+            baseSuppressedPreview("story_flow_anchor", itemInfo);
+            continue;
+        }
+        if (kind === "TextFrame" && !textFrameMayHaveStyleShellForBase(itemInfo)) {
+            baseSuppressedPreview("text_frame_without_style_shell", itemInfo);
+            continue;
+        }
         var extractionPageIndexes = candidatePageIndexesForBase(id);
-        if (!extractionPageIndexes || extractionPageIndexes.length === 0) continue;
+        if (!extractionPageIndexes || extractionPageIndexes.length === 0) {
+            baseSuppressedPreview("no_candidate_page_indexes", itemInfo);
+            continue;
+        }
 
         var mainPageLoopStartedAt = basePerfWallNow();
         for (var extractionPageCursor = 0; extractionPageCursor < extractionPageIndexes.length; extractionPageCursor++) {
@@ -1635,7 +1693,9 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
             if (sourceMayNeedDecorationCompositeBranch(itemInfo)) {
                 var decorationBranchStartedAt = basePerfBranchStart("decoration_composite");
-                if (!hasPlacedVisualInSubtreeForBase(id)) {
+                var allowPlacedVisualClipParentShell = hasPlacedVisualInSubtreeForBase(id)
+                        && sourceMayEmitClipParentShellCandidate(itemInfo, extractionPageIndex);
+                if (!hasPlacedVisualInSubtreeForBase(id) || allowPlacedVisualClipParentShell) {
                     var clipParentForDecoId = clipCarryingParentIdForBase(id);
                     var clipParentForDeco = clipParentForDecoId !== null ? domItemForBase(clipParentForDecoId) : null;
                     var clipParentInfo = clipParentForDecoId !== null ? sourceInfoForBase(clipParentForDecoId) : null;
@@ -1647,7 +1707,12 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                                 clipParentForDecoId, extractionPageIndex);
                         if (hasDecorationSourceSet(extractionPageIndex, clipParentSourceIds)) continue;
                         if (hasBroaderDecorationSourceSet(extractionPageIndex, clipParentSourceIds)) continue;
-                        if (!sourceSetHasExecutableShellMaterial(clipParentSourceIds)) continue;
+                        if (!sourceSetHasExecutableShellMaterial(clipParentSourceIds)) {
+                            baseSuppressedPreview("clip_parent_source_set_without_executable_shell_material", clipParentInfo, {
+                                sourceObjectIds: clipParentSourceIds
+                            });
+                            continue;
+                        }
                         pushBaseExtractionCandidate("pass.decoration_groups", clipParentForDeco, candidateAttrsForInfo(clipParentInfo, {
                             sourceObjectIds: clipParentSourceIds,
                             pageIndex: extractionPageIndex,
@@ -1663,9 +1728,21 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                         var decoSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
                         if (hasBroaderDecorationSourceSet(extractionPageIndex, decoSourceIds)) continue;
                         var decoExportSourceIds = shellExportSourceIdsForSourceSet(id, decoSourceIds);
-                        if (!sourceSetHasExecutableShellMaterial(decoExportSourceIds)) continue;
+                        if (!sourceSetHasExecutableShellMaterial(decoExportSourceIds)) {
+                            baseSuppressedPreview("decoration_group_without_executable_shell_material", itemInfo, {
+                                sourceObjectIds: decoSourceIds,
+                                exportSourceObjectIds: decoExportSourceIds
+                            });
+                            continue;
+                        }
                         item = item || domItemForBase(id);
-                        if (!item) continue;
+                        if (!item) {
+                            baseSuppressedPreview("decoration_group_missing_dom_item", itemInfo, {
+                                sourceObjectIds: decoSourceIds,
+                                exportSourceObjectIds: decoExportSourceIds
+                            });
+                            continue;
+                        }
                         pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
                             sourceObjectIds: decoSourceIds,
                             exportSourceObjectIds: decoExportSourceIds,
@@ -1678,6 +1755,10 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                         }), "decoration_group_source_set");
                         recordDecorationSourceSet(extractionPageIndex, decoSourceIds);
                     }
+                } else {
+                    baseSuppressedPreview("decoration_group_skipped_by_placed_visual_subtree", itemInfo, {
+                        allowPlacedVisualClipParentShell: allowPlacedVisualClipParentShell
+                    });
                 }
                 basePerfBranchEnd("decoration_composite", decorationBranchStartedAt);
             }

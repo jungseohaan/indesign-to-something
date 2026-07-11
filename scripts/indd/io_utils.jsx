@@ -127,6 +127,29 @@ function writeJson(path, obj) {
     f.close();
 }
 
+function appendJsonLine(path, obj) {
+    var f = File(path);
+    f.encoding = "UTF-8";
+    if (!f.exists) {
+        f.open("w");
+        f.close();
+    }
+    f.open("e");
+    f.seek(0, 2);
+    f.writeln(JSON.stringify(obj));
+    f.close();
+}
+
+function appendDiag(outputDir, fileName, obj) {
+    if (!outputDir || !fileName || !obj) return;
+    try {
+        if (!obj.tsIso) {
+            try { obj.tsIso = (new Date()).toISOString(); } catch (eTs) {}
+        }
+        appendJsonLine(outputDir + "/" + fileName, obj);
+    } catch (eAppendDiag) {}
+}
+
 function readJson(path) {
     var f = File(path);
     if (!f.exists) return null;

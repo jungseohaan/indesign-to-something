@@ -967,6 +967,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 } else if (hashiraSpecialType === "textvar") {
                     clone.frameVisibleText = hashiraTextVarResolved;
                 }
+                if (hashiraSpecialType) clone.masterSpecialType = hashiraSpecialType;
                 editableIds[cloneFrameId] = true;
                 textFrames.push(clone);
                 frameClones++;

@@ -64,6 +64,9 @@ public final class TextFlowDocumentBuilder {
             Set<String> stack) {
         if (run == null) return null;
         if ("INLINE_SLOT".equals(run.kind)) {
+            if (!isMaterializableInlineSlot(run)) {
+                return null;
+            }
             TextFlowDocument.InlineSlotAtom atom = new TextFlowDocument.InlineSlotAtom();
             atom.sourceRun = run.sourceRun;
             atom.index = run.index;
@@ -98,6 +101,20 @@ public final class TextFlowDocumentBuilder {
         atom.horizontalScale = run.horizontalScale;
         atom.baselineShift = run.baselineShift;
         return atom;
+    }
+
+    private static boolean isMaterializableInlineSlot(TextFlowDiagnostics.TextFlowRun run) {
+        if (run == null) return false;
+        String planPlacement = safeUpper(run.planPlacement);
+        if (!planPlacement.isEmpty()) {
+            return "INLINE".equals(planPlacement);
+        }
+        String sourcePlacement = safeUpper(run.sourceStoryAnchorPlacement);
+        return "INLINE".equals(sourcePlacement);
+    }
+
+    private static String safeUpper(String value) {
+        return value == null ? "" : value.toUpperCase(java.util.Locale.ROOT);
     }
 
     private static TextFlowDocument.TextFlowUnit nestedFlow(

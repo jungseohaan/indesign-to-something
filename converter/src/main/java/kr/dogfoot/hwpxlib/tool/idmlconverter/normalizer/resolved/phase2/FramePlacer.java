@@ -88,6 +88,10 @@ public final class FramePlacer {
                 continue;
             }
             boolean hwpxOwnedTextFrame = ctx.resolvedData.isHwpxOwnedTextFrame(tf.id());
+            if (shouldSkipPlanlessSyntheticCloneTextFrame(ctx, tf, planKnown, ownedByFloatingTextShell,
+                    hwpxOwnedTextFrame)) {
+                continue;
+            }
             boolean plannedFloatingHwpxText =
                     ownedByFloatingTextShell
                             || (planKnown
@@ -630,6 +634,47 @@ public final class FramePlacer {
     private static int parseDomIdOrNeg(String id) {
         if (id == null) return -1;
         try { return Integer.parseInt(id); } catch (NumberFormatException e) { return -1; }
+    }
+
+    /**
+     * Stage 1 ownership plan이 있는 실행에서는 synthetic master/off-canvas clone TextFrame을
+     * editable fallback만으로 되살리지 않는다.
+     *
+     * <p>"2453_pi20", "17037_oc24" 같은 clone id는 숫자 domId lookup으로는 매칭되지 않고,
+     * 실행 단계가 임의로 HWPX text owner를 만들면 master-derived hidden title/header가
+     * 페이지에 떠오르는 회귀가 생긴다. Stage 1이 명시적으로 floating text owner 또는
+     * floating text-shell owner를 주지 않았다면 skip한다.</p>
+     *
+     * <p>단, source extractor가 이미 per-page folio/page number로 확정한 synthetic clone은
+     * source metadata의 진실을 따라 HWPX text로 살린다. 이 예외는 page/좌표가 아니라
+     * resolved masterSpecialType="pagenum" 메타데이터로만 결정한다.</p>
+     */
+    private static boolean shouldSkipPlanlessSyntheticCloneTextFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            boolean planKnown,
+            boolean ownedByFloatingTextShell,
+            boolean hwpxOwnedTextFrame) {
+        if (ctx == null || ctx.resolvedData == null || tf == null) return false;
+        if (planKnown || ownedByFloatingTextShell || hwpxOwnedTextFrame) return false;
+        if (ctx.resolvedData.ownershipPlans() == null || ctx.resolvedData.ownershipPlans().isEmpty()) {
+            return false;
+        }
+        String textFrameId = tf.id();
+        if (!isSyntheticCloneTextFrameId(textFrameId)) return false;
+        if (isSyntheticPageNumberClone(tf)) return false;
+        return tf.isMasterInstance() || textFrameId.contains("_oc");
+    }
+
+    private static boolean isSyntheticCloneTextFrameId(String textFrameId) {
+        if (textFrameId == null || textFrameId.isEmpty()) return false;
+        return textFrameId.contains("_pi") || textFrameId.contains("_oc");
+    }
+
+    private static boolean isSyntheticPageNumberClone(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String specialType = tf.masterSpecialType();
+        return "pagenum".equals(specialType);
     }
 
     /**

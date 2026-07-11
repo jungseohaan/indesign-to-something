@@ -125,6 +125,87 @@ fn app_name_from_path(app_path: &str) -> String {
         .unwrap_or_else(|| "Adobe InDesign".to_string())
 }
 
+#[derive(Debug, Clone)]
+struct OpenActivitySnapshot {
+    pid: Option<String>,
+    cpu_percent: f64,
+    stat: String,
+    elapsed: String,
+}
+
+impl OpenActivitySnapshot {
+    fn is_busy(&self) -> bool {
+        self.cpu_percent >= 25.0
+            || self.stat.starts_with('R')
+            || self.stat.starts_with('U')
+            || self.stat.contains('D')
+    }
+
+    fn summary(&self) -> String {
+        match self.pid.as_ref() {
+            Some(pid) => format!(
+                "pid={} cpu={:.1}% stat={} elapsed={}",
+                pid, self.cpu_percent, self.stat, self.elapsed
+            ),
+            None => "pid=not_found".to_string(),
+        }
+    }
+}
+
+async fn collect_open_activity_snapshot(app_name: &str) -> Option<OpenActivitySnapshot> {
+    let shell = r#"
+set -u
+pid="$(pgrep -x "$APP_NAME" | head -1 || true)"
+if [ -z "$pid" ]; then
+  exit 0
+fi
+echo "pid=$pid"
+ps -p "$pid" -o %cpu= -o stat= -o etime= 2>/dev/null \
+  | awk '{print "cpu=" $1 "\nstat=" $2 "\nelapsed=" $3}'
+"#;
+
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(shell)
+        .env("APP_NAME", app_name)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return None;
+    }
+
+    let mut pid = None;
+    let mut cpu_percent = 0.0f64;
+    let mut stat = String::new();
+    let mut elapsed = String::new();
+    for line in stdout.lines() {
+        if let Some(v) = line.strip_prefix("pid=") {
+            let value = v.trim();
+            if !value.is_empty() {
+                pid = Some(value.to_string());
+            }
+        } else if let Some(v) = line.strip_prefix("cpu=") {
+            cpu_percent = v.trim().parse::<f64>().unwrap_or(0.0);
+        } else if let Some(v) = line.strip_prefix("stat=") {
+            stat = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("elapsed=") {
+            elapsed = v.trim().to_string();
+        }
+    }
+
+    Some(OpenActivitySnapshot {
+        pid,
+        cpu_percent,
+        stat,
+        elapsed,
+    })
+}
+
 async fn collect_open_stall_diagnostics(
     app_name: &str,
     progress_path: &Path,
@@ -281,6 +362,50 @@ fn is_recoverable_osascript_connection_error(stderr: &str) -> bool {
         || stderr.contains("Connection is invalid")
 }
 
+fn applescript_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn build_extract_applescript(
+    app_name: &str,
+    jsx_path: &str,
+    args: &[String],
+    timeout_secs: u64,
+) -> String {
+    let app_ref = applescript_string(app_name);
+    let jsx_ref = applescript_string(jsx_path);
+    let quoted_args = args
+        .iter()
+        .map(|arg| applescript_string(arg))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!(
+        r#"using terms from application {app_ref}
+    tell application {app_ref}
+        activate
+        repeat with _preflightAttempt from 1 to 30
+            try
+                do script "app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT; app.scriptPreferences.enableRedraw = false; 1" language javascript
+                exit repeat
+            on error
+                delay 2
+            end try
+        end repeat
+        set _jsxSource to read POSIX file {jsx_ref}
+        set _jsxArgs to {{{quoted_args}}}
+        with timeout of {timeout_secs} seconds
+            do script _jsxSource language javascript with arguments _jsxArgs
+        end timeout
+    end tell
+end using terms from"#,
+        app_ref = app_ref,
+        jsx_ref = jsx_ref,
+        quoted_args = quoted_args,
+        timeout_secs = timeout_secs,
+    )
+}
+
 async fn rerun_osascript_after_indesign_restart(
     app: &AppHandle,
     app_name: &str,
@@ -300,12 +425,90 @@ async fn rerun_osascript_after_indesign_restart(
     let _ = std::fs::remove_file(progress_path);
     ensure_indesign_running(app_name, output_dir).await;
     emit_progress(app, "exporting", phase_message);
-    let child = Command::new("osascript")
+    let mut child = Command::new("osascript")
         .arg(script_file)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("osascript 재시도 실행 실패: {}", e))?;
+
+    let started = std::time::Instant::now();
+    let mut last_step = String::new();
+    let mut last_progress_at = std::time::Instant::now();
+    let mut saw_progress = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => break,
+        }
+
+        if let Ok(content) = std::fs::read_to_string(progress_path) {
+            if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
+                let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
+                if !step.is_empty() {
+                    saw_progress = true;
+                    if step != last_step {
+                        last_step = step.to_string();
+                        last_progress_at = std::time::Instant::now();
+                    }
+                }
+            }
+        }
+
+        let elapsed = started.elapsed().as_secs();
+        let stale = last_progress_at.elapsed().as_secs();
+        let open_activity = if last_step == "open" || !saw_progress {
+            collect_open_activity_snapshot(app_name).await
+        } else {
+            None
+        };
+        let open_busy = open_activity.as_ref().map(|v| v.is_busy()).unwrap_or(false);
+        let open_stalled = saw_progress && last_step == "open" && stale > 300 && !open_busy;
+        let no_progress_stalled = !saw_progress && elapsed > 300 && !open_busy;
+        if (saw_progress && last_step == "open" && stale > 300 && open_busy)
+            || (!saw_progress && elapsed > 300 && open_busy)
+        {
+            last_progress_at = std::time::Instant::now();
+            emit_progress(
+                app,
+                "launching",
+                &format!(
+                    "문서 열기 중... InDesign 로딩 지속 감지 ({})",
+                    open_activity
+                        .as_ref()
+                        .map(|v| v.summary())
+                        .unwrap_or_else(|| "activity=unknown".to_string())
+                ),
+            );
+            sleep(Duration::from_millis(300)).await;
+            continue;
+        }
+        if open_stalled || no_progress_stalled {
+            let diagnostics = collect_open_stall_diagnostics(app_name, progress_path, output_dir).await;
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = tokio::process::Command::new("killall")
+                .arg(app_name)
+                .output()
+                .await;
+            if !diagnostics.trim().is_empty() {
+                let _ = std::fs::write(output_dir.join("_open_stall_retry.log"), &diagnostics);
+            }
+            let reason = if open_stalled {
+                "문서 열기 단계가 300초 이상 정체되었습니다."
+            } else {
+                "InDesign 재시도 후 300초 동안 진행률이 생성되지 않았습니다."
+            };
+            return Err(format!(
+                "InDesign 재시도 중단: {}\n\n[open 단계 진단]\n{}",
+                reason,
+                diagnostics.trim()
+            ));
+        }
+        sleep(Duration::from_millis(300)).await;
+    }
+
     child
         .wait_with_output()
         .await
@@ -341,9 +544,9 @@ pub async fn run_extraction(
     emit_progress(app, "launching", "InDesign을 실행하는 중...");
 
     // AppleScript 생성
-    // - `do script ... language «constant ScLgJSLg»`: InDesign ExtendScript 실행
-    //   InDesign 2026 동적 SDEF가 흔들리면 `javascript` 이름이 `java script`처럼
-    //   토큰화되어 -2741 문법 오류가 날 수 있어 enum 코드를 직접 사용한다.
+    // - `do script (read POSIX file ...) language javascript`: InDesign ExtendScript 실행
+    //   dev issue runner와 동일하게 본문을 읽어 실행하고, bootstrap JSX 경로를
+    //   arguments[16]에 넣어 scripts/indd 모듈 기준 디렉토리를 안정적으로 찾는다.
     // - `with arguments`: ExtendScript의 arguments 변수로 전달
     // - arguments[2] = startPage (0=전체), arguments[3] = endPage (0=전체)
     // - arguments[4] = spreadMode ("1"=스프레드 PDF, "0"=페이지별 PDF)
@@ -370,29 +573,26 @@ pub async fn run_extraction(
             config_path, perf_mode, skip_pdf, extract_mode, skip_validation_flag
         ),
     );
-    let applescript = format!(
-        r#"using terms from application "{app_name}"
-    tell application "{app_name}"
-        activate
-        with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "{extract_mode}", "", "{physical_range_flag}", "", "{skip_validation_flag}"}}
-        end timeout
-    end tell
-end using terms from"#,
-        app_name = app_name,
-        jsx_path = jsx_path,
-        indd_path = indd_path,
-        output_dir = output_dir_str,
-        start_page = start_page,
-        end_page = end_page,
-        spread_flag = spread_flag,
-        config_path = config_path,
-        perf_mode = perf_mode,
-        skip_pdf_flag = skip_pdf_flag,
-        extract_mode = extract_mode,
-        physical_range_flag = if physical_range { "1" } else { "" },
-        skip_validation_flag = skip_validation_flag,
-    );
+    let applescript_args = vec![
+        indd_path.to_string(),
+        output_dir_str.clone(),
+        start_page.to_string(),
+        end_page.to_string(),
+        spread_flag.to_string(),
+        "0".to_string(),
+        config_path.clone(),
+        perf_mode.to_string(),
+        skip_pdf_flag.to_string(),
+        String::new(),
+        extract_mode.to_string(),
+        String::new(),
+        if physical_range { "1" } else { "" }.to_string(),
+        String::new(),
+        skip_validation_flag.to_string(),
+        "0".to_string(),
+        jsx_path.to_string(),
+    ];
+    let applescript = build_extract_applescript(&app_name, jsx_path, &applescript_args, 3600);
 
     // 진행률: 추출 실행 중
     emit_progress(app, "exporting", "IDML 추출 중...");
@@ -406,7 +606,7 @@ end using terms from"#,
     let done_path = output_dir.join(".done");
     let timeout_secs = 3600u64;
     // SPEC-030 B.4: phase별 stale 타임아웃 차등 적용
-    // - open: 300s (대용량 파일은 열기만 수분 소요)
+    // - open: 기본 300s. 단, InDesign CPU 활동이 높으면 busy-open으로 보고 더 기다린다.
     // - idml: page-count scaled (InDesign emits no granular progress inside exportFile)
     // - pdf: 600s (48페이지 복잡한 파일 PDF 내보내기 3~4분 소요)
     // - rendered_frames/render_badge: 1800s (복잡 페이지에서 10분+ 가능)
@@ -458,6 +658,33 @@ end using terms from"#,
             // 타임아웃 확인 (절대 또는 정체)
             let elapsed = started.elapsed().as_secs();
             let stale = last_progress_at.elapsed().as_secs();
+            let open_activity = if last_progress_step == "open" {
+                collect_open_activity_snapshot(&app_name).await
+            } else {
+                None
+            };
+            let open_busy = open_activity.as_ref().map(|v| v.is_busy()).unwrap_or(false);
+            let open_busy_grace = last_progress_step == "open"
+                && stale > current_phase_stale
+                && open_busy
+                && elapsed < 1200;
+            if open_busy_grace {
+                last_progress_at = std::time::Instant::now();
+                last_heartbeat_at = std::time::Instant::now();
+                emit_progress(
+                    app,
+                    "launching",
+                    &format!(
+                        "문서 열기 중... 링크/폰트 로딩 지속 감지 ({})",
+                        open_activity
+                            .as_ref()
+                            .map(|v| v.summary())
+                            .unwrap_or_else(|| "activity=unknown".to_string())
+                    ),
+                );
+                sleep(Duration::from_millis(300)).await;
+                continue;
+            }
             if elapsed > timeout_secs || stale > current_phase_stale {
                 let diagnostics = if last_progress_step == "open" {
                     Some(
@@ -538,7 +765,8 @@ end using terms from"#,
                     current_phase_stale = match step {
                         "close_docs" => 60,
                         // 테스트/진단용: open 단계 정체 시 링크/sample 정보를 빨리 노출한다.
-                        "open" => 250,
+                        "open" => 300,
+                        "fix_links" | "pdf_fix_links" => 1800,
                         "idml" => {
                             let pages = if total > 0 { total as u64 } else { 1 };
                             (pages * 45).clamp(900, 3300)
@@ -555,6 +783,8 @@ end using terms from"#,
                     let display = match step {
                         "close_docs" => "이전 문서 정리 중...".to_string(),
                         "open" => "문서 열기 중...".to_string(),
+                        "fix_links" => "링크 상태 확인 중...".to_string(),
+                        "pdf_fix_links" => "PDF용 링크 갱신 중...".to_string(),
                         "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
                         "idml" => "IDML 내보내기 중...".to_string(),
                         "planning" => "추출 계획 생성 중...".to_string(),
@@ -607,8 +837,10 @@ end using terms from"#,
                             _ => "exporting",
                         };
                         emit_progress(app, phase, &display);
-                    } else if matches!(step, "pdf" | "idml" | "open" | "close_docs" | "spread_chunk")
-                        && last_heartbeat_at.elapsed().as_secs() >= 10
+                    } else if matches!(
+                        step,
+                        "pdf" | "idml" | "open" | "close_docs" | "spread_chunk" | "fix_links" | "pdf_fix_links"
+                    ) && last_heartbeat_at.elapsed().as_secs() >= 10
                     {
                         let stale = last_progress_at.elapsed().as_secs();
                         let heartbeat_msg = match step {
@@ -616,7 +848,11 @@ end using terms from"#,
                             "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
                             "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
                             "open" => format!("문서 열기 중... ({}초 경과)", stale),
-                            "spread_chunk" => format!("스프레드 청크 추출 중... ({}초 경과)", stale),
+                            "fix_links" => format!("링크 상태 확인 중... ({}초 경과)", stale),
+                            "pdf_fix_links" => format!("PDF용 링크 갱신 중... ({}초 경과)", stale),
+                            "spread_chunk" => {
+                                format!("스프레드 청크 추출 중... ({}초 경과)", stale)
+                            }
                             _ => display.clone(),
                         };
                         last_heartbeat_at = std::time::Instant::now();
@@ -810,28 +1046,26 @@ pub async fn run_extraction_with_skip(
     let skip_validation_flag = "1";
     let config_path = find_bundled_config(app);
     // arguments[9] = skipRenderPages JSON, arguments[10] = mode "full", arguments[14] = skipValidation
-    let applescript = format!(
-        r#"using terms from application "{app_name}"
-    tell application "{app_name}"
-        activate
-        with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full", "", "", "", "{skip_validation_flag}"}}
-        end timeout
-    end tell
-end using terms from"#,
-        app_name = app_name,
-        jsx_path = jsx_path,
-        indd_path = indd_path,
-        output_dir = output_dir_str,
-        start_page = start_page,
-        end_page = end_page,
-        spread_flag = spread_flag,
-        config_path = config_path,
-        perf_mode = perf_mode,
-        skip_pdf_flag = skip_pdf_flag,
-        skip_render_pages = skip_render_pages_json,
-        skip_validation_flag = skip_validation_flag,
-    );
+    let applescript_args = vec![
+        indd_path.to_string(),
+        output_dir_str.clone(),
+        start_page.to_string(),
+        end_page.to_string(),
+        spread_flag.to_string(),
+        "0".to_string(),
+        config_path.clone(),
+        perf_mode.to_string(),
+        skip_pdf_flag.to_string(),
+        skip_render_pages_json.to_string(),
+        "full".to_string(),
+        String::new(),
+        String::new(),
+        String::new(),
+        skip_validation_flag.to_string(),
+        "0".to_string(),
+        jsx_path.to_string(),
+    ];
+    let applescript = build_extract_applescript(&app_name, jsx_path, &applescript_args, 3600);
     emit_progress(app, "exporting", "부분 재추출 중 (변경 페이지만)...");
     let script_file = output_dir.join("_extract.applescript");
     std::fs::write(&script_file, &applescript)
@@ -987,21 +1221,26 @@ pub async fn run_page_hash_scan(
     let output_dir_str = output_dir.to_string_lossy().to_string();
     let config_path = find_bundled_config(app);
     // arguments[10] = "pre_scan"
-    let applescript = format!(
-        r#"using terms from application "{app_name}"
-    tell application "{app_name}"
-        activate
-        with timeout of 300 seconds
-            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "0", "0", "0", "0", "{config_path}", "standard", "0", "", "pre_scan"}}
-        end timeout
-    end tell
-end using terms from"#,
-        app_name = app_name,
-        jsx_path = jsx_path,
-        indd_path = indd_path,
-        output_dir = output_dir_str,
-        config_path = config_path,
-    );
+    let applescript_args = vec![
+        indd_path.to_string(),
+        output_dir_str.clone(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        config_path,
+        "standard".to_string(),
+        "0".to_string(),
+        String::new(),
+        "pre_scan".to_string(),
+        String::new(),
+        String::new(),
+        String::new(),
+        "1".to_string(),
+        "0".to_string(),
+        jsx_path.to_string(),
+    ];
+    let applescript = build_extract_applescript(&app_name, jsx_path, &applescript_args, 300);
     emit_progress(app, "scanning", "페이지 변경 감지 중...");
     let script_file = output_dir.join("_extract.applescript");
     std::fs::write(&script_file, &applescript)
@@ -1317,27 +1556,26 @@ async fn run_extraction_followup_chunk(
     let skip_validation_flag = "1";
     let config_path = find_bundled_config(app);
     // args[9]="" (no skip pages), args[10]="full", args[11]="1" (chunkMode), args[12]="1" (physicalRange), args[14]="1" (skipValidation)
-    let applescript = format!(
-        r#"using terms from application "{app_name}"
-    tell application "{app_name}"
-        activate
-        with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "1", "1", "", "{skip_validation_flag}"}}
-        end timeout
-    end tell
-end using terms from"#,
-        app_name = app_name,
-        jsx_path = jsx_path,
-        indd_path = indd_path,
-        output_dir = output_dir_str,
-        start_page = start_page,
-        end_page = end_page,
-        spread_flag = spread_flag,
-        config_path = config_path,
-        perf_mode = perf_mode,
-        skip_pdf_flag = skip_pdf_flag,
-        skip_validation_flag = skip_validation_flag,
-    );
+    let applescript_args = vec![
+        indd_path.to_string(),
+        output_dir_str.clone(),
+        start_page.to_string(),
+        end_page.to_string(),
+        spread_flag.to_string(),
+        "0".to_string(),
+        config_path,
+        perf_mode.to_string(),
+        skip_pdf_flag.to_string(),
+        String::new(),
+        "full".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        String::new(),
+        skip_validation_flag.to_string(),
+        "0".to_string(),
+        jsx_path.to_string(),
+    ];
+    let applescript = build_extract_applescript(&app_name, jsx_path, &applescript_args, 3600);
     let script_file = output_dir.join(format!(
         "_extract_chunk_{}_{}.applescript",
         start_page, end_page
