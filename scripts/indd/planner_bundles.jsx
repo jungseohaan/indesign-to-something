@@ -88,7 +88,9 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     } else {
         declaredCandidate = completedCandidate;
     }
-    slotSources = _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources);
+    slotSources = _plannerBundlePruneShellOwnedTextAndTableStructureSources(
+            declaredCandidate, slot, slotSources, clusterIndex);
+    slotSources = _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources, clusterIndex);
     slotSources = _plannerBundleWithoutPlacedContentBranches(
             declaredCandidate, slot, slotSources, clusterIndex);
     slotSources = _plannerBundleWithoutClippedPlacedContentLeafSources(
@@ -120,6 +122,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
             declaredCandidate, slot, exportSourceObjectIds, clusterIndex);
     exportSourceObjectIds = _plannerBundlePruneClippedPlacedContentLeafIds(
             declaredCandidate, slot, exportSourceObjectIds, clusterIndex);
+    exportSourceObjectIds = _plannerBundlePruneShellOwnedTextAndTableStructureExportSources(
+            declaredCandidate, slot, slotSources, exportSourceObjectIds, clusterIndex);
     exportSourceObjectIds = _plannerBundleSourceIdsIntersect(exportSourceObjectIds, sourceIds);
     if (slot === "CONTENT_VISUAL_SLOT"
             && (!slotSources.visualSourceObjectIds || slotSources.visualSourceObjectIds.length === 0)
@@ -699,16 +703,39 @@ function _plannerBundleSourceHasExecutableVisualMaterialInSubtree(sourceId, clus
     return false;
 }
 
-function _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources) {
+function _plannerBundleWithoutOwnedTextVisualSources(slot, slotSources, clusterIndex) {
     if (slot !== "SHELL_SLOT" || !slotSources) return slotSources;
     if (!slotSources.ownedTextFrameIds || slotSources.ownedTextFrameIds.length === 0) return slotSources;
-    var copy = {
+    var removableOwnedTextIds = _plannerBundleOwnedTextVisualSourceIdsToPrune(
+            slotSources.ownedTextFrameIds, clusterIndex);
+    if (!removableOwnedTextIds || removableOwnedTextIds.length === 0) return slotSources;
+    return {
         visualSourceObjectIds: _plannerBundleSourceIdsMinus(
-                slotSources.visualSourceObjectIds || [], slotSources.ownedTextFrameIds),
+                slotSources.visualSourceObjectIds || [], removableOwnedTextIds),
         styleSourceObjectIds: _sortedNumericIds(slotSources.styleSourceObjectIds || []),
         ownedTextFrameIds: _sortedNumericIds(slotSources.ownedTextFrameIds || [])
     };
-    return copy;
+}
+
+function _plannerBundleOwnedTextVisualSourceIdsToPrune(ownedTextFrameIds, clusterIndex) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; ownedTextFrameIds && i < ownedTextFrameIds.length; i++) {
+        var id = Number(ownedTextFrameIds[i]);
+        if (isNaN(id)) continue;
+        var src = clusterIndex && clusterIndex.sourceInfo
+                ? clusterIndex.sourceInfo(id)
+                : null;
+        if (_plannerBundleOwnedTextMustRemainShellVisualSource(src)) continue;
+        _pushUniqueId(out, seen, id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _plannerBundleOwnedTextMustRemainShellVisualSource(src) {
+    if (!src || src.kind !== "TextFrame") return false;
+    if (_plannerBundleIsTableOnlyCarrierTextFrame(src)) return false;
+    return _plannerBundleHasTextFrameShellStyle(src) === true;
 }
 
 function _plannerBundleWithoutPlacedContentBranches(candidate, slot, slotSources, clusterIndex) {
@@ -1348,6 +1375,65 @@ function _plannerBundleNonTextSourceIds(sourceIds, hiddenVisualIdSet, clusterInd
         ids.push(id);
     }
     return _sortedNumericIds(ids);
+}
+
+function _plannerBundlePruneShellOwnedTextAndTableStructureSources(
+        candidate, slot, slotSources, clusterIndex) {
+    if (slot !== "SHELL_SLOT" || !slotSources) return slotSources;
+    var disallowed = _plannerBundleShellIneligibleVisualSourceIds(
+            candidate, slotSources, clusterIndex);
+    if (!disallowed || disallowed.length === 0) return slotSources;
+    return {
+        visualSourceObjectIds: _plannerBundleSourceIdsMinus(
+                slotSources.visualSourceObjectIds || [], disallowed),
+        styleSourceObjectIds: _plannerBundleSourceIdsMinus(
+                slotSources.styleSourceObjectIds || [], disallowed),
+        ownedTextFrameIds: slotSources.ownedTextFrameIds || []
+    };
+}
+
+function _plannerBundlePruneShellOwnedTextAndTableStructureExportSources(
+        candidate, slot, slotSources, exportSourceObjectIds, clusterIndex) {
+    if (slot !== "SHELL_SLOT") return exportSourceObjectIds;
+    var disallowed = _plannerBundleShellIneligibleVisualSourceIds(
+            candidate, slotSources, clusterIndex);
+    if (!disallowed || disallowed.length === 0) return exportSourceObjectIds;
+    return _plannerBundleSourceIdsMinus(exportSourceObjectIds || [], disallowed);
+}
+
+function _plannerBundleShellIneligibleVisualSourceIds(candidate, slotSources, clusterIndex) {
+    var ids = [];
+    var seen = {};
+    function addId(id) {
+        _pushUniqueId(ids, seen, id);
+    }
+    function addTableCarrierAndStructure(sourceId) {
+        var src = clusterIndex && clusterIndex.sourceInfo
+                ? clusterIndex.sourceInfo(sourceId)
+                : null;
+        if (!_plannerBundleIsTableOnlyCarrierTextFrame(src)) return;
+        addId(sourceId);
+        for (var i = 0; src.tableSourceObjectIds && i < src.tableSourceObjectIds.length; i++) {
+            addId(src.tableSourceObjectIds[i]);
+        }
+    }
+
+    for (var i = 0; slotSources && slotSources.ownedTextFrameIds && i < slotSources.ownedTextFrameIds.length; i++) {
+        addId(slotSources.ownedTextFrameIds[i]);
+        addTableCarrierAndStructure(slotSources.ownedTextFrameIds[i]);
+    }
+    for (var j = 0; candidate && candidate.sourceObjectIds && j < candidate.sourceObjectIds.length; j++) {
+        addTableCarrierAndStructure(candidate.sourceObjectIds[j]);
+    }
+    return _sortedNumericIds(ids);
+}
+
+function _plannerBundleIsTableOnlyCarrierTextFrame(src) {
+    if (!src || src.kind !== "TextFrame") return false;
+    if (src.textFrameClass !== "editable") return false;
+    if (src.hasTablesInStory !== true && Number(src.tableCountInStory || 0) <= 0) return false;
+    if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
+    return src.markerOnlyContents === true;
 }
 
 function _plannerBundleTextFrameShellSourceIds(sourceIds, clusterIndex) {

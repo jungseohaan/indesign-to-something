@@ -1222,150 +1222,193 @@ function collectPages(doc, startPage, endPage, skipRenderPagesMap) {
 }
 
 
+function _resolvedIsValidPageItem(item) {
+    if (!item) return false;
+    try {
+        if (item.isValid === false) return false;
+    } catch (eIsValid) {
+        return false;
+    }
+    return true;
+}
+
+function _resolvedMaterializePageItemArray(rawItems) {
+    var out = [];
+    if (!rawItems || typeof rawItems.length !== "number") return out;
+    for (var i = 0; i < rawItems.length; i++) {
+        var item = null;
+        try { item = rawItems[i]; } catch (eItemRead) { continue; }
+        if (!_resolvedIsValidPageItem(item)) continue;
+        out.push(item);
+    }
+    return out;
+}
+
+function _resolvedSafePageItemSnapshot(doc, cachedAllItems, resolvedOptions) {
+    var invalidCachedCount = 0;
+    var cachedCount = 0;
+    if (cachedAllItems && typeof cachedAllItems.length === "number") {
+        cachedCount = cachedAllItems.length;
+        for (var i = 0; i < cachedAllItems.length; i++) {
+            if (!_resolvedIsValidPageItem(cachedAllItems[i])) invalidCachedCount++;
+        }
+    }
+
+    if (!cachedAllItems || invalidCachedCount > 0) {
+        var freshItems = [];
+        try { freshItems = _resolvedMaterializePageItemArray(doc.allPageItems); } catch (eFresh) { freshItems = []; }
+        if (resolvedOptions) {
+            resolvedOptions.pageItemSnapshot = {
+                strategy: "fresh_doc_allPageItems",
+                cachedCount: cachedCount,
+                invalidCachedCount: invalidCachedCount,
+                freshCount: freshItems && typeof freshItems.length === "number" ? freshItems.length : 0
+            };
+        }
+        return freshItems;
+    }
+
+    var cachedItems = _resolvedMaterializePageItemArray(cachedAllItems);
+    if (resolvedOptions) {
+        resolvedOptions.pageItemSnapshot = {
+            strategy: "cached_allPageItems",
+            cachedCount: cachedCount,
+            invalidCachedCount: 0,
+            materializedCount: cachedItems.length
+        };
+    }
+    return cachedItems;
+}
+
 function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems, resolvedOptions) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var items = [];
     var atomicIndex = resolvedOptions ? resolvedOptions.atomicCollectionIndex : null;
-    var allItems = cachedAllItems || doc.allPageItems;
+    var allItems = _resolvedSafePageItemSnapshot(doc, cachedAllItems, resolvedOptions);
     for (var i = 0; i < allItems.length; i++) {
-        var pi = allItems[i];
-        if (_resolvedAtomicShouldSkipRawPageItem(pi, atomicIndex)) {
-            atomicIndex.summary.skippedPageItemCount++;
-            continue;
-        }
-
-        // 페이지 범위 필터
-        var piPageIdx = -1;
         try {
-            var parentPage = pi.parentPage;
-            if (parentPage) piPageIdx = parentPage.documentOffset;
-        } catch (e) {}
-        // piPageIdx는 0-based, startPage/endPage는 1-based.
-        // Spread-level 또는 cross-page source는 parentPage가 범위 밖이어도
-        // requested page와 bounds가 겹치면 Stage 1 ObjectPlan의 실행 source가 될 수
-        // 있다. parentPage만으로 버리면 NATIVE_SOURCE_SHAPE plan은 남고
-        // resolved.pageItems source가 빠져 Stage 3에서 누락된다.
-        if (piPageIdx >= 0) {
-            var pgIdx1 = piPageIdx + 1;
-            if (pgIdx1 < startPage || pgIdx1 > endPage) {
-                var overlapPageIdx = _pageIndexBySpreadBounds(doc, pi, {
-                    startPage: startPage,
-                    endPage: endPage
-                });
-                if (overlapPageIdx < 0) continue;
-                piPageIdx = overlapPageIdx;
-                pgIdx1 = piPageIdx + 1;
+            var pi = allItems[i];
+            if (!_resolvedIsValidPageItem(pi)) continue;
+            if (_resolvedAtomicShouldSkipRawPageItem(pi, atomicIndex)) {
+                atomicIndex.summary.skippedPageItemCount++;
+                continue;
             }
-            if (skipRenderPagesMap[pgIdx1]) continue; // SPEC-030: 증분 추출 스킵
-        }
 
-        var data = {
-            id: pi.id.toString(),
-            type: pi.constructor.name,
-            name: null,
-            parentId: null,
-            pageIndex: piPageIdx
-        };
-        try { data.visible = (pi.visible !== false); } catch (e) { data.visible = true; }
-        try { data.hiddenByParent = isHiddenByVisibility(pi); } catch (e) { data.hiddenByParent = false; }
-
-        // 이름
-        try { data.name = pi.name; } catch (e) {}
-        _copyLayerInfo(data, pi);
-
-        // 부모 관계 (Spread/Page 직속은 null)
-        try {
-            if (pi.parent && pi.parent.constructor.name !== "Spread"
-                && pi.parent.constructor.name !== "Page"
-                && pi.parent.constructor.name !== "MasterSpread") {
-                data.parentId = pi.parent.id.toString();
-            }
-        } catch (e) {}
-
-        // 기하 — InDesign이 모든 변환 적용한 절대 좌표 (pt)
-        try { data.geometricBounds = arrCopy(pi.geometricBounds); } catch (e) {}
-        // SPEC-030: visibleBounds 제거 — Java 측에서 사용 안 함 (geometricBounds 만 사용)
-
-        // 절대 변환 — SPEC-030: rotationAngle 만 사용됨, shear/scale/flip 은 미사용 제거
-        try { data.absoluteRotationAngle = pi.absoluteRotationAngle; } catch (e) {}
-
-        // 채우기
-        try {
-            if (pi.fillColor && pi.fillColor.name !== "None") {
-                data.fillColorName = pi.fillColor.name;
-                data.fillTint = pi.fillTint;
-            }
-        } catch (e) {}
-
-        // 스트로크
-        try {
-            if (pi.strokeColor && pi.strokeColor.name !== "None") {
-                data.strokeColorName = pi.strokeColor.name;
-                data.strokeTint = pi.strokeTint;
-                data.strokeWeight = pi.strokeWeight;
-                data.strokeAlignment = pi.strokeAlignment.toString();
-            }
-        } catch (e) {}
-
-        // 투명도
-        try { data.opacity = pi.transparencySettings.blendingSettings.opacity; } catch (e) {}
-
-        // SPEC-030: 그라디언트 페더 / 드롭 섀도우 제거 — 신 파이프라인에서 pageItem 레벨 사용 안 함.
-        //   (TextFrameBlock 의 dropShadow boolean 은 별도로 transparencySettings 에서 직접 추출)
-
-        // 코너 반경
-        try {
-            if (pi.cornerRadius > 0) {
-                data.cornerRadius = pi.cornerRadius;
-            }
-        } catch (e) {}
-
-        // NEW: z-order (allPageItems 순서 = 시각적 스태킹)
-        data.zOrder = i;
-
-        data.anchoredPosition = _itemAnchoredPosition(pi);
-        data.storyAnchorPlacement = _storyAnchorPlacementForItem(doc, pi, null);
-
-        // NEW: 인라인 여부. Story에 매달린 객체라도 content box 밖에 놓인
-        // anchored visual은 page-space floating source로 보존한다.
-        data.isInline = isInlineItem(pi) && data.storyAnchorPlacement !== "FLOATING_ANCHORED";
-
-        if (_resolvedAtomicShouldSkipPageItem(pi, data, atomicIndex)) {
-            atomicIndex.summary.skippedPageItemCount++;
-            continue;
-        }
-
-        // NEW: Group 자식 ID
-        if (pi.constructor.name === "Group") {
+            // 페이지 범위 필터
+            var piPageIdx = -1;
             try {
-                var rootInfo = atomicIndex && atomicIndex.rootInfo
-                        ? atomicIndex.rootInfo[String(data.id)]
-                        : null;
-                if (rootInfo) {
-                    data.atomicTextlessVectorContent = true;
-                    data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
-                    data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
-                    data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
-                    data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
-                    data.childIds = [];
-                    data.childIdsOmittedByAtomicContent = true;
-                    atomicIndex.summary.compactRootCount++;
-                } else {
-                    var grpChildren = pi.allPageItems;
-                    var childIds = [];
-                    for (var gc = 0; gc < grpChildren.length; gc++) {
-                        childIds.push(grpChildren[gc].id);
-                    }
-                    data.childIds = childIds;
+                var parentPage = pi.parentPage;
+                if (parentPage) piPageIdx = parentPage.documentOffset;
+            } catch (ePage) {}
+            if (piPageIdx >= 0) {
+                var pgIdx1 = piPageIdx + 1;
+                if (pgIdx1 < startPage || pgIdx1 > endPage) {
+                    var overlapPageIdx = _pageIndexBySpreadBounds(doc, pi, {
+                        startPage: startPage,
+                        endPage: endPage
+                    });
+                    if (overlapPageIdx < 0) continue;
+                    piPageIdx = overlapPageIdx;
+                    pgIdx1 = piPageIdx + 1;
                 }
-            } catch (e) {}
-            // SPEC-030: clipContent 제거 — 신 파이프라인 미사용
+                if (skipRenderPagesMap[pgIdx1]) continue;
+            }
+
+            var data = {
+                id: pi.id.toString(),
+                type: pi.constructor.name,
+                name: null,
+                parentId: null,
+                pageIndex: piPageIdx
+            };
+            try { data.visible = (pi.visible !== false); } catch (eVisible) { data.visible = true; }
+            try { data.hiddenByParent = isHiddenByVisibility(pi); } catch (eHidden) { data.hiddenByParent = false; }
+            try { data.name = pi.name; } catch (eName) {}
+            _copyLayerInfo(data, pi);
+
+            try {
+                if (pi.parent && pi.parent.constructor.name !== "Spread"
+                    && pi.parent.constructor.name !== "Page"
+                    && pi.parent.constructor.name !== "MasterSpread") {
+                    data.parentId = pi.parent.id.toString();
+                }
+            } catch (eParent) {}
+
+            try { data.geometricBounds = arrCopy(pi.geometricBounds); } catch (eBounds) {}
+            try { data.absoluteRotationAngle = pi.absoluteRotationAngle; } catch (eRotation) {}
+
+            try {
+                if (pi.fillColor && pi.fillColor.name !== "None") {
+                    data.fillColorName = pi.fillColor.name;
+                    data.fillTint = pi.fillTint;
+                }
+            } catch (eFill) {}
+
+            try {
+                if (pi.strokeColor && pi.strokeColor.name !== "None") {
+                    data.strokeColorName = pi.strokeColor.name;
+                    data.strokeTint = pi.strokeTint;
+                    data.strokeWeight = pi.strokeWeight;
+                    data.strokeAlignment = pi.strokeAlignment.toString();
+                }
+            } catch (eStroke) {}
+
+            try { data.opacity = pi.transparencySettings.blendingSettings.opacity; } catch (eOpacity) {}
+
+            try {
+                if (pi.cornerRadius > 0) {
+                    data.cornerRadius = pi.cornerRadius;
+                }
+            } catch (eCorner) {}
+
+            data.zOrder = i;
+            data.anchoredPosition = _itemAnchoredPosition(pi);
+            data.storyAnchorPlacement = _storyAnchorPlacementForItem(doc, pi, null);
+            data.isInline = isInlineItem(pi) && data.storyAnchorPlacement !== "FLOATING_ANCHORED";
+
+            if (_resolvedAtomicShouldSkipPageItem(pi, data, atomicIndex)) {
+                atomicIndex.summary.skippedPageItemCount++;
+                continue;
+            }
+
+            if (pi.constructor.name === "Group") {
+                try {
+                    var rootInfo = atomicIndex && atomicIndex.rootInfo
+                            ? atomicIndex.rootInfo[String(data.id)]
+                            : null;
+                    if (rootInfo) {
+                        data.atomicTextlessVectorContent = true;
+                        data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
+                        data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
+                        data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
+                        data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
+                        data.childIds = [];
+                        data.childIdsOmittedByAtomicContent = true;
+                        atomicIndex.summary.compactRootCount++;
+                    } else {
+                        var grpChildren = _resolvedMaterializePageItemArray(pi.allPageItems);
+                        var childIds = [];
+                        for (var gc = 0; gc < grpChildren.length; gc++) {
+                            childIds.push(grpChildren[gc].id);
+                        }
+                        data.childIds = childIds;
+                    }
+                } catch (eGroup) {}
+            }
+
+            items.push(data);
+        } catch (eItemCollect) {
+            if (resolvedOptions) {
+                if (!resolvedOptions.pageItemCollectionWarnings) resolvedOptions.pageItemCollectionWarnings = [];
+                if (resolvedOptions.pageItemCollectionWarnings.length < 50) {
+                    resolvedOptions.pageItemCollectionWarnings.push({
+                        index: i,
+                        message: String(eItemCollect)
+                    });
+                }
+            }
+            continue;
         }
-
-        // SPEC-030: pageRelativeBounds 제거 (pageItems 레벨) — Java 측 신 파이프라인 미사용.
-        // TextFrame 의 pageRelativeBounds 는 별도 emission 위치(fData)에서 계속 유지.
-
-        items.push(data);
     }
     return items;
 }
