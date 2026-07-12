@@ -261,6 +261,9 @@ public final class TextFlowDiagnosticsBuilder {
         }
         String placement = safe(item.storyAnchorPlacement()).toUpperCase(java.util.Locale.ROOT);
         String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(java.util.Locale.ROOT);
+        if (item.storyTextInlineSlot()) {
+            return true;
+        }
         if ("FLOATING_ANCHORED".equals(placement) || "ANCHORED".equals(anchoredPosition)) {
             return false;
         }

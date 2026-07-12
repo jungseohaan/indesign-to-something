@@ -863,7 +863,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                         if (anchItems.length > 0) {
                                             anchoredIds.push({
                                                 id: anchItems[0].id,
-                                                storyAnchorPlacement: _storyAnchorPlacementForItem(doc, anchItems[0], story)
+                                                storyAnchorPlacement: _storyAnchorPlacementForItem(doc, anchItems[0], story),
+                                                storyTextInlineSlot: true
                                             });
                                         } else {
                                             anchoredIds.push({ id: null, storyAnchorPlacement: null });
@@ -907,7 +908,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                             if (pi2 < parts.length - 1) {
                                 var anchorRecord = anchorIdx < anchoredIds.length ? anchoredIds[anchorIdx] : null;
                                 if (anchorRecord && anchorRecord.id !== null && anchorRecord.id !== undefined
-                                        && anchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED") {
+                                        && (anchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED"
+                                            || anchorRecord.storyTextInlineSlot === true)) {
                                     paraData.runs.push({
                                         type: "inline_anchor",
                                         anchoredObjectId: anchorRecord.id,
@@ -1180,7 +1182,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                                             if (crcAnch.length > 0) {
                                                                 cellAnchoredIds.push({
                                                                     id: crcAnch[0].id,
-                                                                    storyAnchorPlacement: _storyAnchorPlacementForItem(doc, crcAnch[0], story)
+                                                                    storyAnchorPlacement: _storyAnchorPlacementForItem(doc, crcAnch[0], story),
+                                                                    storyTextInlineSlot: true
                                                                 });
                                                             } else {
                                                                 cellAnchoredIds.push({ id: null, storyAnchorPlacement: null });
@@ -1200,7 +1203,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                                 if (cpi < cellParts.length - 1) {
                                                     var cellAnchorRecord = cellAnchorIdx < cellAnchoredIds.length ? cellAnchoredIds[cellAnchorIdx] : null;
                                                     if (cellAnchorRecord && cellAnchorRecord.id !== null && cellAnchorRecord.id !== undefined
-                                                            && cellAnchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED"
+                                                            && (cellAnchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED"
+                                                                || cellAnchorRecord.storyTextInlineSlot === true)
                                                             && shouldAppendCellInlineAnchorForBoundaryDedupe(
                                                                 cpData,
                                                                 cellAnchorRecord.id,

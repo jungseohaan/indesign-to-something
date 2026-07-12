@@ -24,6 +24,27 @@ function _itemParentKind(item) {
     try { return item && item.parent && item.parent.constructor ? item.parent.constructor.name : null; } catch (e) { return null; }
 }
 
+function _itemHasDirectStoryTextInlineSlot(item) {
+    try {
+        if (!item || !item.parent) return false;
+        var parentKind = _itemParentKind(item);
+        if (parentKind === "Character") {
+            var contents = "";
+            try { contents = String(item.parent.contents || ""); } catch (eContents) {}
+            return contents.indexOf("\uFFFC") >= 0 || contents.indexOf("\u0016") >= 0;
+        }
+        if (parentKind === "InsertionPoint") {
+            try {
+                var pageItems = item.parent.pageItems;
+                for (var i = 0; pageItems && i < pageItems.length; i++) {
+                    if (_itemId(pageItems[i]) === _itemId(item)) return true;
+                }
+            } catch (ePageItems) {}
+        }
+    } catch (e) {}
+    return false;
+}
+
 function _itemContentTypeName(item) {
     try {
         if (!item || item.contentType === undefined || item.contentType === null) return null;
@@ -165,6 +186,7 @@ function _storyAnchorPlacementForItem(doc, item, parentStory) {
 
 function _isInlineFlowItemBySourceInfo(sourceInfo) {
     if (!sourceInfo) return false;
+    if (sourceInfo.storyTextInlineSlot === true) return true;
     var placement = String(sourceInfo.storyAnchorPlacement || "").toUpperCase();
     var anchoredPosition = String(sourceInfo.anchoredPosition || "").toUpperCase();
     if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
@@ -575,6 +597,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             cornerRadius: null,
             anchoredPosition: _itemAnchoredPosition(item),
             storyAnchorPlacement: _storyAnchorPlacementForItem(doc, item, parentStory),
+            storyTextInlineSlot: _itemHasDirectStoryTextInlineSlot(item),
             recoveredMissingParent: false,
             rangeTargetPageIndexes: _rangeTargetPageIndexesForId(id)
         };
@@ -1211,6 +1234,7 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
             hasVisibleFill: src.hasVisibleFill === true,
             hasVisibleStroke: src.hasVisibleStroke === true,
             storyAnchorPlacement: src.storyAnchorPlacement || null,
+            storyTextInlineSlot: src.storyTextInlineSlot === true,
             coverageClaimKinds: claimKinds
         };
         if (fullDiagnostics) {

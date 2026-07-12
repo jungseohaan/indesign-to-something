@@ -3554,6 +3554,7 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.resolvedData == null) return false;
         ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
         if (item == null) return false;
+        if (item.storyTextInlineSlot()) return true;
         String storyAnchorPlacement = upper(item.storyAnchorPlacement());
         String anchoredPosition = upper(item.anchoredPosition());
         if ("FLOATING_ANCHORED".equals(storyAnchorPlacement) || "ANCHORED".equals(anchoredPosition)) {

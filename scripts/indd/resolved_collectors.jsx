@@ -1314,6 +1314,7 @@ function _resolvedSourceParentId(src) {
 
 function _resolvedSourceIsInline(src) {
     if (!src) return false;
+    if (src.storyTextInlineSlot === true) return true;
     if (src.storyAnchorPlacement === "FLOATING_ANCHORED") return false;
     if (src.storyAnchorPlacement === "INLINE" || src.storyAnchorPlacement === "ABOVE_LINE") return true;
     var anchoredPosition = src.anchoredPosition ? String(src.anchoredPosition) : "";
@@ -1399,6 +1400,7 @@ function _collectPageItemsFromSourceItems(startPage, endPage, skipRenderPagesMap
                 zOrder: src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : i,
                 anchoredPosition: src.anchoredPosition || null,
                 storyAnchorPlacement: src.storyAnchorPlacement || null,
+                storyTextInlineSlot: src.storyTextInlineSlot === true,
                 isInline: _resolvedSourceIsInline(src)
             };
             if (src.bounds) data.geometricBounds = arrCopy(src.bounds);
@@ -1539,7 +1541,9 @@ function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAll
             data.zOrder = i;
             data.anchoredPosition = _itemAnchoredPosition(pi);
             data.storyAnchorPlacement = _storyAnchorPlacementForItem(doc, pi, null);
-            data.isInline = isInlineItem(pi) && data.storyAnchorPlacement !== "FLOATING_ANCHORED";
+            data.storyTextInlineSlot = _itemHasDirectStoryTextInlineSlot(pi);
+            data.isInline = data.storyTextInlineSlot === true
+                    || (isInlineItem(pi) && data.storyAnchorPlacement !== "FLOATING_ANCHORED");
 
             if (_resolvedAtomicShouldSkipPageItem(pi, data, atomicIndex)) {
                 atomicIndex.summary.skippedPageItemCount++;

@@ -555,6 +555,7 @@ public class ResolvedDataReader {
         item.isInline(getBool(o, "isInline", false));
         item.anchoredPosition(getString(o, "anchoredPosition"));
         item.storyAnchorPlacement(getString(o, "storyAnchorPlacement"));
+        item.storyTextInlineSlot(getBool(o, "storyTextInlineSlot", false));
         item.clipContent(getBool(o, "clipContent", false));
         if (o.has("childIds") && !o.get("childIds").isJsonNull()) {
             item.childIds(parseIntArray(o.getAsJsonArray("childIds")));

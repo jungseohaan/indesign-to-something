@@ -175,6 +175,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     }
     var zOrder = _plannerBundleZOrder(candidate, primarySourceObjectId, clusterIndex);
     var sourceInlineFlow = _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex);
+    var inlineAnchorSourceObjectId = candidate.inlineAnchorSourceObjectId
+            || _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex);
     var inlineCompositeLayoutDescendant = _plannerBundleIsInsideInlineCompositeLayout(
             sourceIds, clusterIndex);
     var connectorDecorationVisual = _plannerBundleIsInlineCompositeTextlessVectorDecoration(
@@ -241,7 +243,7 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         required: candidate.required === true,
         sourceInlineFlow: sourceInlineFlow,
         inlineCompositeLayoutDescendant: inlineCompositeLayoutDescendant,
-        inlineAnchorSourceObjectId: candidate.inlineAnchorSourceObjectId || null,
+        inlineAnchorSourceObjectId: inlineAnchorSourceObjectId || null,
         inlineSourceTreeClosed: candidate.inlineSourceTreeClosed === true,
         inlineFlowSourceObjectIds: inlineFlowSourceObjectIds,
         connectorDecorationVisual: connectorDecorationVisual,
@@ -467,6 +469,10 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
     for (var i = 0; i < sourceIds.length; i++) {
         var src = clusterIndex.sourceInfo(sourceIds[i]);
         if (!src) continue;
+        if (src.storyTextInlineSlot === true) {
+            sawInline = true;
+            continue;
+        }
         var kind = String(src.kind || "");
         if (kind === "Story" || kind === "Character" || kind === "InsertionPoint" || kind === "Cell") {
             continue;
@@ -487,6 +493,14 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
     }
     cache[cacheKey] = sawInline;
     return cache[cacheKey];
+}
+
+function _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex) {
+    if (!sourceIds || sourceIds.length !== 1 || !clusterIndex || !clusterIndex.sourceInfo) return null;
+    var src = clusterIndex.sourceInfo(sourceIds[0]);
+    if (!src || src.storyTextInlineSlot !== true) return null;
+    var id = Number(sourceIds[0]);
+    return isNaN(id) ? null : id;
 }
 
 function _plannerBundleCache(clusterIndex, name) {
@@ -1741,6 +1755,9 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
         if (candidate.ownershipSlot === "TEXTLESS_GROUP_VISUAL_SLOT") return "CONTENT_VISUAL_SLOT";
         return candidate.ownershipSlot;
     }
+    if (_plannerBundleCandidateIsStoryTextInlineStandaloneVisual(candidate, clusterIndex)) {
+        return "CONTENT_VISUAL_SLOT";
+    }
     if (candidate.slotRole === "shell_slot_only") return "SHELL_SLOT";
     if (candidate.passId === "pass.editable_textframe_visual_shells") return "SHELL_SLOT";
     if (candidate.passId === "pass.decoration_groups") return "SHELL_SLOT";
@@ -1791,6 +1808,21 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
     return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
             ? "CONTENT_VISUAL_SLOT"
             : "SHELL_SLOT";
+}
+
+function _plannerBundleCandidateIsStoryTextInlineStandaloneVisual(candidate, clusterIndex) {
+    if (!candidate || !clusterIndex || !clusterIndex.sourceInfo) return false;
+    var sourceIds = candidate.sourceObjectIds || [];
+    if (sourceIds.length !== 1) return false;
+    if ((candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0)
+            || (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0)
+            || (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0)) {
+        return false;
+    }
+    var src = clusterIndex.sourceInfo(sourceIds[0]);
+    if (!src || src.storyTextInlineSlot !== true) return false;
+    var kind = String(src.kind || "");
+    return kind !== "TextFrame" && kind !== "Story" && kind !== "Character" && kind !== "InsertionPoint";
 }
 
 function _plannerBundlePageTextlessGroupIsDecorationOnly(candidate, clusterIndex) {

@@ -61,11 +61,14 @@ Placement and coordinate space are a single source decision.
   Missing `storyAnchorPlacement` is not treated as `INLINE`; it is a metadata
   defect to fix in Stage 0.
 - `PLACE_INLINE_PNG` requires explicit inline source evidence:
-  `storyAnchorPlacement=INLINE` or `anchoredPosition=INLINE_POSITION`.
+  `storyAnchorPlacement=INLINE`, `anchoredPosition=INLINE_POSITION`, or a
+  Stage 0 `storyTextInlineSlot=true` fact obtained from an actual story anchor
+  marker (`U+FFFC` or `U+0016`) that directly owns the source object.
   `parentKind=Character` / `InsertionPoint` alone is never sufficient because a
   floating anchored object also has a story character anchor. If the source is
-  `FLOATING_ANCHORED` / `Anchored`, Stage 1 must use `placement=FLOATING` and
-  Story/Text Builder must not insert the PNG into the paragraph flow.
+  `FLOATING_ANCHORED` / `Anchored` without `storyTextInlineSlot=true`,
+  Stage 1 must use `placement=FLOATING` and Story/Text Builder must not insert
+  the PNG into the paragraph flow.
 - A table-cell inline anchor is not sufficient when the anchored source is a
   text-shell label whose source-positioned bounds sit outside the table cell's
   content area while the cell also contains real text runs. In that case the

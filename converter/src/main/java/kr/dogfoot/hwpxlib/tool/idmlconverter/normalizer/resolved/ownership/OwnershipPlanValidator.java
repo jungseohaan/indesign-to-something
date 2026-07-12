@@ -1596,6 +1596,7 @@ public final class OwnershipPlanValidator {
 
     private static boolean isExplicitInlineSource(ResolvedPageItem item) {
         if (item == null) return false;
+        if (item.storyTextInlineSlot()) return true;
         String storyAnchorPlacement = safe(item.storyAnchorPlacement()).toUpperCase(java.util.Locale.ROOT);
         String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(java.util.Locale.ROOT);
         if ("FLOATING_ANCHORED".equals(storyAnchorPlacement)

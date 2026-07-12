@@ -2578,6 +2578,7 @@ function _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourc
         var current = src;
         var guard = 0;
         while (current && guard++ < 64) {
+            if (current.storyTextInlineSlot === true) return true;
             var placement = String(current.storyAnchorPlacement || "").toUpperCase();
             if (placement === "INLINE" || placement === "ABOVE_LINE") return true;
             var parentId = current.parentId;
@@ -2625,9 +2626,11 @@ function _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourc
             layoutOnlyInlineSlot: false,
             sourceInlineFlow: true,
             inlineCompositeLayoutDescendant: true,
-            inlineAnchorSourceObjectId: src.parentId !== undefined && src.parentId !== null
+            inlineAnchorSourceObjectId: src.storyTextInlineSlot === true
+                    ? id
+                    : (src.parentId !== undefined && src.parentId !== null
                     ? src.parentId
-                    : null,
+                    : null),
             inlineSourceTreeClosed: true,
             inlineFlowSourceObjectIds: sourceIds,
             connectorDecorationVisual: false,
@@ -2723,6 +2726,7 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
         var current = src;
         var guard = 0;
         while (current && guard++ < 64) {
+            if (current.storyTextInlineSlot === true) return true;
             var placement = String(current.storyAnchorPlacement || "").toUpperCase();
             if (placement === "INLINE" || placement === "ABOVE_LINE") return true;
             var parentId = current.parentId;
@@ -3450,6 +3454,7 @@ function _objectPlanPlacement(bundle) {
     if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";
     if (bundle && bundle.passId === "pass.inline_objects") {
         var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
+        if (bundle.sourceInlineFlow === true && bundle.inlineAnchorSourceObjectId) return "INLINE";
         if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
             return "FLOATING";
         }
