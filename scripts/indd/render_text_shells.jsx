@@ -571,6 +571,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     ? slotPlan.primarySourceObjectId
                     : ""),
             _sourceSetKey(visualIds),
+            _sourceSetKey(slotPlan.excludedInlineSourceObjectIds || []),
             _decoBoundsCacheKey(slotPlan.bounds || [])
         ].join("|");
     }
@@ -1596,6 +1597,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
             opts.sourceObjectIds = slotPlan.sourceObjectIds || ownershipOpts.sourceObjectIds || exportIds;
             opts.exportSourceObjectIds = exportIds;
+            opts.excludedInlineSourceObjectIds = slotPlan.excludedInlineSourceObjectIds
+                    || ownershipOpts.excludedInlineSourceObjectIds
+                    || [];
             opts.visualOnlyChildIds = exportIds;
             opts.layerSource = sourceItems[0];
             opts.reason = ownershipOpts.reason || (isPageTextlessGraphicGroup
@@ -1730,7 +1734,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         _perfRootPrepMs += _decoPerfNow() - _perfRootPrepStartedAt;
         var groupCreateErrors = [];
         var sourceItemDebug = [];
-        var hiddenVisualIds = _sortedNumericIds(slotPlan.hiddenVisualSourceObjectIds || []);
+        var hiddenVisualIds = _sortedNumericIds(_sourceIdsUnion(
+                slotPlan.hiddenVisualSourceObjectIds || [],
+                slotPlan.excludedInlineSourceObjectIds || []));
         function itemParentKey(item) {
             try {
                 var p = item ? item.parent : null;

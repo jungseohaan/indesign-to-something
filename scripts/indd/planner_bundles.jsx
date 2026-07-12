@@ -66,11 +66,20 @@ function _plannerBundleDocument(bundles, summary) {
 
 function _plannerBundleFromCandidate(candidate, clusterIndex) {
     var sourceIds = _internSourceSetIds(candidate.sourceObjectIds || []);
+    if (_plannerBundleIsPageRootTextlessVisualPlane(candidate)
+            && candidate.exportSourceObjectIds
+            && candidate.exportSourceObjectIds.length > 0) {
+        sourceIds = _internSourceSetIds(candidate.exportSourceObjectIds || []);
+    }
     var primarySourceObjectId = candidate.primarySourceObjectId !== undefined
             ? candidate.primarySourceObjectId
             : (sourceIds.length > 0 ? sourceIds[0] : null);
     var slot = _plannerBundleOwnershipSlot(candidate, clusterIndex);
-    var sourceRootObjectIds = _plannerBundleSourceRootObjectIds(sourceIds, clusterIndex);
+    var sourceRootObjectIds = _plannerBundleIsPageRootTextlessVisualPlane(candidate)
+            && candidate.sourceRootObjectIds
+            && candidate.sourceRootObjectIds.length > 0
+            ? _internSourceSetIds(candidate.sourceRootObjectIds || [])
+            : _plannerBundleSourceRootObjectIds(sourceIds, clusterIndex);
     var clusterSourceObjectIds = _plannerBundleClusterSourceObjectIds(
             primarySourceObjectId, sourceRootObjectIds, clusterIndex);
     var clusterRelation = _plannerBundleClusterRelation(
@@ -142,6 +151,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     }
     var hiddenVisualSourceObjectIds = _plannerBundleSourceIdsMinus(
             declaredCandidate.hiddenVisualSourceObjectIds || [], exportSourceObjectIds);
+    var excludedInlineSourceObjectIds = _internSourceSetIds(
+            declaredCandidate.excludedInlineSourceObjectIds || []);
     var hiddenScopeSourceIds = declaredCandidate.mode === "SLOT_ONLY"
             && clusterRelation === "BUNDLE_NARROWER_THAN_CLUSTER"
             ? clusterSourceObjectIds
@@ -205,6 +216,7 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
             exportSourceSetId: _sourceSetId(exportSourceObjectIds),
             hiddenSourceSetId: _sourceSetId(hiddenVisualSourceObjectIds),
             exportSourceObjectIds: exportSourceObjectIds,
+            excludedInlineSourceObjectIds: excludedInlineSourceObjectIds,
         exportTargetObjectId: declaredCandidate.exportTargetObjectId !== undefined
                 ? declaredCandidate.exportTargetObjectId
                 : null,
@@ -906,6 +918,13 @@ function _plannerBundleSourceHasPlacedContentBranch(sourceId, clusterIndex, visi
     return false;
 }
 
+function _plannerBundleIsPageRootTextlessVisualPlane(candidate) {
+    if (!candidate) return false;
+    return candidate.slotRole === "page_root_textless_visual_plane"
+            || candidate.compositeRole === "page_root_textless_visual_plane"
+            || candidate.kind === "PageRootTextlessVisualPlane";
+}
+
 function _plannerBundleSourceIdsUnion(a, b) {
     var ids = [];
     var seen = {};
@@ -957,6 +976,7 @@ function _plannerBundleWithCompletedVisibleFragmentContract(candidate, slot, clu
 
 function _plannerBundleShouldCompleteVisibleFragmentContract(candidate, slot, clusterRelation, clusterProfile, slotSources) {
     if (!candidate) return false;
+    if (_plannerBundleIsPageRootTextlessVisualPlane(candidate)) return false;
     if (clusterRelation !== "BUNDLE_NARROWER_THAN_CLUSTER") return false;
     if (slot !== "SHELL_SLOT" && slot !== "CONTENT_VISUAL_SLOT") return false;
     if (candidate.hiddenVisualSourceObjectIds && candidate.hiddenVisualSourceObjectIds.length > 0) return false;

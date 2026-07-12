@@ -294,6 +294,7 @@ function _executionCandidateContractFields() {
         "styleSourceObjectIds",
         "exportSourceObjectIds",
         "hiddenVisualSourceObjectIds",
+        "excludedInlineSourceObjectIds",
         "ownedTextFrameIds",
         "editableTextFrameIds",
         "hiddenTextFrameIds",
@@ -510,6 +511,10 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
             objectPlan,
             candidate.executionSourceObjectIds || candidate.sourceObjectIds || [],
             candidate.exportSourceObjectIds || []);
+    if (objectPlan.excludedInlineSourceObjectIds) {
+        candidate.excludedInlineSourceObjectIds = _sortedNumericIds(
+                objectPlan.excludedInlineSourceObjectIds || []);
+    }
     if (objectPlan.required !== undefined) candidate.required = objectPlan.required === true;
     if (objectPlan.requiredSlot !== undefined) candidate.requiredSlot = objectPlan.requiredSlot;
     if (objectPlan.requiredSlotReason !== undefined) {

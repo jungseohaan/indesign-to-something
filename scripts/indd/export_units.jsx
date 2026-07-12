@@ -78,6 +78,10 @@ function _exportUnitContract(item, planCandidate) {
             item && item.hiddenVisualSourceObjectIds && item.hiddenVisualSourceObjectIds.length
                     ? item.hiddenVisualSourceObjectIds
                     : (planCandidate ? planCandidate.hiddenVisualSourceObjectIds : null));
+    var excludedInlineSourceObjectIds = _exportUnitSortedIds(
+            item && item.excludedInlineSourceObjectIds && item.excludedInlineSourceObjectIds.length
+                    ? item.excludedInlineSourceObjectIds
+                    : (planCandidate ? planCandidate.excludedInlineSourceObjectIds : null));
     var editableTextFrameIds = _exportUnitSortedIds(
             item && item.editableTextFrameIds && item.editableTextFrameIds.length
                     ? item.editableTextFrameIds
@@ -93,6 +97,7 @@ function _exportUnitContract(item, planCandidate) {
         exportSourceObjectIds.join(","),
         sourceObjectIds.join(","),
         hiddenVisualSourceObjectIds.join(","),
+        excludedInlineSourceObjectIds.join(","),
         editableTextFrameIds.join(",")
     ].join("|");
     return {
@@ -104,6 +109,7 @@ function _exportUnitContract(item, planCandidate) {
         sourceObjectIds: sourceObjectIds,
         exportSourceObjectIds: exportSourceObjectIds,
         hiddenVisualSourceObjectIds: hiddenVisualSourceObjectIds,
+        excludedInlineSourceObjectIds: excludedInlineSourceObjectIds,
         editableTextFrameIds: editableTextFrameIds,
         contractKey: idSeed,
         exportUnitId: "eu.p" + String(pageIndex)
@@ -310,6 +316,7 @@ function _buildExportUnitsFromExtractionResults(extractionResults) {
                 sourceObjectIds: row.sourceObjectIds || [],
                 exportSourceObjectIds: row.exportSourceObjectIds || [],
                 hiddenVisualSourceObjectIds: row.hiddenVisualSourceObjectIds || [],
+                excludedInlineSourceObjectIds: row.excludedInlineSourceObjectIds || [],
                 editableTextFrameIds: row.editableTextFrameIds || [],
                 files: [],
                 resultExportIds: [],

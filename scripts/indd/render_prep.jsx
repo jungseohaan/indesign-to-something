@@ -1811,6 +1811,9 @@ function applyRenderOwnership(entry, renderTarget, opts) {
     if (opts.hiddenVisualSourceObjectIds && opts.hiddenVisualSourceObjectIds.length > 0) {
         entry.hiddenVisualSourceObjectIds = opts.hiddenVisualSourceObjectIds;
     }
+    if (opts.excludedInlineSourceObjectIds && opts.excludedInlineSourceObjectIds.length > 0) {
+        entry.excludedInlineSourceObjectIds = opts.excludedInlineSourceObjectIds;
+    }
     if (opts.exportSourceObjectIds && opts.exportSourceObjectIds.length > 0) {
         entry.exportSourceObjectIds = opts.exportSourceObjectIds;
     }

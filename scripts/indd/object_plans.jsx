@@ -740,6 +740,7 @@ function _slimObjectPlanForWrite(plan) {
         "atomicTextlessVectorContent",
         "atomicContentVisualSlot",
         "hiddenVisualSourceObjectIds",
+        "excludedInlineSourceObjectIds",
         "hiddenVisualSourceSetId",
         "materialization",
         "textAction",
@@ -1738,6 +1739,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         plan.visualSourceSetId = _sourceSetId(plan.visualSourceObjectIds || plan.exportSourceObjectIds || []);
         plan.exportSourceSetId = _sourceSetId(plan.exportSourceObjectIds || plan.visualSourceObjectIds || []);
         plan.hiddenSourceSetId = _sourceSetId(plan.hiddenVisualSourceObjectIds || []);
+        plan.excludedInlineSourceObjectIds = _internSourceSetIds(plan.excludedInlineSourceObjectIds || []);
         plan.kind = "PAGE_BACKGROUND_PLANE";
         plan.mode = "TEXTLESS_CANDIDATE";
         plan.compositeRole = "page_background_plane";
@@ -1809,6 +1811,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         var visualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "visualSourceObjectIds");
         var exportSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "exportSourceObjectIds");
         var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenVisualSourceObjectIds");
+        var excludedInlineSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "excludedInlineSourceObjectIds");
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
                 hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "ownedTextFrameIds"));
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
@@ -1818,9 +1821,10 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         if (exportSourceObjectIds.length === 0) exportSourceObjectIds = sourceRootObjectIds.slice(0);
         if (visualSourceObjectIds.length === 0) visualSourceObjectIds = exportSourceObjectIds.slice(0);
         if (sourceObjectIds.length === 0) sourceObjectIds = visualSourceObjectIds.slice(0);
+        var nonExportSourceObjectIds = _objectPlanSourceIdsMinus(sourceObjectIds, exportSourceObjectIds);
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
                 hiddenVisualSourceObjectIds,
-                _objectPlanSourceIdsMinus(sourceObjectIds, exportSourceObjectIds));
+                _objectPlanSourceIdsMinus(nonExportSourceObjectIds, excludedInlineSourceObjectIds));
 
         var pageIndex = Number(group.pageKey);
         var componentIdPart = _objectPlanSafeIdPart(group.componentKey);
@@ -1848,6 +1852,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plane.visualSourceSetId = _sourceSetId(visualSourceObjectIds);
             plane.exportSourceSetId = _sourceSetId(exportSourceObjectIds);
             plane.hiddenSourceSetId = _sourceSetId(hiddenVisualSourceObjectIds);
+            plane.excludedInlineSourceObjectIds = _internSourceSetIds(excludedInlineSourceObjectIds);
             plane.sourceObjectIds = _internSourceSetIds(sourceObjectIds);
             plane.sourceRootObjectIds = _internSourceSetIds(sourceRootObjectIds);
             plane.clusterSourceObjectIds = _internSourceSetIds(sourceObjectIds);
@@ -1932,6 +1937,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 atomicTextlessVectorContent: false,
                 atomicContentVisualSlot: false,
                 hiddenVisualSourceObjectIds: _internSourceSetIds(hiddenVisualSourceObjectIds),
+                excludedInlineSourceObjectIds: _internSourceSetIds(excludedInlineSourceObjectIds),
                 materialization: "EXTRACTED_PNG_VECTOR",
                 textAction: "DROP_TEXT",
                 visualAction: "PLACE_TEXT_SHELL",
@@ -2310,6 +2316,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         atomicTextlessVectorContent: bundle.atomicTextlessVectorContent === true,
         atomicContentVisualSlot: bundle.atomicContentVisualSlot === true,
         hiddenVisualSourceObjectIds: _internSourceSetIds(bundle.hiddenVisualSourceObjectIds || []),
+        excludedInlineSourceObjectIds: _internSourceSetIds(bundle.excludedInlineSourceObjectIds || []),
         materialization: materialization,
         textAction: textAction,
         visualAction: visualAction,

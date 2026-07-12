@@ -3318,6 +3318,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     pageIndex: pageIndex,
                     rootIds: [],
                     sourceObjectIds: [],
+                    excludedInlineSourceObjectIds: [],
                     exportSourceObjectIds: [],
                     hiddenVisualSourceObjectIds: [],
                     hiddenTextFrameIds: [],
@@ -3331,9 +3332,10 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     textFrameSplit.hiddenTextFrameIds || [],
                     textFrameSplit.pngOwnedTextFrameIds || []);
             var hiddenInlineVisualIds = inlineVisualSourceIdsForPageTextlessGroup(subtreeIds, pageIndex);
-            var hiddenVisualIds = unionSourceIds(hiddenTextFrameIds, hiddenInlineVisualIds);
+            var hiddenVisualIds = hiddenTextFrameIds;
+            var exportExcludedIds = unionSourceIds(hiddenTextFrameIds, hiddenInlineVisualIds);
             var exportIds = rootVisibleIds;
-            exportIds = subtractSourceIds(exportIds, hiddenVisualIds);
+            exportIds = subtractSourceIds(exportIds, exportExcludedIds);
             if (!exportIds || exportIds.length < 1) continue;
             var visualBounds = null;
             for (var bi = 0; bi < exportIds.length; bi++) {
@@ -3346,7 +3348,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 rootSeen[pageKey + "|" + String(root.id)] = true;
                 pageEntry.rootIds = unionSourceIds(pageEntry.rootIds, [root.id]);
             }
-            pageEntry.sourceObjectIds = unionSourceIds(pageEntry.sourceObjectIds, subtreeIds);
+            pageEntry.sourceObjectIds = unionSourceIds(pageEntry.sourceObjectIds, exportIds);
+            pageEntry.excludedInlineSourceObjectIds = unionSourceIds(
+                    pageEntry.excludedInlineSourceObjectIds, hiddenInlineVisualIds);
             pageEntry.exportSourceObjectIds = unionSourceIds(pageEntry.exportSourceObjectIds, exportIds);
             pageEntry.hiddenVisualSourceObjectIds = unionSourceIds(
                     pageEntry.hiddenVisualSourceObjectIds, hiddenVisualIds);
@@ -3375,8 +3379,8 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 candidateId: candidateId,
                 passId: "pass.page_textless_graphic_groups",
                 sourceObjectIds: pageEntry.sourceObjectIds,
-                executionSourceObjectIds: subtractSourceIds(
-                        pageEntry.sourceObjectIds, pageEntry.hiddenVisualSourceObjectIds),
+                sourceRootObjectIds: pageEntry.rootIds,
+                executionSourceObjectIds: pageEntry.exportSourceObjectIds,
                 primarySourceObjectId: pageEntry.rootIds[0],
                 pageIndex: pageEntry.pageIndex,
                 kind: "PageRootTextlessVisualPlane",
@@ -3392,6 +3396,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 compositeRole: "page_root_textless_visual_plane",
                 slotRole: "page_root_textless_visual_plane",
                 exportSourceObjectIds: pageEntry.exportSourceObjectIds,
+                excludedInlineSourceObjectIds: pageEntry.excludedInlineSourceObjectIds,
                 exportTargetObjectId: pageEntry.rootIds[0],
                 atomicExportTargetObjectId: pageEntry.rootIds[0],
                 atomicExportTargetObjectIds: pageEntry.rootIds,
@@ -4533,8 +4538,23 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
         return true;
     }
 
+    function pageTextlessSuppressIntersects(ownerSet, childIds) {
+        if (!ownerSet || !childIds || childIds.length === 0) return false;
+        for (var i = 0; i < childIds.length; i++) {
+            if (ownerSet[String(childIds[i])]) return true;
+        }
+        return false;
+    }
+
     function isPageGroup(candidate) {
         return candidate && candidate.passId === "pass.page_textless_graphic_groups";
+    }
+
+    function isPageRootTextlessPlane(candidate) {
+        return candidate
+                && candidate.passId === "pass.page_textless_graphic_groups"
+                && (candidate.slotRole === "page_root_textless_visual_plane"
+                    || candidate.compositeRole === "page_root_textless_visual_plane");
     }
 
     function isSuppressibleChild(candidate) {
@@ -4569,6 +4589,7 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
         });
         groups[groups.length - 1].sourceSet = pageTextlessSuppressIdSet(groups[groups.length - 1].sourceIds);
         groups[groups.length - 1].exportSet = pageTextlessSuppressIdSet(groups[groups.length - 1].exportIds);
+        groups[groups.length - 1].isPageRootPlane = isPageRootTextlessPlane(group);
     }
     if (groups.length === 0) return { candidates: candidates, suppressedCount: 0, suppressed: [] };
 
@@ -4585,8 +4606,14 @@ function _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sou
         for (var gg = 0; gg < groups.length; gg++) {
             var owner = groups[gg];
             if (String(candidate.pageIndex) !== String(owner.candidate.pageIndex)) continue;
-            if (!pageTextlessSuppressContainsAll(owner.exportSet, childVisibleIds)
-                    && !pageTextlessSuppressContainsAll(owner.sourceSet, ids(candidate, "sourceObjectIds"))) {
+            var candidateSourceIds = ids(candidate, "sourceObjectIds");
+            var coveredByPageRootPlane = owner.isPageRootPlane
+                    && (pageTextlessSuppressIntersects(owner.exportSet, childVisibleIds)
+                        || pageTextlessSuppressIntersects(owner.exportSet, candidateSourceIds)
+                        || pageTextlessSuppressIntersects(owner.sourceSet, candidateSourceIds));
+            if (!coveredByPageRootPlane
+                    && !pageTextlessSuppressContainsAll(owner.exportSet, childVisibleIds)
+                    && !pageTextlessSuppressContainsAll(owner.sourceSet, candidateSourceIds)) {
                 continue;
             }
             coveredBy = owner.candidate;
