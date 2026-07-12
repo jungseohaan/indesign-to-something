@@ -80,7 +80,8 @@ public final class VisualPlanePolicy {
     }
 
     public static boolean isContentZOrder(int zOrder) {
-        return zOrder >= planeBandForPolicyPlane(2);
+        return zOrder >= planeBandForPolicyPlane(1)
+                && zOrder < planeBandForPolicyPlane(2);
     }
 
     private static int planeBandForLayer(VisualLayer layer) {
@@ -99,34 +100,14 @@ public final class VisualPlanePolicy {
         if (isBackgroundMaterialLayer(layer)) {
             return 0;
         }
-        if (layer == VisualLayer.TEXT_CARD_BACKDROP
-                || layer == VisualLayer.CONTAINER_BACKDROP
-                || layer == VisualLayer.CONTAINER_FACE
-                || layer == VisualLayer.LABEL_CONNECTOR_BACKDROP
-                || layer == VisualLayer.LABEL_BACKDROP
-                || layer == VisualLayer.LABEL_OVERLAY_BACKDROP
-                || layer == VisualLayer.CONTAINER_OUTLINE
-                || layer == VisualLayer.FOREGROUND_MASK) {
-            return 1;
-        }
-        return 2;
+        return 1;
     }
 
     private static int policyPlaneIndexName(String layer) {
         if (isBackgroundMaterialLayerName(layer)) {
             return 0;
         }
-        if ("TEXT_CARD_BACKDROP".equals(layer)
-                || "CONTAINER_BACKDROP".equals(layer)
-                || "CONTAINER_FACE".equals(layer)
-                || "LABEL_CONNECTOR_BACKDROP".equals(layer)
-                || "LABEL_BACKDROP".equals(layer)
-                || "LABEL_OVERLAY_BACKDROP".equals(layer)
-                || "CONTAINER_OUTLINE".equals(layer)
-                || "FOREGROUND_MASK".equals(layer)) {
-            return 1;
-        }
-        return 2;
+        return 1;
     }
 
     private static int samePlaneSourceLayerBand(int sourceLayerIndex) {

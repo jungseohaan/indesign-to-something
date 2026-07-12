@@ -188,6 +188,29 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return false;
     }
 
+    function _masterItemBelongsToMasterSide(item, masterPage) {
+        try {
+            if (!item || !masterPage) return false;
+            try {
+                var parentPage = item.parentPage;
+                if (parentPage && parentPage.id === masterPage.id) return true;
+            } catch (eParentPage) {}
+            var cur = item.parent;
+            var hop = 0;
+            while (cur && hop < 10) {
+                var kind = "";
+                try { kind = cur.constructor.name; } catch (eKind) { break; }
+                if (kind === "Page") {
+                    try { return cur.id === masterPage.id; } catch (ePageId) { return false; }
+                }
+                if (kind === "MasterSpread" || kind === "Document") return false;
+                try { cur = cur.parent; } catch (eParent) { break; }
+                hop++;
+            }
+        } catch (e) {}
+        return false;
+    }
+
     function _boundsDiffer(a, b, eps) {
         eps = eps || 0.01;
         try {
@@ -444,7 +467,8 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                     if (!child || child.id === undefined || child.id === null) continue;
                     var parent = child.parent;
                     if (!parent || parent.id !== rootId) continue;
-                    if (child.constructor && child.constructor.name === "TextFrame") continue;
+                    if (child.constructor && child.constructor.name === "TextFrame"
+                            && _isDynamicMasterTextFrame(child)) continue;
                     if (isOnHiddenLayer(child)) continue;
                     try { if (child.visible === false) continue; } catch (eVis) {}
                     try { if (child.nonprinting) continue; } catch (eNp) {}
@@ -516,14 +540,15 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return false;
     }
 
-    function _appendMasterPageEntries(pageItems, item, bounds, pageBounds, sourceDepthOrder) {
+    function _appendMasterPageEntries(pageItems, item, bounds, pageBounds, sourceDepthOrder, masterPage) {
         if (_isPaperFillOnlyMasterMask(item, bounds, pageBounds)) return;
         if (_masterGroupShouldUseChildEntries(item, bounds, pageBounds)) {
             var children = _directMasterGroupChildItems(item);
             for (var ci = 0; ci < children.length; ci++) {
                 try {
                     var cb = _masterItemBounds(children[ci]);
-                    if (!cb || !_masterItemBelongsToPage(cb, pageBounds)) continue;
+                    var childOnMasterSide = _masterItemBelongsToMasterSide(children[ci], masterPage);
+                    if (!cb || (!childOnMasterSide && !_masterItemBelongsToPage(cb, pageBounds))) continue;
                     if (_isPaperFillOnlyMasterMask(children[ci], cb, pageBounds)) continue;
                     pageItems.push({
                         item: children[ci],
@@ -653,6 +678,192 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return best ? _candidateMatch(best, "candidate_inline_source_set_contained_by_master_direct") : null;
     }
 
+    function _appliedMasterSnapshotCandidate(pageIndex) {
+        if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return null;
+        var list = masterCandidatesByPage[String(pageIndex)] || [];
+        if (!list || list.length === 0) return null;
+        var best = null;
+        var bestScore = -999999;
+        for (var i = 0; i < list.length; i++) {
+            var candidate = list[i];
+            if (!candidate) continue;
+            var ids = _masterCandidateComparableSourceIds(candidate);
+            if (!ids || ids.length === 0) continue;
+            var score = ids.length;
+            if (candidate.slotRole === "page_background_plane"
+                    || candidate.compositeRole === "page_background_plane") score += 100000;
+            if (candidate.passId === "pass.master_page_graphics") score += 10000;
+            if (candidate.composite === true) score += 1000;
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return best ? _candidateMatch(best, "applied_master_snapshot_candidate") : null;
+    }
+
+    function _isTopLevelPageLocalItem(item, page) {
+        try {
+            if (!item || !page) return false;
+            try {
+                var parentPage = item.parentPage;
+                if (!parentPage || parentPage.id !== page.id) return false;
+            } catch (eParentPage) {
+                return false;
+            }
+            var cur = item.parent;
+            var guard = 0;
+            while (cur && guard++ < 16) {
+                var kind = "";
+                try { kind = cur.constructor.name; } catch (eKind) { break; }
+                if (kind === "Page") {
+                    try { return cur.id === page.id; } catch (ePageId) { return false; }
+                }
+                if (kind === "Spread") return true;
+                if (kind === "Document" || kind === "MasterSpread") return false;
+                if (kind === "Group" || kind === "TextFrame" || kind === "Rectangle"
+                        || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine") {
+                    return false;
+                }
+                try { cur = cur.parent; } catch (eParent) { break; }
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function _hidePageLocalItemsForAppliedMasterSnapshot(page) {
+        var saved = [];
+        try {
+            var items = page.allPageItems;
+            for (var i = 0; items && i < items.length; i++) {
+                try {
+                    var item = items[i];
+                    if (!_isTopLevelPageLocalItem(item, page)) continue;
+                    var wasVisible = true;
+                    try { wasVisible = item.visible !== false; } catch (eVisible) { wasVisible = true; }
+                    if (!wasVisible) continue;
+                    saved.push({ item: item, visible: wasVisible });
+                    item.visible = false;
+                } catch (eItem) {}
+            }
+        } catch (e) {}
+        return saved;
+    }
+
+    function _restorePageLocalItemsForAppliedMasterSnapshot(saved) {
+        for (var i = 0; saved && i < saved.length; i++) {
+            try {
+                if (saved[i] && saved[i].item && saved[i].item.isValid) {
+                    saved[i].item.visible = saved[i].visible;
+                }
+            } catch (e) {}
+        }
+    }
+
+    function _exportAppliedMasterSnapshotPage(page, file) {
+        if (!page || !file) return false;
+        var ok = false;
+        try {
+            page.exportFile(ExportFormat.PNG_FORMAT, file, false);
+            ok = file.exists;
+        } catch (ePageExport) {
+            dbg("  appliedMasterSnapshot page.exportFile failed: " + ePageExport);
+        }
+        if (ok) return true;
+
+        var savedPageString;
+        var hadPageString = false;
+        try {
+            savedPageString = app.pngExportPreferences.pageString;
+            hadPageString = true;
+            app.pngExportPreferences.pageString = String(page.name);
+            doc.exportFile(ExportFormat.PNG_FORMAT, file, false);
+            ok = file.exists;
+        } catch (eDocExport) {
+            dbg("  appliedMasterSnapshot doc.exportFile failed page=" + page.name + ": " + eDocExport);
+        } finally {
+            try {
+                if (hadPageString) app.pngExportPreferences.pageString = savedPageString;
+            } catch (eRestorePageString) {}
+        }
+        return ok;
+    }
+
+    function _tryCreateAppliedMasterSnapshotResult(pgEntry, msId, masterPageIdx) {
+        try {
+            if (!pgEntry || pgEntry.docIdx === null || pgEntry.docIdx === undefined) return null;
+            var candidateMatch = _appliedMasterSnapshotCandidate(pgEntry.docIdx);
+            if (!candidateMatch || !candidateMatch.candidate) return null;
+            var page = doc.pages[pgEntry.docIdx];
+            if (!page) return null;
+            var pageBounds = null;
+            try { pageBounds = arrCopy(page.bounds); } catch (eBounds) {}
+            if (!pageBounds || pageBounds.length < 4) return null;
+
+            var fileName = "master_applied_" + String(msId) + "_" +
+                    String(masterPageIdx) + "_pi" + String(pgEntry.docIdx) + ".png";
+            var outFile = File(renderDir + "/" + fileName);
+            var hidden = _hidePageLocalItemsForAppliedMasterSnapshot(page);
+            var hiddenMasterText = [];
+            try {
+                try { hiddenMasterText = _hideMasterTextlessTextContent(page.appliedMaster); } catch (eHideMaster) {}
+                if (!_exportAppliedMasterSnapshotPage(page, outFile)) return null;
+            } finally {
+                try { restoreTextFrames(hiddenMasterText); } catch (eRestoreMaster) {}
+                _restorePageLocalItemsForAppliedMasterSnapshot(hidden);
+            }
+            if (!outFile.exists || outFile.length <= 0) return null;
+
+            var candidate = candidateMatch.candidate;
+            var sourceIds = (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0)
+                    ? candidate.sourceObjectIds
+                    : _masterCandidateComparableSourceIds(candidate);
+            var exportIds = (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0)
+                    ? candidate.exportSourceObjectIds
+                    : sourceIds;
+            var relBounds = [
+                0,
+                0,
+                Number(pageBounds[2]) - Number(pageBounds[0]),
+                Number(pageBounds[3]) - Number(pageBounds[1])
+            ];
+            dbg("  appliedMasterSnapshot result docIdx=" + pgEntry.docIdx +
+                " rel=[" + relBounds.join(",") + "] file=" + fileName);
+            var resultEntry = applyRenderOwnership({
+                id: parseInt(msId, 10) * 100000 + pgEntry.docIdx,
+                candidateId: candidateMatch.candidateId,
+                candidateMatchStrategy: candidateMatch.strategy,
+                file: "rendered_frames/" + fileName,
+                bounds: relBounds,
+                pageIndex: pgEntry.docIdx,
+                zOrder: -100000,
+                isMasterGraphic: true,
+                type: "page_object",
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                planPassId: "pass.master_page_graphics",
+                slotRole: candidate.slotRole || "page_background_plane"
+            }, null, {
+                sourceObjectIds: sourceIds,
+                exportSourceObjectIds: exportIds,
+                editableTextFrameIds: [],
+                textFrameIds: [],
+                hiddenTextFrameIds: [],
+                textHiddenBeforeExport: false,
+                textOwner: "none",
+                containsText: false,
+                containsEditableText: false,
+                placementAllowed: true,
+                reason: "applied_master_snapshot"
+            });
+            _copyMasterMatchedCandidateContract(resultEntry, candidate);
+            return resultEntry;
+        } catch (e) {
+            dbg("  appliedMasterSnapshot result error: " + e);
+        }
+        return null;
+    }
+
     function _isDynamicMasterTextFrame(tf) {
         try {
             var story = tf.parentStory;
@@ -682,8 +893,12 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
     function _isMasterTextlessTextFrame(tf) {
         try {
             if (!tf || tf.constructor.name !== "TextFrame") return false;
-            if (_isDynamicMasterTextFrame(tf)) return true;
-            return _textFrameHasContent(tf);
+            // Applied-master visual planes are PNG-owned. Static master labels
+            // such as section-end badges are part of the master graphic, even
+            // when InDesign represents the lettering as a TextFrame. Hide only
+            // dynamic text variables such as page numbers, which are emitted by
+            // the HWPX text/page-number path.
+            return _isDynamicMasterTextFrame(tf);
         } catch (e) {}
         return false;
     }
@@ -778,7 +993,9 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             if (exportedMasterByPage[masterKey] !== undefined) continue;
 
             var mpBnds = null;
-            try { mpBnds = mspread.pages[mpIdx].bounds; } catch (e) { continue; }
+            var masterPage = null;
+            try { masterPage = mspread.pages[mpIdx]; } catch (eMasterPage) { masterPage = null; }
+            try { mpBnds = masterPage ? masterPage.bounds : null; } catch (e) { continue; }
             if (!mpBnds || mpBnds.length < 4) continue;
             dbg("  masterPage[" + mpIdx + "] bounds=[" + mpBnds.join(",") + "]");
 
@@ -789,7 +1006,8 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             for (var pii = 0; pii < masterGraphicItems.length; pii++) {
                 try {
                     var pib = _masterItemBounds(masterGraphicItems[pii]);
-                    if (pib && _masterItemBelongsToPage(pib, mpBnds)) {
+                    var itemOnMasterSide = _masterItemBelongsToMasterSide(masterGraphicItems[pii], masterPage);
+                    if (pib && (itemOnMasterSide || _masterItemBelongsToPage(pib, mpBnds))) {
                         // InDesign's master allPageItems order is part of the
                         // source depth evidence. Earlier entries are visually
                         // above later master background faces, so convert the
@@ -799,7 +1017,8 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                             masterGraphicItems[pii],
                             pib,
                             mpBnds,
-                            masterGraphicItems.length - 1 - pii
+                            masterGraphicItems.length - 1 - pii,
+                            masterPage
                         );
                     }
                 } catch (e) {}
@@ -1035,6 +1254,12 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             var masterKey2 = msId2 + "_" + pgEntry.masterPageIdx;
             var masters = exportedMasterByPage[masterKey2];
             if (!masters || masters.length === 0) continue;
+            var appliedMasterSnapshot = _tryCreateAppliedMasterSnapshotResult(
+                    pgEntry, msId2, pgEntry.masterPageIdx);
+            if (appliedMasterSnapshot) {
+                results.push(appliedMasterSnapshot);
+                continue;
+            }
             for (var mi = 0; mi < masters.length; mi++) {
                 var master = masters[mi];
                 if (!master) continue;

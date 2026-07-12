@@ -1262,7 +1262,9 @@ function _plannerBundleTextFramesAreSimpleMarkers(textFrameIds, clusterIndex) {
 function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
     var ids = [];
     var seen = {};
-    if (candidate && candidate.compositeRole === "table_carrier_textless_shell") {
+    if (candidate && (candidate.compositeRole === "table_carrier_textless_shell"
+            || candidate.compositeRole === "table_carrier_sibling_decoration"
+            || candidate.tableDecorationRole === "table_carrier_sibling_decoration")) {
         return [];
     }
     if (candidate && candidate.passId === "pass.page_textless_graphic_groups") {

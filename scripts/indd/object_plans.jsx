@@ -68,7 +68,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     var rawClippedImageVisualSourceResolution =
             _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById);
     var pageBackgroundPlaneMaterialization =
-            _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans);
+            _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceById);
     var depthFinalization = _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems);
     var inlineFlowContractFinalization = _finalizeObjectPlanInlineFlowContracts(objectPlans);
     var validation = _validateObjectPlanDiagnostics(objectPlans);
@@ -261,24 +261,16 @@ function _objectPlanMinSourceZOrder(ids, sourceById, normalizedOnly) {
 
 function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByPage, zOrder) {
     if (!plan) return null;
-    if (plan.compositeRole === "background_vector_source") {
+    if (_objectPlanIsExplicitPageBackgroundPlane(plan)) {
         return "PAGE_BACKGROUND";
     }
     if (plan.visualLayer === "PAGE_BACKGROUND"
-            && plan.passId !== "pass.page_backgrounds"
-            && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
+            && !_objectPlanIsExplicitPageBackgroundPlane(plan)) {
         return "CONTENT_VISUAL";
     }
     if (plan.visualLayer === "CONTAINER_BACKDROP"
             && !_objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
         return plan.visualAction === "PLACE_TEXT_SHELL" ? "LABEL_BACKDROP" : "CONTENT_VISUAL";
-    }
-    if (plan.visualAction === "PLACE_FLOATING_PNG"
-            && plan.placement === "FLOATING"
-            && plan.visualLayer === "CONTENT_VISUAL"
-            && _objectPlanHasBackgroundLayerSource(plan, sourceById)
-            && _objectPlanMayUseBackgroundPlane(plan, sourceById, editableTextFramesByPage, zOrder)) {
-        return "PAGE_BACKGROUND";
     }
     if (plan.visualAction === "PLACE_TEXT_SHELL"
             && plan.placement === "FLOATING"
@@ -289,6 +281,12 @@ function _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByP
         return "CONTAINER_BACKDROP";
     }
     return plan.visualLayer;
+}
+
+function _objectPlanIsExplicitPageBackgroundPlane(plan) {
+    return !!(plan
+            && plan.slotRole === "page_background_plane"
+            && plan.compositeRole === "page_background_plane");
 }
 
 function _objectPlanHasBackgroundLayerSource(plan, sourceById) {
@@ -387,7 +385,7 @@ function _objectPlanOverlapArea(a, b) {
 }
 
 function _objectPlanPolicyLayerForVisualLayer(visualLayer) {
-    if (visualLayer === "PAGE_BACKGROUND" || visualLayer === "CONTAINER_BACKDROP") {
+    if (visualLayer === "PAGE_BACKGROUND") {
         return "BACKGROUND";
     }
     if (visualLayer === "LABEL_BACKDROP"
@@ -1678,6 +1676,20 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
         }
         if (!changed) continue;
         plan.visualSourceObjectIds = _sortedNumericIds(retained);
+        if (plan.visualSourceObjectIds.length === 0 && pruned === true) {
+            plan.visualAction = "DROP_VISUAL";
+            plan.disabled = true;
+            plan.executable = false;
+            plan.contractStatus = "READY_FOR_STAGE1_IMPORT";
+            plan.rawClippedImageVisualSourceResolution =
+                    "DROPPED_RAW_IMAGE_VISUAL_SOURCE_WITH_HIDDEN_CLIP_PARENT";
+            plan.rawClippedImageVisualSourceResolutionReason =
+                    "clipped Image leaf ids are provenance; the clip-carrying parent is already hidden by another visible slot owner";
+            plan.reason = String(plan.reason || "") + ":raw_clipped_image_visual_source_dropped";
+            mutatedPlanCount++;
+            mutatedPlanIds.push(plan.objectPlanId || plan.bundleId || plan.candidateId || ("plan.index." + pi));
+            continue;
+        }
         plan.rawClippedImageVisualSourceResolution = pruned === true
                 ? "PRUNED_RAW_IMAGE_VISUAL_SOURCE_WITH_HIDDEN_CLIP_PARENT"
                 : "REPLACED_RAW_IMAGE_VISUAL_SOURCE_WITH_CLIP_PARENT";
@@ -1699,24 +1711,90 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
     };
 }
 
-function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans) {
+function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceById) {
     var plans = objectPlans || [];
-    var byPage = {};
+    var byComponent = {};
+    var existingByComponent = {};
     var created = [];
     var absorbed = [];
+    var normalizedExisting = [];
+
+    function normalizePageBackgroundPlane(plan) {
+        if (!plan || !_objectPlanHasPlaneExportableVisualSource(plan)) return false;
+        var shouldUseMasterGraphicsPass =
+                String(plan.passId || "") === "pass.master_page_graphics"
+                || String(plan.planPassId || "") === "pass.master_page_graphics"
+                || String(plan.candidateId || "").indexOf(".pass.master_page_graphics.") >= 0;
+        if (shouldUseMasterGraphicsPass) {
+            plan.passId = "pass.master_page_graphics";
+            plan.candidatePurpose = "MASTER_CANDIDATE";
+            plan.unit = "MASTER_ITEM";
+        } else {
+            plan.candidatePurpose = "SHELL_CANDIDATE";
+        }
+        plan.sourceSetId = _sourceSetId(plan.sourceObjectIds || []);
+        plan.sourceRootSetId = _sourceSetId(plan.sourceRootObjectIds || plan.sourceObjectIds || []);
+        plan.clusterSourceSetId = _sourceSetId(plan.clusterSourceObjectIds || plan.sourceObjectIds || []);
+        plan.visualSourceSetId = _sourceSetId(plan.visualSourceObjectIds || plan.exportSourceObjectIds || []);
+        plan.exportSourceSetId = _sourceSetId(plan.exportSourceObjectIds || plan.visualSourceObjectIds || []);
+        plan.hiddenSourceSetId = _sourceSetId(plan.hiddenVisualSourceObjectIds || []);
+        plan.kind = "PAGE_BACKGROUND_PLANE";
+        plan.mode = "TEXTLESS_CANDIDATE";
+        plan.compositeRole = "page_background_plane";
+        plan.slotRole = "page_background_plane";
+        plan.materialization = "EXTRACTED_PNG_VECTOR";
+        plan.textAction = "DROP_TEXT";
+        plan.visualAction = "PLACE_TEXT_SHELL";
+        plan.placement = "FLOATING";
+        plan.coordinateSpace = "PAGE";
+        plan.visualLayer = "PAGE_BACKGROUND";
+        plan.ownershipSlot = "SHELL_SLOT";
+        plan.policyLayer = "BACKGROUND";
+        plan.clusterRelation = plan.clusterRelation || "PAGE_BACKGROUND_PLANE";
+        plan.migrationStatus = "READY_PAGE_BACKGROUND_PLANE";
+        plan.migrationBlocker = "NONE";
+        plan.executable = true;
+        plan.required = true;
+        plan.reason = String(plan.reason || "stage1_page_background_plane")
+                + ":normalized_explicit_page_background_plane";
+        return true;
+    }
 
     for (var i = 0; i < plans.length; i++) {
         var plan = plans[i];
+        if (plan && (plan.slotRole === "page_background_plane"
+                || plan.compositeRole === "page_background_plane"
+                || plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG")) {
+            if (normalizePageBackgroundPlane(plan)) {
+                normalizedExisting.push(plan.objectPlanId || plan.bundleId || plan.candidateId || ("plan.index." + i));
+            }
+            var existingPageKey = String(plan.pageIndex);
+            var existingComponentKey = _objectPlanPageBackgroundComponentKey(plan, sourceById);
+            existingByComponent[existingPageKey + "|" + existingComponentKey] = plan;
+            continue;
+        }
         if (!_objectPlanEligibleForPageBackgroundPlane(plan)) continue;
         var pageKey = String(plan.pageIndex);
-        if (!byPage[pageKey]) byPage[pageKey] = [];
-        byPage[pageKey].push(plan);
+        var componentKey = _objectPlanPageBackgroundComponentKey(plan, sourceById);
+        var groupKey = pageKey + "|" + componentKey;
+        if (!byComponent[groupKey]) {
+            byComponent[groupKey] = {
+                pageKey: pageKey,
+                componentKey: componentKey,
+                members: []
+            };
+        }
+        byComponent[groupKey].members.push(plan);
     }
 
-    for (var key in byPage) {
-        if (!byPage.hasOwnProperty(key)) continue;
-        var members = byPage[key];
-        if (!members || members.length < 2) continue;
+    var existingUseCountByPage = {};
+    for (var key in byComponent) {
+        if (!byComponent.hasOwnProperty(key)) continue;
+        var group = byComponent[key];
+        var members = group.members;
+        if (!members || members.length < 1) continue;
+        var reusableExisting = existingByComponent[key] || null;
+        var sourceMembers = members;
         members.sort(function(a, b) {
             var az = a.zOrder !== undefined && a.zOrder !== null ? Number(a.zOrder) : 0;
             var bz = b.zOrder !== undefined && b.zOrder !== null ? Number(b.zOrder) : 0;
@@ -1726,94 +1804,160 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans) {
             return String(ai) < String(bi) ? -1 : (String(ai) > String(bi) ? 1 : 0);
         });
 
-        var sourceObjectIds = _objectPlanUnionPlanIds(members, "sourceObjectIds");
-        var sourceRootObjectIds = _objectPlanUnionPlanIds(members, "sourceRootObjectIds");
-        var visualSourceObjectIds = _objectPlanUnionPlanIds(members, "visualSourceObjectIds");
-        var exportSourceObjectIds = _objectPlanUnionPlanIds(members, "exportSourceObjectIds");
-        var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(members, "hiddenVisualSourceObjectIds");
+        var sourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "sourceObjectIds");
+        var sourceRootObjectIds = _objectPlanUnionPlanIds(sourceMembers, "sourceRootObjectIds");
+        var visualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "visualSourceObjectIds");
+        var exportSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "exportSourceObjectIds");
+        var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenVisualSourceObjectIds");
+        hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "ownedTextFrameIds"));
+        hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "editableTextFrameIds"));
+        hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "hiddenTextFrameIds"));
         if (exportSourceObjectIds.length === 0) exportSourceObjectIds = sourceRootObjectIds.slice(0);
         if (visualSourceObjectIds.length === 0) visualSourceObjectIds = exportSourceObjectIds.slice(0);
         if (sourceObjectIds.length === 0) sourceObjectIds = visualSourceObjectIds.slice(0);
+        hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                hiddenVisualSourceObjectIds,
+                _objectPlanSourceIdsMinus(sourceObjectIds, exportSourceObjectIds));
 
-        var pageIndex = Number(key);
-        var primarySourceObjectId = members[0].primarySourceObjectId !== undefined
-                && members[0].primarySourceObjectId !== null
-                ? members[0].primarySourceObjectId
-                : (exportSourceObjectIds.length > 0 ? exportSourceObjectIds[0] : null);
-        var objectPlanId = "object-plan.page-background-plane." + String(pageIndex);
-        var candidateId = "cand.pass.decoration_groups.page." + String(pageIndex)
-                + ".page_background_plane.n" + String(exportSourceObjectIds.length)
-                + ".h" + _sourceSetId(exportSourceObjectIds);
-        var plane = {
-            objectPlanId: objectPlanId,
-            bundleId: "bundle.page-background-plane." + String(pageIndex),
-            candidateId: candidateId,
-            passId: "pass.decoration_groups",
-            pageIndex: pageIndex,
-            kind: "PAGE_BACKGROUND_PLANE",
-            mode: "TEXTLESS_CANDIDATE",
-            candidatePurpose: "SHELL_CANDIDATE",
-            compositeRole: "page_background_plane",
-            slotRole: "page_background_plane",
-            layoutOnlyInlineSlot: false,
-            sourceInlineFlow: false,
-            inlineCompositeLayoutDescendant: false,
-            inlineAnchorSourceObjectId: null,
-            inlineSourceTreeClosed: false,
-            inlineFlowSourceObjectIds: [],
-            connectorDecorationVisual: false,
-            primarySourceObjectId: primarySourceObjectId,
-            sourceSetId: _sourceSetId(sourceObjectIds),
-            sourceRootSetId: _sourceSetId(sourceRootObjectIds),
-            clusterSourceSetId: _sourceSetId(sourceObjectIds),
-            visualSourceSetId: _sourceSetId(visualSourceObjectIds),
-            exportSourceSetId: _sourceSetId(exportSourceObjectIds),
-            hiddenSourceSetId: _sourceSetId(hiddenVisualSourceObjectIds),
-            ownedByNativeShellSourceObjectIds: [],
-            sourceObjectIds: _internSourceSetIds(sourceObjectIds),
-            sourceRootObjectIds: _internSourceSetIds(sourceRootObjectIds),
-            clusterSourceObjectIds: _internSourceSetIds(sourceObjectIds),
-            clusterKindCounts: {},
-            omittedClusterSourceObjectIds: [],
-            omittedClusterKindCounts: {},
-            clusterHasEditableText: false,
-            clusterHasTextFrame: false,
-            clusterHasPlacedContent: false,
-            clusterHasVisualSource: true,
-            visualSourceObjectIds: _internSourceSetIds(visualSourceObjectIds),
-            styleSourceObjectIds: [],
-            ownedTextFrameIds: [],
-            exportSourceObjectIds: _internSourceSetIds(exportSourceObjectIds),
-            exportTargetObjectId: null,
-            atomicExportTargetObjectId: null,
-            atomicExportTargetObjectIds: [],
-            atomicTextlessVectorContent: false,
-            atomicContentVisualSlot: false,
-            hiddenVisualSourceObjectIds: _internSourceSetIds(hiddenVisualSourceObjectIds),
-            materialization: "PAGE_PLANE_PNG",
-            textAction: "DROP_TEXT",
-            visualAction: "PLACE_PAGE_BACKGROUND_PNG",
-            placement: "FLOATING",
-            coordinateSpace: "PAGE",
-            visualLayer: "PAGE_BACKGROUND",
-            zOrder: 0,
-            reason: "stage1_page_background_plane_from_background_objectplans",
-            bounds: _objectPlanUnionBounds(members),
-            renderSourceBounds: null,
-            cropSourceBounds: null,
-            ownershipSlot: "SHELL_SLOT",
-            policyLayer: "BACKGROUND",
-            clusterRelation: "PAGE_BACKGROUND_PLANE",
-            migrationStatus: "READY_PAGE_BACKGROUND_PLANE",
-            migrationBlocker: "NONE",
-            migrationBlockerDetail: {
+        var pageIndex = Number(group.pageKey);
+        var componentIdPart = _objectPlanSafeIdPart(group.componentKey);
+        var plane = reusableExisting;
+        var primarySourceObjectId = plane && plane.primarySourceObjectId !== undefined
+                && plane.primarySourceObjectId !== null
+                ? plane.primarySourceObjectId
+                : (members[0].primarySourceObjectId !== undefined
+                        && members[0].primarySourceObjectId !== null
+                        ? members[0].primarySourceObjectId
+                        : (exportSourceObjectIds.length > 0 ? exportSourceObjectIds[0] : null));
+        var objectPlanId = plane && plane.objectPlanId
+                ? plane.objectPlanId
+                : "object-plan.page-background-plane." + String(pageIndex) + "." + componentIdPart;
+        var candidateId = plane && plane.candidateId
+                ? plane.candidateId
+                : "cand.pass.decoration_groups.page." + String(pageIndex)
+                        + "." + componentIdPart
+                        + ".page_background_plane.n" + String(exportSourceObjectIds.length)
+                        + ".h" + _sourceSetId(exportSourceObjectIds);
+        if (plane) {
+            plane.sourceSetId = _sourceSetId(sourceObjectIds);
+            plane.sourceRootSetId = _sourceSetId(sourceRootObjectIds);
+            plane.clusterSourceSetId = _sourceSetId(sourceObjectIds);
+            plane.visualSourceSetId = _sourceSetId(visualSourceObjectIds);
+            plane.exportSourceSetId = _sourceSetId(exportSourceObjectIds);
+            plane.hiddenSourceSetId = _sourceSetId(hiddenVisualSourceObjectIds);
+            plane.sourceObjectIds = _internSourceSetIds(sourceObjectIds);
+            plane.sourceRootObjectIds = _internSourceSetIds(sourceRootObjectIds);
+            plane.clusterSourceObjectIds = _internSourceSetIds(sourceObjectIds);
+            plane.visualSourceObjectIds = _internSourceSetIds(visualSourceObjectIds);
+            plane.exportSourceObjectIds = _internSourceSetIds(exportSourceObjectIds);
+            plane.hiddenVisualSourceObjectIds = _internSourceSetIds(hiddenVisualSourceObjectIds);
+            plane.ownedTextFrameIds = [];
+            plane.kind = "PAGE_BACKGROUND_PLANE";
+            plane.mode = "TEXTLESS_CANDIDATE";
+            plane.candidatePurpose = "SHELL_CANDIDATE";
+            plane.compositeRole = "page_background_plane";
+            plane.slotRole = "page_background_plane";
+            plane.primarySourceObjectId = primarySourceObjectId;
+            plane.materialization = "EXTRACTED_PNG_VECTOR";
+            plane.textAction = "DROP_TEXT";
+            plane.visualAction = "PLACE_TEXT_SHELL";
+            plane.placement = "FLOATING";
+            plane.coordinateSpace = "PAGE";
+            plane.visualLayer = "PAGE_BACKGROUND";
+            plane.zOrder = 0;
+            plane.reason = String(plane.reason || "stage1_page_background_plane")
+                    + ":expanded_page_background_plane_sources";
+            plane.bounds = _objectPlanUnionBounds(sourceMembers);
+            plane.ownershipSlot = "SHELL_SLOT";
+            plane.policyLayer = "BACKGROUND";
+            plane.clusterRelation = "PAGE_BACKGROUND_PLANE";
+            plane.pageBackgroundComponentKey = group.componentKey;
+            plane.migrationStatus = "READY_PAGE_BACKGROUND_PLANE";
+            plane.migrationBlocker = "NONE";
+            plane.migrationBlockerDetail = {
                 absorbedObjectPlanIds: _objectPlanMemberIds(members)
-            },
-            executable: true,
-            required: true
-        };
-        plans.push(plane);
-        created.push(objectPlanId);
+            };
+            plane.executable = true;
+            plane.required = true;
+            created.push(objectPlanId);
+        } else {
+            var planeObjectPlanId = objectPlanId;
+            var planeCandidateId = candidateId;
+            plane = {
+                objectPlanId: planeObjectPlanId,
+                bundleId: "bundle.page-background-plane." + String(pageIndex) + "." + componentIdPart,
+                candidateId: planeCandidateId,
+                passId: "pass.decoration_groups",
+                pageIndex: pageIndex,
+                kind: "PAGE_BACKGROUND_PLANE",
+                mode: "TEXTLESS_CANDIDATE",
+                candidatePurpose: "SHELL_CANDIDATE",
+                compositeRole: "page_background_plane",
+                slotRole: "page_background_plane",
+                layoutOnlyInlineSlot: false,
+                sourceInlineFlow: false,
+                inlineCompositeLayoutDescendant: false,
+                inlineAnchorSourceObjectId: null,
+                inlineSourceTreeClosed: false,
+                inlineFlowSourceObjectIds: [],
+                connectorDecorationVisual: false,
+                primarySourceObjectId: primarySourceObjectId,
+                sourceSetId: _sourceSetId(sourceObjectIds),
+                sourceRootSetId: _sourceSetId(sourceRootObjectIds),
+                clusterSourceSetId: _sourceSetId(sourceObjectIds),
+                visualSourceSetId: _sourceSetId(visualSourceObjectIds),
+                exportSourceSetId: _sourceSetId(exportSourceObjectIds),
+                hiddenSourceSetId: _sourceSetId(hiddenVisualSourceObjectIds),
+                ownedByNativeShellSourceObjectIds: [],
+                sourceObjectIds: _internSourceSetIds(sourceObjectIds),
+                sourceRootObjectIds: _internSourceSetIds(sourceRootObjectIds),
+                clusterSourceObjectIds: _internSourceSetIds(sourceObjectIds),
+                clusterKindCounts: {},
+                omittedClusterSourceObjectIds: [],
+                omittedClusterKindCounts: {},
+                clusterHasEditableText: false,
+                clusterHasTextFrame: false,
+                clusterHasPlacedContent: false,
+                clusterHasVisualSource: true,
+                visualSourceObjectIds: _internSourceSetIds(visualSourceObjectIds),
+                styleSourceObjectIds: [],
+                ownedTextFrameIds: [],
+                exportSourceObjectIds: _internSourceSetIds(exportSourceObjectIds),
+                exportTargetObjectId: null,
+                atomicExportTargetObjectId: null,
+                atomicExportTargetObjectIds: [],
+                atomicTextlessVectorContent: false,
+                atomicContentVisualSlot: false,
+                hiddenVisualSourceObjectIds: _internSourceSetIds(hiddenVisualSourceObjectIds),
+                materialization: "EXTRACTED_PNG_VECTOR",
+                textAction: "DROP_TEXT",
+                visualAction: "PLACE_TEXT_SHELL",
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                visualLayer: "PAGE_BACKGROUND",
+                zOrder: 0,
+                reason: "stage1_page_background_plane_from_objectplans",
+                bounds: _objectPlanUnionBounds(sourceMembers),
+                renderSourceBounds: null,
+                cropSourceBounds: null,
+                ownershipSlot: "SHELL_SLOT",
+                policyLayer: "BACKGROUND",
+                clusterRelation: "PAGE_BACKGROUND_PLANE",
+                pageBackgroundComponentKey: group.componentKey,
+                migrationStatus: "READY_PAGE_BACKGROUND_PLANE",
+                migrationBlocker: "NONE",
+                migrationBlockerDetail: {
+                    absorbedObjectPlanIds: _objectPlanMemberIds(members)
+                },
+                executable: true,
+                required: true
+            };
+            plans.push(plane);
+            created.push(planeObjectPlanId);
+        }
 
         for (var mi = 0; mi < members.length; mi++) {
             var member = members[mi];
@@ -1821,8 +1965,13 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans) {
             member.absorbedByMaterialization = "PAGE_PLANE_PNG";
             member.visualAction = "DROP_VISUAL";
             member.materialization = "HWPX_TEXT";
-            member.executable = false;
-            member.required = false;
+            if (member.textAction === "OWNED_BY_HWPX_TEXT") {
+                member.executable = true;
+                member.required = true;
+            } else {
+                member.executable = false;
+                member.required = false;
+            }
             member.reason = String(member.reason || "") + ":absorbed_by_page_background_plane";
             absorbed.push(member.objectPlanId || member.candidateId || ("page-background-member." + String(mi)));
         }
@@ -1834,27 +1983,190 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans) {
             absorbedPlanCount: absorbed.length,
             createdObjectPlanIds: created,
             absorbedObjectPlanIds: absorbed
+            ,
+            normalizedExistingPlaneCount: normalizedExisting.length,
+            normalizedExistingObjectPlanIds: normalizedExisting
         }
     };
 }
 
+function _objectPlanPageBackgroundComponentKey(plan, sourceById) {
+    if (!plan) return "empty";
+    var pass = String(plan.passId || "pass.unknown");
+    var islandAncestorId = _objectPlanPageBackgroundIslandAncestorId(plan, sourceById);
+    if (islandAncestorId !== null && islandAncestorId !== undefined) {
+        return pass + ".island." + String(islandAncestorId);
+    }
+    var roots = _sortedNumericIds(plan.sourceRootObjectIds || []);
+    if (roots.length > 0) return pass + ".root." + _sourceSetKey(roots);
+    if (plan.exportTargetObjectId !== null && plan.exportTargetObjectId !== undefined) {
+        return pass + ".target." + String(plan.exportTargetObjectId);
+    }
+    var exports = _sortedNumericIds(plan.exportSourceObjectIds || []);
+    if (exports.length > 0) return pass + ".export." + _sourceSetKey(exports);
+    var visuals = _sortedNumericIds(plan.visualSourceObjectIds || []);
+    if (visuals.length > 0) return pass + ".visual." + _sourceSetKey(visuals);
+    return pass + ".plan." + String(plan.objectPlanId || plan.candidateId || "unknown");
+}
+
+function _objectPlanPageBackgroundIslandAncestorId(plan, sourceById) {
+    if (!plan || !sourceById) return null;
+    var ids = [];
+    ids = ids.concat(plan.sourceRootObjectIds || []);
+    ids = ids.concat(plan.exportSourceObjectIds || []);
+    ids = ids.concat(plan.visualSourceObjectIds || []);
+    ids = ids.concat(plan.sourceObjectIds || []);
+    ids = _sortedNumericIds(ids);
+    if (!ids || ids.length === 0) return null;
+
+    function sourceInfo(id) {
+        return sourceById[String(id)] || null;
+    }
+
+    function parentChain(sourceId) {
+        var out = [];
+        var current = sourceInfo(sourceId);
+        var guard = 0;
+        while (current && guard++ < 128) {
+            out.push(String(current.id));
+            if (current.parentId === null || current.parentId === undefined || String(current.parentId) === "") {
+                break;
+            }
+            current = sourceInfo(current.parentId);
+        }
+        return out;
+    }
+
+    var common = null;
+    for (var i = 0; i < ids.length; i++) {
+        var chain = parentChain(ids[i]);
+        if (!chain || chain.length === 0) continue;
+        if (common === null) {
+            common = {};
+            for (var ci = 0; ci < chain.length; ci++) common[chain[ci]] = true;
+        } else {
+            var next = {};
+            for (var cj = 0; cj < chain.length; cj++) {
+                if (common[chain[cj]] === true) next[chain[cj]] = true;
+            }
+            common = next;
+        }
+    }
+    if (common === null) return null;
+
+    var bestId = null;
+    var bestDepth = -1;
+    for (var idKey in common) {
+        if (!common.hasOwnProperty(idKey) || common[idKey] !== true) continue;
+        var src = sourceInfo(idKey);
+        if (!src) continue;
+        if (src.pageIndex !== null && src.pageIndex !== undefined
+                && plan.pageIndex !== null && plan.pageIndex !== undefined
+                && Number(src.pageIndex) !== Number(plan.pageIndex)) {
+            continue;
+        }
+        var depth = 0;
+        var cur = src;
+        var guard2 = 0;
+        while (cur && guard2++ < 128) {
+            depth++;
+            if (cur.parentId === null || cur.parentId === undefined || String(cur.parentId) === "") break;
+            cur = sourceInfo(cur.parentId);
+        }
+        if (depth > bestDepth) {
+            bestDepth = depth;
+            bestId = idKey;
+        }
+    }
+    return bestId !== null ? Number(bestId) : null;
+}
+
+function _objectPlanSafeIdPart(value) {
+    var raw = String(value || "component");
+    var out = raw.replace(/[^A-Za-z0-9_.-]+/g, "_");
+    if (out.length > 120) {
+        out = out.substring(0, 96) + ".h" + _sourceSetId([raw.length]);
+    }
+    return out || "component";
+}
+
 function _objectPlanEligibleForPageBackgroundPlane(plan) {
     if (!plan) return false;
-    if (!_objectPlanHasVisibleVisual(plan)) return false;
-    if (plan.visualLayer !== "PAGE_BACKGROUND") return false;
-    if (plan.ownershipSlot !== "SHELL_SLOT") return false;
-    if (plan.policyLayer !== "BACKGROUND") return false;
+    if (!_objectPlanHasPlaneExportableVisualSource(plan)) return false;
+    if (plan.slotRole === "page_background_plane"
+            || plan.compositeRole === "page_background_plane"
+            || plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG") return false;
+
     if (plan.placement !== "FLOATING" || plan.coordinateSpace !== "PAGE") return false;
-    if (plan.textAction !== "DROP_TEXT") return false;
-    if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) return false;
-    if (plan.passId !== "pass.decoration_groups") return false;
-    if (plan.visualAction !== "PLACE_FLOATING_PNG") return false;
+    if (plan.layoutOnlyInlineSlot === true
+            || plan.sourceInlineFlow === true
+            || plan.inlineCompositeLayoutDescendant === true
+            || plan.inlineAnchorSourceObjectId !== null
+                    && plan.inlineAnchorSourceObjectId !== undefined) return false;
+
+    if (!_objectPlanIsPageBackgroundPlaneShellMember(plan)) return false;
+    if (plan.textAction === "OWNED_BY_PNG") return false;
+    if (plan.completePngTextAllowed === true) return false;
+    if (plan.materialization === "COMPLETE_PNG") return false;
+    if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(plan)) return false;
+
+    if (plan.visualAction !== "PLACE_FLOATING_PNG"
+            && plan.visualAction !== "PLACE_TEXT_SHELL"
+            && plan.visualAction !== "DROP_VISUAL") return false;
     if (plan.materialization !== "EXTRACTED_PNG_VECTOR"
-            && plan.materialization !== "TEXTLESS_VISUAL_FRAGMENT") return false;
-    if (plan.slotRole !== "background_shell_slot"
-            && plan.compositeRole !== "background_vector_source") return false;
-    if (!plan.exportSourceObjectIds || plan.exportSourceObjectIds.length === 0) return false;
+            && plan.materialization !== "TEXTLESS_VISUAL_FRAGMENT"
+            && plan.materialization !== "NATIVE_SOURCE_SHAPE"
+            && plan.materialization !== "HWPX_TEXT") return false;
+
+    if (!plan.exportSourceObjectIds || plan.exportSourceObjectIds.length === 0) {
+        if (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0) return false;
+    }
     return true;
+}
+
+function _objectPlanIsPageBackgroundPlaneShellMember(plan) {
+    if (!plan) return false;
+    var ownershipSlot = String(plan.ownershipSlot || "");
+    var slotRole = String(plan.slotRole || "").toLowerCase();
+    var compositeRole = String(plan.compositeRole || "").toLowerCase();
+    var candidatePurpose = String(plan.candidatePurpose || "").toLowerCase();
+
+    if (ownershipSlot === "TEXT_SLOT" || slotRole === "text_slot") return false;
+    if (ownershipSlot === "CONTENT_VISUAL_SLOT"
+            || slotRole === "content_visual_slot"
+            || plan.atomicContentVisualSlot === true) return false;
+    if (ownershipSlot === "TABLE_STYLE_SLOT"
+            || slotRole === "table_style_slot"
+            || plan.visualAction === "PLACE_TABLE_STYLE") return false;
+    if (plan.materialization === "HWPX_TABLE_STYLE") return false;
+
+    if (ownershipSlot === "SHELL_SLOT") return true;
+    if (slotRole === "background_shell_slot" || slotRole === "shell_slot_only") return true;
+    if (compositeRole === "background_vector_source"
+            || compositeRole === "source_required_visible_vector_shell_set") return true;
+    if (slotRole.indexOf("shell") >= 0
+            && slotRole.indexOf("content") < 0
+            && slotRole.indexOf("table") < 0) return true;
+    if (compositeRole.indexOf("shell") >= 0
+            && compositeRole.indexOf("content") < 0
+            && compositeRole.indexOf("table") < 0) return true;
+    if (candidatePurpose === "shell_candidate"
+            && (plan.visualAction === "PLACE_TEXT_SHELL"
+                    || plan.slotRole === "background_shell_slot"
+                    || plan.slotRole === "shell_slot_only")) return true;
+    return false;
+}
+
+function _objectPlanHasPlaneExportableVisualSource(plan) {
+    if (!plan) return false;
+    if (plan.visualAction === "PLACE_TABLE_STYLE") return false;
+    if (plan.styleSourceObjectIds && plan.styleSourceObjectIds.length > 0
+            && (!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0)
+            && (!plan.exportSourceObjectIds || plan.exportSourceObjectIds.length === 0)) {
+        return false;
+    }
+    return !!((plan.exportSourceObjectIds && plan.exportSourceObjectIds.length > 0)
+            || (plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0));
 }
 
 function _objectPlanUnionPlanIds(plans, field) {
@@ -2365,6 +2677,7 @@ function _objectPlanVisualAction(bundle) {
     if (bundle.layoutOnlyInlineSlot === true) return "DROP_VISUAL";
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
     if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) return "ABSORB_TEXT_STYLE";
+    if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return "DROP_VISUAL";
     if (bundle.ownershipSlot === "CONTENT_VISUAL_SLOT"
             && (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)) {
         return "DROP_VISUAL";
@@ -2506,7 +2819,7 @@ function _objectPlanMaterialization(bundle, visualAction) {
 
 function _objectPlanVisualLayer(bundle) {
     if (!bundle || !bundle.policyLayer) return "CONTENT_VISUAL";
-    if (bundle.policyLayer === "BACKGROUND") return "PAGE_BACKGROUND";
+    if (bundle.policyLayer === "BACKGROUND") return "CONTENT_VISUAL";
     if (bundle.policyLayer === "DECORATION") {
         if (bundle.connectorDecorationVisual === true) {
             return "LABEL_CONNECTOR_BACKDROP";
@@ -2528,6 +2841,7 @@ function _objectPlanMigrationStatus(bundle) {
     if (!bundle) return "NEEDS_BUNDLE_SOURCE_POLICY";
     if (bundle.layoutOnlyInlineSlot === true) return "READY_LAYOUT_ONLY_INLINE_SLOT";
     if (_objectPlanBundleOwnsInlineCompletePngText(bundle)) return "READY_INLINE_COMPLETE_PNG_TEXT_OWNER";
+    if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return "NEEDS_VISIBLE_SLOT_EXPLICITNESS";
     if (bundle.clusterRelation === "EXACT_SOURCE_CLUSTER") return "READY_EXACT_CLUSTER";
     if (_objectPlanHasInlineTextlessSiblingDecorationContract(bundle)) return "READY_TEXTLESS_CONNECTOR_FRAGMENT";
     if (_objectPlanHasExplicitSlotOnlyContract(bundle)) return "READY_SLOT_ONLY_CLUSTER_FRAGMENT";
@@ -2627,7 +2941,27 @@ function _objectPlanHasExplicitSlotOnlyContract(bundle) {
     if (!_sourceSetContainsAll(bundle.exportSourceObjectIds || [], bundle.visualSourceObjectIds || [])
             && !_objectPlanAllowsRootExportVisibleFragmentContract(bundle)) return false;
     if (_sourceSetsIntersect(bundle.visualSourceObjectIds || [], bundle.hiddenVisualSourceObjectIds || [])) return false;
+    if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return false;
     return true;
+}
+
+function _objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle) {
+    if (!bundle) return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (bundle.slotRole !== "shell_slot_only" && bundle.mode !== "SLOT_ONLY") return false;
+    if (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length !== 1) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length !== 1) return false;
+    if (String(bundle.exportSourceObjectIds[0]) !== String(bundle.visualSourceObjectIds[0])) return false;
+    if (bundle.exportTargetObjectId !== null
+            && bundle.exportTargetObjectId !== undefined
+            && String(bundle.exportTargetObjectId) !== String(bundle.exportSourceObjectIds[0])) {
+        return false;
+    }
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return true;
+    if (bundle.editableTextFrameIds && bundle.editableTextFrameIds.length > 0) return true;
+    if (bundle.styleSourceObjectIds && bundle.styleSourceObjectIds.length > 0) return true;
+    if (bundle.clusterHasEditableText === true || bundle.clusterHasTextFrame === true) return true;
+    return false;
 }
 
 function _objectPlanAllowsRootExportVisibleFragmentContract(bundle) {

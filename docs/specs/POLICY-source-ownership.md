@@ -90,9 +90,16 @@ When a page issue is reported, use this lookup first:
   textless graphic material unless Stage 1 explicitly says otherwise.
 - HWPX execution has three policy strata:
   `BACKGROUND_GRAPHIC < TEXTLESS_IMAGE_GROUP < TEXT_TABLE_STRUCTURE`.
-  Background graphics are source-owned textless material, but they are excluded
-  from ordinary page-local textless image grouping and always form the bottom
-  graphic stratum.
+  `BACKGROUND_GRAPHIC` is not a source-object meaning. It is a page-local
+  execution plane assembled in Stage 1 from source-connected floating
+  `SHELL_SLOT` visual components after `TEXT_SLOT`, `CONTENT_VISUAL_SLOT`,
+  `TABLE_STYLE_SLOT`, and story-flow inline sources are excluded. The component
+  still owns only its textless visual slot; editable text is hidden from the
+  asset and re-emitted in `TEXT_TABLE_STRUCTURE`.
+- Non-background visual material is one source-ordered visual stream. Historical
+  roles such as `DECORATION` and `CONTENT` are diagnostics/source-role labels
+  only; they must not create separate foreground/background execution bands or
+  invert original IDML source depth.
 - Visual material must come from IDML source material or extractor metadata.
 - One source bundle slot has exactly one visible owner.
 - Performance is an ownership property. Stage 1 must avoid creating
@@ -193,7 +200,11 @@ diagnostics only. They do not create four HWPX execution layers.
 
 The executable HWPX policy has exactly three strata:
 
-1. `BACKGROUND_GRAPHIC`: planned page/spread background material.
+1. `BACKGROUND_GRAPHIC`: an explicit page background plane ObjectPlan assembled
+   from page/floating source-connected `SHELL_SLOT` visual components. It is
+   never inferred from bounds, layer name, color, semantic role, or low z-depth
+   alone, and it must not include `TEXT_SLOT`, `CONTENT_VISUAL_SLOT`,
+   `TABLE_STYLE_SLOT`, or story-flow inline material.
 2. `TEXTLESS_IMAGE_GROUP`: all ordinary non-text source graphics, including
    historical decoration/content roles, table/cell decoration, masks, charts,
    photos, shells, badges, and master page graphic fragments.

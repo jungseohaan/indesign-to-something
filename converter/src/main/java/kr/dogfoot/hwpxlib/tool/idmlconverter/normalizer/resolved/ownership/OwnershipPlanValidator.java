@@ -56,6 +56,7 @@ public final class OwnershipPlanValidator {
         v.validateCompositeClippedImageOwnersAreSpecific();
         v.validatePlacedContentVisualsStayContentLayer();
         v.validateContentVisualSlotDoesNotBecomeBackground();
+        v.validatePageBackgroundHasOnlyExplicitPlaneContract();
         v.validateBackgroundShellDoesNotOwnText();
         v.validateBackgroundDepthBand();
         v.validateRenderedPlanExactArtifactMatchPreferred();
@@ -635,6 +636,32 @@ public final class OwnershipPlanValidator {
                             + " visualLayer=" + plan.visualLayer
                             + " policyLayer=" + plan.visualPolicyLayer());
         }
+    }
+
+    private void validatePageBackgroundHasOnlyExplicitPlaneContract() {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || !hasVisibleVisualSlot(plan)) continue;
+            if (plan.visualLayer != VisualLayer.PAGE_BACKGROUND) continue;
+            if (isExplicitPageBackgroundPlaneContract(plan)) continue;
+
+            warn("STAGE4_PAGE_BACKGROUND_FORBIDDEN_NON_PLANE",
+                    "plan=" + planRef(plan)
+                            + " visualLayer=" + plan.visualLayer
+                            + " slotRole=" + safe(plan.slotRole)
+                            + " reason=" + safe(plan.reason)
+                            + " placement=" + plan.placement
+                            + " materialization=" + plan.materialization);
+        }
+    }
+
+    private static boolean isExplicitPageBackgroundPlaneContract(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!"page_background_plane".equals(safe(plan.slotRole))) return false;
+        String candidate = safe(plan.candidateId);
+        String reason = safe(plan.reason);
+        return candidate.contains("page_background_plane")
+                || reason.contains("page_background_plane")
+                || reason.contains("PAGE_BACKGROUND_PLANE");
     }
 
     private void validateBackgroundDepthBand() {

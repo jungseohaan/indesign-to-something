@@ -235,7 +235,7 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
             materialization: "EXTRACTED_PNG_VECTOR",
             textAction: "DROP_TEXT",
             visualAction: "PLACE_FLOATING_PNG",
-            visualLayer: "PAGE_BACKGROUND",
+            visualLayer: "CONTENT_VISUAL",
             placement: "FLOATING",
             coordinateSpace: "PAGE",
             zOrder: src.zOrder !== undefined && src.zOrder !== null ? Number(src.zOrder) : 0,
@@ -342,13 +342,14 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
                 tableDecorationRole: "table_carrier_sibling_decoration",
                 exportSourceObjectIds: sourceIds.slice(0),
                 exportTargetObjectId: sourceIds.length === 1 ? sourceIds[0] : null,
-                hiddenVisualSourceObjectIds: localTableTextFrameIds,
+                hiddenVisualSourceObjectIds: [],
                 visualSourceObjectIds: sourceIds.slice(0),
                 styleSourceObjectIds: [],
                 ownedTextFrameIds: [],
-                editableTextFrameIds: localTableTextFrameIds,
-                hiddenTextFrameIds: localTableTextFrameIds,
-                requiresTextHidden: localTableTextFrameIds.length > 0,
+                editableTextFrameIds: [],
+                hiddenTextFrameIds: [],
+                decoratedTextFrameIds: localTableTextFrameIds,
+                requiresTextHidden: false,
                 textOwner: "none",
                 containsEditableText: false,
                 completePngTextAllowed: false,
@@ -590,6 +591,29 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
         return false;
     }
 
+    function masterItemBelongsToMasterSideForPlan(item, masterPage) {
+        try {
+            if (!item || !masterPage) return false;
+            try {
+                var parentPage = item.parentPage;
+                if (parentPage && parentPage.id === masterPage.id) return true;
+            } catch (eParentPage) {}
+            var cur = item.parent;
+            var hop = 0;
+            while (cur && hop < 10) {
+                var kind = "";
+                try { kind = cur.constructor.name; } catch (eKind) { break; }
+                if (kind === "Page") {
+                    try { return cur.id === masterPage.id; } catch (ePageId) { return false; }
+                }
+                if (kind === "MasterSpread" || kind === "Document") return false;
+                try { cur = cur.parent; } catch (eParent) { break; }
+                hop++;
+            }
+        } catch (e) {}
+        return false;
+    }
+
     function masterDirectChildItemsForPlan(item) {
         var out = [];
         try {
@@ -602,7 +626,7 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                     if (!child || child.id === undefined || child.id === null) continue;
                     var parent = child.parent;
                     if (!parent || parent.id !== rootId) continue;
-                    if (_itemKind(child) === "TextFrame") continue;
+                    if (_itemKind(child) === "TextFrame" && isDynamicMasterTextFrameForPlan(child)) continue;
                     if (isOnHiddenLayer(child)) continue;
                     try { if (child.visible === false) continue; } catch (eVis) {}
                     try { if (child.nonprinting) continue; } catch (eNp) {}
@@ -611,6 +635,33 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
             }
         } catch (e) {}
         return out;
+    }
+
+    function isDynamicMasterTextFrameForPlan(tf) {
+        try {
+            if (!tf || _itemKind(tf) !== "TextFrame") return false;
+            var story = tf.parentStory;
+            if (!story) return false;
+            try {
+                if (String(story.contents).indexOf("\u0018") >= 0) return true;
+            } catch (eContents) {}
+            try {
+                var tvInst = story.textVariableInstances;
+                if (tvInst && tvInst.length > 0) {
+                    var stripped = "";
+                    try {
+                        stripped = String(story.contents)
+                            .replace(/\uFEFF/g, "")
+                            .replace(/\uFFFC/g, "")
+                            .replace(/\u0016/g, "")
+                            .replace(/\u0018/g, "")
+                            .replace(/[\s\r\n]/g, "");
+                    } catch (eStrip) {}
+                    if (stripped.length === 0) return true;
+                }
+            } catch (eTv) {}
+        } catch (e) {}
+        return false;
     }
 
     function masterGroupShouldUseChildEntriesForPlan(item, bounds, pageBounds) {
@@ -667,14 +718,15 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
         return false;
     }
 
-    function appendPlanMasterEntries(entries, item, bounds, pageBounds) {
+    function appendPlanMasterEntries(entries, item, bounds, pageBounds, masterPage) {
         if (isPaperFillOnlyMasterMaskForPlan(item, bounds, pageBounds)) return;
         if (masterGroupShouldUseChildEntriesForPlan(item, bounds, pageBounds)) {
             var children = masterDirectChildItemsForPlan(item);
             for (var ci = 0; ci < children.length; ci++) {
                 try {
                     var cb = _itemBounds(children[ci]);
-                    if (!cb || !boundsIntersectForPlan(cb, pageBounds, 5)) continue;
+                    var childOnMasterSide = masterItemBelongsToMasterSideForPlan(children[ci], masterPage);
+                    if (!cb || (!childOnMasterSide && !boundsIntersectForPlan(cb, pageBounds, 5))) continue;
                     if (isPaperFillOnlyMasterMaskForPlan(children[ci], cb, pageBounds)) continue;
                     entries.push({ item: children[ci], bounds: cb });
                 } catch (eChildEntry) {}
@@ -765,8 +817,10 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                 }
             } catch (eSide) {}
             var masterPageBounds = null;
-            try { masterPageBounds = master.pages[side].bounds; } catch (eBounds) {}
-            if (!masterPageBounds) continue;
+            var masterPage = null;
+            try { masterPage = master.pages[side]; } catch (eMasterPage) {}
+            try { masterPageBounds = masterPage ? masterPage.bounds : null; } catch (eBounds) {}
+            if (!masterPage || !masterPageBounds) continue;
             var cacheKey = String(master.id) + "|" + String(side);
             var cachedClusters = masterCompositeClusterCache[cacheKey];
             if (!cachedClusters) {
@@ -779,8 +833,9 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                         if (_itemKind(item) === "TextFrame") continue;
                         if (!isTopLevelMasterItemForPlan(item)) continue;
                         var b = _itemBounds(item);
-                        if (!b || !boundsIntersectForPlan(b, masterPageBounds, 5)) continue;
-                        appendPlanMasterEntries(entries, item, b, masterPageBounds);
+                        var itemOnMasterSide = masterItemBelongsToMasterSideForPlan(item, masterPage);
+                        if (!b || (!itemOnMasterSide && !boundsIntersectForPlan(b, masterPageBounds, 5))) continue;
+                        appendPlanMasterEntries(entries, item, b, masterPageBounds, masterPage);
                     } catch (eItem) {}
                 }
                 cachedClusters = [];
@@ -1978,6 +2033,15 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 || kind === "InsertionPoint" || kind === "Cell";
     }
 
+    function sourceIsPageRootCandidate(src) {
+        if (!src || src.id === null || src.id === undefined) return false;
+        if (src.parentId === null || src.parentId === undefined) return true;
+        var parent = info(src.parentId);
+        var parentKind = parent ? String(parent.kind || "") : String(src.parentKind || "");
+        return parentKind === "Page" || parentKind === "Spread"
+                || parentKind === "MasterSpread" || parentKind === "Document";
+    }
+
     function sourceBoundsArea(b) {
         if (!b || b.length < 4) return 0;
         return Math.max(0, Number(b[2]) - Number(b[0]))
@@ -2217,7 +2281,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         candidate.materialization = "EXTRACTED_PNG_VECTOR";
         candidate.textAction = "DROP_TEXT";
         candidate.visualAction = "PLACE_FLOATING_PNG";
-        candidate.visualLayer = "PAGE_BACKGROUND";
+        candidate.visualLayer = "CONTENT_VISUAL";
         candidate.placement = "FLOATING";
         candidate.coordinateSpace = "PAGE";
         candidate.ownershipSlot = "SHELL_SLOT";
@@ -2945,6 +3009,20 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         return _sortedNumericIds(out);
     }
 
+    function inlineVisualSourceIdsForPageTextlessGroup(sourceIds, pageIndex) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            var id = sourceIds[i];
+            if (!sourceBelongsToPageTextlessGroupPage(id, pageIndex)) continue;
+            if (!sourceHasVisiblePaint(id)) continue;
+            if (sourceIsInlineFlow(id) || sourceIsStoryAnchoredMaterial(id)) {
+                _pushUniqueId(out, seen, id);
+            }
+        }
+        return _sortedNumericIds(out);
+    }
+
     function filterPageTextlessGroupSourceIds(sourceIds, pageIndex) {
         var out = [];
         var seen = {};
@@ -3215,118 +3293,117 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         };
     }
 
-    var appended = 0;
-    var diagnostics = [];
-    for (var pageKey in byPage) {
-        if (!byPage.hasOwnProperty(pageKey)) continue;
-        var components = buildComponents(byPage[pageKey]);
-        for (var cc = 0; cc < components.length; cc++) {
-            var component = components[cc];
-            var allSourceIds = [], allSourceSeen = {};
-            var exportIds = [], exportSeen = {};
-            var coveredCandidateIds = [];
-            var b = null;
-            var minZ = null;
-            for (var ei = 0; ei < component.length; ei++) {
-                var entry = component[ei];
-                mergeIds(allSourceIds, allSourceSeen, expandSourceIds(entry.sourceIds, true, false));
-                mergeIds(exportIds, exportSeen, expandSourceIds(entry.exportIds, false, false));
-                b = unionBounds(b, entry.bounds);
-                minZ = minZ === null ? entry.zOrder : Math.min(minZ, entry.zOrder);
-                coveredCandidateIds.push(entry.candidate.candidateId || null);
+    function appendPageRootTextlessVisualPlaneCandidates() {
+        var rootCandidates = [];
+        var rootSeen = {};
+        var rootDiagnostics = [];
+        var pages = {};
+        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
+            var root = sourceItems[si];
+            if (!root || root.id === null || root.id === undefined) continue;
+            if (!sourceIsPageRootCandidate(root)) continue;
+            if (root.visible === false || root.hiddenLayer === true || root.nonprinting === true) continue;
+            if (sourceIsTextLike(root.id)) continue;
+            var pageIndex = root.pageIndex !== null && root.pageIndex !== undefined
+                    ? Number(root.pageIndex)
+                    : null;
+            if (pageIndex === null || isNaN(pageIndex) || pageIndex < 0) continue;
+            var subtreeIds = filterPageTextlessGroupSourceIds(descendantIds(root.id), pageIndex);
+            if (!subtreeIds || subtreeIds.length < 2) continue;
+            var rootVisibleIds = visiblePaintSourceIds(subtreeIds, pageIndex);
+            if (!rootVisibleIds || rootVisibleIds.length < 1) continue;
+            var pageKey = String(pageIndex);
+            if (!pages[pageKey]) {
+                pages[pageKey] = {
+                    pageIndex: pageIndex,
+                    rootIds: [],
+                    sourceObjectIds: [],
+                    exportSourceObjectIds: [],
+                    hiddenVisualSourceObjectIds: [],
+                    hiddenTextFrameIds: [],
+                    visualBounds: null,
+                    minZOrder: null
+                };
             }
-            allSourceIds = _sortedNumericIds(allSourceIds);
-            exportIds = _sortedNumericIds(exportIds);
-            allSourceIds = filterPageTextlessGroupSourceIds(allSourceIds, Number(pageKey));
-            exportIds = filterPageTextlessGroupSourceIds(exportIds, Number(pageKey));
-            var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(allSourceIds);
-            var hiddenTextFrameIds = textFrameSplit.hiddenTextFrameIds;
-            var pngOwnedTextFrameIds = textFrameSplit.pngOwnedTextFrameIds;
-            var excludedTextFrameIds = unionSourceIds(hiddenTextFrameIds, pngOwnedTextFrameIds);
-            exportIds = subtractSourceIds(exportIds, excludedTextFrameIds);
-            exportIds = unionSourceIds(exportIds, visiblePaintSourceIds(allSourceIds, Number(pageKey)));
-            var visualSourceIds = exportIds.slice(0);
-            var executionSourceIds = subtractSourceIds(allSourceIds, excludedTextFrameIds);
-            if (exportIds.length < 2 || allSourceIds.length < 2) continue;
-            if (excludedTextFrameIds.length > 0
-                    && componentHasTextShellOwner(component)) {
-                var localSplit = appendNonShellLocalComponentCandidate(
-                        component, pageKey, coveredCandidateIds);
-                if (localSplit) {
-                    diagnostics.push(localSplit);
-                    appended++;
-                }
-                diagnostics.push({
-                    pageIndex: Number(pageKey),
-                    coveredCandidateIds: coveredCandidateIds,
-                    coveredCandidateCount: coveredCandidateIds.length,
-                    sourceObjectCount: allSourceIds.length,
-                    exportSourceObjectCount: exportIds.length,
-                    hiddenTextFrameCount: excludedTextFrameIds.length,
-                    skipped: true,
-                    reason: "text_shell_owner_keeps_component_slots_local"
-                });
-                continue;
+            var pageEntry = pages[pageKey];
+            var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(subtreeIds);
+            var hiddenTextFrameIds = unionSourceIds(
+                    textFrameSplit.hiddenTextFrameIds || [],
+                    textFrameSplit.pngOwnedTextFrameIds || []);
+            var hiddenInlineVisualIds = inlineVisualSourceIdsForPageTextlessGroup(subtreeIds, pageIndex);
+            var hiddenVisualIds = unionSourceIds(hiddenTextFrameIds, hiddenInlineVisualIds);
+            var exportIds = rootVisibleIds;
+            exportIds = subtractSourceIds(exportIds, hiddenVisualIds);
+            if (!exportIds || exportIds.length < 1) continue;
+            var visualBounds = null;
+            for (var bi = 0; bi < exportIds.length; bi++) {
+                var exportSource = info(exportIds[bi]);
+                if (!exportSource || !exportSource.bounds || exportSource.bounds.length < 4) continue;
+                visualBounds = unionBounds(visualBounds, exportSource.bounds);
             }
-            if (excludedTextFrameIds.length > 0
-                    && componentHasDominantPlacedVisualCarrier(component, b)) {
-                diagnostics.push({
-                    pageIndex: Number(pageKey),
-                    coveredCandidateIds: coveredCandidateIds,
-                    coveredCandidateCount: coveredCandidateIds.length,
-                    sourceObjectCount: allSourceIds.length,
-                    exportSourceObjectCount: exportIds.length,
-                    hiddenTextFrameCount: excludedTextFrameIds.length,
-                    skipped: true,
-                    reason: "dominant_placed_visual_carrier_keeps_component_slot_local"
-                });
-                continue;
+            if (!visualBounds || sourceBoundsArea(visualBounds) <= 0) continue;
+            if (!rootSeen[pageKey + "|" + String(root.id)]) {
+                rootSeen[pageKey + "|" + String(root.id)] = true;
+                pageEntry.rootIds = unionSourceIds(pageEntry.rootIds, [root.id]);
             }
-            var atomicTargetIds = atomicExportTargetIdsForExportIds(
-                    allSourceIds, exportIds, Number(pageKey), excludedTextFrameIds);
-            var atomicRootId = atomicTargetIds.length === 1 ? atomicTargetIds[0] : null;
-            var atomic = atomicTargetIds.length > 0;
+            pageEntry.sourceObjectIds = unionSourceIds(pageEntry.sourceObjectIds, subtreeIds);
+            pageEntry.exportSourceObjectIds = unionSourceIds(pageEntry.exportSourceObjectIds, exportIds);
+            pageEntry.hiddenVisualSourceObjectIds = unionSourceIds(
+                    pageEntry.hiddenVisualSourceObjectIds, hiddenVisualIds);
+            pageEntry.hiddenTextFrameIds = unionSourceIds(
+                    pageEntry.hiddenTextFrameIds, hiddenTextFrameIds);
+            pageEntry.visualBounds = unionBounds(pageEntry.visualBounds, visualBounds);
+            var rootZ = root.zOrder !== undefined && root.zOrder !== null ? Number(root.zOrder) : 0;
+            if (pageEntry.minZOrder === null || rootZ < pageEntry.minZOrder) pageEntry.minZOrder = rootZ;
+        }
+        for (var pageKey in pages) {
+            if (!pages.hasOwnProperty(pageKey)) continue;
+            var pageEntry = pages[pageKey];
+            if (!pageEntry.rootIds || pageEntry.rootIds.length < 1) continue;
+            if (!pageEntry.exportSourceObjectIds || pageEntry.exportSourceObjectIds.length < 1) continue;
+            if (!pageEntry.visualBounds || sourceBoundsArea(pageEntry.visualBounds) <= 0) continue;
+            var rootKey = "pass.page_textless_graphic_groups|page:" + pageKey
+                    + "|page-root-plane";
+            if (candidateSeen && candidateSeen[rootKey]) continue;
+            if (candidateSeen) candidateSeen[rootKey] = true;
             var candidateId = _candidateCompositeId(
                     "pass.page_textless_graphic_groups",
-                    Number(pageKey),
-                    allSourceIds,
-                    "visual_adjacency");
-            var seenKey = "pass.page_textless_graphic_groups|page:" + pageKey
-                    + "|src:" + _sourceSetKey(allSourceIds);
-            if (candidateSeen && candidateSeen[seenKey]) continue;
-            if (candidateSeen) candidateSeen[seenKey] = true;
-            candidates.push({
+                    pageEntry.pageIndex,
+                    pageEntry.rootIds,
+                    "page_root_textless_visual_plane");
+            rootCandidates.push({
                 candidateId: candidateId,
                 passId: "pass.page_textless_graphic_groups",
-                sourceObjectIds: allSourceIds,
-                executionSourceObjectIds: executionSourceIds,
-                primarySourceObjectId: allSourceIds.length > 0 ? allSourceIds[0] : null,
-                pageIndex: Number(pageKey),
-                kind: "PageTextlessGraphicGroup",
+                sourceObjectIds: pageEntry.sourceObjectIds,
+                executionSourceObjectIds: subtractSourceIds(
+                        pageEntry.sourceObjectIds, pageEntry.hiddenVisualSourceObjectIds),
+                primarySourceObjectId: pageEntry.rootIds[0],
+                pageIndex: pageEntry.pageIndex,
+                kind: "PageRootTextlessVisualPlane",
                 unit: "PAGE_GRAPHIC_GROUP",
                 mode: "TEXTLESS_CANDIDATE",
                 candidatePurpose: "CONTENT_CANDIDATE",
-                bounds: b,
+                bounds: pageEntry.visualBounds,
                 parentId: null,
-                parentKind: "Page",
+                parentKind: "PageRoot",
                 anchoredPosition: null,
                 storyAnchorPlacement: null,
                 composite: true,
-                compositeRole: "page_textless_graphic_group",
-                slotRole: "page_textless_graphic_group",
-                exportSourceObjectIds: exportIds,
-                exportTargetObjectId: atomicRootId,
-                atomicExportTargetObjectId: atomicRootId,
-                atomicExportTargetObjectIds: atomicTargetIds,
-                atomicTextlessVectorContent: atomic,
-                atomicContentVisualSlot: atomic,
-                hiddenVisualSourceObjectIds: excludedTextFrameIds,
-                visualSourceObjectIds: visualSourceIds,
+                compositeRole: "page_root_textless_visual_plane",
+                slotRole: "page_root_textless_visual_plane",
+                exportSourceObjectIds: pageEntry.exportSourceObjectIds,
+                exportTargetObjectId: pageEntry.rootIds[0],
+                atomicExportTargetObjectId: pageEntry.rootIds[0],
+                atomicExportTargetObjectIds: pageEntry.rootIds,
+                atomicTextlessVectorContent: true,
+                atomicContentVisualSlot: true,
+                hiddenVisualSourceObjectIds: pageEntry.hiddenVisualSourceObjectIds,
+                visualSourceObjectIds: pageEntry.exportSourceObjectIds,
                 styleSourceObjectIds: [],
                 ownedTextFrameIds: [],
-                editableTextFrameIds: excludedTextFrameIds,
-                hiddenTextFrameIds: excludedTextFrameIds,
-                requiresTextHidden: excludedTextFrameIds.length > 0,
+                editableTextFrameIds: pageEntry.hiddenTextFrameIds,
+                hiddenTextFrameIds: pageEntry.hiddenTextFrameIds,
+                requiresTextHidden: pageEntry.hiddenTextFrameIds.length > 0,
                 textOwner: "none",
                 containsEditableText: false,
                 completePngTextAllowed: false,
@@ -3337,38 +3414,48 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 visualLayer: "CONTENT_VISUAL",
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
-                zOrder: minZ !== null ? minZ : 0,
-                coveredCandidateIds: coveredCandidateIds,
+                zOrder: pageEntry.minZOrder !== null ? pageEntry.minZOrder : 0,
+                coveredCandidateIds: [],
                 required: false,
-                reason: atomic
-                        ? "atomic_page_textless_vector_content_from_visual_adjacency"
-                        : "page_textless_graphic_group_from_visual_adjacency"
+                reason: "page_root_textless_visual_plane"
             });
-            diagnostics.push({
+            rootDiagnostics.push({
                 candidateId: candidateId,
-                pageIndex: Number(pageKey),
-                coveredCandidateIds: coveredCandidateIds,
-                coveredCandidateCount: coveredCandidateIds.length,
-                sourceObjectCount: allSourceIds.length,
-                exportSourceObjectCount: exportIds.length,
-                atomicTextlessVectorContent: atomic,
-                atomicExportTargetObjectId: atomicRootId,
-                atomicExportTargetObjectIds: atomicTargetIds,
-                hiddenTextFrameCount: excludedTextFrameIds.length,
-                pngOwnedTextFrameCount: 0,
-                bounds: b
+                pageIndex: pageEntry.pageIndex,
+                rootSourceObjectIds: pageEntry.rootIds,
+                sourceObjectCount: pageEntry.sourceObjectIds.length,
+                exportSourceObjectCount: pageEntry.exportSourceObjectIds.length,
+                hiddenTextFrameCount: pageEntry.hiddenTextFrameIds.length,
+                bounds: pageEntry.visualBounds
             });
-            appended++;
         }
+        for (var ri = 0; ri < rootCandidates.length; ri++) {
+            candidates.push(rootCandidates[ri]);
+        }
+        return {
+            appendedCount: rootCandidates.length,
+            components: rootDiagnostics
+        };
     }
+
+    var rootPlaneDiagnostics = appendPageRootTextlessVisualPlaneCandidates();
     return {
-        appendedCount: appended,
-        componentCount: diagnostics.length,
-        components: diagnostics
+        appendedCount: rootPlaneDiagnostics.appendedCount,
+        componentCount: rootPlaneDiagnostics.components.length,
+        components: rootPlaneDiagnostics.components
     };
 }
 
 function _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceItems) {
+    // Page-root textless visual planes are already the ordinary page graphic
+    // grouping contract. Do not re-merge them by visual adjacency.
+    return {
+        candidates: candidates || [],
+        mergedCount: 0,
+        merged: [],
+        suppressed: true,
+        reason: "page_root_textless_visual_plane_disables_visual_adjacency_merge"
+    };
     if (!candidates || candidates.length === 0) {
         return { candidates: candidates || [], mergedCount: 0, merged: [] };
     }
@@ -6370,6 +6457,8 @@ function _appendUnresolvedVisibleVectorCoverageCandidates(
         var visualAction = hasPlacedVisualTree ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
         var visualLayer = hasPlacedVisualTree ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
         var candidatePurpose = hasPlacedVisualTree ? "CONTENT_CANDIDATE" : "SHELL_CANDIDATE";
+        var unresolvedShellClosure = !hasPlacedVisualTree
+                && String(row && row.coverageStatus || "UNRESOLVED") === "UNRESOLVED";
         var unit = hasPlacedVisualTree
                 ? (passId === "pass.image_textless_groups" ? "GROUP" : "ITEM")
                 : (sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM");
@@ -6421,7 +6510,9 @@ function _appendUnresolvedVisibleVectorCoverageCandidates(
             requiredSlotReason: "source_coverage_closure",
             reason: "source_coverage_closure"
         };
-        candidates.push(candidate);
+        if (!unresolvedShellClosure) {
+            candidates.push(candidate);
+        }
         var plan = {
             objectPlanId: "objectPlan.coverageClosure." + candidateId,
             bundleId: "bundle.coverageClosure." + candidateId,
@@ -6449,15 +6540,20 @@ function _appendUnresolvedVisibleVectorCoverageCandidates(
             coordinateSpace: "PAGE",
             visualLayer: visualLayer,
             zOrder: src.zOrder !== undefined ? src.zOrder : 0,
-            reason: "source_coverage_closure:" + String(row.coverageStatus || "UNRESOLVED"),
+            reason: unresolvedShellClosure
+                    ? "source_coverage_closure:" + String(row.coverageStatus || "UNRESOLVED")
+                            + ":execution_suppressed_pending_clip_owner"
+                    : "source_coverage_closure:" + String(row.coverageStatus || "UNRESOLVED"),
             bounds: src.bounds || null,
             renderSourceBounds: src.bounds || null,
             cropSourceBounds: src.bounds || null,
             ownershipSlot: ownershipSlot,
             migrationStatus: "READY_SOURCE_COVERAGE_CLOSURE",
-            contractStatus: "READY_FOR_STAGE1_IMPORT",
-            executable: true,
-            required: true
+            contractStatus: unresolvedShellClosure
+                    ? "NEEDS_VISIBLE_SLOT_EXPLICITNESS"
+                    : "READY_FOR_STAGE1_IMPORT",
+            executable: unresolvedShellClosure ? false : true,
+            required: unresolvedShellClosure ? false : true
         };
         if (objectPlanDiagnostics && objectPlanDiagnostics.objectPlans) {
             objectPlanDiagnostics.objectPlans.push(plan);

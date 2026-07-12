@@ -537,6 +537,7 @@ function _isExtractionValidationPlannedTextShellCandidate(candidate) {
         return false;
     }
     if (!candidate.exportSourceObjectIds || candidate.exportSourceObjectIds.length === 0) return false;
+    if (candidate.required !== true && candidate.textOwner === "none") return false;
     return candidate.textOwner === "hwpx_tf"
             || (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0)
             || (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0);

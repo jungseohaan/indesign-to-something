@@ -424,6 +424,8 @@ function _createExecutionCandidateFromObjectPlan(objectPlan) {
 
 function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     candidate.objectPlanId = objectPlan.objectPlanId || null;
+    if (objectPlan.passId) candidate.passId = objectPlan.passId;
+    if (objectPlan.unit) candidate.unit = objectPlan.unit;
     candidate.mode = objectPlan.mode || candidate.mode || null;
     candidate.candidatePurpose = objectPlan.candidatePurpose || candidate.candidatePurpose || null;
     candidate.compositeRole = objectPlan.compositeRole || candidate.compositeRole || null;

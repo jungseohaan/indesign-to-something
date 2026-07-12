@@ -41,10 +41,11 @@ public class EquationBuilder {
      * @return 기본값이 설정된 Equation 객체
      */
     public static Equation fromHwpScript(String hwpScript) {
-        return buildEquation(hwpScript);
+        return buildEquation(sanitizeHwpScript(hwpScript));
     }
 
     private static Equation buildEquation(String hwpScript) {
+        hwpScript = sanitizeHwpScript(hwpScript);
         Equation equation = new Equation();
         equation.versionAnd(DEFAULT_VERSION)
                 .textColorAnd(DEFAULT_TEXT_COLOR)
@@ -54,5 +55,37 @@ public class EquationBuilder {
         equation.createScript();
         equation.script().addText(hwpScript);
         return equation;
+    }
+
+    public static String sanitizeHwpScript(String hwpScript) {
+        if (hwpScript == null || hwpScript.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder(hwpScript.length());
+        for (int i = 0; i < hwpScript.length(); ) {
+            int cp = hwpScript.codePointAt(i);
+            i += Character.charCount(cp);
+            if (cp == 0x001A) {
+                out.append(" rarrow ");
+            } else if (isXml10Character(cp)) {
+                out.appendCodePoint(cp);
+            }
+        }
+        return out.toString()
+                .replace('\t', ' ')
+                .replace('\r', ' ')
+                .replace('\f', ' ')
+                .replace('\u000B', ' ')
+                .replaceAll(" +", " ")
+                .trim();
+    }
+
+    private static boolean isXml10Character(int cp) {
+        return cp == 0x9
+                || cp == 0xA
+                || cp == 0xD
+                || (cp >= 0x20 && cp <= 0xD7FF)
+                || (cp >= 0xE000 && cp <= 0xFFFD)
+                || (cp >= 0x10000 && cp <= 0x10FFFF);
     }
 }

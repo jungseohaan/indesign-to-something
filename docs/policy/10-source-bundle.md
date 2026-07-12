@@ -324,33 +324,29 @@ Slot ownership rules:
   faithfully as simple native geometry. Polygon source shapes are not
   materialized as HWPX native polygons; they must use `EXTRACTED_PNG_VECTOR` or
   another extracted visual owner.
-- A visible page/spread-level `Rectangle` or `Oval` source shape with no text
-  frame descendant and no placed-content descendant may be the page-local
-  `BACKGROUND` owner when its original source geometry materially intersects a
-  page. If the same source shape crosses a spread boundary, Stage 1 creates one
-  page-local `PAGE_BACKGROUND` plan per intersected page in the same spread. The
-  facing page is selected from the source page's spread-side bounds, not by
-  scanning every page whose bounds happen to overlap repeated spread
-  coordinates. Later stages must only execute those plans and must not resurrect
-  or drop the background from rendered PNG symptoms.
-- A page-local `BACKGROUND` owner is not limited to a single leaf fill source.
-  When the lowest-z background subtree on a page uses a container root plus
-  descendant fill/polygon/placed-image material to render one authored page
-  backdrop, Stage 1 keeps that subtree as one closed visual bundle for the
-  background slot. The planner must not collapse that bundle to only the root
-  container or to one sibling page-wide fill source, because that drops authored
-  descendant background material before execution.
-- A page-wide single-color fill may coexist with a lower-z background composite
-  subtree on the same page. The fill source must not suppress, replace, or make
-  non-executable the sibling/ancestor background subtree when the subtree is the
-  actual owner of additional background pixels. Duplicate suppression for
-  `BACKGROUND` uses the declared visible slot/source bundle, not a heuristic
-  preference for one leaf fill.
-- A closed page background bundle may include placed-content descendants when
-  those descendants are part of the authored background subtree and no editable
-  text descendants are owned by the same slot. Pruning placed-content branches
-  from such a background bundle is an ownership defect: it turns a real
-  background visual into a root-only empty shell.
+- A page background plane is not a source-object classifier. Stage 1 may create
+  or expand a `page_background_plane` only from page/floating
+  source-connected `SHELL_SLOT` visual components after text, content visual,
+  table-style, and story-flow inline slots have been excluded. Page-wide
+  rectangles, low z-depth, layer names, color, and large bounds are source
+  metadata only; none of them alone makes a source object a background owner.
+- A page background plane is not limited to a single leaf fill source. When the
+  source-connected `SHELL_SLOT` component uses a root plus descendant
+  fill/polygon/vector material to render one textless visual surface, Stage 1
+  keeps that component as one closed visual bundle for the plane. The planner
+  must not collapse that bundle to only the root container or to one sibling
+  fill source, because that drops authored descendant shell material before
+  execution.
+- A broad single-color fill may coexist with another source-connected shell
+  component on the same page. The fill source must not suppress, replace, or
+  make non-executable the sibling/ancestor component when that component owns
+  additional visible shell pixels. Duplicate suppression uses the declared
+  visible slot/source bundle, not a heuristic preference for one leaf fill.
+- A page background plane may include placed-content descendants only when
+  Stage 1 has classified those descendants as part of the same `SHELL_SLOT`
+  component, not as `CONTENT_VISUAL_SLOT`. If the descendant is a photo, chart,
+  QR, illustration, or other content visual owner, it stays out of the page
+  background plane even if it sits visually behind text.
 - `NATIVE_SOURCE_SHAPE` is a fallback materialization for explicit shell plans
   whose executor is guaranteed by Stage 1. It is not allowed for
   `pass.vector_shape_frames`; visible vector source material must have an

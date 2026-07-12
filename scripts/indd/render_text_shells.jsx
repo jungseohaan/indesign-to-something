@@ -34,6 +34,25 @@ function _decoAllPageItems(item) {
     return nested;
 }
 
+function _isAmbiguousSingleRootSlotOnlyExport(candidate) {
+    if (!candidate) return false;
+    if (candidate.slotRole !== "shell_slot_only" && candidate.mode !== "SLOT_ONLY") return false;
+    if (!candidate.exportSourceObjectIds || candidate.exportSourceObjectIds.length !== 1) return false;
+    if (!candidate.visualSourceObjectIds || candidate.visualSourceObjectIds.length !== 1) return false;
+    if (String(candidate.exportSourceObjectIds[0]) !== String(candidate.visualSourceObjectIds[0])) return false;
+    if (!candidate.hiddenVisualSourceObjectIds || candidate.hiddenVisualSourceObjectIds.length === 0) return false;
+    if (candidate.exportTargetObjectId !== null
+            && candidate.exportTargetObjectId !== undefined
+            && String(candidate.exportTargetObjectId) !== String(candidate.exportSourceObjectIds[0])) {
+        return false;
+    }
+    if (candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0) return true;
+    if (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0) return true;
+    if (candidate.styleSourceObjectIds && candidate.styleSourceObjectIds.length > 0) return true;
+    if (candidate.clusterHasEditableText === true || candidate.clusterHasTextFrame === true) return true;
+    return false;
+}
+
 function _buildDecorationCandidateIndexes(decorationCandidates, itemById) {
     var plannedItems = [];
     var plannedSeen = {};
@@ -44,6 +63,7 @@ function _buildDecorationCandidateIndexes(decorationCandidates, itemById) {
     for (var i = 0; decorationCandidates && i < decorationCandidates.length; i++) {
         var candidate = decorationCandidates[i];
         if (!candidate) continue;
+        if (_isAmbiguousSingleRootSlotOnlyExport(candidate)) continue;
         if (candidate.pageIndex !== null && candidate.pageIndex !== undefined) {
             var pageKey = String(candidate.pageIndex);
             if (!decorationCandidatesByPage[pageKey]) decorationCandidatesByPage[pageKey] = [];

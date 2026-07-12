@@ -295,10 +295,12 @@ final class InlineItemDispatcher {
                     .replaceAll("#\\s*#", "#");
             eq.hwpScript(normalized);
         }
+        String hwpScript = EquationBuilder.sanitizeHwpScript(eq.hwpScript());
+        eq.hwpScript(hwpScript);
         Run run = para.addNewRun();
         run.charPrIDRef("0");
         try {
-            Equation template = EquationBuilder.fromHwpScript(eq.hwpScript());
+            Equation template = EquationBuilder.fromHwpScript(hwpScript);
             Equation hwpxEq = run.addNewEquation();
             int resolvedBaseUnit = resolveEquationBaseUnit(eq, template);
             String resolvedFont = resolveEquationFont(eq, template);
@@ -318,7 +320,7 @@ final class InlineItemDispatcher {
 
             // ShapeSize — 한글이 열 때 자동 계산하지만 초기값 필요
             int baseUnit = resolvedBaseUnit;
-            String script = eq.hwpScript();
+            String script = hwpScript;
             long estW = (long) (script.length() * baseUnit * 0.7);
             // 분수(over) 수식은 분자+분수선+분모로 높이가 크므로 별도 추정
             boolean hasFraction = script.contains(" over ");
@@ -351,14 +353,14 @@ final class InlineItemDispatcher {
             hwpxEq.outMargin().leftAnd(100L).rightAnd(100L).topAnd(topMargin).bottomAnd(bottomMargin);
 
             hwpxEq.createScript();
-            hwpxEq.script().addText(eq.hwpScript());
+            hwpxEq.script().addText(hwpScript);
             ctx.equationsConverted++;
         } catch (Exception e) {
             // 수식 파싱 실패 시 텍스트로 표시
             System.err.println("[HwpxParagraphBuilder] 수식 변환 실패: " + e.getMessage()
-                    + " (script=" + eq.hwpScript() + ")");
-            ctx.addWarning("Equation", "수식 변환 실패: " + eq.hwpScript());
-            run.addNewT().addText("[수식: " + eq.hwpScript() + "]");
+                    + " (script=" + hwpScript + ")");
+            ctx.addWarning("Equation", "수식 변환 실패: " + hwpScript);
+            run.addNewT().addText("[수식: " + hwpScript + "]");
         }
     }
 

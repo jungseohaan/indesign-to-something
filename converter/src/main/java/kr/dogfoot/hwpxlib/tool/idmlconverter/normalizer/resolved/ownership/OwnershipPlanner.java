@@ -4072,7 +4072,7 @@ public final class OwnershipPlanner {
             plans.set(i, plan
                     .withTextAction(TextAction.DROP_TEXT)
                     .withOwnedTextFrameIds(new int[0])
-                    .withVisualLayer(VisualLayer.PAGE_BACKGROUND)
+                    .withVisualLayer(VisualLayer.CONTENT_VISUAL)
                     .withMaterialization(nativeShape
                             ? Materialization.NATIVE_SOURCE_SHAPE
                             : plan.materialization)
@@ -4112,7 +4112,7 @@ public final class OwnershipPlanner {
             plans.set(i, plan
                     .withTextAction(TextAction.DROP_TEXT)
                     .withOwnedTextFrameIds(new int[0])
-                    .withVisualLayer(VisualLayer.PAGE_BACKGROUND)
+                    .withVisualLayer(VisualLayer.CONTENT_VISUAL)
                     .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
                             "page_spanning_backdrop_visual_fragment"));
             normalized++;
@@ -4335,7 +4335,7 @@ public final class OwnershipPlanner {
                 .withSourceObjectIds(backdropSourceIds)
                 .withVisualSourceObjectIds(backdropSourceIds)
                 .withSourceBundleKey(sourceBundleKeyOf(renderedGroupForPlan(plan), backdropSourceIds, new int[0]))
-                .withVisualLayer(VisualLayer.PAGE_BACKGROUND)
+                .withVisualLayer(VisualLayer.CONTENT_VISUAL)
                 .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR)
                 .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
                         "page_spanning_backdrop_visual");
@@ -5936,17 +5936,17 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (rg.isPageBackground()) {
-            return VisualLayer.PAGE_BACKGROUND;
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (isSourceBackgroundLayer(rg, sourceIds)
                 && !(visualAction == VisualAction.PLACE_TEXT_SHELL
                 && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
-            return VisualLayer.PAGE_BACKGROUND;
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (isSourceAuthoredPageWashBackdropImage(rg, sourceIds)
                 && !(visualAction == VisualAction.PLACE_TEXT_SHELL
                 && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
-            return VisualLayer.PAGE_BACKGROUND;
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (isSourceDepthPageOrSpreadBackdropImage(rg, sourceIds)
                 && !(visualAction == VisualAction.PLACE_TEXT_SHELL
@@ -13783,16 +13783,6 @@ public final class OwnershipPlanner {
         if (layer == VisualLayer.PAGE_BACKGROUND) {
             return PolicyLayer.BACKGROUND;
         }
-        if (layer == VisualLayer.TEXT_CARD_BACKDROP
-                || layer == VisualLayer.CONTAINER_BACKDROP
-                || layer == VisualLayer.CONTAINER_FACE
-                || layer == VisualLayer.LABEL_CONNECTOR_BACKDROP
-                || layer == VisualLayer.LABEL_BACKDROP
-                || layer == VisualLayer.LABEL_OVERLAY_BACKDROP
-                || layer == VisualLayer.CONTAINER_OUTLINE
-                || layer == VisualLayer.FOREGROUND_MASK) {
-            return PolicyLayer.DECORATION;
-        }
         return PolicyLayer.CONTENT;
     }
 
@@ -13951,25 +13941,21 @@ public final class OwnershipPlanner {
             return layer;
         }
         if (isPageSpanningBackdropVisualFragmentContract(plan)) {
-            return VisualLayer.PAGE_BACKGROUND;
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (isSourceAuthoredPageWashBackdropImage(
                 renderedGroupForPlan(plan), plan.sourceObjectIds)) {
-            return VisualLayer.PAGE_BACKGROUND;
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (!hasPlacedContentSourceTree(plan)) return layer;
         if (hasVisibleShellRootWithPlacedContentTree(plan)) return layer;
         if (isBackgroundLayerName(plan.sourceLayerName)
                 && (layer == VisualLayer.PAGE_BACKGROUND || layer == VisualLayer.CONTAINER_BACKDROP)) {
-            return isPlanAllowedBackgroundPlane(plan, plan.zOrder)
-                    ? layer
-                    : VisualLayer.CONTENT_VISUAL;
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (layer == VisualLayer.PAGE_BACKGROUND
                 || layer == VisualLayer.CONTAINER_BACKDROP) {
-            return isPlanAllowedBackgroundPlane(plan, plan.zOrder)
-                    ? layer
-                    : VisualLayer.CONTENT_VISUAL;
+            return VisualLayer.CONTENT_VISUAL;
         }
         if (layer == VisualLayer.CONTENT_BACKDROP) {
             if (plan.visualAction == VisualAction.PLACE_FLOATING_PNG
