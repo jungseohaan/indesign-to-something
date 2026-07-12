@@ -271,13 +271,18 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
         try { _tfHasContent = item.contents.replace(/[\s﻿]/g, "").length > 0; } catch (e) {}
         var _tfIsEditable = editableIds && editableIds[domId];
         var explicitPlannedTextFrameShellCandidate = false;
+        var explicitTableCarrierShellCandidate = false;
         try {
             explicitPlannedTextFrameShellCandidate = candidate.passId === "pass.editable_textframe_visual_shells"
                     && sourceId !== null
                     && sourceId !== undefined
                     && Number(sourceId) === Number(domId);
+            explicitTableCarrierShellCandidate = explicitPlannedTextFrameShellCandidate
+                    && (candidate.compositeRole === "table_carrier_textless_shell"
+                        || candidate.slotRole === "table_textless_shell_slot");
         } catch (ePlannedTextFrameShellCandidate) {
             explicitPlannedTextFrameShellCandidate = false;
+            explicitTableCarrierShellCandidate = false;
         }
         if (decoChildIds && decoChildIds[domId] && !explicitPlannedTextFrameShellCandidate) continue;
         // editable TF이거나 빈 TF(텍스트 없음)인 경우 처리.
@@ -288,7 +293,7 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
 
         var hasFill = hasVisibleFill(item);
         var hasStroke = hasVisibleStroke(item);
-        if (!hasFill && !hasStroke) continue;
+        if (!hasFill && !hasStroke && !explicitTableCarrierShellCandidate) continue;
 
         // stroke-only TF는 이전 정책처럼 비직사각형/대형 윤곽선만 보존한다.
         // fill이 있는 TF는 배경/말풍선/라벨로 쓰이는 경우가 많아 형태와 관계없이 보존한다.
@@ -325,18 +330,25 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
             var dup = item.duplicate();
             var savedDupTFs = null;
             try {
-                savedDupTFs = hideTextFramesAndOwnedInlineVisuals(dup);
+                savedDupTFs = hideTextFramesAndOwnedInlineVisuals(dup, {
+                    preferTextPaintOnly: explicitTableCarrierShellCandidate
+                });
+                if (explicitTableCarrierShellCandidate) {
+                    clearTableCellTextContentsForExport(dup);
+                }
                 dup.exportFile(ExportFormat.PNG_FORMAT, outFile);
             } finally {
                 try { if (savedDupTFs && savedDupTFs.length > 0) restoreTextFrames(savedDupTFs); } catch (eRestoreDup) {}
                 try { dup.remove(); } catch (e2) {}
             }
             try {
-                if (!outFile.exists || outFile.length < 1024) {
+                if (!explicitTableCarrierShellCandidate && (!outFile.exists || outFile.length < 1024)) {
                     exportTextFrameShellFallbackShape(item, targetPage, outFile);
                 }
             } catch (eFallback) {
-                exportTextFrameShellFallbackShape(item, targetPage, outFile);
+                if (!explicitTableCarrierShellCandidate) {
+                    exportTextFrameShellFallbackShape(item, targetPage, outFile);
+                }
             }
 
             var bounds = null;
@@ -543,6 +555,27 @@ function hideOneTextFrameContent(tf, opts) {
             var rangeState = hideTextPaintTarget(ranges[ri]);
             if (rangeState) savedTargets.push(rangeState);
         }
+        try {
+            var tables = tf.tables.everyItem().getElements();
+            for (var ti = 0; ti < tables.length; ti++) {
+                var cells = tables[ti].cells.everyItem().getElements();
+                for (var ci = 0; ci < cells.length; ci++) {
+                    try {
+                        if (cells[ci].texts && cells[ci].texts.length > 0) {
+                            var cellTextState = hideTextPaintTarget(cells[ci].texts[0]);
+                            if (cellTextState) savedTargets.push(cellTextState);
+                        }
+                    } catch (eCellText) {}
+                    try {
+                        var cellRanges = cells[ci].textStyleRanges.everyItem().getElements();
+                        for (var cri = 0; cri < cellRanges.length; cri++) {
+                            var cellRangeState = hideTextPaintTarget(cellRanges[cri]);
+                            if (cellRangeState) savedTargets.push(cellRangeState);
+                        }
+                    } catch (eCellRanges) {}
+                }
+            }
+        } catch (eTableTextTargets) {}
         if (savedTargets.length > 0) {
             return { tf: tf, mode: "textPaintTargets", targets: savedTargets };
         }
@@ -985,6 +1018,41 @@ function hideTextFramesAndOwnedInlineVisuals(renderTarget, opts) {
     var savedInline = hideTextFrameOwnedInlineVisuals(renderTarget);
     for (var i = 0; i < savedInline.length; i++) saved.push(savedInline[i]);
     return saved;
+}
+
+function clearTableCellTextContentsForExport(renderTarget) {
+    try {
+        var tables = renderTarget.tables.everyItem().getElements();
+        for (var ti = 0; ti < tables.length; ti++) {
+            var cells = tables[ti].cells.everyItem().getElements();
+            for (var ci = 0; ci < cells.length; ci++) {
+                try {
+                    if (cells[ci].texts && cells[ci].texts.length > 0) {
+                        cells[ci].texts[0].contents = "";
+                    }
+                } catch (eCellTextClear) {}
+            }
+        }
+    } catch (eRootTables) {}
+    try {
+        var nested = renderTarget.allPageItems;
+        for (var ni = 0; ni < nested.length; ni++) {
+            try {
+                if (!nested[ni] || !nested[ni].tables) continue;
+                var nestedTables = nested[ni].tables.everyItem().getElements();
+                for (var nti = 0; nti < nestedTables.length; nti++) {
+                    var nestedCells = nestedTables[nti].cells.everyItem().getElements();
+                    for (var nci = 0; nci < nestedCells.length; nci++) {
+                        try {
+                            if (nestedCells[nci].texts && nestedCells[nci].texts.length > 0) {
+                                nestedCells[nci].texts[0].contents = "";
+                            }
+                        } catch (eNestedCellTextClear) {}
+                    }
+                }
+            } catch (eNestedTables) {}
+        }
+    } catch (eNestedItems) {}
 }
 
 function hideTextFramesAndOwnedInlineVisualsFromNestedItems(nested, inlineVisualIds, opts) {

@@ -63,10 +63,15 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems);
     _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems);
     _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems);
+    _appendTableOnlyTextFrameShellObjectPlans(objectPlans, sourceItems);
     _appendTextFrameCleanupObjectPlans(objectPlans, sourceItems);
     var pngOwnedTextFrameCleanup = _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems);
     var textOwnershipResolution = _resolveObjectPlanDuplicateTextOwners(objectPlans);
     var visibleVisualSourceResolution = _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans);
+    var inlineVisualInventory =
+            _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourceById);
+    var pageRootTextlessPlaneInventory =
+            _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourceById);
     var pageLocalVisibleSourceResolution = _resolveObjectPlanPageLocalVisibleSources(objectPlans, sourceById);
     var rawClippedImageVisualSourceResolution =
             _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById);
@@ -81,6 +86,8 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     summary.pngOwnedTextFrameCleanup = pngOwnedTextFrameCleanup.summary;
     summary.textOwnershipResolution = textOwnershipResolution.summary;
     summary.visibleVisualSourceResolution = visibleVisualSourceResolution.summary;
+    summary.inlineVisualInventory = inlineVisualInventory.summary;
+    summary.pageRootTextlessPlaneInventory = pageRootTextlessPlaneInventory.summary;
     summary.pageLocalVisibleSourceResolution = pageLocalVisibleSourceResolution.summary;
     summary.rawClippedImageVisualSourceResolution = rawClippedImageVisualSourceResolution.summary;
     summary.pageBackgroundPlaneMaterialization = pageBackgroundPlaneMaterialization.summary;
@@ -970,6 +977,28 @@ function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
     }
 }
 
+function _appendTableOnlyTextFrameShellObjectPlans(objectPlans, sourceItems) {
+    if (!objectPlans || !sourceItems) return;
+    var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || String(src.kind || "") !== "TextFrame") continue;
+        if (src.hasTablesInStory !== true) continue;
+        if (src.storyHasVisibleTableCellText !== true) continue;
+        if (src.markerOnlyContents !== true) continue;
+        if (src.visible === false) continue;
+        if (src.hiddenLayer === true || src.nonprinting === true) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        if (_objectPlanDecisionIndexHasVisualDecision(decisionIndex, id)) continue;
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        var shellPlan = _tableOnlyTextFrameShellObjectPlan(src, id, pageIndex, zOrder);
+        objectPlans.push(shellPlan);
+        _addObjectPlanToDecisionIndex(decisionIndex, shellPlan);
+    }
+}
+
 function _createObjectPlanDecisionIndex(objectPlans) {
     var index = {
         textDecisionByFrameId: {},
@@ -1114,6 +1143,75 @@ function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder) {
         migrationStatus: "READY_TEXT_ONLY",
         migrationBlocker: "NONE",
         migrationBlockerDetail: {},
+        executable: true,
+        required: true
+    };
+}
+
+function _tableOnlyTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
+    var tableIds = _sortedNumericIds(src.tableSourceObjectIds || []);
+    var sourceIds = _sortedNumericIds([id].concat(tableIds));
+    var visualIds = [id];
+    var sourceSetId = _sourceSetId(sourceIds);
+    var visualSetId = _sourceSetId(visualIds);
+    var candidateId = _candidateId("pass.editable_textframe_visual_shells", id, pageIndex);
+    return {
+        objectPlanId: "objectPlan.table_only_text_frame_shell." + String(id),
+        bundleId: "textFrame.tableOnlyShell." + String(id),
+        candidateId: candidateId,
+        passId: "pass.editable_textframe_visual_shells",
+        pageIndex: pageIndex,
+        kind: "TextFrame",
+        unit: "TEXT_FRAME",
+        mode: "TEXTLESS_CANDIDATE",
+        candidatePurpose: "SHELL_CANDIDATE",
+        compositeRole: "table_carrier_textless_shell",
+        slotRole: "table_textless_shell_slot",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
+        inlineCompositeLayoutDescendant: false,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: id,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: sourceSetId,
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: visualSetId,
+        exportSourceSetId: visualSetId,
+        hiddenSourceSetId: _sourceSetId([]),
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: sourceIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: { TextFrame: 1, Table: tableIds.length },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: true,
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: true,
+        visualSourceObjectIds: visualIds,
+        styleSourceObjectIds: visualIds,
+        ownedTextFrameIds: [id],
+        exportSourceObjectIds: visualIds,
+        exportTargetObjectId: id,
+        hiddenVisualSourceObjectIds: [],
+        excludedInlineSourceObjectIds: [],
+        materialization: "EXTRACTED_PNG_VECTOR",
+        textAction: "DROP_TEXT",
+        visualAction: "PLACE_TEXT_SHELL",
+        placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
+        coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
+        visualLayer: "LABEL_BACKDROP",
+        zOrder: zOrder,
+        reason: "stage1_table_only_text_frame_textless_shell",
+        bounds: src.bounds || null,
+        ownershipSlot: "SHELL_SLOT",
+        policyLayer: "DECORATION",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_EXACT_CLUSTER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
         executable: true,
         required: true
     };
@@ -2048,6 +2146,10 @@ function _objectPlanSafeIdPart(value) {
 function _objectPlanEligibleForPageBackgroundPlane(plan) {
     if (!plan) return false;
     if (plan.absorbedByObjectPlanId) return false;
+    if (plan.compositeRole === "table_carrier_textless_shell"
+            || plan.slotRole === "table_textless_shell_slot") {
+        return false;
+    }
     if (!_objectPlanHasPlaneExportableVisualSource(plan)) return false;
     if (plan.slotRole === "page_background_plane"
             || plan.compositeRole === "page_background_plane"
@@ -2291,6 +2393,337 @@ function _objectPlanMemberIds(plans) {
         ids.push(plans[i].objectPlanId || plans[i].candidateId || ("member." + String(i)));
     }
     return ids;
+}
+
+function _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourceById) {
+    var summary = {
+        createdPlanCount: 0,
+        skippedAlreadyOwnedCount: 0,
+        createdObjectPlanIds: []
+    };
+    if (!objectPlans || !sourceItems || sourceItems.length === 0) return { summary: summary };
+    sourceById = sourceById || _objectPlanSourceInfoById(sourceItems);
+    var visibleOwned = {};
+
+    function markOwned(ids) {
+        for (var i = 0; ids && i < ids.length; i++) {
+            if (ids[i] === null || ids[i] === undefined) continue;
+            visibleOwned[String(ids[i])] = true;
+        }
+    }
+
+    for (var pi = 0; pi < objectPlans.length; pi++) {
+        var plan = objectPlans[pi];
+        if (!plan || !_objectPlanHasVisibleVisual(plan)) continue;
+        if (plan.visualAction === "DROP_VISUAL") continue;
+        markOwned(plan.visualSourceObjectIds || []);
+        markOwned(plan.exportSourceObjectIds || []);
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function hasDirectVisibleMaterial(src) {
+        return !!(src && (src.hasPlacedVisual === true
+                || src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true));
+    }
+
+    function isInlineSourceOrDescendant(src) {
+        var current = src;
+        var guard = 0;
+        while (current && guard++ < 64) {
+            var placement = String(current.storyAnchorPlacement || "").toUpperCase();
+            if (placement === "INLINE" || placement === "ABOVE_LINE") return true;
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return false;
+            current = sourceById ? sourceById[String(parentId)] || null : null;
+        }
+        return false;
+    }
+
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        var kind = sourceKind(src);
+        if (kind === "TextFrame") continue;
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") continue;
+        if (!hasDirectVisibleMaterial(src)) continue;
+        if (!isInlineSourceOrDescendant(src)) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        if (visibleOwned[String(id)] === true) {
+            summary.skippedAlreadyOwnedCount++;
+            continue;
+        }
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? Number(src.pageIndex) : -1;
+        if (isNaN(pageIndex) || pageIndex < 0) continue;
+        var sourceIds = _internSourceSetIds([id]);
+        var sourceSetId = _sourceSetId(sourceIds);
+        var objectPlanId = "object-plan.inline-visual-inventory.page." + String(pageIndex)
+                + ".src." + String(id);
+        var candidateId = "cand.pass.inline_objects.page." + String(pageIndex)
+                + ".src." + String(id) + ".inline_visual_inventory";
+        objectPlans.push({
+            objectPlanId: objectPlanId,
+            bundleId: "bundle.inline-visual-inventory.page." + String(pageIndex)
+                    + ".src." + String(id),
+            candidateId: candidateId,
+            passId: "pass.inline_objects",
+            pageIndex: pageIndex,
+            kind: src.kind || "InlineVisual",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "INLINE_CANDIDATE",
+            compositeRole: "inline_visual_inventory",
+            slotRole: "content_visual_slot",
+            layoutOnlyInlineSlot: false,
+            sourceInlineFlow: true,
+            inlineCompositeLayoutDescendant: true,
+            inlineAnchorSourceObjectId: src.parentId !== undefined && src.parentId !== null
+                    ? src.parentId
+                    : null,
+            inlineSourceTreeClosed: true,
+            inlineFlowSourceObjectIds: sourceIds,
+            connectorDecorationVisual: false,
+            primarySourceObjectId: id,
+            sourceSetId: sourceSetId,
+            sourceRootSetId: sourceSetId,
+            clusterSourceSetId: sourceSetId,
+            visualSourceSetId: sourceSetId,
+            exportSourceSetId: sourceSetId,
+            hiddenSourceSetId: _sourceSetId([]),
+            sourceObjectIds: sourceIds,
+            sourceRootObjectIds: sourceIds,
+            clusterSourceObjectIds: sourceIds,
+            clusterKindCounts: {},
+            omittedClusterSourceObjectIds: [],
+            omittedClusterKindCounts: {},
+            clusterHasEditableText: false,
+            clusterHasTextFrame: false,
+            clusterHasPlacedContent: src.hasPlacedVisual === true,
+            clusterHasVisualSource: true,
+            visualSourceObjectIds: sourceIds,
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            exportSourceObjectIds: sourceIds,
+            exportTargetObjectId: id,
+            atomicExportTargetObjectId: id,
+            atomicExportTargetObjectIds: sourceIds,
+            atomicTextlessVectorContent: true,
+            atomicContentVisualSlot: true,
+            hiddenVisualSourceObjectIds: [],
+            excludedInlineSourceObjectIds: [],
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_INLINE_PNG",
+            placement: "INLINE",
+            coordinateSpace: "STORY_FLOW",
+            visualLayer: "CONTENT_VISUAL",
+            zOrder: src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0,
+            reason: "stage1_inline_visible_material_from_source_inventory",
+            bounds: src.bounds || null,
+            renderSourceBounds: src.bounds || null,
+            cropSourceBounds: src.bounds || null,
+            ownershipSlot: "CONTENT_VISUAL_SLOT",
+            policyLayer: "CONTENT",
+            clusterRelation: "INLINE_VISIBLE_MATERIAL",
+            migrationStatus: "READY_EXACT_CLUSTER",
+            migrationBlocker: "NONE",
+            contractStatus: "READY_FOR_STAGE1_IMPORT",
+            executable: true,
+            required: true
+        });
+        visibleOwned[String(id)] = true;
+        summary.createdPlanCount++;
+        summary.createdObjectPlanIds.push(objectPlanId);
+    }
+
+    return { summary: summary };
+}
+
+function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourceById) {
+    var summary = {
+        createdPlaneCount: 0,
+        visualSourceCount: 0,
+        excludedInlineSourceCount: 0,
+        createdObjectPlanIds: []
+    };
+    if (!objectPlans || !sourceItems || sourceItems.length === 0) return { summary: summary };
+    sourceById = sourceById || _objectPlanSourceInfoById(sourceItems);
+
+    var visualByPage = {};
+    var inlineByPage = {};
+    var boundsByPage = {};
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function numericPageIndex(src) {
+        var pageIndex = src && src.pageIndex !== undefined && src.pageIndex !== null
+                ? Number(src.pageIndex)
+                : -1;
+        return isNaN(pageIndex) ? -1 : pageIndex;
+    }
+
+    function hasDirectVisibleMaterial(src) {
+        return !!(src && (src.hasPlacedVisual === true
+                || src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true));
+    }
+
+    function isInlineSourceOrDescendant(src) {
+        var current = src;
+        var guard = 0;
+        while (current && guard++ < 64) {
+            var placement = String(current.storyAnchorPlacement || "").toUpperCase();
+            if (placement === "INLINE" || placement === "ABOVE_LINE") return true;
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return false;
+            current = sourceById ? sourceById[String(parentId)] || null : null;
+        }
+        return false;
+    }
+
+    function isMasterSource(src) {
+        if (!src) return false;
+        if (src.isMasterGraphic === true) return true;
+        if (src.masterSourceId !== undefined && src.masterSourceId !== null) return true;
+        if (src.masterPageItemId !== undefined && src.masterPageItemId !== null) return true;
+        if (String(src.sourcePageKind || "").toLowerCase() === "master") return true;
+        if (String(src.pageKind || "").toLowerCase() === "master") return true;
+        return false;
+    }
+
+    function unionBounds(union, bounds) {
+        if (!bounds || bounds.length < 4) return union;
+        var b = [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+        if (isNaN(b[0]) || isNaN(b[1]) || isNaN(b[2]) || isNaN(b[3])) return union;
+        if (!union) return b;
+        union[0] = Math.min(union[0], b[0]);
+        union[1] = Math.min(union[1], b[1]);
+        union[2] = Math.max(union[2], b[2]);
+        union[3] = Math.max(union[3], b[3]);
+        return union;
+    }
+
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        if (sourceKind(src) === "TextFrame") continue;
+        if (isMasterSource(src)) continue;
+        if (!hasDirectVisibleMaterial(src)) continue;
+        var pageIndex = numericPageIndex(src);
+        if (pageIndex < 0) continue;
+        var pageKey = String(pageIndex);
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        if (isInlineSourceOrDescendant(src)) {
+            if (!inlineByPage[pageKey]) inlineByPage[pageKey] = [];
+            inlineByPage[pageKey].push(id);
+            summary.excludedInlineSourceCount++;
+            continue;
+        }
+        if (!visualByPage[pageKey]) visualByPage[pageKey] = [];
+        visualByPage[pageKey].push(id);
+        boundsByPage[pageKey] = unionBounds(boundsByPage[pageKey], src.bounds);
+        summary.visualSourceCount++;
+    }
+
+    for (var key in visualByPage) {
+        if (!visualByPage.hasOwnProperty(key)) continue;
+        var visualSourceObjectIds = _internSourceSetIds(_sortedNumericIds(visualByPage[key]));
+        if (!visualSourceObjectIds || visualSourceObjectIds.length === 0) continue;
+        var pageIndexNum = Number(key);
+        var excludedInlineSourceObjectIds = _internSourceSetIds(
+                _sortedNumericIds(inlineByPage[key] || []));
+        var sourceSetId = _sourceSetId(visualSourceObjectIds);
+        var objectPlanId = "object-plan.page-root-textless-plane." + key + ".h" + sourceSetId;
+        var candidateId = "cand.pass.decoration_groups.page." + key
+                + ".page_root_textless_plane.n" + String(visualSourceObjectIds.length)
+                + ".h" + sourceSetId;
+        var plan = {
+            objectPlanId: objectPlanId,
+            bundleId: "bundle.page-root-textless-plane." + key + ".h" + sourceSetId,
+            candidateId: candidateId,
+            passId: "pass.decoration_groups",
+            pageIndex: pageIndexNum,
+            kind: "PAGE_BACKGROUND_PLANE",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "SHELL_CANDIDATE",
+            compositeRole: "page_background_plane",
+            slotRole: "page_background_plane",
+            layoutOnlyInlineSlot: false,
+            sourceInlineFlow: false,
+            inlineCompositeLayoutDescendant: false,
+            inlineAnchorSourceObjectId: null,
+            inlineSourceTreeClosed: false,
+            inlineFlowSourceObjectIds: [],
+            connectorDecorationVisual: false,
+            primarySourceObjectId: visualSourceObjectIds[0],
+            sourceSetId: sourceSetId,
+            sourceRootSetId: sourceSetId,
+            clusterSourceSetId: sourceSetId,
+            visualSourceSetId: sourceSetId,
+            exportSourceSetId: sourceSetId,
+            hiddenSourceSetId: _sourceSetId([]),
+            ownedByNativeShellSourceObjectIds: [],
+            sourceObjectIds: visualSourceObjectIds,
+            sourceRootObjectIds: visualSourceObjectIds,
+            clusterSourceObjectIds: visualSourceObjectIds,
+            clusterKindCounts: {},
+            omittedClusterSourceObjectIds: [],
+            omittedClusterKindCounts: {},
+            clusterHasEditableText: false,
+            clusterHasTextFrame: false,
+            clusterHasPlacedContent: true,
+            clusterHasVisualSource: true,
+            visualSourceObjectIds: visualSourceObjectIds,
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: [],
+            exportSourceObjectIds: visualSourceObjectIds,
+            exportTargetObjectId: null,
+            atomicExportTargetObjectId: null,
+            atomicExportTargetObjectIds: [],
+            atomicTextlessVectorContent: false,
+            atomicContentVisualSlot: false,
+            hiddenVisualSourceObjectIds: [],
+            excludedInlineSourceObjectIds: excludedInlineSourceObjectIds,
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_TEXT_SHELL",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            visualLayer: "PAGE_BACKGROUND",
+            zOrder: OBJECT_PLAN_PAGE_BACKGROUND_PLANE_Z_ORDER,
+            reason: "stage1_page_root_textless_plane_from_source_inventory",
+            bounds: boundsByPage[key] || null,
+            renderSourceBounds: null,
+            cropSourceBounds: null,
+            ownershipSlot: "SHELL_SLOT",
+            policyLayer: "BACKGROUND",
+            clusterRelation: "PAGE_BACKGROUND_PLANE",
+            pageBackgroundComponentKey: "page-root-textless-plane",
+            migrationStatus: "READY_PAGE_BACKGROUND_PLANE",
+            migrationBlocker: "NONE",
+            migrationBlockerDetail: {
+                sourceInventoryVisualCount: visualSourceObjectIds.length,
+                excludedInlineSourceCount: excludedInlineSourceObjectIds.length
+            },
+            executable: true,
+            required: true
+        };
+        objectPlans.push(plan);
+        summary.createdPlaneCount++;
+        summary.createdObjectPlanIds.push(objectPlanId);
+    }
+
+    return { summary: summary };
 }
 
 function _objectPlanUnionBounds(plans) {
@@ -3375,6 +3808,19 @@ function _objectPlanAllowsCompletePngTextSourceOverlap(plan, overlap) {
 
 function _objectPlanAllowsTextFrameShellSourceOverlap(plan, overlap) {
     if (!plan || !overlap || overlap.length === 0) return false;
+    if (plan.compositeRole === "table_carrier_textless_shell"
+            || plan.slotRole === "table_textless_shell_slot") {
+        if (plan.passId !== "pass.editable_textframe_visual_shells") return false;
+        if (plan.ownershipSlot !== "SHELL_SLOT") return false;
+        if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+        if (plan.textAction !== "DROP_TEXT") return false;
+        if (plan.materialization !== "EXTRACTED_PNG_VECTOR") return false;
+        var tableStyleIds = _sourceIdSet(plan.styleSourceObjectIds || []);
+        for (var tableOverlapIndex = 0; tableOverlapIndex < overlap.length; tableOverlapIndex++) {
+            if (!tableStyleIds[String(overlap[tableOverlapIndex])]) return false;
+        }
+        return true;
+    }
     if (plan.ownershipSlot !== "SHELL_SLOT") return false;
     if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
     if (plan.materialization !== "EXTRACTED_PNG_VECTOR") return false;

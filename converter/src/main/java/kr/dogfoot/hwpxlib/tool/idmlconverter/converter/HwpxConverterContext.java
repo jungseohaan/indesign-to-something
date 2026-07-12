@@ -102,19 +102,15 @@ public class HwpxConverterContext {
     public void beginSectionZOrder(List<ASTBlock> blocks) {
         outputZOrderByBlock.clear();
         outputZOrderByRaw.clear();
-        TreeMap<Integer, Boolean> foregroundRawZOrders = new TreeMap<>();
+        TreeMap<Integer, Boolean> rawZOrders = new TreeMap<>();
         if (blocks != null) {
             for (ASTBlock block : blocks) {
                 int raw = rawZOrder(block);
-                if (raw < 0) {
-                    outputZOrderByRaw.put(raw, 0);
-                } else {
-                    foregroundRawZOrders.put(raw, Boolean.TRUE);
-                }
+                rawZOrders.put(raw, Boolean.TRUE);
             }
         }
-        int rank = 1;
-        for (Integer raw : foregroundRawZOrders.keySet()) {
+        int rank = 0;
+        for (Integer raw : rawZOrders.keySet()) {
             outputZOrderByRaw.put(raw, rank++);
         }
         foregroundOutputZOrder = Math.max(1, rank);
@@ -134,7 +130,7 @@ public class HwpxConverterContext {
     public int outputZOrder(int rawZOrder) {
         Integer encoded = outputZOrderByRaw.get(rawZOrder);
         if (encoded != null) return encoded;
-        return rawZOrder < 0 ? 0 : Math.max(1, rawZOrder + 1);
+        return Math.max(0, rawZOrder);
     }
 
     public int foregroundOutputZOrder() {
