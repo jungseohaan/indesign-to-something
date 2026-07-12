@@ -1117,6 +1117,16 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates,
 }
 
 function _includeOwnedInlineVisualsInTextlessShellCandidates(candidates, allItems, planCache, sourceItems) {
+    // Legacy ownership bridge disabled.
+    //
+    // This path matched tiny inline carriers to nearby page-plane visual roots
+    // using geometric adjacency, then rewrote the page/textless candidate source
+    // sets. That violates the source-ownership policy: ownership must come from
+    // resolved source structure/ObjectPlan, not bounds-only matching. It also
+    // caused text-shell graphics to disappear from the page root plane while a
+    // non-inline page group was emitted as pass.inline_objects.
+    return candidates || [];
+
     if (!candidates || candidates.length === 0) return candidates || [];
     var inlineVisualDetector = _createInlineVisualSourceDetector(allItems, planCache);
     var sourceIndexes = _buildSourceItemIndexes(sourceItems || []);
@@ -3298,20 +3308,7 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         var rootSeen = {};
         var rootDiagnostics = [];
         var pages = {};
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var root = sourceItems[si];
-            if (!root || root.id === null || root.id === undefined) continue;
-            if (!sourceIsPageRootCandidate(root)) continue;
-            if (root.visible === false || root.hiddenLayer === true || root.nonprinting === true) continue;
-            if (sourceIsTextLike(root.id)) continue;
-            var pageIndex = root.pageIndex !== null && root.pageIndex !== undefined
-                    ? Number(root.pageIndex)
-                    : null;
-            if (pageIndex === null || isNaN(pageIndex) || pageIndex < 0) continue;
-            var subtreeIds = filterPageTextlessGroupSourceIds(descendantIds(root.id), pageIndex);
-            if (!subtreeIds || subtreeIds.length < 2) continue;
-            var rootVisibleIds = visiblePaintSourceIds(subtreeIds, pageIndex);
-            if (!rootVisibleIds || rootVisibleIds.length < 1) continue;
+        function ensurePageEntry(pageIndex) {
             var pageKey = String(pageIndex);
             if (!pages[pageKey]) {
                 pages[pageKey] = {
@@ -3326,39 +3323,219 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     minZOrder: null
                 };
             }
-            var pageEntry = pages[pageKey];
-            var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(subtreeIds);
-            var hiddenTextFrameIds = unionSourceIds(
-                    textFrameSplit.hiddenTextFrameIds || [],
-                    textFrameSplit.pngOwnedTextFrameIds || []);
-            var hiddenInlineVisualIds = inlineVisualSourceIdsForPageTextlessGroup(subtreeIds, pageIndex);
-            var hiddenVisualIds = hiddenTextFrameIds;
-            var exportExcludedIds = unionSourceIds(hiddenTextFrameIds, hiddenInlineVisualIds);
-            var exportIds = rootVisibleIds;
-            exportIds = subtractSourceIds(exportIds, exportExcludedIds);
-            if (!exportIds || exportIds.length < 1) continue;
-            var visualBounds = null;
-            for (var bi = 0; bi < exportIds.length; bi++) {
-                var exportSource = info(exportIds[bi]);
-                if (!exportSource || !exportSource.bounds || exportSource.bounds.length < 4) continue;
-                visualBounds = unionBounds(visualBounds, exportSource.bounds);
+            return pages[pageKey];
+        }
+        function candidatePageIndexesForSourceId(sourceId) {
+            var pages = [];
+            try {
+                if (sourceIndex && sourceIndex.candidatePageIndexes) {
+                    pages = sourceIndex.candidatePageIndexes(sourceId) || [];
+                }
+            } catch (eCandidatePages) {
+                pages = [];
             }
-            if (!visualBounds || sourceBoundsArea(visualBounds) <= 0) continue;
-            if (!rootSeen[pageKey + "|" + String(root.id)]) {
-                rootSeen[pageKey + "|" + String(root.id)] = true;
-                pageEntry.rootIds = unionSourceIds(pageEntry.rootIds, [root.id]);
+            if ((!pages || pages.length === 0)) {
+                var pi = sourcePageIndex(sourceId);
+                if (pi !== null && pi !== undefined && !isNaN(Number(pi))) pages = [Number(pi)];
             }
-            pageEntry.sourceObjectIds = unionSourceIds(pageEntry.sourceObjectIds, exportIds);
-            pageEntry.excludedInlineSourceObjectIds = unionSourceIds(
-                    pageEntry.excludedInlineSourceObjectIds, hiddenInlineVisualIds);
-            pageEntry.exportSourceObjectIds = unionSourceIds(pageEntry.exportSourceObjectIds, exportIds);
+            var out = [];
+            var seen = {};
+            for (var pi2 = 0; pages && pi2 < pages.length; pi2++) {
+                var pageIndex = Number(pages[pi2]);
+                if (isNaN(pageIndex) || pageIndex < 0 || seen[String(pageIndex)]) continue;
+                seen[String(pageIndex)] = true;
+                out.push(pageIndex);
+            }
+            out.sort(function(a, b) { return a - b; });
+            return out;
+        }
+        function pageLocalSourceObjectIdsForSource(sourceId, pageIndex, fallbackIds) {
+            var ids = null;
+            try {
+                if (sourceIndex && sourceIndex.pageLocalSourceObjectIds) {
+                    ids = sourceIndex.pageLocalSourceObjectIds(sourceId, pageIndex);
+                }
+            } catch (ePageLocalIds) {
+                ids = null;
+            }
+            return _sortedNumericIds(ids && ids.length > 0 ? ids : (fallbackIds || []));
+        }
+        function topPageLocalRootId(sourceId, pageIndex) {
+            var cur = info(sourceId);
+            if (!cur) return sourceId;
+            var top = sourceId;
+            var guard = 0;
+            while (cur && cur.parentId !== null && cur.parentId !== undefined && guard++ < 64) {
+                var parent = info(cur.parentId);
+                if (!parent) break;
+                var parentKind = String(parent.kind || "");
+                if (parentKind === "Page" || parentKind === "Spread"
+                        || parentKind === "MasterSpread" || parentKind === "Document") {
+                    break;
+                }
+                if (!sourceBelongsToPageTextlessGroupPage(parent.id, pageIndex)) break;
+                top = parent.id;
+                cur = parent;
+            }
+            return top;
+        }
+        function pageRootPlanePageBounds(pageIndex) {
+            try {
+                if (sourceIndex && sourceIndex.pageBounds) {
+                    var pb = sourceIndex.pageBounds(Number(pageIndex));
+                    if (pb && pb.length >= 4
+                            && Number(pb[2]) > Number(pb[0])
+                            && Number(pb[3]) > Number(pb[1])) {
+                        return pb;
+                    }
+                }
+            } catch (ePageRootBounds) {}
+            return null;
+        }
+        function pageRootPlaneIntersects(a, b) {
+            if (!a || !b || a.length < 4 || b.length < 4) return false;
+            return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
+                    && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
+        }
+        function pageRootPlanePageRelativeIntersection(bounds, pageBounds) {
+            if (!pageRootPlaneIntersects(bounds, pageBounds)) return null;
+            var top = Math.max(Number(bounds[0]), Number(pageBounds[0]));
+            var left = Math.max(Number(bounds[1]), Number(pageBounds[1]));
+            var bottom = Math.min(Number(bounds[2]), Number(pageBounds[2]));
+            var right = Math.min(Number(bounds[3]), Number(pageBounds[3]));
+            if (bottom <= top || right <= left) return null;
+            return [
+                top - Number(pageBounds[0]),
+                left - Number(pageBounds[1]),
+                bottom - Number(pageBounds[0]),
+                right - Number(pageBounds[1])
+            ];
+        }
+        function pageRootPlanePageRelativeBounds(bounds, pageBounds) {
+            if (!bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return null;
+            return [
+                Number(bounds[0]) - Number(pageBounds[0]),
+                Number(bounds[1]) - Number(pageBounds[1]),
+                Number(bounds[2]) - Number(pageBounds[0]),
+                Number(bounds[3]) - Number(pageBounds[1])
+            ];
+        }
+        function pageRootPlaneBoundsDiffer(a, b, eps) {
+            if (!a || !b || a.length < 4 || b.length < 4) return true;
+            var tolerance = eps === undefined ? 0.01 : Number(eps);
+            for (var di = 0; di < 4; di++) {
+                if (Math.abs(Number(a[di]) - Number(b[di])) > tolerance) return true;
+            }
+            return false;
+        }
+        function addPageRootPlaneSources(pageEntry, rootIds, sourceIds, exportIds, hiddenVisualIds, hiddenTextFrameIds, visualBounds, minZOrder) {
+            pageEntry.rootIds = unionSourceIds(pageEntry.rootIds, rootIds || []);
+            pageEntry.sourceObjectIds = unionSourceIds(pageEntry.sourceObjectIds, sourceIds || []);
+            pageEntry.exportSourceObjectIds = unionSourceIds(pageEntry.exportSourceObjectIds, exportIds || []);
             pageEntry.hiddenVisualSourceObjectIds = unionSourceIds(
-                    pageEntry.hiddenVisualSourceObjectIds, hiddenVisualIds);
+                    pageEntry.hiddenVisualSourceObjectIds, hiddenVisualIds || []);
             pageEntry.hiddenTextFrameIds = unionSourceIds(
-                    pageEntry.hiddenTextFrameIds, hiddenTextFrameIds);
+                    pageEntry.hiddenTextFrameIds, hiddenTextFrameIds || []);
             pageEntry.visualBounds = unionBounds(pageEntry.visualBounds, visualBounds);
-            var rootZ = root.zOrder !== undefined && root.zOrder !== null ? Number(root.zOrder) : 0;
-            if (pageEntry.minZOrder === null || rootZ < pageEntry.minZOrder) pageEntry.minZOrder = rootZ;
+            if (minZOrder !== null && minZOrder !== undefined) {
+                pageEntry.minZOrder = pageEntry.minZOrder === null
+                        ? minZOrder
+                        : Math.min(pageEntry.minZOrder, minZOrder);
+            }
+        }
+        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
+            var root = sourceItems[si];
+            if (!root || root.id === null || root.id === undefined) continue;
+            if (!sourceIsPageRootCandidate(root)) continue;
+            if (root.visible === false || root.hiddenLayer === true || root.nonprinting === true) continue;
+            if (sourceIsTextLike(root.id)) continue;
+            var rootPages = candidatePageIndexesForSourceId(root.id);
+            for (var rpi = 0; rpi < rootPages.length; rpi++) {
+                var pageIndex = Number(rootPages[rpi]);
+                if (isNaN(pageIndex) || pageIndex < 0) continue;
+                var localDescendantIds = pageLocalSourceObjectIdsForSource(
+                        root.id, pageIndex, descendantIds(root.id));
+                var subtreeIds = filterPageTextlessGroupSourceIds(localDescendantIds, pageIndex);
+                if (!subtreeIds || subtreeIds.length < 2) continue;
+                var rootVisibleIds = visiblePaintSourceIds(subtreeIds, pageIndex);
+                if (!rootVisibleIds || rootVisibleIds.length < 1) continue;
+                var pageKey = String(pageIndex);
+                var pageEntry = ensurePageEntry(pageIndex);
+                var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(subtreeIds);
+                var hiddenTextFrameIds = unionSourceIds(
+                        textFrameSplit.hiddenTextFrameIds || [],
+                        textFrameSplit.pngOwnedTextFrameIds || []);
+                var hiddenInlineVisualIds = inlineVisualSourceIdsForPageTextlessGroup(subtreeIds, pageIndex);
+                var hiddenVisualIds = hiddenTextFrameIds;
+                var exportExcludedIds = unionSourceIds(hiddenTextFrameIds, hiddenInlineVisualIds);
+                var exportIds = rootVisibleIds;
+                exportIds = subtractSourceIds(exportIds, exportExcludedIds);
+                if (!exportIds || exportIds.length < 1) continue;
+                var visualBounds = null;
+                for (var bi = 0; bi < exportIds.length; bi++) {
+                    var exportSource = info(exportIds[bi]);
+                    if (!exportSource || !exportSource.bounds || exportSource.bounds.length < 4) continue;
+                    visualBounds = unionBounds(visualBounds, exportSource.bounds);
+                }
+                if (!visualBounds || sourceBoundsArea(visualBounds) <= 0) continue;
+                if (!rootSeen[pageKey + "|" + String(root.id)]) {
+                    rootSeen[pageKey + "|" + String(root.id)] = true;
+                    addPageRootPlaneSources(pageEntry, [root.id], [], [], [], [], null, null);
+                }
+                pageEntry.excludedInlineSourceObjectIds = unionSourceIds(
+                        pageEntry.excludedInlineSourceObjectIds, hiddenInlineVisualIds);
+                var rootZ = root.zOrder !== undefined && root.zOrder !== null ? Number(root.zOrder) : 0;
+                addPageRootPlaneSources(
+                        pageEntry,
+                        [],
+                        exportIds,
+                        exportIds,
+                        hiddenVisualIds,
+                        hiddenTextFrameIds,
+                        visualBounds,
+                        rootZ);
+            }
+        }
+        for (var psi = 0; sourceItems && psi < sourceItems.length; psi++) {
+            var src = sourceItems[psi];
+            if (!src || src.id === null || src.id === undefined) continue;
+            if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+            if (sourceIsTextLike(src.id)) continue;
+            if (!sourceHasVisiblePaint(src.id)) continue;
+            if (sourceIsInlineFlow(src.id)) continue;
+            if (sourceIsStoryAnchoredMaterial(src.id)) continue;
+            var srcPages = candidatePageIndexesForSourceId(src.id);
+            for (var spi2 = 0; spi2 < srcPages.length; spi2++) {
+                var srcPageIndex = Number(srcPages[spi2]);
+                if (isNaN(srcPageIndex) || srcPageIndex < 0) continue;
+                if (sourceHasCrossPageClipParent(src.id, srcPageIndex)) continue;
+                var localIds = pageLocalSourceObjectIdsForSource(src.id, srcPageIndex, [src.id]);
+                for (var li = 0; li < localIds.length; li++) {
+                    var localId = localIds[li];
+                    var localSrc = info(localId);
+                    if (!localSrc) continue;
+                    if (sourceIsTextLike(localId)) continue;
+                    if (localSrc.visible === false || localSrc.hiddenLayer === true || localSrc.nonprinting === true) continue;
+                    if (!sourceHasVisiblePaint(localId)) continue;
+                    if (sourceIsInlineFlow(localId)) continue;
+                    if (sourceIsStoryAnchoredMaterial(localId)) continue;
+                    if (sourceHasCrossPageClipParent(localId, srcPageIndex)) continue;
+                    var srcBounds = localSrc.bounds && localSrc.bounds.length >= 4 ? localSrc.bounds : null;
+                    if (!srcBounds || sourceBoundsArea(srcBounds) <= 0) continue;
+                    var localPageEntry = ensurePageEntry(srcPageIndex);
+                    var localRootId = topPageLocalRootId(localId, srcPageIndex);
+                    var srcZ = localSrc.zOrder !== undefined && localSrc.zOrder !== null ? Number(localSrc.zOrder) : 0;
+                    addPageRootPlaneSources(
+                            localPageEntry,
+                            [localRootId],
+                            [localId],
+                            [localId],
+                            [],
+                            [],
+                            srcBounds,
+                            srcZ);
+                }
+            }
         }
         for (var pageKey in pages) {
             if (!pages.hasOwnProperty(pageKey)) continue;
@@ -3375,55 +3552,26 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     pageEntry.pageIndex,
                     pageEntry.rootIds,
                     "page_root_textless_visual_plane");
-            rootCandidates.push({
-                candidateId: candidateId,
-                passId: "pass.page_textless_graphic_groups",
-                sourceObjectIds: pageEntry.sourceObjectIds,
-                sourceRootObjectIds: pageEntry.rootIds,
-                executionSourceObjectIds: pageEntry.exportSourceObjectIds,
-                primarySourceObjectId: pageEntry.rootIds[0],
-                pageIndex: pageEntry.pageIndex,
-                kind: "PageRootTextlessVisualPlane",
-                unit: "PAGE_GRAPHIC_GROUP",
-                mode: "TEXTLESS_CANDIDATE",
-                candidatePurpose: "CONTENT_CANDIDATE",
-                bounds: pageEntry.visualBounds,
-                parentId: null,
-                parentKind: "PageRoot",
-                anchoredPosition: null,
-                storyAnchorPlacement: null,
-                composite: true,
-                compositeRole: "page_root_textless_visual_plane",
-                slotRole: "page_root_textless_visual_plane",
-                exportSourceObjectIds: pageEntry.exportSourceObjectIds,
-                excludedInlineSourceObjectIds: pageEntry.excludedInlineSourceObjectIds,
-                exportTargetObjectId: pageEntry.rootIds[0],
-                atomicExportTargetObjectId: pageEntry.rootIds[0],
-                atomicExportTargetObjectIds: pageEntry.rootIds,
-                atomicTextlessVectorContent: true,
-                atomicContentVisualSlot: true,
-                hiddenVisualSourceObjectIds: pageEntry.hiddenVisualSourceObjectIds,
-                visualSourceObjectIds: pageEntry.exportSourceObjectIds,
-                styleSourceObjectIds: [],
-                ownedTextFrameIds: [],
-                editableTextFrameIds: pageEntry.hiddenTextFrameIds,
-                hiddenTextFrameIds: pageEntry.hiddenTextFrameIds,
-                requiresTextHidden: pageEntry.hiddenTextFrameIds.length > 0,
-                textOwner: "none",
-                containsEditableText: false,
-                completePngTextAllowed: false,
-                ownershipSlot: "CONTENT_VISUAL_SLOT",
-                materialization: "EXTRACTED_PNG_VECTOR",
-                textAction: "DROP_TEXT",
-                visualAction: "PLACE_FLOATING_PNG",
-                visualLayer: "CONTENT_VISUAL",
-                placement: "FLOATING",
-                coordinateSpace: "PAGE",
-                zOrder: pageEntry.minZOrder !== null ? pageEntry.minZOrder : 0,
-                coveredCandidateIds: [],
-                required: false,
-                reason: "page_root_textless_visual_plane"
-            });
+            var sourceVisualBounds = pageEntry.visualBounds ? pageEntry.visualBounds.slice(0) : null;
+            var pageLocalBounds = sourceVisualBounds;
+            var cropSourceBounds = null;
+            var pageBounds = pageRootPlanePageBounds(pageEntry.pageIndex);
+            if (pageBounds && sourceVisualBounds) {
+                var pageIntersection = pageRootPlanePageRelativeIntersection(sourceVisualBounds, pageBounds);
+                if (pageIntersection) {
+                    pageLocalBounds = pageIntersection;
+                    var sourcePageRelative = pageRootPlanePageRelativeBounds(sourceVisualBounds, pageBounds);
+                    if (sourcePageRelative
+                            && pageRootPlaneBoundsDiffer(sourceVisualBounds, [
+                                Math.max(Number(sourceVisualBounds[0]), Number(pageBounds[0])),
+                                Math.max(Number(sourceVisualBounds[1]), Number(pageBounds[1])),
+                                Math.min(Number(sourceVisualBounds[2]), Number(pageBounds[2])),
+                                Math.min(Number(sourceVisualBounds[3]), Number(pageBounds[3]))
+                            ], 0.01)) {
+                        cropSourceBounds = sourcePageRelative;
+                    }
+                }
+            }
             rootDiagnostics.push({
                 candidateId: candidateId,
                 pageIndex: pageEntry.pageIndex,
@@ -3431,7 +3579,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 sourceObjectCount: pageEntry.sourceObjectIds.length,
                 exportSourceObjectCount: pageEntry.exportSourceObjectIds.length,
                 hiddenTextFrameCount: pageEntry.hiddenTextFrameIds.length,
-                bounds: pageEntry.visualBounds
+                bounds: pageEntry.visualBounds,
+                emitted: false,
+                reason: "page_root_textless_visual_plane_disabled"
             });
         }
         for (var ri = 0; ri < rootCandidates.length; ri++) {
@@ -4693,7 +4843,7 @@ function _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates) {
         if (candidate.passId === "pass.page_textless_graphic_groups") return true;
         if (candidate.passId === "pass.image_textless_groups"
                 && candidate.ownershipSlot === "CONTENT_VISUAL_SLOT") {
-            return true;
+            return false;
         }
         if (candidate.passId === "pass.decoration_groups"
                 && candidate.ownershipSlot === "CONTENT_VISUAL_SLOT"
@@ -4769,6 +4919,17 @@ function _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates) {
 }
 
 function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
+    // Legacy visual-adjacency bridge disabled.
+    //
+    // This path searched for a nearby page visual root around an inline carrier
+    // and emitted that root again as `pass.inline_objects`. That is not source
+    // ownership: it is geometry-based ownership reconstruction. It can split a
+    // page/background plane after Stage 1 has already assigned ownership, causing
+    // the same speech-bubble/shell sources to appear in both page PNG and inline
+    // PNG paths. Inline visuals must be emitted only when the source itself is
+    // inline according to resolved metadata/ObjectPlan.
+    return { candidates: candidates || [], assignedCount: 0, assigned: [] };
+
     if (!candidates || candidates.length === 0 || !sourceItems || sourceItems.length === 0) {
         return { candidates: candidates || [], assignedCount: 0, assigned: [] };
     }
@@ -5033,6 +5194,28 @@ function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
         }
         return _sortedNumericIds(out);
     }
+    function addIds(values, addIds) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; values && i < values.length; i++) {
+            _pushUniqueId(out, seen, values[i]);
+        }
+        for (var ai = 0; addIds && ai < addIds.length; ai++) {
+            _pushUniqueId(out, seen, addIds[ai]);
+        }
+        return _sortedNumericIds(out);
+    }
+    function visualIdsFromSet(removeSet) {
+        var out = [];
+        var seen = {};
+        for (var key in removeSet) {
+            if (!removeSet.hasOwnProperty(key)) continue;
+            var id = Number(key);
+            if (isNaN(id)) continue;
+            if (sourceHasVisibleMaterial(id)) _pushUniqueId(out, seen, id);
+        }
+        return _sortedNumericIds(out);
+    }
     function prunePageGroups(outCandidates, rootIdsByPage) {
         var pruned = [];
         for (var ci = 0; ci < outCandidates.length; ci++) {
@@ -5052,12 +5235,18 @@ function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
                 var subtree = descendants(removeIdsForPage[ri]);
                 for (var si = 0; si < subtree.length; si++) removeSet[String(subtree[si])] = true;
             }
+            var removedVisibleIds = visualIdsFromSet(removeSet);
             var next = copyCandidate(c);
             next.sourceObjectIds = removeIds(next.sourceObjectIds || [], removeSet);
             next.executionSourceObjectIds = removeIds(next.executionSourceObjectIds || [], removeSet);
             next.visualSourceObjectIds = removeIds(next.visualSourceObjectIds || [], removeSet);
             next.exportSourceObjectIds = removeIds(next.exportSourceObjectIds || [], removeSet);
-            next.hiddenVisualSourceObjectIds = removeIds(next.hiddenVisualSourceObjectIds || [], removeSet);
+            next.hiddenVisualSourceObjectIds = addIds(
+                    next.hiddenVisualSourceObjectIds || [],
+                    removedVisibleIds);
+            next.excludedInlineSourceObjectIds = addIds(
+                    next.excludedInlineSourceObjectIds || [],
+                    removedVisibleIds);
             next.ownedTextFrameIds = removeIds(next.ownedTextFrameIds || [], removeSet);
             next.editableTextFrameIds = removeIds(next.editableTextFrameIds || [], removeSet);
             next.hiddenTextFrameIds = removeIds(next.hiddenTextFrameIds || [], removeSet);
@@ -5125,37 +5314,38 @@ function _assignInlineCarrierPageVisuals(candidates, sourceItems) {
             sourceBounds = unionBounds(sourceBounds, bounds(src));
         }
         var candidateId = _candidateCompositeId(
-                "pass.page_textless_graphic_groups",
+                "pass.inline_objects",
                 Number(carrier.pageIndex),
                 subtreeIds,
                 "inline_carrier_" + String(carrier.id));
+        var requiresTextHidden = hiddenTextIds.length > 0;
         appended.push({
             candidateId: candidateId,
-            passId: "pass.page_textless_graphic_groups",
+            passId: "pass.inline_objects",
             sourceObjectIds: subtreeIds,
             executionSourceObjectIds: exportIds.slice(0),
             primarySourceObjectId: root.id,
             pageIndex: Number(carrier.pageIndex),
-            kind: "PageTextlessInlineCarrierVisual",
-            unit: "PAGE_GRAPHIC_GROUP",
+            kind: root.kind || "InlineCarrierVisual",
+            unit: "INLINE_OBJECT",
             mode: "TEXTLESS_CANDIDATE",
-            candidatePurpose: "CONTENT_CANDIDATE",
+            candidatePurpose: "INLINE_CANDIDATE",
             bounds: sourceBounds || bounds(root),
             parentId: root.parentId !== undefined ? root.parentId : null,
             parentKind: root.parentKind || null,
             composite: true,
-            compositeRole: "page_textless_inline_carrier_visual",
-            slotRole: "page_textless_inline_carrier_visual",
+            compositeRole: "inline_flow_visual_root",
+            slotRole: "inline_flow_visual_root",
             exportSourceObjectIds: exportIds.slice(0),
-            exportTargetObjectId: null,
+            exportTargetObjectId: root.id,
             hiddenVisualSourceObjectIds: hiddenTextIds,
             visualSourceObjectIds: exportIds.slice(0),
             styleSourceObjectIds: [],
             ownedTextFrameIds: [],
             editableTextFrameIds: hiddenTextIds,
             hiddenTextFrameIds: hiddenTextIds,
-            requiresTextHidden: hiddenTextIds.length > 0,
-            textOwner: "none",
+            requiresTextHidden: requiresTextHidden,
+            textOwner: requiresTextHidden ? "hwpx_tf" : "none",
             containsEditableText: false,
             completePngTextAllowed: false,
             ownershipSlot: "CONTENT_VISUAL_SLOT",
@@ -6826,11 +7016,7 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
                 && String(src.pageIndex) !== String(child.pageIndex)) {
             return false;
         }
-        if (isInlineFlow(src)) return true;
-        return child && isInlineFlow(child)
-                && src.storyId !== null && src.storyId !== undefined
-                && child.storyId !== null && child.storyId !== undefined
-                && String(src.storyId) === String(child.storyId);
+        return isInlineFlow(src);
     }
     function descendants(id) {
         var key = String(id);

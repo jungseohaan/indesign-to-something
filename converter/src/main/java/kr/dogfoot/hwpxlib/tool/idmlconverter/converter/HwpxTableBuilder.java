@@ -53,7 +53,7 @@ public class HwpxTableBuilder {
         // 테이블 z-order: semantic layer가 배경/콘텐츠를 분리하므로
         // 원래 z-order 값을 그대로 사용 (동일 레이어 내 올바른 스태킹)
         table.idAnd(tableId)
-                .zOrderAnd(astTable.zOrder())
+                .zOrderAnd(ctx.outputZOrder(astTable))
                 .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
@@ -217,7 +217,7 @@ public class HwpxTableBuilder {
         String tableId = HwpxUtil.nextShapeId();
 
         table.idAnd(tableId)
-                .zOrderAnd(0)
+                .zOrderAnd(ctx.foregroundOutputZOrder())
                 .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)

@@ -1718,6 +1718,17 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             return copy;
         }
 
+        function sortSourceItemsForCompositeExport(items) {
+            var copy = sortSourceItemsByPlannedZOrder(items);
+            if (isPageBackgroundPlane) {
+                // InDesign's group construction treats the earlier member as visually
+                // higher inside the new composite. Feed page-plane members in top-first
+                // order so the exported PNG preserves the original source z-depth.
+                copy.reverse();
+            }
+            return copy;
+        }
+
         function pageBackgroundPlaneExportRoots(items) {
             if (!isPageBackgroundPlane) return null;
             if (!exportIds || exportIds.length < 2) return null;
@@ -1725,9 +1736,22 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             var seenRoots = {};
             var pageIndex = null;
             try { pageIndex = page && page.documentOffset !== undefined ? Number(page.documentOffset) : null; } catch (ePageIndex) {}
+            var targetPageBounds = null;
+            try { targetPageBounds = page && page.bounds ? arrCopy(page.bounds) : null; } catch (ePageBounds) {}
 
             function sourceInfo(sourceId) {
                 return sourceInfoById ? sourceInfoById[String(sourceId)] || null : null;
+            }
+
+            function sourceIntersectsTargetPage(src) {
+                if (!src) return false;
+                if (pageIndex !== null
+                        && src.pageIndex !== null && src.pageIndex !== undefined
+                        && Number(src.pageIndex) === pageIndex) {
+                    return true;
+                }
+                if (!targetPageBounds || !src.bounds || src.bounds.length < 4) return false;
+                return _decoBoundsIntersection(src.bounds, targetPageBounds) !== null;
             }
 
             function sourceParentBoundary(src) {
@@ -1745,7 +1769,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 if (!src) return sourceId;
                 if (pageIndex !== null
                         && src.pageIndex !== null && src.pageIndex !== undefined
-                        && Number(src.pageIndex) !== pageIndex) {
+                        && Number(src.pageIndex) !== pageIndex
+                        && !sourceIntersectsTargetPage(src)) {
                     return null;
                 }
                 var topId = src.id !== undefined && src.id !== null ? src.id : sourceId;
@@ -1759,7 +1784,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     if (!parent) break;
                     if (pageIndex !== null
                             && parent.pageIndex !== null && parent.pageIndex !== undefined
-                            && Number(parent.pageIndex) !== pageIndex) {
+                            && Number(parent.pageIndex) !== pageIndex
+                            && !sourceIntersectsTargetPage(parent)) {
                         break;
                     }
                     topId = parent.id !== undefined && parent.id !== null ? parent.id : parentId;
@@ -1797,7 +1823,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 : (isPageTextlessGraphicGroup
                     ? sourceItems
                     : _decoTopmostRenderRoots(sourceItems));
-        var ordered = sortSourceItemsByPlannedZOrder(exportRootSourceItems);
+        var ordered = sortSourceItemsForCompositeExport(exportRootSourceItems);
         _perfRootPrepMs += _decoPerfNow() - _perfRootPrepStartedAt;
         var groupCreateErrors = [];
         var sourceItemDebug = [];
@@ -1926,7 +1952,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     }
                 }
                 bucketGroupRows.sort(function(a, b) {
-                    return a.z - b.z;
+                    return isPageBackgroundPlane ? (b.z - a.z) : (a.z - b.z);
                 });
                 for (var bgi = 0; bgi < bucketGroupRows.length; bgi++) {
                     bucketGroups.push(bucketGroupRows[bgi].group);

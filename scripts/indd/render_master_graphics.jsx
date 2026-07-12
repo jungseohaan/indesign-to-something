@@ -5,6 +5,8 @@
  * It must not create ownership, placement, or fallback decisions.
  */
 
+var MASTER_PAGE_GRAPHICS_PLANE_Z_ORDER = -1000000;
+
 function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCandidates, inlineCandidates) {
     // Strategy v13: 마스터 page side의 visible visual layer를 합성 PNG로 내보낸다.
     //
@@ -790,6 +792,15 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
     }
 
     function _tryCreateAppliedMasterSnapshotResult(pgEntry, msId, masterPageIdx) {
+        // Do not materialize an applied-page snapshot as a master graphic.
+        //
+        // Stage 1 candidates name the exact source bundle to execute. Exporting
+        // the concrete document page here (`page.exportFile`) can capture
+        // page-local graphics that are not part of that master source bundle,
+        // producing duplicate page backgrounds/content. Master graphics are
+        // therefore emitted only through the source-scoped master cluster/direct
+        // exports below.
+        return null;
         try {
             if (!pgEntry || pgEntry.docIdx === null || pgEntry.docIdx === undefined) return null;
             var candidateMatch = _appliedMasterSnapshotCandidate(pgEntry.docIdx);
@@ -836,13 +847,18 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                 file: "rendered_frames/" + fileName,
                 bounds: relBounds,
                 pageIndex: pgEntry.docIdx,
-                zOrder: -100000,
+                zOrder: MASTER_PAGE_GRAPHICS_PLANE_Z_ORDER,
                 isMasterGraphic: true,
                 type: "page_object",
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
                 planPassId: "pass.master_page_graphics",
-                slotRole: candidate.slotRole || "page_background_plane"
+                slotRole: candidate.slotRole || "page_background_plane",
+                compositeRole: candidate.compositeRole || "page_background_plane",
+                visualLayer: candidate.visualLayer || "PAGE_BACKGROUND",
+                layerIndex: candidate.sourceLayerIndex !== undefined && candidate.sourceLayerIndex !== null
+                        ? candidate.sourceLayerIndex
+                        : 0
             }, null, {
                 sourceObjectIds: sourceIds,
                 exportSourceObjectIds: exportIds,
@@ -1316,9 +1332,11 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                     inlineAnchorSourceObjectId: master.inlineAnchorSourceObjectId,
                     inlineSourceTreeClosed: master.inlineSourceTreeClosed === true,
                     pageIndex: pgEntry.docIdx,
-                    zOrder: master.sourceZOrder !== null && master.sourceZOrder !== undefined
-                            ? master.sourceZOrder
-                            : mi,
+                    zOrder: matchedInline
+                            ? (master.sourceZOrder !== null && master.sourceZOrder !== undefined
+                                ? master.sourceZOrder
+                                : mi)
+                            : MASTER_PAGE_GRAPHICS_PLANE_Z_ORDER,
                     isMasterGraphic: !matchedInline,
                     type: matchedInline ? "inline_object" : "page_object",
                     placementRole: matchedInline ? "inline_object" : null,

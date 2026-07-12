@@ -259,7 +259,6 @@ final class PageOverlayBuilder {
             spec.imageFillData = obj.imageFillData();
             spec.forceImageFill = true;
         }
-        spec.nativeGraphicsAllowed = true;
         textBoxBuilder.drawTextBoxComposer().apply(rect, spec);
         if (rect.drawText() != null) {
             rect.drawText().editableAnd(true);

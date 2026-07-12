@@ -117,8 +117,12 @@ Required materialization values:
   decoration)
 - `EXTRACTED_PNG_VECTOR`
 - `TEXTLESS_VISUAL_FRAGMENT`
-- `NATIVE_SOURCE_SHAPE`
 - `COMPLETE_PNG`
+
+`NATIVE_SOURCE_SHAPE` is legacy diagnostic vocabulary and is not an executable
+visible graphic materialization. Rectangles, fills, strokes, rounded corners,
+background-only TextFrames, and vector shells must be supplied by
+InDesign-extracted image material when they are visible graphics.
 
 Slot ownership rules:
 
@@ -347,15 +351,10 @@ Slot ownership rules:
   component, not as `CONTENT_VISUAL_SLOT`. If the descendant is a photo, chart,
   QR, illustration, or other content visual owner, it stays out of the page
   background plane even if it sits visually behind text.
-- `NATIVE_SOURCE_SHAPE` is a fallback materialization for explicit shell plans
-  whose executor is guaranteed by Stage 1. It is not allowed for
-  `pass.vector_shape_frames`; visible vector source material must have an
-  extracted visual owner instead of relying on Java/HWPX stages to redraw it.
-- When duplicate visible-source-slot normalization compares an
-  `EXTRACTED_PNG_VECTOR` `SHELL_SLOT` owner with one or more
-  `NATIVE_SOURCE_SHAPE` owners for the same original source shape, the extracted
-  shell is the canonical owner. Native source shapes are executed only when no
-  extracted owner exists for that source slot.
+- Java/HWP native redrawing is not a fallback for missing shell material.
+  Duplicate visible-source-slot normalization must prefer the planned
+  InDesign-extracted owner and must not create a native owner for the same
+  source slot.
 - For an extracted text shell, duplicate-source-slot comparison uses executable
   visual/style claims only: `visualSourceObjectIds`, `styleSourceObjectIds`, and
   equivalent slot-owner fields declared by Stage 1. `sourceObjectIds` remain

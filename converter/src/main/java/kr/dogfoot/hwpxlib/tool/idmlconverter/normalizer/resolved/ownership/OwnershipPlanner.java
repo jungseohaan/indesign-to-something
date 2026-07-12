@@ -98,6 +98,7 @@ public final class OwnershipPlanner {
         timed("ensureOwnedTextFramePlansForVisibleTextShells", this::ensureOwnedTextFramePlansForVisibleTextShells);
         timed("finalizeOwnedTextFrameDepthContracts.afterShellOwnedTextPlans", this::finalizeOwnedTextFrameDepthContracts);
         timed("normalizeStage1ContractsBeforeValidation", this::normalizeStage1ContractsBeforeValidation);
+        timed("dropNativeSourceShapePlans", this::dropNativeSourceShapePlans);
         writeAndValidatePlans();
         ConversionTiming.metric("stage1.ownershipPlanner.importedPreplannedPlans",
                 importedPreplannedObjectPlanCount);
@@ -2486,6 +2487,7 @@ public final class OwnershipPlanner {
      * not a rendered PNG, so Stage 1 must expose it explicitly for later phases.
      */
     private void planNativeParentTextShells() {
+        if (nativeSourceShapeMaterializationDisabled()) return;
         if (data == null) return;
         for (ResolvedTextFrame tf : data.textFrames()) {
             if (!isVisibleEditableTextFrameSource(tf)) continue;
@@ -2577,6 +2579,7 @@ public final class OwnershipPlanner {
      * recover missing backgrounds from rendered PNG output.
      */
     private void planNativePageBackdropShapes() {
+        if (nativeSourceShapeMaterializationDisabled()) return;
         if (data == null || data.pageItems() == null || data.pages() == null) return;
         for (ResolvedPageItem item : data.pageItems()) {
             if (!isNativePageBackdropSource(item)) continue;
@@ -2933,6 +2936,7 @@ public final class OwnershipPlanner {
      * group may organize those slots, but it is not itself a larger shell owner.
      */
     private void planNativeSiblingTextShells() {
+        if (nativeSourceShapeMaterializationDisabled()) return;
         if (data == null) return;
         Map<String, List<ResolvedTextFrame>> textFramesByParentId = editableTextFramesByParentId();
         for (ResolvedPageItem shell : data.pageItems()) {
@@ -2992,6 +2996,7 @@ public final class OwnershipPlanner {
     }
 
     private void planUnownedVisualOnlyChildShellSlots() {
+        if (nativeSourceShapeMaterializationDisabled()) return;
         if (data == null) return;
         LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
         for (ObjectPlan composite : plans) {
@@ -4068,22 +4073,34 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isPageMaterialVisualPlan(plan)) continue;
-            boolean nativeShape = isNativePageMaterialShapeVisualPlan(plan);
             plans.set(i, plan
                     .withTextAction(TextAction.DROP_TEXT)
                     .withOwnedTextFrameIds(new int[0])
                     .withVisualLayer(VisualLayer.CONTENT_VISUAL)
-                    .withMaterialization(nativeShape
-                            ? Materialization.NATIVE_SOURCE_SHAPE
-                            : plan.materialization)
+                    .withMaterialization(plan.materialization)
                     .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
-                            nativeShape
-                                    ? "native_page_material_backdrop"
-                                    : "paper_page_material_backdrop"));
+                            "paper_page_material_backdrop"));
             normalized++;
         }
         if (normalized > 0) {
             ConversionTiming.metric("stage1.ownershipPlanner.normalizePaperPageMaterialVisualPlans.normalized", normalized);
+        }
+    }
+
+    private boolean nativeSourceShapeMaterializationDisabled() {
+        return true;
+    }
+
+    private void dropNativeSourceShapePlans() {
+        if (plans == null || plans.isEmpty()) return;
+        int before = plans.size();
+        plans.removeIf(plan -> plan != null && plan.materialization == Materialization.NATIVE_SOURCE_SHAPE);
+        int dropped = before - plans.size();
+        if (dropped > 0) {
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_NATIVE_SOURCE_SHAPE_PLANS_DROPPED\""
+                    + ",\"detail\":\"dropped=" + dropped
+                    + "; HWP native shape materialization is disabled; graphics must come from InDesign-extracted images\"}");
+            ConversionTiming.metric("stage1.ownershipPlanner.dropNativeSourceShapePlans.dropped", dropped);
         }
     }
 

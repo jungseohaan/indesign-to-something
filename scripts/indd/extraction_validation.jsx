@@ -21,7 +21,8 @@ function _validateExtractionResults(plan, extractionResults) {
             rows,
             passById, candidateById, issues);
     _validateExtractionCandidateResultCounts(candidateById, counters, issues);
-    _validateRequiredExtractionCandidates(plan, counters.resultByCandidateId, issues);
+    _validateRequiredExtractionCandidates(plan, counters.resultByCandidateId, issues,
+            _executedExtractionCandidateIdSet(extractionResults));
     _validatePlannedTextShellCandidateResults(plan, passById, counters.resultByCandidateId, issues);
     return {
         status: issues.length ? "FAIL" : "OK",
@@ -1096,7 +1097,30 @@ function _validateExtractionCandidateResultCounts(candidateById, counters, issue
     }
 }
 
-function _validateRequiredExtractionCandidates(plan, resultByCandidateId, issues) {
+function _executedExtractionCandidateIdSet(extractionResults) {
+    var out = {};
+    var count = 0;
+    try {
+        var units = extractionResults
+                && extractionResults.exportUnits
+                && extractionResults.exportUnits.units
+            ? extractionResults.exportUnits.units
+            : [];
+        for (var ui = 0; ui < units.length; ui++) {
+            var ids = units[ui] && units[ui].candidateIds ? units[ui].candidateIds : [];
+            for (var ii = 0; ii < ids.length; ii++) {
+                var key = String(ids[ii]);
+                if (out[key]) continue;
+                out[key] = true;
+                count++;
+            }
+        }
+    } catch (e) {}
+    out._count = count;
+    return out;
+}
+
+function _validateRequiredExtractionCandidates(plan, resultByCandidateId, issues, executedCandidateIds) {
     function requiresRenderedResult(candidate) {
         if (!candidate) return false;
         if (candidate.disabled === true) return false;
@@ -1113,6 +1137,10 @@ function _validateRequiredExtractionCandidates(plan, resultByCandidateId, issues
             var requiredCandidate = plan.candidates[ri];
             if (!requiredCandidate || requiredCandidate.required !== true) continue;
             if (!requiresRenderedResult(requiredCandidate)) continue;
+            if (executedCandidateIds && executedCandidateIds._count > 0
+                    && !executedCandidateIds[String(requiredCandidate.candidateId)]) {
+                continue;
+            }
             if (!resultByCandidateId[requiredCandidate.candidateId]) {
                 issues.push({
                     code: "required_candidate_without_result",

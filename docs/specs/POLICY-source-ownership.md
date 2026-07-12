@@ -181,8 +181,10 @@ The Java ownership enums are policy terms, not legacy SPEC terms:
   `PLACE_PAGE_BACKGROUND_PNG`, `PLACE_TEXT_SHELL`,
   `ABSORB_TEXT_STYLE`, `PLACE_TABLE_STYLE`, `DROP_VISUAL`
 - `Materialization`: `HWPX_TEXT`, `HWPX_TABLE_STYLE`,
-  `NATIVE_SOURCE_SHAPE`, `EXTRACTED_PNG_VECTOR`,
-  `TEXTLESS_VISUAL_FRAGMENT`, `PAGE_PLANE_PNG`, `COMPLETE_PNG`
+  `EXTRACTED_PNG_VECTOR`, `TEXTLESS_VISUAL_FRAGMENT`, `PAGE_PLANE_PNG`,
+  `COMPLETE_PNG`. `NATIVE_SOURCE_SHAPE` is legacy diagnostic vocabulary only;
+  visible graphics must come from InDesign-extracted image material, not Java
+  or HWP native redrawing.
 - `Placement`: `INLINE`, `FLOATING`, `TABLE`, `NONE`
 - `CoordinateSpace`: `STORY_FLOW`, `PAGE`, `SOURCE_LOCAL`
 - `VisualLayer`: implementation compatibility label. In V2 policy it must map

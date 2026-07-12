@@ -16,7 +16,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 
 import java.util.*;
 
@@ -274,6 +273,7 @@ public class ASTToHwpxConverter {
         ctx.currentColumnWidth = Math.max(100, layout.pageWidth());
         ctx.pageMarginTop = 0;
         ctx.pageMarginLeft = 0;
+        ctx.beginSectionZOrder(section.blocks());
 
         // TEXT_FRAME_BLOCK 수집
         List<ASTTextFrameBlock> textFrameBlocks = new ArrayList<>();
@@ -287,21 +287,21 @@ public class ASTToHwpxConverter {
         }
 
         // 텍스트 프레임 → 플로팅 테이블로 변환 (모든 프레임은 절대 좌표 기반)
+        //
+        // Textless/background-only graphics must come only from the Stage 1
+        // InDesign-extracted visual owner.  Do not synthesize HWP native rects
+        // or Java-rendered PNGs from TextFrame fill/stroke here.
         List<ASTTextFrameBlock> floatingBlocks = new ArrayList<>();
-        List<ASTTextFrameBlock> backgroundBlocks = new ArrayList<>();
         for (ASTTextFrameBlock block : textFrameBlocks) {
-            if (block.isBackgroundOnly() && !isInFrontPlannedTextFrameVisual(block)) {
-                backgroundBlocks.add(block);
-            } else {
-                floatingBlocks.add(block);
-            }
+            if (block.isBackgroundOnly()) continue;
+            floatingBlocks.add(block);
         }
 
         // SecPr 단락 생성 — 이 단락 하나에 모든 플로팅 객체 + secPr을 넣는다.
         // 첫 페이지 이후에는 pageBreak=true로 설정 → 플로팅 객체가 올바른 페이지에 위치
         Para secPrPara = createSectionPara(sectionFile, pagesConverted > 0);
 
-        // 1) BEHIND_TEXT FIGURE: Stage 1 visualLayer가 behind plane으로 정한 그림을 먼저 배치
+        // 1) BEHIND_TEXT FIGURE: Stage 1 visualLayer가 behind plane으로 정한 그림을 배치
         //
         // HWPX에서는 같은 BEHIND_TEXT 평면 안에서 XML 출력 순서가 겹침 결과에 영향을 준다.
         // Stage 1 zOrder is the final source stacking contract, including same-plane
@@ -331,17 +331,6 @@ public class ASTToHwpxConverter {
         });
         for (ASTFigure fig : behindFigures) {
             imageBuilder.convertFigure(secPrPara, fig);
-            ctx.framesConverted++;
-        }
-
-        // 2) 배경 전용 블록: BEHIND_TEXT, z-order=0 — FIGURE 위에 렌더링됨
-        for (ASTTextFrameBlock block : backgroundBlocks) {
-            if (block.hasNonRectPath()) {
-                // 비사각형 폴리곤 → PNG 래스터화 후 이미지로 배치
-                imageBuilder.convertNonRectBackground(secPrPara, block);
-            } else {
-                textBoxBuilder.convertTextFrameBlock(secPrPara, block);
-            }
             ctx.framesConverted++;
         }
 
@@ -409,28 +398,16 @@ public class ASTToHwpxConverter {
     private static boolean isBehindTextPlaneFigure(ASTFigure fig) {
         if (fig == null) return false;
         String layer = fig.visualLayer();
-        if (VisualPlanePolicy.isBehindTextLayerName(layer)) {
-            return true;
-        }
-        if (isTextShellVisualLayer(layer)) return false;
+        if ("PAGE_BACKGROUND".equals(layer)) return true;
+        if (layer != null && !layer.isEmpty()) return false;
         if (fig.fromGroup()) return false;
-        return layer == null || layer.isEmpty();
-    }
-
-    private static boolean isTextShellVisualLayer(String layer) {
-        return "CONTAINER_BACKDROP".equals(layer)
-                || "CONTENT_BACKDROP".equals(layer)
-                || "TEXT_CARD_BACKDROP".equals(layer)
-                || "LABEL_CONNECTOR_BACKDROP".equals(layer)
-                || "LABEL_BACKDROP".equals(layer)
-                || "LABEL_OVERLAY_BACKDROP".equals(layer)
-                || "CONTAINER_OUTLINE".equals(layer)
-                || "FOREGROUND_MASK".equals(layer);
+        return true;
     }
 
     private static boolean isInFrontPlannedTextFrameVisual(ASTTextFrameBlock block) {
         if (block == null) return false;
-        return VisualPlanePolicy.isInFrontLayerName(block.plannedShellVisualLayer());
+        String layer = block.plannedShellVisualLayer();
+        return layer != null && !layer.isEmpty() && !"PAGE_BACKGROUND".equals(layer);
     }
 
     private static long figureArea(ASTFigure fig) {

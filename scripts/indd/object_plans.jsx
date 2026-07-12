@@ -8,6 +8,7 @@
  */
 
 var OBJECT_PLAN_MASTER_PLANE_Z_ORDER = -1000000;
+var OBJECT_PLAN_PAGE_BACKGROUND_PLANE_Z_ORDER = -900000;
 
 function _buildObjectPlanDiagnostics(sourceItems, candidates) {
     var plannerBundles = _buildPlannerBundles(sourceItems, candidates);
@@ -119,37 +120,16 @@ function _finalizeObjectPlanInlineFlowContracts(objectPlans) {
 }
 
 function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
-    var sourceById = _objectPlanSourceInfoById(sourceItems);
-    var editableTextFrames = _objectPlanEditableTextFrames(sourceItems);
-    var editableTextFramesByPage = _objectPlanEditableTextFramesByPage(editableTextFrames);
-    var sourceZOrderCache = {};
-    var zOrderUpdates = 0;
-    var layerUpdates = 0;
-    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
-        var plan = objectPlans[i];
-        if (!_objectPlanHasVisibleVisual(plan)) continue;
-        var masterPlane = _objectPlanIsMasterPageVisualPlane(plan);
-        var sourceZ = masterPlane
-                ? OBJECT_PLAN_MASTER_PLANE_Z_ORDER
-                : _objectPlanCanonicalVisualSourceZOrder(plan, sourceById, sourceZOrderCache);
-        if (sourceZ >= 0 && plan.zOrder !== sourceZ) {
-            plan.zOrder = sourceZ;
-            zOrderUpdates++;
-        } else if (masterPlane && plan.zOrder !== OBJECT_PLAN_MASTER_PLANE_Z_ORDER) {
-            plan.zOrder = OBJECT_PLAN_MASTER_PLANE_Z_ORDER;
-            zOrderUpdates++;
-        }
-        var layer = _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByPage, sourceZ);
-        if (layer && plan.visualLayer !== layer) {
-            plan.visualLayer = layer;
-            plan.policyLayer = _objectPlanPolicyLayerForVisualLayer(layer);
-            layerUpdates++;
-        }
-    }
+    // Stage 1 ObjectPlan is the ownership/layer contract. This final gate may
+    // validate and summarize, but it must not rewrite `visualLayer`, `zOrder`,
+    // placement, or ownership after the planner has decided them. Older code
+    // recomputed background/content from source z-depth and local text overlap,
+    // which reintroduced exactly the class of layer regressions the ownership
+    // policy is meant to prevent.
     return {
         summary: {
-            zOrderUpdates: zOrderUpdates,
-            layerUpdates: layerUpdates
+            zOrderUpdates: 0,
+            layerUpdates: 0
         }
     };
 }
@@ -1753,6 +1733,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plan.zOrder = OBJECT_PLAN_MASTER_PLANE_Z_ORDER;
         } else {
             plan.candidatePurpose = "SHELL_CANDIDATE";
+            plan.zOrder = OBJECT_PLAN_PAGE_BACKGROUND_PLANE_Z_ORDER;
         }
         plan.sourceSetId = _sourceSetId(plan.sourceObjectIds || []);
         plan.sourceRootSetId = _sourceSetId(plan.sourceRootObjectIds || plan.sourceObjectIds || []);
@@ -1915,7 +1896,9 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plane.placement = "FLOATING";
             plane.coordinateSpace = "PAGE";
             plane.visualLayer = "PAGE_BACKGROUND";
-            plane.zOrder = existingPlaneIsMaster ? OBJECT_PLAN_MASTER_PLANE_Z_ORDER : 0;
+            plane.zOrder = existingPlaneIsMaster
+                    ? OBJECT_PLAN_MASTER_PLANE_Z_ORDER
+                    : OBJECT_PLAN_PAGE_BACKGROUND_PLANE_Z_ORDER;
             plane.reason = String(plane.reason || "stage1_page_background_plane")
                     + ":expanded_page_background_plane_sources"
                     + (existingPlaneIsMaster ? ":master_plane_bottom_depth" : "");
@@ -1988,7 +1971,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
                 visualLayer: "PAGE_BACKGROUND",
-                zOrder: 0,
+                zOrder: OBJECT_PLAN_PAGE_BACKGROUND_PLANE_Z_ORDER,
                 reason: "stage1_page_background_plane_from_objectplans",
                 bounds: _objectPlanUnionBounds(sourceMembers),
                 renderSourceBounds: null,
@@ -2245,6 +2228,7 @@ function _objectPlanPromotePageRootVisibleExportSources(
 
 function _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(hiddenSourceObjectIds, exportSourceObjectIds, sourceById) {
     var exportSet = _objectPlanSourceSetMembership(exportSourceObjectIds || []);
+    var exportAncestorSet = {};
     var out = [];
     var seen = {};
 
@@ -2259,6 +2243,23 @@ function _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(hiddenSourceObjec
     function isPlacedGraphicLeaf(src) {
         var kind = sourceKind(src);
         return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    for (var ei = 0; exportSourceObjectIds && ei < exportSourceObjectIds.length; ei++) {
+        var exportId = Number(exportSourceObjectIds[ei]);
+        if (isNaN(exportId)) continue;
+        var exported = sourceInfo(exportId);
+        var guardExport = 0;
+        while (exported && guardExport++ < 64) {
+            var exportedParentId = exported.parentId;
+            if (exportedParentId === null
+                    || exportedParentId === undefined
+                    || String(exportedParentId) === "") {
+                break;
+            }
+            exportAncestorSet[String(exportedParentId)] = true;
+            exported = sourceInfo(exportedParentId);
+        }
     }
 
     function hasExportedAncestor(sourceId) {
@@ -2277,6 +2278,7 @@ function _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(hiddenSourceObjec
         var sourceId = Number(hiddenSourceObjectIds[i]);
         if (isNaN(sourceId)) continue;
         var src = sourceInfo(sourceId);
+        if (exportAncestorSet[String(sourceId)] === true) continue;
         if (isPlacedGraphicLeaf(src) && hasExportedAncestor(sourceId)) continue;
         _pushUniqueId(out, seen, sourceId);
     }
@@ -2311,7 +2313,12 @@ function _objectPlanUnionBounds(plans) {
 function _objectPlanTextOwnerPriority(plan) {
     if (!plan) return 0;
     var score = 0;
-    if (plan.textAction === "OWNED_BY_PNG") score += 200;
+    if (plan.textAction === "OWNED_BY_PNG") score += 400;
+    if (plan.textAction === "OWNED_BY_HWPX_TEXT"
+            && plan.ownershipSlot === "TEXT_SLOT"
+            && plan.materialization === "HWPX_TEXT") {
+        score += 300;
+    }
     if (plan.visualAction === "DROP_VISUAL") score += 20;
     if (plan.visualAction === "PLACE_TEXT_SHELL") score += 40;
     if (plan.ownershipSlot === "SHELL_SLOT") score += 20;
@@ -2350,6 +2357,10 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     var inlineFlowSourceObjectIds = inlineSourceTreeClosed
             ? _objectPlanInlineFlowSourceObjectIds(bundle)
             : [];
+    var ownershipSlot = bundle.ownershipSlot || _objectPlanSlotFromActions({
+        visualAction: visualAction,
+        textAction: textAction
+    });
 
     return {
         objectPlanId: _objectPlanId(bundle, index),
@@ -2419,7 +2430,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         bounds: bundle.bounds || null,
         renderSourceBounds: bundle.renderSourceBounds || null,
         cropSourceBounds: bundle.cropSourceBounds || null,
-        ownershipSlot: bundle.ownershipSlot || null,
+        ownershipSlot: ownershipSlot,
         policyLayer: bundle.policyLayer || null,
         clusterRelation: bundle.clusterRelation || null,
         migrationStatus: migrationStatus,
@@ -2741,9 +2752,12 @@ function _objectPlanBundleOwnsInlineCompletePngText(bundle) {
     if (bundle.ownershipSlot === "SHELL_SLOT") return false;
     if (bundle.slotRole === "direct_child_shell_slot"
             || bundle.compositeRole === "direct_child_shell_slot") return false;
-    return bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0
-            && ((bundle.visualSourceObjectIds && bundle.visualSourceObjectIds.length > 0)
-                || (bundle.exportSourceObjectIds && bundle.exportSourceObjectIds.length > 0));
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if ((!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)
+            && (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0)) {
+        return false;
+    }
+    return bundle.completePngTextAllowed === true || bundle.textOwner === "indesign_png";
 }
 
 function _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById) {
@@ -2917,7 +2931,13 @@ function _objectPlanMaterialization(bundle, visualAction) {
 
 function _objectPlanVisualLayer(bundle) {
     if (!bundle || !bundle.policyLayer) return "CONTENT_VISUAL";
-    if (bundle.policyLayer === "BACKGROUND") return "CONTENT_VISUAL";
+    if (bundle.slotRole === "page_background_plane"
+            || bundle.compositeRole === "page_background_plane"
+            || bundle.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
+            || bundle.passId === "pass.master_page_graphics") {
+        return "PAGE_BACKGROUND";
+    }
+    if (bundle.policyLayer === "BACKGROUND") return "PAGE_BACKGROUND";
     if (bundle.policyLayer === "DECORATION") {
         if (bundle.connectorDecorationVisual === true) {
             return "LABEL_CONNECTOR_BACKDROP";

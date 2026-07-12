@@ -594,6 +594,7 @@ public class ResolvedDataReader {
         group.pdfPageIndex(getInt(o, "pdfPageIndex", -1));
         // z-order (InDesign allPageItems 인덱스: 0=앞, 큰 값=뒤)
         group.zOrder(getInt(o, "zOrder", 0));
+        group.zOrderKnown(getBool(o, "zOrderKnown", false));
         String itemType = getString(o, "itemType");
         if (itemType == null || itemType.isEmpty()) {
             itemType = group.type();
@@ -607,6 +608,13 @@ public class ResolvedDataReader {
         group.compositeRole(getString(o, "compositeRole"));
         group.slotRole(getString(o, "slotRole"));
         group.placementRole(getString(o, "placementRole"));
+        String visualLayer = getString(o, "visualLayer");
+        if ((visualLayer == null || visualLayer.isEmpty())
+                && ("page_background_plane".equals(group.slotRole())
+                    || "page_background_plane".equals(group.compositeRole()))) {
+            visualLayer = "PAGE_BACKGROUND";
+        }
+        group.visualLayer(visualLayer);
         group.imageFormat(getString(o, "imageFormat"));
         group.whiteStroke(getBool(o, "whiteStroke", false));
         // badge_group: PNG 내보내기 전 TF 텍스트를 숨겼는지 여부

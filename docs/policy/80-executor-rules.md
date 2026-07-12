@@ -119,20 +119,14 @@ Text Builder:
   or table-cell text, and they must not hide those TextFrames before export.
   The loss of editability is the planned owner decision for an unrepresentable
   nested inline InDesign composition.
-- A native parent source shape (`NATIVE_SOURCE_SHAPE`) may supply the shell,
-  fill, stroke, corner, and inset style for a child editable TextFrame, but it
-  should not take the `TEXT_SLOT` away from a direct TextFrame owner. When a
-  direct TextFrame plan exists, the direct TextFrame remains
-  `OWNED_BY_HWPX_TEXT`; the native shell plan keeps `PLACE_TEXT_SHELL` with
-  `textAction=DROP_TEXT` and retains `ownedTextFrameIds` only as a shell/style
-  relation. This keeps Rectangle/Oval-backed inline text boxes consistent with
-  extracted textless shells without merging text into the shell owner.
-- Execution must keep that separation. A `NATIVE_SOURCE_SHAPE` shell that
-  references `ownedTextFrameIds` is emitted as a textless visual shell by the
-  visual executor; the child TextFrame is emitted by the text executor using its
-  own TextFrame bounds. For an inline badge/text-shell atom, however, Stage 1
-  may explicitly choose a single inline carrier whose visual material is the
-  native/extracted shell and whose text remains editable HWPX text. That carrier
+- Java/HWP native redrawing must not supply visible shell, fill, stroke,
+  corner, or background material. A source shape related to an editable
+  TextFrame may only appear visibly through planned InDesign-extracted image
+  material. Direct TextFrame text remains `OWNED_BY_HWPX_TEXT`; the shell slot
+  is visible only when Stage 1 provides an extracted visual owner.
+- Execution must keep that separation. For an inline badge/text-shell atom,
+  Stage 1 may explicitly choose a single inline carrier whose visual material is
+  extracted image material and whose text remains editable HWPX text. That carrier
   may be an HWPX `drawText` object when its fill comes from the planned source
   shell image/vector. Later stages must not invent the shell by Java style,
   bounds, stroke, fill, or corner fallback when source shell material is absent.

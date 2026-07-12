@@ -159,6 +159,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
             : sourceIds;
     hiddenVisualSourceObjectIds = _plannerBundleSourceIdsIntersect(
             hiddenVisualSourceObjectIds, hiddenScopeSourceIds);
+    hiddenVisualSourceObjectIds = _plannerBundlePruneClosedImageTextlessGroupHiddenIds(
+            declaredCandidate, slot, hiddenVisualSourceObjectIds, clusterIndex);
     var materialization = _plannerBundleMaterialization(
             declaredCandidate, slot, slotSources, exportSourceObjectIds,
             hiddenVisualSourceObjectIds, clusterIndex);
@@ -1195,13 +1197,17 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
     var explicitVisualIds = candidate.visualSourceObjectIds || null;
     var explicitStyleIds = candidate.styleSourceObjectIds || null;
     var explicitOwnedTextIds = _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex);
-    var hiddenVisualIdSet = _sourceIdSet(candidate.hiddenVisualSourceObjectIds || []);
+    var hiddenVisualIdSet = _plannerBundleClosedImageTextlessGroupHiddenIdSet(
+            candidate, slot, candidate.hiddenVisualSourceObjectIds || [], clusterIndex);
     var visualSourceObjectIds = [];
     var styleSourceObjectIds = [];
     var ownedTextFrameIds = [];
     var allowInlineAnchorVisualSource = _plannerBundleAllowsInlineAnchorVisualSource(
             candidate, slot);
-    if (_plannerBundleAllowsClosedShellPlacedContentOwnership(candidate)
+    if (_plannerBundleIsClosedImageTextlessGroup(candidate, slot)) {
+        visualSourceObjectIds = _plannerBundleNonTextSourceIds(
+                sourceIds, hiddenVisualIdSet, clusterIndex);
+    } else if (_plannerBundleAllowsClosedShellPlacedContentOwnership(candidate)
             && clusterIndex
             && clusterIndex.descendantSourceObjectIds
             && candidate.primarySourceObjectId !== null
@@ -1265,6 +1271,56 @@ function _plannerBundleSlotSources(candidate, slot, sourceIds, clusterIndex) {
         styleSourceObjectIds: styleSourceObjectIds,
         ownedTextFrameIds: ownedTextFrameIds
     };
+}
+
+function _plannerBundleIsClosedImageTextlessGroup(candidate, slot) {
+    if (!candidate || slot !== "CONTENT_VISUAL_SLOT") return false;
+    if (candidate.passId !== "pass.image_textless_groups") return false;
+    if (candidate.unit && candidate.unit !== "GROUP") return false;
+    if (candidate.mode && candidate.mode !== "TEXTLESS_CANDIDATE") return false;
+    return candidate.compositeRole === "image_group_textless_source_set"
+            || candidate.slotRole === "image_group_textless_source_set"
+            || candidate.kind === "Group";
+}
+
+function _plannerBundleClosedImageTextlessGroupHiddenIdSet(
+        candidate, slot, hiddenVisualSourceObjectIds, clusterIndex) {
+    if (!_plannerBundleIsClosedImageTextlessGroup(candidate, slot)) {
+        return _sourceIdSet(hiddenVisualSourceObjectIds || []);
+    }
+    var kept = [];
+    var seen = {};
+    for (var i = 0; hiddenVisualSourceObjectIds && i < hiddenVisualSourceObjectIds.length; i++) {
+        var id = hiddenVisualSourceObjectIds[i];
+        var src = clusterIndex && clusterIndex.sourceInfo ? clusterIndex.sourceInfo(id) : null;
+        var kind = String(src && src.kind || "");
+        if (kind === "TextFrame" || kind === "Story" || kind === "Character"
+                || kind === "InsertionPoint" || kind === "Cell"
+                || _plannerBundleSourceHasInlineAnchorAncestor(id, clusterIndex)) {
+            _pushUniqueId(kept, seen, id);
+        }
+    }
+    return _sourceIdSet(kept);
+}
+
+function _plannerBundlePruneClosedImageTextlessGroupHiddenIds(
+        candidate, slot, hiddenVisualSourceObjectIds, clusterIndex) {
+    if (!_plannerBundleIsClosedImageTextlessGroup(candidate, slot)) {
+        return _sortedNumericIds(hiddenVisualSourceObjectIds || []);
+    }
+    var kept = [];
+    var seen = {};
+    for (var i = 0; hiddenVisualSourceObjectIds && i < hiddenVisualSourceObjectIds.length; i++) {
+        var id = hiddenVisualSourceObjectIds[i];
+        var src = clusterIndex && clusterIndex.sourceInfo ? clusterIndex.sourceInfo(id) : null;
+        var kind = String(src && src.kind || "");
+        if (kind === "TextFrame" || kind === "Story" || kind === "Character"
+                || kind === "InsertionPoint" || kind === "Cell"
+                || _plannerBundleSourceHasInlineAnchorAncestor(id, clusterIndex)) {
+            _pushUniqueId(kept, seen, id);
+        }
+    }
+    return _sortedNumericIds(kept);
 }
 
 function _plannerBundleTextFramesAreSimpleMarkers(textFrameIds, clusterIndex) {

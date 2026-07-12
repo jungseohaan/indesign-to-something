@@ -5,7 +5,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Objec
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.PolicyLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
@@ -114,7 +113,7 @@ public final class VisualShellPreparationRules {
     }
 
     private static boolean isForegroundVisualLayer(String visualLayer) {
-        return VisualPlanePolicy.isInFrontLayerName(visualLayer);
+        return visualLayer != null && !visualLayer.isEmpty() && !"PAGE_BACKGROUND".equals(visualLayer);
     }
 
     private static boolean isExplicitShellSlotPlan(ObjectPlan plan) {

@@ -1,16 +1,22 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.HWPXFile;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -80,11 +86,67 @@ public class HwpxConverterContext {
     // 변환 경고 수집
     private final List<String> warnings = new ArrayList<>();
 
+    // HWPX zOrder는 음수/큰 갭을 안전하게 보존하지 못할 수 있다. Stage 1의
+    // raw zOrder 순서는 유지하되, 섹션별로 HWPX가 해석 가능한 0 이상의 rank로
+    // 직렬화한다. 이 맵은 ownership/layer 재판정이 아니라 출력 인코딩이다.
+    private final Map<ASTBlock, Integer> outputZOrderByBlock = new IdentityHashMap<>();
+    private final Map<Integer, Integer> outputZOrderByRaw = new LinkedHashMap<>();
+    private int foregroundOutputZOrder = 1;
+
     public void addWarning(String category, String detail) {
         warnings.add("[" + category + "] " + detail);
     }
 
     public List<String> warnings() { return warnings; }
+
+    public void beginSectionZOrder(List<ASTBlock> blocks) {
+        outputZOrderByBlock.clear();
+        outputZOrderByRaw.clear();
+        TreeMap<Integer, Boolean> foregroundRawZOrders = new TreeMap<>();
+        if (blocks != null) {
+            for (ASTBlock block : blocks) {
+                int raw = rawZOrder(block);
+                if (raw < 0) {
+                    outputZOrderByRaw.put(raw, 0);
+                } else {
+                    foregroundRawZOrders.put(raw, Boolean.TRUE);
+                }
+            }
+        }
+        int rank = 1;
+        for (Integer raw : foregroundRawZOrders.keySet()) {
+            outputZOrderByRaw.put(raw, rank++);
+        }
+        foregroundOutputZOrder = Math.max(1, rank);
+        if (blocks != null) {
+            for (ASTBlock block : blocks) {
+                outputZOrderByBlock.put(block, outputZOrder(rawZOrder(block)));
+            }
+        }
+    }
+
+    public int outputZOrder(ASTBlock block) {
+        if (block == null) return 0;
+        Integer encoded = outputZOrderByBlock.get(block);
+        return encoded != null ? encoded : outputZOrder(rawZOrder(block));
+    }
+
+    public int outputZOrder(int rawZOrder) {
+        Integer encoded = outputZOrderByRaw.get(rawZOrder);
+        if (encoded != null) return encoded;
+        return rawZOrder < 0 ? 0 : Math.max(1, rawZOrder + 1);
+    }
+
+    public int foregroundOutputZOrder() {
+        return foregroundOutputZOrder;
+    }
+
+    private int rawZOrder(ASTBlock block) {
+        if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
+        if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
+        if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
+        return 0;
+    }
 
     /** 변환 설정 (spacing, orphan 등) */
     public kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config;

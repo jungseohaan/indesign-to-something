@@ -16,7 +16,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Simpl
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDiagnostics;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowIndex;
@@ -802,7 +801,7 @@ public final class ResolvedBuildContext {
     public Boolean inFrontLayerByOwnershipPlan(RenderedGroup rg) {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
-        return VisualPlanePolicy.isInFrontLayer(plan.visualLayer);
+        return plan.visualLayer != VisualLayer.PAGE_BACKGROUND;
     }
 
     public ObjectPlan findOwnershipPlanForRendered(RenderedGroup rg) {

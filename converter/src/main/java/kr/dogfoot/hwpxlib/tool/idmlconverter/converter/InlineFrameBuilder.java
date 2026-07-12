@@ -280,7 +280,6 @@ final class InlineFrameBuilder {
         applyShapeComponentGeometry(rect, w, h);
 
         DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromInlineObject(obj, w, h);
-        spec.nativeGraphicsAllowed = true;
         if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
             spec.imageFillData = obj.imageFillData();
             spec.forceImageFill = true;
@@ -299,7 +298,7 @@ final class InlineFrameBuilder {
                 obj.cornerRadius(),
                 h,
                 obj.shellShapeType(),
-                obj.nativeGraphicsAllowed() || obj.forceImageFill() || obj.cornerRadius() > 0);
+                false);
 
         rect.createPos();
         if (useWrapping) {

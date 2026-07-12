@@ -64,6 +64,17 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
             candidateMatchStrategy: item.candidateMatchStrategy || null,
             file: item.file || null,
             bounds: item.bounds || null,
+            zOrder: item.zOrder !== undefined && item.zOrder !== null
+                    ? item.zOrder
+                    : (planCandidate && planCandidate.zOrder !== undefined ? planCandidate.zOrder : null),
+            zOrderKnown: item.zOrder !== undefined && item.zOrder !== null
+                    || !!(planCandidate && planCandidate.zOrder !== undefined && planCandidate.zOrder !== null),
+            visualLayer: item.visualLayer || (planCandidate ? planCandidate.visualLayer : null) || null,
+            policyLayer: item.policyLayer || (planCandidate ? planCandidate.policyLayer : null) || null,
+            sourceBounds: item.sourceBounds || null,
+            renderSourceBounds: item.renderSourceBounds || null,
+            cropSourceBounds: item.cropSourceBounds || null,
+            exportSanity: item.exportSanity || null,
             reason: item.reason || null,
             visualOwner: item.visualOwner || null,
             textOwner: item.textOwner || null,

@@ -1852,9 +1852,10 @@ public class ASTPageProcessor {
             fig.pixelWidth(pixelW);
             fig.pixelHeight(pixelH);
             fig.sourceId(idmlHexId);
+            fig.visualLayer(rg.visualLayer());
+            fig.sourceLayerIndex(rg.layerIndex());
             fig.zOrder(rg.zOrder());
-            // page_background: BEHIND_TEXT, 나머지: IN_FRONT_OF_TEXT
-            fig.fromGroup(!isPageBg);
+            fig.fromGroup(!"PAGE_BACKGROUND".equals(rg.visualLayer()));
 
             section.addBlock(fig);
             existingSourceIds.add(idmlHexId);

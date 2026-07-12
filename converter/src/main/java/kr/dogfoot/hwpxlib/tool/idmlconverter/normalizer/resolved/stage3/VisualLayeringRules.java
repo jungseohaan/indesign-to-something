@@ -2,7 +2,6 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
@@ -19,7 +18,7 @@ public final class VisualLayeringRules {
     }
 
     public static boolean isInFrontLayer(VisualLayer layer) {
-        return VisualPlanePolicy.isInFrontLayer(layer);
+        return layer != null && layer != VisualLayer.PAGE_BACKGROUND;
     }
 
     public static boolean isEditableLabelShellCandidate(RenderedGroup rg) {

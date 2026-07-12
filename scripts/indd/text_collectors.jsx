@@ -1451,8 +1451,18 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
             } catch (e) {}
 
             // NEW: page-relative bounds (페이지 bounds 차감)
+            // parentPage is often null for TextFrames nested in Groups. Resolve
+            // the owning page from visible geometry so PAGE coordinate plans do
+            // not leak spread coordinates into HWPX placement.
             try {
-                var tfPage = tf.parentPage;
+                var tfPage = null;
+                try {
+                    tfPage = (typeof _resolveParentPage === "function")
+                            ? _resolveParentPage(tf, doc)
+                            : tf.parentPage;
+                } catch (eResolveParentPage) {
+                    try { tfPage = tf.parentPage; } catch (eParentPage) {}
+                }
                 if (tfPage) {
                     var pageBounds = tfPage.bounds;
                     fData.pageIndex = tfPage.documentOffset;

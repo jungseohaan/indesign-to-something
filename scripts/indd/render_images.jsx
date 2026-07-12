@@ -302,6 +302,141 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
         return String(passId || "") + "|" + (isGroupRender ? "group" : "item") + "|" + String(id);
     }
 
+    function _visibleHideTargetForSourceItem(item) {
+        if (!item) return null;
+        var name = "";
+        try { name = String(item.constructor.name || ""); } catch (eName) {}
+        if (name === "Image" || name === "PDF" || name === "EPS") {
+            try { if (item.parent) return item.parent; } catch (eParent) {}
+        }
+        try {
+            var visible = item.visible;
+            return item;
+        } catch (eVisible) {}
+        try { if (item.parent) return item.parent; } catch (eParent2) {}
+        return item;
+    }
+
+    function _candidateHiddenVisualItems(candidate, rootItem) {
+        var out = [];
+        var seen = {};
+        var ids = candidate && candidate.hiddenVisualSourceObjectIds
+                ? candidate.hiddenVisualSourceObjectIds
+                : [];
+        var hiddenSet = {};
+        for (var si = 0; ids && si < ids.length; si++) hiddenSet[String(ids[si])] = true;
+        function addItem(item, fallbackId) {
+            item = _visibleHideTargetForSourceItem(item);
+            if (!item) return;
+            var key = null;
+            try { key = String(item.id); } catch (eKey) { key = String(fallbackId); }
+            if (seen[key]) return;
+            seen[key] = true;
+            out.push(item);
+        }
+        function sameItem(a, b) {
+            if (!a || !b) return false;
+            try { return String(a.id) === String(b.id); } catch (eId) {}
+            return a === b;
+        }
+        function addItemAndAncestors(item, fallbackId) {
+            item = _visibleHideTargetForSourceItem(item);
+            if (!item) return;
+            addItem(item, fallbackId);
+            var guard = 0;
+            var current = item;
+            while (current && guard++ < 16) {
+                var parent = null;
+                try { parent = current.parent; } catch (eParent) { parent = null; }
+                if (!parent || sameItem(parent, rootItem)) break;
+                var parentName = "";
+                try { parentName = String(parent.constructor.name || ""); } catch (eName) {}
+                if (parentName !== "Group"
+                        && parentName !== "Rectangle"
+                        && parentName !== "Polygon"
+                        && parentName !== "Oval") {
+                    break;
+                }
+                addItem(parent, fallbackId);
+                current = parent;
+            }
+        }
+        for (var hi = 0; ids && hi < ids.length; hi++) {
+            var item = itemById ? itemById[String(ids[hi])] : null;
+            if (!item) continue;
+            addItemAndAncestors(item, ids[hi]);
+        }
+        try {
+            var nested = rootItem && rootItem.allPageItems ? rootItem.allPageItems : [];
+            for (var ni = 0; ni < nested.length; ni++) {
+                var nestedItem = nested[ni];
+                var nestedId = null;
+                try { nestedId = String(nestedItem.id); } catch (eNestedId) {}
+                if (nestedId !== null && hiddenSet[nestedId]) addItemAndAncestors(nestedItem, nestedId);
+            }
+        } catch (eNested) {}
+        try {
+            var graphics = rootItem && rootItem.allGraphics ? rootItem.allGraphics : [];
+            for (var gi = 0; gi < graphics.length; gi++) {
+                var graphic = graphics[gi];
+                var graphicId = null;
+                try { graphicId = String(graphic.id); } catch (eGraphicId) {}
+                if (graphicId !== null && hiddenSet[graphicId]) addItemAndAncestors(graphic, graphicId);
+            }
+        } catch (eGraphics) {}
+        return out;
+    }
+
+    function _hideVisualSourceItemsForExport(items) {
+        var saved = [];
+        if (!items) return saved;
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (!item) continue;
+            var state = { item: item, mode: "visible" };
+            var changed = false;
+            try {
+                state.wasVisible = item.visible;
+                item.visible = false;
+                changed = true;
+            } catch (eVisible) {}
+            if (!changed) {
+                try {
+                    var blend = item.transparencySettings.blendingSettings;
+                    state.opacity = blend.opacity;
+                    blend.opacity = 0;
+                    state.mode = "opacity";
+                    changed = true;
+                } catch (eOpacity) {}
+            }
+            if (changed) saved.push(state);
+        }
+        return saved;
+    }
+
+    function _restoreVisualSourceItemsForExport(saved) {
+        if (!saved) return;
+        for (var i = 0; i < saved.length; i++) {
+            var state = saved[i];
+            if (!state || !state.item) continue;
+            if (state.mode === "visible") {
+                try { state.item.visible = state.wasVisible; } catch (eVisible) {}
+            } else if (state.mode === "opacity") {
+                try {
+                    state.item.transparencySettings.blendingSettings.opacity = state.opacity;
+                } catch (eOpacity) {}
+            }
+        }
+    }
+
+    function _sourceSetCachePart(ids) {
+        if (!ids || ids.length === 0) return "";
+        var copy = [];
+        for (var i = 0; i < ids.length; i++) copy.push(Number(ids[i]));
+        copy.sort(function(a, b) { return a - b; });
+        return copy.join(",");
+    }
+
     var plannedEntries = [];
     for (var gci = 0; imageGroupCandidates && gci < imageGroupCandidates.length; gci++) {
         plannedEntries.push({ candidate: imageGroupCandidates[gci], isGroupRender: true });
@@ -533,7 +668,8 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
         var _imgHiddenTextFrameIds = [];
         var _imgTfInlineVisualIds = [];
         var hiddenTFs = [];
-        var _imgExportCacheKey = _imageExportCacheKey(imagePlanPassId, renderTarget, isGroupRender);
+        var _imgExportCacheKey = _imageExportCacheKey(imagePlanPassId, renderTarget, isGroupRender)
+                + "|hidden:" + _sourceSetCachePart(candidate ? candidate.hiddenVisualSourceObjectIds : null);
         var _imgCachedExport = imageExportCache[_imgExportCacheKey];
         var _imgExportError = null;
         if (_imgCachedExport) {
@@ -552,6 +688,18 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
             _imgTfInlineVisualIds = isGroupRender ? collectTfInlineVisualIds(renderTarget) : [];
             hiddenTFs = isGroupRender ? hideTextFramesAndOwnedInlineVisuals(renderTarget) : [];
             _imgHiddenTextFrameIds = _hiddenTextFrameIdsFromSaved(hiddenTFs);
+            var _imgHiddenVisualItemsSaved = null;
+            var _imgHiddenVisualItems = [];
+            if (isGroupRender && candidate && candidate.hiddenVisualSourceObjectIds
+                    && candidate.hiddenVisualSourceObjectIds.length > 0) {
+                _imgHiddenVisualItems = _candidateHiddenVisualItems(candidate, renderTarget);
+                diag.hiddenVisualSourceObjectIds = candidate.hiddenVisualSourceObjectIds.slice(0);
+                diag.hiddenVisualItemIds = [];
+                for (var _hvi = 0; _hvi < _imgHiddenVisualItems.length; _hvi++) {
+                    try { diag.hiddenVisualItemIds.push(_imgHiddenVisualItems[_hvi].id); } catch (eHiddenDiag) {}
+                }
+                _imgHiddenVisualItemsSaved = _hideVisualSourceItemsForExport(_imgHiddenVisualItems);
+            }
 
             // 그룹 직계 자식 중 배경 폴리곤(Polygon, 배치 이미지 없음, non-None fill)을
             // 그룹 PNG 내보내기 전 임시 숨김. 배경 폴리곤을 이미지와 합성하면
@@ -606,6 +754,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 }
             }
 
+            try { if (_imgHiddenVisualItemsSaved && _imgHiddenVisualItemsSaved.length > 0) _restoreVisualSourceItemsForExport(_imgHiddenVisualItemsSaved); } catch (e) {}
             try { if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs); } catch (e) {}
 
             // 배경 폴리곤 가시성 복원
@@ -620,6 +769,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
             try { _imgExportError = String(e); } catch (eOuterString) { _imgExportError = "outer_export_exception"; }
             try { _imgExportOk = outFile.exists; } catch (e2) {}
             // outer catch: inner try-catch를 우회한 예외가 있어도 TF/bgPolygon 복원
+            try { if (_imgHiddenVisualItemsSaved && _imgHiddenVisualItemsSaved.length > 0) _restoreVisualSourceItemsForExport(_imgHiddenVisualItemsSaved); } catch (e3) {}
             try { if (hiddenTFs && hiddenTFs.length > 0) restoreTextFrames(hiddenTFs); } catch (e3) {}
             for (var _brf = 0; _brf < _imgBgPolygons.length; _brf++) {
                 try { _imgBgPolygons[_brf].visible = true; } catch (e3) {}
@@ -667,6 +817,8 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 if (_imgFragment.cropSourceBounds) _imgEntry.cropSourceBounds = _imgFragment.cropSourceBounds;
                 renderedImageFrames.push(applyRenderOwnership(_imgEntry, renderTarget, {
                     sourceObjectIds: imageSourceIds,
+                    exportSourceObjectIds: candidate ? candidate.exportSourceObjectIds || [] : [],
+                    hiddenVisualSourceObjectIds: candidate ? candidate.hiddenVisualSourceObjectIds || [] : [],
                     textHiddenBeforeExport: _imgActuallyHidText,
                     hiddenTextFrameIds: _imgHiddenTextFrameIds,
                     tfInlineVisualIds: _imgTfInlineVisualIds,
