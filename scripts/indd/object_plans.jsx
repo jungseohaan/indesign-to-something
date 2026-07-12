@@ -1923,12 +1923,18 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         var sourceRootObjectIds = _objectPlanUnionPlanIds(sourceMembers, "sourceRootObjectIds");
         var visualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "visualSourceObjectIds");
         var exportSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "exportSourceObjectIds");
+        var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenVisualSourceObjectIds");
+        var excludedInlineSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "excludedInlineSourceObjectIds");
         exportSourceObjectIds = _objectPlanPromotePageRootVisibleExportSources(
                 sourceObjectIds, visualSourceObjectIds, exportSourceObjectIds, sourceById);
         exportSourceObjectIds = _objectPlanCarrierExportSourceIds(
                 exportSourceObjectIds, visualSourceObjectIds, sourceById);
-        var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenVisualSourceObjectIds");
-        var excludedInlineSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "excludedInlineSourceObjectIds");
+        exportSourceObjectIds = _objectPlanPromotePageRootPlacedImageAtoms(
+                sourceObjectIds,
+                visualSourceObjectIds,
+                exportSourceObjectIds,
+                excludedInlineSourceObjectIds,
+                sourceById);
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
                 hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "ownedTextFrameIds"));
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
@@ -1946,6 +1952,8 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 hiddenVisualSourceObjectIds, exportSourceObjectIds);
         hiddenVisualSourceObjectIds = _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(
                 hiddenVisualSourceObjectIds, exportSourceObjectIds, sourceById);
+        var hiddenPlacedVisualIds = _objectPlanHiddenPlacedVisualLeafIds(
+                hiddenVisualSourceObjectIds, excludedInlineSourceObjectIds, sourceById);
 
         var pageIndex = Number(group.pageKey);
         var componentIdPart = _objectPlanSafeIdPart(group.componentKey);
@@ -1981,6 +1989,10 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plane.visualSourceObjectIds = _internSourceSetIds(visualSourceObjectIds);
             plane.exportSourceObjectIds = _internSourceSetIds(exportSourceObjectIds);
             plane.hiddenVisualSourceObjectIds = _internSourceSetIds(hiddenVisualSourceObjectIds);
+            plane.pageBackgroundHiddenPlacedVisualIds = _internSourceSetIds(hiddenPlacedVisualIds);
+            plane.pageBackgroundHiddenPlacedVisualWarning = hiddenPlacedVisualIds.length > 0
+                    ? "page_background_hidden_placed_visual"
+                    : null;
             plane.ownedTextFrameIds = [];
             plane.kind = "PAGE_BACKGROUND_PLANE";
             plane.mode = "TEXTLESS_CANDIDATE";
@@ -2062,6 +2074,10 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 atomicTextlessVectorContent: false,
                 atomicContentVisualSlot: false,
                 hiddenVisualSourceObjectIds: _internSourceSetIds(hiddenVisualSourceObjectIds),
+                pageBackgroundHiddenPlacedVisualIds: _internSourceSetIds(hiddenPlacedVisualIds),
+                pageBackgroundHiddenPlacedVisualWarning: hiddenPlacedVisualIds.length > 0
+                        ? "page_background_hidden_placed_visual"
+                        : null,
                 excludedInlineSourceObjectIds: _internSourceSetIds(excludedInlineSourceObjectIds),
                 materialization: "EXTRACTED_PNG_VECTOR",
                 textAction: "DROP_TEXT",
@@ -2264,6 +2280,91 @@ function _objectPlanCarrierExportSourceIds(exportSourceObjectIds, visualSourceOb
     return _sortedNumericIds(out);
 }
 
+function _objectPlanPromotePageRootPlacedImageAtoms(
+        sourceObjectIds,
+        visualSourceObjectIds,
+        exportSourceObjectIds,
+        excludedInlineSourceObjectIds,
+        sourceById) {
+    var out = [];
+    var seen = {};
+    var sourceSet = _objectPlanSourceSetMembership(sourceObjectIds || []);
+    var visualSet = _objectPlanSourceSetMembership(visualSourceObjectIds || []);
+    var inlineExcludedSet = _objectPlanSourceSetMembership(excludedInlineSourceObjectIds || []);
+
+    function sourceInfo(sourceId) {
+        return sourceById ? sourceById[String(sourceId)] || null : null;
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function isTextSource(src) {
+        return sourceKind(src) === "TextFrame";
+    }
+
+    function isPlacedGraphicLeaf(src) {
+        var kind = sourceKind(src);
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    function isInlineExcluded(sourceId) {
+        var current = sourceInfo(sourceId);
+        var guard = 0;
+        var currentId = sourceId;
+        while (current && guard++ < 64) {
+            if (inlineExcludedSet[String(currentId)] === true) return true;
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return false;
+            currentId = parentId;
+            current = sourceInfo(parentId);
+        }
+        return inlineExcludedSet[String(sourceId)] === true;
+    }
+
+    function nearestCarrierId(sourceId) {
+        var current = sourceInfo(sourceId);
+        var guard = 0;
+        while (current && guard++ < 64) {
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return null;
+            var parent = sourceInfo(parentId);
+            if (!parent || isTextSource(parent)) return null;
+            if (sourceSet[String(parentId)] === true || visualSet[String(parentId)] === true) {
+                return parentId;
+            }
+            current = parent;
+        }
+        return null;
+    }
+
+    for (var i = 0; exportSourceObjectIds && i < exportSourceObjectIds.length; i++) {
+        _pushUniqueId(out, seen, exportSourceObjectIds[i]);
+    }
+
+    for (var si = 0; sourceObjectIds && si < sourceObjectIds.length; si++) {
+        var sourceId = Number(sourceObjectIds[si]);
+        if (isNaN(sourceId)) continue;
+        if (isInlineExcluded(sourceId)) continue;
+        var src = sourceInfo(sourceId);
+        if (!src || isTextSource(src)) continue;
+        if (isPlacedGraphicLeaf(src)) {
+            _pushUniqueId(out, seen, sourceId);
+            var carrierId = nearestCarrierId(sourceId);
+            if (carrierId !== null && carrierId !== undefined) {
+                _pushUniqueId(out, seen, carrierId);
+            }
+            continue;
+        }
+        if (src.hasPlacedVisual === true && (sourceSet[String(sourceId)] === true
+                || visualSet[String(sourceId)] === true)) {
+            _pushUniqueId(out, seen, sourceId);
+        }
+    }
+    return _sortedNumericIds(out);
+}
+
 function _objectPlanPromotePageRootVisibleExportSources(
         sourceObjectIds, visualSourceObjectIds, exportSourceObjectIds, sourceById) {
     var out = [];
@@ -2322,6 +2423,48 @@ function _objectPlanPromotePageRootVisibleExportSources(
                 || src.hasVisibleFill === true
                 || src.hasVisibleStroke === true
                 || src.hasCandidateVectorPaint === true) {
+            _pushUniqueId(out, seen, sourceId);
+        }
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanHiddenPlacedVisualLeafIds(hiddenSourceObjectIds, excludedInlineSourceObjectIds, sourceById) {
+    var out = [];
+    var seen = {};
+    var excludedSet = _objectPlanSourceSetMembership(excludedInlineSourceObjectIds || []);
+
+    function sourceInfo(sourceId) {
+        return sourceById ? sourceById[String(sourceId)] || null : null;
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function isPlacedGraphicLeaf(src) {
+        var kind = sourceKind(src);
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    function isExcluded(sourceId) {
+        var current = sourceInfo(sourceId);
+        var guard = 0;
+        var currentId = sourceId;
+        while (current && guard++ < 64) {
+            if (excludedSet[String(currentId)] === true) return true;
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return false;
+            currentId = parentId;
+            current = sourceInfo(parentId);
+        }
+        return excludedSet[String(sourceId)] === true;
+    }
+
+    for (var i = 0; hiddenSourceObjectIds && i < hiddenSourceObjectIds.length; i++) {
+        var sourceId = Number(hiddenSourceObjectIds[i]);
+        if (isNaN(sourceId) || isExcluded(sourceId)) continue;
+        if (isPlacedGraphicLeaf(sourceInfo(sourceId))) {
             _pushUniqueId(out, seen, sourceId);
         }
     }
