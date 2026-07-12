@@ -7,6 +7,8 @@
  * are still being migrated.
  */
 
+var OBJECT_PLAN_MASTER_PLANE_Z_ORDER = -1000000;
+
 function _buildObjectPlanDiagnostics(sourceItems, candidates) {
     var plannerBundles = _buildPlannerBundles(sourceItems, candidates);
     return _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems);
@@ -126,9 +128,15 @@ function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
     for (var i = 0; objectPlans && i < objectPlans.length; i++) {
         var plan = objectPlans[i];
         if (!_objectPlanHasVisibleVisual(plan)) continue;
-        var sourceZ = _objectPlanCanonicalVisualSourceZOrder(plan, sourceById, sourceZOrderCache);
+        var masterPlane = _objectPlanIsMasterPageVisualPlane(plan);
+        var sourceZ = masterPlane
+                ? OBJECT_PLAN_MASTER_PLANE_Z_ORDER
+                : _objectPlanCanonicalVisualSourceZOrder(plan, sourceById, sourceZOrderCache);
         if (sourceZ >= 0 && plan.zOrder !== sourceZ) {
             plan.zOrder = sourceZ;
+            zOrderUpdates++;
+        } else if (masterPlane && plan.zOrder !== OBJECT_PLAN_MASTER_PLANE_Z_ORDER) {
+            plan.zOrder = OBJECT_PLAN_MASTER_PLANE_Z_ORDER;
             zOrderUpdates++;
         }
         var layer = _objectPlanCanonicalVisualLayer(plan, sourceById, editableTextFramesByPage, sourceZ);
@@ -137,10 +145,6 @@ function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
             plan.policyLayer = _objectPlanPolicyLayerForVisualLayer(layer);
             layerUpdates++;
         }
-        if (plan.visualLayer === "PAGE_BACKGROUND" && plan.zOrder !== 0) {
-            plan.zOrder = 0;
-            zOrderUpdates++;
-        }
     }
     return {
         summary: {
@@ -148,6 +152,18 @@ function _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems) {
             layerUpdates: layerUpdates
         }
     };
+}
+
+function _objectPlanIsMasterPageVisualPlane(plan) {
+    if (!plan) return false;
+    var passId = String(plan.passId || plan.planPassId || "");
+    var candidateId = String(plan.candidateId || "");
+    var isMaster = passId === "pass.master_page_graphics"
+            || candidateId.indexOf(".pass.master_page_graphics.") >= 0
+            || plan.isMasterGraphic === true;
+    if (!isMaster) return false;
+    if (plan.placement === "INLINE" || plan.coordinateSpace === "STORY_FLOW") return false;
+    return true;
 }
 
 function _objectPlanSourceInfoById(sourceItems) {
@@ -1439,6 +1455,10 @@ function _compareObjectPlanVisibleVisualSourcePriority(a, b) {
 function _objectPlanVisibleVisualSourcePriority(plan) {
     if (!plan) return 0;
     var score = 0;
+    if (plan.passId === "pass.image_textless_groups"
+            && plan.ownershipSlot === "CONTENT_VISUAL_SLOT") {
+        score += 520;
+    }
     if (plan.visualAction === "PLACE_TEXT_SHELL") score += 220;
     if (plan.ownershipSlot === "SHELL_SLOT") score += 160;
     if (plan.slotRole === "shell_slot_only" || plan.mode === "SLOT_ONLY") score += 80;
@@ -1730,12 +1750,17 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plan.passId = "pass.master_page_graphics";
             plan.candidatePurpose = "MASTER_CANDIDATE";
             plan.unit = "MASTER_ITEM";
+            plan.zOrder = OBJECT_PLAN_MASTER_PLANE_Z_ORDER;
         } else {
             plan.candidatePurpose = "SHELL_CANDIDATE";
         }
         plan.sourceSetId = _sourceSetId(plan.sourceObjectIds || []);
         plan.sourceRootSetId = _sourceSetId(plan.sourceRootObjectIds || plan.sourceObjectIds || []);
         plan.clusterSourceSetId = _sourceSetId(plan.clusterSourceObjectIds || plan.sourceObjectIds || []);
+        if ((!plan.visualSourceObjectIds || plan.visualSourceObjectIds.length === 0)
+                && plan.exportSourceObjectIds && plan.exportSourceObjectIds.length > 0) {
+            plan.visualSourceObjectIds = _internSourceSetIds(plan.exportSourceObjectIds);
+        }
         plan.visualSourceSetId = _sourceSetId(plan.visualSourceObjectIds || plan.exportSourceObjectIds || []);
         plan.exportSourceSetId = _sourceSetId(plan.exportSourceObjectIds || plan.visualSourceObjectIds || []);
         plan.hiddenSourceSetId = _sourceSetId(plan.hiddenVisualSourceObjectIds || []);
@@ -1758,7 +1783,8 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         plan.executable = true;
         plan.required = true;
         plan.reason = String(plan.reason || "stage1_page_background_plane")
-                + ":normalized_explicit_page_background_plane";
+                + ":normalized_explicit_page_background_plane"
+                + (shouldUseMasterGraphicsPass ? ":master_plane_bottom_depth" : "");
         return true;
     }
 
@@ -1773,6 +1799,14 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             var existingPageKey = String(plan.pageIndex);
             var existingComponentKey = _objectPlanPageBackgroundComponentKey(plan, sourceById);
             existingByComponent[existingPageKey + "|" + existingComponentKey] = plan;
+            if (!byComponent[existingPageKey + "|" + existingComponentKey]) {
+                byComponent[existingPageKey + "|" + existingComponentKey] = {
+                    pageKey: existingPageKey,
+                    componentKey: existingComponentKey,
+                    members: []
+                };
+            }
+            byComponent[existingPageKey + "|" + existingComponentKey].members.push(plan);
             continue;
         }
         if (!_objectPlanEligibleForPageBackgroundPlane(plan)) continue;
@@ -1810,6 +1844,10 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         var sourceRootObjectIds = _objectPlanUnionPlanIds(sourceMembers, "sourceRootObjectIds");
         var visualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "visualSourceObjectIds");
         var exportSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "exportSourceObjectIds");
+        exportSourceObjectIds = _objectPlanPromotePageRootVisibleExportSources(
+                sourceObjectIds, visualSourceObjectIds, exportSourceObjectIds, sourceById);
+        exportSourceObjectIds = _objectPlanCarrierExportSourceIds(
+                exportSourceObjectIds, visualSourceObjectIds, sourceById);
         var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenVisualSourceObjectIds");
         var excludedInlineSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "excludedInlineSourceObjectIds");
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
@@ -1825,6 +1863,10 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
                 hiddenVisualSourceObjectIds,
                 _objectPlanSourceIdsMinus(nonExportSourceObjectIds, excludedInlineSourceObjectIds));
+        hiddenVisualSourceObjectIds = _objectPlanSourceIdsMinus(
+                hiddenVisualSourceObjectIds, exportSourceObjectIds);
+        hiddenVisualSourceObjectIds = _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(
+                hiddenVisualSourceObjectIds, exportSourceObjectIds, sourceById);
 
         var pageIndex = Number(group.pageKey);
         var componentIdPart = _objectPlanSafeIdPart(group.componentKey);
@@ -1846,6 +1888,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                         + ".page_background_plane.n" + String(exportSourceObjectIds.length)
                         + ".h" + _sourceSetId(exportSourceObjectIds);
         if (plane) {
+            var existingPlaneIsMaster = _objectPlanIsMasterPageVisualPlane(plane);
             plane.sourceSetId = _sourceSetId(sourceObjectIds);
             plane.sourceRootSetId = _sourceSetId(sourceRootObjectIds);
             plane.clusterSourceSetId = _sourceSetId(sourceObjectIds);
@@ -1862,7 +1905,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plane.ownedTextFrameIds = [];
             plane.kind = "PAGE_BACKGROUND_PLANE";
             plane.mode = "TEXTLESS_CANDIDATE";
-            plane.candidatePurpose = "SHELL_CANDIDATE";
+            plane.candidatePurpose = existingPlaneIsMaster ? "MASTER_CANDIDATE" : "SHELL_CANDIDATE";
             plane.compositeRole = "page_background_plane";
             plane.slotRole = "page_background_plane";
             plane.primarySourceObjectId = primarySourceObjectId;
@@ -1872,9 +1915,10 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plane.placement = "FLOATING";
             plane.coordinateSpace = "PAGE";
             plane.visualLayer = "PAGE_BACKGROUND";
-            plane.zOrder = 0;
+            plane.zOrder = existingPlaneIsMaster ? OBJECT_PLAN_MASTER_PLANE_Z_ORDER : 0;
             plane.reason = String(plane.reason || "stage1_page_background_plane")
-                    + ":expanded_page_background_plane_sources";
+                    + ":expanded_page_background_plane_sources"
+                    + (existingPlaneIsMaster ? ":master_plane_bottom_depth" : "");
             plane.bounds = _objectPlanUnionBounds(sourceMembers);
             plane.ownershipSlot = "SHELL_SLOT";
             plane.policyLayer = "BACKGROUND";
@@ -1967,6 +2011,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
 
         for (var mi = 0; mi < members.length; mi++) {
             var member = members[mi];
+            if (member === plane) continue;
             member.absorbedByObjectPlanId = objectPlanId;
             member.absorbedByMaterialization = "PAGE_PLANE_PNG";
             member.visualAction = "DROP_VISUAL";
@@ -1999,92 +2044,13 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
 function _objectPlanPageBackgroundComponentKey(plan, sourceById) {
     if (!plan) return "empty";
     var pass = String(plan.passId || "pass.unknown");
-    var islandAncestorId = _objectPlanPageBackgroundIslandAncestorId(plan, sourceById);
-    if (islandAncestorId !== null && islandAncestorId !== undefined) {
-        return pass + ".island." + String(islandAncestorId);
+    if (pass === "pass.master_page_graphics"
+            || String(plan.planPassId || "") === "pass.master_page_graphics"
+            || String(plan.candidateId || "").indexOf(".pass.master_page_graphics.") >= 0) {
+        var masterRoots = _sortedNumericIds(plan.sourceRootObjectIds || plan.sourceObjectIds || []);
+        return pass + ".master." + (masterRoots.length > 0 ? _sourceSetKey(masterRoots) : "page");
     }
-    var roots = _sortedNumericIds(plan.sourceRootObjectIds || []);
-    if (roots.length > 0) return pass + ".root." + _sourceSetKey(roots);
-    if (plan.exportTargetObjectId !== null && plan.exportTargetObjectId !== undefined) {
-        return pass + ".target." + String(plan.exportTargetObjectId);
-    }
-    var exports = _sortedNumericIds(plan.exportSourceObjectIds || []);
-    if (exports.length > 0) return pass + ".export." + _sourceSetKey(exports);
-    var visuals = _sortedNumericIds(plan.visualSourceObjectIds || []);
-    if (visuals.length > 0) return pass + ".visual." + _sourceSetKey(visuals);
-    return pass + ".plan." + String(plan.objectPlanId || plan.candidateId || "unknown");
-}
-
-function _objectPlanPageBackgroundIslandAncestorId(plan, sourceById) {
-    if (!plan || !sourceById) return null;
-    var ids = [];
-    ids = ids.concat(plan.sourceRootObjectIds || []);
-    ids = ids.concat(plan.exportSourceObjectIds || []);
-    ids = ids.concat(plan.visualSourceObjectIds || []);
-    ids = ids.concat(plan.sourceObjectIds || []);
-    ids = _sortedNumericIds(ids);
-    if (!ids || ids.length === 0) return null;
-
-    function sourceInfo(id) {
-        return sourceById[String(id)] || null;
-    }
-
-    function parentChain(sourceId) {
-        var out = [];
-        var current = sourceInfo(sourceId);
-        var guard = 0;
-        while (current && guard++ < 128) {
-            out.push(String(current.id));
-            if (current.parentId === null || current.parentId === undefined || String(current.parentId) === "") {
-                break;
-            }
-            current = sourceInfo(current.parentId);
-        }
-        return out;
-    }
-
-    var common = null;
-    for (var i = 0; i < ids.length; i++) {
-        var chain = parentChain(ids[i]);
-        if (!chain || chain.length === 0) continue;
-        if (common === null) {
-            common = {};
-            for (var ci = 0; ci < chain.length; ci++) common[chain[ci]] = true;
-        } else {
-            var next = {};
-            for (var cj = 0; cj < chain.length; cj++) {
-                if (common[chain[cj]] === true) next[chain[cj]] = true;
-            }
-            common = next;
-        }
-    }
-    if (common === null) return null;
-
-    var bestId = null;
-    var bestDepth = -1;
-    for (var idKey in common) {
-        if (!common.hasOwnProperty(idKey) || common[idKey] !== true) continue;
-        var src = sourceInfo(idKey);
-        if (!src) continue;
-        if (src.pageIndex !== null && src.pageIndex !== undefined
-                && plan.pageIndex !== null && plan.pageIndex !== undefined
-                && Number(src.pageIndex) !== Number(plan.pageIndex)) {
-            continue;
-        }
-        var depth = 0;
-        var cur = src;
-        var guard2 = 0;
-        while (cur && guard2++ < 128) {
-            depth++;
-            if (cur.parentId === null || cur.parentId === undefined || String(cur.parentId) === "") break;
-            cur = sourceInfo(cur.parentId);
-        }
-        if (depth > bestDepth) {
-            bestDepth = depth;
-            bestId = idKey;
-        }
-    }
-    return bestId !== null ? Number(bestId) : null;
+    return "page-root-textless-plane";
 }
 
 function _objectPlanSafeIdPart(value) {
@@ -2098,6 +2064,7 @@ function _objectPlanSafeIdPart(value) {
 
 function _objectPlanEligibleForPageBackgroundPlane(plan) {
     if (!plan) return false;
+    if (plan.absorbedByObjectPlanId) return false;
     if (!_objectPlanHasPlaneExportableVisualSource(plan)) return false;
     if (plan.slotRole === "page_background_plane"
             || plan.compositeRole === "page_background_plane"
@@ -2110,7 +2077,7 @@ function _objectPlanEligibleForPageBackgroundPlane(plan) {
             || plan.inlineAnchorSourceObjectId !== null
                     && plan.inlineAnchorSourceObjectId !== undefined) return false;
 
-    if (!_objectPlanIsPageBackgroundPlaneShellMember(plan)) return false;
+    if (!_objectPlanCanJoinPageRootTextlessPlane(plan)) return false;
     if (plan.textAction === "OWNED_BY_PNG") return false;
     if (plan.completePngTextAllowed === true) return false;
     if (plan.materialization === "COMPLETE_PNG") return false;
@@ -2130,37 +2097,17 @@ function _objectPlanEligibleForPageBackgroundPlane(plan) {
     return true;
 }
 
-function _objectPlanIsPageBackgroundPlaneShellMember(plan) {
+function _objectPlanCanJoinPageRootTextlessPlane(plan) {
     if (!plan) return false;
     var ownershipSlot = String(plan.ownershipSlot || "");
     var slotRole = String(plan.slotRole || "").toLowerCase();
-    var compositeRole = String(plan.compositeRole || "").toLowerCase();
-    var candidatePurpose = String(plan.candidatePurpose || "").toLowerCase();
 
     if (ownershipSlot === "TEXT_SLOT" || slotRole === "text_slot") return false;
-    if (ownershipSlot === "CONTENT_VISUAL_SLOT"
-            || slotRole === "content_visual_slot"
-            || plan.atomicContentVisualSlot === true) return false;
     if (ownershipSlot === "TABLE_STYLE_SLOT"
             || slotRole === "table_style_slot"
             || plan.visualAction === "PLACE_TABLE_STYLE") return false;
     if (plan.materialization === "HWPX_TABLE_STYLE") return false;
-
-    if (ownershipSlot === "SHELL_SLOT") return true;
-    if (slotRole === "background_shell_slot" || slotRole === "shell_slot_only") return true;
-    if (compositeRole === "background_vector_source"
-            || compositeRole === "source_required_visible_vector_shell_set") return true;
-    if (slotRole.indexOf("shell") >= 0
-            && slotRole.indexOf("content") < 0
-            && slotRole.indexOf("table") < 0) return true;
-    if (compositeRole.indexOf("shell") >= 0
-            && compositeRole.indexOf("content") < 0
-            && compositeRole.indexOf("table") < 0) return true;
-    if (candidatePurpose === "shell_candidate"
-            && (plan.visualAction === "PLACE_TEXT_SHELL"
-                    || plan.slotRole === "background_shell_slot"
-                    || plan.slotRole === "shell_slot_only")) return true;
-    return false;
+    return true;
 }
 
 function _objectPlanHasPlaneExportableVisualSource(plan) {
@@ -2190,6 +2137,150 @@ function _objectPlanUnionPlanIds(plans, field) {
         }
     }
     return _sortedNumericIds(ids);
+}
+
+function _objectPlanCarrierExportSourceIds(exportSourceObjectIds, visualSourceObjectIds, sourceById) {
+    var visualSet = _objectPlanSourceSetMembership(visualSourceObjectIds || []);
+    var out = [];
+    var seen = {};
+
+    function sourceInfo(sourceId) {
+        return sourceById ? sourceById[String(sourceId)] || null : null;
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function isPlacedGraphicLeaf(src) {
+        var kind = sourceKind(src);
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    function nearestVisualCarrierId(sourceId) {
+        var current = sourceInfo(sourceId);
+        var guard = 0;
+        while (current && guard++ < 64) {
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return null;
+            if (visualSet[String(parentId)] === true) return parentId;
+            current = sourceInfo(parentId);
+        }
+        return null;
+    }
+
+    for (var i = 0; exportSourceObjectIds && i < exportSourceObjectIds.length; i++) {
+        var sourceId = Number(exportSourceObjectIds[i]);
+        if (isNaN(sourceId)) continue;
+        var src = sourceInfo(sourceId);
+        var carrierId = isPlacedGraphicLeaf(src) ? nearestVisualCarrierId(sourceId) : null;
+        _pushUniqueId(out, seen, carrierId !== null && carrierId !== undefined ? carrierId : sourceId);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanPromotePageRootVisibleExportSources(
+        sourceObjectIds, visualSourceObjectIds, exportSourceObjectIds, sourceById) {
+    var out = [];
+    var seen = {};
+    var visualSet = _objectPlanSourceSetMembership(visualSourceObjectIds || []);
+
+    function sourceInfo(sourceId) {
+        return sourceById ? sourceById[String(sourceId)] || null : null;
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function isTextSource(src) {
+        return sourceKind(src) === "TextFrame";
+    }
+
+    function isPlacedGraphicLeaf(src) {
+        var kind = sourceKind(src);
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    function nearestVisualCarrierId(sourceId) {
+        var current = sourceInfo(sourceId);
+        var guard = 0;
+        while (current && guard++ < 64) {
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return null;
+            if (visualSet[String(parentId)] === true) return parentId;
+            current = sourceInfo(parentId);
+        }
+        return null;
+    }
+
+    for (var i = 0; exportSourceObjectIds && i < exportSourceObjectIds.length; i++) {
+        _pushUniqueId(out, seen, exportSourceObjectIds[i]);
+    }
+
+    for (var vi = 0; visualSourceObjectIds && vi < visualSourceObjectIds.length; vi++) {
+        _pushUniqueId(out, seen, visualSourceObjectIds[vi]);
+    }
+
+    for (var si = 0; sourceObjectIds && si < sourceObjectIds.length; si++) {
+        var sourceId = Number(sourceObjectIds[si]);
+        if (isNaN(sourceId)) continue;
+        var src = sourceInfo(sourceId);
+        if (!src || isTextSource(src)) continue;
+        if (isPlacedGraphicLeaf(src)) {
+            var carrierId = nearestVisualCarrierId(sourceId);
+            _pushUniqueId(out, seen,
+                    carrierId !== null && carrierId !== undefined ? carrierId : sourceId);
+            continue;
+        }
+        if (src.hasPlacedVisual === true
+                || src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasCandidateVectorPaint === true) {
+            _pushUniqueId(out, seen, sourceId);
+        }
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(hiddenSourceObjectIds, exportSourceObjectIds, sourceById) {
+    var exportSet = _objectPlanSourceSetMembership(exportSourceObjectIds || []);
+    var out = [];
+    var seen = {};
+
+    function sourceInfo(sourceId) {
+        return sourceById ? sourceById[String(sourceId)] || null : null;
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function isPlacedGraphicLeaf(src) {
+        var kind = sourceKind(src);
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    function hasExportedAncestor(sourceId) {
+        var current = sourceInfo(sourceId);
+        var guard = 0;
+        while (current && guard++ < 64) {
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return false;
+            if (exportSet[String(parentId)] === true) return true;
+            current = sourceInfo(parentId);
+        }
+        return false;
+    }
+
+    for (var i = 0; hiddenSourceObjectIds && i < hiddenSourceObjectIds.length; i++) {
+        var sourceId = Number(hiddenSourceObjectIds[i]);
+        if (isNaN(sourceId)) continue;
+        var src = sourceInfo(sourceId);
+        if (isPlacedGraphicLeaf(src) && hasExportedAncestor(sourceId)) continue;
+        _pushUniqueId(out, seen, sourceId);
+    }
+    return _sortedNumericIds(out);
 }
 
 function _objectPlanMemberIds(plans) {
@@ -2274,7 +2365,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         layoutOnlyInlineSlot: bundle.layoutOnlyInlineSlot === true,
         sourceInlineFlow: bundle.sourceInlineFlow === true,
         inlineCompositeLayoutDescendant: bundle.inlineCompositeLayoutDescendant === true,
-        inlineAnchorSourceObjectId: bundle.sourceInlineFlow === true
+        inlineAnchorSourceObjectId: placement === "INLINE"
                 ? (bundle.inlineAnchorSourceObjectId || null)
                 : null,
         inlineSourceTreeClosed: inlineSourceTreeClosed,

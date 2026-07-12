@@ -1718,6 +1718,70 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             return copy;
         }
 
+        function pageBackgroundPlaneExportRoots(items) {
+            if (!isPageBackgroundPlane) return null;
+            if (!exportIds || exportIds.length < 2) return null;
+            var roots = [];
+            var seenRoots = {};
+            var pageIndex = null;
+            try { pageIndex = page && page.documentOffset !== undefined ? Number(page.documentOffset) : null; } catch (ePageIndex) {}
+
+            function sourceInfo(sourceId) {
+                return sourceInfoById ? sourceInfoById[String(sourceId)] || null : null;
+            }
+
+            function sourceParentBoundary(src) {
+                if (!src) return true;
+                var parentKind = "";
+                try { parentKind = String(src.parentKind || ""); } catch (eParentKind) {}
+                return parentKind === "Page"
+                        || parentKind === "Spread"
+                        || parentKind === "Document"
+                        || parentKind === "Story";
+            }
+
+            function topPageLocalAncestorId(sourceId) {
+                var src = sourceInfo(sourceId);
+                if (!src) return sourceId;
+                if (pageIndex !== null
+                        && src.pageIndex !== null && src.pageIndex !== undefined
+                        && Number(src.pageIndex) !== pageIndex) {
+                    return null;
+                }
+                var topId = src.id !== undefined && src.id !== null ? src.id : sourceId;
+                var current = src;
+                var guard = 0;
+                while (current && guard++ < 64) {
+                    if (sourceParentBoundary(current)) break;
+                    var parentId = current.parentId;
+                    if (parentId === null || parentId === undefined || String(parentId) === "") break;
+                    var parent = sourceInfo(parentId);
+                    if (!parent) break;
+                    if (pageIndex !== null
+                            && parent.pageIndex !== null && parent.pageIndex !== undefined
+                            && Number(parent.pageIndex) !== pageIndex) {
+                        break;
+                    }
+                    topId = parent.id !== undefined && parent.id !== null ? parent.id : parentId;
+                    current = parent;
+                }
+                return topId;
+            }
+
+            for (var ri = 0; ri < exportIds.length; ri++) {
+                var rootId = topPageLocalAncestorId(exportIds[ri]);
+                if (rootId === null || rootId === undefined) continue;
+                var key = String(rootId);
+                if (seenRoots[key]) continue;
+                var rootItem = itemById ? itemById[key] : null;
+                if (!rootItem) continue;
+                seenRoots[key] = true;
+                roots.push(rootItem);
+            }
+            if (roots.length < 1) return null;
+            return _decoTopmostRenderRoots(roots);
+        }
+
         var dups = [];
         var tempGroup = null;
         var savedOutOfScope = [];
@@ -1727,9 +1791,12 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         // duplicate/group recursion. Decoration-group composites still use the
         // defensive topmost-root filter.
         var _perfRootPrepStartedAt = _decoPerfNow();
-        var exportRootSourceItems = isPageTextlessGraphicGroup
-                ? sourceItems
-                : _decoTopmostRenderRoots(sourceItems);
+        var pagePlaneRoots = pageBackgroundPlaneExportRoots(sourceItems);
+        var exportRootSourceItems = pagePlaneRoots && pagePlaneRoots.length > 0
+                ? pagePlaneRoots
+                : (isPageTextlessGraphicGroup
+                    ? sourceItems
+                    : _decoTopmostRenderRoots(sourceItems));
         var ordered = sortSourceItemsByPlannedZOrder(exportRootSourceItems);
         _perfRootPrepMs += _decoPerfNow() - _perfRootPrepStartedAt;
         var groupCreateErrors = [];
@@ -1943,8 +2010,17 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 var pageIntersection = null;
                 try { pageIntersection = _decoBoundsIntersection(exportSourceBounds, page.bounds); } catch (eIntersect) {}
                 if (pageIntersection && _decoBoundsDiffer(exportSourceBounds, pageIntersection, 0.01)) {
-                    exportCropSourceBounds = arrCopy(exportSourceBounds);
-                    visibleExportBounds = pageIntersection;
+                    if (isPageBackgroundPlane) {
+                        // Page-background composites can legitimately originate from a spread-wide
+                        // source set. HWPX crop metadata is not a reliable substitute for preserving
+                        // the exported canvas aspect ratio; placing the spread PNG into a single-page
+                        // bounds squashes it horizontally. Keep the full exported canvas bounds and let
+                        // the page viewport clip the off-page part.
+                        visibleExportBounds = arrCopy(exportSourceBounds);
+                    } else {
+                        exportCropSourceBounds = arrCopy(exportSourceBounds);
+                        visibleExportBounds = pageIntersection;
+                    }
                 }
                 exportBounds = arrCopy(visibleExportBounds);
                 _toPageRelativeBounds(exportBounds, page);
@@ -1961,7 +2037,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             // figures in HWPX. Source-union bounds stay as fallback only when the
             // export canvas bounds could not be recovered from the rendered group.
             var bounds = exportBounds || (boundsInfo ? boundsInfo.bounds : null);
-            var cropSourceBounds = exportCropSourceBounds;
+            var cropSourceBounds = exportCropSourceBounds
+                    || (slotPlan.cropSourceBounds ? arrCopy(slotPlan.cropSourceBounds) : null);
 	            if (!cropSourceBounds && !exportBounds && boundsInfo) {
 	                cropSourceBounds = boundsInfo.cropSourceBounds || null;
 	            }

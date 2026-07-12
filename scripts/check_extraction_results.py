@@ -14,6 +14,7 @@ import sys
 
 
 DIRECT_STRATEGIES = {
+    "applied_master_snapshot_candidate",
     "candidate_direct",
     "candidate_source_set_direct",
     "candidate_source_set_contains_master_cluster",

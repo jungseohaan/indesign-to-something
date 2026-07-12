@@ -200,11 +200,11 @@ diagnostics only. They do not create four HWPX execution layers.
 
 The executable HWPX policy has exactly three strata:
 
-1. `BACKGROUND_GRAPHIC`: an explicit page background plane ObjectPlan assembled
-   from page/floating source-connected `SHELL_SLOT` visual components. It is
-   never inferred from bounds, layer name, color, semantic role, or low z-depth
-   alone, and it must not include `TEXT_SLOT`, `CONTENT_VISUAL_SLOT`,
-   `TABLE_STYLE_SLOT`, or story-flow inline material.
+1. `BACKGROUND_GRAPHIC`: an explicit page-root textless plane ObjectPlan
+   assembled from page/floating source-connected non-text visual components. It
+   is never inferred from bounds, layer name, color, semantic role, or low
+   z-depth alone, and it must not include `TEXT_SLOT`, `TABLE_STYLE_SLOT`,
+   `COMPLETE_PNG` text owners, or story-flow inline material.
 2. `TEXTLESS_IMAGE_GROUP`: all ordinary non-text source graphics, including
    historical decoration/content roles, table/cell decoration, masks, charts,
    photos, shells, badges, and master page graphic fragments.

@@ -229,12 +229,12 @@ is an explicit page background plane:
 `slotRole=page_background_plane` and `compositeRole=page_background_plane`.
 The executor-facing action may be the existing extracted text-shell path or a
 dedicated page-plane action, but the ownership contract is the same: the plane
-is assembled from Stage 1 source-connected `SHELL_SLOT` visual components.
+is assembled from Stage 1 source-connected page/floating non-text visual
+components.
 
-A page background plane may include only component members that satisfy all of
-the following source-owned facts:
+A page-root background/textless plane may include only component members that
+satisfy all of the following source-owned facts:
 
-- `ownershipSlot=SHELL_SLOT` or `slotRole` equivalent to a shell slot;
 - `placement=FLOATING` and `coordinateSpace=PAGE`;
 - visible source proof exists through `visualSourceObjectIds` or
   `exportSourceObjectIds`;
@@ -243,7 +243,6 @@ the following source-owned facts:
 The following source slots are always excluded from a page background plane:
 
 - `TEXT_SLOT`;
-- `CONTENT_VISUAL_SLOT`;
 - `TABLE_STYLE_SLOT`;
 - `COMPLETE_PNG` or `OWNED_BY_PNG` text owners;
 - story-flow inline source objects, even when their pixels are obtained through
