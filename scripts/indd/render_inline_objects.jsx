@@ -151,24 +151,11 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             if (seen[key]) continue;
             seen[key] = true;
             try {
-                var itemSaved = hideOneTextFrameContent(textItem, { forceHidden: true });
+                var itemSaved = hideOneTextFrameContent(textItem, {
+                    preserveFrameVisual: true
+                });
                 if (itemSaved) saved.push(itemSaved);
             } catch (eHide) {}
-            try {
-                if (!itemSaved && textItem.parent && textItem.parent.visible !== undefined) {
-                    var parentKey = textItemKey(textItem.parent) || ("parent:" + String(fi));
-                    if (!seen[parentKey]) {
-                        seen[parentKey] = true;
-                        var wasParentVisible = textItem.parent.visible;
-                        textItem.parent.visible = false;
-                        saved.push({
-                            tf: textItem.parent,
-                            mode: "visible",
-                            wasVisible: wasParentVisible
-                        });
-                    }
-                }
-            } catch (eHideParent) {}
         }
         return saved;
     }
