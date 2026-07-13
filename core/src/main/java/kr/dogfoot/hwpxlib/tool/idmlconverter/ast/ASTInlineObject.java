@@ -84,6 +84,10 @@ public class ASTInlineObject extends ASTInlineItem {
     // (도표/삽화 PNG)는 story 흐름에는 남아도 문단 leading을 이미지 높이로 키우지 않는다.
     private boolean affectsLineSpacing = true;
 
+    // true이면 Stage 1에서 visual/text를 모두 page plane 등에 양보한 inline source의
+    // 흐름 예약용 객체다. HWPX 출력은 visible graphic이 아니라 layout-only carrier로만 실행한다.
+    private boolean layoutOnlyInlineSlot;
+
     // Stage 1 ownership plan execution hints. Inline writers must not discard
     // source z/layer because inline shells can overlap page-positioned carriers.
     private int plannedZOrder = Integer.MIN_VALUE;
@@ -245,6 +249,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public boolean affectsLineSpacing() { return affectsLineSpacing; }
     public void affectsLineSpacing(boolean v) { this.affectsLineSpacing = v; }
+
+    public boolean layoutOnlyInlineSlot() { return layoutOnlyInlineSlot; }
+    public void layoutOnlyInlineSlot(boolean v) { this.layoutOnlyInlineSlot = v; }
 
     public int plannedZOrder() { return plannedZOrder; }
     public void plannedZOrder(int v) { this.plannedZOrder = v; }

@@ -1033,6 +1033,11 @@ public class HwpxTextBoxBuilder {
         long w = obj.width() > 0 ? obj.width() : 100;
         long h = obj.height() > 0 ? obj.height() : 100;
 
+        if (isLayoutOnlySpacer(obj)) {
+            addLayoutOnlySpacerTable(para, w, h);
+            return;
+        }
+
         String itemId = getOrCreateSpacerImage();
 
         Run run = para.addNewRun();
@@ -1129,6 +1134,88 @@ public class HwpxTextBoxBuilder {
         pic.img().binaryItemIDRefAnd(itemId)
                 .brightAnd(0).contrastAnd(0)
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
+    }
+
+    private void addLayoutOnlySpacerTable(Para para, long w, long h) {
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+
+        String borderFillId = createTransparentTextFrameBorderFill();
+        Table table = run.addNewTable();
+        table.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(0)
+                .numberingTypeAnd(NumberingType.TABLE)
+                .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        table.pageBreakAnd(TablePageBreak.CELL)
+                .repeatHeaderAnd(false)
+                .rowCntAnd((short) 1)
+                .colCntAnd((short) 1)
+                .cellSpacingAnd(0)
+                .borderFillIDRefAnd(borderFillId)
+                .noAdjustAnd(false);
+
+        table.createSZ();
+        table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        table.createPos();
+        table.pos().treatAsCharAnd(true)
+                .affectLSpacingAnd(true)
+                .flowWithTextAnd(true)
+                .allowOverlapAnd(false)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PARA)
+                .horzRelToAnd(HorzRelTo.COLUMN)
+                .vertAlignAnd(VertAlign.BOTTOM)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(0L)
+                .horzOffset(0L);
+
+        table.createOutMargin();
+        table.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        table.createInMargin();
+        table.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        Tr tr = table.addNewTr();
+        Tc tc = tr.addNewTc();
+        tc.nameAnd("")
+                .headerAnd(false)
+                .hasMarginAnd(true)
+                .protectAnd(false)
+                .editableAnd(false)
+                .dirtyAnd(false)
+                .borderFillIDRefAnd(borderFillId);
+        tc.createCellAddr();
+        tc.cellAddr().colAddrAnd((short) 0).rowAddrAnd((short) 0);
+        tc.createCellSpan();
+        tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
+        tc.createCellSz();
+        tc.cellSz().widthAnd(w).heightAnd(h);
+        tc.createCellMargin();
+        tc.cellMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        tc.createSubList();
+        SubList subList = tc.subList();
+        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+                .lineWrapAnd(LineWrapMethod.BREAK)
+                .vertAlignAnd(VerticalAlign2.TOP)
+                .linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+        paragraphBuilder.addEmptySubListPara(subList, 1);
+    }
+
+    private boolean isLayoutOnlySpacer(ASTInlineObject obj) {
+        if (obj == null) return false;
+        if (obj.layoutOnlyInlineSlot()) return true;
+        if (obj.kind() != ASTInlineObject.ObjectKind.SPACER_RECT) return false;
+        if (!"None".equals(obj.textWrapMode())) return false;
+        return obj.fillColor() == null
+                && obj.strokeColor() == null
+                && obj.imageFillData() == null;
     }
 
     /** 1x1 투명 PNG를 한 번만 생성하여 재사용 */
