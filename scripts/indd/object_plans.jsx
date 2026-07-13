@@ -37,6 +37,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     }
     var _timingStartedAt = _objectPlanNowMs();
     var sourceById = _objectPlanSourceInfoById(sourceItems);
+    var childrenByParentId = _objectPlanSourceChildrenByParentId(sourceItems);
     _recordObjectPlanTiming("sourceIndex", _timingStartedAt, {
         sourceItemCount: sourceItems ? sourceItems.length : 0
     });
@@ -114,6 +115,13 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var layoutOnlyInlineSlots =
+            _appendLayoutOnlyInlineSlotObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendLayoutOnlyInlineSlotPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        createdPlanCount: layoutOnlyInlineSlots.summary.createdPlanCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var pageRootTextlessPlaneInventory = {
         summary: {
             createdPlaneCount: 0,
@@ -174,6 +182,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     summary.visibleVisualSourceResolution = visibleVisualSourceResolution.summary;
     summary.inlineCompletePngTextOwnerResolution = inlineCompletePngTextOwnerResolution.summary;
     summary.inlineVisualInventory = inlineVisualInventory.summary;
+    summary.layoutOnlyInlineSlots = layoutOnlyInlineSlots.summary;
     summary.pageRootTextlessPlaneInventory = pageRootTextlessPlaneInventory.summary;
     summary.pageLocalVisibleSourceResolution = pageLocalVisibleSourceResolution.summary;
     summary.rawClippedImageVisualSourceResolution = rawClippedImageVisualSourceResolution.summary;
@@ -534,6 +543,248 @@ function _objectPlanEmptyInlineTextFrameHasVisibleFramePaint(src) {
     if (!src || String(src.kind || "") !== "TextFrame") return false;
     if (src.storyAnchorPlacement !== "INLINE" && src.storyTextInlineSlot !== true) return false;
     if (src.hasVisibleFill === true || src.hasVisibleStroke === true) return true;
+    return false;
+}
+
+function _appendLayoutOnlyInlineSlotObjectPlans(objectPlans, sourceItems) {
+    var summary = {
+        createdPlanCount: 0,
+        expandedFootprintCount: 0,
+        skippedPlannedCount: 0,
+        skippedTextFrameCount: 0,
+        skippedInvalidBoundsCount: 0,
+        createdObjectPlanIds: []
+    };
+    if (!objectPlans || !sourceItems) return { summary: summary };
+    var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
+    var sourceById = _objectPlanSourceInfoById(sourceItems);
+    var childrenByParentId = _objectPlanSourceChildrenByParentId(sourceItems);
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!_objectPlanIsDirectInlineLayoutSource(src)) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        if (_objectPlanDecisionIndexHasVisualDecision(decisionIndex, id)
+                || _objectPlanDecisionIndexHasTextDecision(decisionIndex, id)) {
+            summary.skippedPlannedCount++;
+            continue;
+        }
+        if (String(src.kind || "") === "TextFrame") {
+            summary.skippedTextFrameCount++;
+            continue;
+        }
+        if (!_objectPlanHasUsableInlineLayoutBounds(src)) {
+            summary.skippedInvalidBoundsCount++;
+            continue;
+        }
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? Number(src.pageIndex) : -1;
+        if (isNaN(pageIndex) || pageIndex < 0) continue;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        var footprint = _objectPlanLayoutOnlyInlineFootprint(
+                src, sourceItems, sourceById, childrenByParentId);
+        if (footprint && footprint.expanded === true) summary.expandedFootprintCount++;
+        var plan = _layoutOnlyInlineSlotObjectPlan(src, id, pageIndex, zOrder, footprint);
+        objectPlans.push(plan);
+        _addObjectPlanToDecisionIndex(decisionIndex, plan);
+        summary.createdPlanCount++;
+        summary.createdObjectPlanIds.push(plan.objectPlanId);
+    }
+    return { summary: summary };
+}
+
+function _objectPlanIsDirectInlineLayoutSource(src) {
+    if (!src) return false;
+    if (src.visible === false) return false;
+    if (src.hiddenLayer === true || src.nonprinting === true) return false;
+    return src.storyTextInlineSlot === true
+            || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+            || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION";
+}
+
+function _objectPlanHasUsableInlineLayoutBounds(src) {
+    var b = src && src.bounds ? src.bounds : null;
+    if (!b || b.length < 4) return false;
+    var h = Math.abs(Number(b[2]) - Number(b[0]));
+    var w = Math.abs(Number(b[3]) - Number(b[1]));
+    return !isNaN(h) && !isNaN(w) && h > 0 && w > 0;
+}
+
+function _objectPlanLayoutOnlyInlineFootprint(src, sourceItems, sourceById, childrenByParentId) {
+    var anchorBounds = src && src.bounds ? _objectPlanNormalizeBounds(src.bounds) : null;
+    if (!anchorBounds) {
+        return {
+            bounds: src ? src.bounds : null,
+            sourceObjectIds: [],
+            expanded: false,
+            reason: "anchor_bounds_unavailable"
+        };
+    }
+    var anchorArea = _objectPlanArea(anchorBounds);
+    if (anchorArea <= 0) {
+        return {
+            bounds: anchorBounds,
+            sourceObjectIds: [],
+            expanded: false,
+            reason: "anchor_bounds_empty"
+        };
+    }
+    var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? Number(src.pageIndex) : -1;
+    var best = null;
+    var bestScore = 0;
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var candidate = sourceItems[i];
+        if (!_objectPlanIsLayoutFootprintClusterCandidate(src, candidate, sourceById)) continue;
+        var cb = _objectPlanNormalizeBounds(candidate.bounds);
+        if (!cb) continue;
+        var overlap = _objectPlanOverlapArea(anchorBounds, cb);
+        if (overlap <= 0) continue;
+        var candidateArea = _objectPlanArea(cb);
+        if (candidateArea <= 0) continue;
+        var overlapRatio = overlap / Math.min(anchorArea, candidateArea);
+        if (overlapRatio < 0.55) continue;
+        var areaRatio = candidateArea / anchorArea;
+        if (areaRatio > 8.0) continue;
+        var pageIndex2 = candidate.pageIndex !== undefined && candidate.pageIndex !== null
+                ? Number(candidate.pageIndex) : -1;
+        if (pageIndex2 !== pageIndex) continue;
+        var kindScore = String(candidate.kind || candidate.type || "") === "Group" ? 1000 : 0;
+        var score = kindScore + (overlapRatio * 100) - Math.abs(areaRatio - 1.5);
+        if (!best || score > bestScore) {
+            best = candidate;
+            bestScore = score;
+        }
+    }
+    if (!best) {
+        return {
+            bounds: anchorBounds,
+            sourceObjectIds: [],
+            expanded: false,
+            reason: "no_overlapping_page_cluster"
+        };
+    }
+    var bestBounds = _objectPlanNormalizeBounds(best.bounds);
+    var union = _objectPlanUnionTwoBounds(anchorBounds, bestBounds);
+    var flowClearance = _objectPlanLayoutFootprintFlowClearance(
+            best, sourceById, childrenByParentId);
+    if (union && flowClearance > 0) union[2] += flowClearance;
+    var bestId = _objectPlanNumericSourceId(best);
+    return {
+        bounds: union || anchorBounds,
+        sourceObjectIds: bestId === null ? [] : [bestId],
+        expanded: !!union && _objectPlanBoundsDifferent(union, anchorBounds, 0.01),
+        reason: "overlapping_page_level_visual_cluster",
+        overlapRatio: _objectPlanOverlapArea(anchorBounds, bestBounds) / Math.min(anchorArea, _objectPlanArea(bestBounds)),
+        clusterBounds: bestBounds,
+        flowClearance: flowClearance
+    };
+}
+
+function _objectPlanIsLayoutFootprintClusterCandidate(anchor, candidate, sourceById) {
+    if (!anchor || !candidate || candidate.id === null || candidate.id === undefined) return false;
+    if (String(anchor.id) === String(candidate.id)) return false;
+    if (candidate.visible === false || candidate.hiddenLayer === true || candidate.nonprinting === true) return false;
+    if (candidate.hiddenByParent === true) return false;
+    if (_objectPlanIsDirectInlineLayoutSource(candidate)) return false;
+    if (String(candidate.storyAnchorPlacement || "").toUpperCase() === "INLINE") return false;
+    if (candidate.isInline === true) return false;
+    if (!_objectPlanHasUsableInlineLayoutBounds(candidate)) return false;
+    var kind = String(candidate.kind || candidate.type || "");
+    if (kind === "TextFrame") return false;
+    var parentKind = String(candidate.parentKind || "").toLowerCase();
+    if (candidate.parentId !== null
+            && candidate.parentId !== undefined
+            && String(candidate.parentId) !== ""
+            && parentKind !== "spread"
+            && parentKind !== "page") {
+        return false;
+    }
+    if (kind === "Group") return true;
+    if (candidate.hasPlacedVisual === true || candidate.hasVisibleFill === true || candidate.hasVisibleStroke === true) {
+        return true;
+    }
+    if (candidate.childIds && candidate.childIds.length > 0) return true;
+    return false;
+}
+
+function _objectPlanNormalizeBounds(bounds) {
+    if (!bounds || bounds.length < 4) return null;
+    var top = Number(bounds[0]);
+    var left = Number(bounds[1]);
+    var bottom = Number(bounds[2]);
+    var right = Number(bounds[3]);
+    if (isNaN(top) || isNaN(left) || isNaN(bottom) || isNaN(right)) return null;
+    return [
+        Math.min(top, bottom),
+        Math.min(left, right),
+        Math.max(top, bottom),
+        Math.max(left, right)
+    ];
+}
+
+function _objectPlanUnionTwoBounds(a, b) {
+    a = _objectPlanNormalizeBounds(a);
+    b = _objectPlanNormalizeBounds(b);
+    if (!a) return b;
+    if (!b) return a;
+    return [
+        Math.min(a[0], b[0]),
+        Math.min(a[1], b[1]),
+        Math.max(a[2], b[2]),
+        Math.max(a[3], b[3])
+    ];
+}
+
+function _objectPlanBoundsDifferent(a, b, eps) {
+    a = _objectPlanNormalizeBounds(a);
+    b = _objectPlanNormalizeBounds(b);
+    if (!a || !b) return false;
+    eps = eps || 0;
+    for (var i = 0; i < 4; i++) {
+        if (Math.abs(a[i] - b[i]) > eps) return true;
+    }
+    return false;
+}
+
+function _objectPlanNumericSourceId(src) {
+    if (!src || src.id === null || src.id === undefined) return null;
+    var n = Number(src.id);
+    return isNaN(n) ? null : n;
+}
+
+function _objectPlanSourceChildrenByParentId(sourceItems) {
+    var out = {};
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.parentId === null || src.parentId === undefined || String(src.parentId) === "") continue;
+        var key = String(src.parentId);
+        if (!out[key]) out[key] = [];
+        out[key].push(src);
+    }
+    return out;
+}
+
+function _objectPlanLayoutFootprintFlowClearance(cluster, sourceById, childrenByParentId) {
+    if (!_objectPlanClusterContainsKind(cluster, sourceById, childrenByParentId, "TextFrame", 0)) return 0;
+    // HWPX TOP_AND_BOTTOM inline carrier reserves the object box, but the
+    // original story composition also has a line-leading gap below the
+    // inline placeholder paragraph.  Use one small text-leading clearance
+    // for page-level clusters that include editable text labels/captions.
+    return 8.0;
+}
+
+function _objectPlanClusterContainsKind(src, sourceById, childrenByParentId, kind, depth) {
+    if (!src || depth > 8) return false;
+    if (String(src.kind || src.type || "") === kind) return true;
+    var childIds = src.childIds || [];
+    for (var i = 0; i < childIds.length; i++) {
+        var child = sourceById ? sourceById[String(childIds[i])] : null;
+        if (_objectPlanClusterContainsKind(child, sourceById, childrenByParentId, kind, depth + 1)) return true;
+    }
+    var parentId = src.id === null || src.id === undefined ? null : String(src.id);
+    var children = parentId === null || !childrenByParentId ? null : childrenByParentId[parentId];
+    for (var j = 0; children && j < children.length; j++) {
+        if (_objectPlanClusterContainsKind(children[j], sourceById, childrenByParentId, kind, depth + 1)) return true;
+    }
     return false;
 }
 
@@ -1562,6 +1813,86 @@ function _emptyInlineTextFrameVisualObjectPlan(src, id, pageIndex, zOrder) {
         policyLayer: "CONTENT",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
         migrationStatus: "READY_EXACT_CLUSTER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
+        executable: true,
+        required: true
+    };
+}
+
+function _layoutOnlyInlineSlotObjectPlan(src, id, pageIndex, zOrder, footprint) {
+    var sourceIds = _internSourceSetIds([id]);
+    var sourceSetId = _sourceSetId(sourceIds);
+    var layoutBounds = footprint && footprint.bounds ? footprint.bounds : (src.bounds || null);
+    var layoutFootprintSourceObjectIds = _internSourceSetIds(
+            footprint && footprint.sourceObjectIds ? footprint.sourceObjectIds : []);
+    return {
+        objectPlanId: "objectPlan.layout_only_inline_slot." + String(id),
+        bundleId: "inline.layoutOnlySlot." + String(id),
+        candidateId: _candidateId("pass.inline_objects", id, pageIndex) + ".layout_only",
+        passId: "pass.inline_objects",
+        pageIndex: pageIndex,
+        kind: src.kind || "InlineObject",
+        unit: "INLINE_OBJECT",
+        mode: "LAYOUT_ONLY",
+        candidatePurpose: "INLINE_LAYOUT_SLOT",
+        compositeRole: "page_plane_absorbed_inline_layout_slot",
+        slotRole: "layout_only_inline_slot",
+        layoutOnlyInlineSlot: true,
+        layoutFootprintExpanded: footprint && footprint.expanded === true,
+        layoutFootprintReason: footprint && footprint.reason ? footprint.reason : "anchor_bounds",
+        layoutFootprintSourceObjectIds: layoutFootprintSourceObjectIds,
+        layoutFootprintClusterBounds: footprint && footprint.clusterBounds ? footprint.clusterBounds : null,
+        layoutFootprintOverlapRatio: footprint && footprint.overlapRatio !== undefined
+                ? footprint.overlapRatio : null,
+        layoutFootprintFlowClearance: footprint && footprint.flowClearance !== undefined
+                ? footprint.flowClearance : null,
+        sourceInlineFlow: true,
+        inlineCompositeLayoutDescendant: false,
+        inlineAnchorSourceObjectId: id,
+        inlineSourceTreeClosed: true,
+        inlineFlowSourceObjectIds: sourceIds,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: id,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: sourceSetId,
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: _sourceSetId([]),
+        exportSourceSetId: _sourceSetId([]),
+        hiddenSourceSetId: _sourceSetId([]),
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: sourceIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: {},
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: false,
+        clusterHasTextFrame: false,
+        clusterHasPlacedContent: src.hasPlacedVisual === true,
+        clusterHasVisualSource: false,
+        visualSourceObjectIds: [],
+        styleSourceObjectIds: [],
+        ownedTextFrameIds: [],
+        exportSourceObjectIds: [],
+        hiddenVisualSourceObjectIds: [],
+        excludedInlineSourceObjectIds: [],
+        materialization: "HWPX_TEXT",
+        textAction: "DROP_TEXT",
+        visualAction: "DROP_VISUAL",
+        placement: "INLINE",
+        coordinateSpace: "STORY_FLOW",
+        visualLayer: "CONTENT_VISUAL",
+        zOrder: zOrder,
+        reason: "page_plane_absorbed_inline_anchor_layout_slot",
+        bounds: layoutBounds,
+        renderSourceBounds: layoutBounds,
+        cropSourceBounds: layoutBounds,
+        ownershipSlot: "CONTENT_VISUAL_SLOT",
+        policyLayer: "CONTENT",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_LAYOUT_ONLY_INLINE_SLOT",
         migrationBlocker: "NONE",
         migrationBlockerDetail: {},
         contractStatus: "READY_FOR_STAGE1_IMPORT",

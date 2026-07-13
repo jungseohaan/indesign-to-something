@@ -3968,15 +3968,19 @@ public class InlineFrameHandler {
         if (ctx == null || anchoredObjectId < 0) return null;
         ObjectPlan plan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
         if (plan == null || plan.bounds == null || plan.bounds.length < 4) return null;
-        double w = Math.abs(plan.bounds[3] - plan.bounds[1]) * ctx.scaleFactor;
-        double h = Math.abs(plan.bounds[2] - plan.bounds[0]) * ctx.scaleFactor;
+        // ObjectPlan bounds are already normalized to InDesign points.  Applying
+        // ctx.scaleFactor here turns points into millimeter-sized HWPX spacers.
+        double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
+        double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
         if (w <= 0 && h <= 0) return null;
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
         obj.width(CoordinateConverter.pointsToHwpunits(Math.max(0.1, w)));
         obj.height(CoordinateConverter.pointsToHwpunits(Math.max(0.1, h)));
+        obj.textWrapMode("None");
         obj.keepInline(true);
+        obj.layoutOnlyInlineSlot(true);
         return obj;
     }
 
