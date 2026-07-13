@@ -363,7 +363,13 @@ public class StoryLoader {
 
                 if (isStandaloneBtArrowGlyphRun(run) && !formulaClusterRun) {
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
-                    para.addItem(createStandaloneArrowRun(ctx, run, defaultRR, sc));
+                    // 화살표 글리프가 여러 IDML 런으로 쪼개져 들어오기도 한다
+                    // (실측: BT화살표 런이 "@C" 하나가 아니라 "@" + "C" 로 분리).
+                    // 각각에 화살표를 넣으면 "→→" 가 된다. 직전 항목이 이미 화살표면
+                    // 이 런은 같은 글리프의 나머지 조각이므로 버린다.
+                    if (!lastItemIsArrow(para)) {
+                        para.addItem(createStandaloneArrowRun(ctx, run, defaultRR, sc));
+                    }
                     continue;
                 }
 
@@ -885,8 +891,14 @@ public class StoryLoader {
             // 하류에서는 폰트가 이미 벗겨져 있어(함초롬돋움) 화살표인지 알 수 없고,
             // "@C" 가 표 셀에 그대로 노출된다(반응식을 표로 조판한 레이아웃).
             boolean arrowRun = BTFontGlyphMap.isBTArrowFont(run.fontFamily());
+            boolean arrowEmitted = false;
             for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(text, run, para, options)) {
                 if (arrowRun) {
+                    // convertRunText 는 런 하나를 여러 ASTTextRun 으로 쪼갤 수 있다.
+                    // 각각에 화살표를 넣으면 "→→" 가 된다(실측: 화살표 단독 셀 8곳).
+                    // → 화살표는 딱 한 번만 내보내고, 나머지 조각은 버린다.
+                    if (arrowEmitted) continue;
+                    arrowEmitted = true;
                     textRun.text("→");
                     textRun.fontFamily(null);
                     textRun.fontStyle(null);
@@ -933,6 +945,21 @@ public class StoryLoader {
         // 화살표 자리에 글자 C 가 그대로 박혔다("CaO+H₂O C Ca(OH)₂").
         String cleaned = text.trim();
         return !cleaned.isEmpty();
+    }
+
+    /**
+     * 문단의 마지막 항목이 이미 화살표 텍스트 런인가.
+     *
+     * <p>BT화살표 글리프가 여러 IDML 런으로 쪼개져 들어오는 경우가 있어
+     * (실측: "@C" 하나가 아니라 "@" + "C" 로 분리), 각 조각마다 화살표를 넣으면
+     * "→→" 가 된다. 중복 삽입을 막는 데 쓴다.
+     */
+    private static boolean lastItemIsArrow(ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().isEmpty()) return false;
+        ASTInlineItem last = para.items().get(para.items().size() - 1);
+        if (!(last instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) last).text();
+        return text != null && "→".equals(text.trim());
     }
 
     private static ASTTextRun createStandaloneArrowRun(

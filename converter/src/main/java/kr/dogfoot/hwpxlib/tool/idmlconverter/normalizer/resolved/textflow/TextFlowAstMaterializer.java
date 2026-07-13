@@ -160,8 +160,14 @@ public final class TextFlowAstMaterializer {
             boolean arrowRun = textAtom.sourceRun != null
                     && BTFontGlyphMap.isBTArrowFont(textAtom.sourceRun.fontFamily());
 
+            boolean arrowEmitted = false;
             for (ASTTextRun run : runs) {
                 if (arrowRun) {
+                    // convertRunText 는 런 하나를 여러 ASTTextRun 으로 쪼갤 수 있다.
+                    // 각각에 화살표를 넣으면 "→→" 가 된다(실측: 화살표 단독 셀 8곳).
+                    // → 화살표는 딱 한 번만 내보내고, 나머지 조각은 버린다.
+                    if (arrowEmitted) continue;
+                    arrowEmitted = true;
                     run.text("→");
                     run.fontFamily(null);
                     run.fontStyle(null);
