@@ -334,8 +334,10 @@ function _objectPlanUsesLowestVisualSourceZOrder(plan) {
     if (!plan) return false;
     if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
     return plan.slotRole === "shell_slot_only"
+            || plan.slotRole === "inline_editable_text_shell_composite"
             || plan.slotRole === "direct_child_shell_slot"
             || plan.compositeRole === "table_carrier_sibling_decoration"
+            || plan.compositeRole === "inline_editable_text_shell_composite"
             || plan.compositeRole === "direct_child_shell_slot"
             || plan.passId === "pass.decoration_groups"
             || plan.passId === "pass.editable_textframe_visual_shells";
@@ -4218,7 +4220,7 @@ function _objectPlanTextOwnerPriority(plan) {
 }
 
 function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
-    bundle = _normalizeObjectPlanBundle(bundle || {});
+    bundle = _normalizeObjectPlanBundle(bundle || {}, sourceById);
     var textAction = _objectPlanTextAction(bundle, sourceById);
     var visualAction = _objectPlanVisualAction(bundle, sourceById);
     var placement = _objectPlanPlacement(bundle);
@@ -4325,7 +4327,10 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     };
 }
 
-function _normalizeObjectPlanBundle(bundle) {
+function _normalizeObjectPlanBundle(bundle, sourceById) {
+    if (_objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById)) {
+        return _inlineEditableTextShellCompositeBundle(bundle, sourceById);
+    }
     if (_objectPlanBundleIsDeclaredTextlessShellComposite(bundle)) {
         return _declaredTextlessShellCompositeBundle(bundle);
     }
@@ -4336,6 +4341,127 @@ function _normalizeObjectPlanBundle(bundle) {
         return _closedPlacedContentCarrierBundle(bundle);
     }
     return bundle || {};
+}
+
+function _objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.inline_objects") return false;
+    if (_objectPlanPlacement(bundle) !== "INLINE") return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) return false;
+    var visualIds = _objectPlanInlineEditableTextShellVisualIds(bundle, sourceById);
+    return visualIds.length > 0;
+}
+
+function _inlineEditableTextShellCompositeBundle(bundle, sourceById) {
+    var normalized = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) normalized[key] = bundle[key];
+    }
+    var rootIds = _objectPlanInlineEditableTextShellRootIds(bundle);
+    var expandedIds = _objectPlanInlineRootExpandedSourceIds(rootIds, sourceById);
+    var sourceIds = _sourceIdsUnion(bundle.sourceObjectIds || [], expandedIds);
+    var ownedTextFrameIds = _sourceIdsUnion(
+            bundle.ownedTextFrameIds || [],
+            _objectPlanTextFrameSourceIds(sourceIds, sourceById));
+    var visualIds = _objectPlanNonTextVisualSourceIds(
+            sourceIds, ownedTextFrameIds, sourceById);
+    var exportIds = _sourceIdsUnion(rootIds, visualIds);
+    var hiddenIds = _objectPlanSourceIdsMinus(
+            _sourceIdsUnion(bundle.hiddenVisualSourceObjectIds || [], ownedTextFrameIds),
+            visualIds);
+
+    normalized.sourceObjectIds = sourceIds;
+    normalized.sourceRootObjectIds = rootIds.length > 0 ? rootIds : _sortedNumericIds(bundle.sourceRootObjectIds || []);
+    normalized.clusterSourceObjectIds = _sourceIdsUnion(bundle.clusterSourceObjectIds || [], sourceIds);
+    normalized.visualSourceObjectIds = visualIds;
+    normalized.exportSourceObjectIds = exportIds;
+    normalized.hiddenVisualSourceObjectIds = hiddenIds;
+    normalized.ownedTextFrameIds = ownedTextFrameIds;
+    normalized.ownershipSlot = "SHELL_SLOT";
+    normalized.policyLayer = "DECORATION";
+    normalized.visualLayer = "LABEL_BACKDROP";
+    normalized.requiredSlot = "SHELL_SLOT";
+    normalized.requiredSlotReason = "inline_editable_text_shell_composite";
+    if (!_objectPlanInlineEditableTextShellKeepsRole(normalized.slotRole)) {
+        normalized.slotRole = "inline_editable_text_shell_composite";
+    }
+    if (!_objectPlanInlineEditableTextShellKeepsRole(normalized.compositeRole)) {
+        normalized.compositeRole = "inline_editable_text_shell_composite";
+    }
+    normalized.inlineTextShellComposite = true;
+    normalized.clusterRelation = normalized.clusterRelation || "EXACT_SOURCE_CLUSTER";
+    return normalized;
+}
+
+function _objectPlanInlineEditableTextShellKeepsRole(role) {
+    role = String(role || "");
+    return role === "shell_slot_only"
+            || role === "direct_child_shell_slot"
+            || role === "inline_editable_text_shell_composite";
+}
+
+function _objectPlanInlineEditableTextShellRootIds(bundle) {
+    var roots = [];
+    var seen = {};
+    function add(id) {
+        var n = Number(id);
+        if (isNaN(n)) return;
+        _pushUniqueId(roots, seen, n);
+    }
+    for (var r = 0; bundle && bundle.sourceRootObjectIds && r < bundle.sourceRootObjectIds.length; r++) {
+        add(bundle.sourceRootObjectIds[r]);
+    }
+    if (roots.length === 0 && bundle) add(bundle.primarySourceObjectId);
+    if (roots.length === 0 && bundle) add(bundle.exportTargetObjectId);
+    if (roots.length === 0 && bundle && bundle.sourceObjectIds && bundle.sourceObjectIds.length > 0) {
+        add(bundle.sourceObjectIds[0]);
+    }
+    return _sortedNumericIds(roots);
+}
+
+function _objectPlanInlineRootExpandedSourceIds(rootIds, sourceById) {
+    var out = [];
+    var seen = {};
+    function visit(id) {
+        var n = Number(id);
+        if (isNaN(n)) return;
+        if (seen[String(n)]) return;
+        seen[String(n)] = true;
+        out.push(n);
+        var src = sourceById ? sourceById[String(n)] : null;
+        var childIds = src && src.childIds ? src.childIds : [];
+        for (var i = 0; i < childIds.length; i++) {
+            visit(childIds[i]);
+        }
+    }
+    for (var r = 0; rootIds && r < rootIds.length; r++) {
+        visit(rootIds[r]);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanTextFrameSourceIds(sourceIds, sourceById) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+        var id = Number(sourceIds[i]);
+        if (isNaN(id)) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        if (_objectPlanSourceKind(src) !== "TextFrame") continue;
+        _pushUniqueId(out, seen, id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanInlineEditableTextShellVisualIds(bundle, sourceById) {
+    var rootIds = _objectPlanInlineEditableTextShellRootIds(bundle);
+    var expandedIds = _objectPlanInlineRootExpandedSourceIds(rootIds, sourceById);
+    var sourceIds = _sourceIdsUnion(bundle ? bundle.sourceObjectIds || [] : [], expandedIds);
+    var ownedTextFrameIds = _sourceIdsUnion(
+            bundle ? bundle.ownedTextFrameIds || [] : [],
+            _objectPlanTextFrameSourceIds(sourceIds, sourceById));
+    return _objectPlanNonTextVisualSourceIds(sourceIds, ownedTextFrameIds, sourceById);
 }
 
 function _objectPlanBundleIsDeclaredTextlessShellComposite(bundle) {
@@ -4486,10 +4612,14 @@ function _objectPlanNonTextVisualSourceIds(ids, ownedTextFrameIds, sourceById) {
         if (isNaN(id)) continue;
         if (owned[String(id)]) continue;
         var src = sourceById ? sourceById[String(id)] : null;
-        if (src && _objectPlanSourceKindIsTextOnly(src.kind)) continue;
+        if (src && _objectPlanSourceKindIsTextOnly(_objectPlanSourceKind(src))) continue;
         _pushUniqueId(out, seen, id);
     }
     return _sortedNumericIds(out);
+}
+
+function _objectPlanSourceKind(src) {
+    return String((src && (src.kind || src.type || src.itemType)) || "");
 }
 
 function _objectPlanSourceKindIsTextOnly(kind) {
@@ -4664,7 +4794,7 @@ function _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById) {
     }
     for (var i = 0; i < bundle.ownedTextFrameIds.length; i++) {
         var src = sourceById ? sourceById[String(bundle.ownedTextFrameIds[i])] : null;
-        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        if (!src || _objectPlanSourceKind(src) !== "TextFrame") return false;
         if (src.simpleMarkerLabelContents !== true) return false;
     }
     return true;
