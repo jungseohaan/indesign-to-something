@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.ChemicalFormulaPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
@@ -157,9 +158,23 @@ public class ASTStoryConverter {
         List<ASTEquation> ehMathGroupFractions = new ArrayList<>(); // EH 수식 그룹의 인라인 분수
         List<IDMLCharacterRun> patternMathGroup = new ArrayList<>(); // 패턴 감지 수식 그룹
 
+        // 화학 반응식은 HWP 수식으로 만들지 않는다(한글이 BT 글리프를 렌더링 못 해 깨짐).
+        // 표 셀로 조판된 화학식(탭 구분)이 이 경로를 탄다 — ASTTableConverter →
+        // ASTStoryConverter.convertParagraph. StoryLoader 쪽 차단만으로는 막지 못한다.
+        // 화살표 글리프(@C/?C/C)는 화학식 여부와 무관하게 항상 실제 화살표로 바꾼다.
+        // 반응식을 표로 조판하면 화살표만 홀로 든 셀이 생기는데, 그 문단에는 원소기호가
+        // 없어 화학식 판정을 통과하지 못한다. 그대로 두면 "@C" 가 화면에 노출된다.
+        ChemicalFormulaPolicy.normalizeArrowGlyphRuns(runs);
+
+        boolean chemicalFormulaPara =
+                ChemicalFormulaPolicy.isChemicalFormulaParagraphFromIdml(runs);
+        if (chemicalFormulaPara) {
+            ChemicalFormulaPolicy.demoteMathRunsToText(runs);
+        }
+
         // 단락 또는 스토리에 BT 수식 폰트 런이 하나라도 있는지 확인
-        boolean paraHasBTRuns = storyHasBTRuns;
-        if (!paraHasBTRuns) {
+        boolean paraHasBTRuns = !chemicalFormulaPara && storyHasBTRuns;
+        if (!paraHasBTRuns && !chemicalFormulaPara) {
             for (IDMLCharacterRun r : runs) {
                 if (r.isBTFont() || r.grepMathFont()) { paraHasBTRuns = true; break; }
             }
@@ -198,8 +213,8 @@ public class ASTStoryConverter {
             String runText = run.content();
             boolean orcOnly = runText != null && !runText.isEmpty()
                     && runText.replace("\uFFFC", "").isEmpty();
-            boolean formulaClusterRun =
-                    ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+            boolean formulaClusterRun = !chemicalFormulaPara
+                    && ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
 
             if (orcOnly && formulaClusterRun) {
                 if (!npMathGroup.isEmpty()) {
@@ -219,8 +234,11 @@ public class ASTStoryConverter {
             }
 
             // EH 수식 그룹 진입 여부 판단
+            // 화학식 문단은 어떤 수식 그룹에도 넣지 않는다.
             boolean enterEHMathGroup = false;
-            if (!orcOnly && run.isEHFont()) {
+            if (chemicalFormulaPara) {
+                enterEHMathGroup = false;
+            } else if (!orcOnly && run.isEHFont()) {
                 enterEHMathGroup = true;
             } else if (!orcOnly && EHFontGlyphMap.containsEHEncodedChars(run.content())) {
                 // 폰트 미지정이지만 EH 인코딩 패턴(Û` 등) 포함 → EH 그룹으로 진입
@@ -234,7 +252,7 @@ public class ASTStoryConverter {
 
             // NP 수식 그룹 진입 여부 판단
             boolean enterNPMathGroup = false;
-            if (!enterEHMathGroup && !orcOnly) {
+            if (!chemicalFormulaPara && !enterEHMathGroup && !orcOnly) {
                 if (run.isNPFont()) {
                     enterNPMathGroup = true;
                 } else if (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx)) {
@@ -251,7 +269,7 @@ public class ASTStoryConverter {
 
             // BT 수식 그룹 진입 여부 판단
             boolean enterMathGroup = false;
-            if (!enterEHMathGroup && !enterNPMathGroup && !orcOnly) {
+            if (!chemicalFormulaPara && !enterEHMathGroup && !enterNPMathGroup && !orcOnly) {
                 if ((run.isBTFont() || run.grepMathFont())
                         && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
                         && !ASTMathGrouper.isPlainAlphanumericRun(run)) {

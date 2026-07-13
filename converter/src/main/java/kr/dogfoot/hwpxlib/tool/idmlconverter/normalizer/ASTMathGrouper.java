@@ -181,9 +181,17 @@ public class ASTMathGrouper {
      * 내용이 알파벳/숫자/공백만으로 구성되면 수식이 아닌 일반 텍스트로 처리.
      * 예: "1", "2" (문항 번호) 등이 수식으로 잘못 변환되는 것을 방지.
      */
-    static boolean isPlainAlphanumericRun(IDMLCharacterRun run) {
-        // BT 폰트가 직접 적용된 런은 수식으로 간주
-        if (run.isBTFont()) return false;
+    public static boolean isPlainAlphanumericRun(IDMLCharacterRun run) {
+        // BT 폰트가 직접 적용된 런은 수식으로 간주.
+        //
+        // 단, "BT수식H" 계열은 예외다. 이름만 수식이고 실제로는 본문 속 영문/숫자/기호를
+        // 조판하는 폰트다(GREP 스타일 "00_영문", "00_숫자"가 적용). 실측:
+        //   BT수식H-분수N   (356회)  "1-1", "1.", "2.", "H", "O", "2"
+        //   BT수식H-편한글씨 (48회)   ":"  (비율 표기)
+        // 이걸 무조건 수식으로 보면 한글 문장 속 원소기호까지 HWP 수식(이탤릭)이 된다
+        // — "수소 원자(H)" 의 H, "산소 원자(O)" 의 O (표 셀에서 관측).
+        // → 폰트가 아니라 내용으로 판정하도록 아래 검사를 계속 진행한다.
+        if (run.isBTFont() && !BTFontGlyphMap.isBTBodyTextFont(run.fontFamily())) return false;
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
         // 수식 기호가 하나라도 있으면 수식 가능 → plain이 아님

@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
@@ -259,6 +260,29 @@ public class StoryLoader {
                 }
                 if (paraHasMathSymbols) break;
             }
+            // 화학 반응식(2Mg + O2 -> 2MgO)은 HWP 수식으로 만들지 않는다.
+            //
+            // 수식(ASTEquation)으로 내보내면 한글 수식 편집기가 BT 계열 폰트 글리프를
+            // 렌더링하지 못해 깨진 글자("갤")가 표시된다(과학 교과서 p20에서 확인).
+            // 화학식은 분수/루트/시그마 같은 수학적 구조가 없고 "원소기호 + 아래첨자 +
+            // 연산자/화살표" 뿐이라 일반 텍스트 + 아래첨자로 충분히 표현된다.
+            //
+            // 반드시 "문단 단위"로 판정해 그 문단의 BT 런을 통째로 텍스트화한다.
+            // 개별 런/그룹 단위로 빼내면 한 화학식이 여러 조각으로 파편화된다
+            // (예: '(CH', '(O', '_{3}+2 HCl' — 실제로 겪은 회귀).
+            //
+            // 판정은 resolvedRuns 로 한다. 이 시점의 IDML 런에는 아직 폰트/위치가
+            // 붙지 않아(fontFamily=null, position=null) BT 폰트도 아래첨자도 안 보인다.
+            // resolvedRuns 가 null 인 문단(표 형태로 조판된 화학반응식 등)은
+            // IDML 런으로 폴백 판정한다. 실측: 탭 구분 화학식이 resolved 스토리와
+            // 매칭되지 않아 resolvedRuns=NULL 로 들어왔고, 그래서 수식으로 남아 깨졌다.
+            boolean chemicalFormulaPara = resolvedRuns != null
+                    ? ChemicalFormulaPolicy.isChemicalFormulaParagraph(resolvedRuns)
+                    : ChemicalFormulaPolicy.isChemicalFormulaParagraphFromIdml(runs);
+            if (chemicalFormulaPara) {
+                ChemicalFormulaPolicy.demoteMathRunsToText(runs);
+            }
+
             for (IDMLCharacterRun r : runs) {
                 if (r.isBTFont()) paraHasBTRuns = true;
                 if (r.isNPFont()) {
@@ -326,8 +350,9 @@ public class StoryLoader {
                 String _runTxt = run.content();
                 boolean _orcOnly = _runTxt != null && !_runTxt.isEmpty()
                         && _runTxt.replace("￼", "").isEmpty();
-                boolean formulaClusterRun =
-                        ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+                // 화학식 문단에서는 formula cluster(→ ASTEquation) 경로도 끈다.
+                boolean formulaClusterRun = !chemicalFormulaPara
+                        && ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
 
                 if (_orcOnly && formulaClusterRun
                         && MathProcessor.isFormulaAnswerPlaceholderRun(ctx, run)) {
@@ -343,7 +368,11 @@ public class StoryLoader {
                 }
 
                 // EH 수식 그룹 진입
-                boolean enterEH = !_orcOnly && (run.isEHFont()
+                // 화학식 문단은 어떤 수식 그룹에도 넣지 않는다. EH 그룹에 들어가면
+                // copyMathRunTextStyle 이 IDML 런의 isSubscript()(= CharacterStyle 이름에
+                // "하부자" 포함 여부)를 그대로 복사해, 계수 2 까지 아래첨자가 된다.
+                // (2Mg + O₂ → 2MgO 에서 "2MgO"의 계수 2 가 작아지던 원인)
+                boolean enterEH = !chemicalFormulaPara && !_orcOnly && (run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
@@ -351,7 +380,7 @@ public class StoryLoader {
 
                 // NP 수식 그룹 진입
                 boolean enterNP = false;
-                if (!enterEH && !_orcOnly) {
+                if (!chemicalFormulaPara && !enterEH && !_orcOnly) {
                     enterNP = run.isNPFont()
                             || (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx))
                             || (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx))
@@ -361,8 +390,9 @@ public class StoryLoader {
                 }
 
                 // BT 수식 그룹 진입
+                // 화학식 문단은 수식으로 만들지 않는다(한글이 BT 글리프를 렌더링 못 해 깨짐).
                 boolean enterBT = false;
-                if (!enterEH && !enterNP && !_orcOnly) {
+                if (!chemicalFormulaPara && !enterEH && !enterNP && !_orcOnly) {
                     enterBT = (run.isBTFont()
                                 && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
@@ -549,6 +579,16 @@ public class StoryLoader {
             // Legacy-only: Stage 1 ObjectPlan이 있으면 source/story order가 실행 계약이다.
             if (!hasIdmlInlineAnchors && !hasStage1ObjectPlans(ctx)) {
                 ASTTableConverter.reorderInlineObjectsByBoundsX(para);
+            }
+
+            // 화학식 문단 마무리 — 화살표 글리프(@C/?C) 치환 + 아래첨자 재계산.
+            //
+            // 이 경로의 문단은 수식 그룹을 타지 않으므로
+            // MathProcessor.convertMathRunsInParagraph 의 화학식 정리를 거치지 않는다.
+            // 그래서 여기서 같은 정리를 직접 적용해야 한다. 빠뜨리면 "@C" 가 화면에
+            // 그대로 노출되고, 계수(2MgO 의 2)가 아래첨자로 작아진다.
+            if (chemicalFormulaPara) {
+                MathProcessor.normalizeChemicalFormulaRuns(para.items());
             }
     }
 
@@ -836,7 +876,24 @@ public class StoryLoader {
             if (!includeTextRuns) continue;
             String text = run.text();
             if (text == null) continue;
+
+            // 화살표 글리프(@C/?C/C)를 실제 화살표로 치환한다.
+            //
+            // 이 경로(resolved 셀 런 → AST)는 IDML 런을 거치지 않아
+            // buildParagraphContent 의 isStandaloneBtArrowGlyphRun 분기를 타지 못한다.
+            // 여기가 화살표 폰트 정보(BT화살표)가 살아있는 마지막 지점이다. 놓치면
+            // 하류에서는 폰트가 이미 벗겨져 있어(함초롬돋움) 화살표인지 알 수 없고,
+            // "@C" 가 표 셀에 그대로 노출된다(반응식을 표로 조판한 레이아웃).
+            boolean arrowRun = BTFontGlyphMap.isBTArrowFont(run.fontFamily());
             for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(text, run, para, options)) {
+                if (arrowRun) {
+                    textRun.text("→");
+                    textRun.fontFamily(null);
+                    textRun.fontStyle(null);
+                    textRun.grepMathFont(false);
+                    textRun.subscript(false);
+                    textRun.superscript(false);
+                }
                 para.addItem(textRun);
             }
             if (text.indexOf('\r') >= 0) break;
@@ -868,10 +925,14 @@ public class StoryLoader {
         String normalizedStyle = style.toLowerCase(java.util.Locale.ROOT)
                 .replace("%3a", ":")
                 .replace("%ed%99%94%ec%82%b4%ed%91%9c", "화살표");
+        if (!normalizedStyle.contains("화살표")) return false;
+        // 화살표 폰트/스타일이면 글리프 코드가 무엇이든 화살표다.
+        //
+        // 문서마다 코드가 다르다(관측: "@C", "?C", 그리고 접두문자 없는 "C").
+        // 예전에는 "@C"/"?C" 만 인정해서, 접두문자 없는 "C" 를 쓰는 문단은
+        // 화살표 자리에 글자 C 가 그대로 박혔다("CaO+H₂O C Ca(OH)₂").
         String cleaned = text.trim();
-        return normalizedStyle.contains("화살표")
-                && ("@C".equals(cleaned) || "@c".equals(cleaned)
-                    || "?C".equals(cleaned) || "?c".equals(cleaned));
+        return !cleaned.isEmpty();
     }
 
     private static ASTTextRun createStandaloneArrowRun(
