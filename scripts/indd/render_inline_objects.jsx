@@ -192,6 +192,10 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
 
     var savedInlineItems = [];
     var savedDocumentTextFrames = [];
+    // SPEC-030 계측 변수 (예외 경로에서도 정의되도록 미리 선언)
+    var _tCollectInline = 0, _tHideInline = 0, _tCollectText = 0, _tHideText = 0;
+    var _tPrepTotal = 0, _tExportLoop = 0, _tRestore = 0;
+    var _exportLoopStart = 0;
     try {
         try { savedRes = app.pngExportPreferences.exportResolution; } catch (eRes) {}
         try { savedTransparent = app.pngExportPreferences.transparentBackground; } catch (eTrans) {}
@@ -205,8 +209,26 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         try { app.pngExportPreferences.exportingSpread = false; } catch (eSetSpread) {}
         try { doc.viewPreferences.displayPerformance = ViewDisplaySettings.HIGH_QUALITY; } catch (eSetDisplay) {}
 
-        savedInlineItems = _hideItemsForExport(collectInlineItemsToHide());
-        savedDocumentTextFrames = hideCollectedTextItems(collectDocumentTextItemsToHide());
+        // SPEC-030 계측: 06b1 구간(157s)이 "준비(hide/collect)" 와 "PNG export" 중
+        // 어디서 시간을 쓰는지 분리한다. 지금까지 이 구간은 마커가 없어 블랙박스였다.
+        var _perfPrepStart = nowMs();
+        var _inlineToHide = collectInlineItemsToHide();
+        _tCollectInline = nowMs() - _perfPrepStart;
+
+        var _t0 = nowMs();
+        savedInlineItems = _hideItemsForExport(_inlineToHide);
+        _tHideInline = nowMs() - _t0;
+
+        _t0 = nowMs();
+        var _textToHide = collectDocumentTextItemsToHide();
+        _tCollectText = nowMs() - _t0;   // ← 문서 전체 5회 순회 + allPageItems 중첩 루프
+
+        _t0 = nowMs();
+        savedDocumentTextFrames = hideCollectedTextItems(_textToHide);
+        _tHideText = nowMs() - _t0;
+
+        _tPrepTotal = nowMs() - _perfPrepStart;
+        _exportLoopStart = nowMs();
 
         for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
             var pageIndex = pageNumber - 1;
@@ -269,7 +291,9 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 }
             });
         }
+        _tExportLoop = nowMs() - _exportLoopStart;
     } finally {
+        var _restoreStart = nowMs();
         try { restoreTextFrames(savedDocumentTextFrames); } catch (eRestoreTextFrames) {}
         try { _restoreItemsForExport(savedInlineItems); } catch (eRestoreInline) {}
         try { if (savedRes !== null) app.pngExportPreferences.exportResolution = savedRes; } catch (eRestoreRes) {}
@@ -277,15 +301,29 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         try { if (savedQuality !== null) app.pngExportPreferences.pngQuality = savedQuality; } catch (eRestoreQuality) {}
         try { if (savedSpread !== null) app.pngExportPreferences.exportingSpread = savedSpread; } catch (eRestoreSpread) {}
         try { if (savedDisplayPerf !== null) doc.viewPreferences.displayPerformance = savedDisplayPerf; } catch (eRestoreDisplay) {}
+        _tRestore = nowMs() - _restoreStart;
     }
 
     try {
+        // SPEC-030: 06b1 구간 비용 분해 — export vs 준비(hide/collect) vs 복원
+        var _perfBreakdown = {
+            collectInlineMs: _tCollectInline,
+            hideInlineMs: _tHideInline,
+            collectTextMs: _tCollectText,        // 문서 전체 5회 순회 + 중첩 allPageItems
+            hideTextMs: _tHideText,
+            prepTotalMs: _tPrepTotal,
+            exportLoopMs: _tExportLoop,          // 실제 PNG export 42장
+            restoreMs: _tRestore,
+            hiddenTextItemCount: savedDocumentTextFrames.length,
+            hiddenInlineItemCount: savedInlineItems.length
+        };
         writeJson(outputDir + "/single-textless-page-plane-export.json", {
             schemaVersion: 1,
             mode: "single-textless-plane",
             elapsedMs: nowMs() - startedAt,
             pageCount: results.length,
             hiddenInlineItemCount: savedInlineItems.length,
+            perfBreakdown: _perfBreakdown,
             diagnostics: diagnostics
         });
     } catch (eWriteSinglePlaneDiag) {}

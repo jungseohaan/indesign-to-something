@@ -113,23 +113,101 @@ function buildParagraphCharacterCorrectionDescriptor(para) {
     return descriptor;
 }
 
+// SPEC-030: GREP 식이 이 텍스트에 매칭될 가능성이 있는가?
+//
+// 반환 false = "절대 매칭될 수 없음" → 문자 단위 스캔(splitRunByStoryChars) 생략.
+// 확신이 없으면 반드시 true 를 반환한다(fail-open). 오탐(true)은 성능만 손해지만,
+// 미탐(false)은 서식이 깨지므로 훨씬 위험하다.
+//
+// 기존 구현은 하드코딩된 소수 패턴 목록이라 실제 문서의 GREP 식
+// (`[\l\u]`, `\p{Nd}`, `[%]`, `[①-ⓩ❶-❿㈀-㉻]` 등)을 하나도 인식하지 못하고
+// 전부 fail-open 시켜서, 한글 본문에도 매 문자 DOM 스캔을 돌렸다.
+// → 식에서 "매칭에 반드시 필요한 문자 부류"를 뽑아 텍스트와 대조한다.
+
+// GREP 토큰 → 텍스트에 그 부류 문자가 있는지 검사하는 술어
+function _grepTokenPresentInText(token, text) {
+    // \l 소문자, \u 대문자, \d/\p{Nd} 숫자, \w 단어문자, \s 공백
+    if (token === "\\l") return /[a-z]/.test(text);
+    if (token === "\\u") return /[A-Z]/.test(text);
+    if (token === "\\d" || token === "\\p{Nd}") return /[0-9]/.test(text);
+    if (token === "\\w") return /[0-9A-Za-z_]/.test(text);
+    if (token === "\\s") return /\s/.test(text);
+    return null; // 모르는 토큰
+}
+
 function grepExpressionCouldAffectText(expr, text) {
     if (!expr) return true;
     text = text || "";
-    if (expr === "·") return text.indexOf("·") >= 0;
-    if (expr === "~") return text.indexOf("~") >= 0;
-    if (expr === "-") return text.indexOf("-") >= 0;
-    if (expr === "」") return text.indexOf("」") >= 0;
-    if (expr === "[●]") return text.indexOf("●") >= 0;
-    if (expr === "[㈀-㉻①-ⓩ]") return /[㈀-㉻①-ⓩ]/.test(text);
-    if (expr.indexOf("<.+?>") >= 0) return /<[^>]+>/.test(text);
-    if (expr.indexOf("\\(.+?\\)") >= 0) return /[()]/.test(text);
-    if (expr.indexOf("[‘\\’\\“\\”]") >= 0) return /[‘’“”]/.test(text);
-    if (expr.indexOf("(?<=^).+?(?=: )") >= 0) return text.indexOf(": ") >= 0;
-    if (expr.indexOf("~K") >= 0) return text.indexOf("~") >= 0 && text.indexOf("K") >= 0;
-    if (expr.indexOf("(?<=") >= 0 && expr.indexOf("(?=$)") >= 0) return text.indexOf("\b") >= 0;
-    if (expr.indexOf("(?<=") >= 0 && expr.indexOf("\\-+?") >= 0) return text.indexOf("\b") >= 0 && text.indexOf("-") >= 0;
-    return true;
+    if (text.length === 0) return false;
+
+    var e = String(expr);
+
+    // 안전장치: 아래 구조가 보이면 정적 분석을 신뢰하지 않고 스캔한다.
+    //  - 부정 문자 클래스 [^...] : 거의 모든 문자에 매칭될 수 있음
+    //  - . 와일드카드
+    //  - 역참조/치환 등 해석 불가 구문
+    if (e.indexOf("[^") >= 0) return true;
+    if (e.indexOf(".") >= 0 && e.indexOf("\\.") < 0) return true;
+
+    // 식에서 "필수 문자 집합" 후보를 모은다.
+    // 리터럴 문자 클래스 [...] 와 백슬래시 토큰(\l \u \d \p{Nd} ...)만 본다.
+    // lookbehind/lookahead((?<=..) (?=..)) 안의 조건도 "그 문자가 텍스트에
+    // 존재해야 한다"는 필요조건이므로 동일하게 취급 가능하지만,
+    // 보수적으로 가기 위해 여기서는 전체 식을 스캔해 등장하는 요구 문자를 모두 모으고
+    // "그 중 하나라도 텍스트에 있으면 true" 로 판정한다.
+    var requiredFound = false;   // 판정 가능한 요구 조건을 하나라도 확인했는가
+    var anySatisfied = false;
+
+    // 1) \p{...} 및 \l \u \d \w \s 토큰
+    var tokenRe = /\\p\{[^}]*\}|\\[a-zA-Z]/g;
+    var m;
+    while ((m = tokenRe.exec(e)) !== null) {
+        var present = _grepTokenPresentInText(m[0], text);
+        if (present === null) return true;   // 모르는 토큰 → 안전하게 스캔
+        requiredFound = true;
+        if (present) anySatisfied = true;
+    }
+
+    // 2) 문자 클래스 [...] — 범위(a-z)와 개별 문자를 모두 처리
+    var classRe = /\[([^\]]*)\]/g;
+    while ((m = classRe.exec(e)) !== null) {
+        var body = m[1];
+        if (body.length === 0) continue;
+        requiredFound = true;
+        // 클래스 안의 백슬래시 토큰은 위 1)에서 이미 처리됨. 여기서는
+        // 이스케이프를 벗겨 리터럴/범위만 남긴다.
+        var cleaned = body.replace(/\\([^a-zA-Z])/g, "$1")  // \~ \. \· → ~ . ·
+                          .replace(/\\[a-zA-Z]/g, "")        // \l \u \d 등은 제거(1에서 처리)
+                          .replace(/\\p\{[^}]*\}/g, "");
+        for (var ci = 0; ci < cleaned.length; ci++) {
+            var ch = cleaned.charAt(ci);
+            // 범위 표기 a-z
+            if (ci + 2 < cleaned.length && cleaned.charAt(ci + 1) === "-") {
+                var lo = cleaned.charCodeAt(ci);
+                var hi = cleaned.charCodeAt(ci + 2);
+                if (hi >= lo) {
+                    for (var ti = 0; ti < text.length; ti++) {
+                        var code = text.charCodeAt(ti);
+                        if (code >= lo && code <= hi) { anySatisfied = true; break; }
+                    }
+                }
+                ci += 2;
+                continue;
+            }
+            if (ch === "|") continue;  // 클래스 안의 | 는 리터럴이지만 무시해도 안전
+            if (text.indexOf(ch) >= 0) anySatisfied = true;
+        }
+    }
+
+    // 3) 문자 클래스/토큰이 전혀 없는 순수 리터럴 식 (예: "그림")
+    if (!requiredFound) {
+        var literal = e.replace(/\\(.)/g, "$1");
+        // 정규식 메타문자가 남아 있으면 해석 포기 → 스캔
+        if (/[()\[\]{}?*+^$|]/.test(literal)) return true;
+        return text.indexOf(literal) >= 0;
+    }
+
+    return anySatisfied;
 }
 
 function correctionDescriptorNeedsRunScan(descriptor, text) {
@@ -219,10 +297,28 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
         }
         var propsCache = sharedParaCache ? sharedParaCache.props : {};
         var colorCache = sharedParaCache ? sharedParaCache.colors : {};
+
+        // SPEC-030 실측 기록 (실패한 시도 — 재시도 금지):
+        // para.characters.everyItem() 로 문단 전체 문자 속성을 일괄 조회해 캐시를
+        // 채우는 방식을 시도했으나 55.2s → 77.9s 로 오히려 41% 느려졌다.
+        // 이유: 런은 평균 22자인데 문단은 수백 자다. 22자를 처리하려고 문단 전체
+        // × 7속성을 끌어오면 과다 조회 손실이 캐시 재사용 이득을 압도한다.
+        // → 필요한 문자만 개별 접근하는 아래 방식을 유지한다.
+        //
+        // (유효했던 최적화: char 객체를 1회만 인덱싱해 7개 속성을 읽는다.
+        //  기존은 속성마다 para.characters[absIdx] 를 다시 인덱싱했다.)
+        function charColorFrom(ch) {
+            var color = null;
+            try {
+                var fc = ch.fillColor;
+                color = fc ? fc.name : null;
+            } catch (e) {}
+            return color;
+        }
         function getCharColor(absIdx) {
             if (colorCache[absIdx] !== undefined) return colorCache[absIdx];
             var color = null;
-            try { color = para.characters[absIdx].fillColor ? para.characters[absIdx].fillColor.name : null; } catch (e) {}
+            try { color = charColorFrom(para.characters[absIdx]); } catch (e) {}
             colorCache[absIdx] = color;
             return color;
         }
@@ -230,13 +326,24 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
             if (propsCache[absIdx]) return propsCache[absIdx];
             var color = null, size = null, font = null, style = null;
             var baselineShift = null, position = null, charStyle = null;
-            color = getCharColor(absIdx);
-            try { size = para.characters[absIdx].pointSize; } catch (e) {}
-            try { font = para.characters[absIdx].appliedFont.fontFamily; } catch (e) {}
-            try { style = para.characters[absIdx].fontStyle; } catch (e) {}
-            try { baselineShift = para.characters[absIdx].baselineShift; } catch (e) {}
-            try { position = para.characters[absIdx].position ? para.characters[absIdx].position.toString() : null; } catch (e) {}
-            try { charStyle = para.characters[absIdx].appliedCharacterStyle ? para.characters[absIdx].appliedCharacterStyle.name : null; } catch (e) {}
+            var ch = null;
+            try { ch = para.characters[absIdx]; } catch (eChar) { ch = null; }
+            if (ch === null) {
+                color = getCharColor(absIdx);
+            } else {
+                if (colorCache[absIdx] !== undefined) {
+                    color = colorCache[absIdx];
+                } else {
+                    color = charColorFrom(ch);
+                    colorCache[absIdx] = color;
+                }
+                try { size = ch.pointSize; } catch (e) {}
+                try { font = ch.appliedFont.fontFamily; } catch (e) {}
+                try { style = ch.fontStyle; } catch (e) {}
+                try { baselineShift = ch.baselineShift; } catch (e) {}
+                try { position = ch.position ? ch.position.toString() : null; } catch (e) {}
+                try { charStyle = ch.appliedCharacterStyle ? ch.appliedCharacterStyle.name : null; } catch (e) {}
+            }
             // GREP 스타일로 적용된 이탤릭 감지: fontStyle이 숫자(가변 폰트 웨이트)인데
             // appliedCharacterStyle에 "이탤릭" 또는 "Italic"이 포함되면 fontStyle을 "Italic"으로 보정
             if (style && /^\d+$/.test(style)) {

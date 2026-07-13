@@ -19,7 +19,10 @@ pub async fn convert_idml(
     let sleep = app.state::<crate::SleepPreventionHandle>();
     let _sleep_lease = sleep.acquire("convert_idml");
 
+    // JVM 기본 최대 힙은 물리 RAM의 1/4(8GB 머신 → 2GB)이다. 이미지/벡터가 많은
+    // 교과서 문서에서는 이 상한에 쉽게 도달해 OutOfMemoryError 로 변환이 통째로 실패한다.
     let mut args = vec![
+        "-Xmx4g".to_string(),
         "-jar".to_string(),
         jar_path,
         "--convert".to_string(),

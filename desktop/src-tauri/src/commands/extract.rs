@@ -245,8 +245,20 @@ pub fn extract_cache_stats() -> Result<(usize, u64), String> {
 #[tauri::command]
 pub async fn export_ast(idml_path: String, jar_path: String) -> Result<serde_json::Value, String> {
     let java = find_java();
+    // --export-ast 는 레거시 파이프라인(IDMLNormalizer)을 타면서 이미지 프레임을
+    // parallelStream 으로 디코딩한다(ASTPageProcessor.processImageFrames).
+    // JVM 기본 최대 힙은 물리 RAM의 1/4(8GB 머신 → 2GB)뿐이라, 이미지가 많은
+    // 문서에서 BufferedImage 가 동시에 여러 장 올라가며 OutOfMemoryError 로 죽는다.
+    // → 힙 상한을 명시하고, 병렬 디코딩 폭을 제한해 피크 메모리를 낮춘다.
     let output = Command::new(&java)
-        .args(["-jar", &jar_path, "--export-ast", &idml_path])
+        .args([
+            "-Xmx4g",
+            "-XX:ActiveProcessorCount=2",
+            "-jar",
+            &jar_path,
+            "--export-ast",
+            &idml_path,
+        ])
         .output()
         .await
         .map_err(|e| format!("Failed to execute Java: {}", e))?;
