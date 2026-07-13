@@ -64,6 +64,119 @@ function _plannerBundleDocument(bundles, summary) {
     };
 }
 
+function _syncPlannerBundleDiagnosticsToExecutionCandidates(plannerBundleDiagnostics, executionCandidates, options) {
+    options = options || {};
+    if (!plannerBundleDiagnostics || !plannerBundleDiagnostics.bundles) {
+        return {
+            diagnostics: plannerBundleDiagnostics,
+            summary: {
+                originalBundleCount: 0,
+                retainedBundleCount: 0,
+                prunedBundleCount: 0
+            },
+            pruned: []
+        };
+    }
+    var activeCandidateIds = {};
+    var activeObjectPlanIds = {};
+    var activeBundleIds = {};
+    var rows = executionCandidates || [];
+    for (var i = 0; i < rows.length; i++) {
+        var candidate = rows[i];
+        if (candidate && candidate.candidateId) activeCandidateIds[String(candidate.candidateId)] = true;
+        if (candidate && candidate.objectPlanId) activeObjectPlanIds[String(candidate.objectPlanId)] = true;
+    }
+    var plans = options.objectPlanDiagnostics && options.objectPlanDiagnostics.objectPlans
+            ? options.objectPlanDiagnostics.objectPlans
+            : [];
+    for (var p = 0; p < plans.length; p++) {
+        var plan = plans[p];
+        if (!plan || !plan.bundleId) continue;
+        if (plan.objectPlanId && activeObjectPlanIds[String(plan.objectPlanId)]) {
+            activeBundleIds[String(plan.bundleId)] = true;
+        } else if (plan.candidateId && activeCandidateIds[String(plan.candidateId)]) {
+            activeBundleIds[String(plan.bundleId)] = true;
+        }
+    }
+
+    var bundles = plannerBundleDiagnostics.bundles || [];
+    var kept = [];
+    var pruned = [];
+    for (var b = 0; b < bundles.length; b++) {
+        var bundle = bundles[b];
+        if (!bundle) continue;
+        if ((bundle.bundleId && activeBundleIds[String(bundle.bundleId)])
+                || !bundle.candidateId
+                || activeCandidateIds[String(bundle.candidateId)]) {
+            kept.push(bundle);
+        } else {
+            pruned.push({
+                bundleId: bundle.bundleId || null,
+                candidateId: bundle.candidateId || null,
+                passId: bundle.passId || null,
+                pageIndex: bundle.pageIndex,
+                ownershipSlot: bundle.ownershipSlot || null,
+                materialization: bundle.materialization || null,
+                reason: options.reason || "execution_candidate_suppressed"
+            });
+        }
+    }
+
+    var previousSummary = plannerBundleDiagnostics.summary || {};
+    var summary = _summarizePlannerBundles(kept);
+    for (var summaryKey in previousSummary) {
+        if (!previousSummary.hasOwnProperty(summaryKey)) continue;
+        if (summary[summaryKey] !== undefined) continue;
+        summary[summaryKey] = previousSummary[summaryKey];
+    }
+    summary.candidateCount = rows.length;
+    summary.executionCandidateSync = {
+        originalBundleCount: bundles.length,
+        retainedBundleCount: kept.length,
+        prunedBundleCount: pruned.length,
+        activeExecutionCandidateCount: rows.length,
+        reason: options.reason || "execution_candidate_suppressed"
+    };
+    plannerBundleDiagnostics.summary = summary;
+    plannerBundleDiagnostics.bundles = kept;
+    return {
+        diagnostics: plannerBundleDiagnostics,
+        summary: summary.executionCandidateSync,
+        pruned: pruned
+    };
+}
+
+function _summarizePlannerBundles(bundles) {
+    bundles = bundles || [];
+    var summary = {
+        candidateCount: bundles.length,
+        reusedSourceClusterIndex: true,
+        bundleCount: 0,
+        slotCounts: {},
+        policyLayerCounts: {},
+        relationCounts: {},
+        executableBundleCount: 0,
+        requiredBundleCount: 0,
+        bundlesWithVisualSources: 0,
+        bundlesWithStyleSources: 0,
+        bundlesWithOwnedTextFrames: 0
+    };
+    for (var i = 0; i < bundles.length; i++) {
+        var bundle = bundles[i];
+        if (!bundle) continue;
+        summary.bundleCount++;
+        _incrementPlannerSummary(summary.slotCounts, bundle.ownershipSlot);
+        _incrementPlannerSummary(summary.policyLayerCounts, bundle.policyLayer);
+        _incrementPlannerSummary(summary.relationCounts, bundle.clusterRelation);
+        if (bundle.executable) summary.executableBundleCount++;
+        if (bundle.required) summary.requiredBundleCount++;
+        if (bundle.visualSourceObjectIds && bundle.visualSourceObjectIds.length > 0) summary.bundlesWithVisualSources++;
+        if (bundle.styleSourceObjectIds && bundle.styleSourceObjectIds.length > 0) summary.bundlesWithStyleSources++;
+        if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) summary.bundlesWithOwnedTextFrames++;
+    }
+    return summary;
+}
+
 function _plannerBundleFromCandidate(candidate, clusterIndex) {
     var sourceIds = _internSourceSetIds(candidate.sourceObjectIds || []);
     if (_plannerBundleIsPageRootTextlessVisualPlane(candidate)

@@ -7219,47 +7219,74 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             _suppressChildShellSlotsCoveredByCompositeShellCandidates(executionCandidates, sourceItems);
     executionCandidates = compositeShellExecutionSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d16b4_plan_suppressCompositeShellSlotChildren");
-    if (sourceSlotCanonicalizationDiagnostics.diagnostics
-            && sourceSlotCanonicalizationDiagnostics.diagnostics.suppressedCount > 0
+    if ((sourceSlotCanonicalizationDiagnostics.diagnostics
+                    && sourceSlotCanonicalizationDiagnostics.diagnostics.suppressedCount > 0)
             || multiTextParentSuppressionDiagnostics.suppressedCount > 0
             || pageTextlessExecutionSuppressionDiagnostics.suppressedCount > 0
             || compositeShellExecutionSuppressionDiagnostics.suppressedCount > 0) {
-        plannerBundleDiagnostics = _buildPlannerBundles(sourceItems, executionCandidates, {
-            sourceClusterDiagnostics: sourceClusterDiagnostics,
-            sourceClusterIndex: sourceClusterIndex
-        });
-        _marker(ctx.outputDir, "03d16c_plan_rebuildPlannerBundlesAfterSubsumed");
-        objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
-        _marker(ctx.outputDir, "03d16d_plan_rebuildObjectPlansAfterSubsumed");
-        executionCandidates = _buildExecutionCandidatesFromObjectPlans(executionCandidates, objectPlanDiagnostics);
-        _marker(ctx.outputDir, "03d16e_plan_rebuildExecutionCandidatesAfterSubsumed");
-        executionCandidates = _excludeDirectChildShellSourcesFromParentShellExports(executionCandidates, sourceItems);
-        _marker(ctx.outputDir, "03d16f_plan_excludeChildShellSourcesFromParentExportsAfterRebuild");
+        _marker(ctx.outputDir, "03d16c_plan_skipPlannerBundleRebuildAfterSubsumed");
         if (ctx.writePlannerDiagnostics === true) {
             try {
-                writeJson(ctx.outputDir + "/execution-candidates-after-rebuild-before-secondary-suppressions.json",
+                writeJson(ctx.outputDir + "/execution-candidates-after-subsumed-before-secondary-suppressions.json",
                         executionCandidates || []);
-            } catch (eExecutionCandidatesAfterRebuildBeforeSecondarySuppressionsWrite) {}
+            } catch (eExecutionCandidatesAfterSubsumedBeforeSecondarySuppressionsWrite) {}
         }
-        multiTextParentSuppressionDiagnostics = _suppressChildExportsCoveredByTextlessGroupCandidates(
+        var secondaryMultiTextParentSuppressionDiagnostics = _suppressChildExportsCoveredByTextlessGroupCandidates(
                 executionCandidates, sourceItems);
-        executionCandidates = multiTextParentSuppressionDiagnostics.candidates;
-        _marker(ctx.outputDir, "03d16g_plan_suppressTextlessGroupChildrenAfterRebuild");
-        pageTextlessExecutionSuppressionDiagnostics =
+        executionCandidates = secondaryMultiTextParentSuppressionDiagnostics.candidates;
+        multiTextParentSuppressionDiagnostics = {
+            candidates: executionCandidates,
+            suppressedCount: (multiTextParentSuppressionDiagnostics.suppressedCount || 0)
+                    + (secondaryMultiTextParentSuppressionDiagnostics.suppressedCount || 0),
+            suppressed: (multiTextParentSuppressionDiagnostics.suppressed || []).concat(
+                    secondaryMultiTextParentSuppressionDiagnostics.suppressed || [])
+        };
+        _marker(ctx.outputDir, "03d16g_plan_suppressTextlessGroupChildrenAfterSubsumed");
+        var secondaryPageTextlessExecutionSuppressionDiagnostics =
                 _suppressChildExportsCoveredByPageTextlessGraphicGroups(executionCandidates, sourceItems);
-        executionCandidates = pageTextlessExecutionSuppressionDiagnostics.candidates;
-        _marker(ctx.outputDir, "03d16g0_plan_suppressPageTextlessGraphicGroupChildrenAfterRebuild");
-        var compositeShellExecutionSuppressionAfterRebuildDiagnostics =
+        executionCandidates = secondaryPageTextlessExecutionSuppressionDiagnostics.candidates;
+        pageTextlessExecutionSuppressionDiagnostics = {
+            candidates: executionCandidates,
+            suppressedCount: (pageTextlessExecutionSuppressionDiagnostics.suppressedCount || 0)
+                    + (secondaryPageTextlessExecutionSuppressionDiagnostics.suppressedCount || 0),
+            suppressed: (pageTextlessExecutionSuppressionDiagnostics.suppressed || []).concat(
+                    secondaryPageTextlessExecutionSuppressionDiagnostics.suppressed || [])
+        };
+        _marker(ctx.outputDir, "03d16g0_plan_suppressPageTextlessGraphicGroupChildrenAfterSubsumed");
+        var secondaryCompositeShellExecutionSuppressionDiagnostics =
                 _suppressChildShellSlotsCoveredByCompositeShellCandidates(executionCandidates, sourceItems);
-        executionCandidates = compositeShellExecutionSuppressionAfterRebuildDiagnostics.candidates;
+        executionCandidates = secondaryCompositeShellExecutionSuppressionDiagnostics.candidates;
         compositeShellExecutionSuppressionDiagnostics = {
             candidates: executionCandidates,
             suppressedCount: (compositeShellExecutionSuppressionDiagnostics.suppressedCount || 0)
-                    + (compositeShellExecutionSuppressionAfterRebuildDiagnostics.suppressedCount || 0),
+                    + (secondaryCompositeShellExecutionSuppressionDiagnostics.suppressedCount || 0),
             suppressed: (compositeShellExecutionSuppressionDiagnostics.suppressed || []).concat(
-                    compositeShellExecutionSuppressionAfterRebuildDiagnostics.suppressed || [])
+                    secondaryCompositeShellExecutionSuppressionDiagnostics.suppressed || [])
         };
-        _marker(ctx.outputDir, "03d16g0a_plan_suppressCompositeShellSlotChildrenAfterRebuild");
+        _marker(ctx.outputDir, "03d16g0a_plan_suppressCompositeShellSlotChildrenAfterSubsumed");
+        var plannerBundleExecutionSyncDiagnostics =
+                _syncPlannerBundleDiagnosticsToExecutionCandidates(
+                        plannerBundleDiagnostics, executionCandidates, {
+                            objectPlanDiagnostics: objectPlanDiagnostics,
+                            reason: "post_object_plan_subsumed_execution_suppression"
+                        });
+        _marker(ctx.outputDir, "03d16g0a0_plan_syncPlannerBundlesAfterSubsumed");
+        var objectPlanExecutionSyncDiagnostics =
+                _syncObjectPlanDiagnosticsToExecutionCandidates(
+                        objectPlanDiagnostics, executionCandidates, {
+                            reason: "post_object_plan_subsumed_execution_suppression"
+                        });
+        _marker(ctx.outputDir, "03d16g0a1_plan_syncObjectPlansAfterSubsumed");
+        if (ctx.writePlannerDiagnostics === true) {
+            try {
+                writeJson(ctx.outputDir + "/planner-bundle-execution-sync-diagnostics.json",
+                        plannerBundleExecutionSyncDiagnostics || {});
+            } catch (ePlannerBundleExecutionSyncDiagnosticsWrite) {}
+            try {
+                writeJson(ctx.outputDir + "/object-plan-execution-sync-diagnostics.json",
+                        objectPlanExecutionSyncDiagnostics || {});
+            } catch (eObjectPlanExecutionSyncDiagnosticsWrite) {}
+        }
     }
     executionCandidates = _backfillVisibleCandidateVisualSources(executionCandidates, sourceItems);
     _marker(ctx.outputDir, "03d16g0b_plan_backfillExecutionVisualSources");

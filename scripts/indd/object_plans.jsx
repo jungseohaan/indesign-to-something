@@ -18,70 +18,143 @@ function _buildObjectPlanDiagnostics(sourceItems, candidates) {
 function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems) {
     var bundles = plannerBundles && plannerBundles.bundles ? plannerBundles.bundles : [];
     var objectPlans = [];
+    var buildTimings = [];
+    function _objectPlanNowMs() {
+        try { return (new Date()).getTime(); } catch (eObjectPlanNow) { return 0; }
+    }
+    function _recordObjectPlanTiming(tag, startedAt, extra) {
+        var row = {
+            tag: tag,
+            ms: _objectPlanNowMs() - startedAt
+        };
+        if (extra) {
+            for (var key in extra) {
+                if (extra.hasOwnProperty && !extra.hasOwnProperty(key)) continue;
+                row[key] = extra[key];
+            }
+        }
+        buildTimings.push(row);
+    }
+    var _timingStartedAt = _objectPlanNowMs();
     var sourceById = _objectPlanSourceInfoById(sourceItems);
-    var summary = {
-        planCount: 0,
-        executablePlanCount: 0,
-        readyExactClusterCount: 0,
-        migrationStatusCounts: {},
-        textActionCounts: {},
-        visualActionCounts: {},
-        materializationCounts: {},
-        placementCounts: {},
-        coordinateSpaceCounts: {},
-        visualLayerCounts: {},
-        plansWithVisualSources: 0,
-        plansWithStyleSources: 0,
-        plansWithOwnedTextFrames: 0,
-        importReadyPlanCount: 0,
-        issueCount: 0,
-        contractStatusCounts: {},
-        issueCodeCounts: {},
-        migrationBlockerCounts: {}
-    };
+    _recordObjectPlanTiming("sourceIndex", _timingStartedAt, {
+        sourceItemCount: sourceItems ? sourceItems.length : 0
+    });
 
+    _timingStartedAt = _objectPlanNowMs();
     for (var i = 0; i < bundles.length; i++) {
         var plan = _objectPlanFromPlannerBundle(bundles[i], i, sourceById);
         objectPlans.push(plan);
-        summary.planCount++;
-        if (plan.executable) summary.executablePlanCount++;
-        if (plan.migrationStatus === "READY_EXACT_CLUSTER") summary.readyExactClusterCount++;
-        _incrementObjectPlanSummary(summary.migrationStatusCounts, plan.migrationStatus);
-        _incrementObjectPlanSummary(summary.textActionCounts, plan.textAction);
-        _incrementObjectPlanSummary(summary.visualActionCounts, plan.visualAction);
-        _incrementObjectPlanSummary(summary.materializationCounts, plan.materialization);
-        _incrementObjectPlanSummary(summary.placementCounts, plan.placement);
-        _incrementObjectPlanSummary(summary.coordinateSpaceCounts, plan.coordinateSpace);
-        _incrementObjectPlanSummary(summary.visualLayerCounts, plan.visualLayer);
-        if (plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0) summary.plansWithVisualSources++;
-        if (plan.styleSourceObjectIds && plan.styleSourceObjectIds.length > 0) summary.plansWithStyleSources++;
-        if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) summary.plansWithOwnedTextFrames++;
-        _incrementObjectPlanSummary(summary.migrationBlockerCounts, plan.migrationBlocker || "NONE");
     }
+    _recordObjectPlanTiming("plannerBundlePlans", _timingStartedAt, {
+        bundleCount: bundles.length,
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var deduplication = _deduplicateObjectPlansByIdentity(objectPlans);
+    _recordObjectPlanTiming("deduplicateByIdentity", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        removedPlanCount: deduplication.summary ? deduplication.summary.removedPlanCount : 0
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendEditableTextFrameObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendEditableTextFramePlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendVisibleTextFramePlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendEmptyEditableTextFramePlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendTableOnlyTextFramePlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendTableOnlyTextFrameShellObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendTableOnlyTextFrameShellPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendTextFrameCleanupObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendTextFrameCleanupPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var pngOwnedTextFrameCleanup = _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("pngOwnedTextFrameCleanup", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var textOwnershipResolution = _resolveObjectPlanDuplicateTextOwners(objectPlans);
+    _recordObjectPlanTiming("resolveDuplicateTextOwners", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var visibleVisualSourceResolution = _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans);
+    _recordObjectPlanTiming("resolveDuplicateVisibleVisualSources", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var inlineVisualInventory =
             _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourceById);
+    _recordObjectPlanTiming("appendInlineVisualInventoryPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var pageRootTextlessPlaneInventory =
             _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourceById);
+    _recordObjectPlanTiming("appendPageRootTextlessPlanePlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var pageLocalVisibleSourceResolution = _resolveObjectPlanPageLocalVisibleSources(objectPlans, sourceById);
+    _recordObjectPlanTiming("resolvePageLocalVisibleSources", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var rawClippedImageVisualSourceResolution =
             _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById);
+    _recordObjectPlanTiming("resolveRawClippedImageVisualSources", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var pageBackgroundPlaneMaterialization =
             _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceById);
+    _recordObjectPlanTiming("applyPageBackgroundPlaneMaterialization", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var depthFinalization = _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems);
+    _recordObjectPlanTiming("finalizeVisualDepthContracts", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var inlineFlowContractFinalization = _finalizeObjectPlanInlineFlowContracts(objectPlans);
+    _recordObjectPlanTiming("finalizeInlineFlowContracts", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var validation = _validateObjectPlanDiagnostics(objectPlans);
+    _recordObjectPlanTiming("validateObjectPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var sourceSetRefs = _attachObjectPlanSourceSetRefs(objectPlans);
-    summary = _summarizeObjectPlans(objectPlans, validation);
+    _recordObjectPlanTiming("attachSourceSetRefs", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
+    var summary = _summarizeObjectPlans(objectPlans, validation);
+    _recordObjectPlanTiming("summarizeObjectPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
     summary.objectPlanDeduplication = deduplication.summary;
     summary.pngOwnedTextFrameCleanup = pngOwnedTextFrameCleanup.summary;
     summary.textOwnershipResolution = textOwnershipResolution.summary;
@@ -94,6 +167,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     summary.visualDepthFinalization = depthFinalization.summary;
     summary.inlineFlowContractFinalization = inlineFlowContractFinalization.summary;
     summary.sourceSetInterning = sourceSetRefs.summary;
+    summary.objectPlanBuildTimings = buildTimings;
 
     return {
         schemaVersion: 1,
@@ -628,6 +702,101 @@ function _createObjectPlanSourceSetInterner() {
         intern: intern,
         result: result
     };
+}
+
+function _syncObjectPlanDiagnosticsToExecutionCandidates(objectPlanDiagnostics, executionCandidates, options) {
+    options = options || {};
+    if (!objectPlanDiagnostics || !objectPlanDiagnostics.objectPlans) {
+        return {
+            diagnostics: objectPlanDiagnostics,
+            summary: {
+                originalPlanCount: 0,
+                retainedPlanCount: 0,
+                prunedPlanCount: 0,
+                retainedVisiblePlanCount: 0,
+                prunedVisiblePlanCount: 0
+            },
+            pruned: []
+        };
+    }
+
+    var activeObjectPlanIds = {};
+    var activeCandidateIds = {};
+    var rows = executionCandidates || [];
+    for (var i = 0; i < rows.length; i++) {
+        var candidate = rows[i];
+        if (!candidate) continue;
+        if (candidate.objectPlanId) activeObjectPlanIds[String(candidate.objectPlanId)] = true;
+        if (candidate.candidateId) activeCandidateIds[String(candidate.candidateId)] = true;
+    }
+
+    var plans = objectPlanDiagnostics.objectPlans || [];
+    var kept = [];
+    var pruned = [];
+    var retainedVisiblePlanCount = 0;
+    var prunedVisiblePlanCount = 0;
+    for (var p = 0; p < plans.length; p++) {
+        var plan = plans[p];
+        if (!plan) continue;
+        var visible = _objectPlanHasVisibleVisual(plan);
+        var keep = _shouldKeepObjectPlanAfterExecutionCandidateSync(
+                plan, activeObjectPlanIds, activeCandidateIds);
+        if (keep) {
+            kept.push(plan);
+            if (visible) retainedVisiblePlanCount++;
+        } else {
+            pruned.push({
+                objectPlanId: plan.objectPlanId || null,
+                candidateId: plan.candidateId || null,
+                passId: plan.passId || null,
+                pageIndex: plan.pageIndex,
+                ownershipSlot: plan.ownershipSlot || null,
+                materialization: plan.materialization || null,
+                visualAction: plan.visualAction || null,
+                reason: options.reason || "execution_candidate_suppressed"
+            });
+            if (visible) prunedVisiblePlanCount++;
+        }
+    }
+
+    var previousSummary = objectPlanDiagnostics.summary || {};
+    objectPlanDiagnostics.objectPlans = kept;
+    var validation = _validateObjectPlanDiagnostics(kept);
+    var sourceSetRefs = _attachObjectPlanSourceSetRefs(kept);
+    var summary = _summarizeObjectPlans(kept, validation);
+    for (var summaryKey in previousSummary) {
+        if (!previousSummary.hasOwnProperty(summaryKey)) continue;
+        if (summary[summaryKey] !== undefined) continue;
+        summary[summaryKey] = previousSummary[summaryKey];
+    }
+    summary.sourceSetInterning = sourceSetRefs.summary;
+    summary.executionCandidateSync = {
+        originalPlanCount: plans.length,
+        retainedPlanCount: kept.length,
+        prunedPlanCount: pruned.length,
+        retainedVisiblePlanCount: retainedVisiblePlanCount,
+        prunedVisiblePlanCount: prunedVisiblePlanCount,
+        activeExecutionCandidateCount: rows.length,
+        reason: options.reason || "execution_candidate_suppressed"
+    };
+    objectPlanDiagnostics.summary = summary;
+    objectPlanDiagnostics.validation = validation;
+    objectPlanDiagnostics.sourceSetRefs = sourceSetRefs;
+
+    return {
+        diagnostics: objectPlanDiagnostics,
+        summary: summary.executionCandidateSync,
+        pruned: pruned
+    };
+}
+
+function _shouldKeepObjectPlanAfterExecutionCandidateSync(plan, activeObjectPlanIds, activeCandidateIds) {
+    if (!plan) return false;
+    if (!_objectPlanHasVisibleVisual(plan)) return true;
+    if (plan.objectPlanId && activeObjectPlanIds[String(plan.objectPlanId)]) return true;
+    if (plan.candidateId && activeCandidateIds[String(plan.candidateId)]) return true;
+    if (!plan.objectPlanId && !plan.candidateId) return true;
+    return false;
 }
 
 function _slimObjectPlanDiagnosticsForWrite(diagnostics) {
@@ -1819,6 +1988,8 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
     var created = [];
     var absorbed = [];
     var normalizedExisting = [];
+    var protectedTextlessGroupSlots = [];
+    var protectedTextlessGroupSourceIdsByPage = {};
 
     function normalizePageBackgroundPlane(plan) {
         if (!plan || !_objectPlanHasPlaneExportableVisualSource(plan)) return false;
@@ -1871,6 +2042,62 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         return true;
     }
 
+    function isProtectedTextlessGroupSlot(plan) {
+        if (!plan) return false;
+        if (plan.absorbedByObjectPlanId) return false;
+        if (String(plan.slotRole || "") !== "textless_group_visual_slot"
+                && String(plan.compositeRole || "") !== "textless_group_visual_slot") {
+            return false;
+        }
+        if (plan.placement !== "FLOATING" || plan.coordinateSpace !== "PAGE") return false;
+        if (plan.layoutOnlyInlineSlot === true
+                || plan.sourceInlineFlow === true
+                || plan.inlineCompositeLayoutDescendant === true
+                || plan.inlineAnchorSourceObjectId !== null
+                        && plan.inlineAnchorSourceObjectId !== undefined) {
+            return false;
+        }
+        if (plan.visualAction !== "PLACE_TEXT_SHELL"
+                && plan.visualAction !== "PLACE_FLOATING_PNG") {
+            return false;
+        }
+        if (plan.materialization !== "EXTRACTED_PNG_VECTOR"
+                && plan.materialization !== "COMPLETE_PNG") {
+            return false;
+        }
+        return !!((plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0)
+                || (plan.exportSourceObjectIds && plan.exportSourceObjectIds.length > 0));
+    }
+
+    function protectTextlessGroupSlot(plan) {
+        var pageKey = String(plan.pageIndex);
+        var protectedIds = _sourceIdsUnion(
+                plan.visualSourceObjectIds || [],
+                plan.exportSourceObjectIds || []);
+        if (!protectedTextlessGroupSourceIdsByPage[pageKey]) {
+            protectedTextlessGroupSourceIdsByPage[pageKey] = [];
+        }
+        protectedTextlessGroupSourceIdsByPage[pageKey] = _sourceIdsUnion(
+                protectedTextlessGroupSourceIdsByPage[pageKey],
+                protectedIds);
+        plan.pageBackgroundPlaneProtected = true;
+        plan.pageBackgroundPlaneProtectedReason =
+                "textless_group_visual_slot_is_visible_slot_owner_before_page_background_plane";
+        protectedTextlessGroupSlots.push({
+            objectPlanId: plan.objectPlanId || null,
+            candidateId: plan.candidateId || null,
+            pageIndex: plan.pageIndex,
+            ownershipSlot: plan.ownershipSlot || null,
+            slotRole: plan.slotRole || null,
+            compositeRole: plan.compositeRole || null,
+            protectedSourceObjectIds: protectedIds
+        });
+    }
+
+    for (var pre = 0; pre < plans.length; pre++) {
+        if (isProtectedTextlessGroupSlot(plans[pre])) protectTextlessGroupSlot(plans[pre]);
+    }
+
     for (var i = 0; i < plans.length; i++) {
         var plan = plans[i];
         if (plan && (plan.slotRole === "page_background_plane"
@@ -1892,6 +2119,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             byComponent[existingPageKey + "|" + existingComponentKey].members.push(plan);
             continue;
         }
+        if (isProtectedTextlessGroupSlot(plan)) continue;
         if (!_objectPlanEligibleForPageBackgroundPlane(plan)) continue;
         var pageKey = String(plan.pageIndex);
         var componentKey = _objectPlanPageBackgroundComponentKey(plan, sourceById);
@@ -1930,6 +2158,8 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenVisualSourceObjectIds");
         var hiddenTextFrameIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenTextFrameIds");
         var excludedInlineSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "excludedInlineSourceObjectIds");
+        var protectedTextlessGroupSourceIds =
+                protectedTextlessGroupSourceIdsByPage[group.pageKey] || [];
         exportSourceObjectIds = _objectPlanPromotePageRootVisibleExportSources(
                 sourceObjectIds, visualSourceObjectIds, exportSourceObjectIds, sourceById);
         exportSourceObjectIds = _objectPlanCarrierExportSourceIds(
@@ -1940,6 +2170,16 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 exportSourceObjectIds,
                 excludedInlineSourceObjectIds,
                 sourceById);
+        sourceObjectIds = _objectPlanSourceIdsMinus(
+                sourceObjectIds, protectedTextlessGroupSourceIds);
+        sourceRootObjectIds = _objectPlanSourceIdsMinus(
+                sourceRootObjectIds, protectedTextlessGroupSourceIds);
+        visualSourceObjectIds = _objectPlanSourceIdsMinus(
+                visualSourceObjectIds, protectedTextlessGroupSourceIds);
+        exportSourceObjectIds = _objectPlanSourceIdsMinus(
+                exportSourceObjectIds, protectedTextlessGroupSourceIds);
+        hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                hiddenVisualSourceObjectIds, protectedTextlessGroupSourceIds);
         hiddenTextFrameIds = _sourceIdsUnion(
                 hiddenTextFrameIds, _objectPlanUnionPlanIds(sourceMembers, "ownedTextFrameIds"));
         hiddenTextFrameIds = _sourceIdsUnion(
@@ -2153,7 +2393,9 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             absorbedObjectPlanIds: absorbed
             ,
             normalizedExistingPlaneCount: normalizedExisting.length,
-            normalizedExistingObjectPlanIds: normalizedExisting
+            normalizedExistingObjectPlanIds: normalizedExisting,
+            protectedTextlessGroupSlotCount: protectedTextlessGroupSlots.length,
+            protectedTextlessGroupSlots: protectedTextlessGroupSlots
         }
     };
 }
@@ -2606,6 +2848,7 @@ function _objectPlanVisibleTextFrameShellIds(sourceObjectIds, sourceById) {
 function _objectPlanPruneExportSourcesWithHiddenDescendants(exportSourceObjectIds, hiddenSourceObjectIds, sourceById) {
     var hiddenSet = _objectPlanSourceSetMembership(hiddenSourceObjectIds || []);
     var childrenByParent = {};
+    var hiddenDescendantMemo = {};
     var out = [];
     var seen = {};
 
@@ -2631,20 +2874,27 @@ function _objectPlanPruneExportSourcesWithHiddenDescendants(exportSourceObjectId
 
     function buildChildrenIndex() {
         if (childrenByParent.__built === true) return;
+        try {
+            if (sourceById && sourceById.__objectPlanChildrenByParentId) {
+                childrenByParent = sourceById.__objectPlanChildrenByParentId;
+                return;
+            }
+        } catch (eCachedChildrenRead) {}
+        var built = {};
         for (var key in sourceById) {
             if (!sourceById.hasOwnProperty(key)) continue;
+            if (String(key).indexOf("__objectPlan") === 0) continue;
             var src = sourceById[key];
             if (!src || src.id === null || src.id === undefined) continue;
             var parentId = src.parentId;
             if (parentId === null || parentId === undefined || String(parentId) === "") continue;
             var parentKey = String(parentId);
-            if (!childrenByParent[parentKey]) childrenByParent[parentKey] = [];
-            childrenByParent[parentKey].push(src);
+            if (!built[parentKey]) built[parentKey] = [];
+            built[parentKey].push(src);
         }
-        for (var parentKey2 in childrenByParent) {
-            if (!childrenByParent.hasOwnProperty(parentKey2)) continue;
-            if (parentKey2 === "__built") continue;
-            childrenByParent[parentKey2].sort(function(a, b) {
+        for (var parentKey2 in built) {
+            if (!built.hasOwnProperty(parentKey2)) continue;
+            built[parentKey2].sort(function(a, b) {
                 var az = sourceSortValue(a);
                 var bz = sourceSortValue(b);
                 if (az !== bz) return az - bz;
@@ -2655,17 +2905,28 @@ function _objectPlanPruneExportSourcesWithHiddenDescendants(exportSourceObjectId
                 return ai - bi;
             });
         }
-        childrenByParent.__built = true;
+        built.__built = true;
+        childrenByParent = built;
+        try { sourceById.__objectPlanChildrenByParentId = built; } catch (eCachedChildrenWrite) {}
     }
 
     function hasHiddenDescendant(sourceId) {
+        var key = String(sourceId);
+        if (hiddenDescendantMemo.hasOwnProperty(key)) return hiddenDescendantMemo[key];
         var children = childrenByParent[String(sourceId)] || [];
         for (var i = 0; i < children.length; i++) {
             var child = children[i];
             if (!child || child.id === null || child.id === undefined) continue;
-            if (hiddenSet[String(child.id)] === true) return true;
-            if (hasHiddenDescendant(child.id)) return true;
+            if (hiddenSet[String(child.id)] === true) {
+                hiddenDescendantMemo[key] = true;
+                return true;
+            }
+            if (hasHiddenDescendant(child.id)) {
+                hiddenDescendantMemo[key] = true;
+                return true;
+            }
         }
+        hiddenDescendantMemo[key] = false;
         return false;
     }
 

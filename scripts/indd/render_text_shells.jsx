@@ -1583,110 +1583,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 ? _pageBackgroundPlaneCompositeCacheKey(slotPlan)
                 : null;
 
-        function pageRelativeBoundsForPageSnapshot() {
-            var pageBounds = null;
-            try { pageBounds = page && page.bounds ? arrCopy(page.bounds) : null; } catch (ePageBounds) {}
-            if (!pageBounds || pageBounds.length < 4) return slotPlan.bounds ? arrCopy(slotPlan.bounds) : null;
-            return [
-                0,
-                0,
-                Number(pageBounds[2]) - Number(pageBounds[0]),
-                Number(pageBounds[3]) - Number(pageBounds[1])
-            ];
-        }
-
-        function renderPageBackgroundPlaneSnapshot() {
-            if (!isPageBackgroundPlane) return false;
-            if (slotPlan.passId !== "pass.page_textless_graphic_groups") return false;
-            var savedText = [];
-            var savedHiddenVisuals = [];
-            var snapshotStartedAt = _decoPerfNow();
-            try {
-                var hiddenVisualIds = _sortedNumericIds(_sourceIdsUnion(
-                        slotPlan.hiddenVisualSourceObjectIds || [],
-                        slotPlan.excludedInlineSourceObjectIds || []));
-                var hiddenItems = [];
-                var hiddenSeen = {};
-                for (var hvi = 0; hvi < hiddenVisualIds.length; hvi++) {
-                    var hiddenItem = null;
-                    try { hiddenItem = itemById ? itemById[String(hiddenVisualIds[hvi])] : null; } catch (eHiddenLookup) {}
-                    if (!hiddenItem) continue;
-                    var hiddenKey = String(hiddenVisualIds[hvi]);
-                    if (hiddenSeen[hiddenKey]) continue;
-                    hiddenSeen[hiddenKey] = true;
-                    hiddenItems.push(hiddenItem);
-                }
-                if (hiddenItems.length > 0) savedHiddenVisuals = _hideItemsForExport(hiddenItems);
-                try {
-                    savedText = hideTextFrames(page, {
-                        preferTextPaintOnly: true,
-                        preserveFrameVisual: true
-                    });
-                } catch (eHidePageText) {
-                    savedText = [];
-                }
-                try { page.exportFile(ExportFormat.PNG_FORMAT, outFile, false); } catch (ePageExport) {}
-                if (!outFile.exists || outFile.length < 512) {
-                    return fail("page_background_plane_snapshot_export_too_small", {
-                        fileName: fileName,
-                        fileExists: outFile.exists,
-                        fileBytes: outFile.exists ? outFile.length : 0,
-                        exportSourceObjectIds: exportIds
-                    });
-                }
-                var bounds = pageRelativeBoundsForPageSnapshot();
-                var z = zOrderForComposite();
-                var opts = ownershipOptsForComposite();
-                var entryId = -930000000 + (Number(slotPlan.primarySourceObjectId || exportIds[0]) || 0);
-                var entry = {
-                    id: entryId,
-                    file: "rendered_frames/" + fileName,
-                    bounds: bounds,
-                    pageIndex: page.documentOffset,
-                    candidateId: slotPlan.candidateId || null,
-                    candidateMatchStrategy: "planned_page_background_plane_snapshot",
-                    zOrder: z,
-                    exportSanity: {
-                        fileBytes: outFile.length,
-                        sourceSetComposite: true,
-                        pageBackgroundPlane: true,
-                        pageBackgroundPlaneSnapshot: true,
-                        pageTextlessGraphicGroup: true,
-                        exportSourceObjectIds: exportIds,
-                        pageRelativeBounds: bounds,
-                        exportPageRelativeBounds: bounds,
-                        exportFullPageRelativeBounds: bounds,
-                        hiddenVisualSourceObjectIds: hiddenVisualIds,
-                        hiddenTextFrameIds: slotPlan.hiddenTextFrameIds || []
-                    }
-                };
-                results.push(applyRenderOwnership(entry, sourceItems[0], opts));
-                renderedPageKeys[renderKey] = true;
-                markCompositeSourcesRendered();
-                if (pagePlaneCacheKey) {
-                    pageBackgroundPlaneCompositeFileCache[pagePlaneCacheKey] = {
-                        fileName: fileName,
-                        bounds: bounds ? arrCopy(bounds) : null,
-                        cropSourceBounds: null,
-                        exportFullBounds: bounds ? arrCopy(bounds) : null
-                    };
-                }
-                _decoPerfRecord("page_background_plane_snapshot", page, page, ownershipOpts, snapshotStartedAt, {
-                    result: "rendered",
-                    passId: slotPlan.passId || null,
-                    candidatePurpose: slotPlan.candidatePurpose || null,
-                    compositeRole: slotPlan.compositeRole || null,
-                    exportSourceObjectCount: exportIds.length,
-                    hiddenVisualCount: hiddenVisualIds.length,
-                    fileName: fileName
-                });
-                return true;
-            } finally {
-                try { if (savedText && savedText.length > 0) restoreTextFrames(savedText); } catch (eRestorePageText) {}
-                try { if (savedHiddenVisuals && savedHiddenVisuals.length > 0) _restoreItemsForExport(savedHiddenVisuals); } catch (eRestorePageVisuals) {}
-            }
-        }
-
         function zOrderForComposite() {
             if (slotPlan.zOrder !== undefined && slotPlan.zOrder !== null) {
                 return slotPlan.zOrder;
@@ -1727,10 +1623,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             for (var rsi = 0; rsi < renderedSourceIds.length; rsi++) {
                 renderedIds[renderedSourceIds[rsi]] = true;
             }
-        }
-
-        if (renderPageBackgroundPlaneSnapshot()) {
-            return true;
         }
 
         if (pagePlaneCacheKey) {
@@ -2024,9 +1916,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 } catch (eSourceItemDebug) {}
 	                var hiddenForItem = [];
 	                var _perfHiddenCollectStartedAt = _decoPerfNow();
-	                if (!useAtomicTextlessVectorTarget) {
-	                    try { hiddenForItem = _collectOutOfScopeChildrenForSourceIds(ordered[i], exportIds); } catch (eOutOfScope) {}
-	                }
+		                if (!useAtomicTextlessVectorTarget && !isPageBackgroundPlane) {
+		                    try { hiddenForItem = _collectOutOfScopeChildrenForSourceIds(ordered[i], exportIds); } catch (eOutOfScope) {}
+		                }
 	                try {
 	                    var hiddenSeen = {};
                     for (var hfi = 0; hfi < hiddenForItem.length; hfi++) {
@@ -2042,8 +1934,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 		                    _perfHiddenHideMs += _decoPerfNow() - _perfHiddenHideStartedAt;
 		                    for (var si = 0; savedForItem && si < savedForItem.length; si++) {
 		                        savedOutOfScope.push(savedForItem[si]);
-		                    }
-		                }
+                        }
+                    }
                     var hiddenTextFramesForItem = [];
                     try {
                         appendHiddenTextFramesForItem(
