@@ -240,6 +240,8 @@ function buildPageData(doc, startPage, endPage, allItems) {
 
 // args 배열을 파싱해 ctx 객체를 반환하고 전역 CONFIG를 초기화한다.
 function _parseArgs(args) {
+    var graphicsMode = "single-textless-plane";
+    try { CANONICAL_GRAPHICS_MODE = graphicsMode; } catch (eGraphicsModeGlobal) {}
     var ctx = {
         inddPath:           args[0],
         outputDir:          args[1],
@@ -251,6 +253,7 @@ function _parseArgs(args) {
         perfMode:           (args[7] || "standard").toLowerCase(),
         skipRenderPagesMap: {},
         extractScriptPath:   args[16] || null,
+        graphicsMode:        graphicsMode,
         // SPEC-030 B.2: "pre_scan" 모드 — 해시만 계산하고 렌더링 없이 종료
         extractMode:        (args[10] || "full").toLowerCase(),
         // 분할 추출 모드: IDML 재내보내기 생략, resolved를 resolved_START_END.json에 저장
@@ -267,7 +270,8 @@ function _parseArgs(args) {
             || ctx.perfMode === "debug";
     ctx.skipValidation = args[14] === "1"
             || args[14] === "--skip-validation"
-            || args[14] === "skip-validation";
+            || args[14] === "skip-validation"
+            || graphicsMode === "single-textless-plane";
     ctx.reuseExistingIdml = args[15] === "1"
             || args[15] === "--reuse-idml"
             || args[15] === "reuse-idml";
@@ -299,6 +303,7 @@ function _parseArgs(args) {
         cfgLog.writeln("writePlannerDiagnostics=" + ctx.writePlannerDiagnostics);
         cfgLog.writeln("skipValidation=" + ctx.skipValidation);
         cfgLog.writeln("reuseExistingIdml=" + ctx.reuseExistingIdml);
+        cfgLog.writeln("graphicsMode=" + ctx.graphicsMode);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
         try { cfgLog.writeln("moduleLoadDebug=" + _EXTRACT_MODULE_LOAD_DEBUG); } catch (eModuleDebugLog) {}
         cfgLog.close();

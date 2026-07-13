@@ -72,7 +72,7 @@ public final class FramePlacer {
 
         for (ResolvedTextFrame tf : frames) {
             int tfDomId = parseDomIdOrNeg(tf.id());
-            ObjectPlan textPlan = ctx.findAnyTextFrameOwnershipPlan(tfDomId);
+            ObjectPlan textPlan = ctx.findAnyTextFrameOwnershipPlan(tf.id());
             boolean planKnown = textPlan != null;
             boolean ownedByFloatingTextShell = ctx.isTextFrameOwnedByFloatingTextShellPlan(tfDomId);
             if (planKnown
@@ -97,7 +97,7 @@ public final class FramePlacer {
                             || (planKnown
                             ? textPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                                 && textPlan.placement == Placement.FLOATING
-                            : ctx.ownershipPlanPlacesFloatingHwpxText(tfDomId));
+                            : ctx.ownershipPlanPlacesFloatingHwpxText(tf.id()));
             boolean editableForHwpx = ctx.resolvedData.isEditableTextFrame(tf.id()) || hwpxOwnedTextFrame;
             if (!plannedFloatingHwpxText && ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
                 continue;
@@ -167,7 +167,7 @@ public final class FramePlacer {
             double w = localBounds.w;
             double h = localBounds.h;
             boolean usingObjectPlanBounds = false;
-            ObjectPlan hwpxTextPlan = ctx.findHwpxTextFrameOwnershipPlan(tfDomId);
+            ObjectPlan hwpxTextPlan = ctx.findHwpxTextFrameOwnershipPlan(tf.id());
             LocalFrameBounds planBounds = computePlannedPageFrameBounds(ctx, hwpxTextPlan);
             if (planBounds != null) {
                 x = planBounds.x;

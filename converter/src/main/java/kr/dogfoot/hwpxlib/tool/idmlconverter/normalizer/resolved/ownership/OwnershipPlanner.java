@@ -457,7 +457,7 @@ public final class OwnershipPlanner {
         if (pageTextlessGraphicGroupNeedsContractRepair(plan)) {
             warnImportedPlanRepairSuppressed(plan,
                     "IMPORTED_PAGE_TEXTLESS_GRAPHIC_GROUP_REPAIR_SUPPRESSED",
-                    "expected repair was DROP_TEXT/PLACE_FLOATING_PNG/CONTENT_VISUAL/FLOATING/PAGE");
+                    "expected repair was DROP_TEXT/PLACE_FLOATING_PNG/PAGE_BACKGROUND/FLOATING/PAGE/PAGE_PLANE_PNG");
             return plan;
         }
         if (isImportedStoryFlowInlineShellSlotWithPagePosition(plan)) {
@@ -1306,8 +1306,8 @@ public final class OwnershipPlanner {
             warn("PAGE_TEXTLESS_GRAPHIC_GROUP_CONTRACT_REPAIR_SUPPRESSED",
                     "plan=" + planRef(plan)
                             + " expected=text:DROP_TEXT visual:PLACE_FLOATING_PNG"
-                            + " layer:CONTENT_VISUAL placement:FLOATING coordinate:PAGE"
-                            + " materialization:EXTRACTED_PNG_VECTOR");
+                            + " layer:PAGE_BACKGROUND placement:FLOATING coordinate:PAGE"
+                            + " materialization:PAGE_PLANE_PNG");
             suppressed++;
         }
         ConversionTiming.metric("stage1.ownershipPlanner.restorePageTextlessGraphicGroupContracts.suppressed",
@@ -9205,10 +9205,10 @@ public final class OwnershipPlanner {
         if (isClosedInlineCarrierVisualPlan(plan)) return false;
         return plan.textAction != TextAction.DROP_TEXT
                 || plan.visualAction != VisualAction.PLACE_FLOATING_PNG
-                || plan.visualLayer != VisualLayer.CONTENT_VISUAL
+                || plan.visualLayer != VisualLayer.PAGE_BACKGROUND
                 || plan.placement != Placement.FLOATING
                 || plan.coordinateSpace != CoordinateSpace.PAGE
-                || plan.materialization != Materialization.EXTRACTED_PNG_VECTOR;
+                || plan.materialization != Materialization.PAGE_PLANE_PNG;
     }
 
     private static boolean isClosedInlineCarrierVisualPlan(ObjectPlan plan) {

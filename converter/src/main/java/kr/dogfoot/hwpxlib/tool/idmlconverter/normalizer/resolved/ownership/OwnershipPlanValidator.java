@@ -656,17 +656,26 @@ public final class OwnershipPlanValidator {
 
     private static boolean isExplicitPageBackgroundPlaneContract(ObjectPlan plan) {
         if (plan == null) return false;
-        if (!"page_background_plane".equals(safe(plan.slotRole))) return false;
+        String slotRole = safe(plan.slotRole);
+        if (!"page_background_plane".equals(slotRole)
+                && !"page_textless_plane".equals(slotRole)) {
+            return false;
+        }
+        if (plan.materialization == Materialization.PAGE_PLANE_PNG) return true;
         String candidate = safe(plan.candidateId);
         String reason = safe(plan.reason);
         return candidate.contains("page_background_plane")
+                || candidate.contains("single_textless_page_plane")
+                || candidate.contains("page_textless_plane")
                 || reason.contains("page_background_plane")
-                || reason.contains("PAGE_BACKGROUND_PLANE");
+                || reason.contains("PAGE_BACKGROUND_PLANE")
+                || reason.contains("single_textless_page_plane");
     }
 
     private void validateBackgroundDepthBand() {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || !hasVisibleVisualSlot(plan)) continue;
+            if (isExplicitPageBackgroundPlaneContract(plan)) continue;
             if (plan.visualLayer == VisualLayer.PAGE_BACKGROUND
                     && !VisualPlanePolicy.isBackgroundZOrder(plan.zOrder)) {
                 warn("STAGE4_PAGE_BACKGROUND_NOT_BOTTOM_Z",

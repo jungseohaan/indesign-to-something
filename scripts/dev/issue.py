@@ -32,6 +32,7 @@ AUDIT_PATH = REPO_ROOT / "scripts" / "ownership_plan_audit.py"
 TRACE_SOURCE_PATH = REPO_ROOT / "scripts" / "dev" / "trace_source.py"
 PAGE_INVENTORY_PATH = REPO_ROOT / "scripts" / "dev" / "page_inventory.py"
 IDML_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "idml"
+PREVIEW_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "preview"
 
 CASE_ALIASES = {
     "park31-u1": ("중3-1국어교과서(박영민)", "u1"),
@@ -456,6 +457,161 @@ def store_cached_idml(indd_path: Path, extract_dir: Path, enabled: bool) -> Dict
     return info
 
 
+def preview_cache_file(indd_path: Path, start_page: int, end_page: int) -> Path:
+    return PREVIEW_CACHE_ROOT / idml_cache_key(indd_path) / f"p{start_page:03d}-{end_page:03d}.pdf"
+
+
+def restore_cached_preview(indd_path: Path, extract_dir: Path, start_page: int, end_page: int, enabled: bool) -> Dict[str, Any]:
+    cached_pdf = preview_cache_file(indd_path, start_page, end_page)
+    info: Dict[str, Any] = {
+        "enabled": enabled,
+        "hit": False,
+        "cacheFile": str(cached_pdf),
+    }
+    if not enabled:
+        info["reason"] = "disabled"
+        return info
+    if not cached_pdf.exists():
+        info["reason"] = "miss"
+        return info
+    link_or_copy_file(cached_pdf, extract_dir / "preview.pdf")
+    info["hit"] = True
+    info["reason"] = "restored"
+    return info
+
+
+def store_cached_preview(indd_path: Path, extract_dir: Path, start_page: int, end_page: int, enabled: bool) -> Dict[str, Any]:
+    cached_pdf = preview_cache_file(indd_path, start_page, end_page)
+    info: Dict[str, Any] = {
+        "enabled": enabled,
+        "stored": False,
+        "cacheFile": str(cached_pdf),
+    }
+    if not enabled:
+        info["reason"] = "disabled"
+        return info
+    preview_pdf = extract_dir / "preview.pdf"
+    if not preview_pdf.exists():
+        info["reason"] = "missing_preview_pdf"
+        return info
+    cached_pdf.parent.mkdir(parents=True, exist_ok=True)
+    if not cached_pdf.exists() or not os.path.samefile(preview_pdf, cached_pdf):
+        shutil.copy2(preview_pdf, cached_pdf)
+    stat = indd_path.stat()
+    metadata = {
+        "sourceINDD": str(indd_path.resolve()),
+        "sourceSize": stat.st_size,
+        "sourceMtimeNs": stat.st_mtime_ns,
+        "startPage": start_page,
+        "endPage": end_page,
+        "storedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    (cached_pdf.parent / f"{cached_pdf.stem}.metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    info["stored"] = True
+    info["reason"] = "stored"
+    return info
+
+
+def write_preview_applescript(
+    path: Path,
+    app_name: str,
+    indd_path: Path,
+    preview_pdf: Path,
+    start_page: int,
+    end_page: int,
+) -> None:
+    js = f"""
+(function () {{
+    app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;
+    app.scriptPreferences.enableRedraw = false;
+
+    var inddFile = File({json.dumps(str(indd_path), ensure_ascii=False)});
+    var outFile = File({json.dumps(str(preview_pdf), ensure_ascii=False)});
+    if (!inddFile.exists) throw new Error("INDD not found: " + inddFile.fsName);
+    if (!outFile.parent.exists) outFile.parent.create();
+
+    function findOpenDocument(fsName) {{
+        for (var i = 0; i < app.documents.length; i++) {{
+            try {{
+                if (app.documents[i].fullName && app.documents[i].fullName.fsName === fsName) {{
+                    return app.documents[i];
+                }}
+            }} catch (e) {{}}
+        }}
+        return null;
+    }}
+
+    var doc = findOpenDocument(inddFile.fsName);
+    var openedHere = false;
+    if (!doc) {{
+        doc = app.open(inddFile, false);
+        openedHere = true;
+    }}
+
+    try {{
+        app.pdfExportPreferences.exportReaderSpreads = false;
+        if ({start_page} === 1 && {end_page} === doc.pages.length) {{
+            app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
+        }} else {{
+            app.pdfExportPreferences.pageRange = "+{start_page}-+{end_page}";
+        }}
+        app.pdfExportPreferences.colorBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+        app.pdfExportPreferences.colorBitmapSamplingDPI = 300;
+        app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.JPEG;
+        app.pdfExportPreferences.colorBitmapQuality = CompressionQuality.HIGH;
+        app.pdfExportPreferences.grayscaleBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+        app.pdfExportPreferences.grayscaleBitmapSamplingDPI = 300;
+        app.pdfExportPreferences.grayscaleBitmapCompression = BitmapCompression.JPEG;
+        app.pdfExportPreferences.grayscaleBitmapQuality = CompressionQuality.HIGH;
+        app.pdfExportPreferences.monochromeBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+        app.pdfExportPreferences.monochromeBitmapSamplingDPI = 1200;
+        app.pdfExportPreferences.cropImagesToFrames = true;
+        app.pdfExportPreferences.compressTextAndLineArt = true;
+        app.pdfExportPreferences.acrobatCompatibility = AcrobatCompatibility.ACROBAT_7;
+        app.pdfExportPreferences.subsetFontsBelow = 100;
+        app.pdfExportPreferences.optimizePDF = true;
+        doc.exportFile(ExportFormat.PDF_TYPE, outFile);
+    }} finally {{
+        if (openedHere) doc.close(SaveOptions.NO);
+    }}
+}})();
+"""
+    script = f'''using terms from application "{app_name}"
+    tell application "{app_name}"
+        activate
+        with timeout of 1800 seconds
+            do script {json.dumps(js, ensure_ascii=False)} language javascript
+        end timeout
+    end tell
+end using terms from
+'''
+    path.write_text(script, encoding="utf-8")
+
+
+def ensure_preview_pdf(
+    app_name: str,
+    indd_path: Path,
+    extract_dir: Path,
+    issue_dir: Path,
+    start_page: int,
+    end_page: int,
+    enabled: bool,
+    dry_run: bool,
+) -> Dict[str, Any]:
+    restore = restore_cached_preview(indd_path, extract_dir, start_page, end_page, enabled)
+    if not enabled or restore.get("hit") or dry_run:
+        return {"restore": restore}
+
+    script_path = issue_dir / "run_preview_export.scpt"
+    write_preview_applescript(script_path, app_name, indd_path, extract_dir / "preview.pdf", start_page, end_page)
+    run(["osascript", str(script_path)], dry_run=dry_run)
+    store = store_cached_preview(indd_path, extract_dir, start_page, end_page, enabled)
+    return {"restore": restore, "store": store}
+
+
 def write_trace_files(extract_dir: Path, issue_dir: Path) -> None:
     trace = issue_dir / "trace"
     trace.mkdir(parents=True, exist_ok=True)
@@ -697,7 +853,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             int(extract_range["extractStartPage"]),
             int(extract_range["extractEndPage"]),
             args.perf_mode,
-            args.skip_pdf,
+            True,
             args.extract_config,
             args.extract_mode,
             bool(idml_cache_restore.get("hit")),
@@ -713,7 +869,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     print(f"[issue] case={args.case} book={book_key} unit={unit_key} page={args.page}..{end_page}")
     print(f"[issue] extract-local-page={extract_range['extractStartPage']}..{extract_range['extractEndPage']} mode={extract_range['pageRangeMode']}")
+    print(f"[issue] extract-mode={args.extract_mode} graphics-mode=single-textless-plane")
     print(f"[issue] idml-cache={idml_cache_restore.get('reason')} hit={idml_cache_restore.get('hit')} dir={idml_cache_restore.get('cacheDir')}")
+    print(f"[issue] preview-cache={'disabled' if args.skip_pdf else 'enabled'}")
     print(f"[issue] output={issue_dir}")
     ensure_indesign_running(args.app, issue_dir, args.dry_run)
     run(["osascript", str(script_path)], dry_run=args.dry_run)
@@ -724,6 +882,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "book": book_key,
             "unit": unit_key,
             "sourceINDD": str(indd_path),
+            "extractMode": args.extract_mode,
+            "graphicsMode": "single-textless-plane",
             "idmlCache": idml_cache_restore,
             **extract_range,
         }
@@ -732,7 +892,18 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         validate_extraction_success(extract_dir)
         validate_extraction_page_range(extract_dir, extract_range)
         idml_cache_store = store_cached_idml(indd_path, extract_dir, args.reuse_idml)
+        preview_cache = ensure_preview_pdf(
+            args.app,
+            indd_path,
+            extract_dir,
+            issue_dir,
+            int(extract_range["extractStartPage"]),
+            int(extract_range["extractEndPage"]),
+            not args.skip_pdf,
+            args.dry_run,
+        )
         issue_meta["idmlCacheStore"] = idml_cache_store
+        issue_meta["previewCache"] = preview_cache
         (extract_dir / "issue-run.json").write_text(json.dumps(issue_meta, ensure_ascii=False, indent=2), encoding="utf-8")
         (issue_dir / "issue-run.json").write_text(json.dumps(issue_meta, ensure_ascii=False, indent=2), encoding="utf-8")
 

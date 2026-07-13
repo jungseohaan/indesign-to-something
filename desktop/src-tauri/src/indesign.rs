@@ -485,7 +485,8 @@ async fn rerun_osascript_after_indesign_restart(
             continue;
         }
         if open_stalled || no_progress_stalled {
-            let diagnostics = collect_open_stall_diagnostics(app_name, progress_path, output_dir).await;
+            let diagnostics =
+                collect_open_stall_diagnostics(app_name, progress_path, output_dir).await;
             let _ = child.kill().await;
             let _ = child.wait().await;
             let _ = tokio::process::Command::new("killall")
@@ -842,7 +843,13 @@ pub async fn run_extraction(
                         emit_progress(app, phase, &display);
                     } else if matches!(
                         step,
-                        "pdf" | "idml" | "open" | "close_docs" | "spread_chunk" | "fix_links" | "pdf_fix_links"
+                        "pdf"
+                            | "idml"
+                            | "open"
+                            | "close_docs"
+                            | "spread_chunk"
+                            | "fix_links"
+                            | "pdf_fix_links"
                     ) && last_heartbeat_at.elapsed().as_secs() >= 10
                     {
                         let stale = last_progress_at.elapsed().as_secs();
