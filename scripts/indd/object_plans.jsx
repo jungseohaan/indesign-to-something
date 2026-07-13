@@ -2069,11 +2069,47 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 || (plan.exportSourceObjectIds && plan.exportSourceObjectIds.length > 0));
     }
 
-    function protectTextlessGroupSlot(plan) {
+    function _objectPlanSourceSetHasPlacedMedia(ids) {
+        for (var i = 0; ids && i < ids.length; i++) {
+            var src = sourceById ? sourceById[String(ids[i])] : null;
+            if (!src) continue;
+            var kind = String(src.kind || src.type || src.itemType || "");
+            if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+            if (src.hasPlacedVisual === true) return true;
+        }
+        return false;
+    }
+
+    function isProtectedPlacedBackgroundShellSlot(plan) {
+        if (!plan) return false;
+        if (plan.absorbedByObjectPlanId) return false;
+        if (String(plan.passId || "") !== "pass.decoration_groups") return false;
+        if (String(plan.ownershipSlot || "") !== "SHELL_SLOT") return false;
+        if (String(plan.slotRole || "") !== "background_shell_slot"
+                && String(plan.compositeRole || "") !== "background_vector_source"
+                && String(plan.visualLayer || "") !== "PAGE_BACKGROUND") {
+            return false;
+        }
+        if (plan.placement !== "FLOATING" || plan.coordinateSpace !== "PAGE") return false;
+        if (plan.visualAction !== "PLACE_TEXT_SHELL"
+                && plan.visualAction !== "PLACE_FLOATING_PNG") {
+            return false;
+        }
+        if (plan.materialization !== "EXTRACTED_PNG_VECTOR"
+                && plan.materialization !== "COMPLETE_PNG") {
+            return false;
+        }
+        var candidateIds = _sourceIdsUnion(
+                _sourceIdsUnion(plan.sourceObjectIds || [], plan.visualSourceObjectIds || []),
+                plan.exportSourceObjectIds || []);
+        return _objectPlanSourceSetHasPlacedMedia(candidateIds);
+    }
+
+    function protectPageBackgroundAbsorptionSlot(plan, reason) {
         var pageKey = String(plan.pageIndex);
         var protectedIds = _sourceIdsUnion(
-                plan.visualSourceObjectIds || [],
-                plan.exportSourceObjectIds || []);
+                _sourceIdsUnion(plan.visualSourceObjectIds || [], plan.exportSourceObjectIds || []),
+                plan.sourceObjectIds || []);
         if (!protectedTextlessGroupSourceIdsByPage[pageKey]) {
             protectedTextlessGroupSourceIdsByPage[pageKey] = [];
         }
@@ -2081,8 +2117,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 protectedTextlessGroupSourceIdsByPage[pageKey],
                 protectedIds);
         plan.pageBackgroundPlaneProtected = true;
-        plan.pageBackgroundPlaneProtectedReason =
-                "textless_group_visual_slot_is_visible_slot_owner_before_page_background_plane";
+        plan.pageBackgroundPlaneProtectedReason = reason;
         protectedTextlessGroupSlots.push({
             objectPlanId: plan.objectPlanId || null,
             candidateId: plan.candidateId || null,
@@ -2090,12 +2125,21 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             ownershipSlot: plan.ownershipSlot || null,
             slotRole: plan.slotRole || null,
             compositeRole: plan.compositeRole || null,
+            reason: reason,
             protectedSourceObjectIds: protectedIds
         });
     }
 
     for (var pre = 0; pre < plans.length; pre++) {
-        if (isProtectedTextlessGroupSlot(plans[pre])) protectTextlessGroupSlot(plans[pre]);
+        if (isProtectedTextlessGroupSlot(plans[pre])) {
+            protectPageBackgroundAbsorptionSlot(
+                    plans[pre],
+                    "textless_group_visual_slot_is_visible_slot_owner_before_page_background_plane");
+        } else if (isProtectedPlacedBackgroundShellSlot(plans[pre])) {
+            protectPageBackgroundAbsorptionSlot(
+                    plans[pre],
+                    "placed_background_shell_slot_is_visible_slot_owner_before_page_background_plane");
+        }
     }
 
     for (var i = 0; i < plans.length; i++) {
@@ -2119,7 +2163,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             byComponent[existingPageKey + "|" + existingComponentKey].members.push(plan);
             continue;
         }
-        if (isProtectedTextlessGroupSlot(plan)) continue;
+        if (isProtectedTextlessGroupSlot(plan) || isProtectedPlacedBackgroundShellSlot(plan)) continue;
         if (!_objectPlanEligibleForPageBackgroundPlane(plan)) continue;
         var pageKey = String(plan.pageIndex);
         var componentKey = _objectPlanPageBackgroundComponentKey(plan, sourceById);

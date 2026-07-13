@@ -184,6 +184,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
     var sourceItemIndexes = null;
     try { sourceItemIndexes = _buildSourceItemIndexes(sourceItems || []); } catch (eSourceIndexes) {}
     var sourceInfoById = sourceItemIndexes ? sourceItemIndexes.sourceInfoById || {} : {};
+    var sourceChildIdsByParentId = sourceItemIndexes ? sourceItemIndexes.childIdsByParentId || {} : {};
     var decoPerfStats = {
         passId: decorationCandidates && decorationCandidates.length > 0
                 ? String(decorationCandidates[0].passId || "unknown")
@@ -248,6 +249,106 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
             decoPerfStats.renderEvents.push(event);
         } catch (e) {}
+    }
+
+    function _decoPageBoundsForPerf(page) {
+        try { return page && page.bounds ? arrCopy(page.bounds) : null; } catch (ePageBoundsForPerf) {}
+        return null;
+    }
+
+    function _decoSourceBoundsForPerf(info) {
+        try {
+            if (info && info.bounds && info.bounds.length >= 4) return info.bounds;
+            if (info && info.geometricBounds && info.geometricBounds.length >= 4) return info.geometricBounds;
+        } catch (eSourceBoundsForPerf) {}
+        return null;
+    }
+
+    function _decoBoundsAreaForPerf(bounds) {
+        if (!bounds || bounds.length < 4) return 0;
+        var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+        var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+        if (isNaN(h) || isNaN(w)) return 0;
+        return h * w;
+    }
+
+    function _decoBoundsCoverageForPerf(bounds, pageBounds) {
+        var area = _decoBoundsAreaForPerf(bounds);
+        var pageArea = _decoBoundsAreaForPerf(pageBounds);
+        if (area <= 0 || pageArea <= 0) return 0;
+        return Math.round((area / pageArea) * 1000) / 1000;
+    }
+
+    function _decoSourceKindForPerf(info) {
+        try { return String((info && (info.kind || info.type || info.itemType)) || ""); } catch (eKindForPerf) {}
+        return "";
+    }
+
+    function _decoPagePlaneRootComplexity(rootItems, page) {
+        var rows = [];
+        var pageBounds = _decoPageBoundsForPerf(page);
+        var maxRows = 80;
+        function visit(sourceId, stats, seen, depth) {
+            if (sourceId === null || sourceId === undefined) return;
+            if (depth > 256) {
+                stats.depthLimit = true;
+                return;
+            }
+            var key = String(sourceId);
+            if (seen[key]) return;
+            seen[key] = true;
+            var info = sourceInfoById ? sourceInfoById[key] : null;
+            if (!info) return;
+            stats.descendantCount++;
+            var kind = _decoSourceKindForPerf(info);
+            if (!stats.kindCounts[kind]) stats.kindCounts[kind] = 0;
+            stats.kindCounts[kind]++;
+            if (kind === "TextFrame") stats.textFrameCount++;
+            if (kind === "Image" || kind === "PDF" || kind === "EPS") stats.placedVisualLeafCount++;
+            try {
+                if (info.hasPlacedVisual === true) stats.placedVisualCarrierCount++;
+                if (info.hasVisibleFill === true || info.fillColorName) stats.visibleFillCount++;
+                if (info.hasVisibleStroke === true || info.strokeColorName || Number(info.strokeWeight || 0) > 0) stats.visibleStrokeCount++;
+                if (info.hasCandidateVectorPaint === true) stats.vectorPaintCount++;
+            } catch (eInfoStats) {}
+            var children = sourceChildIdsByParentId ? sourceChildIdsByParentId[key] || [] : [];
+            for (var ci = 0; ci < children.length; ci++) {
+                visit(children[ci], stats, seen, depth + 1);
+            }
+        }
+        for (var i = 0; rootItems && i < rootItems.length && rows.length < maxRows; i++) {
+            var root = rootItems[i];
+            var rootId = null;
+            try { rootId = root && root.id !== undefined && root.id !== null ? root.id : null; } catch (eRootId) {}
+            var rootInfo = rootId !== null && rootId !== undefined && sourceInfoById
+                    ? sourceInfoById[String(rootId)]
+                    : null;
+            var bounds = _decoSourceBoundsForPerf(rootInfo);
+            var stats = {
+                rootId: rootId,
+                kind: _decoSourceKindForPerf(rootInfo),
+                layerName: rootInfo ? rootInfo.layerName || null : null,
+                zOrder: rootInfo && rootInfo.zOrder !== undefined ? rootInfo.zOrder : null,
+                bounds: bounds ? arrCopy(bounds) : null,
+                pageCoverage: _decoBoundsCoverageForPerf(bounds, pageBounds),
+                descendantCount: 0,
+                textFrameCount: 0,
+                placedVisualLeafCount: 0,
+                placedVisualCarrierCount: 0,
+                vectorPaintCount: 0,
+                visibleFillCount: 0,
+                visibleStrokeCount: 0,
+                kindCounts: {}
+            };
+            visit(rootId, stats, {}, 0);
+            rows.push(stats);
+        }
+        rows.sort(function(a, b) {
+            var av = (Number(a.pageCoverage || 0) * 1000000) + Number(a.descendantCount || 0);
+            var bv = (Number(b.pageCoverage || 0) * 1000000) + Number(b.descendantCount || 0);
+            return bv - av;
+        });
+        return rows;
     }
 
     function _decoPerfSafePassId() {
@@ -1493,7 +1594,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 exportMs: _perfExportMs,
                 boundsMs: _perfBoundsMs,
                 cleanupMs: _perfCleanupMs,
-                hiddenForItemCount: _hiddenForItemCount
+                hiddenForItemCount: _hiddenForItemCount,
+                pagePlaneRootDiagnostics: pagePlaneRootDiagnostics || []
             });
             return false;
         }
@@ -1830,6 +1932,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     ? sourceItems
                     : _decoTopmostRenderRoots(sourceItems));
         var ordered = sortSourceItemsForCompositeExport(exportRootSourceItems);
+        var pagePlaneRootDiagnostics = isPageBackgroundPlane
+                ? _decoPagePlaneRootComplexity(ordered, page)
+                : [];
         _perfRootPrepMs += _decoPerfNow() - _perfRootPrepStartedAt;
         var groupCreateErrors = [];
         var sourceItemDebug = [];
@@ -2176,6 +2281,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 	                boundsMs: _perfBoundsMs,
 	                cleanupMs: _perfCleanupMs,
 	                hiddenForItemCount: _hiddenForItemCount,
+	                pagePlaneRootDiagnostics: pagePlaneRootDiagnostics || [],
 	                fileName: fileName
 	            });
             return true;
