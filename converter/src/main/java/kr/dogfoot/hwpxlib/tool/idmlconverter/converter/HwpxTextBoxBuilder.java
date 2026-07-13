@@ -820,10 +820,7 @@ public class HwpxTextBoxBuilder {
             for (ASTInlineItem item : para.items()) {
                 if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                     ASTInlineObject obj = (ASTInlineObject) item;
-                    if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
-                            && obj.height() >= ConverterConstants.MIN_TEXT_BOX_HEIGHT
-                            // 데코 박스 (예: 자모 ㅍㅎㅂㅅ 배지) 는 작고 정사각형에 가까움 → 다단 후보 아님
-                            && !(obj.width() < 4000 && obj.height() < 4000)) {
+                    if (isRedistributableInlineTextFrame(obj)) {
                         if (obj.width() < halfWidth) {
                             narrowFrames.add(obj);
                         } else {
@@ -866,6 +863,17 @@ public class HwpxTextBoxBuilder {
                 }
             }
         }
+    }
+
+    private static boolean isRedistributableInlineTextFrame(ASTInlineObject obj) {
+        if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return false;
+        if (obj.height() < ConverterConstants.MIN_TEXT_BOX_HEIGHT) return false;
+        // Stage 1이 visible PNG shell로 확정한 inline frame은 source bounds가 실행 계약이다.
+        // 다단 레이아웃 보정이 이 폭을 container 폭으로 재분배하면 inline graphic이 늘어난다.
+        if (obj.imageData() != null && obj.imageData().length > 0) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return false;
+        // 데코 박스 (예: 자모 ㅍㅎㅂㅅ 배지) 는 작고 정사각형에 가까움 → 다단 후보 아님
+        return !(obj.width() < 4000 && obj.height() < 4000);
     }
 
 

@@ -69,7 +69,10 @@ final class InlineFrameBuilder {
         // 단일 단락 안에 2+ ITF 자식 → 다단 래퍼 → 부모 폭으로 확장
         // (InDesign에서 나란히 배치되는 다단 레이아웃)
         // 복수 단락 ITF(각 행이 독립 단락인 배지 그룹의 RIGHT 컬럼)는 확장하지 않음
-        if (ctx.currentContainerWidth > w && obj.paragraphs() != null && obj.paragraphs().size() == 1) {
+        if (!hasDrawableShell
+                && ctx.currentContainerWidth > w
+                && obj.paragraphs() != null
+                && obj.paragraphs().size() == 1) {
             int innerCount = 0;
             for (ASTParagraph p : obj.paragraphs()) {
                 for (ASTInlineItem it : p.items()) {

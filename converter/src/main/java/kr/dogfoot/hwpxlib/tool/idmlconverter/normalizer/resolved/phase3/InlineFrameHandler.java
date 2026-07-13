@@ -2406,7 +2406,12 @@ public class InlineFrameHandler {
                         .replace("\uFFFC", "")
                         .replace("\r", "")
                         .replace("\n", ""),
-                "CENTER");
+                "CENTER",
+                null,
+                atom -> {
+                    if (atom == null || atom.anchoredObjectId == null) return null;
+                    return loadPlannedInlineAnchorItems(ctx, atom.anchoredObjectId, null, null);
+                });
     }
 
     private static List<ASTParagraph> convertShellTextParagraphs(

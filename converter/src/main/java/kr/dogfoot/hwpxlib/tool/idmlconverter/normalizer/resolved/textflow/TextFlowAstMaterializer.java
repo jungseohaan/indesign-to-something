@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
@@ -14,6 +15,10 @@ import java.util.function.Function;
 /** Materializes planner-declared TextFlow units into AST text without re-scanning resolved stories. */
 public final class TextFlowAstMaterializer {
     private TextFlowAstMaterializer() {}
+
+    public interface InlineAtomResolver {
+        List<ASTInlineItem> resolve(TextFlowDocument.InlineSlotAtom atom);
+    }
 
     public static boolean appendFirstVisibleTextRuns(
             ResolvedBuildContext ctx,
@@ -43,6 +48,16 @@ public final class TextFlowAstMaterializer {
             Function<String, String> textTransformer,
             String defaultAlignment,
             ResolvedTextFlowAstConverter.Options runOptions) {
+        return convertUnit(ctx, unit, textTransformer, defaultAlignment, runOptions, null);
+    }
+
+    public static List<ASTParagraph> convertUnit(
+            ResolvedBuildContext ctx,
+            TextFlowDocument.TextFlowUnit unit,
+            Function<String, String> textTransformer,
+            String defaultAlignment,
+            ResolvedTextFlowAstConverter.Options runOptions,
+            InlineAtomResolver inlineAtomResolver) {
         List<ASTParagraph> out = new ArrayList<>();
         if (ctx == null || unit == null || unit.paragraphs == null) return out;
         for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
@@ -59,7 +74,7 @@ public final class TextFlowAstMaterializer {
                     astParagraph.alignment(alignment);
                 }
             }
-            if (appendTextAtoms(ctx, astParagraph, paragraph, textTransformer, runOptions)) {
+            if (appendTextAtoms(ctx, astParagraph, paragraph, textTransformer, runOptions, inlineAtomResolver)) {
                 out.add(astParagraph);
             }
         }
@@ -80,11 +95,32 @@ public final class TextFlowAstMaterializer {
             TextFlowDocument.TextFlowParagraph paragraph,
             Function<String, String> textTransformer,
             ResolvedTextFlowAstConverter.Options runOptions) {
+        return appendTextAtoms(ctx, target, paragraph, textTransformer, runOptions, null);
+    }
+
+    private static boolean appendTextAtoms(
+            ResolvedBuildContext ctx,
+            ASTParagraph target,
+            TextFlowDocument.TextFlowParagraph paragraph,
+            Function<String, String> textTransformer,
+            ResolvedTextFlowAstConverter.Options runOptions,
+            InlineAtomResolver inlineAtomResolver) {
         boolean appended = false;
         if (appendGeneratedPrefixText(ctx, target, paragraph, runOptions)) {
             appended = true;
         }
         for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+            if (atom instanceof TextFlowDocument.InlineSlotAtom) {
+                if (inlineAtomResolver == null) continue;
+                List<ASTInlineItem> items = inlineAtomResolver.resolve((TextFlowDocument.InlineSlotAtom) atom);
+                if (items == null || items.isEmpty()) continue;
+                for (ASTInlineItem item : items) {
+                    if (item == null) continue;
+                    target.addItem(item);
+                    appended = true;
+                }
+                continue;
+            }
             if (!(atom instanceof TextFlowDocument.TextAtom)) continue;
             TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
             String text = textAtom.text;
