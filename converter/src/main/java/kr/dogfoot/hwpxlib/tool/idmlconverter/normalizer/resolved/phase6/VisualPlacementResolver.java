@@ -1,10 +1,11 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
- * SPEC-036: 렌더 그래픽의 "배치 vs 억제" 결정을 한 곳으로 모으기 위한 공용 결정 함수.
+ * source ownership policy: 렌더 그래픽의 "배치 vs 억제" 결정을 한 곳으로 모으기 위한 공용 결정 함수.
  *
  * <p>Stage 3 visual execution is plan-only. This resolver reports only the
  * already-decided ObjectPlan rejection reason; it does not create fallback
@@ -35,6 +36,9 @@ public final class VisualPlacementResolver {
      * @return 거부 사유, 또는 plan이 floating을 막지 않으면 null
      */
     public static PlanRejection planRejection(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx.visualActionByOwnershipPlan(rg) == VisualAction.ABSORB_TEXT_STYLE) {
+            return null;
+        }
         if (ctx.shouldDropVisualByOwnershipPlan(rg)) {
             return new PlanRejection("SKIP_OBJECT_PLAN_DROP_VISUAL",
                     "OwnershipPlanner visualAction=DROP_VISUAL");

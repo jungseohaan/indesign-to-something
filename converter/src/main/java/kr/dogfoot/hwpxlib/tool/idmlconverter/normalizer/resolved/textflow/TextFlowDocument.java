@@ -24,6 +24,7 @@ public final class TextFlowDocument {
         public int index;
         public String styleName;
         public String justification;
+        public String generatedPrefixText;
         public final List<TextFlowAtom> atoms = new ArrayList<>();
     }
 

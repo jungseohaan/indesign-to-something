@@ -142,6 +142,7 @@ public class StoryLoader {
 
             // 단락 속성(정렬/줄간격/간격/들여쓰기/탭): 셀 안/밖 공용 루틴 사용
             ParagraphPropertyResolver.apply(para, ip, resolvedParagraph, ctx, styleAlignCache);
+            applyComposedLinePitchFallback(para, ctx, resolvedStory, i);
 
             // resolved 런 (스타일 상속 보강용)
             List<ResolvedRun> resolvedRuns = null;
@@ -149,7 +150,7 @@ public class StoryLoader {
                 resolvedRuns = resolvedStory.paragraphs().get(i).runs();
             }
 
-            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 다음에 \u0007 (BEL) 또는
+            // source ownership policy: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 다음에 \u0007 (BEL) 또는
             // \u0008 (BS, IDML 변환값) 이 나오면 첫 anchor TF 폭만큼 paragraph leftMargin 적용.
             // (예: "1  가 같은 사건을..." 패턴에서 "가" 부터의 줄은 "1" 폭만큼 들여쓰기)
             if (resolvedRuns != null && resolvedRuns.size() >= 2 && para.leftMargin() == null) {
@@ -182,6 +183,7 @@ public class StoryLoader {
             ConversionTiming.addCounter("phase3.storyLoader.styleContextNanos",
                     System.nanoTime() - styleContextStart);
 
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
             buildParagraphContent(ctx, ip, resolvedParagraph, resolvedRuns, storyId, i, sc, para);
 
             paragraphs.add(para);
@@ -207,6 +209,8 @@ public class StoryLoader {
     static void buildParagraphContent(ResolvedBuildContext ctx, IDMLParagraph ip,
             ResolvedParagraph resolvedParagraph, List<ResolvedRun> resolvedRuns,
             String storyId, int paraIndex, StoryConverter.StyleContext sc, ASTParagraph para) {
+        boolean cellPath = storyId == null && resolvedParagraph == null && resolvedRuns == null;
+        String perfPrefix = cellPath ? "phase3.storyLoader.cell" : "phase3.storyLoader.story";
         boolean hasIdmlInlineAnchors = false;
             // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
@@ -274,6 +278,7 @@ public class StoryLoader {
 
             for (int idx = 0; idx < runs.size(); idx++) {
                 IDMLCharacterRun run = runs.get(idx);
+                applyCharacterStylePosition(ctx, run);
 
                 // GREP 수식 리셋: 단일 라틴 문자(수식 변수 x, a, n)는 유지, 나머지 제거
                 if (run.grepMathFont()) {
@@ -321,6 +326,21 @@ public class StoryLoader {
                 String _runTxt = run.content();
                 boolean _orcOnly = _runTxt != null && !_runTxt.isEmpty()
                         && _runTxt.replace("￼", "").isEmpty();
+                boolean formulaClusterRun =
+                        ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+
+                if (_orcOnly && formulaClusterRun
+                        && MathProcessor.isFormulaAnswerPlaceholderRun(ctx, run)) {
+                    MathProcessor.flushMathGroups(ctx, null, npMathGroup, ehMathGroup, para);
+                    mathGroup.add(ASTMathGrouper.formulaAnswerBoxRun(run));
+                    continue;
+                }
+
+                if (isStandaloneBtArrowGlyphRun(run) && !formulaClusterRun) {
+                    MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
+                    para.addItem(createStandaloneArrowRun(ctx, run, defaultRR, sc));
+                    continue;
+                }
 
                 // EH 수식 그룹 진입
                 boolean enterEH = !_orcOnly && (run.isEHFont()
@@ -346,7 +366,8 @@ public class StoryLoader {
                     enterBT = (run.isBTFont()
                                 && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
-                            || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()));
+                            || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()))
+                            || formulaClusterRun;
                 }
 
                 if (enterEH) {
@@ -368,6 +389,7 @@ public class StoryLoader {
 
                     if (text.contains("\uFFFC")) {
                         hasIdmlInlineAnchors = true;
+                        long inlineBranchStart = System.nanoTime();
                         String[] parts = text.split("\uFFFC", -1);
                         // inlineAnchors 순서로 인라인 ID 목록 생성 (FFFC 출현 순서 보장)
                         List<String> inlineIds = new ArrayList<>();
@@ -405,6 +427,7 @@ public class StoryLoader {
                             if (pi < parts.length - 1 && partText.endsWith("  ")) {
                                 partText = partText.replaceAll("\\s+$", " "); // 후행 다중 공백 → 단일 공백
                             }
+                            partText = normalizeLeadingTabAfterLeadingInlineObjects(para, partText);
                             if (!partText.isEmpty()) {
                                 // resolved 런 스타일 차이가 있으면 분할 시도
                                 boolean partSplit = false;
@@ -415,9 +438,15 @@ public class StoryLoader {
                                 if (!partSplit) {
                                     ResolvedRun matchedRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
                                     if (matchedRR != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
+                                    long createStart = System.nanoTime();
                                     ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, partText, matchedRR != null ? matchedRR : defaultRR, sc);
+                                    ConversionTiming.addCounter(perfPrefix + ".createRunNanos",
+                                            System.nanoTime() - createStart);
                                     if (!RunBuilder.splitBulletRun(ctx, tr, para)) {
-                                        RunBuilder.splitLatinVarsInMixedText(ctx, tr, para);
+                                        long splitLatinStart = System.nanoTime();
+                                        RunBuilder.splitChemicalFormulasAndLatinVarsInMixedText(ctx, tr, para);
+                                        ConversionTiming.addCounter(perfPrefix + ".splitLatinVarsNanos",
+                                                System.nanoTime() - splitLatinStart);
                                     }
                                 }
                             }
@@ -435,6 +464,7 @@ public class StoryLoader {
                                             InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId,
                                                     partText, nextPartText);
                                     if (plannedItems != null) {
+                                        InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, para);
                                         for (ASTInlineItem item : plannedItems) para.addItem(item);
                                         anchorIdx++;
                                         continue;
@@ -443,144 +473,7 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    List<ASTInlineObject> plannedAnchorTextShellFragments =
-                                            InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
-                                    if (plannedAnchorTextShellFragments != null && !plannedAnchorTextShellFragments.isEmpty()) {
-                                        for (ASTInlineObject fragment : plannedAnchorTextShellFragments) para.addItem(fragment);
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    ASTInlineObject plannedAnchorTextShell =
-                                            InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
-                                    if (plannedAnchorTextShell != null) {
-                                        para.addItem(plannedAnchorTextShell);
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    ASTInlineObject groupShell =
-                                            InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, domId);
-                                    if (groupShell != null) {
-                                        para.addItem(groupShell);
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    if (InlineFrameHandler.hasTextBlockPlacedDescendant(ctx, domId)
-                                            || InlineFrameHandler.hasPlannedFloatingHwpxTextDescendant(ctx, domId)) {
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
-                                    if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)
-                                            && storyId != null
-                                            && InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
-                                        anchorIdx++;
-                                        continue;
-                                    }
-                                    // SPEC-025: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
-                                    // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
-                                    java.util.List<ASTInlineObject> boxList =
-                                            InlineFrameHandler.tryInlineGroupAsBoxList(ctx, domId);
-                                    if (boxList != null && !boxList.isEmpty()) {
-                                        for (ASTInlineObject box : boxList) para.addItem(box);
-                                    } else {
-                                        ASTInlineObject shapeShell =
-                                                InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, domId);
-                                        if (shapeShell != null) {
-                                            para.addItem(shapeShell);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        List<ASTInlineObject> plannedAnchorTextShellFragments2 =
-                                                InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
-                                        if (plannedAnchorTextShellFragments2 != null && !plannedAnchorTextShellFragments2.isEmpty()) {
-                                            for (ASTInlineObject fragment : plannedAnchorTextShellFragments2) para.addItem(fragment);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        ASTInlineObject plannedAnchorTextShell2 =
-                                                InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
-                                        if (plannedAnchorTextShell2 != null) {
-                                            para.addItem(plannedAnchorTextShell2);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        if (InlineFrameHandler.hasDirectDropOnlyInlinePlanForAnchor(ctx, domId)) {
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        // 분수 구조 인라인 TextFrame(2단락) → 수식으로 변환
-                                        ASTEquation fracEq = InlineFrameHandler.tryInlineFractionAsEquation(ctx, domId);
-                                        if (fracEq != null) {
-                                            para.addItem(fracEq);
-                                        } else {
-                                            if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, domId)) {
-                                                ASTInlineObject inlineObj =
-                                                        SimpleButtonLabelInlineFactory.create(ctx, domId);
-                                                if (inlineObj != null) {
-                                                    para.addItem(inlineObj);
-                                                    anchorIdx++;
-                                                    continue;
-                                                }
-                                            }
-                                            // 배경 도형 + 단일 짧은 텍스트프레임 (예: 페이지 39 "가" / "나" 캡슐 배지)
-                                            // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
-                                            ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, domId);
-                                            if (singleBadge != null) {
-                                                para.addItem(singleBadge);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-                                            ASTInlineObject plannedTextShell =
-                                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, domId);
-                                            if (plannedTextShell != null) {
-                                                para.addItem(plannedTextShell);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-                                            // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
-                                            // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
-                                            ASTInlineObject inlineTableFrame =
-                                                    InlineFrameHandler.tryInlineTextFrameWithTables(ctx, domId);
-                                            if (inlineTableFrame != null) {
-                                                para.addItem(inlineTableFrame);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-
-                                            List<ASTInlineItem> nestedItems =
-                                                    InlineFrameHandler.tryInlineTextFrameAsItems(ctx, domId,
-                                                            partText, nextPartText);
-                                            if (nestedItems != null && !nestedItems.isEmpty()) {
-                                                for (ASTInlineItem item : nestedItems) para.addItem(item);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-                                            // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환
-                                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, domId,
-                                                    partText, nextPartText);
-                                            if (textRun != null) {
-                                                if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, domId, partText, nextPartText)) {
-                                                    maybeInsertDecorativeLeaderTab(ctx, ip, run, inlineHexId, partText, para);
-                                                }
-                                                para.addItem(textRun);
-                                            } else {
-                                                // SPEC-025: 빈 inline TextFrame 이지만 fillColor 가 있으면 데코 박스 (예: 본문 빈칸 강조 박스)
-                                                ASTInlineObject emptyBox = InlineFrameHandler.tryInlineEmptyFilledBoxAsFrame(ctx, domId);
-                                                if (emptyBox != null) {
-                                                    para.addItem(emptyBox);
-                                                } else {
-                                                    if (InlineFrameHandler.isInlineTextShellCompanionForEditableText(ctx, domId)) {
-                                                        anchorIdx++;
-                                                        continue;
-                                                    }
-                                                    ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
-                                                    if (inlineObj != null) {
-                                                        para.addItem(inlineObj);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    warnUnplannedInlineAnchorSkipped(ctx, storyId, domId);
                                 } catch (Exception e) { /* skip */ }
                                 if (!hasVisibleText(para)) {
                                     firstTextRunAfterLeadingAnchor = true;
@@ -588,11 +481,14 @@ public class StoryLoader {
                                 anchorIdx++;
                             }
                         }
+                        ConversionTiming.addCounter(perfPrefix + ".inlineAnchorBranchNanos",
+                                System.nanoTime() - inlineBranchStart);
                     } else {
                         if (firstTextRunAfterLeadingAnchor) {
                             text = StoryConverter.stripLeadingAnchorLayoutSpaces(text);
                             firstTextRunAfterLeadingAnchor = false;
                         }
+                        text = normalizeLeadingTabAfterLeadingInlineObjects(para, text);
                         // GREP 스타일 분할: IDML 단일 런이 resolved에서 여러 런(다른 색상/폰트)으로 분할된 경우
                         // resolved 런 경계에서 IDML 런을 분할하여 각각의 색상을 적용
                         boolean splitByResolved = false;
@@ -603,13 +499,19 @@ public class StoryLoader {
                         if (!splitByResolved) {
                             ResolvedRun matchedRR2 = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, text);
                             if (matchedRR2 != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
+                            long createStart = System.nanoTime();
                             ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, text, matchedRR2 != null ? matchedRR2 : defaultRR, sc);
+                            ConversionTiming.addCounter(perfPrefix + ".createRunNanos",
+                                    System.nanoTime() - createStart);
                             // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
                             if (!RunBuilder.splitBulletRun(ctx, tr, para)) {
                                 if (EHFontGlyphMap.containsEHFractionPattern(text)) {
                                     MathProcessor.splitFractionPatternInText(ctx, text, tr, para);
                                 } else {
-                                    RunBuilder.splitLatinVarsInMixedText(ctx, tr, para);
+                                    long splitLatinStart = System.nanoTime();
+                                    RunBuilder.splitChemicalFormulasAndLatinVarsInMixedText(ctx, tr, para);
+                                    ConversionTiming.addCounter(perfPrefix + ".splitLatinVarsNanos",
+                                            System.nanoTime() - splitLatinStart);
                                 }
                             }
                         }
@@ -617,6 +519,8 @@ public class StoryLoader {
                 }
             }
             ConversionTiming.addCounter("phase3.storyLoader.runLoopNanos",
+                    System.nanoTime() - runLoopStart);
+            ConversionTiming.addCounter(perfPrefix + ".runLoopNanos",
                     System.nanoTime() - runLoopStart);
             // 단락 끝 잔여 수식 그룹 flush
             MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
@@ -642,11 +546,43 @@ public class StoryLoader {
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             RunBuilder.resetBulletParagraphColors(ctx, para);
 
-            // 인라인 객체 boundsX 기반 재정렬: FFFC 앵커 순서가 없는 경우에만
-            // (IDML 경로에서 FFFC 분할 후 앵커 순서로 삽입된 경우 재정렬하면 순서 깨짐)
-            if (!hasIdmlInlineAnchors) {
+            // Legacy-only: Stage 1 ObjectPlan이 있으면 source/story order가 실행 계약이다.
+            if (!hasIdmlInlineAnchors && !hasStage1ObjectPlans(ctx)) {
                 ASTTableConverter.reorderInlineObjectsByBoundsX(para);
             }
+    }
+
+    private static boolean hasStage1ObjectPlans(ResolvedBuildContext ctx) {
+        return ctx != null && ctx.ownershipPlans != null && !ctx.ownershipPlans.isEmpty();
+    }
+
+    private static String normalizeLeadingTabAfterLeadingInlineObjects(ASTParagraph para, String text) {
+        if (text == null || text.isEmpty() || text.charAt(0) != '\t') return text;
+        if (!paragraphContainsOnlyInlineObjectsSoFar(para)) return text;
+        int offset = 0;
+        while (offset < text.length() && text.charAt(offset) == '\t') {
+            offset++;
+        }
+        return " " + text.substring(offset);
+    }
+
+    private static void warnUnplannedInlineAnchorSkipped(
+            ResolvedBuildContext ctx,
+            String storyId,
+            int anchoredId) {
+        if (ctx == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_UNPLANNED_INLINE_ANCHOR_SKIPPED\""
+                + ",\"storyId\":\"" + ObjectPlan.escape(storyId) + "\""
+                + ",\"anchoredObjectId\":" + anchoredId
+                + ",\"detail\":\"StoryLoader did not synthesize inline material without a Stage 1 ObjectPlan\"}");
+    }
+
+    private static boolean paragraphContainsOnlyInlineObjectsSoFar(ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().isEmpty()) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTInlineObject)) return false;
+        }
+        return true;
     }
 
     public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,
@@ -677,13 +613,15 @@ public class StoryLoader {
             return result;
         }
         if (hasTextFrameStoryOwnedByPlacedTextFrame(ctx, idmlCell)
+                && !hasCellOwnedNestedStoryRef(ctx, idmlCell)
                 && !hasPlannedInlineAtomicCellContent(ctx, idmlCell)
                 && !hasDirectVisibleCellText(idmlCell)) {
             return result;
         }
         ResolvedTable.Cell resolvedCell = findResolvedCell(ctx, idmlTable, idmlCell);
         if ((idmlCell.paragraphs() == null || idmlCell.paragraphs().isEmpty())
-                && resolvedCell != null) {
+                && resolvedCell != null
+                && hasDirectCellTextOrInlineObject(idmlCell)) {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
             if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
@@ -701,14 +639,50 @@ public class StoryLoader {
             StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
             sc.hasTabStops = para.hasTabStops();
             buildParagraphContent(ctx, ip, null, null, cellStoryId, paraIndex, sc, para);
+            MathProcessor.convertMathRunsInParagraph(ctx, para);
             result.add(para);
+            ConversionTiming.addCounter("phase3.storyLoader.cell.paragraphs", 1);
             paraIndex++;
         }
-        applyResolvedCellInlineGraphicRescueAnchors(ctx, resolvedCell, result);
+        applyResolvedCellInlineGraphicRescueAnchors(ctx, idmlCell, resolvedCell, result);
         for (ASTParagraph para : result) {
+            MathProcessor.convertMathRunsInParagraph(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
         }
+        if (!hasMeaningfulCellParagraphContent(result)
+                && idmlCell.textFrameStoryRefs() != null
+                && !idmlCell.textFrameStoryRefs().isEmpty()) {
+            return new ArrayList<>();
+        }
         return result;
+    }
+
+    private static boolean hasMeaningfulCellParagraphContent(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return false;
+        for (ASTParagraph para : paragraphs) {
+            if (paragraphHasMeaningfulCellContent(para)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean paragraphHasMeaningfulCellContent(ASTParagraph para) {
+        if (para == null) return false;
+        if (para.inlineTable() != null) return true;
+        if (para.items() == null || para.items().isEmpty()) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (item == null) continue;
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !normalizeCellOwnershipText(text).isEmpty()) {
+                    return true;
+                }
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -728,6 +702,7 @@ public class StoryLoader {
                 || !resolvedCellHasInlineAnchors(resolvedCell)) {
             return result;
         }
+        boolean includeResolvedText = hasDirectVisibleCellText(idmlCell);
 
         int paraIndex = 0;
         for (ResolvedParagraph resolvedParagraph : resolvedCell.paragraphs()) {
@@ -745,15 +720,57 @@ public class StoryLoader {
             } else {
                 applyResolvedParagraphPropertiesOnly(para, resolvedParagraph);
             }
-            appendResolvedRunsInOrder(ctx, resolvedParagraph, para);
+            appendResolvedRunsInOrder(ctx, resolvedParagraph, para, includeResolvedText);
+            MathProcessor.convertMathRunsInParagraph(ctx, para);
             RunPostProcessor.splitOverlineRuns(para);
             RunPostProcessor.convertItalicRunsToEquations(para);
             RunBuilder.resetBulletParagraphColors(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
-            result.add(para);
+            if (para.items() != null && !para.items().isEmpty()) {
+                result.add(para);
+            }
             paraIndex++;
         }
         return result;
+    }
+
+    static void applyComposedLinePitchFallback(ASTParagraph para,
+                                               ResolvedBuildContext ctx,
+                                               ResolvedStory resolvedStory,
+                                               int paragraphIndex) {
+        if (para == null || para.lineSpacing() != null) return;
+        if (ctx == null || ctx.resolvedData == null || resolvedStory == null || resolvedStory.id() == null) return;
+
+        List<Double> tops = new ArrayList<>();
+        for (ResolvedTextFrame tf : ctx.resolvedData.getTextFramesForStory(resolvedStory.id())) {
+            if (tf == null || tf.composedLines() == null) continue;
+            for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+                if (line == null || line.paraIndex() != paragraphIndex) continue;
+                double[] b = line.bounds();
+                if (b == null || b.length < 4) continue;
+                tops.add(b[0]);
+            }
+        }
+        if (tops.size() < 2) return;
+        tops.sort(Double::compareTo);
+
+        List<Double> deltas = new ArrayList<>();
+        Double prev = null;
+        for (Double top : tops) {
+            if (top == null) continue;
+            if (prev != null) {
+                double delta = top - prev;
+                if (delta >= 4.0 && delta <= 50.0) {
+                    deltas.add(delta);
+                }
+            }
+            prev = top;
+        }
+        if (deltas.isEmpty()) return;
+        deltas.sort(Double::compareTo);
+        double pitch = deltas.get(deltas.size() / 2);
+        para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(pitch));
+        para.lineSpacingType("fixed");
     }
 
     private static ResolvedTable.Cell findResolvedCell(
@@ -785,8 +802,12 @@ public class StoryLoader {
     private static void appendResolvedRunsInOrder(
             ResolvedBuildContext ctx,
             ResolvedParagraph resolvedParagraph,
-            ASTParagraph para) {
+            ASTParagraph para,
+            boolean includeTextRuns) {
         if (ctx == null || resolvedParagraph == null || resolvedParagraph.runs() == null || para == null) return;
+        if (includeTextRuns) {
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
+        }
         ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
                 .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
                 .truncateAtParagraphBreak(true);
@@ -805,17 +826,14 @@ public class StoryLoader {
                 List<ASTInlineItem> plannedItems =
                         InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
                 if (plannedItems != null) {
+                    InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, para);
                     appendInlineItemsKeepingObjectsInline(para, plannedItems);
                     continue;
                 }
-                ASTInlineObject inline = InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
-                if (inline == null) inline = InlineFrameHandler.loadInlineObject(ctx, anchoredId);
-                if (inline == null) continue;
-                inline.keepInline(true);
-                para.addItem(inline);
                 continue;
             }
 
+            if (!includeTextRuns) continue;
             String text = run.text();
             if (text == null) continue;
             for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(text, run, para, options)) {
@@ -825,6 +843,52 @@ public class StoryLoader {
         }
     }
 
+    private static void appendGeneratedParagraphPrefix(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph resolvedParagraph,
+            ASTParagraph para) {
+        if (ctx == null || resolvedParagraph == null || para == null) return;
+        String prefix = ResolvedTextFlowAstConverter.generatedPrefixToInsert(resolvedParagraph);
+        if (prefix == null || prefix.trim().isEmpty()) return;
+        ResolvedRun styleRun = ResolvedTextFlowAstConverter.firstVisibleResolvedRun(resolvedParagraph);
+        if (styleRun == null) return;
+        ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
+                .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
+                .truncateAtParagraphBreak(false);
+        for (ASTTextRun run : ResolvedTextFlowAstConverter.convertRunText(prefix, styleRun, para, options)) {
+            para.addItem(run);
+        }
+    }
+
+    private static boolean isStandaloneBtArrowGlyphRun(IDMLCharacterRun run) {
+        if (run == null) return false;
+        String style = run.appliedCharacterStyle();
+        String text = run.content();
+        if (style == null || text == null) return false;
+        String normalizedStyle = style.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%ed%99%94%ec%82%b4%ed%91%9c", "화살표");
+        String cleaned = text.trim();
+        return normalizedStyle.contains("화살표")
+                && ("@C".equals(cleaned) || "@c".equals(cleaned)
+                    || "?C".equals(cleaned) || "?c".equals(cleaned));
+    }
+
+    private static ASTTextRun createStandaloneArrowRun(
+            ResolvedBuildContext ctx,
+            IDMLCharacterRun source,
+            ResolvedRun resolvedRun,
+            StoryConverter.StyleContext sc) {
+        ASTTextRun arrow = RunBuilder.createRunFromIDML(ctx, source, "\u2192", resolvedRun, sc);
+        arrow.fontFamily(null);
+        arrow.fontStyle(null);
+        arrow.characterStyleRef(null);
+        arrow.grepMathFont(false);
+        arrow.subscript(false);
+        arrow.superscript(false);
+        return arrow;
+    }
+
     private static boolean isResolvedCellInlineGraphicRescueAnchor(
             ResolvedBuildContext ctx,
             int anchoredId) {
@@ -832,15 +896,18 @@ public class StoryLoader {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || plan.domId != anchoredId) continue;
             if (plan.placement != Placement.INLINE) return false;
-            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) return false;
-            if (plan.reason == null || !"inline_graphic_only".equals(plan.reason)) return false;
-            return plan.sourceObjectIds != null && plan.sourceObjectIds.length == 1;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+                return false;
+            }
+            return plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0;
         }
         return false;
     }
 
     private static void applyResolvedCellInlineGraphicRescueAnchors(
             ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
             ResolvedTable.Cell resolvedCell,
             List<ASTParagraph> paragraphs) {
         if (ctx == null || resolvedCell == null || resolvedCell.paragraphs() == null
@@ -858,13 +925,11 @@ public class StoryLoader {
                 if (run == null || !run.isInlineAnchor()) continue;
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
-                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)
-                        && !isResolvedCellInlineGraphicPrefixMarkerAnchor(ctx, anchoredId)) {
+                if (!cellContainsInlineAnchor(idmlCell, anchoredId)) continue;
+                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
                     continue;
                 }
-                int targetIndex = isResolvedCellInlineGraphicPrefixMarkerAnchor(ctx, anchoredId)
-                        ? nearestParagraphIndexByInlineVisualY(ctx, resolvedCell, anchoredId, paraIndex, paragraphs.size())
-                        : paraIndex;
+                int targetIndex = paraIndex;
                 if (targetIndex < 0 || targetIndex >= paragraphs.size()) continue;
 
                 ASTParagraph target = paragraphs.get(targetIndex);
@@ -874,6 +939,7 @@ public class StoryLoader {
                 List<ASTInlineItem> plannedItems =
                         InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
                 if (plannedItems == null || plannedItems.isEmpty()) continue;
+                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, target);
                 for (ASTInlineItem item : plannedItems) {
                     if (item instanceof ASTInlineObject) {
                         ((ASTInlineObject) item).keepInline(true);
@@ -885,15 +951,85 @@ public class StoryLoader {
         }
     }
 
-    private static boolean isResolvedCellInlineGraphicPrefixMarkerAnchor(
-            ResolvedBuildContext ctx,
-            int anchoredId) {
-        ObjectPlan plan = inlineGraphicPlanFor(ctx, anchoredId);
-        if (plan == null) return false;
-        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
-        String reason = plan.reason != null ? plan.reason : "";
-        return "inline_graphic_only".equals(reason)
-                || "paper_inline_anchor_uses_page_material_slot".equals(reason);
+    private static boolean cellContainsInlineAnchor(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+            int anchorId) {
+        if (idmlCell == null || idmlCell.paragraphs() == null || anchorId <= 0) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null) continue;
+                if (containsInlineAnchorDomId(run, anchorId)) return true;
+                if (containsInlineGraphicDomId(run.inlineGraphics(), anchorId)) return true;
+                if (containsInlineFrameDomId(run.inlineFrames(), anchorId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsInlineAnchorDomId(IDMLCharacterRun run, int anchorId) {
+        if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) return false;
+        for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+            if (anchor == null) continue;
+            if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+                List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame> frames = run.inlineFrames();
+                int index = anchor.index();
+                if (frames != null && index >= 0 && index < frames.size()
+                        && idMatches(frames.get(index).selfId(), anchorId)) {
+                    return true;
+                }
+            } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC) {
+                List<IDMLCharacterRun.InlineGraphic> graphics = run.inlineGraphics();
+                int index = anchor.index();
+                if (graphics != null && index >= 0 && index < graphics.size()
+                        && inlineGraphicContainsDomId(graphics.get(index), anchorId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsInlineGraphicDomId(
+            List<IDMLCharacterRun.InlineGraphic> graphics,
+            int anchorId) {
+        if (graphics == null || graphics.isEmpty()) return false;
+        for (IDMLCharacterRun.InlineGraphic graphic : graphics) {
+            if (inlineGraphicContainsDomId(graphic, anchorId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean inlineGraphicContainsDomId(
+            IDMLCharacterRun.InlineGraphic graphic,
+            int anchorId) {
+        if (graphic == null) return false;
+        if (idMatches(graphic.selfId(), anchorId)) return true;
+        if (containsInlineGraphicDomId(graphic.childGraphics(), anchorId)) return true;
+        return containsInlineFrameDomId(graphic.childTextFrames(), anchorId);
+    }
+
+    private static boolean containsInlineFrameDomId(
+            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame> frames,
+            int anchorId) {
+        if (frames == null || frames.isEmpty()) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame : frames) {
+            if (frame == null) continue;
+            if (idMatches(frame.selfId(), anchorId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean idMatches(String sourceId, int domId) {
+        if (sourceId == null || sourceId.isEmpty() || domId <= 0) return false;
+        try {
+            if (sourceId.charAt(0) == 'u' || sourceId.charAt(0) == 'U') {
+                return Integer.parseInt(sourceId.substring(1), 16) == domId;
+            }
+            return Integer.parseInt(sourceId) == domId;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static ObjectPlan inlineGraphicPlanFor(ResolvedBuildContext ctx, int anchoredId) {
@@ -901,73 +1037,8 @@ public class StoryLoader {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || plan.domId != anchoredId) continue;
             if (plan.placement != Placement.INLINE) return null;
-            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) return null;
-            return plan;
-        }
-        return null;
-    }
-
-    private static int nearestParagraphIndexByInlineVisualY(
-            ResolvedBuildContext ctx,
-            ResolvedTable.Cell resolvedCell,
-            int anchoredId,
-            int fallbackIndex,
-            int paragraphCount) {
-        ObjectPlan targetPlan = inlineGraphicPlanFor(ctx, anchoredId);
-        if (targetPlan == null || targetPlan.bounds == null || targetPlan.bounds.length < 4) {
-            return clampParagraphIndex(fallbackIndex, paragraphCount);
-        }
-        double targetCenterY = (targetPlan.bounds[0] + targetPlan.bounds[2]) / 2.0;
-        double bestDistance = Double.MAX_VALUE;
-        int bestIndex = -1;
-        List<ResolvedParagraph> resolvedParagraphs = resolvedCell != null ? resolvedCell.paragraphs() : null;
-        if (resolvedParagraphs != null) {
-            for (int p = 0; p < resolvedParagraphs.size() && p < paragraphCount; p++) {
-                Double paraY = representativeInlineVisualCenterY(ctx, resolvedParagraphs.get(p), anchoredId);
-                if (paraY == null) continue;
-                double distance = Math.abs(paraY - targetCenterY);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    bestIndex = p;
-                }
-            }
-        }
-        if (bestIndex >= 0) return bestIndex;
-        return clampParagraphIndex(fallbackIndex, paragraphCount);
-    }
-
-    private static int clampParagraphIndex(int index, int paragraphCount) {
-        if (paragraphCount <= 0) return -1;
-        if (index < 0) return 0;
-        if (index >= paragraphCount) return paragraphCount - 1;
-        return index;
-    }
-
-    private static Double representativeInlineVisualCenterY(
-            ResolvedBuildContext ctx,
-            ResolvedParagraph paragraph,
-            int excludeAnchoredId) {
-        if (paragraph == null || paragraph.runs() == null) return null;
-        double sum = 0.0;
-        int count = 0;
-        for (ResolvedRun run : paragraph.runs()) {
-            if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
-            int anchoredId = run.anchoredObjectId();
-            if (anchoredId == excludeAnchoredId) continue;
-            ObjectPlan plan = inlinePlanWithBoundsFor(ctx, anchoredId);
-            if (plan == null) continue;
-            sum += (plan.bounds[0] + plan.bounds[2]) / 2.0;
-            count++;
-        }
-        return count > 0 ? sum / count : null;
-    }
-
-    private static ObjectPlan inlinePlanWithBoundsFor(ResolvedBuildContext ctx, int anchoredId) {
-        if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return null;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
-            if (plan == null || plan.domId != anchoredId) continue;
-            if (plan.placement != Placement.INLINE) return null;
-            if (plan.bounds == null || plan.bounds.length < 4) return null;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return null;
             return plan;
         }
         return null;
@@ -1031,6 +1102,9 @@ public class StoryLoader {
         }
         if (resolvedParagraph.justification() != null) {
             para.alignment(resolvedParagraph.justification());
+        }
+        if (resolvedParagraph.autoLeading() != null && resolvedParagraph.autoLeading() > 0) {
+            para.autoLeadingPercent((int) Math.round(resolvedParagraph.autoLeading()));
         }
         Double fixedLeading = resolvedParagraph.fixedLeading();
         if (fixedLeading != null && fixedLeading > 0) {
@@ -1144,9 +1218,10 @@ public class StoryLoader {
             ASTInlineItem item = items.get(i);
             if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
             if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                String text = ((ASTTextRun) item).text();
+                ASTTextRun textRun = (ASTTextRun) item;
+                String text = textRun.text();
                 if (text == null || text.trim().isEmpty()) continue;
-                if (isPageNumberText(text)) {
+                if (isPageNumberTextRun(textRun)) {
                     if (TextFlowTabPolicy.hasTabImmediatelyBefore(items, i)) return;
                     if (!enableRightmostDotLeader(ctx, paragraph, para)) return;
 
@@ -1178,6 +1253,23 @@ public class StoryLoader {
         if (text == null) return false;
         String cleaned = text.replace("\r", "").replace("\n", "").trim();
         return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean isPageNumberTextRun(ASTTextRun run) {
+        if (run == null || !isPageNumberText(run.text())) return false;
+        if (run.subscript() || run.superscript()) return false;
+        String style = run.characterStyleRef();
+        if (style != null) {
+            String lower = style.toLowerCase(java.util.Locale.ROOT)
+                    .replace("%3a", ":")
+                    .replace("%25", "%");
+            if (lower.contains("subscript") || lower.contains("superscript")
+                    || lower.contains("하부자") || lower.contains("상부자")
+                    || lower.contains("아래첨자") || lower.contains("위첨자")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isPageNumberInlineObject(ASTInlineObject obj) {
@@ -1382,26 +1474,12 @@ public class StoryLoader {
             if (run.isInlineAnchor()) {
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
-                List<ASTInlineObject> fragments =
-                        InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, anchoredId);
-                if (fragments != null && !fragments.isEmpty()) {
-                    for (ASTInlineObject fragment : fragments) {
-                        if (fragment == null) continue;
-                        fragment.keepInline(true);
-                        para.addItem(fragment);
-                    }
+                List<ASTInlineItem> plannedItems =
+                        InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, null, null);
+                if (plannedItems != null && !plannedItems.isEmpty()) {
+                    appendInlineItemsKeepingObjectsInline(para, plannedItems);
                     inserted = true;
-                    continue;
                 }
-                ASTInlineObject inline =
-                        InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
-                if (inline == null) {
-                    inline = InlineFrameHandler.loadInlineObject(ctx, anchoredId);
-                }
-                if (inline == null) continue;
-                inline.keepInline(true);
-                para.addItem(inline);
-                inserted = true;
                 continue;
             }
             String text = run.text();
@@ -1456,6 +1534,20 @@ public class StoryLoader {
         }
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(domId));
         if (tf == null) return false;
+        if (hasStage1ObjectPlans(ctx)) {
+            if (hasSourceAutoPageNumberMarker(ctx, tf)) return true;
+            if (legacyLooksLikeInlinePageNumberFrame(ctx, tf)) {
+                warnPageNumberRoleHeuristicSuppressed(ctx, domId, "idml_story");
+            }
+            return false;
+        }
+        return legacyLooksLikeInlinePageNumberFrame(ctx, tf);
+    }
+
+    private static boolean legacyLooksLikeInlinePageNumberFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || tf == null) return false;
         String text = tf.frameVisibleText();
         if ((text == null || text.trim().isEmpty()) && tf.storyId() != null) {
             ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
@@ -1478,6 +1570,36 @@ public class StoryLoader {
         double w = Math.abs(gb[3] - gb[1]);
         double h = Math.abs(gb[2] - gb[0]);
         return w <= 40.0 && h <= 25.0;
+    }
+
+    private static boolean hasSourceAutoPageNumberMarker(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        if (containsAutoPageNumberMarker(tf.frameVisibleText())) return true;
+        if (ctx == null || ctx.resolvedData == null || tf.storyId() == null) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph rp : story.paragraphs()) {
+            if (rp == null || rp.runs() == null) continue;
+            for (ResolvedRun run : rp.runs()) {
+                if (run != null && containsAutoPageNumberMarker(run.text())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsAutoPageNumberMarker(String text) {
+        return text != null && text.indexOf('\u0018') >= 0;
+    }
+
+    private static void warnPageNumberRoleHeuristicSuppressed(
+            ResolvedBuildContext ctx,
+            int anchoredId,
+            String surface) {
+        if (ctx == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_PAGE_NUMBER_ROLE_HEURISTIC_SUPPRESSED\""
+                + ",\"anchoredObjectId\":" + anchoredId
+                + ",\"surface\":\"" + ObjectPlan.escape(surface) + "\""
+                + ",\"detail\":\"Stage 1 ObjectPlans are present; page-number role must come from source metadata, not digit text or frame bounds\"}");
     }
 
     private static IDMLTextFrame findInlineFrame(IDMLCharacterRun run, String inlineHexId) {
@@ -1517,9 +1639,27 @@ public class StoryLoader {
             return false;
         }
         for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            if (hasCellOwnedNestedStoryRef(ctx, idmlCell, storyRef)) continue;
             if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)) return true;
         }
         return false;
+    }
+
+    private static boolean hasCellOwnedNestedStoryRef(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (idmlCell == null || idmlCell.textFrameStoryRefs() == null) return false;
+        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            if (hasCellOwnedNestedStoryRef(ctx, idmlCell, storyRef)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasCellOwnedNestedStoryRef(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+            String storyRef) {
+        return StoryFlowAssembler.shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef);
     }
 
     private static boolean hasDirectVisibleCellText(
@@ -1531,6 +1671,22 @@ public class StoryLoader {
                 if (run == null || run.content() == null) continue;
                 String normalized = normalizeCellOwnershipText(run.content());
                 if (!normalized.isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasDirectCellTextOrInlineObject(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (hasDirectVisibleCellText(idmlCell)) return true;
+        if (idmlCell == null || idmlCell.paragraphs() == null) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null) continue;
+                if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) return true;
+                if (run.inlineFrames() != null && !run.inlineFrames().isEmpty()) return true;
+                if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) return true;
             }
         }
         return false;
@@ -1693,6 +1849,25 @@ public class StoryLoader {
             }
         }
         return false;
+    }
+
+    private static void applyCharacterStylePosition(ResolvedBuildContext ctx, IDMLCharacterRun run) {
+        if (ctx == null || ctx.styleResolver == null || run == null) return;
+        String styleRef = run.appliedCharacterStyle();
+        if (styleRef == null || styleRef.isEmpty()) return;
+        IDMLStyleDef style = ctx.styleResolver.getResolvedCharacterStyle(styleRef);
+        if (style == null) return;
+        if (isNormalPosition(run.position()) && style.position() != null) {
+            run.position(style.position());
+        }
+        if (run.baselineShift() == null && style.baselineShift() != null) {
+            run.baselineShift(style.baselineShift());
+        }
+    }
+
+    private static boolean isNormalPosition(String position) {
+        if (position == null || position.trim().isEmpty()) return true;
+        return position.toLowerCase(java.util.Locale.ROOT).contains("normal");
     }
 
     private static String toDecimalStoryId(String storyRef) {

@@ -32,6 +32,7 @@ final class LineSpacingResolver {
         for (ASTInlineItem item : para.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
+                if (!InlineFlowPolicy.participatesInLineSpacing(obj)) continue;
                 long h = obj.height();
                 // IMAGE with container: 컨테이너 높이 사용
                 if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE

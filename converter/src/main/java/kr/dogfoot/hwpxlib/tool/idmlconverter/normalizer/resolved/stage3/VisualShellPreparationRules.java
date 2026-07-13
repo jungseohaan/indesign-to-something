@@ -5,7 +5,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Objec
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.PolicyLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
@@ -65,37 +64,6 @@ public final class VisualShellPreparationRules {
                 && isPaperFilledContainerShell(ctx, rg);
     }
 
-    public static double minimumVisibleWidthForMasterEdgeStrip(
-            ResolvedBuildContext ctx,
-            RenderedGroup rg,
-            double rawLeft,
-            double rawRight,
-            double rawTop,
-            double rawBottom,
-            double cropRefLeft,
-            double cropRefRight,
-            double visLeft,
-            double visRight,
-            double pageWidth,
-            double pageHeight) {
-        if (ctx == null || rg == null || pageWidth >= 1e8) return 0.0;
-        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-        if (!isMasterStripPlan(plan)) return 0.0;
-
-        boolean leftEdge = (rawLeft < -0.5 || cropRefLeft < -0.5) && Math.abs(visLeft) < 0.5;
-        boolean rightEdge = (rawRight > pageWidth + 0.5 || cropRefRight > pageWidth + 0.5)
-                && Math.abs(visRight - pageWidth) < 0.5;
-        if (!leftEdge && !rightEdge) return 0.0;
-
-        double fullW = Math.max(rawRight - rawLeft, cropRefRight - cropRefLeft);
-        double fullH = rawBottom - rawTop;
-        if (fullW <= 1.0 || fullH <= 0.5) return 0.0;
-        double maxStripHeight = pageHeight < 1e8 ? Math.min(40.0, pageHeight * 0.15) : 40.0;
-        if (fullH > maxStripHeight) return 0.0;
-
-        return Math.max(Math.min(fullW * 0.60, 24.0), 0.0);
-    }
-
     public static boolean isMasterEdgeStripPlan(
             ResolvedBuildContext ctx,
             RenderedGroup rg,
@@ -108,11 +76,12 @@ public final class VisualShellPreparationRules {
         if (ctx == null || rg == null) return false;
         ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
         if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (!isExplicitShellSlotPlan(plan)) return false;
         if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
                 && !ShellRole.isTextShell(plan)) return false;
         PolicyLayer layer = plan.visualPolicyLayer();
         if (layer != PolicyLayer.BACKGROUND && layer != PolicyLayer.DECORATION) return false;
-        return hasContainerSizedBounds(rg);
+        return hasContainerSizedBounds(plan);
     }
 
     private static boolean isBackgroundLike(
@@ -135,9 +104,7 @@ public final class VisualShellPreparationRules {
 
     private static boolean isMasterStripPlan(ObjectPlan plan) {
         if (plan == null) return false;
-        String reason = safe(plan.reason);
-        return "master_graphic".equals(reason)
-                || "haseera_graphic".equals(reason);
+        return "pass.master_page_graphics".equals(safe(plan.planPassId));
     }
 
     private static boolean isPlannedTextShell(ResolvedBuildContext ctx, RenderedGroup rg) {
@@ -146,12 +113,29 @@ public final class VisualShellPreparationRules {
     }
 
     private static boolean isForegroundVisualLayer(String visualLayer) {
-        return VisualPlanePolicy.isInFrontLayerName(visualLayer);
+        return visualLayer != null && !visualLayer.isEmpty() && !"PAGE_BACKGROUND".equals(visualLayer);
     }
 
-    private static boolean hasContainerSizedBounds(RenderedGroup rg) {
-        if (rg == null) return false;
-        double[] b = rg.bounds();
+    private static boolean isExplicitShellSlotPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        String slotRole = safe(plan.slotRole);
+        if ("shell_slot_only".equals(slotRole)
+                || "direct_child_shell_slot".equals(slotRole)
+                || "TEXTLESS_SHELL_SLOT".equals(slotRole)
+                || "background_shell_slot".equals(slotRole)
+                || "textless_group_visual_slot".equals(slotRole)) {
+            return true;
+        }
+        String candidateId = safe(plan.candidateId);
+        return candidateId.contains(".shell_slot_only")
+                || candidateId.endsWith("shell_slot_only")
+                || candidateId.contains(".direct_child_shell_slot")
+                || candidateId.endsWith("direct_child_shell_slot");
+    }
+
+    private static boolean hasContainerSizedBounds(ObjectPlan plan) {
+        if (plan == null) return false;
+        double[] b = plan.bounds;
         if (b == null || b.length < 4) return false;
         double w = b[3] - b[1];
         double h = b[2] - b[0];

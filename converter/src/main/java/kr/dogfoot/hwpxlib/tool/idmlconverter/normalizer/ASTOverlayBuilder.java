@@ -568,6 +568,9 @@ class ASTOverlayBuilder {
         }
         String domId = ParagraphTextHelpers.domIdFromSourceId(tf.selfId());
         if (domId == null) return false;
+        if (hasStage1ObjectPlans(resolvedData)) {
+            return resolvedData.isHwpxOwnedTextFrame(domId);
+        }
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
                 : resolvedData.allRenderedFloatingItems()) {
             if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
@@ -580,5 +583,11 @@ class ASTOverlayBuilder {
             }
         }
         return false;
+    }
+
+    private static boolean hasStage1ObjectPlans(ResolvedData resolvedData) {
+        return resolvedData != null
+                && resolvedData.ownershipPlans() != null
+                && !resolvedData.ownershipPlans().isEmpty();
     }
 }

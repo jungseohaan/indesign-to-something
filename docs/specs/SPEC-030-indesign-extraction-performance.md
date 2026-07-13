@@ -120,7 +120,7 @@
 - 적용: 25+ for-loop 에 페이지 게이트 추가
 - 데스크탑 UI: "특정 페이지만 다시 추출" 버튼
 
-#### A.4 SPEC-025 fully editable 모드에서 PNG 렌더 스킵 (예상 -10~20%)
+#### A.4 Source ownership fully editable 모드에서 PNG 렌더 스킵 (예상 -10~20%)
 - 단일 캡슐 배지 (예: "가" / "나") — Phase 3 가 INLINE_TEXT_FRAME 으로 처리 가능
 - 다중 박스 배지 (ㅍㅎㅂㅅ) — Phase 3 가 tryInlineGroupAsBoxList 로 처리
 - 노란 강조 도형 — Phase 3 가 floating ASTFigure 로 처리
@@ -313,6 +313,91 @@
    - 판단: 파일 크기와 cache artifact 비용은 줄었지만 총 시간에는 큰 영향이
      없다. 다음 큰 병목은 `08_complexFrames`와 개별 PNG export batch화다.
 
+0.6. **In-process spread chunk extraction 설계**
+   - 배경:
+     - 현재 desktop의 `run_extraction_chunked()`는 여러 osascript 호출로 페이지
+       범위를 나눈다.
+     - 이 방식은 문서 open/close, InDesign scripting bootstrap, 일부
+       preference 초기화를 청크마다 반복할 수 있어 대형 문서에서는 안정성은
+       좋아도 총 시간 단축 폭이 제한된다.
+     - 더 큰 병목은 JSX 내부 Stage 0/1 planner가 선택 범위 전체 source/candidate를
+       한 번에 처리하는 데 있다. 26페이지 실측에서 planning만 약 600초 이상이다.
+   - 목표:
+     - InDesign 문서는 한 번만 열고, IDML은 한 번만 export한다.
+     - 선택된 페이지 범위를 spread 단위 chunk로 나눈 뒤, 각 spread chunk에 대해
+       Stage 0~4를 chunk-local로 실행한다.
+     - 마지막에 chunk 산출물을 merge하여 기존 `resolved.json`,
+       `extraction-results.json`, `export-units.json`, `page_hashes.json`,
+       `page_item_map.json` 계약을 유지한다.
+   - JSX 실행 구조:
+     1. `_computePageRange(doc, ctx)` 후 `selectedSpreadChunks`를 만든다.
+        - chunk key: `{spreadId, startPage, endPage, pageIndexes}`.
+        - 같은 spread에 걸친 source material은 같은 chunk 안에 포함한다.
+        - requested range 밖의 페이지라도 같은 spread에서 선택 페이지 bounds와
+          교차하는 source는 Stage 0 provenance로 포함할 수 있다.
+     2. `ctx.extractMode === "spread_chunks"`이면 `main()`은 아래 루프를 실행한다.
+        - `doc.exportFile(IDML)`은 루프 전에 한 번만 수행한다.
+        - 각 chunk마다 `chunkCtx = _createChunkContext(ctx, chunk)`를 만든다.
+        - `collectRangePageItems(doc, chunk.startPage, chunk.endPage)`를 호출한다.
+        - `_buildExtractionPlan(doc, chunkCtx, chunkItems)`와 `_runRenderPhases(...)`를
+          chunk-local로 실행한다.
+        - chunk 출력은 `chunks/spread_<spreadId>/` 아래에 기록한다.
+     3. loop 종료 후 `_mergeSpreadChunkOutputs(ctx, chunks)`가 기존 top-level
+        출력 파일을 생성한다.
+   - 병합 규칙:
+     - `resolved.json`:
+       - `documentInfo`, `paragraphStyles`, `colors`, `fonts`, `fontMetrics`는 첫 chunk
+         값을 사용하되, summary count만 전체 값으로 갱신한다.
+       - `stories`, `textFrames`, `pages`, `pageItems`는 id 기준으로 stable union한다.
+       - 같은 id가 여러 chunk에 있으면 requested page ownership이 있는 chunk를
+         우선하고, 없으면 앞 chunk 값을 유지한다.
+     - `extraction-results.json` / `export-units.json`:
+       - `candidateId`, `objectPlanId`, `renderUnitId`는 chunk prefix를 붙여 충돌을
+         막는다.
+       - source identity는 원본 IDML source id를 유지한다.
+       - 같은 source bundle/slot owner가 여러 chunk에서 나오면 ObjectPlan
+         slot identity key로 dedupe한다.
+     - `page_hashes.json` / `page_item_map.json`:
+       - page index key 기준으로 단순 merge한다.
+     - PNG outputs:
+       - chunk별 파일명 prefix를 유지하거나, 최종 merge 단계에서 manifest 기반으로
+         top-level `rendered_frames/`에 복사한다.
+       - 파일 복사 여부와 무관하게 `export-units.json.file`은 최종 상대 경로로
+         정규화한다.
+   - 정책 invariant:
+     - spread chunk는 성능 실행 단위일 뿐 ownership 예외가 아니다.
+     - Stage 1 결정은 chunk-local source metadata + same-spread provenance로 한다.
+     - 병합 단계는 새 ownership을 만들지 않는다. 같은 source bundle/slot의 중복
+       owner를 제거하거나 validation issue로 기록만 한다.
+     - inline/floating, visualLayer, materialization은 chunk 이후에 뒤집지 않는다.
+   - 예상 효과:
+     - 26페이지 기준 `03d02_plan_sourceItems`, base candidate, normalize,
+       pageTextless group, sourceSlotRegistry가 spread-local source 수에 비례해
+       감소한다.
+     - IDML export와 document open은 한 번만 발생하므로 기존 multi-osascript
+       chunking보다 손실이 작다.
+     - 보수 추정: 전체 1,000초 케이스에서 25~40% 단축.
+     - planner의 비선형 비교가 강한 문서는 40% 이상도 가능하다.
+   - 구현 순서:
+     1. `spread_chunks` extractMode와 `_selectedSpreadChunks(doc, ctx)` 추가.
+     2. chunk output directory와 file path prefix 규칙 추가.
+     3. resolved merge만 먼저 구현하고 PNG/render 결과는 기존 top-level 출력에
+        prefix path로 직접 쓰도록 한다.
+     4. extraction-results/export-units merge 추가.
+     5. 기존 single-range 결과와 chunked 결과의 count, source coverage,
+        ObjectPlan issue count를 비교하는 regression report 추가.
+   - 회귀 리스크:
+     - spread 밖으로 이어지는 story/thread/table-cell flow.
+     - applied master source가 여러 spread chunk에서 반복 materialize되는 경우.
+     - spread boundary를 넘는 큰 background/decoration source.
+     - 같은 source id가 chunk별 prefix 때문에 다른 owner처럼 보이는 경우.
+   - 검증 기준:
+     - 같은 케이스 single-range vs spread-chunks에서 final `export-units`의
+       visible source slot owner set이 동일해야 한다.
+     - `resolved.pages` page count와 page order가 동일해야 한다.
+     - validation issue count는 증가하지 않아야 한다.
+     - elapsed target: 26페이지 기준 `~1,000s → <=600s`.
+
 1. **hide/restore batch화**
    - 현재: 이미지 후보마다 hide → export → restore 반복.
    - 변경: 같은 page/source-set export 후보를 pass별로 묶고, hide/restore 대상 계산을 한 번만 한다.
@@ -390,4 +475,4 @@ src/main/java/.../resolved/ResolvedDataReader.java  # 슬림화된 JSON 호환
 ## 관련 SPEC
 
 - [SPEC-011](SPEC-011-extract-cache.md) (추출 캐시)
-- [SPEC-025](SPEC-025-text-image-rendering-removal.md) (텍스트 이미지 렌더링 제거 — A.4 의 기반)
+- [POLICY-source-ownership](POLICY-source-ownership.md) (텍스트/PNG ownership 기준)

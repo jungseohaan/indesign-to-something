@@ -60,6 +60,10 @@ final class ParaPrFactory {
     }
 
     String createOverrideParaPr(ASTParagraph astPara, String baseParaPrId) {
+        return createOverrideParaPr(astPara, baseParaPrId, false);
+    }
+
+    String createOverrideParaPr(ASTParagraph astPara, String baseParaPrId, boolean preserveSourceFixedLeading) {
         // 기본 스타일에서 값 상속
         ASTStyleDef baseStyle = findParagraphStyle(astPara.paragraphStyleRef());
 
@@ -170,13 +174,38 @@ final class ParaPrFactory {
         paraPr.createLineSpacing();
         Integer lsValue = astPara.lineSpacing();
         String lsType = astPara.lineSpacingType();
-        if (lsValue == null && baseStyle != null && baseStyle.lineSpacing() != null) {
+        if (preserveSourceFixedLeading
+                && baseStyle != null
+                && "fixed".equals(baseStyle.lineSpacingType())
+                && baseStyle.lineSpacing() != null
+                && baseStyle.lineSpacing() > 0) {
+            lsValue = baseStyle.lineSpacing();
+            lsType = baseStyle.lineSpacingType();
+        } else if (preserveSourceFixedLeading) {
+            ParaPr basePr = findParaPrById(baseParaPrId);
+            if (basePr != null
+                    && basePr.lineSpacing() != null
+                    && basePr.lineSpacing().type() == LineSpacingType.FIXED
+                    && basePr.lineSpacing().value() != null
+                    && basePr.lineSpacing().value() > 0) {
+                lsValue = basePr.lineSpacing().value();
+                lsType = "fixed";
+            }
+        } else if (lsValue == null && baseStyle != null && baseStyle.lineSpacing() != null) {
             lsValue = baseStyle.lineSpacing();
             lsType = baseStyle.lineSpacingType();
         }
+        boolean hasSourceFixedLeading = "fixed".equals(lsType) && lsValue != null && lsValue > 0;
         // SPEC-031: DSL para rule — 줄간격 오버라이드 (dslCtx는 위에서 이미 applyParaRule 호출됨)
-        if (dslCtx.targetLineSpacingPct != null) {
+        if (dslCtx.targetLineSpacingPct != null
+                && !(preserveSourceFixedLeading && hasSourceFixedLeading)) {
             lsValue = dslCtx.targetLineSpacingPct;
+            lsType = "percent";
+        }
+        if (!preserveSourceFixedLeading
+                && "fixed".equals(lsType)
+                && shouldPreferAutoLeadingPercent(astPara, lsValue)) {
+            lsValue = astPara.autoLeadingPercent();
             lsType = "percent";
         }
         if (lsValue != null) {
@@ -194,6 +223,48 @@ final class ParaPrFactory {
         }
 
         return newId;
+    }
+
+    private static boolean shouldPreferAutoLeadingPercent(ASTParagraph para, Integer fixedLeading) {
+        if (para == null || fixedLeading == null || fixedLeading <= 0) return false;
+        Integer autoLeading = para.autoLeadingPercent();
+        if (autoLeading == null || autoLeading <= 0) return false;
+        int dominantFont = dominantTextFontSize(para);
+        if (dominantFont <= 0) return false;
+        int textLength = meaningfulTextLength(para);
+        if (textLength < 20) return false;
+        // Keep ordinary source leading even when it is visually roomy. This
+        // fallback exists only for pathological fixed spacing introduced by
+        // oversized inline artifacts, not for body text leading from IDML/resolved.
+        return fixedLeading >= Math.round(dominantFont * 2.5f);
+    }
+
+    private static int dominantTextFontSize(ASTParagraph para) {
+        int bestFont = 0;
+        int bestLen = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            Integer fs = run.fontSizeHwpunits();
+            if (fs == null || fs <= 0) continue;
+            int len = run.text() != null ? run.text().trim().length() : 0;
+            if (len > bestLen) {
+                bestLen = len;
+                bestFont = fs;
+            }
+        }
+        return bestFont;
+    }
+
+    private static int meaningfulTextLength(ASTParagraph para) {
+        int total = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text == null) continue;
+            total += text.trim().length();
+        }
+        return total;
     }
 
     /**

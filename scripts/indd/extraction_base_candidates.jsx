@@ -8,6 +8,7 @@
 
 function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceClusterIndex, candidates, candidateSeen) {
     var basePerfStartedAt = (new Date()).getTime();
+    var basePerfDetailedTiming = ctx && ctx.enableBaseCandidateDetailedTiming === true;
     var basePerfStats = {
         stage: "03d05_plan_baseCandidates",
         sourceItemCount: sourceItems ? sourceItems.length : 0,
@@ -19,17 +20,30 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         candidateCountAtEnd: 0,
         helperCalls: {},
         helperMs: {},
+        mainBranchMs: {},
+        mainBranchCounts: {},
         cacheHits: {},
         cacheMisses: {},
+        emittedByRole: {},
+        duplicateSkippedByRole: {},
+        consideredByRole: {},
+        fallbackMs: {},
+        mainLoopMs: 0,
+        mainPageLoopMs: 0,
         broaderDecorationScannedSetCount: 0,
         broaderDecorationIndexedSetCount: 0,
         lastLabel: "start",
         lastItemIndex: -1,
-        elapsedMs: 0
+        elapsedMs: 0,
+        suppressedPreview: []
     };
 
-    function basePerfNow() {
+    function basePerfWallNow() {
         return (new Date()).getTime();
+    }
+
+    function basePerfNow() {
+        return basePerfDetailedTiming ? basePerfWallNow() : 0;
     }
 
     function basePerfAdd(mapName, key, value) {
@@ -41,11 +55,67 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     function basePerfCall(name, startedAt) {
         basePerfAdd("helperCalls", name, 1);
-        basePerfAdd("helperMs", name, Math.max(0, basePerfNow() - startedAt));
+        if (basePerfDetailedTiming) {
+            basePerfAdd("helperMs", name, Math.max(0, basePerfWallNow() - startedAt));
+        }
+    }
+
+    function basePerfHotCall(name, startedAt) {
+        basePerfAdd("helperCalls", name, 1);
+        if (basePerfDetailedTiming && startedAt) {
+            basePerfAdd("helperMs", name, Math.max(0, basePerfWallNow() - startedAt));
+        }
+    }
+
+    function basePerfBranchStart(name) {
+        basePerfAdd("mainBranchCounts", name, 1);
+        return basePerfNow();
+    }
+
+    function basePerfBranchEnd(name, startedAt) {
+        if (basePerfDetailedTiming && startedAt) {
+            basePerfAdd("mainBranchMs", name, Math.max(0, basePerfWallNow() - startedAt));
+        }
     }
 
     function basePerfCache(name, hit) {
         basePerfAdd(hit ? "cacheHits" : "cacheMisses", name, 1);
+    }
+
+    function basePerfRole(mapName, role, value) {
+        basePerfAdd(mapName, role || "unknown", value || 1);
+    }
+
+    function pushBaseExtractionCandidate(passId, item, attrs, role) {
+        role = role || (attrs && attrs.compositeRole) || passId || "unknown";
+        basePerfRole("consideredByRole", role, 1);
+        var before = candidates ? candidates.length : 0;
+        var startedAt = basePerfNow();
+        _pushExtractionCandidate(candidates, candidateSeen, passId, item, cloneBaseCandidateAttrs(attrs));
+        basePerfHotCall("pushBaseExtractionCandidate", startedAt);
+        var after = candidates ? candidates.length : 0;
+        if (after > before) {
+            basePerfRole("emittedByRole", role, after - before);
+        } else {
+            basePerfRole("duplicateSkippedByRole", role, 1);
+        }
+    }
+
+    function cloneBaseCandidateAttrs(attrs) {
+        if (!attrs) return attrs;
+        var out = {};
+        for (var key in attrs) {
+            if (!attrs.hasOwnProperty(key)) continue;
+            var value = attrs[key];
+            if (value && typeof value !== "string"
+                    && value.length !== undefined
+                    && value.slice) {
+                out[key] = value.slice(0);
+            } else {
+                out[key] = value;
+            }
+        }
+        return out;
     }
 
     function basePerfMarker(name) {
@@ -57,37 +127,284 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfStats.lastLabel = label;
             basePerfStats.lastItemIndex = itemIndex;
             basePerfStats.candidateCountAtEnd = candidates ? candidates.length : 0;
-            basePerfStats.elapsedMs = Math.max(0, basePerfNow() - basePerfStartedAt);
+            basePerfStats.elapsedMs = Math.max(0, basePerfWallNow() - basePerfStartedAt);
             writeJson(ctx.outputDir + "/_base_candidate_perf.json", basePerfStats);
         } catch (eBasePerfWrite) {}
     }
 
+    function baseSuppressedPreview(reason, itemInfo, extra) {
+        try {
+            if (!itemInfo) return;
+            if (basePerfStats.suppressedPreview.length >= 200) return;
+            var row = {
+                reason: reason || "unknown",
+                id: itemInfo.id,
+                kind: itemInfo.kind,
+                pageIndex: itemInfo.pageIndex,
+                parentId: itemInfo.parentId,
+                hasChildren: itemInfo.hasChildren === true,
+                hasPlacedVisual: itemInfo.hasPlacedVisual === true,
+                hasVisibleFill: itemInfo.hasVisibleFill === true,
+                hasVisibleStroke: itemInfo.hasVisibleStroke === true
+            };
+            if (extra) {
+                for (var key in extra) {
+                    if (!extra.hasOwnProperty(key)) continue;
+                    row[key] = extra[key];
+                }
+            }
+            basePerfStats.suppressedPreview.push(row);
+        } catch (eBaseSuppressedPreview) {}
+    }
+
     basePerfMarker("03d05a_base_enter");
+
+    var sourceHasStoryFlowAnchorById = {};
+
+    function sourceInfoHasStoryFlowAnchorForBase(info) {
+        if (!info) return false;
+        var parentKind = String(info.parentKind || "");
+        if (parentKind === "Cell" || parentKind === "Story") {
+            return true;
+        }
+        return _isInlineFlowItemBySourceInfo(info);
+    }
 
     function sourceHasStoryFlowAnchor(sourceId) {
         if (sourceId === null || sourceId === undefined) return false;
+        var startedAt = basePerfNow();
+        var sourceKey = String(sourceId);
+        if (sourceHasStoryFlowAnchorById.hasOwnProperty(sourceKey)) {
+            basePerfCache("sourceHasStoryFlowAnchor", true);
+            basePerfHotCall("sourceHasStoryFlowAnchor", startedAt);
+            return sourceHasStoryFlowAnchorById[sourceKey];
+        }
+        basePerfCache("sourceHasStoryFlowAnchor", false);
+        var declaredInfo = sourceInfoForBase(sourceId);
+        if (declaredInfo) {
+            sourceHasStoryFlowAnchorById[sourceKey] = sourceInfoHasStoryFlowAnchorForBase(declaredInfo);
+            basePerfHotCall("sourceHasStoryFlowAnchor", startedAt);
+            return sourceHasStoryFlowAnchorById[sourceKey];
+        }
         var current = sourceClusterIndex && sourceClusterIndex.sourceInfo
                 ? sourceClusterIndex.sourceInfo(sourceId)
                 : null;
         for (var depth = 0; depth < 64 && current; depth++) {
             var parentKind = String(current.parentKind || "");
             if (parentKind === "Character" || parentKind === "InsertionPoint") {
-                return _isInlineFlowItemBySourceInfo(current);
+                sourceHasStoryFlowAnchorById[sourceKey] = _isInlineFlowItemBySourceInfo(current);
+                basePerfHotCall("sourceHasStoryFlowAnchor", startedAt);
+                return sourceHasStoryFlowAnchorById[sourceKey];
             }
             if (parentKind === "Cell" || parentKind === "Story") {
+                sourceHasStoryFlowAnchorById[sourceKey] = true;
+                basePerfHotCall("sourceHasStoryFlowAnchor", startedAt);
                 return true;
             }
             var parentId = current.parentId;
-            if (parentId === null || parentId === undefined) return false;
+            if (parentId === null || parentId === undefined) {
+                sourceHasStoryFlowAnchorById[sourceKey] = false;
+                basePerfHotCall("sourceHasStoryFlowAnchor", startedAt);
+                return false;
+            }
             current = sourceClusterIndex.sourceInfo(parentId);
         }
+        sourceHasStoryFlowAnchorById[sourceKey] = false;
+        basePerfHotCall("sourceHasStoryFlowAnchor", startedAt);
         return false;
+    }
+
+    function sourceKindCanEmitBaseCandidate(kind) {
+        kind = String(kind || "");
+        return kind === "TextFrame" || kind === "Group" || kind === "Rectangle"
+                || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine";
     }
 
     function sourceItemHasChildren(sourceId) {
         if (sourceId === null || sourceId === undefined) return false;
-        var info = sourceIndex.sourceInfo(sourceId);
+        var startedAt = basePerfNow();
+        var info = sourceInfoForBase(sourceId);
+        basePerfHotCall("sourceItemHasChildren", startedAt);
         return !!(info && info.hasChildren);
+    }
+
+    var candidatePageIndexesForBaseById = {};
+    var pageLocalSourceObjectIdsForBaseByKey = {};
+    var hasPlacedVisualInSubtreeForBaseById = {};
+    var hasCandidateVectorPaintForBaseById = {};
+    var clipCarryingParentIdForBaseById = {};
+    var pageBoundsForBaseByPage = {};
+
+    function pageIndexInBaseRange(pageIndex) {
+        pageIndex = Number(pageIndex);
+        if (!(pageIndex >= 0)) return false;
+        return pageIndex >= Number(ctx.startPage || 1) - 1
+                && pageIndex <= Number(ctx.endPage || ctx.startPage || 1) - 1;
+    }
+
+    function pageBoundsForBase(pageIndex) {
+        var key = String(pageIndex);
+        if (pageBoundsForBaseByPage.hasOwnProperty(key)) {
+            return pageBoundsForBaseByPage[key];
+        }
+        var bounds = null;
+        try { bounds = sourceIndex.pageBounds(Number(pageIndex)); } catch (ePageBoundsForBase) { bounds = null; }
+        pageBoundsForBaseByPage[key] = bounds;
+        return bounds;
+    }
+
+    function sourceBoundsContainedInPageForBase(sourceBounds, pageBounds) {
+        if (!sourceBounds || !pageBounds || sourceBounds.length < 4 || pageBounds.length < 4) return false;
+        var eps = 0.001;
+        return Number(sourceBounds[0]) >= Number(pageBounds[0]) - eps
+                && Number(sourceBounds[1]) >= Number(pageBounds[1]) - eps
+                && Number(sourceBounds[2]) <= Number(pageBounds[2]) + eps
+                && Number(sourceBounds[3]) <= Number(pageBounds[3]) + eps;
+    }
+
+    function sourceBoundsHasPageAreaForBase(sourceBounds, pageBounds) {
+        if (!sourceBounds || !pageBounds || sourceBounds.length < 4 || pageBounds.length < 4) return true;
+        var eps = 0.001;
+        var top = Math.max(Number(sourceBounds[0]), Number(pageBounds[0]));
+        var left = Math.max(Number(sourceBounds[1]), Number(pageBounds[1]));
+        var bottom = Math.min(Number(sourceBounds[2]), Number(pageBounds[2]));
+        var right = Math.min(Number(sourceBounds[3]), Number(pageBounds[3]));
+        return bottom - top > eps && right - left > eps;
+    }
+
+    function filterCandidatePageIndexesWithAreaForBase(sourceInfo, indexes) {
+        if (!sourceInfo || !sourceInfo.bounds || sourceInfo.bounds.length < 4) {
+            return indexes ? indexes.slice(0) : [];
+        }
+        var out = [];
+        for (var i = 0; indexes && i < indexes.length; i++) {
+            var pageIndex = indexes[i];
+            if (sourceBoundsHasPageAreaForBase(sourceInfo.bounds, pageBoundsForBase(pageIndex))) {
+                out.push(pageIndex);
+            }
+        }
+        return out;
+    }
+
+    function candidatePageIndexesForBase(sourceId) {
+        var startedAt = basePerfNow();
+        var key = String(sourceId);
+        if (candidatePageIndexesForBaseById.hasOwnProperty(key)) {
+            basePerfCache("candidatePageIndexesForBase", true);
+            basePerfHotCall("candidatePageIndexesForBase", startedAt);
+            return candidatePageIndexesForBaseById[key].slice(0);
+        }
+        basePerfCache("candidatePageIndexesForBase", false);
+        var sourceInfo = baseCandidateSourceInfoById[String(sourceId)];
+        var sourcePageIndex = sourceInfo ? Number(sourceInfo.pageIndex) : -1;
+        if (pageIndexInBaseRange(sourcePageIndex)) {
+            if (!sourceInfo.bounds || sourceInfo.bounds.length < 4
+                    || sourceBoundsContainedInPageForBase(sourceInfo.bounds, pageBoundsForBase(sourcePageIndex))) {
+                candidatePageIndexesForBaseById[key] = [sourcePageIndex];
+                basePerfCache("candidatePageIndexesForBase.fastPageLocal", true);
+                basePerfHotCall("candidatePageIndexesForBase", startedAt);
+                return [sourcePageIndex];
+            }
+        }
+        basePerfCache("candidatePageIndexesForBase.fastPageLocal", false);
+        var indexes = filterCandidatePageIndexesWithAreaForBase(
+                sourceInfo, sourceIndex.candidatePageIndexes(sourceId) || []);
+        candidatePageIndexesForBaseById[key] = indexes.slice(0);
+        basePerfHotCall("candidatePageIndexesForBase", startedAt);
+        return indexes;
+    }
+
+    function pageLocalSourceObjectIdsForBase(sourceId, pageIndex) {
+        var key = String(sourceId) + "|" + String(pageIndex);
+        if (pageLocalSourceObjectIdsForBaseByKey.hasOwnProperty(key)) {
+            basePerfCache("pageLocalSourceObjectIdsForBase", true);
+            return pageLocalSourceObjectIdsForBaseByKey[key];
+        }
+        basePerfCache("pageLocalSourceObjectIdsForBase", false);
+        var startedAt = basePerfNow();
+        var ids = null;
+        try {
+            ids = sourceIndex.pageLocalSourceObjectIds(sourceId, pageIndex);
+        } catch (ePageLocalSourceObjectIdsForBase) {
+            ids = null;
+        }
+        basePerfHotCall("pageLocalSourceObjectIdsForBase", startedAt);
+        ids = ids || [sourceId];
+        pageLocalSourceObjectIdsForBaseByKey[key] = ids;
+        return ids;
+    }
+
+    function hasPlacedVisualInSubtreeForBase(sourceId) {
+        var key = String(sourceId);
+        if (hasPlacedVisualInSubtreeForBaseById.hasOwnProperty(key)) {
+            basePerfCache("hasPlacedVisualInSubtreeForBase", true);
+            return hasPlacedVisualInSubtreeForBaseById[key];
+        }
+        basePerfCache("hasPlacedVisualInSubtreeForBase", false);
+        var startedAt = basePerfNow();
+        var result = sourceIndex.hasPlacedVisualInSubtree(sourceId);
+        basePerfHotCall("hasPlacedVisualInSubtreeForBase", startedAt);
+        hasPlacedVisualInSubtreeForBaseById[key] = result;
+        return result;
+    }
+
+    function hasCandidateVectorPaintForBase(sourceId) {
+        var key = String(sourceId);
+        if (hasCandidateVectorPaintForBaseById.hasOwnProperty(key)) {
+            basePerfCache("hasCandidateVectorPaintForBase", true);
+            return hasCandidateVectorPaintForBaseById[key];
+        }
+        basePerfCache("hasCandidateVectorPaintForBase", false);
+        var startedAt = basePerfNow();
+        var result = sourceIndex.hasCandidateVectorPaint(sourceId) === true;
+        basePerfHotCall("hasCandidateVectorPaintForBase", startedAt);
+        hasCandidateVectorPaintForBaseById[key] = result;
+        return result;
+    }
+
+    function clipCarryingParentIdForBase(sourceId) {
+        var key = String(sourceId);
+        if (clipCarryingParentIdForBaseById.hasOwnProperty(key)) {
+            basePerfCache("clipCarryingParentIdForBase", true);
+            return clipCarryingParentIdForBaseById[key];
+        }
+        basePerfCache("clipCarryingParentIdForBase", false);
+        var startedAt = basePerfNow();
+        var result = null;
+        try {
+            result = sourceIndex.clipCarryingParentIdOfSource(sourceId);
+        } catch (eClipCarryingParentIdForBase) {
+            result = null;
+        }
+        basePerfHotCall("clipCarryingParentIdForBase", startedAt);
+        clipCarryingParentIdForBaseById[key] = result;
+        return result;
+    }
+
+    function domItemForBase(sourceId) {
+        var startedAt = basePerfNow();
+        var item = null;
+        try { item = sourceIndex.domItem(sourceId); } catch (eDomItemForBase) { item = null; }
+        basePerfHotCall("domItemForBase", startedAt);
+        return item;
+    }
+
+    var sourceIsInPagePlaneForBaseByKey = {};
+
+    function sourceIsInPagePlaneForBase(sourceId, pageIndex) {
+        if (!sourceIndex.sourceIsInPagePlane) return true;
+        var cacheKey = String(sourceId) + "|" + String(pageIndex);
+        if (sourceIsInPagePlaneForBaseByKey.hasOwnProperty(cacheKey)) {
+            basePerfCache("sourceIsInPagePlaneForBase", true);
+            return sourceIsInPagePlaneForBaseByKey[cacheKey];
+        }
+        basePerfCache("sourceIsInPagePlaneForBase", false);
+        var startedAt = basePerfNow();
+        var result = false;
+        try { result = sourceIndex.sourceIsInPagePlane(sourceId, pageIndex) === true; } catch (eSourceIsInPagePlane) {}
+        sourceIsInPagePlaneForBaseByKey[cacheKey] = result;
+        basePerfHotCall("sourceIsInPagePlaneForBase", startedAt);
+        return result;
     }
 
     function shellExportSourceIdsForSourceSet(rootSourceId, sourceIds) {
@@ -108,12 +425,12 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 || rootSourceId === null || rootSourceId === undefined) {
             return false;
         }
-        var current = sourceIndex.sourceInfo(sourceId);
+        var current = sourceInfoForBase(sourceId);
         for (var depth = 0; depth < 64 && current; depth++) {
             if (String(current.id) === String(rootSourceId)) return false;
-            if (sourceIndex.hasPlacedVisualInSubtree(current.id)) return true;
+            if (hasPlacedVisualInSubtreeForBase(current.id)) return true;
             if (current.parentId === null || current.parentId === undefined) return false;
-            current = sourceIndex.sourceInfo(current.parentId);
+            current = sourceInfoForBase(current.parentId);
         }
         return false;
     }
@@ -136,23 +453,166 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     function shouldEmitDecorationSourceCandidate(itemInfo) {
         if (!itemInfo) return false;
         var kind = itemInfo.kind;
-        if (kind === "Group") return sourceItemHasChildren(itemInfo.id);
+        if (kind === "Group") return itemInfo.hasChildren === true;
         if (kind === "Rectangle" || kind === "Oval"
                 || kind === "Polygon" || kind === "GraphicLine") {
-            if (sourceItemHasChildren(itemInfo.id)) return true;
+            if (itemInfo.hasChildren === true) return true;
             return false;
         }
         return false;
+    }
+
+    function textFrameMayHaveStyleShellForBase(itemInfo) {
+        if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") return false;
+        return itemInfo.hasVisibleFill === true
+                || itemInfo.hasVisibleStroke === true
+                || _sourceHasTextFrameShellStyleMetadataInIndex(
+                        itemInfo.id, sourceIndex.sourceInfoById);
+    }
+
+    function sourceMayBeBackgroundVectorCandidateFast(itemInfo, pageIndex) {
+        if (!itemInfo) return false;
+        var kindName = String(itemInfo.kind || "");
+        if (kindName !== "Rectangle" && kindName !== "Oval" && kindName !== "Polygon") return false;
+        if (itemInfo.visible === false || itemInfo.hiddenLayer === true || itemInfo.nonprinting === true) return false;
+        if (!itemInfo.bounds || itemInfo.bounds.length < 4) return false;
+        if (itemInfo.hasChildren === true || itemInfo.hasPlacedVisual === true) return false;
+        if (itemInfo.hasVisibleFill !== true || itemInfo.hasVisibleStroke === true) return false;
+        var pb = pageBoundsForBase(Number(pageIndex));
+        if (!pb || pb.length < 4 || !sourceBoundsIntersects(itemInfo.bounds, pb)) return false;
+        var pageWidth = Math.max(0, Number(pb[3]) - Number(pb[1]));
+        var pageHeight = Math.max(0, Number(pb[2]) - Number(pb[0]));
+        if (pageWidth <= 0 || pageHeight <= 0) return false;
+        var width = Math.max(0, Number(itemInfo.bounds[3]) - Number(itemInfo.bounds[1]));
+        var height = Math.max(0, Number(itemInfo.bounds[2]) - Number(itemInfo.bounds[0]));
+        var touchesLeft = Number(itemInfo.bounds[1]) <= Number(pb[1]) + 1.0;
+        var touchesRight = Number(itemInfo.bounds[3]) >= Number(pb[3]) - 1.0;
+        var touchesTop = Number(itemInfo.bounds[0]) <= Number(pb[0]) + 1.0;
+        var touchesBottom = Number(itemInfo.bounds[2]) >= Number(pb[2]) - 1.0;
+        var spansWidth = width >= pageWidth * 0.85 && touchesLeft && touchesRight;
+        var spansHeight = height >= pageHeight * 0.85 && touchesTop && touchesBottom;
+        return spansWidth || spansHeight;
+    }
+
+    function sourceMayNeedDecorationCompositeBranch(itemInfo) {
+        if (!itemInfo) return false;
+        var kindName = String(itemInfo.kind || "");
+        if (kindName === "Group") return true;
+        if (kindName !== "Rectangle" && kindName !== "Oval"
+                && kindName !== "Polygon" && kindName !== "GraphicLine") {
+            return false;
+        }
+        return itemInfo.hasChildren === true
+                || clipCarryingParentIdForBase(itemInfo.id) !== null;
+    }
+
+    function sourceMayEmitClipParentShellCandidate(itemInfo, pageIndex) {
+        if (!itemInfo) return false;
+        var kindName = String(itemInfo.kind || "");
+        if (!sourceKindCanCarryClipForBase(kindName)) return false;
+        if (itemInfo.hasChildren !== true) return false;
+        if (sourceIndex.hasPlacedVisual(itemInfo.id) === true) return false;
+        if (sourceHasClipParentShellOwner(itemInfo.id, pageIndex)) return false;
+        if (!shouldEmitDecorationSourceCandidate(itemInfo)) return false;
+
+        var sourceIds = pageLocalSourceObjectIdsForBase(itemInfo.id, pageIndex);
+        if (!sourceIds || sourceIds.length === 0) return false;
+        var exportIds = shellExportSourceIdsForSourceSet(itemInfo.id, sourceIds);
+        if (!exportIds || exportIds.length === 0) return false;
+        return sourceSetHasExecutableShellMaterial(exportIds);
     }
 
     function shouldRasterizeLeafVectorShell(itemInfo) {
         if (!itemInfo) return false;
         var kind = String(itemInfo.kind || "");
         if (kind !== "Polygon" && !isUnsafeNativeGraphicLineShell(itemInfo)) return false;
-        if (sourceItemHasChildren(itemInfo.id)) return false;
+        if (itemInfo.hasChildren === true) return false;
         if (itemInfo.hasPlacedVisual === true) return false;
-        if (sourceIndex.hasPlacedVisualInSubtree(itemInfo.id)) return false;
-        return sourceIndex.hasCandidateVectorPaint(itemInfo.id) === true;
+        if (hasPlacedVisualInSubtreeForBase(itemInfo.id)) return false;
+        return hasCandidateVectorPaintForBase(itemInfo.id) === true;
+    }
+
+    function sourceLooksLikeVisibleVectorMaterial(itemInfo) {
+        if (!itemInfo) return false;
+        if (itemInfo.visible === false || itemInfo.hiddenLayer === true || itemInfo.nonprinting === true) return false;
+        var kind = String(itemInfo.kind || "");
+        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Oval"
+                && kind !== "Polygon" && kind !== "GraphicLine") {
+            return false;
+        }
+        if (hasPlacedVisualInSubtreeForBase(itemInfo.id)) return false;
+        if (kind === "Group") {
+            return itemInfo.hasChildren === true
+                    && (itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true);
+        }
+        return itemInfo.hasVisibleFill === true
+                || itemInfo.hasVisibleStroke === true
+                || hasCandidateVectorPaintForBase(itemInfo.id) === true;
+    }
+
+    function markCandidateSourceClaims(candidate, claimed) {
+        if (!candidate || !claimed) return;
+        function mark(ids) {
+            for (var i = 0; ids && i < ids.length; i++) {
+                if (ids[i] === null || ids[i] === undefined) continue;
+                claimed[String(ids[i])] = true;
+            }
+        }
+        mark(candidate.sourceObjectIds);
+        mark(candidate.visualSourceObjectIds);
+        mark(candidate.exportSourceObjectIds);
+    }
+
+    function appendUnclaimedVisibleVectorSourceCandidates() {
+        var claimed = {};
+        for (var ci = 0; candidates && ci < candidates.length; ci++) {
+            markCandidateSourceClaims(candidates[ci], claimed);
+        }
+        var appended = 0;
+        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
+            var itemInfo = sourceItems[si];
+            if (!itemInfo || itemInfo.id === null || itemInfo.id === undefined) continue;
+            if (claimed[String(itemInfo.id)] === true) continue;
+            if (!sourceLooksLikeVisibleVectorMaterial(itemInfo)) continue;
+            if (sourceHasStoryFlowAnchor(itemInfo.id)) continue;
+            if (sourceHasEditableTextDescendantForBase(itemInfo.id, itemInfo.pageIndex)) continue;
+
+            var sourceIds = null;
+            sourceIds = pageLocalSourceObjectIdsForBase(itemInfo.id, itemInfo.pageIndex);
+            sourceIds = _sortedNumericIds(sourceIds);
+            if (!sourceSetHasExecutableShellMaterial(sourceIds)) continue;
+
+            var exportIds = shellExportSourceIdsForSourceSet(itemInfo.id, sourceIds);
+            if (!exportIds || exportIds.length === 0) exportIds = sourceIds;
+            if (!sourceSetHasExecutableShellMaterial(exportIds)) continue;
+
+            var item = null;
+            item = domItemForBase(itemInfo.id);
+            pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                sourceObjectIds: sourceIds,
+                exportSourceObjectIds: exportIds,
+                exportTargetObjectId: itemInfo.id,
+                visualSourceObjectIds: exportIds,
+                pageIndex: itemInfo.pageIndex,
+                unit: "GROUP_OR_ITEM",
+                mode: "TEXTLESS_CANDIDATE",
+                candidatePurpose: "SHELL_CANDIDATE",
+                compositeRole: sourceIds.length > 1
+                        ? "unclaimed_visible_vector_source_set"
+                        : "unclaimed_visible_vector_source",
+                slotRole: "shell_slot_only",
+                renderMode: "SLOT_ONLY",
+                hiddenVisualSourceObjectIds: [],
+                containsEditableText: false,
+                textOwner: "none",
+                required: false
+            }), "unclaimed_visible_vector_fallback");
+            recordDecorationSourceSet(itemInfo.pageIndex, sourceIds);
+            for (var mi = 0; mi < sourceIds.length; mi++) claimed[String(sourceIds[mi])] = true;
+            for (var ei = 0; ei < exportIds.length; ei++) claimed[String(exportIds[ei])] = true;
+            appended++;
+        }
+        basePerfStats.unclaimedVisibleVectorFallbackCount = appended;
     }
 
     function isUnsafeNativeGraphicLineShell(itemInfo) {
@@ -182,6 +642,9 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     var baseCandidateSourceInfoById = {};
     var baseCandidateChildIdsByParentId = {};
+    var parentHasEditableTextFrameChildByPage = {};
+    var parentHasEmptyCarrierTextFrameChildByPage = {};
+    var predeclareCandidateInfos = [];
     for (var sourceInfoIndex = 0; sourceInfoIndex < sourceItems.length; sourceInfoIndex++) {
         var sourceInfoEntry = sourceItems[sourceInfoIndex];
         if (!sourceInfoEntry || sourceInfoEntry.id === null || sourceInfoEntry.id === undefined) continue;
@@ -195,22 +658,63 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         }
     }
 
+    function sourceInfoForBase(sourceId) {
+        if (sourceId === null || sourceId === undefined) return null;
+        var info = baseCandidateSourceInfoById[String(sourceId)];
+        if (info) return info;
+        try { return sourceIndex.sourceInfo(sourceId); } catch (eSourceInfoForBase) {}
+        return null;
+    }
+    for (var editableSiblingIndex = 0; editableSiblingIndex < sourceItems.length; editableSiblingIndex++) {
+        var editableSiblingInfo = sourceItems[editableSiblingIndex];
+        if (editableSiblingInfo && editableSiblingInfo.hiddenLayer !== true
+                && shouldEmitDecorationSourceCandidate(editableSiblingInfo)
+                && !hasPlacedVisualInSubtreeForBase(editableSiblingInfo.id)) {
+            predeclareCandidateInfos.push(editableSiblingInfo);
+        }
+        if (!editableSiblingInfo || editableSiblingInfo.parentId === null
+                || editableSiblingInfo.parentId === undefined) continue;
+        if (String(editableSiblingInfo.parentKind || "") !== "Group") continue;
+        if (String(editableSiblingInfo.kind || "") !== "TextFrame") continue;
+        if (editableSiblingInfo.hasText !== true && Number(editableSiblingInfo.textLength || 0) <= 0) {
+            parentHasEmptyCarrierTextFrameChildByPage[
+                    String(editableSiblingInfo.parentId) + "|" + String(editableSiblingInfo.pageIndex)] = true;
+        }
+        if (editableSiblingInfo.textFrameClass !== "editable") continue;
+        if (editableSiblingInfo.hasText !== true) continue;
+        parentHasEditableTextFrameChildByPage[
+                String(editableSiblingInfo.parentId) + "|" + String(editableSiblingInfo.pageIndex)] = true;
+    }
+
     var executableShellMaterialBySourceSetKey = {};
+    var executableShellMaterialBySourceId = {};
+
+    function sourceHasExecutableShellMaterialForBase(sourceId) {
+        var key = String(sourceId);
+        if (executableShellMaterialBySourceId.hasOwnProperty(key)) {
+            return executableShellMaterialBySourceId[key];
+        }
+        var result = _sourceHasExecutableShellMaterialMetadataInIndex(
+                sourceId, baseCandidateSourceInfoById, baseCandidateChildIdsByParentId) === true;
+        executableShellMaterialBySourceId[key] = result;
+        return result;
+    }
 
     function sourceSetHasExecutableShellMaterial(sourceIds) {
-        var startedAt = basePerfNow();
         var cacheKey = sourceSetKeyInGivenOrder(sourceIds || []);
         if (cacheKey && executableShellMaterialBySourceSetKey.hasOwnProperty(cacheKey)) {
             basePerfCache("sourceSetHasExecutableShellMaterial", true);
-            basePerfCall("sourceSetHasExecutableShellMaterial", startedAt);
             return executableShellMaterialBySourceSetKey[cacheKey];
         }
         basePerfCache("sourceSetHasExecutableShellMaterial", false);
-        var result = _candidateHasExecutableShellMaterial({
-            candidatePurpose: "SHELL_CANDIDATE",
-            sourceObjectIds: sourceIds || [],
-            exportSourceObjectIds: sourceIds || []
-        }, baseCandidateSourceInfoById, baseCandidateChildIdsByParentId);
+        var startedAt = basePerfNow();
+        var result = false;
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            if (sourceHasExecutableShellMaterialForBase(sourceIds[i])) {
+                result = true;
+                break;
+            }
+        }
         if (cacheKey) executableShellMaterialBySourceSetKey[cacheKey] = result;
         basePerfCall("sourceSetHasExecutableShellMaterial", startedAt);
         return result;
@@ -220,9 +724,19 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     function sourceSetKeyInGivenOrder(ids) {
         if (!ids || ids.length === 0) return "";
+        if (ids._baseSourceSetKey !== undefined) return ids._baseSourceSetKey;
         var out = [];
         for (var i = 0; i < ids.length; i++) out.push(String(Number(ids[i])));
-        return out.join(",");
+        var key = out.join(",");
+        try {
+            Object.defineProperty(ids, "_baseSourceSetKey", {
+                value: key,
+                enumerable: false
+            });
+        } catch (eBaseSourceSetKey) {
+            ids._baseSourceSetKey = key;
+        }
+        return key;
     }
 
     function cachedSourceSetContainsAll(ownerIds, memberIds) {
@@ -312,6 +826,18 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         return false;
     }
 
+    function sourceCoveredByBroaderDecorationSourceSet(pageIndex, sourceId) {
+        if (sourceId === null || sourceId === undefined) return false;
+        var pageKey = String(pageIndex);
+        var memberKey = pageKey + "|" + String(sourceId);
+        var pageSets = broaderDecorationSourceSetsByPageMember[memberKey] || [];
+        for (var i = 0; i < pageSets.length; i++) {
+            var ownerIds = pageSets[i];
+            if (ownerIds && ownerIds.length > 1) return true;
+        }
+        return false;
+    }
+
     function predeclareDecorationSourceSet(pageIndex, sourceIds) {
         if (!sourceIds || sourceIds.length <= 1) return;
         var key = _sourceSetKey(sourceIds || []);
@@ -345,15 +871,16 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         for (var depth = 0; depth < 16 && currentId !== null && currentId !== undefined; depth++) {
             var src = baseCandidateSourceInfoById[String(currentId)];
             if (!src || src.parentId === null || src.parentId === undefined) return false;
-            if (sourceIndex.sourceIsInPagePlane
-                    && !sourceIndex.sourceIsInPagePlane(src.id, pageIndex)) return false;
-            var siblings = baseCandidateChildIdsByParentId[String(src.parentId)] || [];
-            for (var si = 0; si < siblings.length; si++) {
-                if (String(siblings[si]) === String(currentId)) continue;
-                var sibling = baseCandidateSourceInfoById[String(siblings[si])];
-                if (sibling && sourceIndex.sourceIsInPagePlane
-                        && !sourceIndex.sourceIsInPagePlane(sibling.id, pageIndex)) continue;
-                if (sourceIsEmptyCarrierTextFrameForPage(sibling, pageIndex)) return true;
+            if (!sourceIsInPagePlaneForBase(src.id, pageIndex)) return false;
+            if (parentHasEmptyCarrierTextFrameChildByPage[
+                    String(src.parentId) + "|" + String(pageIndex)] === true) {
+                var siblings = baseCandidateChildIdsByParentId[String(src.parentId)] || [];
+                for (var si = 0; si < siblings.length; si++) {
+                    if (String(siblings[si]) === String(currentId)) continue;
+                    var sibling = baseCandidateSourceInfoById[String(siblings[si])];
+                    if (sibling && !sourceIsInPagePlaneForBase(sibling.id, pageIndex)) continue;
+                    if (sourceIsEmptyCarrierTextFrameForPage(sibling, pageIndex)) return true;
+                }
             }
             currentId = src.parentId;
         }
@@ -361,6 +888,25 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     }
 
     var clippedPlacedCarrierSiblingShellByKey = {};
+    var mayBeClippedPlacedCarrierSiblingShellByKey = {};
+
+    function sourceMayBeClippedPlacedCarrierSiblingShell(itemInfo, pageIndex) {
+        if (!itemInfo || itemInfo.id === null || itemInfo.id === undefined) return false;
+        var cacheKey = String(itemInfo.id) + "|" + String(pageIndex);
+        if (mayBeClippedPlacedCarrierSiblingShellByKey.hasOwnProperty(cacheKey)) {
+            return mayBeClippedPlacedCarrierSiblingShellByKey[cacheKey];
+        }
+        var kindName = String(itemInfo.kind || "");
+        var result = kindName === "Rectangle" || kindName === "Oval" || kindName === "Polygon";
+        if (result && itemInfo.hasPlacedVisual === true) result = false;
+        if (result && itemInfo.hasChildren !== true) result = false;
+        if (result && hasPlacedVisualInSubtreeForBase(itemInfo.id) !== true) result = false;
+        if (result) {
+            result = sourceOrAncestorHasDirectEmptyCarrierTextFrameSiblingForPage(itemInfo.id, pageIndex);
+        }
+        mayBeClippedPlacedCarrierSiblingShellByKey[cacheKey] = result;
+        return result;
+    }
 
     function sourceIsClippedPlacedCarrierSiblingShell(itemInfo, pageIndex) {
         if (!itemInfo || itemInfo.id === null || itemInfo.id === undefined) return false;
@@ -382,12 +928,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfCall("sourceIsClippedPlacedCarrierSiblingShell", startedAt);
             return false;
         }
-        if (!sourceIndex.hasPlacedVisualInSubtree(itemInfo.id)) {
-            clippedPlacedCarrierSiblingShellByKey[cacheKey] = false;
-            basePerfCall("sourceIsClippedPlacedCarrierSiblingShell", startedAt);
-            return false;
-        }
-        if (!sourceItemHasChildren(itemInfo.id)) {
+        if (!sourceMayBeClippedPlacedCarrierSiblingShell(itemInfo, pageIndex)) {
             clippedPlacedCarrierSiblingShellByKey[cacheKey] = false;
             basePerfCall("sourceIsClippedPlacedCarrierSiblingShell", startedAt);
             return false;
@@ -403,10 +944,9 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfCall("sourceIsClippedPlacedCarrierSiblingShell", startedAt);
             return false;
         }
-        var result = sourceOrAncestorHasDirectEmptyCarrierTextFrameSiblingForPage(itemInfo.id, pageIndex);
-        clippedPlacedCarrierSiblingShellByKey[cacheKey] = result;
+        clippedPlacedCarrierSiblingShellByKey[cacheKey] = true;
         basePerfCall("sourceIsClippedPlacedCarrierSiblingShell", startedAt);
-        return result;
+        return true;
     }
 
     var insideClippedPlacedCarrierSiblingShellByKey = {};
@@ -451,17 +991,75 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 || lower.indexOf("backdrop") >= 0;
     }
 
-    function sourceIsBackgroundVectorCandidate(info, sourceId) {
+    var pageWideSingleColorMinZByPage = {};
+
+    function sourceBoundsIntersects(a, b) {
+        if (!a || !b || a.length < 4 || b.length < 4) return false;
+        return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
+                && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
+    }
+
+    function sourceLooksLikePageWideSingleColorFill(info, pageIndex) {
         if (!info) return false;
         var kindName = String(info.kind || "");
-        if (kindName !== "Rectangle" && kindName !== "Oval"
-                && kindName !== "Polygon" && kindName !== "GraphicLine") {
-            return false;
-        }
+        if (kindName !== "Rectangle" && kindName !== "Oval" && kindName !== "Polygon") return false;
+        if (!info.bounds || info.bounds.length < 4) return false;
         if (info.hasChildren === true || info.hasPlacedVisual === true) return false;
-        if (sourceIndex.hasPlacedVisualInSubtree(sourceId)) return false;
-        if (sourceIndex.hasCandidateVectorPaint(sourceId) !== true) return false;
-        return sourceLayerNameIsBackground(info.layerName);
+        if (hasPlacedVisualInSubtreeForBase(info.id) === true) return false;
+        if (info.hasVisibleFill !== true || info.hasVisibleStroke === true) return false;
+        if (info.visible === false || info.hiddenLayer === true || info.nonprinting === true) return false;
+        var pb = null;
+        try { pb = sourceIndex.pageBounds(Number(pageIndex)); } catch (ePageBounds) { pb = null; }
+        if (!pb || pb.length < 4 || !sourceBoundsIntersects(info.bounds, pb)) return false;
+        var pageWidth = Math.max(0, Number(pb[3]) - Number(pb[1]));
+        var pageHeight = Math.max(0, Number(pb[2]) - Number(pb[0]));
+        if (pageWidth <= 0 || pageHeight <= 0) return false;
+        var width = Math.max(0, Number(info.bounds[3]) - Number(info.bounds[1]));
+        var height = Math.max(0, Number(info.bounds[2]) - Number(info.bounds[0]));
+        var touchesLeft = Number(info.bounds[1]) <= Number(pb[1]) + 1.0;
+        var touchesRight = Number(info.bounds[3]) >= Number(pb[3]) - 1.0;
+        var touchesTop = Number(info.bounds[0]) <= Number(pb[0]) + 1.0;
+        var touchesBottom = Number(info.bounds[2]) >= Number(pb[2]) - 1.0;
+        var spansWidth = width >= pageWidth * 0.85 && touchesLeft && touchesRight;
+        var spansHeight = height >= pageHeight * 0.85 && touchesTop && touchesBottom;
+        return spansWidth || spansHeight;
+    }
+
+    function minPageWideSingleColorSourceZ(pageIndex) {
+        var key = String(pageIndex);
+        if (pageWideSingleColorMinZByPage.hasOwnProperty(key)) {
+            return pageWideSingleColorMinZByPage[key];
+        }
+        var minZ = null;
+        var pb = null;
+        try { pb = sourceIndex.pageBounds(Number(pageIndex)); } catch (ePageBounds) { pb = null; }
+        for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+            var src = sourceItems[i];
+            if (!src || !src.bounds || src.bounds.length < 4) continue;
+            if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+            if (src.isInline === true) continue;
+            if (!pb || pb.length < 4 || !sourceBoundsIntersects(src.bounds, pb)) continue;
+            var z = Number(src.zOrder || 0);
+            if (minZ === null || z < minZ) minZ = z;
+        }
+        pageWideSingleColorMinZByPage[key] = minZ;
+        return minZ;
+    }
+
+    function sourceIsBackgroundVectorCandidate(info, sourceId, pageIndex) {
+        var startedAt = basePerfNow();
+        function finishBackgroundVectorCandidate(result) {
+            basePerfCall("sourceIsBackgroundVectorCandidate", startedAt);
+            return result;
+        }
+        if (!sourceLooksLikePageWideSingleColorFill(info, pageIndex)) return finishBackgroundVectorCandidate(false);
+        if (info.hasChildren === true || info.hasPlacedVisual === true) return finishBackgroundVectorCandidate(false);
+        if (hasPlacedVisualInSubtreeForBase(sourceId)) return finishBackgroundVectorCandidate(false);
+        if (hasCandidateVectorPaintForBase(sourceId) !== true) return finishBackgroundVectorCandidate(false);
+        var minZ = minPageWideSingleColorSourceZ(pageIndex);
+        if (minZ === null || minZ === undefined) return finishBackgroundVectorCandidate(false);
+        var result = Number(info.zOrder || 0) <= Number(minZ) + 0.001;
+        return finishBackgroundVectorCandidate(result);
     }
 
     function sourceBoundsAreaForBase(sourceId) {
@@ -511,6 +1109,17 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     var directSiblingTextShellOwnerByKey = {};
 
+    function sourceMayHaveDirectSiblingTextShellOwner(sourceId, pageIndex) {
+        var src = baseCandidateSourceInfoById[String(sourceId)];
+        if (!src) return false;
+        var kindName = String(src.kind || "");
+        if (kindName !== "Rectangle" && kindName !== "Oval" && kindName !== "Polygon") return false;
+        if (String(src.parentKind || "") !== "Group") return false;
+        if (src.parentId === null || src.parentId === undefined) return false;
+        return parentHasEditableTextFrameChildByPage[
+                String(src.parentId) + "|" + String(pageIndex)] === true;
+    }
+
     function sourceHasDirectSiblingTextShellOwner(sourceId, pageIndex) {
         var cacheKey = String(sourceId) + "|" + String(pageIndex);
         if (directSiblingTextShellOwnerByKey.hasOwnProperty(cacheKey)) {
@@ -521,6 +1130,11 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         var startedAt = basePerfNow();
         var src = baseCandidateSourceInfoById[String(sourceId)];
         if (!src) {
+            directSiblingTextShellOwnerByKey[cacheKey] = false;
+            basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
+            return false;
+        }
+        if (!sourceMayHaveDirectSiblingTextShellOwner(sourceId, pageIndex)) {
             directSiblingTextShellOwnerByKey[cacheKey] = false;
             basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
             return false;
@@ -541,7 +1155,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
             return false;
         }
-        if (sourceIndex.hasCandidateVectorPaint(sourceId) !== true) {
+        if (hasCandidateVectorPaintForBase(sourceId) !== true) {
             directSiblingTextShellOwnerByKey[cacheKey] = false;
             basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
             return false;
@@ -551,8 +1165,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
             return false;
         }
-        if (sourceIndex.sourceIsInPagePlane
-                && !sourceIndex.sourceIsInPagePlane(sourceId, pageIndex)) {
+        if (!sourceIsInPagePlaneForBase(sourceId, pageIndex)) {
             directSiblingTextShellOwnerByKey[cacheKey] = false;
             basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
             return false;
@@ -564,8 +1177,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             if (String(siblingId) === String(sourceId)) continue;
             var sibling = baseCandidateSourceInfoById[String(siblingId)];
             if (!sibling || sibling.kind !== "TextFrame") continue;
-            if (sourceIndex.sourceIsInPagePlane
-                    && !sourceIndex.sourceIsInPagePlane(siblingId, pageIndex)) continue;
+            if (!sourceIsInPagePlaneForBase(siblingId, pageIndex)) continue;
             if (sibling.textFrameClass !== "editable" || sibling.hasText !== true) continue;
             if (sibling.pageIndex !== pageIndex) continue;
             if (!sourceTextFrameFitsShellForBase(sourceId, siblingId)) continue;
@@ -578,6 +1190,57 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     }
 
     var clipParentShellOwnerForBaseByKey = {};
+    var sourceMayHaveClipParentShellOwnerForBaseById = {};
+
+    function sourceKindCanCarryClipForBase(kind) {
+        kind = String(kind || "");
+        return kind === "Oval" || kind === "Rectangle" || kind === "Polygon";
+    }
+
+    function sourceKindCanHaveShellAncestorForBase(kind) {
+        kind = String(kind || "");
+        return kind === "Group" || kind === "Rectangle" || kind === "Oval" || kind === "Polygon";
+    }
+
+    function sourceMayHaveClipParentShellOwner(sourceId) {
+        var sourceKey = String(sourceId);
+        if (sourceMayHaveClipParentShellOwnerForBaseById.hasOwnProperty(sourceKey)) {
+            return sourceMayHaveClipParentShellOwnerForBaseById[sourceKey];
+        }
+        var src = baseCandidateSourceInfoById[sourceKey];
+        if (!src || src.parentId === null || src.parentId === undefined) {
+            sourceMayHaveClipParentShellOwnerForBaseById[sourceKey] = false;
+            return false;
+        }
+        if (clipCarryingParentIdForBase(sourceId) !== null) {
+            sourceMayHaveClipParentShellOwnerForBaseById[sourceKey] = true;
+            return true;
+        }
+        var parentId = src.parentId;
+        for (var depth = 0; depth < 32 && parentId !== null && parentId !== undefined; depth++) {
+            var parentInfo = baseCandidateSourceInfoById[String(parentId)];
+            if (!parentInfo) {
+                sourceMayHaveClipParentShellOwnerForBaseById[sourceKey] = false;
+                return false;
+            }
+            if (shouldEmitDecorationSourceCandidate(parentInfo)
+                    && !hasPlacedVisualInSubtreeForBase(parentInfo.id)) {
+                sourceMayHaveClipParentShellOwnerForBaseById[sourceKey] = true;
+                return true;
+            }
+            if (!sourceKindCanHaveShellAncestorForBase(parentInfo.kind)) {
+                sourceMayHaveClipParentShellOwnerForBaseById[sourceKey] = false;
+                return false;
+            }
+            if (sourceKindCanCarryClipForBase(parentInfo.kind) && parentInfo.hasChildren === true) {
+                sourceMayHaveClipParentShellOwnerForBaseById[sourceKey] = true;
+                return true;
+            }
+            parentId = parentInfo.parentId;
+        }
+        sourceMayHaveClipParentShellOwnerForBaseById[sourceKey] = false;
+        return false;
+    }
 
     function clipParentShellOwnerForBase(sourceId, pageIndex) {
         var cacheKey = String(sourceId) + "|" + String(pageIndex);
@@ -587,12 +1250,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         }
         basePerfCache("clipParentShellOwnerForBase", false);
         var startedAt = basePerfNow();
-        var clipParentId = null;
-        try {
-            clipParentId = sourceIndex.clipCarryingParentIdOfSource(sourceId);
-        } catch (eClipOwnerId) {
-            clipParentId = null;
-        }
+        var clipParentId = clipCarryingParentIdForBase(sourceId);
         if (clipParentId === null || clipParentId === undefined) {
             clipParentShellOwnerForBaseByKey[cacheKey] = false;
             basePerfCall("clipParentShellOwnerForBase", startedAt);
@@ -603,14 +1261,13 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfCall("clipParentShellOwnerForBase", startedAt);
             return null;
         }
-        var clipParentInfo = sourceIndex.sourceInfo(clipParentId);
+        var clipParentInfo = sourceInfoForBase(clipParentId);
         if (!clipParentInfo || clipParentInfo.hiddenLayer === true) {
             clipParentShellOwnerForBaseByKey[cacheKey] = false;
             basePerfCall("clipParentShellOwnerForBase", startedAt);
             return null;
         }
-        if (sourceIndex.sourceIsInPagePlane
-                && !sourceIndex.sourceIsInPagePlane(clipParentId, pageIndex)) {
+        if (!sourceIsInPagePlaneForBase(clipParentId, pageIndex)) {
             clipParentShellOwnerForBaseByKey[cacheKey] = false;
             basePerfCall("clipParentShellOwnerForBase", startedAt);
             return null;
@@ -620,13 +1277,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfCall("clipParentShellOwnerForBase", startedAt);
             return null;
         }
-        var ownerSourceIds = null;
-        try {
-            ownerSourceIds = sourceIndex.pageLocalSourceObjectIds(clipParentId, pageIndex);
-        } catch (eClipOwnerSourceIds) {
-            ownerSourceIds = null;
-        }
-        ownerSourceIds = ownerSourceIds || [clipParentId];
+        var ownerSourceIds = pageLocalSourceObjectIdsForBase(clipParentId, pageIndex);
         if (!sourceSetHasExecutableShellMaterial(ownerSourceIds)) {
             clipParentShellOwnerForBaseByKey[cacheKey] = false;
             basePerfCall("clipParentShellOwnerForBase", startedAt);
@@ -651,11 +1302,11 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         }
         basePerfCache("ancestorShellOwnerForBase", false);
         var startedAt = basePerfNow();
-        var src = sourceIndex.sourceInfo(sourceId);
+        var src = sourceInfoForBase(sourceId);
         var parentId = src ? src.parentId : null;
         var bestOwner = null;
         for (var depth = 0; depth < 32 && parentId !== null && parentId !== undefined; depth++) {
-            var parentInfo = sourceIndex.sourceInfo(parentId);
+            var parentInfo = sourceInfoForBase(parentId);
             if (!parentInfo) {
                 ancestorShellOwnerForBaseByKey[cacheKey] = false;
                 basePerfCall("ancestorShellOwnerForBase", startedAt);
@@ -666,21 +1317,14 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 basePerfCall("ancestorShellOwnerForBase", startedAt);
                 return null;
             }
-            if (sourceIndex.sourceIsInPagePlane
-                    && !sourceIndex.sourceIsInPagePlane(parentInfo.id, pageIndex)) {
+            if (!sourceIsInPagePlaneForBase(parentInfo.id, pageIndex)) {
                 ancestorShellOwnerForBaseByKey[cacheKey] = false;
                 basePerfCall("ancestorShellOwnerForBase", startedAt);
                 return null;
             }
             if (shouldEmitDecorationSourceCandidate(parentInfo)
-                    && !sourceIndex.hasPlacedVisualInSubtree(parentInfo.id)) {
-                var ownerSourceIds = null;
-                try {
-                    ownerSourceIds = sourceIndex.pageLocalSourceObjectIds(parentInfo.id, pageIndex);
-                } catch (eAncestorOwnerSourceIds) {
-                    ownerSourceIds = null;
-                }
-                ownerSourceIds = ownerSourceIds || [parentInfo.id];
+                    && !hasPlacedVisualInSubtreeForBase(parentInfo.id)) {
+                var ownerSourceIds = pageLocalSourceObjectIdsForBase(parentInfo.id, pageIndex);
                 if (_sourceIdsContain(ownerSourceIds, sourceId)
                         && sourceSetHasExecutableShellMaterial(ownerSourceIds)) {
                     bestOwner = {
@@ -705,6 +1349,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     }
 
     function markClipParentShellOwner(attrs, sourceId, pageIndex) {
+        if (!sourceMayHaveClipParentShellOwner(sourceId)) return attrs;
         var owner = clipParentShellOwnerForBase(sourceId, pageIndex);
         if (!owner) owner = ancestorShellOwnerForBase(sourceId, pageIndex);
         if (!owner) return attrs;
@@ -713,10 +1358,22 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         return attrs;
     }
 
+    var sourceHasClipParentShellOwnerForBaseByKey = {};
+
     function sourceHasClipParentShellOwner(sourceId, pageIndex) {
+        var cacheKey = String(sourceId) + "|" + String(pageIndex);
+        if (sourceHasClipParentShellOwnerForBaseByKey.hasOwnProperty(cacheKey)) {
+            basePerfCache("sourceHasClipParentShellOwner", true);
+            return sourceHasClipParentShellOwnerForBaseByKey[cacheKey];
+        }
+        basePerfCache("sourceHasClipParentShellOwner", false);
         var startedAt = basePerfNow();
-        var result = clipParentShellOwnerForBase(sourceId, pageIndex) !== null
-                || ancestorShellOwnerForBase(sourceId, pageIndex) !== null;
+        var result = false;
+        if (sourceMayHaveClipParentShellOwner(sourceId)) {
+            result = clipParentShellOwnerForBase(sourceId, pageIndex) !== null
+                    || ancestorShellOwnerForBase(sourceId, pageIndex) !== null;
+        }
+        sourceHasClipParentShellOwnerForBaseByKey[cacheKey] = result;
         basePerfCall("sourceHasClipParentShellOwner", startedAt);
         return result;
     }
@@ -732,10 +1389,10 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     function topVisualOnlyCompositeRoot(sourceId, pageIndex) {
         var currentId = sourceId;
-        var current = sourceIndex.sourceInfo(currentId);
+        var current = sourceInfoForBase(currentId);
         var guard = 0;
         while (current && current.parentId !== null && current.parentId !== undefined && guard < 32) {
-            var parent = sourceIndex.sourceInfo(current.parentId);
+            var parent = sourceInfoForBase(current.parentId);
             if (!parent || String(parent.kind || "") !== "Group") break;
             if (parent.hiddenLayer === true) break;
             if (!sourceIndex.hasPlacedVisualInSubtree(parent.id)) break;
@@ -755,71 +1412,93 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     basePerfMarker("03d05b_base_indexes_ready");
     basePerfWrite("indexes_ready", -1);
 
-    for (var predeclareIndex = 0; predeclareIndex < sourceItems.length; predeclareIndex++) {
-        basePerfStats.predeclareItemCount++;
-        if (predeclareIndex > 0 && predeclareIndex % 250 === 0) {
-            basePerfWrite("predeclare", predeclareIndex);
-        }
-        var predeclareInfo = sourceItems[predeclareIndex];
-        if (!predeclareInfo || predeclareInfo.id === null || predeclareInfo.id === undefined) continue;
-        if (predeclareInfo.hiddenLayer === true) continue;
-        if (!shouldEmitDecorationSourceCandidate(predeclareInfo)) continue;
-        if (sourceIndex.hasPlacedVisualInSubtree(predeclareInfo.id)) continue;
-        var predeclarePageIndexes = sourceIndex.candidatePageIndexes(predeclareInfo.id);
-        if (!predeclarePageIndexes || predeclarePageIndexes.length === 0) continue;
-        for (var predeclarePageCursor = 0; predeclarePageCursor < predeclarePageIndexes.length; predeclarePageCursor++) {
-            basePerfStats.predeclarePageCount++;
-            var predeclarePageIndex = predeclarePageIndexes[predeclarePageCursor];
-            var predeclareSourceIds = null;
-            try {
-                predeclareSourceIds = sourceIndex.pageLocalSourceObjectIds(predeclareInfo.id, predeclarePageIndex);
-            } catch (ePredeclareSourceIds) {
-                predeclareSourceIds = null;
-            }
-            predeclareSourceIds = predeclareSourceIds || [predeclareInfo.id];
-            if (!sourceSetHasExecutableShellMaterial(predeclareSourceIds)) continue;
-            predeclareDecorationSourceSet(predeclarePageIndex, predeclareSourceIds);
-        }
-    }
+    // Legacy pre-declaration of broad decoration source sets used to scan
+    // candidate page-local descendants before ObjectPlan ownership existed.
+    // With page-root textless planes, this creates a second hidden owner for
+    // the same visual material and can force expensive DOM subtree queries on
+    // large textbook files. Stage 1 now emits the canonical page/textless
+    // visual candidates, so keep this pass closed and let later planning use
+    // only source-index metadata.
+    basePerfStats.predeclareItemCount = predeclareCandidateInfos.length;
+    basePerfStats.predeclarePageCount = 0;
 
     basePerfMarker("03d05c_base_predeclare_done");
     basePerfWrite("predeclare_done", sourceItems.length);
 
+    var mainLoopStartedAt = basePerfWallNow();
     for (var i = 0; i < sourceItems.length; i++) {
         basePerfStats.mainItemCount++;
-        if (i > 0 && i % 100 === 0) {
+        if (i > 0 && i % 1000 === 0) {
             basePerfWrite("main_loop", i);
         }
         var itemInfo = sourceItems[i];
         var kind = itemInfo.kind;
         var id = itemInfo.id;
         if (id === null) continue;
-        var item = sourceIndex.domItem(id);
-        if (!item) continue;
+        var item = null;
 
-        var extractionPageIndexes = sourceIndex.candidatePageIndexes(id);
-        if (!extractionPageIndexes || extractionPageIndexes.length === 0) continue;
-        if (itemInfo.hiddenLayer === true) continue;
-        if (kind !== "TextFrame" && sourceHasStoryFlowAnchor(id)) continue;
+        if (itemInfo.hiddenLayer === true) {
+            baseSuppressedPreview("hidden_layer", itemInfo);
+            continue;
+        }
+        if (!sourceKindCanEmitBaseCandidate(kind)) {
+            baseSuppressedPreview("source_kind_cannot_emit_base_candidate", itemInfo);
+            continue;
+        }
+        if (kind !== "TextFrame"
+                && itemInfo.pageIndex !== null && itemInfo.pageIndex !== undefined
+                && pageIndexInBaseRange(itemInfo.pageIndex)
+                && sourceCoveredByBroaderDecorationSourceSet(itemInfo.pageIndex, id)) {
+            baseSuppressedPreview("covered_by_broader_decoration_source_set", itemInfo);
+            continue;
+        }
+        if (kind !== "TextFrame" && sourceHasStoryFlowAnchor(id)) {
+            baseSuppressedPreview("story_flow_anchor", itemInfo);
+            continue;
+        }
+        if (kind === "TextFrame" && !textFrameMayHaveStyleShellForBase(itemInfo)) {
+            baseSuppressedPreview("text_frame_without_style_shell", itemInfo);
+            continue;
+        }
+        var extractionPageIndexes = candidatePageIndexesForBase(id);
+        if (!extractionPageIndexes || extractionPageIndexes.length === 0) {
+            baseSuppressedPreview("no_candidate_page_indexes", itemInfo);
+            continue;
+        }
 
+        var mainPageLoopStartedAt = basePerfWallNow();
         for (var extractionPageCursor = 0; extractionPageCursor < extractionPageIndexes.length; extractionPageCursor++) {
             basePerfStats.mainPageCount++;
             var extractionPageIndex = extractionPageIndexes[extractionPageCursor];
 
             if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
-                var directSiblingTextShellOwned = sourceHasDirectSiblingTextShellOwner(id, extractionPageIndex);
-                var ownedByClipParentShell = sourceHasClipParentShellOwner(id, extractionPageIndex);
-                if (!directSiblingTextShellOwned
-                        && !ownedByClipParentShell
-                        && sourceIsBackgroundVectorCandidate(itemInfo, id)) {
-                    var backgroundVectorSourceIds = null;
-                    try {
-                        backgroundVectorSourceIds = sourceIndex.pageLocalSourceObjectIds(id, extractionPageIndex);
-                    } catch (eBackgroundVectorSourceIds) {
-                        backgroundVectorSourceIds = [id];
-                    }
+                var rectBranchStartedAt = basePerfBranchStart("rectangle_oval_polygon");
+                var rectDirectSiblingTextShellOwned = null;
+                var rectOwnedByClipParentShell = null;
+
+                function directSiblingTextShellOwnedForRect() {
+                    if (rectDirectSiblingTextShellOwned !== null) return rectDirectSiblingTextShellOwned;
+                    rectDirectSiblingTextShellOwned = sourceMayHaveDirectSiblingTextShellOwner(id, extractionPageIndex)
+                            ? sourceHasDirectSiblingTextShellOwner(id, extractionPageIndex)
+                            : false;
+                    return rectDirectSiblingTextShellOwned;
+                }
+
+                function ownedByClipParentShellForRect() {
+                    if (rectOwnedByClipParentShell !== null) return rectOwnedByClipParentShell;
+                    rectOwnedByClipParentShell = sourceHasClipParentShellOwner(id, extractionPageIndex);
+                    return rectOwnedByClipParentShell;
+                }
+
+                if (sourceMayBeBackgroundVectorCandidateFast(itemInfo, extractionPageIndex)
+                        && sourceIsBackgroundVectorCandidate(itemInfo, id, extractionPageIndex)
+                        && !directSiblingTextShellOwnedForRect()
+                        && !ownedByClipParentShellForRect()) {
+                    var backgroundVectorSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
                     if (hasBroaderDecorationSourceSet(extractionPageIndex, backgroundVectorSourceIds || [id])) continue;
-                    _pushExtractionCandidate(candidates, candidateSeen, "pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                    item = item || domItemForBase(id);
+                    if (!item) continue;
+                    pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
                         sourceObjectIds: backgroundVectorSourceIds,
                         pageIndex: extractionPageIndex,
                         unit: "GROUP_OR_ITEM",
@@ -832,50 +1511,55 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                         hiddenVisualSourceObjectIds: [],
                         containsEditableText: false,
                         textOwner: "none"
-                    }));
+                    }), "background_vector_source");
                     recordDecorationSourceSet(extractionPageIndex, backgroundVectorSourceIds || [id]);
                     continue;
                 }
-                if (sourceIndex.hasPlacedVisual(id) && !ownedByClipParentShell) {
-                    _pushExtractionCandidate(candidates, candidateSeen, "pass.image_placed_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
+                if (sourceIndex.hasPlacedVisual(id) && !ownedByClipParentShellForRect()) {
+                    item = item || domItemForBase(id);
+                    if (!item) continue;
+                    var placedFrameSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
+                    pushBaseExtractionCandidate("pass.image_placed_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
+                        sourceObjectIds: placedFrameSourceIds,
+                        visualSourceObjectIds: placedFrameSourceIds,
+                        exportSourceObjectIds: placedFrameSourceIds,
+                        exportTargetObjectId: id,
                         pageIndex: extractionPageIndex,
                         unit: "ITEM",
                         mode: "ORIGINAL_VISUAL",
                         candidatePurpose: "CONTENT_CANDIDATE"
-                    }), id, extractionPageIndex));
+                    }), id, extractionPageIndex), "placed_image_frame");
                     try {
                         if (itemInfo.parentKind === "Group") {
                             var imageParentId = topVisualOnlyCompositeRoot(itemInfo.parentId, extractionPageIndex);
-                            var imageParentItem = sourceIndex.domItem(imageParentId);
+                            var imageParentItem = domItemForBase(imageParentId);
                             if (imageParentItem
                                     && !sourceIsInsideClippedPlacedCarrierSiblingShell(imageParentId, extractionPageIndex)
                                     && !sourceIndex.hasEditableTextDescendantOutsideSubtree(imageParentId, id)) {
-                                var imageGroupSourceIds = null;
-                                try { imageGroupSourceIds = sourceIndex.pageLocalSourceObjectIds(imageParentId, extractionPageIndex); } catch (eImageGroupSourceIds) {}
-                                var imageParentInfo = sourceIndex.sourceInfo(imageParentId);
-                                _pushExtractionCandidate(candidates, candidateSeen, "pass.image_textless_groups", imageParentItem, markClipParentShellOwner(candidateAttrsForInfo(imageParentInfo, {
+                                var imageGroupSourceIds = pageLocalSourceObjectIdsForBase(
+                                        imageParentId, extractionPageIndex);
+                            var imageParentInfo = sourceInfoForBase(imageParentId);
+                                pushBaseExtractionCandidate("pass.image_textless_groups", imageParentItem, markClipParentShellOwner(candidateAttrsForInfo(imageParentInfo, {
                                     sourceObjectIds: imageGroupSourceIds,
                                     pageIndex: extractionPageIndex,
                                     unit: "GROUP",
                                     mode: "TEXTLESS_CANDIDATE",
                                     candidatePurpose: "CONTENT_CANDIDATE",
                                     compositeRole: imageGroupSourceIds && imageGroupSourceIds.length > 1 ? "image_group_textless_source_set" : null
-                                }), imageParentId, extractionPageIndex));
+                                }), imageParentId, extractionPageIndex), "image_group_textless_source_set");
                             }
                         }
                     } catch (eParentImageCandidate) {}
                 }
-                if (!directSiblingTextShellOwned
-                        && !ownedByClipParentShell
+                if (sourceMayBeClippedPlacedCarrierSiblingShell(itemInfo, extractionPageIndex)
+                        && !directSiblingTextShellOwnedForRect()
+                        && !ownedByClipParentShellForRect()
                         && sourceIsClippedPlacedCarrierSiblingShell(itemInfo, extractionPageIndex)) {
-                    var clippedCarrierShellSourceIds = null;
-                    try {
-                        clippedCarrierShellSourceIds = sourceIndex.pageLocalSourceObjectIds(id, extractionPageIndex);
-                    } catch (eClippedCarrierShellSourceIds) {
-                        clippedCarrierShellSourceIds = [id];
-                    }
+                    var clippedCarrierShellSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
                     if (hasBroaderDecorationSourceSet(extractionPageIndex, clippedCarrierShellSourceIds || [id])) continue;
-                    _pushExtractionCandidate(candidates, candidateSeen, "pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                    item = item || domItemForBase(id);
+                    if (!item) continue;
+                    pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
                         sourceObjectIds: clippedCarrierShellSourceIds,
                         pageIndex: extractionPageIndex,
                         unit: "GROUP_OR_ITEM",
@@ -890,13 +1574,17 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                         visualOnlyChildIds: clippedCarrierShellSourceIds || [id],
                         containsEditableText: false,
                         textOwner: "none"
-                    }));
+                    }), "clipped_placed_carrier_sibling_shell");
                     recordDecorationSourceSet(extractionPageIndex, clippedCarrierShellSourceIds || [id]);
                 }
 
-                if (!directSiblingTextShellOwned && !ownedByClipParentShell && shouldRasterizeLeafVectorShell(itemInfo)) {
+                if (shouldRasterizeLeafVectorShell(itemInfo)
+                        && !directSiblingTextShellOwnedForRect()
+                        && !ownedByClipParentShellForRect()) {
                     if (hasBroaderDecorationSourceSet(extractionPageIndex, [id])) continue;
-                    _pushExtractionCandidate(candidates, candidateSeen, "pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                    item = item || domItemForBase(id);
+                    if (!item) continue;
+                    pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
                         sourceObjectIds: [id],
                         pageIndex: extractionPageIndex,
                         unit: "GROUP_OR_ITEM",
@@ -910,15 +1598,17 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                         hiddenVisualSourceObjectIds: [],
                         containsEditableText: false,
                         textOwner: "none"
-                    }));
+                    }), "leaf_vector_shell_source");
                     recordDecorationSourceSet(extractionPageIndex, [id]);
                     continue;
-                } else if (!ownedByClipParentShell
-                        && sourceIndex.hasCandidateVectorPaint(id) === true
-                        && !sourceIndex.hasPlacedVisualInSubtree(id)
-                        && !sourceItemHasChildren(id)) {
+                } else if (hasCandidateVectorPaintForBase(id) === true
+                        && !hasPlacedVisualInSubtreeForBase(id)
+                        && itemInfo.hasChildren !== true
+                        && !ownedByClipParentShellForRect()) {
                     if (hasBroaderDecorationSourceSet(extractionPageIndex, [id])) continue;
-                    _pushExtractionCandidate(candidates, candidateSeen, "pass.vector_shape_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
+                    item = item || domItemForBase(id);
+                    if (!item) continue;
+                    pushBaseExtractionCandidate("pass.vector_shape_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
                         sourceObjectIds: [id],
                         pageIndex: extractionPageIndex,
                         unit: "ITEM",
@@ -930,69 +1620,93 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                         hiddenVisualSourceObjectIds: [],
                         containsEditableText: false,
                         textOwner: "none"
-                    }), id, extractionPageIndex));
+                    }), id, extractionPageIndex), "leaf_vector_shape_frame");
                 }
+                basePerfBranchEnd("rectangle_oval_polygon", rectBranchStartedAt);
             }
 
-            if (kind === "GraphicLine"
-                    && !sourceHasClipParentShellOwner(id, extractionPageIndex)
-                    && sourceIndex.hasCandidateVectorPaint(id) === true) {
-                if (shouldRasterizeLeafVectorShell(itemInfo)) {
-                    if (hasBroaderDecorationSourceSet(extractionPageIndex, [id])) continue;
-                    _pushExtractionCandidate(candidates, candidateSeen, "pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+            if (kind === "GraphicLine") {
+                var graphicLineBranchStartedAt = basePerfBranchStart("graphic_line");
+                if (hasCandidateVectorPaintForBase(id) === true
+                        && !sourceHasClipParentShellOwner(id, extractionPageIndex)) {
+                    if (shouldRasterizeLeafVectorShell(itemInfo)) {
+                        if (hasBroaderDecorationSourceSet(extractionPageIndex, [id])) {
+                            basePerfBranchEnd("graphic_line", graphicLineBranchStartedAt);
+                            continue;
+                        }
+                        item = item || domItemForBase(id);
+                        if (!item) {
+                            basePerfBranchEnd("graphic_line", graphicLineBranchStartedAt);
+                            continue;
+                        }
+                        pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                            sourceObjectIds: [id],
+                            pageIndex: extractionPageIndex,
+                            unit: "GROUP_OR_ITEM",
+                            mode: "TEXTLESS_CANDIDATE",
+                            candidatePurpose: "SHELL_CANDIDATE",
+                            compositeRole: "leaf_vector_shell_source",
+                            slotRole: "shell_slot_only",
+                            renderMode: "SLOT_ONLY",
+                            exportSourceObjectIds: [id],
+                            exportTargetObjectId: id,
+                            hiddenVisualSourceObjectIds: [],
+                            containsEditableText: false,
+                            textOwner: "none"
+                        }), "graphic_line_leaf_vector_shell_source");
+                        recordDecorationSourceSet(extractionPageIndex, [id]);
+                        basePerfBranchEnd("graphic_line", graphicLineBranchStartedAt);
+                        continue;
+                    }
+                    if (hasBroaderDecorationSourceSet(extractionPageIndex, [id])) {
+                        basePerfBranchEnd("graphic_line", graphicLineBranchStartedAt);
+                        continue;
+                    }
+                    item = item || domItemForBase(id);
+                    if (!item) {
+                        basePerfBranchEnd("graphic_line", graphicLineBranchStartedAt);
+                        continue;
+                    }
+                    pushBaseExtractionCandidate("pass.vector_shape_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
                         sourceObjectIds: [id],
                         pageIndex: extractionPageIndex,
-                        unit: "GROUP_OR_ITEM",
+                        unit: "ITEM",
                         mode: "TEXTLESS_CANDIDATE",
-                        candidatePurpose: "SHELL_CANDIDATE",
-                        compositeRole: "leaf_vector_shell_source",
-                        slotRole: "shell_slot_only",
+                        candidatePurpose: "VECTOR_CANDIDATE",
                         renderMode: "SLOT_ONLY",
                         exportSourceObjectIds: [id],
                         exportTargetObjectId: id,
                         hiddenVisualSourceObjectIds: [],
                         containsEditableText: false,
                         textOwner: "none"
-                    }));
-                    recordDecorationSourceSet(extractionPageIndex, [id]);
-                    continue;
+                    }), id, extractionPageIndex), "graphic_line_vector_shape_frame");
                 }
-                if (hasBroaderDecorationSourceSet(extractionPageIndex, [id])) continue;
-                _pushExtractionCandidate(candidates, candidateSeen, "pass.vector_shape_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
-                    sourceObjectIds: [id],
-                    pageIndex: extractionPageIndex,
-                    unit: "ITEM",
-                    mode: "TEXTLESS_CANDIDATE",
-                    candidatePurpose: "VECTOR_CANDIDATE",
-                    renderMode: "SLOT_ONLY",
-                    exportSourceObjectIds: [id],
-                    exportTargetObjectId: id,
-                    hiddenVisualSourceObjectIds: [],
-                    containsEditableText: false,
-                    textOwner: "none"
-                }), id, extractionPageIndex));
+                basePerfBranchEnd("graphic_line", graphicLineBranchStartedAt);
             }
 
-            if (kind === "Group" || kind === "Rectangle" || kind === "Oval"
-                    || kind === "Polygon" || kind === "GraphicLine") {
-                if (!sourceIndex.hasPlacedVisualInSubtree(id)) {
-                    var clipParentForDecoId = sourceIndex.clipCarryingParentIdOfSource(id);
-                    var clipParentForDeco = clipParentForDecoId !== null ? sourceIndex.domItem(clipParentForDecoId) : null;
-                    var clipParentInfo = clipParentForDecoId !== null ? sourceIndex.sourceInfo(clipParentForDecoId) : null;
+            if (sourceMayNeedDecorationCompositeBranch(itemInfo)) {
+                var decorationBranchStartedAt = basePerfBranchStart("decoration_composite");
+                var allowPlacedVisualClipParentShell = hasPlacedVisualInSubtreeForBase(id)
+                        && sourceMayEmitClipParentShellCandidate(itemInfo, extractionPageIndex);
+                if (!hasPlacedVisualInSubtreeForBase(id) || allowPlacedVisualClipParentShell) {
+                    var clipParentForDecoId = clipCarryingParentIdForBase(id);
+                    var clipParentForDeco = clipParentForDecoId !== null ? domItemForBase(clipParentForDecoId) : null;
+                    var clipParentInfo = clipParentForDecoId !== null ? sourceInfoForBase(clipParentForDecoId) : null;
                     if (clipParentForDeco && clipParentInfo && clipParentInfo.hiddenLayer !== true
                             && !sourceHasClipParentShellOwner(clipParentForDecoId, extractionPageIndex)
-                            && !sourceIndex.hasPlacedVisualInSubtree(clipParentForDecoId)
+                            && !hasPlacedVisualInSubtreeForBase(clipParentForDecoId)
                             && shouldEmitDecorationSourceCandidate(clipParentInfo)) {
-                        var clipParentSourceIds = null;
-                        try {
-                            clipParentSourceIds = sourceIndex.pageLocalSourceObjectIds(
-                                    clipParentForDecoId, extractionPageIndex);
-                        } catch (eClipParentSourceIds) {}
-                        clipParentSourceIds = clipParentSourceIds || [clipParentForDecoId];
+                        var clipParentSourceIds = pageLocalSourceObjectIdsForBase(
+                                clipParentForDecoId, extractionPageIndex);
                         if (hasDecorationSourceSet(extractionPageIndex, clipParentSourceIds)) continue;
                         if (hasBroaderDecorationSourceSet(extractionPageIndex, clipParentSourceIds)) continue;
-                        if (!sourceSetHasExecutableShellMaterial(clipParentSourceIds)) continue;
-                        _pushExtractionCandidate(candidates, candidateSeen, "pass.decoration_groups", clipParentForDeco, candidateAttrsForInfo(clipParentInfo, {
+                        if (!sourceSetHasExecutableShellMaterial(clipParentSourceIds)) {
+                            baseSuppressedPreview("clip_parent_source_set_without_executable_shell_material", clipParentInfo, {
+                                sourceObjectIds: clipParentSourceIds
+                            });
+                            continue;
+                        }
+                        pushBaseExtractionCandidate("pass.decoration_groups", clipParentForDeco, candidateAttrsForInfo(clipParentInfo, {
                             sourceObjectIds: clipParentSourceIds,
                             pageIndex: extractionPageIndex,
                             unit: "GROUP_OR_ITEM",
@@ -1000,17 +1714,29 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                             candidatePurpose: "SHELL_CANDIDATE",
                             compositeRole: clipParentSourceIds && clipParentSourceIds.length > 1 ? "clip_parent_source_set" : null,
                             suffix: "clip_parent"
-                        }));
+                        }), "clip_parent_source_set");
                         recordDecorationSourceSet(extractionPageIndex, clipParentSourceIds);
                     } else if (!sourceHasClipParentShellOwner(id, extractionPageIndex)
                             && shouldEmitDecorationSourceCandidate(itemInfo)) {
-                        var decoSourceIds = null;
-                        try { decoSourceIds = sourceIndex.pageLocalSourceObjectIds(id, extractionPageIndex); } catch (eDecoSourceIds) {}
-                        decoSourceIds = decoSourceIds || [id];
+                        var decoSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
                         if (hasBroaderDecorationSourceSet(extractionPageIndex, decoSourceIds)) continue;
                         var decoExportSourceIds = shellExportSourceIdsForSourceSet(id, decoSourceIds);
-                        if (!sourceSetHasExecutableShellMaterial(decoExportSourceIds)) continue;
-                        _pushExtractionCandidate(candidates, candidateSeen, "pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                        if (!sourceSetHasExecutableShellMaterial(decoExportSourceIds)) {
+                            baseSuppressedPreview("decoration_group_without_executable_shell_material", itemInfo, {
+                                sourceObjectIds: decoSourceIds,
+                                exportSourceObjectIds: decoExportSourceIds
+                            });
+                            continue;
+                        }
+                        item = item || domItemForBase(id);
+                        if (!item) {
+                            baseSuppressedPreview("decoration_group_missing_dom_item", itemInfo, {
+                                sourceObjectIds: decoSourceIds,
+                                exportSourceObjectIds: decoExportSourceIds
+                            });
+                            continue;
+                        }
+                        pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
                             sourceObjectIds: decoSourceIds,
                             exportSourceObjectIds: decoExportSourceIds,
                             visualSourceObjectIds: decoExportSourceIds,
@@ -1019,25 +1745,31 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                             mode: "TEXTLESS_CANDIDATE",
                             candidatePurpose: "SHELL_CANDIDATE",
                             compositeRole: decoSourceIds && decoSourceIds.length > 1 ? "decoration_group_source_set" : null
-                        }));
+                        }), "decoration_group_source_set");
                         recordDecorationSourceSet(extractionPageIndex, decoSourceIds);
                     }
+                } else {
+                    baseSuppressedPreview("decoration_group_skipped_by_placed_visual_subtree", itemInfo, {
+                        allowPlacedVisualClipParentShell: allowPlacedVisualClipParentShell
+                    });
                 }
+                basePerfBranchEnd("decoration_composite", decorationBranchStartedAt);
             }
 
             if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
+                var complexBranchStartedAt = basePerfBranchStart("complex_graphic");
                 try {
-                    if (sourceItemHasChildren(id)
+                    if (itemInfo.hasChildren === true
                             && !sourceIndex.hasPlacedVisual(id)
                             && !sourceHasClipParentShellOwner(id, extractionPageIndex)
-                            && !sourceIsClippedPlacedCarrierSiblingShell(itemInfo, extractionPageIndex)) {
+                            && !(sourceMayBeClippedPlacedCarrierSiblingShell(itemInfo, extractionPageIndex)
+                                    && sourceIsClippedPlacedCarrierSiblingShell(itemInfo, extractionPageIndex))) {
                         var complexEditableTextIds = [];
                         try { complexEditableTextIds = sourceIndex.textFrameIdsInSubtree(id, true, true); } catch (eComplexTextIds) {}
                         if (complexEditableTextIds && complexEditableTextIds.length > 0) {
                             continue;
                         }
-                        var complexSourceIds = null;
-                        try { complexSourceIds = sourceIndex.pageLocalSourceObjectIds(id, extractionPageIndex); } catch (eComplexSourceIds) {}
+                        var complexSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
                         if (hasDecorationSourceSet(extractionPageIndex, complexSourceIds || [id])) continue;
                         if (hasBroaderDecorationSourceSet(extractionPageIndex, complexSourceIds || [id])) continue;
                         var complexVisualSourceIds = [];
@@ -1045,7 +1777,9 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                         var complexExportSourceIds = complexSourceIds && complexSourceIds.length > 0
                                 ? complexSourceIds
                                 : (complexVisualSourceIds && complexVisualSourceIds.length > 0 ? complexVisualSourceIds : [id]);
-                        _pushExtractionCandidate(candidates, candidateSeen, "pass.complex_graphic_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
+                        item = item || domItemForBase(id);
+                        if (!item) continue;
+                        pushBaseExtractionCandidate("pass.complex_graphic_frames", item, markClipParentShellOwner(candidateAttrsForInfo(itemInfo, {
                             sourceObjectIds: complexSourceIds,
                             exportSourceObjectIds: complexExportSourceIds,
                             exportTargetObjectId: id,
@@ -1055,40 +1789,60 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                             mode: "TEXTLESS_CANDIDATE",
                             candidatePurpose: "CONTENT_CANDIDATE",
                             compositeRole: complexSourceIds && complexSourceIds.length > 1 ? "complex_graphic_source_set" : null
-                        }), id, extractionPageIndex));
+                        }), id, extractionPageIndex), "complex_graphic_source_set");
                     }
                 } catch (eComplexCandidate) {}
+                basePerfBranchEnd("complex_graphic", complexBranchStartedAt);
             }
 
             if (kind === "TextFrame") {
-                var hasShellPaint = itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true;
-                if (hasShellPaint) {
-                    var tfShellSourceIds = [id];
-                    _pushExtractionCandidate(candidates, candidateSeen, "pass.editable_textframe_visual_shells", item, candidateAttrsForInfo(itemInfo, {
-                        sourceObjectIds: tfShellSourceIds,
-                        exportSourceObjectIds: tfShellSourceIds,
-                        visualSourceObjectIds: tfShellSourceIds,
-                        styleSourceObjectIds: tfShellSourceIds,
-                        editableTextFrameIds: tfShellSourceIds,
-                        hiddenTextFrameIds: tfShellSourceIds,
-                        requiresTextHidden: true,
-                        textOwner: "hwpx_tf",
-                        pageIndex: extractionPageIndex,
-                        unit: "TEXT_FRAME",
-                        mode: "TEXTLESS_CANDIDATE",
-                        candidatePurpose: "SHELL_CANDIDATE",
-                        compositeRole: "textframe_style_shell_slot",
-                        slotRole: "direct_child_shell_slot"
-                    }));
-                }
+                var textFrameBranchStartedAt = basePerfBranchStart("textframe_style_shell");
+                var tfShellSourceIds = [id];
+                item = item || domItemForBase(id);
+                if (!item) continue;
+                pushBaseExtractionCandidate("pass.editable_textframe_visual_shells", item, candidateAttrsForInfo(itemInfo, {
+                    sourceObjectIds: tfShellSourceIds,
+                    exportSourceObjectIds: tfShellSourceIds,
+                    visualSourceObjectIds: tfShellSourceIds,
+                    styleSourceObjectIds: tfShellSourceIds,
+                    editableTextFrameIds: tfShellSourceIds,
+                    hiddenTextFrameIds: tfShellSourceIds,
+                    requiresTextHidden: true,
+                    textOwner: "hwpx_tf",
+                    pageIndex: extractionPageIndex,
+                    unit: "TEXT_FRAME",
+                    mode: "TEXTLESS_CANDIDATE",
+                    candidatePurpose: "SHELL_CANDIDATE",
+                    compositeRole: "textframe_style_shell_slot",
+                    slotRole: "direct_child_shell_slot"
+                }), "textframe_style_shell_slot");
+                basePerfBranchEnd("textframe_style_shell", textFrameBranchStartedAt);
             }
         }
+        basePerfStats.mainPageLoopMs += Math.max(0, basePerfWallNow() - mainPageLoopStartedAt);
     }
+    basePerfStats.mainLoopMs = Math.max(0, basePerfWallNow() - mainLoopStartedAt);
+    var unclaimedFallbackStartedAt = basePerfWallNow();
+    basePerfMarker("03d05d0_base_unclaimedVisibleVectorFallback_start");
+    if (ctx && ctx.enableLegacyUnclaimedVisibleVectorFallback === true) {
+        appendUnclaimedVisibleVectorSourceCandidates();
+        basePerfStats.unclaimedVisibleVectorFallbackSkipped = false;
+    } else {
+        basePerfStats.unclaimedVisibleVectorFallbackCount = 0;
+        basePerfStats.unclaimedVisibleVectorFallbackSkipped = true;
+    }
+    basePerfStats.fallbackMs.unclaimedVisibleVectorFallback = Math.max(
+            0, basePerfWallNow() - unclaimedFallbackStartedAt);
+    basePerfMarker("03d05d1_base_unclaimedVisibleVectorFallback_done");
     basePerfMarker("03d05d_base_main_done");
     basePerfWrite("done", sourceItems.length);
 }
 
 function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen) {
+    function itemInfoHasTextFrameShellStyle(itemInfo) {
+        if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") return false;
+        return itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true;
+    }
     function hasCandidate(passId, pageIndex, sourceIds) {
         var sourceKey = _sourceSetKey(sourceIds || []);
         for (var ci = 0; candidates && ci < candidates.length; ci++) {
@@ -1099,15 +1853,41 @@ function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems
         }
         return false;
     }
+    function hasInlineDirectChildShellOwner(pageIndex, itemInfo) {
+        var sourceId = itemInfo ? itemInfo.id : null;
+        if (sourceId === null || sourceId === undefined) return false;
+        for (var ci = 0; candidates && ci < candidates.length; ci++) {
+            var candidate = candidates[ci];
+            if (!candidate || candidate.passId !== "pass.inline_objects") continue;
+            if (String(candidate.pageIndex) !== String(pageIndex)) continue;
+            if (candidate.slotRole !== "direct_child_shell_slot"
+                    && candidate.compositeRole !== "direct_child_shell_slot") continue;
+            if (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0
+                    && !_sourceIdsContain(candidate.visualSourceObjectIds || [], sourceId)) {
+                continue;
+            }
+            if ((!candidate.visualSourceObjectIds || candidate.visualSourceObjectIds.length === 0)
+                    && itemInfo.hasText === true) {
+                continue;
+            }
+            if (!_sourceIdsContain(candidate.sourceObjectIds || [], sourceId)
+                    && !_sourceIdsContain(candidate.exportSourceObjectIds || [], sourceId)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
     for (var i = 0; sourceItems && i < sourceItems.length; i++) {
         var itemInfo = sourceItems[i];
         if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") continue;
         if (itemInfo.textFrameClass !== "editable") continue;
-        if (itemInfo.hasVisibleFill !== true && itemInfo.hasVisibleStroke !== true) continue;
         if (itemInfo.id === null || itemInfo.id === undefined) continue;
         var id = itemInfo.id;
+        if (!itemInfoHasTextFrameShellStyle(itemInfo)) continue;
         var sourceIds = [id];
         if (hasCandidate("pass.editable_textframe_visual_shells", itemInfo.pageIndex, sourceIds)) continue;
+        if (hasInlineDirectChildShellOwner(itemInfo.pageIndex, itemInfo)) continue;
         var candidateId = _candidateId("pass.editable_textframe_visual_shells", id, itemInfo.pageIndex);
         candidates.push({
             candidateId: candidateId,

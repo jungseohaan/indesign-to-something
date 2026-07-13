@@ -2,7 +2,6 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
@@ -19,32 +18,7 @@ public final class VisualLayeringRules {
     }
 
     public static boolean isInFrontLayer(VisualLayer layer) {
-        return VisualPlanePolicy.isInFrontLayer(layer);
-    }
-
-    public static boolean isBadgeShellGraphicBehind(RenderedGroup rg) {
-        return rg != null && "inline_badge".equals(rg.reason());
-    }
-
-    public static boolean isTextOwnedVisualShell(RenderedGroup rg) {
-        if (rg == null) return false;
-        if (isTextOwnedRenderedContent(rg)) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        return isTextFrameVisualShellReason(rg.reason());
-    }
-
-    public static boolean isTextOwnedRenderedContent(RenderedGroup rg) {
-        if (rg == null) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        return reason.contains("mixed_group_text_hidden")
-                || reason.contains("image_group_text_hidden")
-                || reason.contains("complex_graphic_text_hidden");
+        return layer != null && layer != VisualLayer.PAGE_BACKGROUND;
     }
 
     public static boolean isEditableLabelShellCandidate(RenderedGroup rg) {
@@ -53,17 +27,39 @@ public final class VisualLayeringRules {
         if ("indesign_png".equals(rg.textOwner())) return false;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!isTextFrameVisualShellReason(rg.reason())) return false;
-        return true;
+        return isStructuredTextShellCandidate(rg);
     }
 
-    public static boolean isTextFrameVisualShellReason(String reason) {
-        if (reason == null) return false;
-        return reason.contains("decoration")
-                || reason.contains("text_hidden")
-                || reason.contains("visual_shell")
-                || reason.contains("textframe_visual_shell")
-                || reason.contains("complex_graphic");
+    public static boolean isStructuredTextShellCandidate(RenderedGroup rg) {
+        if (rg == null) return false;
+        if ("TEXTLESS_SHELL_WITH_TF".equals(rg.atomicObjectKind())) return true;
+        if ("pass.editable_textframe_visual_shells".equals(rg.planPassId())) return true;
+        if (isStructuredShellRole(rg.slotRole())) return true;
+        if (isStructuredShellRole(rg.compositeRole())) return true;
+        return rg.hasEditableTextHiddenFromPng() && hasAnyEditableTextFrameId(rg);
+    }
+
+    private static boolean hasAnyEditableTextFrameId(RenderedGroup rg) {
+        return rg != null
+                && rg.editableTextFrameIds() != null
+                && rg.editableTextFrameIds().length > 0;
+    }
+
+    private static boolean isStructuredShellRole(String value) {
+        if (value == null || value.isEmpty()) return false;
+        return "SHELL_SLOT".equals(value)
+                || "TEXTLESS_SHELL_SLOT".equals(value)
+                || "shell_slot_only".equals(value)
+                || "direct_child_shell_slot".equals(value)
+                || "background_shell_slot".equals(value)
+                || "inline_textless_sibling_decoration_slot".equals(value)
+                || "textframe_style_shell_slot".equals(value)
+                || "native_parent_text_shell_slot".equals(value)
+                || "source_declared_closed_text_shell".equals(value)
+                || "table_carrier_textless_shell".equals(value)
+                || "table_carrier_sibling_decoration".equals(value)
+                || "clipped_placed_carrier_sibling_shell".equals(value)
+                || "leaf_vector_shell_source".equals(value);
     }
 
     public static boolean isPageObject(RenderedGroup rg) {

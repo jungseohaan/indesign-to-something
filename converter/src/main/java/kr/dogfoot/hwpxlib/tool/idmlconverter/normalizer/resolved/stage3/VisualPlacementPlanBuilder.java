@@ -4,7 +4,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
@@ -54,16 +53,12 @@ public final class VisualPlacementPlanBuilder {
         long y = CoordinateConverter.pointsToHwpunits(visTop * ctx.scaleFactor);
         long w = CoordinateConverter.pointsToHwpunits((visRight - visLeft) * ctx.scaleFactor);
         long h = CoordinateConverter.pointsToHwpunits((visBottom - visTop) * ctx.scaleFactor);
-        if (prepared.hasStripCropOverride()) {
-            x = CoordinateConverter.pointsToHwpunits(prepared.stripCropLeftOverride * ctx.scaleFactor);
-            w = CoordinateConverter.pointsToHwpunits(prepared.stripCropWidthOverride * ctx.scaleFactor);
-        }
         if (w <= 0 || h <= 0) {
             return null;
         }
 
-        boolean fromGroup = VisualPlanePolicy.isInFrontLayer(ownershipPlan.visualLayer);
         String visualLayer = ownershipPlan.visualLayer != null ? ownershipPlan.visualLayer.name() : null;
+        boolean fromGroup = !"PAGE_BACKGROUND".equals(visualLayer);
         int zOrder = ownershipPlan.zOrder;
         int sourceLayerIndex = ownershipPlan.sourceLayerIndex;
 

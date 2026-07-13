@@ -69,7 +69,7 @@ public class StoryConverterTest {
 
         ResolvedBuildContext ctx = new ResolvedBuildContext();
         ctx.resolvedData = data;
-        ctx.ownershipPlans.add(new ObjectPlan(
+        ctx.ownershipPlans.add(ObjectPlan.legacyDefaulted(
                 96421,
                 "rendered_floating_item:inline_object:inline_object",
                 1,
@@ -83,7 +83,7 @@ public class StoryConverterTest {
                 "inline_graphic_only",
                 "rendered_frames/inline_96421.png",
                 null));
-        ctx.ownershipPlans.add(new ObjectPlan(
+        ctx.ownershipPlans.add(ObjectPlan.legacyDefaulted(
                 96423,
                 "text_frame",
                 1,
@@ -394,7 +394,7 @@ public class StoryConverterTest {
     }
 
     private static void addInlineTableSourcePlan(ResolvedBuildContext ctx, int textFrameDomId) {
-        ctx.addOwnershipPlan(new ObjectPlan(
+        ctx.addOwnershipPlan(ObjectPlan.legacyDefaulted(
                 textFrameDomId,
                 "text_frame",
                 0,

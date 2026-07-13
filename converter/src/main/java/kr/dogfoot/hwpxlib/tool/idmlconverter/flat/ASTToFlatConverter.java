@@ -478,6 +478,8 @@ public class ASTToFlatConverter {
     private static FlatInlineItem convertEquation(ASTEquation eq) {
         FlatInlineItem item = FlatInlineItem.equation(eq.hwpScript(), eq.sourceType());
         item.equationTextColor(eq.textColor());
+        item.equationPreferredBaseUnit(eq.preferredBaseUnit());
+        item.equationPreferredFontFamily(eq.preferredFontFamily());
         return item;
     }
 

@@ -211,7 +211,7 @@ public class StyleRegistry {
         int height = styleDef.fontSizeHwpunits() != null ? styleDef.fontSizeHwpunits() : 1000;
         String textColor = (styleDef.textColor() != null && !styleDef.textColor().isEmpty()) ? styleDef.textColor() : "#000000";
         // bold/italic: 명시적 플래그 우선, 없으면 fontStyle 파싱
-        boolean bold = Boolean.TRUE.equals(styleDef.bold());
+        boolean bold = Boolean.TRUE.equals(styleDef.bold()) || isEmphasisStyle(styleDef.styleName());
         boolean italic = Boolean.TRUE.equals(styleDef.italic());
         if (!bold && !italic && styleDef.fontStyle() != null) {
             String fs = styleDef.fontStyle().toLowerCase();
@@ -350,5 +350,13 @@ public class StyleRegistry {
         if (lower.contains("dashed") || lower.contains("dash")) return LineType3.DASH;
         if (lower.contains("dotted") || lower.contains("dot")) return LineType3.DOT;
         return null;  // Solid는 기본값
+    }
+
+    private static boolean isEmphasisStyle(String styleName) {
+        if (styleName == null || styleName.isEmpty()) return false;
+        String lower = styleName.toLowerCase();
+        return styleName.contains("강조")
+                || lower.contains("emphasis")
+                || lower.contains("strong");
     }
 }

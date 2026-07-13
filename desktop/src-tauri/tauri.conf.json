@@ -36,6 +36,8 @@
     ],
     "resources": [
       "../../scripts/extract_indd.jsx",
+      "../../scripts/export_pdf_bg.jsx",
+      "../../scripts/indd",
       "../../conversion-config.json",
       "../../font-mapping.json"
     ]

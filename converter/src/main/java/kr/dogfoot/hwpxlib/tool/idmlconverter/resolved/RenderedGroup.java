@@ -19,11 +19,15 @@ public class RenderedGroup {
     private int zOrder;          // ExtendScript 할당 z-order (renderedFloatingItems)
     private boolean zOrderKnown; // true: IDML z-order normalizer가 실제 원본 순서를 확인함
     private String itemType;     // "vector" | "group" | "text_decoration" | "image" | "other"
+    private String exportUnitId; // Stable executed export unit contract id
+    private String renderUnitId; // Stage 1 RenderUnit id that authorized this render
+    private String renderUnitSlotIdentityKey;
     private String planPassId;   // ExtractionPlan pass that produced this render
     private String candidateId;  // ExtractionPlan candidate id
     private String compositeRole;
     private String slotRole;
     private String placementRole;
+    private String visualLayer;   // Stage 1 visual layer contract (PAGE_BACKGROUND, ...)
     private boolean textHiddenBeforeExport; // true: PNG 내보내기 전 TF 텍스트를 숨겼음 → PNG는 텍스트 없음
     private String imageFormat;   // "jpg", "jpeg", "png" 등 (소스 파일 직접 복사 시 설정)
     private String visualOwner;   // "indesign_png" | "hwpx_shape" | ...
@@ -91,6 +95,15 @@ public class RenderedGroup {
     public String itemType() { return itemType; }
     public void itemType(String v) { this.itemType = v; }
 
+    public String exportUnitId() { return exportUnitId; }
+    public void exportUnitId(String v) { this.exportUnitId = v; }
+
+    public String renderUnitId() { return renderUnitId; }
+    public void renderUnitId(String v) { this.renderUnitId = v; }
+
+    public String renderUnitSlotIdentityKey() { return renderUnitSlotIdentityKey; }
+    public void renderUnitSlotIdentityKey(String v) { this.renderUnitSlotIdentityKey = v; }
+
     public String planPassId() { return planPassId; }
     public void planPassId(String v) { this.planPassId = v; }
 
@@ -105,6 +118,9 @@ public class RenderedGroup {
 
     public String placementRole() { return placementRole; }
     public void placementRole(String v) { this.placementRole = v; }
+
+    public String visualLayer() { return visualLayer; }
+    public void visualLayer(String v) { this.visualLayer = v; }
 
     private String pdfFile;      // PDF 배경 파일 상대 경로 (page_background 타입)
     private int pdfPageIndex;    // PDF 파일 내 페이지 인덱스 (0-based)

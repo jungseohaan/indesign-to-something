@@ -29,6 +29,7 @@ public final class TextFlowDiagnostics {
         public int index;
         public String styleName;
         public String justification;
+        public String generatedPrefixText;
         public final List<TextFlowRun> runs = new ArrayList<>();
     }
 

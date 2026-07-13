@@ -204,18 +204,6 @@ public class IDMLToHwpxConverter {
             for (String w : earlyWarnings) { result.addWarning(w); }
             for (String w : astDoc.warnings()) { result.addWarning(w); }
 
-            // Phase 3.4: Semantic Block Discovery (development default: always write)
-            try {
-                reporter.reportProgress(92, 100, "Semantic Block 추출 중...");
-                try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3_4.semanticBlocks.extract")) {
-                    extractSemanticBlocks(astDoc, resolvedData, hwpxPath, result);
-                }
-            } catch (Exception e) {
-                String msg = "[SemanticBlock] 추출 실패 (HWPX 변환은 계속 진행): " + e.getMessage();
-                System.err.println(msg);
-                result.addWarning(msg);
-            }
-
             // Phase 3.5: 시멘틱 레이어 추출 (SPEC-018 M3, 옵션)
             if (options.extractSemantics()) {
                 try {
@@ -596,7 +584,7 @@ public class IDMLToHwpxConverter {
                 earlyWarnings.add("[Resolved] overlay 보강 실패: " + e.getMessage());
             }
         }
-        // SPEC-035: source ownership/placement is decided by ObjectPlan only.
+        // source ownership policy: source ownership/placement is decided by ObjectPlan only.
         // Legacy floating-image merge mutates text-frame geometry after planning,
         // so it is intentionally disabled.
         // Phase 2.10: orphan 렌더 그래픽 주입
@@ -671,77 +659,6 @@ public class IDMLToHwpxConverter {
         for (int id : ids) {
             target.add(id);
         }
-    }
-
-    private static int adjustRenderedBackgroundShellZOrder(
-            RenderedGroup rg, ASTSection section, ASTFigure figure, int currentZ) {
-        if (!isRenderedBackgroundShellCandidate(rg)
-                || section == null || figure == null
-                || figure.width() <= 0 || figure.height() <= 0) {
-            return currentZ;
-        }
-        int minOverlapZ = Integer.MAX_VALUE;
-        for (ASTBlock block : section.blocks()) {
-            if (block == null || block == figure) continue;
-            long[] b = blockBounds(block);
-            if (b == null) continue;
-            long overlap = overlapArea(
-                    figure.x(), figure.y(), figure.width(), figure.height(),
-                    b[0], b[1], b[2], b[3]);
-            if (overlap <= 0) continue;
-            int z = blockZOrder(block);
-            if (z <= 0) continue;
-            if (z < minOverlapZ) minOverlapZ = z;
-        }
-        if (minOverlapZ == Integer.MAX_VALUE) return currentZ;
-        return Math.max(0, Math.min(currentZ, minOverlapZ - 1));
-    }
-
-    private static boolean isRenderedBackgroundShellCandidate(RenderedGroup rg) {
-        if (rg == null) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        return "decoration_group".equals(reason)
-                || reason.contains("complex_graphic_text_hidden")
-                || reason.contains("mixed_group_text_hidden")
-                || reason.contains("image_group_text_hidden")
-                || reason.contains("visual_label_text_hidden_shell")
-                || reason.contains("editable_composite_text_hidden_shell")
-                || reason.contains("textframe_visual_shell");
-    }
-
-    private static long[] blockBounds(ASTBlock block) {
-        if (block instanceof ASTTextFrameBlock) {
-            ASTTextFrameBlock tf = (ASTTextFrameBlock) block;
-            return new long[] { tf.x(), tf.y(), tf.effectiveWidth(), tf.height() };
-        }
-        if (block instanceof ASTFigure) {
-            ASTFigure fig = (ASTFigure) block;
-            return new long[] { fig.x(), fig.y(), fig.width(), fig.height() };
-        }
-        if (block instanceof ASTTable) {
-            ASTTable table = (ASTTable) block;
-            return new long[] { table.x(), table.y(), table.width(), table.height() };
-        }
-        return null;
-    }
-
-    private static int blockZOrder(ASTBlock block) {
-        if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
-        if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
-        if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
-        return 0;
-    }
-
-    private static long overlapArea(
-            long ax, long ay, long aw, long ah,
-            long bx, long by, long bw, long bh) {
-        long left = Math.max(ax, bx);
-        long top = Math.max(ay, by);
-        long right = Math.min(ax + aw, bx + bw);
-        long bottom = Math.min(ay + ah, by + bh);
-        if (right <= left || bottom <= top) return 0;
-        return (right - left) * (bottom - top);
     }
 
     private static boolean isRenderedCoveredByUsedSource(
@@ -1014,34 +931,9 @@ public class IDMLToHwpxConverter {
                     pageOrphanZCounter.put(pageIdx, orphanZ + 1);
                 }
                 fig.zOrder(idmlZ);
-                // renderedGraphicFrame(벡터 도형)은 텍스트/배지보다 앞에 표시
-                // IDML z-order 없으면 높은 값으로 설정하여 배경 위에 배치
-                if (idmlZ <= 0 && resolvedData.getRenderedGraphicFrameByIdmlId(idmlHexId) != null) {
-                    fig.zOrder(9000 + pageOrphanZCounter.getOrDefault(pageIdx, 0));
-                }
-
-                // 배경 vs 전경 판단: 이미지 면적이 페이지의 50% 이상이면 배경(BEHIND_TEXT)
-                boolean isBackground = false;
-                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage bgPage =
-                        (resolvedData != null) ? resolvedData.getPage(pageIdx) : null;
-                if (bgPage != null && bgPage.bounds() != null) {
-                    double[] pb = bgPage.bounds();
-                    double pageArea = (pb[2] - pb[0]) * (pb[3] - pb[1]);
-                    double orphanArea = (double) figW * figH / (100.0 * 100.0); // hwpunit → pt
-                    if (pageArea > 0 && orphanArea / pageArea > 0.5) {
-                        isBackground = true;
-                    }
-                }
-                boolean demoteToBehindText = false;
-                if (isBackground) {
-                    fig.zOrder(0);  // 배경은 최하위 z-order
-                } else {
-                    int beforeAdjustZ = fig.zOrder();
-                    int adjustedZ = adjustRenderedBackgroundShellZOrder(rg, section, fig, beforeAdjustZ);
-                    fig.zOrder(adjustedZ);
-                    demoteToBehindText = adjustedZ < beforeAdjustZ;
-                }
-                fig.fromGroup(!isBackground && !demoteToBehindText);  // 배경이면 BEHIND_TEXT, 아니면 IN_FRONT_OF_TEXT
+                fig.visualLayer(rg.visualLayer());
+                fig.sourceLayerIndex(rg.layerIndex());
+                fig.fromGroup(!"PAGE_BACKGROUND".equals(rg.visualLayer()));
 
                 section.addBlock(fig);
 
@@ -1109,7 +1001,9 @@ public class IDMLToHwpxConverter {
                                 adjFig.pixelWidth(img.getWidth());
                                 adjFig.pixelHeight(img.getHeight());
                                 adjFig.sourceId(idmlHexId + "_adj");
-                                adjFig.fromGroup(true);
+                                adjFig.visualLayer(rg.visualLayer());
+                                adjFig.sourceLayerIndex(rg.layerIndex());
+                                adjFig.fromGroup(!"PAGE_BACKGROUND".equals(rg.visualLayer()));
                                 if (adjCropLeft > 0 || adjCropTop > 0) {
                                     adjFig.cropLeftFraction(adjCropLeft);
                                     adjFig.cropTopFraction(adjCropTop);
@@ -1258,41 +1152,10 @@ public class IDMLToHwpxConverter {
                 fig.pixelWidth(img.getWidth());
                 fig.pixelHeight(img.getHeight());
                 fig.sourceId(idmlHexId);
-                fig.fromGroup(true);
-
-                // z-order: 겹치는 도형 기준
-                long figArea = figW * figH;
-                int minSmallerZ = Integer.MAX_VALUE;
-                int maxOverlapZ = 0;
-                boolean hasSmallerOverlap = false;
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : section.blocks()) {
-                    if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) {
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure existing =
-                                (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
-                        long ew = existing.width(), eh = existing.height();
-                        long ox1 = Math.max(existing.x(), figX);
-                        long oy1 = Math.max(existing.y(), figY);
-                        long ox2 = Math.min(existing.x() + ew, figX + figW);
-                        long oy2 = Math.min(existing.y() + eh, figY + figH);
-                        if (ox2 > ox1 && oy2 > oy1) {
-                            if (existing.zOrder() > maxOverlapZ) {
-                                maxOverlapZ = existing.zOrder();
-                            }
-                            long existArea = ew * eh;
-                            if (existArea < figArea) {
-                                hasSmallerOverlap = true;
-                                if (existing.zOrder() < minSmallerZ) {
-                                    minSmallerZ = existing.zOrder();
-                                }
-                            }
-                        }
-                    }
-                }
-                if (hasSmallerOverlap) {
-                    fig.zOrder(Math.max(0, minSmallerZ - 1));
-                } else {
-                    fig.zOrder(maxOverlapZ + 1);
-                }
+                fig.visualLayer(rg.visualLayer());
+                fig.sourceLayerIndex(rg.layerIndex());
+                fig.zOrder(rg.zOrder());
+                fig.fromGroup(!"PAGE_BACKGROUND".equals(rg.visualLayer()));
 
                 section.addBlock(fig);
                 // 이 그룹의 자식 ID를 커버 목록에 추가 (하위 그룹 중복 방지)
@@ -1509,39 +1372,6 @@ public class IDMLToHwpxConverter {
                 + layer.relations.size() + " relations → " + outputPath);
         result.addWarning("[Semantic] 추출 완료: " + layer.nodes.size() + " 노드, "
                 + classified + " 분류 → " + outputPath);
-    }
-
-    /**
-     * Semantic Block Discovery JSON을 HWPX 옆에 생성한다.
-     *
-     * <p>개발 중에는 항상 생성하고, 안정화 후 ConvertOptions로 옵션화한다.</p>
-     */
-    private static void extractSemanticBlocks(
-            ASTDocument astDoc,
-            ResolvedData resolvedData,
-            String hwpxPath,
-            ConvertResult result) throws java.io.IOException {
-        String documentName = astDoc != null && astDoc.sourceFile() != null
-                ? astDoc.sourceFile()
-                : (hwpxPath == null ? "out" : new File(hwpxPath).getName());
-        kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockDocument document =
-                kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockDetector.detect(
-                        astDoc, documentName, resolvedData);
-        java.nio.file.Path outPath = java.nio.file.Paths.get(defaultSemanticBlocksOutputPath(hwpxPath));
-        kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockWriter.write(document, outPath);
-        ConversionTiming.metric("semanticBlocks.blocks", document.summary.blocks);
-        ConversionTiming.metric("semanticBlocks.members", document.summary.members);
-        ConversionTiming.metric("semanticBlocks.anchors", document.summary.anchors);
-        result.addWarning("[SemanticBlock] " + outPath + " 생성 완료: "
-                + document.summary.blocks + " blocks, " + document.summary.members + " members");
-    }
-
-    /** hwpx 경로 → 같은 디렉토리의 .semantic-blocks.json. */
-    private static String defaultSemanticBlocksOutputPath(String hwpxPath) {
-        if (hwpxPath == null) return "out.semantic-blocks.json";
-        int dot = hwpxPath.lastIndexOf('.');
-        if (dot < 0) return hwpxPath + ".semantic-blocks.json";
-        return hwpxPath.substring(0, dot) + ".semantic-blocks.json";
     }
 
     /** hwpx 경로 → 같은 디렉토리의 .semantic.json. */

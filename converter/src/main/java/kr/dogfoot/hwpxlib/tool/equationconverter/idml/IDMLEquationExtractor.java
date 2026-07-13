@@ -344,15 +344,15 @@ public class IDMLEquationExtractor {
      */
     private String cleanHwpScript(String script) {
         // backtick(`) 을 → 로 변환 (InDesign에서 `는 → 기호로 사용)
-        script = script.replace("`", " -> ");
+        script = script.replace("`", " rarrow ");
         // "@" 을 ^{2}로 변환 (InDesign NP폰트에서 @는 제곱을 의미)
         // 단, "int"는 적분 기호이므로 제외 (이미 변환됨)
         script = script.replaceAll("([a-zA-Z0-9])@", "$1 ^{2}");
         // 독립적인 @ 는 제곱
         script = script.replace("@", " ^{2}");
-        // 중복된 화살표 제거: "-> -> " → "-> "
-        while (script.contains("-> ->")) {
-            script = script.replace("-> ->", "->");
+        // 중복된 화살표 제거
+        while (script.contains("rarrow rarrow")) {
+            script = script.replace("rarrow rarrow", "rarrow");
         }
         // 연속 공백 정리
         script = script.replaceAll("\\s+", " ");

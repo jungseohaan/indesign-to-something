@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SPEC-025 Phase 1: 텍스트 커버리지 측정 도구.
+source ownership policy Phase 1: 텍스트 커버리지 측정 도구.
 
 resolved.json의 모든 텍스트가 HWPX section XML에 포함되는지 비교한다.
 
@@ -74,14 +74,14 @@ def get_page_bounds(resolved):
 
 
 def classify_missing_reason(frame, page_bounds):
-    """frame 정보로 누락 원인 추정. SPEC-025 확장 필드 우선 사용.
+    """frame 정보로 누락 원인 추정. source ownership policy 확장 필드 우선 사용.
     반환: (reason_short, reason_detail)."""
     if not frame:
         return ("no-frame", "스토리에 매칭되는 textFrame 없음 (테이블 셀 또는 인라인)")
     reasons = []
     detail = []
 
-    # SPEC-025 진단 필드 (있으면 우선)
+    # source ownership policy 진단 필드 (있으면 우선)
     cls = frame.get("classification")
     if cls:
         # classifyTextFrame 직접 결과

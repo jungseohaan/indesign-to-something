@@ -81,6 +81,21 @@
       "expect": {
         "blockingFailures": 0
       }
+    },
+    {
+      "id": "science31-u1-p039",
+      "case": "중3과학교과서/u1",
+      "page": 39,
+      "title": "table cell inline native shell missing",
+      "tags": ["table", "inline", "shell", "native-shape"],
+      "notes": [
+        "테이블 셀 내부 inline anchor group의 shell/content가 HWPX 결과에서 보이지 않음",
+        "ObjectPlan은 inline ownership을 가지지만 cell flow executor 또는 table path에서 누락되는 것으로 의심됨",
+        "page/text/coordinate 예외 없이 table cell inline anchor ownership과 executor handoff로 해결해야 함"
+      ],
+      "expect": {
+        "blockingFailures": 0
+      }
     }
   ]
 }

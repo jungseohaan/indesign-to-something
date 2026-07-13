@@ -18,13 +18,17 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLSchemaExtractor;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.CoordinateDiagnoser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedZOrderNormalizer;
 import kr.dogfoot.hwpxlib.tool.hwpxconverter.HwpxToIdmlConverter;
 
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 /**
  * IDML to HWPX 변환기 CLI 진입점.
@@ -98,6 +102,8 @@ public class ConverterCLI {
                 String idmlPath = args[1];
                 IDMLValidator.Result vr = IDMLValidator.validate(idmlPath);
                 System.out.println(vr.toJson());
+            } else if ("--idml-zorder-map".equals(command)) {
+                runIdmlZOrderMap(args);
             } else if ("--extract-schema".equals(command)) {
                 String idmlPath = args[1];
                 String schema = IDMLSchemaExtractor.extractSchema(idmlPath);
@@ -126,6 +132,41 @@ public class ConverterCLI {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace(System.err);
             System.exit(1);
+        }
+    }
+
+    private static void runIdmlZOrderMap(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Usage: --idml-zorder-map <idml-path> <output-json>");
+            System.exit(1);
+        }
+        IDMLDocument doc = IDMLLoader.load(args[1]);
+        try {
+            Map<String, Integer> map = ResolvedZOrderNormalizer.readSourceZOrderMap(doc);
+            StringBuilder json = new StringBuilder();
+            json.append("{\"schemaVersion\":1,");
+            json.append("\"policy\":\"POLICY-source-ownership\",");
+            json.append("\"mode\":\"idml-source-zorder-map\",");
+            json.append("\"source\":\"ResolvedZOrderNormalizer\",");
+            json.append("\"count\":").append(map.size()).append(',');
+            json.append("\"zOrderBySourceObjectId\":{");
+            List<String> keys = new ArrayList<>(map.keySet());
+            keys.sort((a, b) -> {
+                try {
+                    return Integer.compare(Integer.parseInt(a), Integer.parseInt(b));
+                } catch (NumberFormatException ignored) {
+                    return a.compareTo(b);
+                }
+            });
+            for (int i = 0; i < keys.size(); i++) {
+                if (i > 0) json.append(',');
+                String key = keys.get(i);
+                json.append('"').append(escapeJson(key)).append("\":").append(map.get(key));
+            }
+            json.append("}}");
+            Files.writeString(new File(args[2]).toPath(), json.toString(), StandardCharsets.UTF_8);
+        } finally {
+            doc.cleanup();
         }
     }
 

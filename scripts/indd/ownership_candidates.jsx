@@ -125,29 +125,96 @@ function _pushExtractionCandidate(candidates, seen, passId, item, attrs) {
     });
 }
 
-function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds) {
+function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds, itemById) {
     var ids = editableTextFrameIds || [];
     if (!item || ids.length !== 1) return false;
     var markerText = null;
+    function maybeReadTextFrame(tf) {
+        if (!tf) return false;
+        try {
+            if (tf.constructor.name !== "TextFrame") return false;
+            if (String(tf.id) !== String(ids[0])) return false;
+            markerText = _plainTextOfTextFrameForOwnership(tf);
+            return true;
+        } catch (eReadTf) {}
+        return false;
+    }
     try {
         var nested = item.allPageItems;
         for (var i = 0; i < nested.length; i++) {
-            try {
-                if (nested[i].constructor.name !== "TextFrame") continue;
-                if (String(nested[i].id) !== String(ids[0])) continue;
-                markerText = _plainTextOfTextFrameForOwnership(nested[i]);
-                break;
-            } catch (eNested) {}
+            if (maybeReadTextFrame(nested[i])) break;
         }
     } catch (eAll) {}
     if (markerText === null) {
         try {
-            if (item.constructor.name === "TextFrame" && String(item.id) === String(ids[0])) {
-                markerText = _plainTextOfTextFrameForOwnership(item);
+            var textFrames = item.textFrames;
+            var count = textFrames && textFrames.length !== undefined
+                    ? Number(textFrames.length || 0)
+                    : 0;
+            for (var ti = 0; ti < count; ti++) {
+                if (maybeReadTextFrame(textFrames[ti])) break;
             }
+        } catch (eTextFrames) {}
+    }
+    if (markerText === null) {
+        try {
+            maybeReadTextFrame(item);
         } catch (eSelf) {}
     }
+    if (markerText === null && itemById) {
+        try {
+            maybeReadTextFrame(itemById[String(ids[0])]);
+        } catch (eById) {}
+    }
     return _isSimpleMarkerLabelTextForOwnership(markerText);
+}
+
+function _inlineCompositeCompletePngDecisionForOwnership(item, editableTextFrameIds, itemById) {
+    var ids = editableTextFrameIds || [];
+    if (!item || ids.length === 0) return false;
+    var markerById = {};
+
+    function maybeReadTextFrame(tf) {
+        if (!tf) return false;
+        try {
+            if (tf.constructor.name !== "TextFrame") return false;
+            var tfId = tf.id !== undefined && tf.id !== null ? String(tf.id) : null;
+            if (!tfId || markerById.hasOwnProperty(tfId)) return false;
+            markerById[tfId] = _isSimpleMarkerLabelTextForOwnership(
+                    _plainTextOfTextFrameForOwnership(tf));
+            return true;
+        } catch (eReadTf) {}
+        return false;
+    }
+
+    try {
+        var nested = item.allPageItems;
+        for (var i = 0; nested && i < nested.length; i++) {
+            maybeReadTextFrame(nested[i]);
+        }
+    } catch (eAll) {}
+    try {
+        var textFrames = item.textFrames;
+        var count = textFrames && textFrames.length !== undefined
+                ? Number(textFrames.length || 0)
+                : 0;
+        for (var ti = 0; ti < count; ti++) {
+            maybeReadTextFrame(textFrames[ti]);
+        }
+    } catch (eTextFrames) {}
+    if (itemById) {
+        for (var ii = 0; ii < ids.length; ii++) {
+            var tf = itemById[String(ids[ii])];
+            if (tf) maybeReadTextFrame(tf);
+        }
+    }
+
+    for (var mi = 0; mi < ids.length; mi++) {
+        if (markerById[String(ids[mi])] !== true) {
+            return false;
+        }
+    }
+    return true;
 }
 
 function _createExtractionPlanSourceIndexCache(doc, sourceIndex) {
@@ -330,7 +397,8 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
     for (var si = 0; sourceItems && si < sourceItems.length; si++) {
         var sourceEntry = sourceItems[si];
         if (!sourceEntry || sourceEntry.id === null || sourceEntry.id === undefined) continue;
-        if (sourceEntry.kind !== "Rectangle" && sourceEntry.kind !== "Oval" && sourceEntry.kind !== "Polygon") continue;
+        if (sourceEntry.kind !== "Rectangle" && sourceEntry.kind !== "Oval"
+                && sourceEntry.kind !== "Polygon" && sourceEntry.kind !== "Group") continue;
         if (!_isInlineFlowItemBySourceInfo(sourceEntry)) continue;
         if (!pageIndexInCurrentExtraction(sourceEntry.pageIndex)) continue;
         var shellItem = planCache && planCache.domItem ? planCache.domItem(sourceEntry.id) : null;
@@ -339,20 +407,27 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
         if (!editableTextFrameIds || editableTextFrameIds.length === 0) continue;
         var sourceObjectIds = [sourceEntry.id].concat(editableTextFrameIds);
         sourceObjectIds = _sortedNumericIds(sourceObjectIds);
-        var completeMarkerOwnsText = _inlineCompleteMarkerDecisionForOwnership(shellItem, editableTextFrameIds);
+        var completeMarkerOwnsText = _inlineCompositeCompletePngDecisionForOwnership(
+                shellItem, editableTextFrameIds);
+        var completeExportSourceIds = completeMarkerOwnsText ? _sortedNumericIds(sourceObjectIds) : [];
         var requiresTextHidden = editableTextFrameIds.length > 0 && !completeMarkerOwnsText;
         _pushExtractionCandidate(candidates, seen, "pass.inline_objects", shellItem, {
             sourceObjectIds: sourceObjectIds,
+            exportSourceObjectIds: completeExportSourceIds,
+            visualSourceObjectIds: completeExportSourceIds,
             pageIndex: sourceEntry.pageIndex,
             unit: "INLINE_OBJECT",
             mode: "TEXTLESS_CANDIDATE",
             candidatePurpose: "INLINE_CANDIDATE",
             editableTextFrameIds: editableTextFrameIds,
+            ownedTextFrameIds: completeMarkerOwnsText ? editableTextFrameIds : [],
             hiddenTextFrameIds: requiresTextHidden ? editableTextFrameIds : [],
             requiresTextHidden: requiresTextHidden,
             textOwner: completeMarkerOwnsText ? "indesign_png" : (requiresTextHidden ? "hwpx_tf" : "none"),
             containsEditableText: completeMarkerOwnsText,
-            completePngTextAllowed: completeMarkerOwnsText
+            completePngTextAllowed: completeMarkerOwnsText,
+            materialization: completeMarkerOwnsText ? "COMPLETE_PNG" : null,
+            textAction: completeMarkerOwnsText ? "OWNED_BY_PNG" : null
         });
     }
 }
@@ -380,7 +455,6 @@ function _isDirectChildShellSlotCandidate(candidate) {
         return true;
     }
     if (String(candidate.candidateId || "").indexOf("direct_child_shell_slot") >= 0) return true;
-    if (candidate.passId === "pass.inline_objects") return true;
     return false;
 }
 
@@ -471,7 +545,7 @@ function _sourceHasExecutableShellMaterialMetadataInIndex(sourceId, sourceInfoBy
     if (!src) return false;
     var kind = String(src.kind || "");
     if (kind === "TextFrame") {
-        return _sourceHasVisiblePaintMetadataInIndex(sourceId, sourceInfoById);
+        return _sourceHasTextFrameShellStyleMetadataInIndex(sourceId, sourceInfoById);
     }
     if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine") {
         return _sourceHasVisiblePaintMetadataInIndex(sourceId, sourceInfoById)

@@ -5,7 +5,9 @@
  * It must not create ownership, placement, or fallback decisions.
  */
 
-function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCandidates) {
+var MASTER_PAGE_GRAPHICS_PLANE_Z_ORDER = -1000000;
+
+function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCandidates, inlineCandidates) {
     // Strategy v13: 마스터 page side의 visible visual layer를 합성 PNG로 내보낸다.
     //
     // 이전 구현은 각 master page side에서 가장 큰 non-TF/non-Group item 하나만 export했다.
@@ -37,6 +39,16 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         var _mck = String(_mc.pageIndex);
         if (!masterCandidatesByPage[_mck]) masterCandidatesByPage[_mck] = [];
         masterCandidatesByPage[_mck].push(_mc);
+    }
+    var inlineCandidatesByPage = {};
+    for (var _ici = 0; inlineCandidates && _ici < inlineCandidates.length; _ici++) {
+        var _ic = inlineCandidates[_ici];
+        if (!_ic || _ic.pageIndex === null || _ic.pageIndex === undefined) continue;
+        if (_ic.placement && _ic.placement !== "INLINE") continue;
+        if (_ic.visualAction && _ic.visualAction !== "PLACE_INLINE_PNG") continue;
+        var _ick = String(_ic.pageIndex);
+        if (!inlineCandidatesByPage[_ick]) inlineCandidatesByPage[_ick] = [];
+        inlineCandidatesByPage[_ick].push(_ic);
     }
 
     // masterSpreadId → [{docIdx, masterPageIdx}, ...] 빌드
@@ -108,6 +120,31 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return false;
     }
 
+    function _boundsArea(b) {
+        try {
+            if (!b || b.length < 4) return 0;
+            var h = Math.max(0, Number(b[2]) - Number(b[0]));
+            var w = Math.max(0, Number(b[3]) - Number(b[1]));
+            return h * w;
+        } catch (e) {}
+        return 0;
+    }
+
+    function _boundsIntersectionArea(a, b) {
+        var inter = _boundsIntersection(a, b);
+        return inter ? _boundsArea(inter) : 0;
+    }
+
+    function _masterEntriesStronglyOverlap(a, b, pad) {
+        if (!a || !b) return false;
+        if (!_boundsIntersect(a.bounds, b.bounds, pad)) return false;
+        var overlap = _boundsIntersectionArea(a.bounds, b.bounds);
+        if (overlap <= VISIBLE_INTERSECTION_EPS) return false;
+        var minArea = Math.min(_boundsArea(a.bounds), _boundsArea(b.bounds));
+        if (minArea <= VISIBLE_INTERSECTION_EPS) return false;
+        return overlap / minArea >= 0.05;
+    }
+
     function _boundsIntersection(a, b) {
         try {
             if (!a || !b || a.length < 4 || b.length < 4) return null;
@@ -153,6 +190,29 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return false;
     }
 
+    function _masterItemBelongsToMasterSide(item, masterPage) {
+        try {
+            if (!item || !masterPage) return false;
+            try {
+                var parentPage = item.parentPage;
+                if (parentPage && parentPage.id === masterPage.id) return true;
+            } catch (eParentPage) {}
+            var cur = item.parent;
+            var hop = 0;
+            while (cur && hop < 10) {
+                var kind = "";
+                try { kind = cur.constructor.name; } catch (eKind) { break; }
+                if (kind === "Page") {
+                    try { return cur.id === masterPage.id; } catch (ePageId) { return false; }
+                }
+                if (kind === "MasterSpread" || kind === "Document") return false;
+                try { cur = cur.parent; } catch (eParent) { break; }
+                hop++;
+            }
+        } catch (e) {}
+        return false;
+    }
+
     function _boundsDiffer(a, b, eps) {
         eps = eps || 0.01;
         try {
@@ -186,7 +246,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                     if (used[j]) continue;
                     var touches = false;
                     for (var k = 0; k < cluster.length; k++) {
-                        if (_boundsIntersect(cluster[k].bounds, pageItems[j].bounds, pad)) {
+                        if (_masterEntriesStronglyOverlap(cluster[k], pageItems[j], pad)) {
                             touches = true;
                             break;
                         }
@@ -219,6 +279,89 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             } catch (e) {}
         }
         return union;
+    }
+
+    function _copyMasterEntryLayerInfo(target, sourceEntry) {
+        if (!target || !sourceEntry || !sourceEntry.item) return target;
+        try {
+            _copyLayerInfo(target, sourceEntry.item);
+        } catch (e) {}
+        return target;
+    }
+
+    function _copyMasterMatchedCandidateContract(target, candidate) {
+        if (!target || !candidate) return target;
+        if (!_masterCandidateContractCompatible(target, candidate)) {
+            return target;
+        }
+        var fields = [
+            "objectPlanId",
+            "renderUnitId",
+            "renderUnitSlotIdentityKey",
+            "materialization",
+            "textAction",
+            "visualAction",
+            "visualLayer",
+            "ownershipSlot",
+            "slotRole",
+            "contractStatus",
+            "mode",
+            "candidatePurpose",
+            "compositeRole"
+        ];
+        for (var i = 0; i < fields.length; i++) {
+            var key = fields[i];
+            if (!candidate.hasOwnProperty || !candidate.hasOwnProperty(key)) continue;
+            var value = candidate[key];
+            if (value === undefined || value === null || value === "") continue;
+            target[key] = value;
+        }
+        if (candidate.passId) target.planPassId = candidate.passId;
+        if (candidate.mode) target.renderMode = candidate.mode;
+        return target;
+    }
+
+    function _masterSlotChannelOf(entry) {
+        if (!entry) return "UNKNOWN";
+        var slotRole = entry.slotRole ? String(entry.slotRole) : "";
+        if (slotRole === "CONTENT_VISUAL_SLOT") return "CONTENT";
+        if (slotRole === "TEXTLESS_SHELL_SLOT" || slotRole === "SHELL_SLOT") return "SHELL";
+        var ownershipSlot = entry.ownershipSlot ? String(entry.ownershipSlot) : "";
+        if (ownershipSlot === "CONTENT_VISUAL_SLOT") return "CONTENT";
+        if (ownershipSlot === "TEXTLESS_SHELL_SLOT" || ownershipSlot === "SHELL_SLOT") return "SHELL";
+        var textOwner = entry.textOwner ? String(entry.textOwner) : "";
+        if (textOwner === "hwpx_tf") return "SHELL";
+        if (textOwner === "none") return "CONTENT";
+        var visualAction = entry.visualAction ? String(entry.visualAction) : "";
+        if (visualAction === "PLACE_TEXT_SHELL") return "SHELL";
+        if (visualAction === "PLACE_FLOATING_PNG" || visualAction === "PLACE_INLINE_PNG") return "CONTENT";
+        return "UNKNOWN";
+    }
+
+    function _masterCandidateContractCompatible(target, candidate) {
+        var targetChannel = _masterSlotChannelOf(target);
+        var candidateChannel = _masterSlotChannelOf(candidate);
+        if (targetChannel === "UNKNOWN" || candidateChannel === "UNKNOWN") return true;
+        return targetChannel === candidateChannel;
+    }
+
+    function _primaryMasterLayerEntry(entries) {
+        if (!entries || entries.length === 0) return null;
+        var primary = null;
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            if (!entry || !entry.item) continue;
+            if (!primary) {
+                primary = entry;
+                continue;
+            }
+            var primaryDepth = primary.sourceDepthOrder;
+            var entryDepth = entry.sourceDepthOrder;
+            if (primaryDepth === null || primaryDepth === undefined) primaryDepth = Number.MAX_VALUE;
+            if (entryDepth === null || entryDepth === undefined) entryDepth = Number.MAX_VALUE;
+            if (entryDepth < primaryDepth) primary = entry;
+        }
+        return primary;
     }
 
     function _masterEntrySourceDepth(entries) {
@@ -314,6 +457,117 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return false;
     }
 
+    function _directMasterGroupChildItems(item) {
+        var out = [];
+        try {
+            if (!item || !item.constructor || item.constructor.name !== "Group") return out;
+            var rootId = item.id;
+            var nested = item.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                try {
+                    var child = nested[i];
+                    if (!child || child.id === undefined || child.id === null) continue;
+                    var parent = child.parent;
+                    if (!parent || parent.id !== rootId) continue;
+                    if (child.constructor && child.constructor.name === "TextFrame"
+                            && _isDynamicMasterTextFrame(child)) continue;
+                    if (isOnHiddenLayer(child)) continue;
+                    try { if (child.visible === false) continue; } catch (eVis) {}
+                    try { if (child.nonprinting) continue; } catch (eNp) {}
+                    out.push(child);
+                } catch (eChild) {}
+            }
+        } catch (e) {}
+        return out;
+    }
+
+    function _masterHasPlacedVisual(item) {
+        try { if (item.images && item.images.length > 0) return true; } catch (eImage) {}
+        try { if (item.pdfs && item.pdfs.length > 0) return true; } catch (ePdf) {}
+        try { if (item.epss && item.epss.length > 0) return true; } catch (eEps) {}
+        return false;
+    }
+
+    function _masterGroupShouldUseChildEntries(item, bounds, pageBounds) {
+        try {
+            if (!item || !item.constructor || item.constructor.name !== "Group") return false;
+            if (!bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return false;
+            var pageH = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));
+            var pageW = Math.abs(Number(pageBounds[3]) - Number(pageBounds[1]));
+            var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+            if (pageH <= 0.01 || pageW <= 0.01 || h <= 0.01 || w <= 0.01) return false;
+            if (h <= pageH * 1.25 && w <= pageW * 1.25) return false;
+            return _directMasterGroupChildItems(item).length > 0;
+        } catch (e) {}
+        return false;
+    }
+
+    function _isPaperFillOnlyMasterMask(item, bounds, pageBounds) {
+        try {
+            if (!item || !bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return false;
+            if (!hasVisibleFill(item)) return false;
+            if (hasVisibleStroke(item)) return false;
+            var fillName = "";
+            try { fillName = item.fillColor ? String(item.fillColor.name || "") : ""; } catch (eFill) {}
+            fillName = fillName.toLowerCase();
+            if (fillName !== "paper" && fillName !== "[paper]") return false;
+            if (_masterHasPlacedVisual(item)) return false;
+            try {
+                var nested = item.allPageItems;
+                for (var ni = 0; nested && ni < nested.length; ni++) {
+                    var child = nested[ni];
+                    if (!child) continue;
+                    if (_masterHasPlacedVisual(child)) return false;
+                    if (hasVisibleStroke(child)) return false;
+                    if (hasVisibleFill(child)) {
+                        var childFill = "";
+                        try { childFill = child.fillColor ? String(child.fillColor.name || "") : ""; } catch (eChildFill) {}
+                        childFill = childFill.toLowerCase();
+                        if (childFill !== "paper" && childFill !== "[paper]") return false;
+                    }
+                }
+            } catch (eNested) {}
+            var pageH = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));
+            var pageW = Math.abs(Number(pageBounds[3]) - Number(pageBounds[1]));
+            var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+            var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+            if (pageH <= 0.01 || pageW <= 0.01 || h <= 0.01 || w <= 0.01) return false;
+            var touchesEdge = bounds[0] <= pageBounds[0] + 0.01
+                    || bounds[1] <= pageBounds[1] + 0.01
+                    || bounds[2] >= pageBounds[2] - 0.01
+                    || bounds[3] >= pageBounds[3] - 0.01;
+            return touchesEdge && (h >= pageH * 0.5 || w >= pageW * 0.5);
+        } catch (e) {}
+        return false;
+    }
+
+    function _appendMasterPageEntries(pageItems, item, bounds, pageBounds, sourceDepthOrder, masterPage) {
+        if (_isPaperFillOnlyMasterMask(item, bounds, pageBounds)) return;
+        if (_masterGroupShouldUseChildEntries(item, bounds, pageBounds)) {
+            var children = _directMasterGroupChildItems(item);
+            for (var ci = 0; ci < children.length; ci++) {
+                try {
+                    var cb = _masterItemBounds(children[ci]);
+                    var childOnMasterSide = _masterItemBelongsToMasterSide(children[ci], masterPage);
+                    if (!cb || (!childOnMasterSide && !_masterItemBelongsToPage(cb, pageBounds))) continue;
+                    if (_isPaperFillOnlyMasterMask(children[ci], cb, pageBounds)) continue;
+                    pageItems.push({
+                        item: children[ci],
+                        bounds: cb,
+                        sourceDepthOrder: (sourceDepthOrder * 1000) + (children.length - 1 - ci)
+                    });
+                } catch (eChildEntry) {}
+            }
+            return;
+        }
+        pageItems.push({
+            item: item,
+            bounds: bounds,
+            sourceDepthOrder: sourceDepthOrder
+        });
+    }
+
     function _collectIdsForMasterItems(entries) {
         var ids = [], seen = {};
         for (var i = 0; i < entries.length; i++) {
@@ -346,32 +600,282 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
         return _sourceSetKey(a || []) === _sourceSetKey(b || []);
     }
 
-    function _findMasterCandidateForSources(pageIndex, sourceIds) {
+    function _masterCandidateComparableSourceIds(candidate) {
+        if (!candidate) return [];
+        if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0) {
+            return candidate.exportSourceObjectIds;
+        }
+        if (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0) {
+            return candidate.visualSourceObjectIds;
+        }
+        if (candidate.executionSourceObjectIds && candidate.executionSourceObjectIds.length > 0) {
+            return candidate.executionSourceObjectIds;
+        }
+        return candidate.sourceObjectIds || [];
+    }
+
+    function _normalizeMasterClusterMatchSourceIds(sourceIds, hiddenTextSourceIds) {
+        if (!sourceIds || sourceIds.length === 0) return [];
+        var normalized = sourceIds.slice(0);
+        if (hiddenTextSourceIds && hiddenTextSourceIds.length > 0) {
+            normalized = _removeSourceIds(normalized, hiddenTextSourceIds);
+        }
+        return normalized;
+    }
+
+    function _findMasterCandidateForSources(pageIndex, sourceIds, hiddenTextSourceIds, allowSuperset) {
         if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return null;
         if (!sourceIds || sourceIds.length === 0) return null;
+        if (allowSuperset === undefined || allowSuperset === null) allowSuperset = true;
+        var matchSourceIds = _normalizeMasterClusterMatchSourceIds(sourceIds, hiddenTextSourceIds);
+        if (!matchSourceIds || matchSourceIds.length === 0) matchSourceIds = sourceIds;
         var list = masterCandidatesByPage[String(pageIndex)] || [];
         var bestSuperset = null;
         var bestSupersetSize = 999999;
         for (var i = 0; i < list.length; i++) {
             var candidate = list[i];
-            if (!candidate || !candidate.sourceObjectIds || candidate.sourceObjectIds.length === 0) continue;
-            if (_sameSourceSet(candidate.sourceObjectIds, sourceIds)) {
+            var candidateSourceIds = _masterCandidateComparableSourceIds(candidate);
+            if (!candidate || !candidateSourceIds || candidateSourceIds.length === 0) continue;
+            if (_sameSourceSet(candidateSourceIds, sourceIds)) {
                 return _candidateMatch(candidate, "candidate_source_set_direct");
+            }
+            if (_sameSourceSet(candidateSourceIds, matchSourceIds)) {
+                return _candidateMatch(candidate, "candidate_source_set_without_hidden_master_text");
             }
             // Master composite candidates are declared from the applied master
             // source graph. During export, a visible cluster can be a strict
             // subset of that declared graph because only items intersecting
             // the concrete master page side are overridden/exported. This is
             // still an execution of the Stage 1 candidate, not new ownership.
-            if (candidate.composite === true
-                    && _sourceSetContainsAll(candidate.sourceObjectIds, sourceIds)
-                    && candidate.sourceObjectIds.length < bestSupersetSize) {
+            if (allowSuperset
+                    && candidate.composite === true
+                    && _sourceSetContainsAll(candidateSourceIds, matchSourceIds)
+                    && candidateSourceIds.length < bestSupersetSize) {
                 bestSuperset = candidate;
-                bestSupersetSize = candidate.sourceObjectIds.length;
+                bestSupersetSize = candidateSourceIds.length;
             }
         }
         if (bestSuperset) {
             return _candidateMatch(bestSuperset, "candidate_source_set_contains_master_cluster");
+        }
+        return null;
+    }
+
+    function _findInlineCandidateForMasterDirectSources(pageIndex, sourceIds) {
+        if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return null;
+        if (!sourceIds || sourceIds.length === 0) return null;
+        var list = inlineCandidatesByPage[String(pageIndex)] || [];
+        var best = null;
+        var bestSize = 999999;
+        for (var i = 0; i < list.length; i++) {
+            var candidate = list[i];
+            if (!candidate || !candidate.sourceObjectIds || candidate.sourceObjectIds.length === 0) continue;
+            if (!_sourceSetContainsAll(sourceIds, candidate.sourceObjectIds)) continue;
+            var candidateSize = candidate.sourceObjectIds.length;
+            if (candidateSize < bestSize) {
+                best = candidate;
+                bestSize = candidateSize;
+            }
+        }
+        return best ? _candidateMatch(best, "candidate_inline_source_set_contained_by_master_direct") : null;
+    }
+
+    function _appliedMasterSnapshotCandidate(pageIndex) {
+        if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return null;
+        var list = masterCandidatesByPage[String(pageIndex)] || [];
+        if (!list || list.length === 0) return null;
+        var best = null;
+        var bestScore = -999999;
+        for (var i = 0; i < list.length; i++) {
+            var candidate = list[i];
+            if (!candidate) continue;
+            var ids = _masterCandidateComparableSourceIds(candidate);
+            if (!ids || ids.length === 0) continue;
+            var score = ids.length;
+            if (candidate.slotRole === "page_background_plane"
+                    || candidate.compositeRole === "page_background_plane") score += 100000;
+            if (candidate.passId === "pass.master_page_graphics") score += 10000;
+            if (candidate.composite === true) score += 1000;
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return best ? _candidateMatch(best, "applied_master_snapshot_candidate") : null;
+    }
+
+    function _isTopLevelPageLocalItem(item, page) {
+        try {
+            if (!item || !page) return false;
+            try {
+                var parentPage = item.parentPage;
+                if (!parentPage || parentPage.id !== page.id) return false;
+            } catch (eParentPage) {
+                return false;
+            }
+            var cur = item.parent;
+            var guard = 0;
+            while (cur && guard++ < 16) {
+                var kind = "";
+                try { kind = cur.constructor.name; } catch (eKind) { break; }
+                if (kind === "Page") {
+                    try { return cur.id === page.id; } catch (ePageId) { return false; }
+                }
+                if (kind === "Spread") return true;
+                if (kind === "Document" || kind === "MasterSpread") return false;
+                if (kind === "Group" || kind === "TextFrame" || kind === "Rectangle"
+                        || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine") {
+                    return false;
+                }
+                try { cur = cur.parent; } catch (eParent) { break; }
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function _hidePageLocalItemsForAppliedMasterSnapshot(page) {
+        var saved = [];
+        try {
+            var items = page.allPageItems;
+            for (var i = 0; items && i < items.length; i++) {
+                try {
+                    var item = items[i];
+                    if (!_isTopLevelPageLocalItem(item, page)) continue;
+                    var wasVisible = true;
+                    try { wasVisible = item.visible !== false; } catch (eVisible) { wasVisible = true; }
+                    if (!wasVisible) continue;
+                    saved.push({ item: item, visible: wasVisible });
+                    item.visible = false;
+                } catch (eItem) {}
+            }
+        } catch (e) {}
+        return saved;
+    }
+
+    function _restorePageLocalItemsForAppliedMasterSnapshot(saved) {
+        for (var i = 0; saved && i < saved.length; i++) {
+            try {
+                if (saved[i] && saved[i].item && saved[i].item.isValid) {
+                    saved[i].item.visible = saved[i].visible;
+                }
+            } catch (e) {}
+        }
+    }
+
+    function _exportAppliedMasterSnapshotPage(page, file) {
+        if (!page || !file) return false;
+        var ok = false;
+        try {
+            page.exportFile(ExportFormat.PNG_FORMAT, file, false);
+            ok = file.exists;
+        } catch (ePageExport) {
+            dbg("  appliedMasterSnapshot page.exportFile failed: " + ePageExport);
+        }
+        if (ok) return true;
+
+        var savedPageString;
+        var hadPageString = false;
+        try {
+            savedPageString = app.pngExportPreferences.pageString;
+            hadPageString = true;
+            app.pngExportPreferences.pageString = String(page.name);
+            doc.exportFile(ExportFormat.PNG_FORMAT, file, false);
+            ok = file.exists;
+        } catch (eDocExport) {
+            dbg("  appliedMasterSnapshot doc.exportFile failed page=" + page.name + ": " + eDocExport);
+        } finally {
+            try {
+                if (hadPageString) app.pngExportPreferences.pageString = savedPageString;
+            } catch (eRestorePageString) {}
+        }
+        return ok;
+    }
+
+    function _tryCreateAppliedMasterSnapshotResult(pgEntry, msId, masterPageIdx) {
+        // Do not materialize an applied-page snapshot as a master graphic.
+        //
+        // Stage 1 candidates name the exact source bundle to execute. Exporting
+        // the concrete document page here (`page.exportFile`) can capture
+        // page-local graphics that are not part of that master source bundle,
+        // producing duplicate page backgrounds/content. Master graphics are
+        // therefore emitted only through the source-scoped master cluster/direct
+        // exports below.
+        return null;
+        try {
+            if (!pgEntry || pgEntry.docIdx === null || pgEntry.docIdx === undefined) return null;
+            var candidateMatch = _appliedMasterSnapshotCandidate(pgEntry.docIdx);
+            if (!candidateMatch || !candidateMatch.candidate) return null;
+            var page = doc.pages[pgEntry.docIdx];
+            if (!page) return null;
+            var pageBounds = null;
+            try { pageBounds = arrCopy(page.bounds); } catch (eBounds) {}
+            if (!pageBounds || pageBounds.length < 4) return null;
+
+            var fileName = "master_applied_" + String(msId) + "_" +
+                    String(masterPageIdx) + "_pi" + String(pgEntry.docIdx) + ".png";
+            var outFile = File(renderDir + "/" + fileName);
+            var hidden = _hidePageLocalItemsForAppliedMasterSnapshot(page);
+            var hiddenMasterText = [];
+            try {
+                try { hiddenMasterText = _hideMasterTextlessTextContent(page.appliedMaster); } catch (eHideMaster) {}
+                if (!_exportAppliedMasterSnapshotPage(page, outFile)) return null;
+            } finally {
+                try { restoreTextFrames(hiddenMasterText); } catch (eRestoreMaster) {}
+                _restorePageLocalItemsForAppliedMasterSnapshot(hidden);
+            }
+            if (!outFile.exists || outFile.length <= 0) return null;
+
+            var candidate = candidateMatch.candidate;
+            var sourceIds = (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0)
+                    ? candidate.sourceObjectIds
+                    : _masterCandidateComparableSourceIds(candidate);
+            var exportIds = (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0)
+                    ? candidate.exportSourceObjectIds
+                    : sourceIds;
+            var relBounds = [
+                0,
+                0,
+                Number(pageBounds[2]) - Number(pageBounds[0]),
+                Number(pageBounds[3]) - Number(pageBounds[1])
+            ];
+            dbg("  appliedMasterSnapshot result docIdx=" + pgEntry.docIdx +
+                " rel=[" + relBounds.join(",") + "] file=" + fileName);
+            var resultEntry = applyRenderOwnership({
+                id: parseInt(msId, 10) * 100000 + pgEntry.docIdx,
+                candidateId: candidateMatch.candidateId,
+                candidateMatchStrategy: candidateMatch.strategy,
+                file: "rendered_frames/" + fileName,
+                bounds: relBounds,
+                pageIndex: pgEntry.docIdx,
+                zOrder: MASTER_PAGE_GRAPHICS_PLANE_Z_ORDER,
+                isMasterGraphic: true,
+                type: "page_object",
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                planPassId: "pass.master_page_graphics",
+                slotRole: candidate.slotRole || "page_background_plane",
+                compositeRole: candidate.compositeRole || "page_background_plane",
+                visualLayer: candidate.visualLayer || "PAGE_BACKGROUND",
+                layerIndex: candidate.sourceLayerIndex !== undefined && candidate.sourceLayerIndex !== null
+                        ? candidate.sourceLayerIndex
+                        : 0
+            }, null, {
+                sourceObjectIds: sourceIds,
+                exportSourceObjectIds: exportIds,
+                editableTextFrameIds: [],
+                textFrameIds: [],
+                hiddenTextFrameIds: [],
+                textHiddenBeforeExport: false,
+                textOwner: "none",
+                containsText: false,
+                containsEditableText: false,
+                placementAllowed: true,
+                reason: "applied_master_snapshot"
+            });
+            _copyMasterMatchedCandidateContract(resultEntry, candidate);
+            return resultEntry;
+        } catch (e) {
+            dbg("  appliedMasterSnapshot result error: " + e);
         }
         return null;
     }
@@ -405,8 +909,12 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
     function _isMasterTextlessTextFrame(tf) {
         try {
             if (!tf || tf.constructor.name !== "TextFrame") return false;
-            if (_isDynamicMasterTextFrame(tf)) return true;
-            return _textFrameHasContent(tf);
+            // Applied-master visual planes are PNG-owned. Static master labels
+            // such as section-end badges are part of the master graphic, even
+            // when InDesign represents the lettering as a TextFrame. Hide only
+            // dynamic text variables such as page numbers, which are emitted by
+            // the HWPX text/page-number path.
+            return _isDynamicMasterTextFrame(tf);
         } catch (e) {}
         return false;
     }
@@ -501,7 +1009,9 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             if (exportedMasterByPage[masterKey] !== undefined) continue;
 
             var mpBnds = null;
-            try { mpBnds = mspread.pages[mpIdx].bounds; } catch (e) { continue; }
+            var masterPage = null;
+            try { masterPage = mspread.pages[mpIdx]; } catch (eMasterPage) { masterPage = null; }
+            try { mpBnds = masterPage ? masterPage.bounds : null; } catch (e) { continue; }
             if (!mpBnds || mpBnds.length < 4) continue;
             dbg("  masterPage[" + mpIdx + "] bounds=[" + mpBnds.join(",") + "]");
 
@@ -512,16 +1022,20 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             for (var pii = 0; pii < masterGraphicItems.length; pii++) {
                 try {
                     var pib = _masterItemBounds(masterGraphicItems[pii]);
-                    if (pib && _masterItemBelongsToPage(pib, mpBnds)) {
+                    var itemOnMasterSide = _masterItemBelongsToMasterSide(masterGraphicItems[pii], masterPage);
+                    if (pib && (itemOnMasterSide || _masterItemBelongsToPage(pib, mpBnds))) {
                         // InDesign's master allPageItems order is part of the
                         // source depth evidence. Earlier entries are visually
                         // above later master background faces, so convert the
                         // order into an HWPX-increasing z depth once here.
-                        pageItems.push({
-                            item: masterGraphicItems[pii],
-                            bounds: pib,
-                            sourceDepthOrder: masterGraphicItems.length - 1 - pii
-                        });
+                        _appendMasterPageEntries(
+                            pageItems,
+                            masterGraphicItems[pii],
+                            pib,
+                            mpBnds,
+                            masterGraphicItems.length - 1 - pii,
+                            masterPage
+                        );
                     }
                 } catch (e) {}
             }
@@ -543,11 +1057,15 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             for (var ci = 0; ci < clusters.length; ci++) {
                 var clusterItems = clusters[ci];
                 var clusterSourceIds = _collectIdsForMasterItems(clusterItems);
+                var hiddenTextSourceIds = _collectMasterTextlessTextFrameIds(clusterItems);
                 var plannedOnAppliedPage = false;
                 var appliedPages = masterToPages[msId] || [];
                 for (var api = 0; api < appliedPages.length; api++) {
                     if (appliedPages[api].masterPageIdx !== mpIdx) continue;
-                    if (_findMasterCandidateForSources(appliedPages[api].docIdx, clusterSourceIds)) {
+                    if (_findMasterCandidateForSources(
+                            appliedPages[api].docIdx,
+                            clusterSourceIds,
+                            hiddenTextSourceIds)) {
                         plannedOnAppliedPage = true;
                         break;
                     }
@@ -565,7 +1083,6 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                 var overriddenSourceEntries = [];
                 var directSourceEntries = [];
                 var hiddenText = [];
-                var hiddenTextSourceIds = _collectMasterTextlessTextFrameIds(clusterItems);
                 var grpBnds = null;
                 var originalClusterBnds = _unionMasterEntryBounds(clusterItems);
                 try {
@@ -660,6 +1177,10 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                                 cropSourceBnds[3] - relBase[1]
                             ];
                         }
+                        _copyMasterEntryLayerInfo(
+                            exportedCluster,
+                            _primaryMasterLayerEntry(overriddenSourceEntries)
+                        );
                         exportedClusters.push(exportedCluster);
                         dbg("  relBounds[" + ci + "]: ["+exportedCluster.relTop+","+exportedCluster.relLeft+
                             ","+exportedCluster.relBottom+","+exportedCluster.relRight+"]" +
@@ -699,13 +1220,9 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                             relBottom: directVisibleBounds[2] - mpBnds[0],
                             relRight:  directVisibleBounds[3] - mpBnds[1],
                             sourceObjectIds: directSourceIds,
-                            sourceZOrder: directEntry.sourceDepthOrder
+                            sourceZOrder: directEntry.sourceDepthOrder,
+                            masterDirectChildCluster: true
                         };
-                        var directInlineAnchorSourceId = _directInlineAnchorSourceId(directEntry, directSourceIds);
-                        if (directInlineAnchorSourceId !== null && directInlineAnchorSourceId !== undefined) {
-                            directCluster.inlineAnchorSourceObjectId = directInlineAnchorSourceId;
-                            directCluster.inlineSourceTreeClosed = true;
-                        }
                         if (directHiddenTextSourceIds.length > 0) {
                             directCluster.hiddenTextFrameIds = directHiddenTextSourceIds;
                         }
@@ -726,6 +1243,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                                 directBounds[3] - mpBnds[1]
                             ];
                         }
+                        _copyMasterEntryLayerInfo(directCluster, directEntry);
                         exportedClusters.push(directCluster);
                         dbg("  directMaster[" + ci + "." + foi + "]: " + directName +
                             " rel=[" + directCluster.relTop + "," + directCluster.relLeft +
@@ -752,6 +1270,12 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
             var masterKey2 = msId2 + "_" + pgEntry.masterPageIdx;
             var masters = exportedMasterByPage[masterKey2];
             if (!masters || masters.length === 0) continue;
+            var appliedMasterSnapshot = _tryCreateAppliedMasterSnapshotResult(
+                    pgEntry, msId2, pgEntry.masterPageIdx);
+            if (appliedMasterSnapshot) {
+                results.push(appliedMasterSnapshot);
+                continue;
+            }
             for (var mi = 0; mi < masters.length; mi++) {
                 var master = masters[mi];
                 if (!master) continue;
@@ -761,46 +1285,89 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage, masterCand
                         master.relBottom,
                         master.relRight
                     ])) continue;
-                var masterCandidateMatch = _findMasterCandidateForSources(
+                var isDirectMasterFragment = master.masterDirectChildCluster === true;
+                var inlineCandidateMatch = isDirectMasterFragment
+                        ? _findInlineCandidateForMasterDirectSources(
+                                pgEntry.docIdx,
+                                master.sourceObjectIds || [parseInt(msId2, 10)])
+                        : null;
+                var masterCandidateMatch = inlineCandidateMatch || _findMasterCandidateForSources(
                         pgEntry.docIdx,
-                        master.sourceObjectIds || [parseInt(msId2, 10)]);
+                        master.sourceObjectIds || [parseInt(msId2, 10)],
+                        master.hiddenTextFrameIds || [],
+                        true);
                 if (!masterCandidateMatch) {
                     dbg("  SKIP result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
                         " cluster=" + mi + ": no applied-page candidate at result creation");
                     continue;
                 }
+                var matchedCandidate = masterCandidateMatch ? (masterCandidateMatch.candidate || null) : null;
+                var matchedInline = inlineCandidateMatch && matchedCandidate;
+                var resultSourceObjectIds = isDirectMasterFragment
+                        ? (master.sourceObjectIds || [parseInt(msId2, 10)])
+                        : (matchedCandidate && matchedCandidate.sourceObjectIds
+                        && matchedCandidate.sourceObjectIds.length > 0
+                        ? matchedCandidate.sourceObjectIds
+                        : (master.sourceObjectIds || [parseInt(msId2, 10)]));
+                var resultExportSourceObjectIds = isDirectMasterFragment
+                        ? resultSourceObjectIds
+                        : (matchedCandidate && matchedCandidate.exportSourceObjectIds
+                        && matchedCandidate.exportSourceObjectIds.length > 0
+                        ? matchedCandidate.exportSourceObjectIds
+                        : resultSourceObjectIds);
                 dbg("  result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
                     " cluster=" + mi +
                     " rel=["+master.relTop+","+master.relLeft+","+master.relBottom+","+master.relRight+"]");
                 var pageTextFrameIds = _pageCloneTextFrameIds(master.hiddenTextFrameIds, pgEntry.docIdx);
-                results.push(applyRenderOwnership({
+                var localSlotRole = matchedInline
+                        ? (matchedCandidate.slotRole || matchedCandidate.ownershipSlot || "CONTENT_VISUAL_SLOT")
+                        : (pageTextFrameIds.length > 0 ? "TEXTLESS_SHELL_SLOT" : "CONTENT_VISUAL_SLOT");
+                var resultEntry = applyRenderOwnership({
                     id: parseInt(msId2, 10) * 100 + mi,
-                    candidateId: masterCandidateMatch.candidateId,
-                    candidateMatchStrategy: masterCandidateMatch.strategy,
+                    candidateId: masterCandidateMatch ? masterCandidateMatch.candidateId : null,
+                    candidateMatchStrategy: masterCandidateMatch ? masterCandidateMatch.strategy : null,
                     file: master.relPath,
                     bounds: [master.relTop, master.relLeft, master.relBottom, master.relRight],
                     cropSourceBounds: master.cropSourceBounds,
                     inlineAnchorSourceObjectId: master.inlineAnchorSourceObjectId,
                     inlineSourceTreeClosed: master.inlineSourceTreeClosed === true,
                     pageIndex: pgEntry.docIdx,
-                    zOrder: master.sourceZOrder !== null && master.sourceZOrder !== undefined
-                            ? master.sourceZOrder
-                            : mi,
-                    isMasterGraphic: true
+                    zOrder: matchedInline
+                            ? (master.sourceZOrder !== null && master.sourceZOrder !== undefined
+                                ? master.sourceZOrder
+                                : mi)
+                            : MASTER_PAGE_GRAPHICS_PLANE_Z_ORDER,
+                    isMasterGraphic: !matchedInline,
+                    type: matchedInline ? "inline_object" : "page_object",
+                    placementRole: matchedInline ? "inline_object" : null,
+                    placement: matchedInline ? "INLINE" : "FLOATING",
+                    coordinateSpace: matchedInline ? "STORY_FLOW" : "PAGE",
+                    planPassId: matchedInline ? "pass.inline_objects" : "pass.master_page_graphics",
+                    slotRole: localSlotRole
                 }, null, {
-                    sourceObjectIds: master.sourceObjectIds || [parseInt(msId2, 10)],
-                    editableTextFrameIds: pageTextFrameIds,
-                    textFrameIds: pageTextFrameIds,
-                    hiddenTextFrameIds: pageTextFrameIds,
-                    textHiddenBeforeExport: pageTextFrameIds.length > 0,
-                    textOwner: pageTextFrameIds.length > 0 ? "hwpx_tf" : "none",
+                    sourceObjectIds: resultSourceObjectIds,
+                    exportSourceObjectIds: resultExportSourceObjectIds,
+                    editableTextFrameIds: matchedInline ? [] : pageTextFrameIds,
+                    textFrameIds: matchedInline ? [] : pageTextFrameIds,
+                    hiddenTextFrameIds: matchedInline ? [] : pageTextFrameIds,
+                    textHiddenBeforeExport: matchedInline ? false : pageTextFrameIds.length > 0,
+                    textOwner: matchedInline ? "none" : (pageTextFrameIds.length > 0 ? "hwpx_tf" : "none"),
                     containsText: false,
                     containsEditableText: false,
                     placementAllowed: true,
-                    reason: pageTextFrameIds.length > 0
+                    reason: matchedInline
+                            ? "inline_graphic_only"
+                            : (pageTextFrameIds.length > 0
                             ? "master_graphic_textless"
-                            : "master_graphic"
-                }));
+                            : "master_graphic")
+                });
+                if (master.layerId !== undefined && master.layerId !== null) resultEntry.layerId = master.layerId;
+                if (master.layerName !== undefined && master.layerName !== null) resultEntry.layerName = master.layerName;
+                if (master.layerIndex !== undefined && master.layerIndex !== null) resultEntry.layerIndex = master.layerIndex;
+                if (matchedCandidate) {
+                    _copyMasterMatchedCandidateContract(resultEntry, matchedCandidate);
+                }
+                results.push(resultEntry);
             }
         }
     }

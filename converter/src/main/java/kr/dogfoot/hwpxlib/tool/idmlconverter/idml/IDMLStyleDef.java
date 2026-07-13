@@ -38,6 +38,7 @@ public class IDMLStyleDef {
     private String ruleAboveColor;      // 단락 위선 색상
     private String ruleBelowColor;      // 단락 아래선 색상
     private Double baselineShift;  // 기준선 이동 (points)
+    private String position;       // Subscript / Superscript / Normal
     private String capitalization;  // "SmallCaps", "AllCaps", "Normal"
 
     // 단락 분리 제어
@@ -207,6 +208,9 @@ public class IDMLStyleDef {
 
     public Double baselineShift() { return baselineShift; }
     public void baselineShift(Double v) { this.baselineShift = v; }
+
+    public String position() { return position; }
+    public void position(String v) { this.position = v; }
 
     public String capitalization() { return capitalization; }
     public void capitalization(String v) { this.capitalization = v; }

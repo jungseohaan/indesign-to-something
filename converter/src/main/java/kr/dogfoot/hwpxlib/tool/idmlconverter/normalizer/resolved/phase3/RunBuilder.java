@@ -15,7 +15,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildCo
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Phase 3 런 빌드 + 매칭 + 스타일 헬퍼 (W3 Step F).
@@ -23,6 +27,21 @@ import java.util.List;
  */
 class RunBuilder {
     private RunBuilder() {}
+
+    private static final Set<String> CHEMICAL_ELEMENT_SYMBOLS = new HashSet<>(Arrays.asList(
+            "H","He","Li","Be","B","C","N","O","F","Ne",
+            "Na","Mg","Al","Si","P","S","Cl","Ar","K","Ca",
+            "Sc","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn",
+            "Ga","Ge","As","Se","Br","Kr","Rb","Sr","Y","Zr",
+            "Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn",
+            "Sb","Te","I","Xe","Cs","Ba","La","Ce","Pr","Nd",
+            "Pm","Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb",
+            "Lu","Hf","Ta","W","Re","Os","Ir","Pt","Au","Hg",
+            "Tl","Pb","Bi","Po","At","Rn","Fr","Ra","Ac","Th",
+            "Pa","U","Np","Pu","Am","Cm","Bk","Cf","Es","Fm",
+            "Md","No","Lr","Rf","Db","Sg","Bh","Hs","Mt","Ds",
+            "Rg","Cn","Nh","Fl","Mc","Lv","Ts","Og"
+    ));
 
     /** 기본 매칭 신뢰도(LOW)로 createRunFromIDML 호출 — 호환용 래퍼. */
     static ASTTextRun createRunFromIDML(ResolvedBuildContext ctx, IDMLCharacterRun cr, String text, ResolvedRun rr, StoryConverter.StyleContext sc) {
@@ -82,6 +101,10 @@ class RunBuilder {
             text = EHFontGlyphMap.applyEHGrepAsciiGlyphMap(text);
         }
         tr.text(text);
+        String characterStyleRef = resolvedCharacterStyleRef(rr, cr);
+        if (characterStyleRef != null) {
+            tr.characterStyleRef(characterStyleRef);
+        }
 
         // fontFamily / fontSize / textColor: 헬퍼로 단일 우선순위 적용
         // SPEC-016: 매칭 신뢰도(confidence)에 따라 resolved 오버라이드 여부 결정
@@ -143,7 +166,7 @@ class RunBuilder {
             Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
                     ? cr.tracking() : sc.tracking;
             if (trackingVal != null && trackingVal != 0) {
-                // SPEC-029: IDML tracking 1/1000 em → HWPX spacing % (1/100 em). 표준 변환은 /10.
+                // resolved spacing policy: IDML tracking 1/1000 em → HWPX spacing % (1/100 em). 표준 변환은 /10.
                 // (이전 한국어 fontName 케이스는 × 0.5 = ×50 적용으로 자간 5배 과대 → 제거)
                 tr.letterSpacing((short) Math.round(trackingVal / 10.0));
             }
@@ -160,13 +183,18 @@ class RunBuilder {
             // HWPX fonts do not enlarge the symbol relative to the source.
             applyMarkerScaleFromResolved(tr, rr);
         }
+        // IDML Position/Resolved position is the authoritative source for
+        // chemical-formula subscripts and mathematical superscripts. Some
+        // sources encode this as Position=SUBSCRIPT without a baselineShift,
+        // so the baselineShift heuristic below is not sufficient on its own.
+        applyPositionStyle(tr, rr, cr);
         // baselineShift: InDesign에서 작은 글자 + 양수 baselineShift = 위첨자,
         // 작은 글자 + 음수 baselineShift = 아래첨자 패턴을 감지하여 sup/subscript로 변환
         // resolved 우선, IDML CR fallback
         Double bsVal = (rr != null && rr.baselineShift() != null && rr.baselineShift() != 0)
                 ? rr.baselineShift()
                 : (cr.baselineShift() != null && cr.baselineShift() != 0 ? cr.baselineShift() : null);
-        if (bsVal != null) {
+        if (bsVal != null && !tr.subscript() && !tr.superscript()) {
             double bsPt = bsVal;
             // 인접 런의 fontSize 비교: 현재 런이 주변보다 작으면 첨자로 판별
             double curFs = (rr != null && rr.fontSize() != null && rr.fontSize() > 0) ? rr.fontSize()
@@ -255,6 +283,45 @@ class RunBuilder {
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
+    }
+
+    private static void applyPositionStyle(ASTTextRun target, ResolvedRun rr, IDMLCharacterRun cr) {
+        String position = explicitPosition(rr != null ? rr.position() : null);
+        if (position == null) {
+            position = explicitPosition(cr != null ? cr.position() : null);
+        }
+        if (position == null) return;
+        String p = position.toLowerCase(Locale.ROOT);
+        if (p.contains("superscript")) {
+            target.superscript(true);
+            target.subscript(false);
+        } else if (p.contains("subscript")) {
+            target.subscript(true);
+            target.superscript(false);
+        }
+    }
+
+    private static String explicitPosition(String position) {
+        if (position == null || position.trim().isEmpty()) return null;
+        String p = position.toLowerCase(Locale.ROOT);
+        return p.contains("normal") ? null : position;
+    }
+
+    private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr) {
+        String style = rr != null ? rr.charStyle() : null;
+        if (isUsableCharacterStyleRef(style)) return style;
+        style = cr != null ? cr.appliedCharacterStyle() : null;
+        if (isUsableCharacterStyleRef(style)) return style;
+        return null;
+    }
+
+    private static boolean isUsableCharacterStyleRef(String style) {
+        if (style == null) return false;
+        String trimmed = style.trim();
+        return !trimmed.isEmpty()
+                && !"[None]".equals(trimmed)
+                && !"[없음]".equals(trimmed)
+                && !"CharacterStyle/$ID/[No character style]".equals(trimmed);
     }
 
     private static String normalizeComparableText(String text) {
@@ -573,6 +640,101 @@ class RunBuilder {
         }
     }
 
+    static void splitChemicalFormulasAndLatinVarsInMixedText(ResolvedBuildContext ctx,
+                                                              ASTTextRun originalRun,
+                                                              ASTParagraph para) {
+        String text = originalRun.text();
+        if (text == null || text.isEmpty()) {
+            para.addItem(originalRun);
+            return;
+        }
+
+        int cursor = 0;
+        boolean emitted = false;
+        while (cursor < text.length()) {
+            FormulaTokenMatch match = findNextChemicalFormulaToken(text, cursor);
+            if (match == null) break;
+
+            if (match.start > cursor) {
+                ASTTextRun before = cloneRunWithText(ctx, originalRun, text.substring(cursor, match.start));
+                splitLatinVarsInMixedText(ctx, before, para);
+            }
+
+            emitChemicalFormulaToken(ctx, originalRun, para, match.token);
+            emitted = true;
+            cursor = match.endExclusive;
+        }
+
+        if (!emitted) {
+            splitLatinVarsInMixedText(ctx, originalRun, para);
+            return;
+        }
+
+        if (cursor < text.length()) {
+            ASTTextRun after = cloneRunWithText(ctx, originalRun, text.substring(cursor));
+            splitLatinVarsInMixedText(ctx, after, para);
+        }
+    }
+
+    private static void emitChemicalFormulaToken(ResolvedBuildContext ctx,
+                                                 ASTTextRun templateRun,
+                                                 ASTParagraph para,
+                                                 String token) {
+        para.addItem(cloneRunWithText(ctx, templateRun, token));
+    }
+
+    private static FormulaTokenMatch findNextChemicalFormulaToken(String text, int fromIndex) {
+        for (int i = Math.max(0, fromIndex); i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (!Character.isUpperCase(ch)) continue;
+            FormulaTokenMatch match = tryParseChemicalFormulaToken(text, i);
+            if (match != null) return match;
+        }
+        return null;
+    }
+
+    private static FormulaTokenMatch tryParseChemicalFormulaToken(String text, int start) {
+        if (start < 0 || start >= text.length()) return null;
+        if (!Character.isUpperCase(text.charAt(start))) return null;
+        if (start > 0 && Character.isLetterOrDigit(text.charAt(start - 1))) return null;
+
+        int i = start;
+        boolean hasDigit = false;
+        boolean parsedAnyElement = false;
+        while (i < text.length()) {
+            int elementEnd = i + 1;
+            if (elementEnd < text.length() && Character.isLowerCase(text.charAt(elementEnd))) {
+                elementEnd++;
+            }
+            String symbol = text.substring(i, elementEnd);
+            if (!CHEMICAL_ELEMENT_SYMBOLS.contains(symbol)) break;
+            parsedAnyElement = true;
+            i = elementEnd;
+
+            int digitStart = i;
+            while (i < text.length() && Character.isDigit(text.charAt(i))) {
+                i++;
+            }
+            if (i > digitStart) hasDigit = true;
+        }
+
+        if (!parsedAnyElement || !hasDigit) return null;
+        if (i < text.length() && Character.isLetterOrDigit(text.charAt(i))) return null;
+        return new FormulaTokenMatch(start, i, text.substring(start, i));
+    }
+
+    private static final class FormulaTokenMatch {
+        final int start;
+        final int endExclusive;
+        final String token;
+
+        FormulaTokenMatch(int start, int endExclusive, String token) {
+            this.start = start;
+            this.endExclusive = endExclusive;
+            this.token = token;
+        }
+    }
+
     static ASTTextRun cloneRunWithText(ResolvedBuildContext ctx, ASTTextRun src, String text) {
         ASTTextRun tr = new ASTTextRun();
         tr.text(text);
@@ -583,6 +745,8 @@ class RunBuilder {
         tr.shadeColor(src.shadeColor());
         tr.letterSpacing(src.letterSpacing());
         tr.grepMathFont(src.grepMathFont());
+        tr.subscript(src.subscript());
+        tr.superscript(src.superscript());
         tr.underline(src.underline());
         tr.underlineShape(src.underlineShape());
         tr.underlineColor(src.underlineColor());
@@ -836,7 +1000,7 @@ class RunBuilder {
 
             ASTTextRun tr = createRunFromIDML(ctx, cr, seg.text, effectiveRr, sc, effConf);
             if (!splitBulletRun(ctx, tr, para)) {
-                splitLatinVarsInMixedText(ctx, tr, para);
+                splitChemicalFormulasAndLatinVarsInMixedText(ctx, tr, para);
             }
         }
         return true;

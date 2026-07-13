@@ -141,10 +141,28 @@ def collect_source_items(extraction_plan: Any, source_ids: Set[int], page: Optio
     return out
 
 
+def source_items_document(extraction_plan: Any, source_graph: Any) -> Dict[str, Any]:
+    if isinstance(extraction_plan, dict) and extraction_plan.get("sourceItems"):
+        return extraction_plan
+    if isinstance(source_graph, dict) and source_graph.get("nodes"):
+        return {"sourceItems": source_graph.get("nodes") or []}
+    if isinstance(source_graph, dict) and source_graph.get("nodePreview"):
+        return {"sourceItems": source_graph.get("nodePreview") or []}
+    if isinstance(extraction_plan, dict):
+        summary = extraction_plan.get("sourceItemSummary")
+        if isinstance(summary, dict) and summary.get("sourceItemPreview"):
+            return {"sourceItems": summary.get("sourceItemPreview") or []}
+    return extraction_plan if isinstance(extraction_plan, dict) else {}
+
+
 def collect_candidates(extraction_plan: Any, source_ids: Set[int], page: Optional[int], snippet: Optional[str]) -> List[Dict[str, Any]]:
     if not isinstance(extraction_plan, dict):
         return []
     rows = extraction_plan.get("candidates") or []
+    if not rows:
+        summary = extraction_plan.get("candidateSummary")
+        if isinstance(summary, dict):
+            rows = summary.get("candidatePreview") or []
     out: List[Dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict) or not page_matches(row, page):
@@ -279,6 +297,8 @@ def write_markdown(path: Path, report: Dict[str, Any]) -> None:
 
 def build_report(extract_dir: Path, source_ids: Set[int], page: Optional[int], snippet: Optional[str]) -> Dict[str, Any]:
     extraction_plan = load_json(extract_dir / "extraction-plan.json")
+    source_graph = load_json(extract_dir / "source-graph.json")
+    source_items_doc = source_items_document(extraction_plan, source_graph)
     object_plans_json = load_json(extract_dir / "object-plans.json")
     extraction_results = load_json(extract_dir / "extraction-results.json")
     text_flows = load_jsonl(extract_dir / "text-flow.jsonl")
@@ -287,7 +307,7 @@ def build_report(extract_dir: Path, source_ids: Set[int], page: Optional[int], s
 
     text_flow_rows = collect_text_flows(text_flows, source_ids, page, snippet)
     source_ids = expand_sources([text_flow_rows], source_ids)
-    source_items = collect_source_items(extraction_plan, source_ids, page, snippet)
+    source_items = collect_source_items(source_items_doc, source_ids, page, snippet)
     candidates = collect_candidates(extraction_plan, source_ids, page, snippet)
     object_plans = collect_object_plans(object_plans_json, source_ids, page, snippet)
     ownership_rows = collect_jsonl(ownership_plan, source_ids, page, snippet)
@@ -300,7 +320,7 @@ def build_report(extract_dir: Path, source_ids: Set[int], page: Optional[int], s
     )
     if expanded != source_ids:
         text_flow_rows = collect_text_flows(text_flows, expanded, page, snippet)
-        source_items = collect_source_items(extraction_plan, expanded, page, snippet)
+        source_items = collect_source_items(source_items_doc, expanded, page, snippet)
         candidates = collect_candidates(extraction_plan, expanded, page, snippet)
         object_plans = collect_object_plans(object_plans_json, expanded, page, snippet)
         ownership_rows = collect_jsonl(ownership_plan, expanded, page, snippet)

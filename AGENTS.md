@@ -23,13 +23,11 @@ IDML/resolved 메타데이터와 `POLICY-source-ownership.md`만 ownership의 �
 ## 기준 문서
 
 - `docs/specs/POLICY-source-ownership.md` (Active / Canonical)
-- `docs/specs/SPEC-035-indesign-render-ownership.md` (legacy 이관 기록과 배경 설명)
-- 보조 SPEC:
-  - `docs/specs/SPEC-025-text-image-rendering-removal.md`
-  - `docs/specs/SPEC-028-inline-anchored-group-duplicate.md`
-  - `docs/specs/SPEC-033-badge-inline-simplification.md`
+- `docs/policy/` canonical modules
+- `docs/specs/POLICY-extraction-planning.md`
 
-`SPEC-035`와 source ownership policy가 충돌하면 항상 `POLICY-source-ownership.md`를 따른다.
+삭제된 legacy ownership SPEC는 참조하지 않는다. 필요한 규칙은 반드시
+`POLICY-source-ownership.md` 또는 `docs/policy/`에 표현한다.
 
 ## Stage 구조
 

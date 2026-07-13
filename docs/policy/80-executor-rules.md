@@ -7,18 +7,25 @@
 
 Executor emission order:
 
+- HWPX execution uses two planes: text/table structure and textless graphic
+  material. Executors may translate Stage 1 plans into those planes, but they
+  must not create additional foreground/background role bands.
 - Executor emission must preserve the finalized Stage 1 source-depth contract.
   When HWPX XML order affects overlapping objects in the same execution plane,
   emit planned objects back-to-front: smaller `ObjectPlan.zOrder` first, larger
   `ObjectPlan.zOrder` later. This is not a new ownership decision and must not
   recalculate, promote, demote, or drop any plan.
-- Pixel preparation must not remove the fill of a visual whose finalized policy
-  layer is `BACKGROUND`. Knockout/transparent-paper preparation is allowed only
-  for planned shell material where the fill is not the owned visual slot.
+- Pixel preparation must not remove the fill of a planned textless graphic.
+  Knockout/transparent-paper preparation is allowed only when Stage 1 explicitly
+  declares that the removed pixels are not the owned visual slot.
 
 Text Builder:
 
 - Emits only planned HWPX text/table text.
+- Emits editable HWPX table structure as visually neutral carriers. It must not
+  recreate table/cell decoration as HWPX cell fill, border, pattern, shadow, or
+  synthetic outer line. Visible table decoration must come from planned
+  textless graphic material.
 - Builds source story/cell flow before container placement. The flow already
   contains source inline anchors and planned inline objects.
 - A source tab is a TextFlow token and may be emitted only once. If Text Builder
@@ -49,10 +56,10 @@ Text Builder:
   and reported by validation when required material is missing.
 - Tables, TextFrames, and other containers consume the prepared flow; they do
   not recover missing inline objects by matching visible strings after layout.
-- Structural bridges such as side-head table normalization may execute only
-  when Stage 1 has already marked the source table with an explicit plan. If a
-  bridge recognizes an unplanned structural candidate, it records a validation
-  warning and leaves the AST unchanged.
+- Structural table bridges must not create or relocate ownership. If Stage 1
+  did not produce executable table/cell flow for a source cell, the executor
+  leaves that cell empty and reports missing required material through
+  validation instead of synthesizing structural or rescue content.
 - Executors must not synthesize a new inline text-shell `ObjectPlan` from
   resolved/page-item metadata. If Stage 1 did not plan an inline text shell, the
   executor leaves that anchor to the already planned text/visual owner.
@@ -61,6 +68,11 @@ Text Builder:
   `page_object` render is the canonical extracted shell for an inline source,
   the table-cell executor attaches that shell material to the same inline shell
   carrier.
+- If Stage 1 says a master-origin source is a story-flow inline visual, a
+  master direct export may be used only as that inline plan's material file.
+  The executor must stamp the result with the inline candidate, inline
+  placement, and story-flow coordinate space. It must not also emit a floating
+  master-page graphic owner for the same source slot.
 - Code must not rebuild cell text from a resolved story as a fallback. Missing
   cell text or missing inline anchors are Stage 1/Text Builder planning defects,
   not an invitation for executor recovery.
@@ -77,6 +89,11 @@ Text Builder:
   and after editable TextFrames, the executor materializes that same plan as
   source-ordered inline fragments: visual leaf, HWPX text, visual leaf. This is
   execution of source child order, not a new ownership or placement decision.
+- The source child order for that fragment materialization comes only from
+  `ObjectPlan.inlineFlowSourceObjectIds`. If the plan has hidden child visual
+  sources but lacks this array, execution reports a Stage 1 planning defect and
+  leaves the carrier unexpanded. The executor must not infer before/after order
+  from source bounds, rendered bounds, text content, or overlap.
 - If that inline shell has extracted PNG material, the executor uses the
   extracted image as the shell carrier fill before native vector
   reconstruction. The owned text uses the source TextFrame story paragraphs,
@@ -96,20 +113,20 @@ Text Builder:
   emits the editable text for those ids; otherwise the editable text must have a
   separate planned TextFrame/table owner unless the source explicitly declares
   complete-PNG text ownership.
-- A native parent source shape (`NATIVE_SOURCE_SHAPE`) may supply the shell,
-  fill, stroke, corner, and inset style for a child editable TextFrame, but it
-  should not take the `TEXT_SLOT` away from a direct TextFrame owner. When a
-  direct TextFrame plan exists, the direct TextFrame remains
-  `OWNED_BY_HWPX_TEXT`; the native shell plan keeps `PLACE_TEXT_SHELL` with
-  `textAction=DROP_TEXT` and retains `ownedTextFrameIds` only as a shell/style
-  relation. This keeps Rectangle/Oval-backed inline text boxes consistent with
-  extracted textless shells without merging text into the shell owner.
-- Execution must keep that separation. A `NATIVE_SOURCE_SHAPE` shell that
-  references `ownedTextFrameIds` is emitted as a textless visual shell by the
-  visual executor; the child TextFrame is emitted by the text executor using its
-  own TextFrame bounds. For an inline badge/text-shell atom, however, Stage 1
-  may explicitly choose a single inline carrier whose visual material is the
-  native/extracted shell and whose text remains editable HWPX text. That carrier
+- When Stage 1 declares an inline composite as
+  `materialization=COMPLETE_PNG` and `textAction=OWNED_BY_PNG`, executors emit
+  only that inline PNG. They must not rebuild descendant TextFrames as floating
+  or table-cell text, and they must not hide those TextFrames before export.
+  The loss of editability is the planned owner decision for an unrepresentable
+  nested inline InDesign composition.
+- Java/HWP native redrawing must not supply visible shell, fill, stroke,
+  corner, or background material. A source shape related to an editable
+  TextFrame may only appear visibly through planned InDesign-extracted image
+  material. Direct TextFrame text remains `OWNED_BY_HWPX_TEXT`; the shell slot
+  is visible only when Stage 1 provides an extracted visual owner.
+- Execution must keep that separation. For an inline badge/text-shell atom,
+  Stage 1 may explicitly choose a single inline carrier whose visual material is
+  extracted image material and whose text remains editable HWPX text. That carrier
   may be an HWPX `drawText` object when its fill comes from the planned source
   shell image/vector. Later stages must not invent the shell by Java style,
   bounds, stroke, fill, or corner fallback when source shell material is absent.
@@ -131,11 +148,12 @@ Text Builder:
   own or displace the surrounding `TEXT_SLOT`. If HWPX cannot materialize that
   decoration faithfully, Stage 1 may drop the visual, but the carrier TextFrame
   text remains `OWNED_BY_HWPX_TEXT`.
-- A source inline `GraphicLine` used as a text-style marker is never a standalone
-  inline PNG owner. Stage 1 must either absorb it into an explicit HWPX text
-  style/underline-tab representation or assign `DROP_VISUAL`; the executor must
-  not preserve it as `PLACE_INLINE_PNG` merely because it is anchored in story
-  flow.
+- A source inline thin vector strip used as a text-style marker is never a
+  standalone inline PNG owner. This includes `GraphicLine`, `Polygon`, or
+  `Rectangle` material wrapped in an inline `Group`. Stage 1 must either absorb
+  it into an explicit HWPX text style/underline-tab representation or assign
+  `DROP_VISUAL`; the executor must not preserve it as `PLACE_INLINE_PNG` merely
+  because it is anchored in story flow.
 - Text Builder must not split, shrink, or horizontally shift a TextFrame from
   `composedLines`, `wrapIndentLeft`, `wrapIndentRight`, paragraph Y offsets, or
   line-gap measurements. Those are extractor diagnostics for validation and
@@ -175,6 +193,7 @@ Text Builder:
   plans as floating/wrapping carriers do not participate in the story line box.
 - Does not merge unrelated TextFrames.
 - Does not create shell/table fallback visuals.
+- Does not create HWPX table decoration fallback visuals.
 
 Visual Builder:
 
@@ -184,22 +203,23 @@ Visual Builder:
   `hiddenVisualSourceObjectIds`) as Stage 1 output. It must not reinterpret
   broad ancestry `sourceObjectIds` as the visible material set.
 - Does not change inline/floating placement.
-- Uses `ObjectPlan.zOrder`, `ObjectPlan.visualLayer`, and the policy-layer
-  plane mapping as execution inputs; it does not recompute z-order or foreground
-  plane from overlap, bounds, or rendered pixels.
+- Uses `ObjectPlan.zOrder`, `ObjectPlan.visualLayer`, and the Stage 1
+  two-plane mapping as execution inputs; it does not recompute z-order or
+  foreground plane from overlap, bounds, or rendered pixels.
 - Stage 3 placement helpers may convert planned bounds into HWPX units and copy
   planned `visualLayer`, `zOrder`, and source layer metadata into executable
   records. They are adapters, not planners. A method/class in Stage 3 must not
   decide whether a visual is background, decoration, content, behind text, or in
   front of text.
 - When execution needs the HWPX plane, it translates the finalized
-  `ObjectPlan.visualLayer` through the canonical `VisualPlanePolicy` table.
-  Executor-local foreground/background layer lists are not allowed.
+  `ObjectPlan` through the canonical `VisualPlanePolicy` table. Executor-local
+  foreground/background layer lists are not allowed.
 - Does not search alternate inline/floating placement, source-only matches, or
   overlap-scored fallback plans when no exact render/placement plan is found.
-- Does not lower shell/background visuals because they overlap TextFrames with
-  semantic text. If a shell must sit behind text, Stage 1 must express that in
-  the plan's layer and z-order.
+- Does not lower or raise shell/background/content visuals because they overlap
+  TextFrames with semantic text. Editable text/table structure is already in the
+  text/table plane; if a graphic still covers it, the graphic asset or Stage 1
+  plane mapping is wrong.
 - Does not replace missing extracted material with synthetic bounds-based
   graphics.
 - Does not treat an existing cached/rendered file path as ownership evidence.

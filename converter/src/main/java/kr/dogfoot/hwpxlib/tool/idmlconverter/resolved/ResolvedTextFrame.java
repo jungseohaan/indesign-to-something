@@ -45,6 +45,7 @@ public class ResolvedTextFrame {
     private boolean hiddenByParent;    // self/ancestor Group visible=false
     private String masterSourceId;    // 마스터 원본 TextFrame DOM ID
     private boolean isMasterInstance; // 마스터 페이지 아이템 인스턴스 (regular page에 배치된 마스터 아이템)
+    private String masterSpecialType; // synthetic master clone special type ("pagenum" 등)
     private String layerId;           // InDesign ItemLayer id
     private String layerName;         // InDesign ItemLayer name
     private int layerIndex = -1;      // document.layers index, when available
@@ -151,6 +152,9 @@ public class ResolvedTextFrame {
 
     public boolean isMasterInstance() { return isMasterInstance; }
     public void isMasterInstance(boolean v) { this.isMasterInstance = v; }
+
+    public String masterSpecialType() { return masterSpecialType; }
+    public void masterSpecialType(String v) { this.masterSpecialType = v; }
 
     public String layerId() { return layerId; }
     public void layerId(String v) { this.layerId = v; }

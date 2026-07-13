@@ -53,7 +53,7 @@ public class HwpxTableBuilder {
         // 테이블 z-order: semantic layer가 배경/콘텐츠를 분리하므로
         // 원래 z-order 값을 그대로 사용 (동일 레이어 내 올바른 스태킹)
         table.idAnd(tableId)
-                .zOrderAnd(astTable.zOrder())
+                .zOrderAnd(ctx.outputZOrder(astTable))
                 .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
@@ -217,7 +217,7 @@ public class HwpxTableBuilder {
         String tableId = HwpxUtil.nextShapeId();
 
         table.idAnd(tableId)
-                .zOrderAnd(0)
+                .zOrderAnd(ctx.foregroundOutputZOrder())
                 .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
@@ -390,6 +390,7 @@ public class HwpxTableBuilder {
         long rowYOffset = 0;
         java.util.List<ASTTableRow> physicalRows = physicalRows(astTable);
         java.util.Map<Integer, Integer> rowIndexMap = physicalRowIndexMap(physicalRows);
+        boolean singleCellTable = isSingleCellTable(astTable, physicalRows);
 
         for (ASTTableRow astRow : physicalRows) {
             Tr tr = table.addNewTr();
@@ -484,7 +485,7 @@ public class HwpxTableBuilder {
                 HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(astCell.paragraphs(), cellContentWidth);
 
                 // 셀 내용 (단락) 추가 — drawText/단일컬럼과 동일한 공용 루틴
-                paragraphBuilder.fillSubListContent(subList, astCell.paragraphs(), null, astCell.height());
+                paragraphBuilder.fillSubListContent(subList, astCell.paragraphs(), null, astCell.height(), singleCellTable);
             }
 
             rowYOffset += astRow.rowHeight();
@@ -526,6 +527,18 @@ public class HwpxTableBuilder {
         return rows;
     }
 
+    private static boolean isSingleCellTable(ASTTable table, java.util.List<ASTTableRow> physicalRows) {
+        if (table == null) return false;
+        int colCount = table.columnWidths() != null && !table.columnWidths().isEmpty()
+                ? table.columnWidths().size()
+                : table.colCount();
+        if (colCount != 1) return false;
+        java.util.List<ASTTableRow> rows = physicalRows != null ? physicalRows : table.rows();
+        if (rows == null || rows.size() != 1) return false;
+        ASTTableRow row = rows.get(0);
+        return row != null && row.cells() != null && row.cells().size() == 1;
+    }
+
     private static java.util.Map<Integer, Integer> physicalRowIndexMap(java.util.List<ASTTableRow> rows) {
         java.util.Map<Integer, Integer> map = new java.util.HashMap<>();
         if (rows == null) return map;
@@ -560,120 +573,15 @@ public class HwpxTableBuilder {
     // ── 셀 BorderFill 생성 ──
 
     String createCellBorderFill(ASTTableCell cell) {
-        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
-        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
-
-        bf.idAnd(bfId)
-                .threeDAnd(false)
-                .shadowAnd(false)
-                .centerLineAnd(CenterLineSort.NONE)
-                .breakCellSeparateLine(false);
-
-        // 대각선
-        // IDML TopRightDiagonalLine(↙ /) → HWPX slash(/)
-        bf.createSlash();
-        if (cell.topRightDiagonalLine()) {
-            bf.slash().typeAnd(SlashType.CENTER).CrookedAnd(false).isCounter(false);
-        } else {
-            bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
-        }
-
-        // IDML TopLeftDiagonalLine(↘ \) → HWPX backSlash(\)
-        bf.createBackSlash();
-        if (cell.topLeftDiagonalLine()) {
-            bf.backSlash().typeAnd(SlashType.CENTER).CrookedAnd(false).isCounter(false);
-        } else {
-            bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
-        }
-
-        // 테두리
-        bf.createLeftBorder();
-        applyCellBorder(bf.leftBorder(), cell.leftBorder());
-
-        bf.createRightBorder();
-        applyCellBorder(bf.rightBorder(), cell.rightBorder());
-
-        bf.createTopBorder();
-        applyCellBorder(bf.topBorder(), cell.topBorder());
-
-        bf.createBottomBorder();
-        applyCellBorder(bf.bottomBorder(), cell.bottomBorder());
-
-        // 대각선 스타일
-        bf.createDiagonal();
-        if ((cell.topLeftDiagonalLine() || cell.topRightDiagonalLine()) && cell.diagonalBorder() != null) {
-            ASTTableCell.CellBorder diag = cell.diagonalBorder();
-            LineType2 lineType = HwpxParagraphBuilder.strokeTypeToLineType(diag.strokeType());
-            LineWidth lineWidth = HwpxParagraphBuilder.hwpunitToLineWidth(diag.weight());
-            String color = diag.color() != null ? diag.color() : "#000000";
-            bf.diagonal().typeAnd(lineType).widthAnd(lineWidth).color(color);
-        } else {
-            bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
-        }
-
-        // 배경 채우기 — 실제 색상값(#으로 시작)이 있을 때만
-        String cellFill = cell.fillColor();
-        if (cellFill != null && cellFill.startsWith("#")) {
-            bf.createFillBrush();
-            VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), cellFill, "#FF000000");
-        }
-
-        return bfId;
+        // Source ownership policy: HWPX tables own editable structure only.
+        // Cell fill/border/diagonal decoration is textless graphic material.
+        return "1";
     }
 
     private String createTableOuterBorderFill(ASTTable table) {
-        ASTTableCell.CellBorder left = null;
-        ASTTableCell.CellBorder right = null;
-        ASTTableCell.CellBorder top = null;
-        ASTTableCell.CellBorder bottom = null;
-
-        for (ASTTableRow row : physicalRows(table)) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null) continue;
-                if (cell.columnIndex() == 0) {
-                    left = strongerBorder(left, cell.leftBorder());
-                }
-                if (cell.columnIndex() + Math.max(1, cell.columnSpan()) >= table.colCount()) {
-                    right = strongerBorder(right, cell.rightBorder());
-                }
-                if (cell.rowIndex() == 0) {
-                    top = strongerBorder(top, cell.topBorder());
-                }
-                if (cell.rowIndex() + Math.max(1, cell.rowSpan()) >= table.rowCount()) {
-                    bottom = strongerBorder(bottom, cell.bottomBorder());
-                }
-            }
-        }
-
-        if (!isVisibleBorder(left) && !isVisibleBorder(right)
-                && !isVisibleBorder(top) && !isVisibleBorder(bottom)) {
-            return "1";
-        }
-
-        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
-        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
-        bf.idAnd(bfId)
-                .threeDAnd(false)
-                .shadowAnd(false)
-                .centerLineAnd(CenterLineSort.NONE)
-                .breakCellSeparateLine(false);
-
-        bf.createSlash();
-        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
-        bf.createBackSlash();
-        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
-        bf.createLeftBorder();
-        applyCellBorder(bf.leftBorder(), left);
-        bf.createRightBorder();
-        applyCellBorder(bf.rightBorder(), right);
-        bf.createTopBorder();
-        applyCellBorder(bf.topBorder(), top);
-        bf.createBottomBorder();
-        applyCellBorder(bf.bottomBorder(), bottom);
-        bf.createDiagonal();
-        bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
-        return bfId;
+        // Source ownership policy: table chrome is emitted by the visual plan,
+        // not by HWPX table style.
+        return "1";
     }
 
     private static ASTTableCell.CellBorder strongerBorder(

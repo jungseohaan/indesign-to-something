@@ -7,9 +7,9 @@
 > Goal: Decide IDML source ownership once, then execute that plan without
 > case-specific reinterpretation.
 
-This is the canonical policy for source ownership. `SPEC-035` is only a
-migration note; the former render-ownership SPEC-036 policy is consolidated
-here.
+This is the canonical policy for source ownership. Removed ownership SPECs are
+intentionally not linked from this policy; their usable rules have been
+consolidated here.
 
 ## 1. Core Principles
 
@@ -50,11 +50,18 @@ here.
 
 ## 1.1 Refactoring Direction
 
-The extractor and converter must move toward a source-cluster-first pipeline.
+The extractor and converter must move toward a closed source-coverage pipeline.
+Stage 1 does not begin from rendered candidates or from visually missing
+objects. It begins by registering every IDML/resolved `SourceObject` in the page
+range, assigning a coverage status to each one, grouping related source objects
+into `SourceBundle`s, splitting each bundle into ownership slots, assigning one
+owner to every slot, and creating `RenderUnit`s only for the slots that need
+extracted PNG/vector material.
+
 InDesign source trees are recursive, so conversion first normalizes source
-objects into atomic source clusters, then decides text, shell, content, and
-table-style ownership, and only then places those atoms into page, inline,
-table-cell, master, or spread-fragment contexts.
+objects into closed source coverage and source bundles, then decides text,
+shell, content, and table-style ownership, and only then places those atoms into
+page, inline, table-cell, master, or spread-fragment contexts.
 
 Placement context must not define the identity of a source cluster. A
 `TEXT_OWNING_SHELL` is the same ownership class whether it is page-floating,
@@ -77,6 +84,12 @@ as descendant source ids, page-local source ids, and editable TextFrame
 membership. These queries are planner inputs only. They must not become a
 second ownership decision path, and they must not reinterpret placement after
 ObjectPlan creation.
+
+During migration, a Java legacy bridge may report missing or mutated ownership
+plans, but those reports are defects in Stage 0/Stage 1 source coverage,
+bundle construction, slot decomposition, slot ownership, RenderUnit creation, or
+ObjectPlan serialization. They are not work queues for reason-by-reason recovery
+inside Java.
 
 While the legacy candidate planner remains active, cluster query diagnostics
 may compare cluster-derived source sets with legacy candidate source sets. A
@@ -170,6 +183,20 @@ the omitted descendants, Stage 1 may mark the plan `SLOT_ONLY` with
 when no editable TextFrame/text carrier is omitted from the content fragment.
 Text-owning shell fragments use the same fields, but keep the editable
 TextFrame ids in `ownedTextFrameIds`.
+
+A large textless vector group may be finalized early as an atomic
+`CONTENT_VISUAL_SLOT` when source metadata proves that one closed Group root, or
+a small closed set of sibling Group roots, contains the executable visual source
+set. Editable TextFrames inside those roots remain HWPX-owned text when they
+are explicitly listed in the hidden/omitted source set; they are not absorbed
+into the visual slot. Stage 1 records broad provenance in `sourceObjectIds`, the
+executable visual closure in `exportSourceObjectIds`, any hidden text/style
+descendants in `hiddenVisualSourceObjectIds`, and the closed render root or
+root set in `exportTargetObjectId`/`atomicExportTargetObjectIds` or an
+equivalent atomic target reference. Later stages must not re-own or re-export
+internal polygon/vector children as independent visible candidates. They may
+use the atomic root set for PNG export while keeping the expanded source set as
+proof metadata.
 
 When a page item source tree contains placed content, Stage 1 must not also
 emit a partial `NATIVE_SOURCE_SHAPE`/vector owner for the ancestor shape. The
@@ -490,6 +517,12 @@ slots. Each registry entry is keyed by the visible execution identity:
 - hidden/omitted source ids that must not be painted into that slot;
 - materialization, layer, z-order, bounds, and reason.
 
+The registry may store large source-id collections as interned source-set
+references. A source-set reference is a stable identity for a sorted set of
+source ids, and it may be used for recursive clusters, executable export sets,
+hidden/omitted sets, page-local fragments, and diagnostic ancestry. Registry
+lookups compare the references or indexed membership, not freshly copied arrays.
+
 Candidate generation must be registry-gated:
 
 - If no registry entry exists for a source/slot/channel, no candidate is
@@ -540,11 +573,25 @@ Source-tree reads must also be registry-backed:
 - Recursive descendants, source roots, page-local fragments, editable
   TextFrame ids, inline-anchor ancestry, placed-content descendants, and table
   membership are indexed once in Stage 0/1.
+- Stage 0/1 interns repeated source id sets once and exposes stable references
+  for planner, validator, exporter, and diagnostics.
+- Stage 1 diagnostic builders that need source clusters must reuse the
+  prepared source-cluster index instead of rebuilding clusters for every
+  bundle/object-plan refresh.
 - Later planner code may query that index, but must not call live InDesign
   recursive APIs such as `allPageItems` inside loops over candidates, pages, or
   render passes.
 - A candidate/planner loop must not rescan a source subtree to rediscover
   ownership facts that are already in the registry.
+- Diagnostics may expand source-set references for human review, but execution
+  and validation use compact refs, status maps, and indexed membership checks.
+- The normal conversion path proves source coverage and slot closure by compact
+  proof records (`coverageClaimRef`, `slotClosureRef`, `exportClosureRef`,
+  `hiddenChildrenRef`, and interned source-set refs), not by copying descendant
+  arrays into every candidate, bundle, ObjectPlan, coverage row, or validation
+  row.
+- Expanded recursive arrays are trace/explain data. They are emitted for
+  failing records, not as the default representation of a successful plan.
 
 Normalize becomes validation:
 
@@ -557,6 +604,11 @@ Normalize becomes validation:
   output look correct.
 - If such a correction is needed, the registry/ObjectPlan policy is incomplete
   and candidate generation must be fixed before export.
+- Candidate generation must therefore do slot partitioning before export. A
+  parent composite that excludes child text/shell/table/content slots is born as
+  `SLOT_ONLY` with explicit export/hidden refs, or it is born as `DROP_VISUAL`;
+  it is not emitted as a broad visible candidate and then narrowed by normalize
+  or rebuild passes.
 
 Performance invariants:
 
@@ -568,9 +620,33 @@ Performance invariants:
   `PLACE_TEXT_SHELL`.
 - The same source tree is traversed once to build indexes and then only queried
   by id/set lookups.
+- Recursive source-set arrays are not copied into every ObjectPlan, bundle, or
+  coverage row in normal conversion output.
+- Validators on the normal path validate proof refs and indexed membership
+  checks. They expand source trees only for trace/dev explanation or failing
+  records.
+- Full RenderUnit rows are retained in the in-memory Stage 1 model for
+  validation/execution, but normal conversion output writes only summary and
+  bounded preview rows unless trace/dev diagnostics are enabled.
+- Full source item rows are retained in the in-memory extraction plan and
+  diagnostics/debug output, but normal `extraction-plan.json` and
+  `source-graph.json` write source item summaries and bounded previews instead
+  of duplicating every source row.
+- Full extraction candidates are retained in the in-memory extraction plan for
+  renderer lookup and validation, but normal `extraction-plan.json` writes
+  candidate summaries and bounded previews instead of duplicating every
+  candidate instruction.
 - Page-spanning source material emits explicit page-local slot plans before
   export, so no adjacent-page overflow copy or post-export ownership repair is
   needed.
+- Chunked extraction may reuse immutable document-level Stage 0 facts such as
+  IDML, z-order maps, resolved source metadata, and interned source-set indexes.
+  Each chunk still runs Stage 1 with its own page/placement context, and chunk
+  merge is a result merge only; it never reassigns source ownership.
+- A performance optimization is policy-compatible only when it preserves the
+  same source-slot registry and proof refs. Skipping repeated traversal,
+  copying, serialization, or diagnostic expansion is encouraged; skipping
+  ownership planning or validation is not.
 
 Migration milestones for performance work:
 

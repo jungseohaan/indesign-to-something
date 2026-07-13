@@ -84,17 +84,18 @@ public final class TextFlowDiagnosticsBuilder {
                     outPara.sourceParagraph = paragraph;
                     outPara.styleName = paragraph.styleName();
                     outPara.justification = paragraph.justification();
+                    outPara.generatedPrefixText = paragraph.generatedPrefixText();
                     int runIndex = 0;
                     for (ResolvedRun run : paragraph.runs()) {
                         TextFlowDiagnostics.TextFlowRun outRun = buildRun(ctx, run, runIndex++);
-                        outPara.runs.add(outRun);
+                        if (outRun != null) outPara.runs.add(outRun);
                     }
                     overlayIdmlInlineSlots(ctx, story.id(), outPara);
                 }
                 flow.paragraphs.add(outPara);
             }
             recomputeFlowCounters(flow);
-            collectInlineWarnings(flow, diagnostics, warnedInlineSlots);
+            collectInlineWarnings(ctx, flow, diagnostics, warnedInlineSlots);
             diagnostics.flows.add(flow);
         }
         return diagnostics;
@@ -112,10 +113,17 @@ public final class TextFlowDiagnosticsBuilder {
             return out;
         }
         if (run.isInlineAnchor()) {
+            int anchoredObjectId = run.anchoredObjectId();
+            if (isAbsorbedTextStyleAnchor(ctx, anchoredObjectId)) {
+                return null;
+            }
+            if (!isTextFlowInlineSlot(ctx, anchoredObjectId)) {
+                return null;
+            }
             out.kind = "INLINE_SLOT";
-            out.anchoredObjectId = run.anchoredObjectId();
-            applySourceMetadata(ctx, out, run.anchoredObjectId());
-            ObjectPlan plan = findPlanForAnchor(ctx, run.anchoredObjectId());
+            out.anchoredObjectId = anchoredObjectId;
+            applySourceMetadata(ctx, out, anchoredObjectId);
+            ObjectPlan plan = findPlanForAnchor(ctx, anchoredObjectId);
             if (plan != null) {
                 out.planTextAction = plan.textAction != null ? plan.textAction.name() : null;
                 out.planVisualAction = plan.visualAction != null ? plan.visualAction.name() : null;
@@ -153,6 +161,7 @@ public final class TextFlowDiagnosticsBuilder {
         List<IdmlInlineSlot> missing = new ArrayList<>();
         for (IdmlInlineSlot slot : slots) {
             if (slot.anchorObjectId == null) continue;
+            if (isAbsorbedTextStyleAnchor(ctx, slot.anchorObjectId)) continue;
             if (!paragraphHasInlineAnchor(paragraph, slot.anchorObjectId)) {
                 missing.add(slot);
             }
@@ -164,6 +173,7 @@ public final class TextFlowDiagnosticsBuilder {
         for (IdmlInlineSlot slot : missing) {
             int index = insertIndexForTextOffset(paragraph.runs, slot.textOffset);
             TextFlowDiagnostics.TextFlowRun run = buildIdmlInlineRun(ctx, slot.anchorObjectId);
+            if (run == null) continue;
             paragraph.runs.add(Math.max(0, Math.min(index + inserted, paragraph.runs.size())), run);
             inserted++;
         }
@@ -213,6 +223,8 @@ public final class TextFlowDiagnosticsBuilder {
     }
 
     private static TextFlowDiagnostics.TextFlowRun buildIdmlInlineRun(ResolvedBuildContext ctx, int anchorObjectId) {
+        if (isAbsorbedTextStyleAnchor(ctx, anchorObjectId)) return null;
+        if (!isTextFlowInlineSlot(ctx, anchorObjectId)) return null;
         TextFlowDiagnostics.TextFlowRun out = new TextFlowDiagnostics.TextFlowRun();
         out.kind = "INLINE_SLOT";
         out.anchoredObjectId = anchorObjectId;
@@ -226,6 +238,38 @@ public final class TextFlowDiagnosticsBuilder {
             out.planReason = plan.reason;
         }
         return out;
+    }
+
+    private static boolean isAbsorbedTextStyleAnchor(ResolvedBuildContext ctx, int anchorObjectId) {
+        ObjectPlan plan = findPlanForAnchor(ctx, anchorObjectId);
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.visualAction == VisualAction.ABSORB_TEXT_STYLE;
+    }
+
+    private static boolean isTextFlowInlineSlot(ResolvedBuildContext ctx, int anchorObjectId) {
+        ObjectPlan plan = findPlanForAnchor(ctx, anchorObjectId);
+        if (plan != null) {
+            return plan.placement == Placement.INLINE;
+        }
+        if (ctx == null || ctx.resolvedData == null) {
+            return true;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(anchorObjectId));
+        if (item == null) {
+            return true;
+        }
+        String placement = safe(item.storyAnchorPlacement()).toUpperCase(java.util.Locale.ROOT);
+        String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(java.util.Locale.ROOT);
+        if (item.storyTextInlineSlot()) {
+            return true;
+        }
+        if ("FLOATING_ANCHORED".equals(placement) || "ANCHORED".equals(anchoredPosition)) {
+            return false;
+        }
+        return "INLINE".equals(placement)
+                || "INLINE_POSITION".equals(anchoredPosition)
+                || "INLINEPOSITION".equals(anchoredPosition);
     }
 
     private static boolean paragraphHasInlineAnchor(TextFlowDiagnostics.TextFlowParagraph paragraph, int anchorObjectId) {
@@ -267,6 +311,9 @@ public final class TextFlowDiagnosticsBuilder {
         flow.inlineSlotCount = 0;
         for (TextFlowDiagnostics.TextFlowParagraph paragraph : flow.paragraphs) {
             if (paragraph == null || paragraph.runs == null) continue;
+            if (paragraph.generatedPrefixText != null) {
+                flow.textLength += paragraph.generatedPrefixText.length();
+            }
             for (TextFlowDiagnostics.TextFlowRun run : paragraph.runs) {
                 if (run == null) continue;
                 if ("INLINE_SLOT".equals(run.kind)) {
@@ -279,6 +326,7 @@ public final class TextFlowDiagnosticsBuilder {
     }
 
     private static void collectInlineWarnings(
+            ResolvedBuildContext ctx,
             TextFlowDiagnostics.TextFlow flow,
             TextFlowDiagnostics diagnostics,
             Set<String> warnedInlineSlots) {
@@ -287,6 +335,7 @@ public final class TextFlowDiagnosticsBuilder {
             if (paragraph == null || paragraph.runs == null) continue;
             for (TextFlowDiagnostics.TextFlowRun run : paragraph.runs) {
                 if (run == null || !"INLINE_SLOT".equals(run.kind) || run.planVisualAction != null) continue;
+                if (!inlineSlotHasPotentialVisibleMaterial(ctx, run)) continue;
                 String code = unplannedInlineWarningCode(run);
                 String key = code + ":" + run.anchoredObjectId + ":" + safe(run.sourceStatus);
                 if (warnedInlineSlots.add(key)) {
@@ -296,6 +345,29 @@ public final class TextFlowDiagnosticsBuilder {
                 }
             }
         }
+    }
+
+    private static boolean inlineSlotHasPotentialVisibleMaterial(
+            ResolvedBuildContext ctx,
+            TextFlowDiagnostics.TextFlowRun run) {
+        if (ctx == null || ctx.resolvedData == null || run == null || run.anchoredObjectId == null) {
+            return true;
+        }
+        if (!"NATIVE_INLINE_SOURCE".equals(run.sourceStatus)
+                && !"NATIVE_PAGE_SOURCE".equals(run.sourceStatus)) {
+            return true;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(run.anchoredObjectId));
+        if (item == null) return true;
+        if (item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if ("Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) return true;
+        if (item.childIds() != null && item.childIds().length > 0) return true;
+        String fill = item.fillColorName();
+        if (fill != null && !"None".equals(fill) && !"[None]".equals(fill)) return true;
+        String stroke = item.strokeColorName();
+        return stroke != null && !"None".equals(stroke) && !"[None]".equals(stroke)
+                && item.strokeWeight() > 0;
     }
 
     private static void applySourceMetadata(

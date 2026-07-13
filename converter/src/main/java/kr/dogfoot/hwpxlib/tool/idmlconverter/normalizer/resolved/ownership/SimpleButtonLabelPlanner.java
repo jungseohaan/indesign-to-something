@@ -33,17 +33,13 @@ public final class SimpleButtonLabelPlanner {
             String labelText = data.simpleButtonLabelText(labelTf.id());
             if (labelText == null) continue;
 
-            RenderedGroup completeRender = findCompletePngRender(data, anchor, labelTf);
-            RenderedGroup textlessShellRender = completeRender == null
-                    ? findTextlessShellRender(data, anchor, labelTf)
-                    : null;
-            SimpleButtonLabelPlan.Mode mode = completeRender != null
-                    ? SimpleButtonLabelPlan.Mode.COMPLETE_PNG
-                    : SimpleButtonLabelPlan.Mode.TEXT_SHELL;
-            RenderedGroup visualRender = completeRender != null ? completeRender : textlessShellRender;
+            // Text-bearing simple button labels are always materialized as
+            // HWPX text + separate shell. Do not re-promote them to COMPLETE_PNG.
+            RenderedGroup textlessShellRender = findTextlessShellRender(data, anchor, labelTf);
+            if (textlessShellRender == null) continue;
+            SimpleButtonLabelPlan.Mode mode = SimpleButtonLabelPlan.Mode.TEXT_SHELL;
             LabelStyle labelStyle = labelStyle(ctx, labelTf, labelText);
             int[] sources = sourceIds(anchor, labelTf, shell);
-            int[] visualSources = visualSourceIds(anchor, shell);
             SimpleButtonLabelPlan plan = new SimpleButtonLabelPlan(
                     parseInt(anchor.id()),
                     parseInt(labelTf.id()),
@@ -58,42 +54,8 @@ public final class SimpleButtonLabelPlanner {
                     labelStyle.horizontalScale,
                     mode,
                     sources,
-                    mode == SimpleButtonLabelPlan.Mode.COMPLETE_PNG
-                            ? "simple_button_label_complete_png"
-                            : "simple_button_label_text_shell");
+                    "simple_button_label_text_shell");
             ctx.addSimpleButtonLabelPlan(plan);
-            int labelTfId = parseInt(labelTf.id());
-            int[] ownedTextFrameIds = mode == SimpleButtonLabelPlan.Mode.COMPLETE_PNG
-                    ? new int[0]
-                    : new int[] { labelTfId };
-            ObjectPlan objectPlan = new ObjectPlan(
-                    plan.anchorDomId,
-                    "simple_button_label:" + safe(anchor.type()),
-                    plan.pageIndex,
-                    mode == SimpleButtonLabelPlan.Mode.COMPLETE_PNG
-                            ? TextAction.OWNED_BY_PNG
-                            : TextAction.OWNED_BY_HWPX_TEXT,
-                    mode == SimpleButtonLabelPlan.Mode.COMPLETE_PNG
-                            ? VisualAction.PLACE_INLINE_PNG
-                            : VisualAction.PLACE_TEXT_SHELL,
-                    VisualLayer.LABEL_BACKDROP,
-                    Placement.INLINE,
-                    visualRender != null ? visualRender.id() : null,
-                    sources,
-                    visualSources,
-                    ownedTextFrameIds,
-                    new int[0],
-                    "simple_button_label:" + plan.anchorDomId,
-                    visualRender != null ? visualRender.zOrder() : anchor.zOrder(),
-                    plan.reason,
-                    visualRender != null ? visualRender.file() : null,
-                    visualRender != null && visualRender.bounds() != null
-                            ? visualRender.bounds()
-                            : (anchor.pageRelativeBounds() != null ? anchor.pageRelativeBounds() : anchor.geometricBounds()),
-                    null,
-                    null,
-                    -1);
-            ctx.addOwnershipPlan(objectPlan);
         }
     }
 

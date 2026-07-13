@@ -94,7 +94,7 @@ final class PageOverlayBuilder {
 
         table.createSZ();
         table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(0L).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
         table.createPos();
@@ -134,11 +134,15 @@ final class PageOverlayBuilder {
         tc.createCellSpan();
         tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
         tc.createCellSz();
-        tc.cellSz().widthAnd(w).heightAnd(0L);
-        // 셀 여백: 페이지 레벨 승격된 오버레이는 위치가 절대 좌표로 이미 처리되므로
-        // applyImplicitTextMargin()이 설정한 위치 기반 여백은 사용하지 않는다.
+        tc.cellSz().widthAnd(w).heightAnd(h);
+        // 셀 여백: 페이지 레벨 승격 오버레이는 위치 기반 implicit margin은 쓰지 않되,
+        // 원본 TextFrame의 insetSpacing에서 온 명시적 텍스트 여백은 보존한다.
         tc.createCellMargin();
-        tc.cellMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        tc.cellMargin()
+                .leftAnd(obj.textMarginLeft())
+                .rightAnd(obj.textMarginRight())
+                .topAnd(obj.textMarginTop())
+                .bottomAnd(obj.textMarginBottom());
 
         tc.createSubList();
         SubList subList = tc.subList();
@@ -255,7 +259,6 @@ final class PageOverlayBuilder {
             spec.imageFillData = obj.imageFillData();
             spec.forceImageFill = true;
         }
-        spec.nativeGraphicsAllowed = true;
         textBoxBuilder.drawTextBoxComposer().apply(rect, spec);
         if (rect.drawText() != null) {
             rect.drawText().editableAnd(true);

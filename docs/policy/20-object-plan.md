@@ -7,19 +7,9 @@
 
 Every visible candidate must have one `ObjectPlan` before AST generation.
 
-Required identity fields:
+Required executor identity fields:
 
 - `sourceObjectIds`: source bundle identity.
-- `sourceRootObjectIds`: diagnostic top-level roots inside `sourceObjectIds`.
-  Multi-root composite diagnostics use this to compare the union of closed
-  source trees with the executable bundle.
-- `clusterSourceObjectIds`: diagnostic recursive descendants of the primary
-  source root or source-root union. This may prove a closed source tree during
-  migration, but final executors use explicit slot source fields instead.
-- `clusterKindCounts`, `omittedClusterSourceObjectIds`, and
-  `omittedClusterKindCounts`: diagnostic evidence for narrower-than-cluster
-  blockers. They are not execution inputs; they only show what source kinds
-  Stage 1 has not yet assigned to explicit slots.
 - `visualSourceObjectIds`: source ids used as visible visual material.
 - `styleSourceObjectIds`: source ids absorbed as HWPX style.
 - `ownedTextFrameIds`: TextFrame ids whose text is owned by HWPX.
@@ -34,6 +24,58 @@ Required identity fields:
 - `renderSourceBounds`: optional extractor/source provenance bounds for a
   page-local fragment. It explains what broader source area produced the
   fragment, but `bounds` remains the only visible placement bounds.
+- `cropSourceBounds`: optional extractor-authored pixel-preparation contract
+  for a page-local visual fragment when the rendered PNG still contains a
+  broader physical page/spread source. It is executable crop metadata, not
+  ownership provenance, and must never be derived from `renderSourceBounds`.
+  Stage 1 may compute both fields from the same source-extent analysis, but it
+  must write the executable crop extent explicitly to `cropSourceBounds`.
+- `inlineSourceTreeClosed` and `inlineFlowSourceObjectIds`: optional Stage 1
+  execution contract for closed inline shell/carrier plans whose source children
+  must be emitted as source-ordered inline fragments. When hidden visual children
+  contain HWPX-owned TextFrames, Stage 1 must provide the complete source order
+  here. Executors must not reconstruct the order from TextFrame bounds,
+  rendered bounds, overlap, or DOM probing.
+
+Normal executor-facing ObjectPlans must stay small. They may carry explicit
+slot source ids and stable proof references, but they must not carry expanded
+recursive cluster evidence unless that evidence is itself part of the executable
+slot. The normal execution contract is limited to:
+
+- explicit source ids needed for ancestry, visible material, style absorption,
+  text ownership, export, and hidden material;
+- placement, coordinate space, layer/plane, z-order, bounds, materialization,
+  action, and reason fields;
+- compact proof refs such as `coverageClaimRef`, `slotClosureRef`,
+  `exportClosureRef`, `hiddenChildrenRef`, and source-set refs that can be
+  expanded from Stage 0/1 diagnostics when needed.
+
+Diagnostic evidence fields are separate from the executor contract:
+
+- `sourceRootObjectIds`: diagnostic top-level roots inside `sourceObjectIds`.
+  Multi-root composite diagnostics use this to compare the union of closed
+  source trees with the executable bundle.
+- `clusterSourceObjectIds`: diagnostic recursive descendants of the primary
+  source root or source-root union. This may prove a closed source tree during
+  migration, but final executors use explicit slot source fields instead.
+- `clusterKindCounts`, `omittedClusterSourceObjectIds`, and
+  `omittedClusterKindCounts`: diagnostic evidence for narrower-than-cluster
+  blockers. They are not execution inputs; they only show what source kinds
+  Stage 1 has not yet assigned to explicit slots.
+
+Large recursive source sets may be represented by stable source-set references,
+such as `sourceSetId`, `clusterSourceSetId`, `exportSourceSetId`, and
+`hiddenSourceSetId`, when the expanded arrays are available from Stage 0/1
+diagnostics or trace mode. Validators may expand those references for failing
+records, but executors must not require expanded cluster or omitted-cluster
+arrays to place, hide, export, or drop material.
+
+In normal conversion output, diagnostic recursive fields are omitted unless a
+plan is failing, not import-ready, or trace/dev diagnostics are enabled. A
+validator on the normal path validates the compact proof refs and indexed
+membership checks; it does not force every ObjectPlan to repeat
+`clusterSourceObjectIds`, `omittedClusterSourceObjectIds`, or other expanded
+evidence arrays.
 
 For `PLACE_TEXT_SHELL`, visible source evidence may come from
 `styleSourceObjectIds` instead of `visualSourceObjectIds` when the shell is a
@@ -112,12 +154,24 @@ The inline plan owns the shell PNG and the child TextFrame ids become
 `ownedTextFrameIds`; later stages must not replace that shell with a generated
 shape or drop it as layout-only text.
 
+For a closed inline text shell that is materialized as source-ordered fragments,
+`inlineFlowSourceObjectIds` is the only legal order source. It may include both
+exported visual leaf ids and hidden child TextFrame ids. If this array is
+missing while `hiddenVisualSourceObjectIds` names HWPX-owned child TextFrames,
+the plan is incomplete and execution must report a planning defect instead of
+sorting child frames by geometry.
+
 For a `PLACE_TEXT_SHELL` plan, executor-visible source is the union of
 `visualSourceObjectIds`, `styleSourceObjectIds`, and `ownedTextFrameIds`, after
 Stage 1 has removed child slots owned by inline/table/content plans. The hidden
 visual set for export is `executionSourceObjectIds - exportSourceObjectIds`.
 This keeps broad source ancestry available for diagnostics without letting a
 parent shell hide or export child slots that another ObjectPlan already owns.
+
+This removal happens while building the slot owner and `RenderUnit`, not as a
+post-plan normalization repair. If Stage 1 cannot name the child slots that are
+excluded from the parent export before the parent `RenderUnit` is created, the
+parent plan is not executable and must be reported as a planning defect.
 
 When a parent source bundle loses a child visible slot to a direct child plan,
 the parent plan has only two valid forms:
@@ -195,6 +249,7 @@ Allowed visual actions:
 
 - `PLACE_INLINE_PNG`
 - `PLACE_FLOATING_PNG`
+- `PLACE_PAGE_BACKGROUND_PNG`
 - `PLACE_TEXT_SHELL`
 - `ABSORB_TEXT_STYLE`
 - `PLACE_TABLE_STYLE`
@@ -207,16 +262,33 @@ document-specific symptom.
 
 Stage 1 decides in this order:
 
-1. Drop hidden source trees.
-2. Resolve source bundle roots and closed membership.
-3. Assign table/cell structure and table style slots from IDML table metadata.
-4. Assign editable text from source story/thread/table membership.
-5. Assign complete visual bundles declared by extractor/source metadata.
-6. Assign textless shell material for editable text owners.
-7. Assign content visual material.
-8. Resolve placement from original anchor/page ownership.
-9. Resolve visual layer from original layer/z and the four policy layers.
-10. Validate slot uniqueness and source coverage.
+1. Register every IDML/resolved source object in the selected page range.
+2. Build the source-slot registry and compact source-set/proof indexes:
+   parent/child closure, page-local fragments, inline/table/master context,
+   slot closure, source-set interning, and coverage claim lookup.
+3. Assign a coverage status to every source object:
+   `VISIBLE_OWNED`, `TEXT_OWNED`, `STYLE_OWNED`, `HIDDEN_BY_OWNER`,
+   `DROPPED_INTENTIONAL`, `PROVENANCE_ONLY`, or `UNRESOLVED`.
+4. Build `SourceBundle`s from source tree, story/thread, table/cell,
+   inline/anchor, page/spread, and applied-master relationships.
+5. Split every bundle into explicit ownership slots:
+   `TEXT_SLOT`, `SHELL_SLOT`, `TABLE_STYLE_SLOT`, and
+   `CONTENT_VISUAL_SLOT`.
+6. Assign exactly one `SlotOwner` to every visible/style/text slot.
+7. Create `RenderUnit`s for slots whose owner requires extracted PNG/vector
+   material.
+8. Derive `ObjectPlan`s from bundle, slot, owner, and RenderUnit records.
+9. Resolve placement from original anchor/page/table/master context.
+10. Resolve visual layer from source role, source layer/z, and the four policy
+   layers.
+11. Validate source coverage, slot uniqueness, RenderUnit/ObjectPlan closure,
+    and executor readiness.
+
+Steps 3-8 may query the registry, but they must not rebuild recursive source
+clusters, rescan source subtrees, or create broad candidates that require later
+normalization to become executable. If a slot cannot be closed from the registry
+at creation time, the planner records a defect instead of creating a provisional
+owner and repairing it in a later rebuild pass.
 
 No later stage may create a new owner to compensate for a missing decision.
 

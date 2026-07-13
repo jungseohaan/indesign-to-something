@@ -8,11 +8,58 @@
 This policy governs the InDesign ExtendScript extraction layer. It complements
 `POLICY-source-ownership.md`.
 
+## 0. Target Model
+
+The final V2 target is not a candidate-recovery pipeline. Extraction planning is
+the materialization part of the closed source-coverage model:
+
+`SourceObject -> SourceBundle -> OwnershipSlot -> SlotOwner -> RenderUnit -> ObjectPlan`
+
+The normal conversion path uses compact proof references for that model. Full
+source traversal is required, but full recursive source arrays are not copied
+through every transitional record. Stage 0/1 owns the source-set intern table
+and proof indexes; candidates, RenderUnits, ObjectPlans, validators, and
+diagnostics reference those facts by stable ids unless trace/dev expansion or a
+failing record requires human-readable detail.
+
+During migration, `ExtractionPlan.candidates` may remain as export instructions.
+They are transitional records. The final extractor executes confirmed
+`RenderUnit`s, and each exported result must correspond to one prior RenderUnit.
+If the extractor emits a PNG/vector result that has no RenderUnit, Stage 1 is
+incomplete and validation must fail.
+
+Even during migration, a candidate that stands in for a future `RenderUnit` must
+be slot-closed before export. It may carry broad ancestry for diagnostics, but
+its executable export source set and hidden child declarations must already
+match the slot it will render. Extraction planning must not emit a broad parent
+candidate and rely on normalization, result matching, Java duplicate removal, or
+post-export validation to narrow the visible ownership later.
+
+For large textless vector content, a slot-closed candidate may carry both the
+expanded `exportSourceObjectIds` proof set and an atomic
+`exportTargetObjectId`/`atomicExportTargetObjectIds` reference. The atomic
+target is valid only when source metadata proves that one closed Group root, or
+a small closed set of sibling Group roots, contains the executable visual set.
+Editable text descendants may be omitted only when they are explicitly declared
+in the hidden/omitted source set and remain owned by HWPX text. The executor
+should render that root set once, hiding the declared omitted descendants, and
+must not independently render the internal polygon children.
+
+The same atomic contract applies to `resolved.json` collection. Once Stage 1
+has declared an atomic textless vector `CONTENT_VISUAL_SLOT`, resolved
+`pageItems` may compact the internal non-text polygon/vector descendants and
+record only the atomic root metadata plus counts/target references. This is a
+collection optimization, not a new ownership decision: the expanded source
+proof remains in the in-memory plan, ObjectPlan/RenderUnit diagnostics, and
+export metadata. Hidden/editable TextFrame descendants must still be collected
+as text sources.
+
 ## 1. Core Principle
 
 Extraction is not ownership.
 
-- `ExtractionPlan` decides which source material candidates to export.
+- `ExtractionPlan` currently decides which source material candidates to export.
+  In the V2 target, those candidates are replaced by confirmed `RenderUnit`s.
 - The extractor executes `ExtractionPlan` and records facts.
 - Java `OwnershipPlanner` decides final `TEXT_SLOT`, `SHELL_SLOT`,
   `TABLE_STYLE_SLOT`, and `CONTENT_VISUAL_SLOT` owners.
@@ -30,6 +77,28 @@ The extraction pipeline has four stages:
 | E2 | Directed Extractor | Execute planned export passes and record results | Hidden fallback or suppress |
 | E3 | Extraction Validate | Check plan/result consistency | New export decisions |
 
+## 2.1 Chunked Execution
+
+Spread/page chunking is a performance partition of extraction execution, not a
+new ownership policy.
+
+- IDML export, IDML z-order maps, resolved source metadata, source indexes, and
+  source-set intern tables may be prepared once for the selected document/range
+  and reused by chunk-local planning.
+- Chunk-local E1 planning must still use the chunk's page/placement context for
+  page-local fragments, applied-master fragments, hidden children, and export
+  closure.
+- Chunk merge may concatenate and de-duplicate planned results, RenderUnits,
+  page hashes, and resolved records. It must not reinterpret ownership,
+  placement, layer, materialization, hidden children, or source-slot identity.
+- Chunk-local resolved records may retain atomic compaction from Stage 1. Merge
+  must preserve the compact root records and diagnostics instead of expanding
+  internal descendants again.
+- Reusing a previously exported IDML package is valid for test/dev reruns when
+  the source INDD identity, size, and modification time match the cache key.
+  Reuse skips immutable Stage 0 extraction work only; it does not skip Stage 1
+  ownership planning or validation.
+
 ## 3. ExtractionPlan
 
 `extraction-plan.json` is written before render/export passes.
@@ -46,6 +115,17 @@ Required top-level fields:
 - `exportPasses`
 
 `sourceItems` are facts. They do not own conversion slots.
+
+The in-memory `ExtractionPlan` keeps full `sourceItems` for planning,
+validation, source-graph generation, and exporter lookup. Normal conversion
+output may replace the full array with `sourceItemSummary` plus bounded preview
+rows. Full source facts for trace tooling belong to diagnostics/debug output;
+normal `source-graph.json` may also be a summary artifact.
+
+The same split applies to `candidates`: the in-memory `ExtractionPlan` keeps
+full candidate instructions for renderer lookup and validation, while normal
+`extraction-plan.json` may replace the full array with `candidateSummary` and
+bounded preview rows after the execution lookup has been built.
 
 Recommended source item fields:
 
@@ -69,6 +149,8 @@ Required candidate fields:
 - `candidateId`
 - `passId`
 - `sourceObjectIds`
+- `sourceSetId` or an equivalent interned source-set ref when the expanded
+  `sourceObjectIds` array is diagnostic rather than required for execution
 - `pageIndex`
 - `unit`
 - `mode`
@@ -84,6 +166,8 @@ Composite candidate fields:
 - `slotRole` when the candidate is deliberately narrowed to one visible slot
 - `hiddenVisualSourceObjectIds` when child visual sources must be hidden during
   export to make the rendered file match the candidate's visible source set
+- compact proof refs such as `slotClosureRef`, `exportClosureRef`, and
+  `hiddenChildrenRef` when the candidate stands in for a future RenderUnit
 
 Composite candidates represent one materialized visual candidate produced from
 multiple source objects. A result may attach to a composite candidate when its
@@ -95,6 +179,19 @@ When a parent shell/background candidate contains child content visuals, E1 must
 write a `SLOT_ONLY` candidate for the parent shell and direct E2 to hide those
 child visual sources before export. Creating a full composite and relying on
 Java duplicate removal is an extraction-policy violation.
+
+The same rule applies to text, table, and shell child slots. A parent composite
+candidate is exportable only when its `sourceObjectIds`/`exportSourceObjectIds`,
+hidden text ids, hidden visual ids, and closure refs already describe the
+rendered pixels. Candidate normalization may stabilize ids and attach missing
+diagnostic refs, but it must not invent executable export/hidden sets that
+should have been chosen by source-slot planning.
+
+Candidate normalization is therefore a migration validation aid. On the normal
+conversion path it may canonicalize representation and report missing refs, but
+it must not be the mechanism that discovers slot ownership, creates export
+sets, removes duplicate visible owners, or rebuilds ownership after broad
+candidates have already been generated.
 
 `exportPasses` describe allowed candidate production. They do not decide final
 visible owners.
@@ -199,6 +296,18 @@ During migration, the first candidate gate may be validation-based: the legacy
 pass can still scan broad DOM collections, but every emitted result must attach
 to a planned candidate.
 
+That migration allowance is for metadata indexing only. A migrated pass must
+not use a broad DOM scan for export discovery, candidate replacement, or
+ownership recovery. New export work must be driven by the planned candidate or
+RenderUnit list, and broad scans may only populate the Stage 0/1 source index
+used by those planned records.
+
+Pre-export gates use candidate-return lookups as executable instructions, not
+as hints for a second source-set search. A positive gate result returns the exact
+candidate/RenderUnit identity to stamp into the extraction result. A miss means
+the item is skipped or reported; it does not trigger a fallback search through
+all source-set members, descendants, page items, or alternate render channels.
+
 The final candidate gate is stricter:
 
 - each exporter receives candidate instructions instead of scanning freely;
@@ -212,6 +321,12 @@ The final candidate gate is stricter:
   direct source export is allowed only as the same applied-page planned source
   material, not as a fallback channel or a replacement candidate. Page-less
   master candidates are not valid for visible export results.
+- master source origin does not override placement ownership. When an applied
+  master source object is also the direct source of a planned
+  `pass.inline_objects` story-flow candidate, `pass.master_page_graphics` must
+  not stamp it as a floating master result. If InDesign requires a direct master
+  export to produce the pixels, that result is stamped with the inline
+  candidate, `placement=INLINE`, and `coordinateSpace=STORY_FLOW`.
 - master page graphic candidates are `TEXTLESS_CANDIDATE` exports. Master
   TextFrames in the planned source cluster are hidden before export even when
   they do not have a document `parentPage`; the result row records those source

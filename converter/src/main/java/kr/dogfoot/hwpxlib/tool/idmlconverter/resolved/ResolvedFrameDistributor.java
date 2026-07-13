@@ -221,7 +221,7 @@ public class ResolvedFrameDistributor {
             }
         }
 
-        // SPEC-035: source TextFrames remain independently owned visible
+        // source ownership policy: source TextFrames remain independently owned visible
         // outputs. Same-page frames must not be merged by story/bounds.
         annotateParagraphPageBounds(astDoc, resolved);
     }
@@ -860,7 +860,7 @@ public class ResolvedFrameDistributor {
      * HWPX에서도 하나의 글상자로 합쳐야 한다.
      */
     private static void mergeSamePageFrames(ASTDocument astDoc) {
-        // Deprecated by SPEC-035. Same-page TextFrames keep independent source
+        // Deprecated by source ownership policy. Same-page TextFrames keep independent source
         // ownership; no story/bounds based merge is allowed here.
     }
 

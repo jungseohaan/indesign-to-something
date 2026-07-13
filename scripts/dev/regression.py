@@ -21,12 +21,22 @@ from typing import Any, Dict, Iterable, List, Optional
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AUDIT_PATH = REPO_ROOT / "scripts" / "ownership_plan_audit.py"
 ISSUE_PATH = REPO_ROOT / "scripts" / "dev" / "issue.py"
+EXTRACTION_CHECK_PATH = REPO_ROOT / "scripts" / "check_extraction_results.py"
 
 
 def load_audit_module() -> Any:
     spec = importlib.util.spec_from_file_location("ownership_plan_audit", AUDIT_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load audit module: {AUDIT_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_extraction_check_module() -> Any:
+    spec = importlib.util.spec_from_file_location("check_extraction_results", EXTRACTION_CHECK_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load extraction result checker: {EXTRACTION_CHECK_PATH}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -116,6 +126,23 @@ def warning_findings(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     return findings
 
 
+def extraction_policy_report(extract_dir: Path) -> Dict[str, Any]:
+    return load_extraction_check_module().build_report(extract_dir)
+
+
+def extraction_policy_failures(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    failures: List[Dict[str, Any]] = []
+    for error in report.get("errors") or []:
+        if not isinstance(error, dict):
+            continue
+        failures.append({
+            "code": "extractionPolicy:" + str(error.get("code") or "unknown"),
+            "count": int(error.get("count") or 1),
+            "message": "extraction artifact violates source ownership policy",
+        })
+    return failures
+
+
 def write_markdown(path: Path, result: Dict[str, Any]) -> None:
     report = result["audit"]
     counts = report.get("counts") or {}
@@ -140,6 +167,14 @@ def write_markdown(path: Path, result: Dict[str, Any]) -> None:
             lines.append(f"- `{warning['code']}`: {warning['count']} - {warning['message']}")
     else:
         lines.append("- none")
+    extraction_policy = result.get("extractionPolicy") or {}
+    extraction_errors = extraction_policy.get("errors") or []
+    lines += ["", "## Extraction Policy", ""]
+    if extraction_errors:
+        for error in extraction_errors[:20]:
+            lines += ["```json", json.dumps(error, ensure_ascii=False, indent=2), "```", ""]
+    else:
+        lines.append("- OK")
     lines += [
         "",
         "## Counts",
@@ -177,8 +212,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     extract_dir = resolve_extract(args)
+    extraction_policy = extraction_policy_report(extract_dir)
     audit = load_audit_module().build_report(extract_dir)
-    failures = blocking_failures(audit, args.strict_warnings)
+    failures = extraction_policy_failures(extraction_policy) + blocking_failures(audit, args.strict_warnings)
     warnings = warning_findings(audit)
     result = {
         "status": "FAIL" if failures else "PASS",
@@ -186,6 +222,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "generatedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
         "blockingFailures": failures,
         "warnings": warnings,
+        "extractionPolicy": extraction_policy,
         "audit": audit,
     }
 

@@ -707,6 +707,18 @@ public class BTFontEquationConverter {
      * 폰트별 특수 글리프 변환.
      */
     private static String convertGlyphs(String text) {
+        // InDesign 화살표 글리프(CharacterStyle 기반 @C/?C)는 HWP 수식의 정식 화살표 명령어로 정규화.
+        // 한컴 공식 수식 문서에서 right arrow는 rarrow 또는 -> 로 입력할 수 있지만,
+        // HWPX import에서는 alias보다 명령어형이 더 안정적이다.
+        text = text.replace("@C", " rarrow ")
+                .replace("@c", " rarrow ")
+                .replace("?C", " rarrow ")
+                .replace("?c", " rarrow ")
+                .replace("\u2192", " rarrow ")
+                .replace("\u2190", " larrow ")
+                .replace("\u2194", " lrarrow ")
+                .replace("\u21D2", " rarrow ")
+                .replace("\u21D4", " lrarrow ");
         // \ → TIMES (곱셈)
         text = text.replace("\\", " TIMES ");
         // … (U+2026) → CDOTS (가운데점)

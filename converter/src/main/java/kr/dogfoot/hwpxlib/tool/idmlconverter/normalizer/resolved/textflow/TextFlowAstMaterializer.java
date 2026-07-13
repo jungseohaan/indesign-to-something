@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.ParagraphPropertyResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -80,6 +81,9 @@ public final class TextFlowAstMaterializer {
             Function<String, String> textTransformer,
             ResolvedTextFlowAstConverter.Options runOptions) {
         boolean appended = false;
+        if (appendGeneratedPrefixText(ctx, target, paragraph, runOptions)) {
+            appended = true;
+        }
         for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
             if (!(atom instanceof TextFlowDocument.TextAtom)) continue;
             TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
@@ -111,5 +115,55 @@ public final class TextFlowAstMaterializer {
             }
         }
         return appended;
+    }
+
+    private static boolean appendGeneratedPrefixText(
+            ResolvedBuildContext ctx,
+            ASTParagraph target,
+            TextFlowDocument.TextFlowParagraph paragraph,
+            ResolvedTextFlowAstConverter.Options runOptions) {
+        if (paragraph == null || target == null) return false;
+        String prefix = null;
+        ResolvedRun styleRun = null;
+        if (paragraph.sourceParagraph != null) {
+            prefix = ResolvedTextFlowAstConverter.generatedPrefixToInsert(paragraph.sourceParagraph);
+            styleRun = ResolvedTextFlowAstConverter.firstVisibleResolvedRun(paragraph.sourceParagraph);
+        }
+        if (paragraph.sourceParagraph == null
+                && (prefix == null || prefix.trim().isEmpty())
+                && paragraph.generatedPrefixText != null) {
+            prefix = paragraph.generatedPrefixText;
+        }
+        if (prefix == null || prefix.trim().isEmpty()) return false;
+        if (styleRun == null) {
+            styleRun = firstVisibleSourceRun(paragraph);
+        }
+        if (styleRun == null) return false;
+        List<ASTTextRun> runs = ResolvedTextFlowAstConverter.convertRunText(
+                prefix,
+                styleRun,
+                target,
+                runOptions != null
+                        ? runOptions
+                        : ResolvedTextFlowAstConverter.options()
+                                .colorResolver(color -> ctx.resolvedData != null
+                                        ? ctx.resolvedData.resolveColorHex(color)
+                                        : color)
+                                .truncateAtParagraphBreak(false));
+        for (ASTTextRun run : runs) {
+            target.addItem(run);
+        }
+        return !runs.isEmpty();
+    }
+
+    private static ResolvedRun firstVisibleSourceRun(TextFlowDocument.TextFlowParagraph paragraph) {
+        if (paragraph == null || paragraph.atoms == null) return null;
+        for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+            if (!(atom instanceof TextFlowDocument.TextAtom)) continue;
+            TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
+            if (textAtom.text == null || textAtom.text.trim().isEmpty()) continue;
+            if (textAtom.sourceRun != null) return textAtom.sourceRun;
+        }
+        return null;
     }
 }

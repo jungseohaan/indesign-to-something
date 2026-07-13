@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
@@ -44,12 +45,41 @@ public final class StoryFlowAssembler {
         if (cellFlow != null && !cellFlow.isEmpty()) {
             return cellFlow;
         }
+        List<ASTParagraph> directNestedTableFlow = buildDirectNestedTableFlow(ctx, idmlCell);
+        if (directNestedTableFlow != null && !directNestedTableFlow.isEmpty()) {
+            return directNestedTableFlow;
+        }
         List<ASTParagraph> nestedTextFrameFlow = buildNestedTextFrameStoryFlow(ctx, idmlCell);
         if (nestedTextFrameFlow != null && !nestedTextFrameFlow.isEmpty()) {
             return nestedTextFrameFlow;
         }
         List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
         return inlineShellFlow != null ? inlineShellFlow : new ArrayList<ASTParagraph>();
+    }
+
+    private static List<ASTParagraph> buildDirectNestedTableFlow(
+            ResolvedBuildContext ctx,
+            IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || ctx.styleResolver == null
+                || idmlCell == null || !idmlCell.hasDirectNestedTables()) {
+            return null;
+        }
+        List<ASTParagraph> paragraphs = new ArrayList<>();
+        for (IDMLTable nestedTable : idmlCell.directNestedTables()) {
+            if (nestedTable == null) continue;
+            ASTTable nestedAst = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter.convertTableSimple(
+                    nestedTable,
+                    0, 0, 0,
+                    null, null, null,
+                    ctx.resolvedData,
+                    ctx.styleResolver,
+                    (table, nestedCell) -> buildCellFlow(ctx, table, nestedCell));
+            if (nestedAst == null) continue;
+            ASTParagraph paragraph = new ASTParagraph();
+            paragraph.inlineTable(nestedAst);
+            paragraphs.add(paragraph);
+        }
+        return paragraphs;
     }
 
     private static List<ASTParagraph> buildOwnedInlineShellFlow(
@@ -78,20 +108,6 @@ public final class StoryFlowAssembler {
             for (ResolvedTextFrame tf : frames) {
                 int tfDomId = parseDomId(tf);
                 if (tfDomId < 0) continue;
-                List<ASTInlineObject> fragments =
-                        InlineFrameHandler.loadPlannedInlineTextShellFragmentsForOwnedTextFrame(ctx, tfDomId);
-                if (fragments != null && !fragments.isEmpty()) {
-                    ASTParagraph paragraph = new ASTParagraph();
-                    for (ASTInlineObject fragment : fragments) {
-                        if (fragment == null) continue;
-                        fragment.keepInline(true);
-                        paragraph.addItem(fragment);
-                    }
-                    if (paragraph.items() != null && !paragraph.items().isEmpty()) {
-                        paragraphs.add(paragraph);
-                    }
-                    continue;
-                }
                 ASTInlineObject inlineShell =
                         InlineFrameHandler.loadPlannedInlineTextShellForOwnedTextFrame(ctx, tfDomId);
                 if (inlineShell == null) continue;
@@ -128,21 +144,31 @@ public final class StoryFlowAssembler {
         ASTParagraph paragraph = new ASTParagraph();
         for (Integer anchorId : resolvedCell.inlineAnchorIds()) {
             if (anchorId == null || anchorId < 0) continue;
+            if (!cellContainsInlineAnchor(idmlCell, anchorId)) continue;
+            if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, anchorId)) continue;
             List<ASTInlineItem> plannedItems =
                     InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchorId, null, null);
             if (plannedItems != null) {
+                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchorId, paragraph);
                 appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
-                continue;
             }
-            ASTInlineObject inline = InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchorId);
-            if (inline == null) inline = InlineFrameHandler.loadInlineObject(ctx, anchorId);
-            if (inline == null) continue;
-            inline.keepInline(true);
-            paragraph.addItem(inline);
         }
         if (paragraph.items() != null && !paragraph.items().isEmpty()) {
             paragraphs.add(paragraph);
         }
+    }
+
+    private static boolean cellContainsInlineAnchor(IDMLTableCell idmlCell, int anchorId) {
+        if (idmlCell == null || idmlCell.paragraphs() == null || anchorId < 0) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                for (String inlineId : inlineGraphicIdsInRunOrder(run)) {
+                    if (parseInlineObjectDomId(inlineId) == anchorId) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void appendPlannedInlineTextShellsFromCellAnchors(
@@ -170,12 +196,9 @@ public final class StoryFlowAssembler {
                     List<ASTInlineItem> plannedItems =
                             InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, null, null);
                     if (plannedItems != null) {
+                        InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, paragraph);
                         appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
-                        continue;
                     }
-                    ASTInlineObject inlineShell =
-                            InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
-                    if (inlineShell != null) paragraph.addItem(inlineShell);
                 }
             }
             if (paragraph != null && paragraph.items() != null && !paragraph.items().isEmpty()) {
@@ -250,8 +273,13 @@ public final class StoryFlowAssembler {
                 || idmlCell.textFrameStoryRefs().isEmpty()) {
             return null;
         }
+        List<ASTParagraph> merged = new ArrayList<>();
         for (String storyRef : idmlCell.textFrameStoryRefs()) {
-            if (storyRef == null || isStoryOwnedByPlacedTextFrame(ctx, storyRef)) continue;
+            if (storyRef == null) continue;
+            if (!shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef)
+                    && isStoryOwnedByPlacedTextFrame(ctx, storyRef)) {
+                continue;
+            }
             IDMLStory idmlStory = ctx.loadIDMLStory != null ? ctx.loadIDMLStory.apply(storyRef) : null;
             if (idmlStory != null && idmlStory.hasTables()) continue;
             ResolvedStory story = ctx.resolvedData.getStory(toDecimalStoryId(storyRef));
@@ -260,9 +288,49 @@ public final class StoryFlowAssembler {
             }
             if (!hasAuthoritativeResolvedStructure(story)) continue;
             List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story);
-            if (paragraphs != null && !paragraphs.isEmpty()) return paragraphs;
+            if (paragraphs != null && !paragraphs.isEmpty()) {
+                merged.addAll(paragraphs);
+            }
         }
-        return null;
+        return merged.isEmpty() ? null : merged;
+    }
+
+    public static boolean shouldCellConsumeNestedStoryRef(
+            ResolvedBuildContext ctx,
+            IDMLTableCell idmlCell,
+            String storyRef) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null
+                || storyRef == null
+                || idmlCell.textFrameStoryRefs() == null
+                || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return false;
+        }
+        boolean referencedByCell = false;
+        for (String ref : idmlCell.textFrameStoryRefs()) {
+            if (ref == null) continue;
+            if (ref.equals(storyRef) || toDecimalStoryId(ref).equals(toDecimalStoryId(storyRef))) {
+                referencedByCell = true;
+                break;
+            }
+        }
+        if (!referencedByCell) return false;
+
+        String storyId = toDecimalStoryId(storyRef);
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
+        if ((frames == null || frames.isEmpty()) && !storyRef.equals(storyId)) {
+            frames = ctx.resolvedData.getTextFramesForStory(storyRef);
+        }
+        if (frames == null || frames.isEmpty()) return false;
+
+        boolean sawInlineFrame = false;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null) continue;
+            if (!tf.isInline()) {
+                return false;
+            }
+            sawInlineFrame = true;
+        }
+        return sawInlineFrame;
     }
 
     public static boolean isStoryOwnedByPlacedTextFrame(ResolvedBuildContext ctx, String storyRef) {

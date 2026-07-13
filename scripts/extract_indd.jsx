@@ -15,7 +15,7 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "54";
+var EXTRACT_SCRIPT_VERSION = "56";
 var _EXTRACT_MODULE_LOAD_DEBUG = "";
 var _EXTRACT_MODULE_ALIAS_SOURCE = "";
 var _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS = null;
@@ -101,12 +101,11 @@ function _loadExtractInddModules(scriptArgs, configPath) {
     } catch (eConfigBase) {
         debug.push("configBaseError=" + eConfigBase);
     }
-    try {
-        if (typeof Folder !== "undefined" && Folder.current) {
-            pushBaseFolder(Folder.current);
-            pushBaseFolder(Folder(Folder.current.fsName + "/scripts"));
-        }
-    } catch (eCurrentBase) {}
+    // NOTE:
+    // InDesign desktop `do script ... language javascript` 실행에서는
+    // `Folder.current`가 invalid object(30614)로 깨져 있는 경우가 있다.
+    // 이 fallback은 없어도 `$.fileName` / configPath / scriptArgs 경로로
+    // 모듈 해석이 가능하므로, 여기서는 참조하지 않는다.
 
     var moduleNames = [
         "io_utils.jsx",
@@ -136,6 +135,7 @@ function _loadExtractInddModules(scriptArgs, configPath) {
         "resolved_collectors.jsx",
         "text_collectors.jsx",
         "preview_export.jsx",
+        "export_units.jsx",
         "extraction_result_writer.jsx",
         "extraction_validation.jsx",
         "extraction_orchestrator.jsx"

@@ -21,7 +21,7 @@ public final class ParagraphTextHelpers {
      * <p>형식:
      * <ul>
      *   <li>{@code "u" + hex(domId)} → decimal domId (정상 케이스)</li>
-     *   <li>{@code "u" + originalDomId + "_pi" + pageIdx} → 그대로 (SPEC-025 master instance clone; 별도 entry)</li>
+     *   <li>{@code "u" + originalDomId + "_pi" + pageIdx} → 그대로 (source ownership policy master instance clone; 별도 entry)</li>
      *   <li>{@code "u" + raw} → raw (NumberFormatException fallback)</li>
      * </ul>
      */
@@ -30,7 +30,7 @@ public final class ParagraphTextHelpers {
         String s = sourceId.startsWith("u") ? sourceId.substring(1) : sourceId;
         int us = s.indexOf('_');
         if (us >= 0) {
-            // SPEC-025 master instance / off-canvas clone: "_pi"/"_oc" 접미사는 stripping 하지 않음 (별도 frame entry)
+            // source ownership policy master instance / off-canvas clone: "_pi"/"_oc" 접미사는 stripping 하지 않음 (별도 frame entry)
             if (us + 3 <= s.length()) {
                 String suffix3 = s.substring(us, us + 3);
                 if ("_pi".equals(suffix3) || "_oc".equals(suffix3)) {

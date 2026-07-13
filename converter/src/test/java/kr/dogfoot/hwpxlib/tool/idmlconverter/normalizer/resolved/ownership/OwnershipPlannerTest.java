@@ -1363,8 +1363,62 @@ public class OwnershipPlannerTest {
 
         Assert.assertNotNull(plan);
         Assert.assertEquals(0, plan.zOrder);
-        Assert.assertEquals(VisualLayer.CONTENT_BACKDROP, plan.visualLayer);
-        Assert.assertEquals(PolicyLayer.CONTENT, plan.visualPolicyLayer());
+        Assert.assertEquals(VisualLayer.CONTAINER_BACKDROP, plan.visualLayer);
+        Assert.assertEquals(PolicyLayer.BACKGROUND, plan.visualPolicyLayer());
+        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(visual));
+    }
+
+    @Test
+    public void pageWashPlacedPdfWithFilledRootFrameIsPageBackground() {
+        ResolvedData data = new ResolvedData();
+        data.addPage(page(0, new double[] { 0, 0, 280, 220 }));
+
+        ResolvedPageItem root = pageItem(
+                4637,
+                "Rectangle",
+                new double[] { -3.0, -3.0, 283.0, 220.0 },
+                "활동_박스 Y02",
+                null,
+                0.0);
+        root.fillTint(40.0);
+        root.zOrder(635);
+        data.addPageItem(root);
+
+        ResolvedPageItem child = pageItem(
+                27166,
+                "PDF",
+                new double[] { -15.2, 0.0, 295.2, 220.0 },
+                null,
+                null,
+                0.0);
+        child.parentId("4637");
+        child.opacity(10.0);
+        child.zOrder(636);
+        data.addPageItem(child);
+
+        RenderedGroup visual = rendered(
+                4637,
+                "page_object",
+                "page_object",
+                "pdf_export",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 4637, 27166 });
+        visual.containsEditableText(Boolean.FALSE);
+        visual.containsText(Boolean.FALSE);
+        visual.bounds(new double[] { 0.0, 0.0, 280.0, 220.0 });
+        visual.zOrder(0);
+        visual.zOrderKnown(true);
+        data.addRenderedFloatingItem(visual);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 4637, "pdf_export");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(VisualLayer.PAGE_BACKGROUND, plan.visualLayer);
+        Assert.assertEquals(PolicyLayer.BACKGROUND, plan.visualPolicyLayer());
+        Assert.assertEquals(0, plan.zOrder);
         Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(visual));
     }
 
@@ -1608,7 +1662,7 @@ public class OwnershipPlannerTest {
     }
 
     @Test
-    public void tableOnlyCarrierParentShapeBecomesTableStyleSlotNotShellVisual() {
+    public void tableOnlyCarrierSiblingDecorationKeepsShellVisualBesideTableStructure() {
         ResolvedData data = new ResolvedData();
         ResolvedTextFrame tf = textFrame(501, "\u0016");
         tf.storyId("501");
@@ -1618,12 +1672,12 @@ public class OwnershipPlannerTest {
 
         ResolvedPageItem parent = pageItem(
                 500,
-                "Rectangle",
+                "Group",
                 new double[] { 155.0, 63.0, 189.0, 203.0 },
-                "#표색_인디핑크미색",
-                "Black",
-                0.25);
-        parent.childIds(new int[] { 501 });
+                null,
+                null,
+                0.0);
+        parent.childIds(new int[] { 501, 502 });
         data.addPageItem(parent);
 
         ResolvedPageItem tfItem = pageItem(
@@ -1636,27 +1690,39 @@ public class OwnershipPlannerTest {
         tfItem.parentId("500");
         data.addPageItem(tfItem);
 
+        ResolvedPageItem cellDecoration = pageItem(
+                502,
+                "Rectangle",
+                new double[] { 155.0, 63.0, 189.0, 203.0 },
+                "#표색_인디핑크미색",
+                "Black",
+                0.25);
+        cellDecoration.parentId("500");
+        data.addPageItem(cellDecoration);
+
         RenderedGroup shell = rendered(
-                500,
+                502,
                 "page_object",
                 "page_object",
-                "decoration_group",
+                "slot_only_textless_shell",
                 "indesign_png",
                 "hwpx_tf",
                 new String[] { "501" },
-                new int[] { 500, 501 });
+                new int[] { 501, 502 });
         shell.bounds(new double[] { 155.0, 63.0, 189.0, 203.0 });
+        shell.containsEditableText(Boolean.FALSE);
+        shell.containsText(Boolean.FALSE);
         data.addRenderedFloatingItem(shell);
 
         ResolvedBuildContext ctx = plan(data, storyWithSingleCellTable("u1f5i1", "cell text"));
         ObjectPlan tablePlan = findPlanByKind(ctx, 501, "text_frame:table_only");
-        ObjectPlan shellPlan = findRenderedPlan(ctx, 500, "decoration_group");
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 502, "slot_only_textless_shell");
 
         Assert.assertNotNull(tablePlan);
         Assert.assertEquals(VisualAction.PLACE_TABLE_STYLE, tablePlan.visualAction);
-        Assert.assertArrayEquals(new int[] { 500 }, tablePlan.styleSourceObjectIds);
+        Assert.assertArrayEquals(new int[0], tablePlan.styleSourceObjectIds);
         Assert.assertNotNull(shellPlan);
-        Assert.assertEquals(VisualAction.DROP_VISUAL, shellPlan.visualAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
     }
 
     @Test
@@ -1676,6 +1742,81 @@ public class OwnershipPlannerTest {
                 new double[] { 155.0, 63.0, 189.0, 203.0 },
                 data.getTablePlacementBounds("u1f5i1"),
                 0.0001);
+    }
+
+    @Test
+    public void renderedPlanLookupPrefersExactArtifactBeforeSharedCandidate() {
+        ResolvedData data = new ResolvedData();
+        RenderedGroup composite = rendered(
+                700,
+                "page_object",
+                "page_object",
+                "master_graphic_textless",
+                "indesign_png",
+                "hwpx_tf",
+                new String[0],
+                new int[] { 10, 11, 12 });
+        composite.candidateId("shared-candidate");
+        composite.file("rendered_frames/composite.png");
+        data.addRenderedFloatingItem(composite);
+
+        RenderedGroup direct = rendered(
+                701,
+                "page_object",
+                "page_object",
+                "master_graphic",
+                "indesign_png",
+                "none",
+                new String[0],
+                new int[] { 12 });
+        direct.candidateId("shared-candidate");
+        direct.file("rendered_frames/direct.png");
+        data.addRenderedFloatingItem(direct);
+
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = data;
+        ObjectPlan compositePlan = renderedPlan(
+                700,
+                "planner_declared_rendered:pass.master_page_graphics:MASTER_ITEM",
+                "rendered_frames/composite.png",
+                VisualAction.PLACE_TEXT_SHELL,
+                VisualLayer.LABEL_BACKDROP,
+                Materialization.EXTRACTED_PNG_VECTOR,
+                0)
+                .withExtractionCandidate("shared-candidate", "pass.master_page_graphics", "TEXTLESS_SHELL_SLOT");
+        ObjectPlan directPlan = renderedPlan(
+                701,
+                "rendered_floating_item:page_object:page_object",
+                "rendered_frames/direct.png",
+                VisualAction.PLACE_FLOATING_PNG,
+                VisualLayer.CONTENT_VISUAL,
+                Materialization.EXTRACTED_PNG_VECTOR,
+                5)
+                .withExtractionCandidate("shared-candidate", "pass.master_page_graphics", "CONTENT_VISUAL_SLOT");
+        ctx.addOwnershipPlan(compositePlan);
+        ctx.addOwnershipPlan(directPlan);
+
+        Assert.assertSame(directPlan, ctx.findOwnershipPlanForRendered(direct));
+        OwnershipPlanValidator.validate(ctx);
+        Assert.assertFalse(hasWarning(ctx, "STAGE4_RENDERED_PLAN_ARTIFACT_MISMATCH"));
+    }
+
+    @Test
+    public void validatorWarnsWhenPageBackgroundKeepsSourceZAboveBottomBand() {
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = new ResolvedData();
+        ctx.addOwnershipPlan(renderedPlan(
+                720,
+                "rendered_floating_item:page_object:page_object",
+                "rendered_frames/background.png",
+                VisualAction.PLACE_FLOATING_PNG,
+                VisualLayer.PAGE_BACKGROUND,
+                Materialization.TEXTLESS_VISUAL_FRAGMENT,
+                12));
+
+        OwnershipPlanValidator.validate(ctx);
+
+        Assert.assertTrue(hasWarning(ctx, "STAGE4_PAGE_BACKGROUND_NOT_BOTTOM_Z"));
     }
 
     private static ResolvedBuildContext plan(ResolvedData data) {
@@ -1728,6 +1869,50 @@ public class OwnershipPlannerTest {
             if (id == sourceId) return true;
         }
         return false;
+    }
+
+    private static boolean hasWarning(ResolvedBuildContext ctx, String code) {
+        if (ctx == null || ctx.ownershipWarningLines == null) return false;
+        String needle = "\"code\":\"" + code + "\"";
+        for (String line : ctx.ownershipWarningLines) {
+            if (line != null && line.contains(needle)) return true;
+        }
+        return false;
+    }
+
+    private static ObjectPlan renderedPlan(
+            int renderId,
+            String kind,
+            String file,
+            VisualAction visualAction,
+            VisualLayer visualLayer,
+            Materialization materialization,
+            int zOrder) {
+        return new ObjectPlan(
+                renderId,
+                kind,
+                0,
+                TextAction.DROP_TEXT,
+                visualAction,
+                visualLayer,
+                Placement.FLOATING,
+                renderId,
+                new int[] { renderId },
+                new int[] { renderId },
+                new int[0],
+                new int[0],
+                new int[0],
+                "test-bundle-" + renderId,
+                materialization,
+                CoordinateSpace.PAGE,
+                null,
+                zOrder,
+                "test_plan",
+                file,
+                new double[] { 10, 10, 20, 40 },
+                null,
+                null,
+                -1);
     }
 
     private static ResolvedTextFrame textFrame(int id, String text) {

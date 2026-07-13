@@ -145,6 +145,7 @@ public final class AnchoredTablePlanner {
             for (IDMLTableCell cell : row.cells()) {
                 if (cell == null) continue;
                 boolean hasContent = (cell.textFrameStoryRefs() != null && !cell.textFrameStoryRefs().isEmpty())
+                        || cell.hasDirectNestedTables()
                         || cellHasText(cell);
                 if (hasContent) contentCells++;
             }
@@ -186,7 +187,17 @@ public final class AnchoredTablePlanner {
         for (IDMLTableRow row : wrapperTable.rows()) {
             if (row == null || row.cells() == null) continue;
             for (IDMLTableCell cell : row.cells()) {
-                if (cell == null || cell.textFrameStoryRefs() == null) continue;
+                if (cell == null) continue;
+                if (cell.hasDirectNestedTables()) {
+                    IDMLTable nestedTable = cell.directNestedTables().get(0);
+                    if (nestedTable != null && nestedTable.selfId() != null) {
+                        return new NestedTableRef(
+                                null,
+                                nestedTable.selfId(),
+                                -1);
+                    }
+                }
+                if (cell.textFrameStoryRefs() == null) continue;
                 for (String storyRef : cell.textFrameStoryRefs()) {
                     IDMLStory nestedStory = ctx.loadIDMLStory.apply(storyRef);
                     if (nestedStory == null || !nestedStory.hasTables()) continue;

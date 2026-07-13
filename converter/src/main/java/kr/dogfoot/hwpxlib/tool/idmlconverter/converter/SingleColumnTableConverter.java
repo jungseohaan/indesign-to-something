@@ -158,7 +158,9 @@ final class SingleColumnTableConverter {
         suppressFirstParagraphSpaceBefore(paragraphs);
 
         // suppressBorder: 배경 사각형이 테두리를 담당하므로 개별 컬럼은 테두리/배경 없이
-        String cellBfId = suppressBorder ? "1" : textBoxBuilder.createTextFrameBorderFill(block);
+        String cellBfId = suppressBorder
+                ? textBoxBuilder.createTransparentTextFrameBorderFill()
+                : textBoxBuilder.createTextFrameBorderFill(block);
 
         // 테이블 속성
         // This 1x1 table is a fixed-position text-frame carrier, not a semantic table.

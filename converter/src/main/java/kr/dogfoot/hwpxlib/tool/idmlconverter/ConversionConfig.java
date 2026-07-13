@@ -270,8 +270,12 @@ public class ConversionConfig {
         public boolean preferCellLevel = true;
         /** true(기본): 단독 PNG 못 찾으면 페이지 배경 PNG에서 셀 영역 crop 시도 (Step E, v2). */
         public boolean fallbackToBackgroundCrop = true;
-        /** true(기본): 중첩 테이블 감지 시 무조건 표 전체 PNG fallback (Step F, v2). */
-        public boolean nestedTableForcesPng = true;
+        /**
+         * Deprecated migration flag.
+         * V2 policy keeps nested tables editable as table structure, so this no
+         * longer forces whole-table PNG fallback.
+         */
+        public boolean nestedTableForcesPng = false;
     }
 
     public static class FontMetricEntry {

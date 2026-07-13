@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.GroupedFlowStackPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
@@ -62,9 +63,6 @@ public final class FramePlacer {
     public static void placeTextFrames(ResolvedBuildContext ctx, List<ASTSection> sections) {
         List<ResolvedTextFrame> frames = ctx.resolvedData.textFrames();
 
-        FrameIndex idx = buildIndex(ctx.resolvedData.allRenderedFloatingItems(), frames, ctx);
-        ctx.conceptDiagramTextFrameIds.addAll(collectConceptDiagramTextFrameIds(ctx, frames));
-
         // FP-B: title overlay 및 inline Y-조정 내부 루프에서 같은 페이지 TF만 검색하도록
         // pageIndex → TF 목록 사전 구축 (O(N²) → O(N) per TF)
         Map<Integer, List<ResolvedTextFrame>> inlineFramesByPage = new HashMap<>();
@@ -74,7 +72,7 @@ public final class FramePlacer {
 
         for (ResolvedTextFrame tf : frames) {
             int tfDomId = parseDomIdOrNeg(tf.id());
-            ObjectPlan textPlan = ctx.findTextFrameOwnershipPlan(tfDomId);
+            ObjectPlan textPlan = ctx.findAnyTextFrameOwnershipPlan(tfDomId);
             boolean planKnown = textPlan != null;
             boolean ownedByFloatingTextShell = ctx.isTextFrameOwnedByFloatingTextShellPlan(tfDomId);
             if (planKnown
@@ -89,8 +87,11 @@ public final class FramePlacer {
             if (planKnown && textPlan.placement == Placement.INLINE && !ownedByFloatingTextShell) {
                 continue;
             }
-            boolean conceptDiagramTf = ctx.conceptDiagramTextFrameIds.contains(tf.id());
             boolean hwpxOwnedTextFrame = ctx.resolvedData.isHwpxOwnedTextFrame(tf.id());
+            if (shouldSkipPlanlessSyntheticCloneTextFrame(ctx, tf, planKnown, ownedByFloatingTextShell,
+                    hwpxOwnedTextFrame)) {
+                continue;
+            }
             boolean plannedFloatingHwpxText =
                     ownedByFloatingTextShell
                             || (planKnown
@@ -98,7 +99,7 @@ public final class FramePlacer {
                                 && textPlan.placement == Placement.FLOATING
                             : ctx.ownershipPlanPlacesFloatingHwpxText(tfDomId));
             boolean editableForHwpx = ctx.resolvedData.isEditableTextFrame(tf.id()) || hwpxOwnedTextFrame;
-            if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
+            if (!plannedFloatingHwpxText && ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
                 continue;
             }
             if (tf.isInline()
@@ -133,18 +134,11 @@ public final class FramePlacer {
             if (!inlineToFloating && isNestedInTextFrame(ctx, tf)) {
                 continue;
             }
-            // 배경에 포함된 legacy non-editable 프레임은 건너뜀.
-            // Stage 1 ObjectPlan이 HWPX text ownership을 결정한 프레임은
-            // 후속 휴리스틱으로 다시 skip하지 않는다.
+            // Stage 1 ObjectPlan 없는 non-editable TF는 실행 단계에서
+            // HWPX text owner로 새로 승격하지 않는다.
             if (!inlineToFloating && !editableForHwpx && !planKnown) {
-                if (shouldSkipNonEditableTf(ctx, tf, tfDomId, idx)) continue;
+                if (shouldSkipNonEditableTf(ctx, tf)) continue;
             }
-            // badge_group_child(non-editable)는 부모 PNG가 텍스트를 포함하므로 글상자 배치 건너뜀.
-            // SPEC-025: editable로 승격된 frame은 !isEditableTextFrame 가드로 보호됨 → 건너뛰지 않음
-            boolean skipAsBadgeChild = !editableForHwpx
-                    && tfDomId >= 0 && idx.badgeChildDomIds.contains(tfDomId);
-            if (skipAsBadgeChild) { continue; }
-
             // 페이지 인덱스 결정 (document offset → section index 매핑)
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) {
@@ -163,7 +157,7 @@ public final class FramePlacer {
             double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
             double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
 
-            // SPEC-035: linked/threaded TextFrames do not merge geometry.
+            // source ownership policy: linked/threaded TextFrames do not merge geometry.
             boolean hasNextPageChain = hasNextPageChainOnDifferentPage(ctx, tf);
 
             LocalFrameBounds localBounds = computeLocalFrameBounds(
@@ -172,7 +166,20 @@ public final class FramePlacer {
             double y = localBounds.y;
             double w = localBounds.w;
             double h = localBounds.h;
-            if (hasAnchoredTablePlan(ctx, tfDomId)) {
+            boolean usingObjectPlanBounds = false;
+            ObjectPlan hwpxTextPlan = ctx.findHwpxTextFrameOwnershipPlan(tfDomId);
+            LocalFrameBounds planBounds = computePlannedPageFrameBounds(ctx, hwpxTextPlan);
+            if (planBounds != null) {
+                x = planBounds.x;
+                y = planBounds.y;
+                w = planBounds.w;
+                h = planBounds.h;
+                usingObjectPlanBounds = true;
+            } else if (plannedFloatingHwpxText) {
+                warnTextPlanMissingExecutableBounds(ctx, hwpxTextPlan, tf);
+                continue;
+            }
+            if (!usingObjectPlanBounds && hasAnchoredTablePlan(ctx, tfDomId)) {
                 LocalFrameBounds pageRelativeBounds = computeScaledPageRelativeFrameBounds(ctx, tf);
                 if (pageRelativeBounds != null) {
                     x = pageRelativeBounds.x;
@@ -183,7 +190,7 @@ public final class FramePlacer {
             }
             ASTSection section = sections.get(pageIdx);
             boolean hasVisibleText = hasVisibleTextExcludingObjectControls(tf.frameVisibleText());
-            if (!hasVisibleText) {
+            if (!usingObjectPlanBounds && !hasVisibleText) {
                 // Object-replacement-only carrier TFs still come from resolved page-relative
                 // coordinates. Convert through the same scaleFactor contract as visible frames.
                 LocalFrameBounds pageRelativeBounds = computeScaledPageRelativeFrameBounds(ctx, tf);
@@ -201,7 +208,7 @@ public final class FramePlacer {
                 double origH = h;
                 h += y;
                 y = 0;
-                // SPEC-025: _oc 해시라 헤더 등 페이지 위쪽 경계선에 위치한 TF (예: y=-8, h=8) 는
+                // source ownership policy: _oc 해시라 헤더 등 페이지 위쪽 경계선에 위치한 TF (예: y=-8, h=8) 는
                 // 클램핑 후 h=0 이 되어 스킵됨 → 원래 높이를 복원해 페이지 상단에 배치.
                 if (h <= 0 && origH > 0) h = origH;
             }
@@ -220,7 +227,7 @@ public final class FramePlacer {
                 h = clipped[3];
             }
 
-            if (hasAnchoredTablePlan(ctx, tfDomId)) {
+            if (!usingObjectPlanBounds && hasAnchoredTablePlan(ctx, tfDomId)) {
                 LocalFrameBounds pageRelativeBounds = computeScaledPageRelativeFrameBounds(ctx, tf);
                 if (pageRelativeBounds != null) {
                     x = pageRelativeBounds.x;
@@ -232,7 +239,7 @@ public final class FramePlacer {
             if (w <= 0) continue;
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
-            // SPEC-025: master instance clones use synthetic ids like "2453_pi20" — not pure numeric.
+            // source ownership policy: master instance clones use synthetic ids like "2453_pi20" — not pure numeric.
             block.sourceId(ParagraphTextHelpers.domIdToSourceId(tf.id()));
             block.storyId(tf.storyId());
             // \uFFFC 로 시작하는 TF에 inline TF가 좌측 가장자리를 공유하는 경우
@@ -299,10 +306,17 @@ public final class FramePlacer {
             // 내부 여백 (insetSpacing — 이미 pt로 스케일됨)
             if (tf.insetSpacing() != null) {
                 double[] inset = tf.insetSpacing();
-                block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
-                block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
-                block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
-                block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+                if (isObjectReplacementOnlyInlinePngCarrier(ctx, tf)) {
+                    block.insetTop(0);
+                    block.insetLeft(0);
+                    block.insetBottom(0);
+                    block.insetRight(0);
+                } else {
+                    block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
+                    block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
+                    block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
+                    block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+                }
             }
 
             // 수직 정렬
@@ -350,23 +364,11 @@ public final class FramePlacer {
                     System.err.println("[FramePlacer] fill/stroke 속성 적용 오류 tf=" + tf.id() + ": " + eFill);
                 }
             }
-            java.util.Set<String> releasedFillIds = releasedNativeFillChildIdsForTf(ctx, tfDomId);
-            if (!hasPlannedTextShell
-                    && (!hasRenderedVisualShell || hasAbsorbedTextStylePlan(ctx, tfDomId)
-                    || !releasedFillIds.isEmpty())) {
-                // PNG가 풀어준 도형이 있으면 그 id로만 형제 흡수를 제한(다른 장식 흡수 방지).
-                applyGroupBackgroundShapeStyle(ctx, tf, block,
-                        releasedFillIds.isEmpty() ? null : releasedFillIds);
-                // released 경로(사이드박스 대형 배경/제목바)만 전역 정책과 무관하게 강제 fill.
-                if (!releasedFillIds.isEmpty()
-                        && block.fillColor() != null && block.fillColor().startsWith("#")) {
+            java.util.Set<String> plannedStyleSourceIds = plannedTextFrameStyleSourceIds(ctx, tfDomId);
+            if (!hasPlannedTextShell && !plannedStyleSourceIds.isEmpty()) {
+                applyGroupBackgroundShapeStyle(ctx, block, plannedStyleSourceIds);
+                if (block.fillColor() != null && block.fillColor().startsWith("#")) {
                     block.forceNativeFill(true);
-                    // 흡수된 배경 도형은 별도 complex_graphic PNG로도 추출될 수 있으므로
-                    // 동일 slot의 visible 실행을 막기 위해 흡수 source로 기록한다.
-                    for (String fid : releasedFillIds) {
-                        try { ctx.nativeFillAbsorbedIds.add(Integer.parseInt(fid)); }
-                        catch (NumberFormatException ignore) { }
-                    }
                 }
             }
             // overflow 감지용 텍스트 길이 저장
@@ -442,18 +444,6 @@ public final class FramePlacer {
                 return true;
             }
         }
-        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
-        if (groups == null) return false;
-        String tfId = String.valueOf(tfDomId);
-        for (RenderedGroup rg : groups) {
-            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!containsEditableTextFrameId(rg, tfId)) continue;
-            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-            if (plan == null) continue;
-            if (!ShellRole.isTextShell(plan)) continue;
-            if (plan.placement != Placement.FLOATING) continue;
-            if (plan.hasVisibleVisual()) return true;
-        }
         return false;
     }
 
@@ -461,21 +451,6 @@ public final class FramePlacer {
         if (ctx == null || tfDomId < 0) return false;
         if (ctx.isTextFrameOwnedByTextShellPlan(tfDomId)) return true;
         if (ctx.isTextFrameStyleOwnedByVisibleTextShellPlan(tfDomId)) return true;
-        if (ctx.resolvedData == null) return false;
-        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
-        if (groups == null) return false;
-        String tfId = String.valueOf(tfDomId);
-        for (RenderedGroup rg : groups) {
-            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!containsEditableTextFrameId(rg, tfId)) continue;
-            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-            if (plan == null) continue;
-            if (ShellRole.isTextShell(plan)
-                    && containsInt(plan.ownedTextFrameIds, tfDomId)
-                    && plan.hasVisibleVisual()) {
-                return true;
-            }
-        }
         return false;
     }
 
@@ -513,44 +488,24 @@ public final class FramePlacer {
         return item != null && String.valueOf(parentDomId).equals(item.parentId());
     }
 
-    /**
-     * 이 TF를 owner로 하는 deco PNG가 "굽지 않고 풀어준" 대형 배경 도형 DOM ID 집합.
-     * (extract_indd.jsx가 nativeFillChildIds로 명시 → Java가 네이티브 fill로 렌더)
-     * 비어있지 않으면 PNG 셸이 있어도 applyGroupBackgroundShapeStyle 게이트를 열어 형제 도형 fill을 흡수.
-     */
-    private static java.util.Set<String> releasedNativeFillChildIdsForTf(ResolvedBuildContext ctx, int tfDomId) {
-        java.util.Set<String> ids = new java.util.HashSet<>();
-        if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return ids;
-        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
-        if (groups == null) return ids;
-        String tfId = String.valueOf(tfDomId);
-        for (RenderedGroup rg : groups) {
-            if (rg == null) continue;
-            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-            if (plan == null) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null || rg.nativeFillChildIds() == null) continue;
-            boolean ownsTf = false;
-            for (String editableId : editableIds) {
-                if (tfId.equals(editableId)) { ownsTf = true; break; }
+    private static java.util.Set<String> plannedTextFrameStyleSourceIds(ResolvedBuildContext ctx, int tfDomId) {
+        java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+        if (ctx == null || tfDomId < 0 || ctx.ownershipPlans == null) return ids;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.styleSourceObjectIds == null
+                    || plan.styleSourceObjectIds.length == 0) {
+                continue;
             }
-            if (!ownsTf) continue;
-            for (int id : rg.nativeFillChildIds()) ids.add(String.valueOf(id));
+            if (!containsInt(plan.ownedTextFrameIds, tfDomId)
+                    && plan.domId != tfDomId
+                    && !containsInt(plan.sourceObjectIds, tfDomId)) {
+                continue;
+            }
+            for (int styleSourceId : plan.styleSourceObjectIds) {
+                if (styleSourceId >= 0) ids.add(String.valueOf(styleSourceId));
+            }
         }
         return ids;
-    }
-
-    private static boolean hasAbsorbedTextStylePlan(ResolvedBuildContext ctx, int tfDomId) {
-        if (ctx == null || tfDomId < 0 || ctx.ownershipPlans == null) return false;
-        for (ObjectPlan plan : ctx.ownershipPlans) {
-            if (plan == null || plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) continue;
-            if (plan.domId == tfDomId) return true;
-            if (plan.sourceObjectIds == null) continue;
-            for (int sourceObjectId : plan.sourceObjectIds) {
-                if (sourceObjectId == tfDomId) return true;
-            }
-        }
-        return false;
     }
 
     private static boolean hasAnchoredTablePlan(ResolvedBuildContext ctx, int tfDomId) {
@@ -578,74 +533,32 @@ public final class FramePlacer {
     }
 
     /**
-     * non-editable + non-inlineToFloating TF의 배치 여부를 결정한다.
-     * true 반환 시 해당 TF를 건너뜀, false 반환 시 글상자 배치 계속.
+     * non-editable + non-inlineToFloating + no ObjectPlan TF는 Stage 2에서
+     * 새 HWPX text owner로 승격하지 않는다.
      */
     private static boolean shouldSkipNonEditableTf(
-            ResolvedBuildContext ctx, ResolvedTextFrame tf, int tfDomId, FrameIndex idx) {
-        if (shouldPlaceVisualLabelTextSeparately(ctx, tf)) return false;
-        if (hasEditableInlineTextHiddenGroupInStory(ctx, tf.storyId())) return false;
-        if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return true;
-
-        // domId=None TF: ExtendScript가 domId를 얻지 못해 editability 확인 불가.
-        // storyId가 있고 비-숨김/비인쇄이면 IDML에 실제 내용이 있을 수 있으므로 배치 허용.
-        if (tf.id() == null && tf.storyId() != null && !tf.sourceHidden()) return false;
-
-        boolean sharedWithEditable = tf.storyId() != null && idx.editableStoryIds.contains(tf.storyId());
-        if (sharedWithEditable) return false;
-
-        // non-editable 플로팅 TF 중, 자기 story + 텍스트가 있고 PNG로 렌더됐으며
-        // 부모가 회전된 Rectangle (absoluteRotationAngle≠0)인 경우 텍스트 글상자로 배치.
-        // (예: 오느른/운느라/싸인 — 부모 Rectangle이 비스듬히 기울어진 TF)
-        String _vis = tf.frameVisibleText();
-        String _visCleaned = (_vis == null) ? "" : _vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
-        boolean _hasOwnText = _visCleaned.length() >= 2;
-        boolean _isRendered = tfDomId >= 0 && ctx.resolvedData.isRenderedByOtherChannel(tfDomId);
-
-        boolean _parentIsRotatedRect = false;
-        ResolvedPageItem _tfPi = ctx.resolvedData.getPageItem(tf.id());
-        if (_hasOwnText && _isRendered && !tf.isInline()) {
-            if (_tfPi != null && _tfPi.parentId() != null) {
-                ResolvedPageItem _parent = ctx.resolvedData.getPageItem(_tfPi.parentId());
-                if (_parent != null && "Rectangle".equals(_parent.type())
-                        && Math.abs(_parent.absoluteRotationAngle()) > 0.5) {
-                    _parentIsRotatedRect = true;
-                }
-            }
+            ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx != null) {
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_UNPLANNED_NON_EDITABLE_TEXT_FRAME_SKIPPED\""
+                    + ",\"textFrameId\":\"" + ObjectPlan.escape(tf != null ? tf.id() : null) + "\""
+                    + ",\"storyId\":\"" + ObjectPlan.escape(tf != null ? tf.storyId() : null) + "\""
+                    + ",\"detail\":\"non-editable TextFrame without an ObjectPlan was not promoted to HWPX text by FramePlacer\"}");
         }
-
-        // PNG 렌더링 없이 자기 스토리에 텍스트만 있는 non-editable TF:
-        // 조상 Group에 PNG가 없는 경우 텍스트 글상자로 배치 (예: "새로운 단어가..." 글상자)
-        boolean _nonRenderedWithText = false;
-        if (!_parentIsRotatedRect && _hasOwnText && !_isRendered
-                && tf.storyId() != null && !tf.isInline()) {
-            boolean _ancestorHasPng = false;
-            String _anPid = (_tfPi != null) ? _tfPi.parentId() : null;
-            for (int _d = 0; _d < 5 && _anPid != null && !_ancestorHasPng; _d++) {
-                int _anPidInt = parseDomIdOrNeg(_anPid);
-                if (_anPidInt >= 0) {
-                    if (ctx.resolvedData.isInlineObjectId(_anPidInt)) { _ancestorHasPng = true; break; }
-                    // inline_* 파일을 가진 그룹(배지)만 텍스트 포함 PNG로 간주.
-                    // deco_*/shape_* 등 page_object 타입은 텍스트 TF 내용이 PNG에 캡처되지 않음.
-                    if (idx.inlineFileGroupIds.contains(_anPidInt)) { _ancestorHasPng = true; break; }
-                }
-                if (!_ancestorHasPng) {
-                    ResolvedPageItem _anParPi = ctx.resolvedData.getPageItem(_anPid);
-                    _anPid = (_anParPi != null) ? _anParPi.parentId() : null;
-                }
-            }
-            _nonRenderedWithText = !_ancestorHasPng;
-        }
-
-        if (_parentIsRotatedRect) {
-            return false; // 글상자로 배치
-        }
-        return !_nonRenderedWithText; // nonRenderedWithText → 배치(false), 그 외 → 건너뜀(true)
+        return true;
     }
 
-    private static boolean hasEditableInlineTextHiddenGroupInStory(
-            ResolvedBuildContext ctx, String storyId) {
-        return editableInlineTextLengthForStory(ctx, storyId) > 0;
+    private static void warnTextPlanMissingExecutableBounds(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            ResolvedTextFrame tf) {
+        if (ctx == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_TEXT_PLAN_MISSING_EXECUTABLE_BOUNDS\""
+                + ",\"candidateId\":\"" + ObjectPlan.escape(plan != null ? plan.candidateId : null) + "\""
+                + ",\"planPassId\":\"" + ObjectPlan.escape(plan != null ? plan.planPassId : null) + "\""
+                + ",\"textFrameId\":\"" + ObjectPlan.escape(tf != null ? tf.id() : null) + "\""
+                + ",\"placement\":\"" + (plan != null ? plan.placement : null) + "\""
+                + ",\"coordinateSpace\":\"" + (plan != null ? plan.coordinateSpace : null) + "\""
+                + ",\"detail\":\"floating HWPX text placement requires a HWPX_TEXT ObjectPlan with PAGE executable bounds; FramePlacer skipped legacy TextFrame geometry\"}");
     }
 
     private static int editableInlineTextLengthForStory(
@@ -658,8 +571,7 @@ public final class FramePlacer {
             if (rg == null) continue;
             if (!storyId.equals(rg.parentStoryId())) continue;
             if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) continue;
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
-            String[] editableIds = rg.editableTextFrameIds();
+            String[] editableIds = plannedOrLegacyEditableTextFrameIds(ctx, rg);
             if (editableIds == null || editableIds.length == 0) continue;
             for (String editableId : editableIds) {
                 ResolvedTextFrame child = ctx.resolvedData.getTextFrame(editableId);
@@ -669,6 +581,41 @@ public final class FramePlacer {
             }
         }
         return total;
+    }
+
+    private static String[] plannedOrLegacyEditableTextFrameIds(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg) {
+        if (rg == null) return new String[0];
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan != null) {
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
+                return new String[0];
+            }
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+                return new String[0];
+            }
+            String[] out = new String[plan.ownedTextFrameIds.length];
+            for (int i = 0; i < plan.ownedTextFrameIds.length; i++) {
+                out[i] = String.valueOf(plan.ownedTextFrameIds[i]);
+            }
+            return out;
+        }
+        if (ctx != null && ctx.hasStage1ObjectPlans()) {
+            return new String[0];
+        }
+        if (!rg.hasEditableTextHiddenFromPng()) {
+            return new String[0];
+        }
+        String[] direct = rg.editableTextFrameIds();
+        if (direct != null && direct.length > 0) return direct;
+        int[] atomic = rg.atomicOwnedTextFrameIds();
+        if (atomic == null || atomic.length == 0) return new String[0];
+        String[] out = new String[atomic.length];
+        for (int i = 0; i < atomic.length; i++) {
+            out[i] = String.valueOf(atomic[i]);
+        }
+        return out;
     }
 
     private static int visibleTextLength(String text) {
@@ -684,70 +631,74 @@ public final class FramePlacer {
                 .length();
     }
 
-    private static boolean shouldPlaceVisualLabelTextSeparately(
-            ResolvedBuildContext ctx, ResolvedTextFrame tf) {
-        if (ctx == null || tf == null || tf.id() == null) return false;
-        if (tf.sourceHidden()) return false;
-        int domId;
-        try {
-            domId = Integer.parseInt(tf.id());
-        } catch (NumberFormatException e) {
-            return false;
-        }
-        ObjectPlan plan = ctx.findTextFrameOwnershipPlan(domId);
-        return plan != null && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT;
-    }
-
     private static int parseDomIdOrNeg(String id) {
         if (id == null) return -1;
         try { return Integer.parseInt(id); } catch (NumberFormatException e) { return -1; }
     }
 
     /**
+     * Stage 1 ownership plan이 있는 실행에서는 synthetic master/off-canvas clone TextFrame을
+     * editable fallback만으로 되살리지 않는다.
+     *
+     * <p>"2453_pi20", "17037_oc24" 같은 clone id는 숫자 domId lookup으로는 매칭되지 않고,
+     * 실행 단계가 임의로 HWPX text owner를 만들면 master-derived hidden title/header가
+     * 페이지에 떠오르는 회귀가 생긴다. Stage 1이 명시적으로 floating text owner 또는
+     * floating text-shell owner를 주지 않았다면 skip한다.</p>
+     *
+     * <p>단, source extractor가 이미 per-page folio/page number로 확정한 synthetic clone은
+     * source metadata의 진실을 따라 HWPX text로 살린다. 이 예외는 page/좌표가 아니라
+     * resolved masterSpecialType="pagenum" 메타데이터로만 결정한다.</p>
+     */
+    private static boolean shouldSkipPlanlessSyntheticCloneTextFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            boolean planKnown,
+            boolean ownedByFloatingTextShell,
+            boolean hwpxOwnedTextFrame) {
+        if (ctx == null || ctx.resolvedData == null || tf == null) return false;
+        if (planKnown || ownedByFloatingTextShell || hwpxOwnedTextFrame) return false;
+        if (ctx.resolvedData.ownershipPlans() == null || ctx.resolvedData.ownershipPlans().isEmpty()) {
+            return false;
+        }
+        String textFrameId = tf.id();
+        if (!isSyntheticCloneTextFrameId(textFrameId)) return false;
+        if (isSyntheticPageNumberClone(tf)) return false;
+        return tf.isMasterInstance() || textFrameId.contains("_oc");
+    }
+
+    private static boolean isSyntheticCloneTextFrameId(String textFrameId) {
+        if (textFrameId == null || textFrameId.isEmpty()) return false;
+        return textFrameId.contains("_pi") || textFrameId.contains("_oc");
+    }
+
+    private static boolean isSyntheticPageNumberClone(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String specialType = tf.masterSpecialType();
+        return "pagenum".equals(specialType);
+    }
+
+    /**
      * Stage 1 plan이 style source로 명시한 형제 도형만 TF block style로 흡수한다.
-     * 실행 단계에서 overlap만 보고 새로운 shell/style owner를 찾지 않는다.
+     * 실행 단계에서 overlap/bounds로 새로운 shell/style owner를 고르지 않는다.
      */
     private static void applyGroupBackgroundShapeStyle(
-            ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTextFrameBlock block,
-            java.util.Set<String> allowedSourceIds) {
-        if (allowedSourceIds == null || allowedSourceIds.isEmpty()) return;
-        ResolvedPageItem tfItem = ctx.resolvedData.getPageItem(tf.id());
-        if (tfItem == null || tfItem.parentId() == null || tf.geometricBounds() == null) return;
-
-        double[] tfb = tf.geometricBounds();
-        ResolvedPageItem parent = ctx.resolvedData.getPageItem(tfItem.parentId());
-        if (isTextShellShape(parent) && overlapRatio(tfb, parent.geometricBounds()) >= 0.75
-                && allowedSourceIds.contains(parent.id())) {
-            applyPageItemStyleToBlock(ctx, parent, block);
+            ResolvedBuildContext ctx, ASTTextFrameBlock block,
+            java.util.Set<String> plannedStyleSourceIds) {
+        if (ctx == null || ctx.resolvedData == null || plannedStyleSourceIds == null
+                || plannedStyleSourceIds.isEmpty()) {
             return;
         }
-
-        ResolvedPageItem best = null;
-        double bestScore = 0.0;
-        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
-            if (pi == null || pi.id() == null || pi.id().equals(tf.id())) continue;
-            if (!allowedSourceIds.contains(pi.id())) continue;
-            if (!tfItem.parentId().equals(pi.parentId())) continue;
-            if (!isTextShellShape(pi)) continue;
-            double[] pb = pi.geometricBounds();
-            if (pb == null || pb.length < 4) continue;
-            double score = overlapRatio(tfb, pb);
-            if (score > bestScore) {
-                bestScore = score;
-                best = pi;
-            }
+        for (String sourceId : plannedStyleSourceIds) {
+            ResolvedPageItem source = ctx.resolvedData.getPageItem(sourceId);
+            if (!isTextShellShape(source)) continue;
+            applyPageItemStyleToBlock(ctx, source, block);
         }
-        if (best == null || bestScore < 0.75) return;
-
-        applyPageItemStyleToBlock(ctx, best, block);
     }
 
     private static boolean isTextShellShape(ResolvedPageItem item) {
         if (item == null) return false;
         String t = item.type();
-        if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) return false;
-        double[] gb = item.geometricBounds();
-        return gb != null && gb.length >= 4;
+        return "Rectangle".equals(t) || "Polygon".equals(t) || "Oval".equals(t);
     }
 
     private static void applyPageItemStyleToBlock(
@@ -805,134 +756,10 @@ public final class FramePlacer {
         return strokeWeight / scale;
     }
 
-    private static double overlapRatio(double[] a, double[] b) {
-        double y1 = Math.max(a[0], b[0]);
-        double x1 = Math.max(a[1], b[1]);
-        double y2 = Math.min(a[2], b[2]);
-        double x2 = Math.min(a[3], b[3]);
-        if (y2 <= y1 || x2 <= x1) return 0.0;
-        double overlap = (y2 - y1) * (x2 - x1);
-        double areaA = Math.max(0.0, (a[2] - a[0]) * (a[3] - a[1]));
-        double areaB = Math.max(0.0, (b[2] - b[0]) * (b[3] - b[1]));
-        double denom = Math.min(areaA, areaB);
-        return denom > 0 ? overlap / denom : 0.0;
-    }
-
-    /** {@link #placeTextFrames} 에서 사전 구축하는 룩업 인덱스 집합. */
-    private static final class FrameIndex {
-        final Set<Integer> badgeChildDomIds;
-        final Map<Integer, Integer> badgeChildToParentId;
-        final Map<Integer, int[]> inlineObjectChildIdsMap;
-        final Set<Integer> childrenOfInlineObjects;
-        final Set<Integer> inlineFileGroupIds;
-        final Set<Integer> allRenderedItemIds;
-        final Set<Integer> renderedItemWithFileIds;
-        final Set<String> editableStoryIds;
-        /** inline_object 타입 RenderedGroup을 id → 객체로 조회 (ancestor 체인 탐색용). */
-        final Map<Integer, RenderedGroup> inlineObjectById;
-
-        FrameIndex(Set<Integer> badgeChildDomIds,
-                   Map<Integer, Integer> badgeChildToParentId,
-                   Map<Integer, int[]> inlineObjectChildIdsMap,
-                   Set<Integer> childrenOfInlineObjects,
-                   Set<Integer> inlineFileGroupIds,
-                   Set<Integer> allRenderedItemIds,
-                   Set<Integer> renderedItemWithFileIds,
-                   Set<String> editableStoryIds,
-                   Map<Integer, RenderedGroup> inlineObjectById) {
-            this.badgeChildDomIds = badgeChildDomIds;
-            this.badgeChildToParentId = badgeChildToParentId;
-            this.inlineObjectChildIdsMap = inlineObjectChildIdsMap;
-            this.childrenOfInlineObjects = childrenOfInlineObjects;
-            this.inlineFileGroupIds = inlineFileGroupIds;
-            this.allRenderedItemIds = allRenderedItemIds;
-            this.renderedItemWithFileIds = renderedItemWithFileIds;
-            this.editableStoryIds = editableStoryIds;
-            this.inlineObjectById = inlineObjectById;
-        }
-    }
-
-    private static FrameIndex buildIndex(List<RenderedGroup> renderedItems,
-                                          List<ResolvedTextFrame> frames,
-                                          ResolvedBuildContext ctx) {
-        Set<Integer> badgeChildDomIds = new HashSet<>();
-        Map<Integer, Integer> badgeChildToParentId = new HashMap<>();
-        Map<Integer, int[]> inlineObjectChildIdsMap = new HashMap<>();
-        Set<Integer> childrenOfInlineObjects = new HashSet<>();
-        Set<Integer> inlineFileGroupIds = new HashSet<>();
-        Set<Integer> allRenderedItemIds = new HashSet<>();
-        Set<Integer> renderedItemWithFileIds = new HashSet<>();
-        Map<Integer, RenderedGroup> inlineObjectById = new HashMap<>();
-        for (RenderedGroup _rgi : renderedItems) {
-            allRenderedItemIds.add(_rgi.id());
-            if (_rgi.file() != null) renderedItemWithFileIds.add(_rgi.id());
-            if ("badge_group_child".equals(_rgi.itemType())) {
-                badgeChildDomIds.add(_rgi.id());
-                badgeChildToParentId.put(_rgi.id(), _rgi.badgeGroupId());
-            }
-            if ("inline_object".equals(_rgi.itemType())) {
-                inlineObjectById.put(_rgi.id(), _rgi);
-                if (_rgi.childIds() != null) {
-                    inlineObjectChildIdsMap.put(_rgi.id(), _rgi.childIds());
-                    for (int cid : _rgi.childIds()) childrenOfInlineObjects.add(cid);
-                }
-            }
-            if (isRenderedInlineObject(_rgi) && _rgi.file() != null && !_rgi.file().isEmpty()) {
-                inlineFileGroupIds.add(_rgi.id());
-            }
-        }
-        Set<String> editableStoryIds = new HashSet<>();
-        for (ResolvedTextFrame _tf : frames) {
-            if (_tf.storyId() != null && ctx.resolvedData.isEditableTextFrame(_tf.id())) {
-                editableStoryIds.add(_tf.storyId());
-            }
-        }
-        return new FrameIndex(badgeChildDomIds, badgeChildToParentId, inlineObjectChildIdsMap,
-                childrenOfInlineObjects, inlineFileGroupIds, allRenderedItemIds,
-                renderedItemWithFileIds, editableStoryIds, inlineObjectById);
-    }
-
-    private static boolean isOwnedTextShellPlan(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (rg == null) return false;
-        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
-        if (plan != null
-                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                && ShellRole.isTextShell(plan)) {
-            return true;
-        }
-        return false;
-    }
-
     private static boolean containsInt(int[] values, int expected) {
         if (values == null) return false;
         for (int value : values) {
             if (value == expected) return true;
-        }
-        return false;
-    }
-
-    private static boolean isRenderedPageObject(RenderedGroup rg) {
-        if (rg == null) return false;
-        String itemType = rg.itemType();
-        if (itemType == null || itemType.isEmpty()) {
-            itemType = rg.type();
-        }
-        return "page_object".equals(itemType);
-    }
-
-    private static boolean isRenderedInlineObject(RenderedGroup rg) {
-        if (rg == null) return false;
-        String itemType = rg.itemType();
-        if (itemType == null || itemType.isEmpty()) {
-            itemType = rg.type();
-        }
-        return "inline_object".equals(itemType);
-    }
-
-    private static boolean containsEditableTextFrameId(RenderedGroup rg, String tfId) {
-        if (rg == null || tfId == null || rg.editableTextFrameIds() == null) return false;
-        for (String editableId : rg.editableTextFrameIds()) {
-            if (tfId.equals(editableId)) return true;
         }
         return false;
     }
@@ -943,202 +770,6 @@ public final class FramePlacer {
             if (expected.equals(value)) return true;
         }
         return false;
-    }
-
-    private static boolean isOwnedTextFrameShellReason(String reason) {
-        if (reason == null) return false;
-        return reason.contains("text_hidden")
-                || reason.contains("visual_shell")
-                || reason.contains("editable_textframe_visual_shell")
-                || reason.contains("image_group")
-                || reason.contains("decoration_group")
-                || reason.contains("mixed_group_text_hidden")
-                || reason.contains("complex_graphic_text_hidden")
-                || reason.contains("label_backdrop_group");
-    }
-
-    public static Set<String> collectConceptDiagramTextFrameIds(
-            ResolvedBuildContext ctx,
-            List<ResolvedTextFrame> frames) {
-        Set<String> result = new HashSet<>();
-        if (ctx == null || ctx.resolvedData == null || frames == null || frames.isEmpty()) return result;
-
-        Map<String, ResolvedTextFrame> byId = new HashMap<>();
-        Map<Integer, List<ResolvedTextFrame>> byPage = new HashMap<>();
-        for (ResolvedTextFrame tf : frames) {
-            if (tf == null || tf.id() == null) continue;
-            byId.put(tf.id(), tf);
-            byPage.computeIfAbsent(tf.pageIndex(), k -> new ArrayList<>()).add(tf);
-        }
-
-        Map<Integer, List<double[]>> clusterBoundsByPage = new HashMap<>();
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (!isConceptDiagramShellCandidate(ctx, rg)) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null || editableIds.length < 3) continue;
-
-            int shortLabels = 0;
-            int longTexts = 0;
-            for (String editableId : editableIds) {
-                ResolvedTextFrame tf = byId.get(editableId);
-                String clean = cleanVisibleText(tf);
-                if (clean.isEmpty()) continue;
-                if (clean.length() <= 18 && !isNumericOnlyActivityMarker(clean)) shortLabels++;
-                if (clean.length() >= 18) longTexts++;
-            }
-            if (shortLabels < 2 || longTexts < 1) continue;
-
-            double[] rb = rg.bounds();
-            if (rb == null || rb.length < 4) continue;
-            boolean hasIndependentDescription = false;
-            for (ResolvedTextFrame tf : byPage.getOrDefault(rg.pageIndex(), Collections.emptyList())) {
-                if (tf == null || tf.id() == null) continue;
-                if (containsString(editableIds, tf.id())) continue;
-                if (!isParentlessTextFrame(ctx, tf)) continue;
-                String clean = cleanVisibleText(tf);
-                if (clean.length() < 8) continue;
-                if (looksLikeNumberedActivityPrompt(clean)) continue;
-                double[] tb = boundsOf(tf);
-                if (isConceptDescriptionConnected(rb, tb, ctx.scaleFactor)) {
-                    hasIndependentDescription = true;
-                    result.add(tf.id());
-                }
-            }
-            if (!hasIndependentDescription) continue;
-
-            for (String editableId : editableIds) {
-                if (editableId != null) result.add(editableId);
-            }
-            clusterBoundsByPage.computeIfAbsent(rg.pageIndex(), k -> new ArrayList<>()).add(rb);
-        }
-
-        // Concept diagrams often have side-axis headings that are separate TFs
-        // outside the visual shell. Add only close parentless headings on pages
-        // where a cluster was already confirmed by shell + independent description.
-        for (Map.Entry<Integer, List<double[]>> entry : clusterBoundsByPage.entrySet()) {
-            int pageIndex = entry.getKey();
-            double[] union = unionBounds(entry.getValue());
-            if (union == null) continue;
-            for (ResolvedTextFrame tf : byPage.getOrDefault(pageIndex, Collections.emptyList())) {
-                if (tf == null || tf.id() == null || result.contains(tf.id())) continue;
-                if (!isParentlessTextFrame(ctx, tf)) continue;
-                String clean = cleanVisibleText(tf);
-                if (clean.length() < 4 || clean.length() > 40) continue;
-                double[] tb = boundsOf(tf);
-                if (tb == null || tb.length < 4) continue;
-                double horizontalGap = union[1] - tb[3];
-                if (horizontalGap < -4.0 || horizontalGap > 65.0) continue;
-                double yOverlap = Math.min(union[2], tb[2]) - Math.max(union[0], tb[0]);
-                double tfHeight = tb[2] - tb[0];
-                double tfCenterY = (tb[0] + tb[2]) / 2.0;
-                boolean verticallyRelated = yOverlap > Math.max(1.0, tfHeight * 0.20)
-                        || (tfCenterY >= union[0] - 8.0 && tfCenterY <= union[2] + 8.0);
-                if (verticallyRelated) {
-                    result.add(tf.id());
-                }
-            }
-        }
-
-        if (!result.isEmpty()) {
-            System.err.println("[FramePlacer] concept diagram cluster TFs protected: " + result);
-        }
-        return result;
-    }
-
-    private static boolean isConceptDiagramShellCandidate(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (rg == null) return false;
-        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
-        if (plan == null) return false;
-        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
-        if (!ShellRole.isTextShell(plan)) return false;
-        double[] b = rg.bounds();
-        if (b == null || b.length < 4) return false;
-        double h = b[2] - b[0];
-        double w = b[3] - b[1];
-        return h >= 8.0 && w >= 35.0;
-    }
-
-    private static boolean isNumericOnlyActivityMarker(String clean) {
-        if (clean == null) return false;
-        return clean.trim().matches("[0-9０-９]+");
-    }
-
-    private static boolean looksLikeNumberedActivityPrompt(String clean) {
-        if (clean == null) return false;
-        String s = clean.trim();
-        return s.matches("^\\(?[0-9０-９]+\\)?[\\s\\t.．、,，]+.*");
-    }
-
-    private static boolean isParentlessTextFrame(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
-        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return false;
-        ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
-        return pi == null || pi.parentId() == null || pi.parentId().isEmpty();
-    }
-
-    private static boolean isInsideOrMostlyCovered(double[] shellBounds, double[] tfBounds, double scaleFactor) {
-        if (shellBounds == null || shellBounds.length < 4 || tfBounds == null || tfBounds.length < 4) return false;
-        if (isInsideOrMostlyCoveredSameScale(shellBounds, tfBounds)) return true;
-        if (scaleFactor > 0 && Math.abs(scaleFactor - 1.0) > 0.001) {
-            double[] scaled = new double[] {
-                    shellBounds[0] * scaleFactor,
-                    shellBounds[1] * scaleFactor,
-                    shellBounds[2] * scaleFactor,
-                    shellBounds[3] * scaleFactor
-            };
-            return isInsideOrMostlyCoveredSameScale(scaled, tfBounds);
-        }
-        return false;
-    }
-
-    private static boolean isConceptDescriptionConnected(double[] shellBounds, double[] tfBounds, double scaleFactor) {
-        if (shellBounds == null || shellBounds.length < 4 || tfBounds == null || tfBounds.length < 4) return false;
-        if (isConceptDescriptionConnectedSameScale(shellBounds, tfBounds)) return true;
-        if (scaleFactor > 0 && Math.abs(scaleFactor - 1.0) > 0.001) {
-            double[] scaled = new double[] {
-                    shellBounds[0] * scaleFactor,
-                    shellBounds[1] * scaleFactor,
-                    shellBounds[2] * scaleFactor,
-                    shellBounds[3] * scaleFactor
-            };
-            return isConceptDescriptionConnectedSameScale(scaled, tfBounds);
-        }
-        return false;
-    }
-
-    private static boolean isConceptDescriptionConnectedSameScale(double[] shellBounds, double[] tfBounds) {
-        if (isInsideOrMostlyCoveredSameScale(shellBounds, tfBounds)) return true;
-        double tfWidth = tfBounds[3] - tfBounds[1];
-        double tfHeight = tfBounds[2] - tfBounds[0];
-        if (tfWidth <= 0 || tfHeight <= 0) return false;
-        double xOverlap = Math.min(shellBounds[3], tfBounds[3]) - Math.max(shellBounds[1], tfBounds[1]);
-        if (xOverlap <= 0 || xOverlap / tfWidth < 0.60) return false;
-        double yOverlap = Math.min(shellBounds[2], tfBounds[2]) - Math.max(shellBounds[0], tfBounds[0]);
-        if (yOverlap > 0 && yOverlap / tfHeight >= 0.25) return true;
-        double verticalGap = tfBounds[0] - shellBounds[2];
-        return verticalGap >= 0 && verticalGap <= Math.max(8.0, tfHeight * 0.75);
-    }
-
-    private static boolean isInsideOrMostlyCoveredSameScale(double[] outer, double[] inner) {
-        if (containsBounds(outer, inner, 1.0)) return true;
-        double innerArea = area(inner);
-        return innerArea > 0 && overlapArea(outer, inner) / innerArea >= 0.72;
-    }
-
-    private static double[] unionBounds(List<double[]> bounds) {
-        if (bounds == null || bounds.isEmpty()) return null;
-        double[] out = null;
-        for (double[] b : bounds) {
-            if (b == null || b.length < 4) continue;
-            if (out == null) {
-                out = new double[] { b[0], b[1], b[2], b[3] };
-            } else {
-                if (b[0] < out[0]) out[0] = b[0];
-                if (b[1] < out[1]) out[1] = b[1];
-                if (b[2] > out[2]) out[2] = b[2];
-                if (b[3] > out[3]) out[3] = b[3];
-            }
-        }
-        return out;
     }
 
     private static boolean isNestedInTextFrame(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
@@ -1179,24 +810,10 @@ public final class FramePlacer {
         if (ctx == null || tf == null) return false;
         int tfDomId = parseDomIdOrNeg(tf.id());
         if (tfDomId < 0) return false;
-        ObjectPlan plan = ctx.findTextFrameOwnershipPlan(tfDomId);
-        if (plan != null
+        ObjectPlan plan = ctx.findHwpxTextFrameOwnershipPlan(tfDomId);
+        return plan != null
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                && ShellRole.isTextShell(plan)) {
-            return true;
-        }
-        List<RenderedGroup> groups = ctx.resolvedData != null ? ctx.resolvedData.allRenderedFloatingItems() : null;
-        if (groups == null) return false;
-        for (RenderedGroup rg : groups) {
-            if (rg == null || !containsEditableTextFrameId(rg, tf.id())) continue;
-            ObjectPlan rgPlan = ctx.findOwnershipPlanForRendered(rg);
-            if (rgPlan != null
-                    && rgPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                    && ShellRole.isTextShell(rgPlan)) {
-                return true;
-            }
-        }
-        return false;
+                && ShellRole.isTextShell(plan);
     }
 
     private static boolean startsWithInlineAnchor(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
@@ -1248,6 +865,49 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    private static boolean isObjectReplacementOnlyInlinePngCarrier(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || ctx.textFlowDocument == null || tf == null || tf.storyId() == null) return false;
+        if (!isOnlyObjectReplacementText(tf.frameVisibleText())) return false;
+        TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(tf.storyId());
+        if (unit == null || unit.paragraphs == null) return false;
+        for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
+            if (paragraph == null || paragraph.atoms == null) continue;
+            for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+                if (!(atom instanceof TextFlowDocument.InlineSlotAtom)) continue;
+                TextFlowDocument.InlineSlotAtom slot = (TextFlowDocument.InlineSlotAtom) atom;
+                if ("PLACE_INLINE_PNG".equals(slot.planVisualAction)
+                        && "INLINE".equals(slot.planPlacement)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isOnlyObjectReplacementText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean sawObjectReplacement = false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '￼') {
+                sawObjectReplacement = true;
+                continue;
+            }
+            if (Character.isWhitespace(ch)
+                    || ch == '\u0003'
+                    || ch == '\u0007'
+                    || ch == '\b'
+                    || ch == '\r'
+                    || ch == '\n') {
+                continue;
+            }
+            return false;
+        }
+        return sawObjectReplacement;
     }
 
     private static String cleanAnchorProbeText(String text) {
@@ -1482,19 +1142,6 @@ public final class FramePlacer {
         return tf.paragraphStart() == tf.paragraphEnd();
     }
 
-    private static String cleanVisibleText(ResolvedTextFrame tf) {
-        String text = tf != null ? tf.frameVisibleText() : null;
-        if (text == null) return "";
-        return text.replace("\uFFFC", "")
-                .replace("\u0016", "")
-                .replace("\u0018", "")
-                .replace("\u0003", "")
-                .replace("\u0007", "")
-                .replace("\r", "")
-                .replace("\n", "")
-                .trim();
-    }
-
     private static double[] boundsOf(ResolvedTextFrame tf) {
         if (tf == null) return null;
         double[] b = tf.pageRelativeBounds();
@@ -1514,6 +1161,59 @@ public final class FramePlacer {
                 y,
                 geometricBounds[3] - geometricBounds[1],
                 geometricBounds[2] - geometricBounds[0]);
+    }
+
+    private static LocalFrameBounds computePlannedPageFrameBounds(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan) {
+        if (!isHwpxTextBoundsPlan(plan)) return null;
+        if (plan == null || plan.coordinateSpace != CoordinateSpace.PAGE) return null;
+        double[] bounds = plan.bounds;
+        if (!isValidBounds(bounds)) return null;
+        ResolvedPage page = null;
+        if (ctx != null && ctx.resolvedData != null && plan.pageIndex >= 0) {
+            Integer sectionIndex = ctx.pageDocOffsetToSection != null
+                    ? ctx.pageDocOffsetToSection.get(plan.pageIndex)
+                    : null;
+            if (sectionIndex != null) {
+                page = ctx.resolvedData.getPage(sectionIndex);
+            }
+            if (page == null) {
+                page = ctx.resolvedData.getPage(plan.pageIndex);
+            }
+        }
+        if (page == null) {
+            return new LocalFrameBounds(
+                    bounds[1],
+                    bounds[0],
+                    bounds[3] - bounds[1],
+                    bounds[2] - bounds[0]);
+        }
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double[] pageBounds = page.bounds();
+        if (pageBounds == null || pageBounds.length < 4) {
+            return new LocalFrameBounds(
+                    bounds[1],
+                    bounds[0],
+                    bounds[3] - bounds[1],
+                    bounds[2] - bounds[0]);
+        }
+        double rawPageTop = pageBounds[0] / scale;
+        double rawPageLeft = pageBounds[1] / scale;
+        boolean pageRelativeCoords = rawPageLeft > 1.0 && bounds[1] < rawPageLeft;
+        double left = pageRelativeCoords ? bounds[1] : (bounds[1] - rawPageLeft);
+        double top = pageRelativeCoords ? bounds[0] : (bounds[0] - rawPageTop);
+        return new LocalFrameBounds(
+                left * scale,
+                top * scale,
+                (bounds[3] - bounds[1]) * scale,
+                (bounds[2] - bounds[0]) * scale);
+    }
+
+    private static boolean isHwpxTextBoundsPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.materialization == Materialization.HWPX_TEXT;
     }
 
     private static LocalFrameBounds computePageRelativeFrameBounds(ResolvedTextFrame tf) {

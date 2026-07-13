@@ -167,11 +167,46 @@ function _addRenderMeta(arr, type, planPassId) {
 function _buildItemById(allItems) {
     var itemById = {};
     if (!allItems) return itemById;
-    for (var i = 0; i < allItems.length; i++) {
+    function canIndexParent(item) {
+        var kind = "";
+        try { kind = item && item.constructor ? String(item.constructor.name || "") : ""; } catch (eKind) {}
+        return kind === "Group"
+                || kind === "Rectangle"
+                || kind === "Oval"
+                || kind === "Polygon"
+                || kind === "GraphicLine"
+                || kind === "TextFrame";
+    }
+    function putItem(item) {
         try {
-            var item = allItems[i];
-            if (item && item.id !== undefined) itemById[String(item.id)] = item;
+            if (item && item.id !== undefined) {
+                itemById[String(item.id)] = item;
+                return true;
+            }
         } catch (e) {}
+        return false;
+    }
+    for (var i = 0; i < allItems.length; i++) {
+        putItem(allItems[i]);
+    }
+    for (var pass = 0; pass < 8; pass++) {
+        var appended = false;
+        var keys = [];
+        for (var key in itemById) {
+            if (itemById.hasOwnProperty(key)) keys.push(key);
+        }
+        for (var ki = 0; ki < keys.length; ki++) {
+            var item = itemById[keys[ki]];
+            var parent = null;
+            try { parent = item ? item.parent : null; } catch (eParent) {}
+            if (!parent || !canIndexParent(parent)) continue;
+            var parentId = null;
+            try { parentId = parent.id; } catch (eParentId) {}
+            if (parentId === null || parentId === undefined) continue;
+            if (itemById[String(parentId)]) continue;
+            if (putItem(parent)) appended = true;
+        }
+        if (!appended) break;
     }
     return itemById;
 }

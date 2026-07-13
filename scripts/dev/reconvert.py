@@ -55,6 +55,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--extract", type=Path, required=True, help="Existing extract directory.")
     parser.add_argument("--out", type=Path, default=None, help="Output HWPX path.")
     parser.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--margin-guide",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Draw diagnostic margin guide lines into the converted HWPX.",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     extract_dir = args.extract
@@ -78,8 +84,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "--links-directory",
         str(extract_dir / "Links"),
         "--include-images",
-        "--margin-guide",
     ]
+    if args.margin_guide:
+        cmd.append("--margin-guide")
     if CONVERSION_CONFIG.exists():
         cmd.extend(["--config", str(CONVERSION_CONFIG)])
     run(cmd)

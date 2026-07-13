@@ -11,7 +11,6 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
 import javax.imageio.ImageIO;
@@ -95,7 +94,7 @@ public class HwpxImageBuilder {
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
         String wrapMode = obj.textWrapMode();
         boolean idmlWrapping = isAnchored && wrapMode != null && !"None".equals(wrapMode);
-        boolean useWrapping = idmlWrapping;
+        boolean useWrapping = InlineFlowPolicy.usesNonFlowWrapping(obj);
 
         // TextWrapMethod / TextFlowSide 결정
         TextWrapMethod twm;
@@ -103,6 +102,11 @@ public class HwpxImageBuilder {
         if (idmlWrapping) {
             twm = mapTextWrapMethod(wrapMode);
             tfs = mapTextFlowSide(obj.textWrapSide());
+        } else if (useWrapping) {
+            // Story-flow inline material that must not resize the paragraph line box
+            // still needs to occupy its own vertical band in the story.
+            twm = TextWrapMethod.TOP_AND_BOTTOM;
+            tfs = TextFlowSide.BOTH_SIDES;
         } else {
             // 인라인(treatAsChar=1)은 텍스트 흐름 자체의 visible object다.
             // BEHIND_TEXT로 내리면 셀 fill/background 뒤에 숨을 수 있으므로
@@ -118,7 +122,7 @@ public class HwpxImageBuilder {
 
         // ShapeObject
         pic.idAnd(picId)
-                .zOrderAnd(0)
+                .zOrderAnd(ctx.foregroundOutputZOrder())
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(twm)
                 .textFlowAnd(tfs)
@@ -253,7 +257,7 @@ public class HwpxImageBuilder {
         String picId = HwpxUtil.nextShapeId();
 
         pic.idAnd(picId)
-                .zOrderAnd(1000)
+                .zOrderAnd(ctx.foregroundOutputZOrder())
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
@@ -363,7 +367,7 @@ public class HwpxImageBuilder {
         Container container = run.addNewContainer();
 
         container.idAnd(HwpxUtil.nextShapeId())
-                .zOrderAnd(0)
+                .zOrderAnd(ctx.foregroundOutputZOrder())
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
@@ -530,7 +534,7 @@ public class HwpxImageBuilder {
         String picId = HwpxUtil.nextShapeId();
 
         pic.idAnd(picId)
-                .zOrderAnd(0)
+                .zOrderAnd(ctx.foregroundOutputZOrder())
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
@@ -669,10 +673,7 @@ public class HwpxImageBuilder {
         TextWrapMethod figWrap = isBehindTextVisualLayer(figure.visualLayer())
                 ? TextWrapMethod.BEHIND_TEXT
                 : TextWrapMethod.IN_FRONT_OF_TEXT;
-        int outputZOrder = outputZOrderForVisualLayer(
-                figure.visualLayer(),
-                figure.zOrder(),
-                figure.sourceLayerIndex());
+        int outputZOrder = ctx.outputZOrder(figure);
 
         // ShapeObject
         pic.idAnd(picId)
@@ -760,30 +761,7 @@ public class HwpxImageBuilder {
     }
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
-        return VisualPlanePolicy.isBehindTextLayerName(visualLayer);
-    }
-
-    private static boolean isInFrontVisualLayer(String visualLayer) {
-        return VisualPlanePolicy.isInFrontLayerName(visualLayer);
-    }
-
-    private static int outputZOrderForVisualLayer(
-            String visualLayer,
-            int originalZOrder,
-            int sourceLayerIndex) {
-        // Stage 1 ObjectPlan.zOrder is the visual order contract. visualLayer
-        // chooses only the HWPX plane/wrap. Local label shells/connectors stay in
-        // the front plane and rely on the planned source-depth relation to sit
-        // below their owned text; moving them to BEHIND_TEXT hides them behind
-        // unrelated HWPX carriers.
-        int z = Math.max(0, originalZOrder);
-        if ("PAGE_BACKGROUND".equals(visualLayer) || "CONTAINER_BACKDROP".equals(visualLayer)) {
-            return z;
-        }
-        if ("CONTENT_BACKDROP".equals(visualLayer)) {
-            return 10000 + z;
-        }
-        return originalZOrder;
+        return "PAGE_BACKGROUND".equals(visualLayer);
     }
 
     // ── 배경 PNG ──
@@ -859,168 +837,6 @@ public class HwpxImageBuilder {
         pic.img().binaryItemIDRefAnd(itemId)
                 .brightAnd(0).contrastAnd(0)
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
-    }
-
-    // ── 비사각형 배경 블록 → PNG 래스터화 ──
-
-    /**
-     * 비사각형 폴리곤 배경 블록을 PNG로 래스터화하여 BEHIND_TEXT 이미지로 배치한다.
-     * pathPointsX/Y는 페이지 상대 HWPUNIT 좌표. 블록의 x,y,w,h가 뷰포트(클리핑 영역).
-     * 캔버스가 클리핑된 영역이므로, 폴리곤이 자연스럽게 페이지 경계에서 잘린다.
-     */
-    public void convertNonRectBackground(Para anchorPara, ASTTextFrameBlock block) {
-        long[] px = block.pathPointsX();
-        long[] py = block.pathPointsY();
-        if (px == null || py == null || px.length < 3) return;
-
-        String fillColor = block.fillColor();
-        if (fillColor == null || !fillColor.startsWith("#")) return;
-
-        // 래스터 크기 결정: HWPUNIT → 1pt=100hu, 72dpi 기준 1px=1pt
-        int pixW = (int) Math.max(1, block.width() / 100);
-        int pixH = (int) Math.max(1, block.height() / 100);
-        if (pixW > 2000) pixW = 2000;
-        if (pixH > 2000) pixH = 2000;
-
-        // 색상 파싱 + tint 적용 (흰색 블렌딩으로 색상 농도 조절, 불투명 유지)
-        int rgb = Integer.parseInt(fillColor.substring(1, 7), 16);
-        double fraction = block.fillTint() / 100.0;
-        int r = (int) Math.round(255 + (((rgb >> 16) & 0xFF) - 255) * fraction);
-        int g = (int) Math.round(255 + (((rgb >> 8) & 0xFF) - 255) * fraction);
-        int b = (int) Math.round(255 + ((rgb & 0xFF) - 255) * fraction);
-        r = Math.max(0, Math.min(255, r));
-        g = Math.max(0, Math.min(255, g));
-        b = Math.max(0, Math.min(255, b));
-
-        // 폴리곤 래스터화 — 페이지 상대 HWPUNIT 좌표를 캔버스 픽셀로 매핑
-        // 캔버스는 block의 클리핑된 영역 [x, y, w, h]에 대응
-        double scaleX = (double) pixW / block.width();
-        double scaleY = (double) pixH / block.height();
-
-        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
-                pixW, pixH, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-        java.awt.Graphics2D g2 = img.createGraphics();
-        g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
-                java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-
-        java.awt.geom.Path2D.Double path = new java.awt.geom.Path2D.Double();
-        path.moveTo((px[0] - block.x()) * scaleX, (py[0] - block.y()) * scaleY);
-        for (int i = 1; i < px.length; i++) {
-            path.lineTo((px[i] - block.x()) * scaleX, (py[i] - block.y()) * scaleY);
-        }
-        path.closePath();
-
-        g2.setColor(new java.awt.Color(r, g, b));
-        g2.fill(path);
-        g2.dispose();
-
-        // PNG 인코딩
-        byte[] pngData;
-        try {
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            javax.imageio.ImageIO.write(img, "png", baos);
-            pngData = baos.toByteArray();
-        } catch (java.io.IOException e) {
-            System.err.println("[NonRectBG] PNG encoding failed: " + e.getMessage());
-            ctx.addWarning("NonRectBG", "PNG 인코딩 실패: " + e.getMessage());
-            return;
-        }
-
-        // HWPX Picture 배치
-        String itemId = ImageInserter.registerImage(ctx.hwpxFile, pngData, "png");
-
-        long x = block.x();
-        long y = block.y();
-        long displayW = block.width();
-        long displayH = block.height();
-
-        Run anchorRun = anchorPara.addNewRun();
-        anchorRun.charPrIDRef("0");
-
-        Picture pic = anchorRun.addNewPicture();
-        String picId = HwpxUtil.nextShapeId();
-
-        pic.idAnd(picId)
-                .zOrderAnd(block.zOrder())
-                .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
-                .textFlowAnd(TextFlowSide.BOTH_SIDES)
-                .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None)
-                .reverseAnd(false);
-
-        pic.hrefAnd("");
-        pic.groupLevelAnd((short) 0);
-        pic.instidAnd(HwpxUtil.nextShapeId());
-
-        pic.createOffset();
-        pic.offset().set(0L, 0L);
-
-        pic.createOrgSz();
-        pic.orgSz().set(displayW, displayH);
-
-        pic.createCurSz();
-        pic.curSz().set(displayW, displayH);
-
-        pic.createFlip();
-        pic.flip().horizontalAnd(false).verticalAnd(false);
-
-        pic.createRotationInfo();
-        pic.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(displayW / 2).centerYAnd(displayH / 2).rotateimageAnd(true);
-
-        pic.createRenderingInfo();
-        pic.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        pic.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        pic.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-
-        pic.createSZ();
-        pic.sz().widthAnd(displayW).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(displayH).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
-
-        pic.createPos();
-        pic.pos().treatAsCharAnd(false)
-                .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
-                .holdAnchorAndSOAnd(false)
-                .vertRelToAnd(VertRelTo.PAPER)
-                .horzRelToAnd(HorzRelTo.PAPER)
-                .vertAlignAnd(VertAlign.TOP)
-                .horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(y)
-                .horzOffset(x);
-
-        pic.createOutMargin();
-        pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
-
-        pic.createImgRect();
-        pic.imgRect().createPt0();
-        pic.imgRect().pt0().set(0L, 0L);
-        pic.imgRect().createPt1();
-        pic.imgRect().pt1().set(displayW, 0L);
-        pic.imgRect().createPt2();
-        pic.imgRect().pt2().set(displayW, displayH);
-        pic.imgRect().createPt3();
-        pic.imgRect().pt3().set(0L, displayH);
-
-        pic.createImgClip();
-        pic.imgClip().leftAnd(0L).rightAnd(displayW)
-                .topAnd(0L).bottomAnd(displayH);
-
-        pic.createInMargin();
-        pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
-
-        pic.createImgDim();
-        pic.imgDim().dimwidthAnd(displayW).dimheightAnd(displayH);
-
-        pic.createImg();
-        pic.img().binaryItemIDRefAnd(itemId)
-                .brightAnd(0).contrastAnd(0)
-                .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
-
-        ctx.imagesConverted++;
     }
 
     // ── 이미지 픽셀 크롭 ──

@@ -116,6 +116,22 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
         return null;
     }
 
+    function _plannedInlineCandidateHasVisibleCarrierContent(candidate, itemId) {
+        if (!candidate) return false;
+        var sourceIds = candidate.sourceObjectIds || [];
+        var visualIds = candidate.visualSourceObjectIds || [];
+        var exportIds = candidate.exportSourceObjectIds || [];
+        if (sourceIds.length > 1) return true;
+        if (visualIds.length > 1 || exportIds.length > 1) return true;
+        for (var vi = 0; vi < visualIds.length; vi++) {
+            if (String(visualIds[vi]) !== String(itemId)) return true;
+        }
+        for (var ei = 0; ei < exportIds.length; ei++) {
+            if (String(exportIds[ei]) !== String(itemId)) return true;
+        }
+        return false;
+    }
+
     try {
 
     // 인라인 객체 추출: ExtractionPlan의 inline 후보만 개별 PNG로 렌더
@@ -163,16 +179,16 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         var inFill = inItem.fillColor ? inItem.fillColor.name : "None";
                         var inStroke = inItem.strokeColor ? inItem.strokeColor.name : "None";
                         var inSW = inItem.strokeWeight || 0;
-                        var inContent = inItem.contentType ? inItem.contentType.toString() : "";
                         // 채움/선 없고, 그래픽 콘텐츠 없는 빈 프레임 → 스페이서
                         if (!plannedPageVisual &&
                             (inFill === "None" || inFill === "[None]") &&
-                            ((inStroke === "None" || inStroke === "[None]") || inSW === 0) &&
-                            inContent !== "1886548852" /* GraphicType with image */ ) {
+                            ((inStroke === "None" || inStroke === "[None]") || inSW === 0)) {
+                            var hasPlannedCarrierContent =
+                                    _plannedInlineCandidateHasVisibleCarrierContent(inlineCandidate, inItem.id);
                             // allGraphics 확인 — 이미지가 있으면 건너뛰지 않음
                             var hasGraphic = false;
                             try { hasGraphic = inItem.allGraphics && inItem.allGraphics.length > 0; } catch(eg) {}
-                            if (!hasGraphic) {
+                            if (!hasPlannedCarrierContent && !hasGraphic) {
                                 inlineStats.spacerSkipped++;
                                 continue;
                             }
@@ -205,8 +221,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 var inlineHiddenTextFrameIds = [];
                 var savedInlineOutOfScopeItems = [];
                 var inlineCompleteMarkerEditableIds = [];
-                var inlineCompleteMarker = inlineCandidate.textOwner === "indesign_png"
-                        && inlineCandidate.completePngTextAllowed === true;
+                var inlineCompleteMarker = false;
                 try {
                     inlineCompleteMarkerEditableIds = inlineCandidate.editableTextFrameIds || [];
                     // Stage 1 contract: the planner decides whether inline text is
@@ -284,13 +299,11 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             type: "inline_object",
                             placementRole: "inline_object",
                             visualOwner: "indesign_png",
-                            textOwner: inlineCompleteMarker ? "indesign_png" : (_inlineHasHiddenText ? "hwpx_tf" : "none"),
-                            containsText: inlineCompleteMarker ? true : false,
-                            containsEditableText: inlineCompleteMarker ? true : false,
+                            textOwner: _inlineHasHiddenText ? "hwpx_tf" : "none",
+                            containsText: false,
+                            containsEditableText: false,
                             placementAllowed: true,
-                            reason: inlineCompleteMarker
-                                    ? "visual_marker_label_indesign_png"
-                                    : (_inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only"),
+                            reason: _inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only",
                             sourceObjectIds: _inlineEntrySourceIds,
                             childIds: inlineHiddenTextFrameIds,
                             exportSanity: {
@@ -311,7 +324,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 containsText: _inlineBaseEntry.containsText,
                                 containsEditableText: _inlineBaseEntry.containsEditableText,
                                 placementAllowed: true,
-                                editableTextFrameIds: inlineCompleteMarker ? inlineCompleteMarkerEditableIds : inlineHiddenTextFrameIds,
+                                editableTextFrameIds: inlineHiddenTextFrameIds,
                                 sourceObjectIds: _inlineEntrySourceIds,
                                 exportSourceObjectIds: inlineCandidate.exportSourceObjectIds || [],
                                 hiddenVisualSourceObjectIds: inlineCandidate.hiddenVisualSourceObjectIds || [],

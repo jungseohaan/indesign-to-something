@@ -202,6 +202,7 @@ public final class ResolvedTextFlowAstConverter {
 
     private static void addRuns(ASTParagraph para, ResolvedParagraph resolvedPara, Options options) {
         if (resolvedPara.runs() == null) return;
+        addGeneratedPrefixRun(para, resolvedPara, options);
         for (ResolvedRun resolvedRun : resolvedPara.runs()) {
             if (resolvedRun == null || resolvedRun.isInlineAnchor() || resolvedRun.text() == null) continue;
             String text = resolvedRun.text();
@@ -226,6 +227,63 @@ public final class ResolvedTextFlowAstConverter {
             }
             if (stopAfterRun) break;
         }
+    }
+
+    private static void addGeneratedPrefixRun(
+            ASTParagraph para,
+            ResolvedParagraph resolvedPara,
+            Options options) {
+        String prefix = generatedPrefixToInsert(resolvedPara);
+        if (prefix == null) return;
+        ResolvedRun styleRun = firstVisibleResolvedRun(resolvedPara);
+        if (styleRun == null) return;
+        for (ASTTextRun run : convertPreparedRunText(prefix, styleRun, para, options)) {
+            para.addItem(run);
+        }
+    }
+
+    public static String generatedPrefixToInsert(ResolvedParagraph paragraph) {
+        if (paragraph == null) return null;
+        String prefix = paragraph.generatedPrefixText();
+        if (prefix == null || prefix.trim().isEmpty()) return null;
+        String normalizedPrefix = normalizeGeneratedPrefixComparable(prefix);
+        if (normalizedPrefix.isEmpty()) return null;
+        String paragraphText = resolvedParagraphText(paragraph);
+        String normalizedParagraphText = normalizeGeneratedPrefixComparable(paragraphText);
+        if (normalizedParagraphText.startsWith(normalizedPrefix)) return null;
+        return prefix;
+    }
+
+    public static ResolvedRun firstVisibleResolvedRun(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return null;
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+            String text = normalizeGeneratedPrefixComparable(run.text());
+            if (!text.isEmpty()) return run;
+        }
+        return null;
+    }
+
+    private static String resolvedParagraphText(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+            sb.append(run.text());
+        }
+        return sb.toString();
+    }
+
+    private static String normalizeGeneratedPrefixComparable(String text) {
+        if (text == null) return "";
+        return text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
     }
 
     private static boolean hasVisibleText(ASTParagraph paragraph) {

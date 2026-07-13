@@ -55,6 +55,9 @@ public final class ParagraphPropertyResolver {
 
         if (resolvedParagraph != null) {
             ResolvedParagraph rp = resolvedParagraph;
+            if (rp.autoLeading() != null && rp.autoLeading() > 0) {
+                para.autoLeadingPercent((int) Math.round(rp.autoLeading()));
+            }
             // leading: resolved 우선 (실제 렌더링 값), IDML 스타일 fallback
             // 단, auto leading(>50pt = percentage 값)은 무시
             Double fixedLeading = rp.fixedLeading(); // resolved (실제 렌더링 값)
@@ -140,6 +143,9 @@ public final class ParagraphPropertyResolver {
             }
         }
         Double fixedLeading = rp.fixedLeading();
+        if (rp.autoLeading() != null && rp.autoLeading() > 0) {
+            para.autoLeadingPercent((int) Math.round(rp.autoLeading()));
+        }
         if (fixedLeading != null && fixedLeading > 0) {
             para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
             para.lineSpacingType("fixed");

@@ -10,6 +10,7 @@ the policy-code-verify loop.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -30,6 +31,7 @@ DEFAULT_JAVA = Path("/opt/homebrew/opt/openjdk/bin/java")
 AUDIT_PATH = REPO_ROOT / "scripts" / "ownership_plan_audit.py"
 TRACE_SOURCE_PATH = REPO_ROOT / "scripts" / "dev" / "trace_source.py"
 PAGE_INVENTORY_PATH = REPO_ROOT / "scripts" / "dev" / "page_inventory.py"
+IDML_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "idml"
 
 CASE_ALIASES = {
     "park31-u1": ("중3-1국어교과서(박영민)", "u1"),
@@ -141,6 +143,16 @@ def run(cmd: List[str], *, cwd: Path = REPO_ROOT, dry_run: bool = False) -> None
     subprocess.run(cmd, cwd=str(cwd), check=True)
 
 
+def try_run(cmd: List[str], *, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def load_module(path: Path, name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -158,6 +170,51 @@ def shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
+def launch_indesign(app_name: str, issue_dir: Path) -> None:
+    prelaunch = f'tell application "{app_name}" to activate\n'
+    prelaunch_file = issue_dir / "_prelaunch.applescript"
+    prelaunch_file.write_text(prelaunch, encoding="utf-8")
+    try_run(["osascript", str(prelaunch_file)])
+
+
+def ensure_indesign_running(app_name: str, issue_dir: Path, dry_run: bool = False) -> None:
+    if dry_run:
+        return
+
+    already_running = try_run(["pgrep", "-x", app_name]).returncode == 0
+    if not already_running:
+        launch_indesign(app_name, issue_dir)
+        time.sleep(10)
+
+    probe = (
+        f'using terms from application "{app_name}"\n'
+        f'    tell application "{app_name}" to get name\n'
+        f'end using terms from\n'
+    )
+    probe_file = issue_dir / "_probe.applescript"
+    probe_file.write_text(probe, encoding="utf-8")
+
+    for attempt in range(10):
+        result = try_run(["osascript", str(probe_file)])
+        if result.returncode == 0:
+            return
+        if attempt == 5:
+            print("[issue] InDesign SDEF probe 5회 실패 → hung 의심, killall 후 재기동")
+            try_run(["killall", app_name])
+            time.sleep(3)
+            launch_indesign(app_name, issue_dir)
+            time.sleep(15)
+        else:
+            wait = 5 if attempt == 0 else 9
+            time.sleep(wait)
+
+    last = try_run(["osascript", str(probe_file)])
+    stderr = (last.stderr or "").strip()
+    raise SystemExit(
+        f"InDesign AppleScript dictionary probe failed after retries: {stderr or 'unknown error'}"
+    )
+
+
 def write_applescript(
     path: Path,
     app_name: str,
@@ -168,6 +225,8 @@ def write_applescript(
     perf_mode: str,
     skip_pdf: bool,
     extract_config: str,
+    extract_mode: str,
+    reuse_existing_idml: bool,
 ) -> None:
     args = [
         str(indd_path),
@@ -180,16 +239,30 @@ def write_applescript(
         perf_mode,
         "1" if skip_pdf else "0",
         "",
-        "full",
+        extract_mode,
         "",
         "1",
+        "",
+        "",
+        "1" if reuse_existing_idml else "0",
+        str(EXTRACT_JSX),
     ]
     quoted_args = ", ".join(json.dumps(a, ensure_ascii=False) for a in args)
     script = f'''using terms from application "{app_name}"
     tell application "{app_name}"
         activate
+        repeat with _preflightAttempt from 1 to 30
+            try
+                do script "app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT; app.scriptPreferences.enableRedraw = false; 1" language javascript
+                exit repeat
+            on error
+                delay 2
+            end try
+        end repeat
+        set _jsxSource to read POSIX file "{EXTRACT_JSX}"
+        set _jsxArgs to {{{quoted_args}}}
         with timeout of 3600 seconds
-            do script POSIX file "{EXTRACT_JSX}" language «constant ScLgJSLg» with arguments {{{quoted_args}}}
+            do script _jsxSource language javascript with arguments _jsxArgs
         end timeout
     end tell
 end using terms from
@@ -296,6 +369,91 @@ def copy_if_exists(src: Path, dst: Path) -> None:
     if src.exists():
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+
+
+def link_or_copy_file(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        dst.unlink()
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def idml_cache_key(indd_path: Path) -> str:
+    stat = indd_path.stat()
+    payload = {
+        "path": str(indd_path.resolve()),
+        "size": stat.st_size,
+        "mtimeNs": stat.st_mtime_ns,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def idml_cache_dir(indd_path: Path) -> Path:
+    return IDML_CACHE_ROOT / idml_cache_key(indd_path)
+
+
+def restore_cached_idml(indd_path: Path, extract_dir: Path, enabled: bool) -> Dict[str, Any]:
+    cache_dir = idml_cache_dir(indd_path)
+    info: Dict[str, Any] = {
+        "enabled": enabled,
+        "hit": False,
+        "cacheDir": str(cache_dir),
+        "key": cache_dir.name,
+    }
+    if not enabled:
+        return info
+    cached_idml = cache_dir / "output.idml"
+    if not cached_idml.exists():
+        info["reason"] = "miss"
+        return info
+    link_or_copy_file(cached_idml, extract_dir / "output.idml")
+    for name in ["idml-zorder-map.json", "idml-zorder-map-summary.json", "_idml_zorder_map.log"]:
+        cached = cache_dir / name
+        if cached.exists():
+            link_or_copy_file(cached, extract_dir / name)
+    info["hit"] = True
+    info["reason"] = "restored"
+    return info
+
+
+def store_cached_idml(indd_path: Path, extract_dir: Path, enabled: bool) -> Dict[str, Any]:
+    cache_dir = idml_cache_dir(indd_path)
+    info: Dict[str, Any] = {
+        "enabled": enabled,
+        "stored": False,
+        "cacheDir": str(cache_dir),
+        "key": cache_dir.name,
+    }
+    if not enabled:
+        return info
+    idml_path = extract_dir / "output.idml"
+    if not idml_path.exists():
+        info["reason"] = "missing_output_idml"
+        return info
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached_idml = cache_dir / "output.idml"
+    if not cached_idml.exists() or not os.path.samefile(idml_path, cached_idml):
+        shutil.copy2(idml_path, cached_idml)
+    for name in ["idml-zorder-map.json", "idml-zorder-map-summary.json", "_idml_zorder_map.log"]:
+        src = extract_dir / name
+        dst = cache_dir / name
+        if src.exists() and (not dst.exists() or not os.path.samefile(src, dst)):
+            shutil.copy2(src, dst)
+    stat = indd_path.stat()
+    metadata = {
+        "sourceINDD": str(indd_path.resolve()),
+        "sourceSize": stat.st_size,
+        "sourceMtimeNs": stat.st_mtime_ns,
+        "storedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    info["stored"] = True
+    info["reason"] = "stored"
+    return info
 
 
 def write_trace_files(extract_dir: Path, issue_dir: Path) -> None:
@@ -478,11 +636,28 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--output-root", default=str(REPO_ROOT / "output" / "issues"))
     parser.add_argument("--app", default="Adobe InDesign 2026")
     parser.add_argument("--perf-mode", default="fast")
-    parser.add_argument("--extract-config", default="", help="Optional extractor config path.")
+    parser.add_argument(
+        "--extract-config",
+        default=str(CONVERSION_CONFIG),
+        help="Optional extractor config path. Defaults to the repo conversion-config.json.",
+    )
+    parser.add_argument("--extract-mode", default="full", help="Extractor mode, e.g. full or spread_chunks.")
+    parser.add_argument(
+        "--reuse-idml",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Reuse cached output.idml for repeated immutable-INDD test runs.",
+    )
     parser.add_argument("--source", action="append", default=[], help="Optional source id to trace after conversion.")
     parser.add_argument("--snippet", default=None, help="Optional text snippet to trace after conversion.")
     parser.add_argument("--skip-pdf", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--margin-guide",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Draw diagnostic margin guide lines into the converted HWPX.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -502,7 +677,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     extract_range = resolve_extract_page_range(unit, args.page, end_page)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    issue_dir = Path(args.output_root) / args.case / f"{page_label(args.page, args.end_page)}-{stamp}"
+    output_root = Path(args.output_root)
+    if not output_root.is_absolute():
+        output_root = REPO_ROOT / output_root
+    issue_dir = output_root / args.case / f"{page_label(args.page, args.end_page)}-{stamp}"
     extract_dir = issue_dir / "extract"
     converted_dir = issue_dir / "converted"
 
@@ -510,6 +688,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     if not args.dry_run:
         extract_dir.mkdir(parents=True, exist_ok=True)
         converted_dir.mkdir(parents=True, exist_ok=True)
+        idml_cache_restore = restore_cached_idml(indd_path, extract_dir, args.reuse_idml)
         write_applescript(
             script_path,
             args.app,
@@ -520,11 +699,23 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             args.perf_mode,
             args.skip_pdf,
             args.extract_config,
+            args.extract_mode,
+            bool(idml_cache_restore.get("hit")),
         )
+    else:
+        idml_cache_restore = {
+            "enabled": args.reuse_idml,
+            "hit": False,
+            "cacheDir": str(idml_cache_dir(indd_path)),
+            "key": idml_cache_dir(indd_path).name,
+            "reason": "dry_run",
+        }
 
     print(f"[issue] case={args.case} book={book_key} unit={unit_key} page={args.page}..{end_page}")
     print(f"[issue] extract-local-page={extract_range['extractStartPage']}..{extract_range['extractEndPage']} mode={extract_range['pageRangeMode']}")
+    print(f"[issue] idml-cache={idml_cache_restore.get('reason')} hit={idml_cache_restore.get('hit')} dir={idml_cache_restore.get('cacheDir')}")
     print(f"[issue] output={issue_dir}")
+    ensure_indesign_running(args.app, issue_dir, args.dry_run)
     run(["osascript", str(script_path)], dry_run=args.dry_run)
 
     if not args.dry_run:
@@ -533,14 +724,20 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "book": book_key,
             "unit": unit_key,
             "sourceINDD": str(indd_path),
+            "idmlCache": idml_cache_restore,
             **extract_range,
         }
         (extract_dir / "issue-run.json").write_text(json.dumps(issue_meta, ensure_ascii=False, indent=2), encoding="utf-8")
         (issue_dir / "issue-run.json").write_text(json.dumps(issue_meta, ensure_ascii=False, indent=2), encoding="utf-8")
         validate_extraction_success(extract_dir)
         validate_extraction_page_range(extract_dir, extract_range)
+        idml_cache_store = store_cached_idml(indd_path, extract_dir, args.reuse_idml)
+        issue_meta["idmlCacheStore"] = idml_cache_store
+        (extract_dir / "issue-run.json").write_text(json.dumps(issue_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        (issue_dir / "issue-run.json").write_text(json.dumps(issue_meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    hwpx_path = converted_dir / f"{args.case}-{page_label(args.page, args.end_page)}.hwpx"
+    case_file_label = args.case.replace("/", "-").replace(":", "-")
+    hwpx_path = converted_dir / f"{case_file_label}-{page_label(args.page, args.end_page)}.hwpx"
     ensure_converter_built(args.dry_run)
     convert_cmd = [
         java_command(),
@@ -552,8 +749,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "--links-directory",
         str(extract_dir / "Links"),
         "--include-images",
-        "--margin-guide",
     ]
+    if args.margin_guide:
+        convert_cmd.append("--margin-guide")
     if CONVERSION_CONFIG.exists():
         convert_cmd.extend(["--config", str(CONVERSION_CONFIG)])
     run(convert_cmd, dry_run=args.dry_run)

@@ -357,8 +357,173 @@ function collectComposedLines(tf) {
     return result;
 }
 
-function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems) {
+function _resolvedIdList(values) {
+    var out = [];
+    var seen = {};
+    if (!values || typeof values.length !== "number") return out;
+    for (var i = 0; i < values.length; i++) {
+        if (values[i] === null || values[i] === undefined) continue;
+        var key = String(values[i]);
+        if (seen[key]) continue;
+        seen[key] = true;
+        var num = Number(values[i]);
+        out.push(isFinite(num) ? num : values[i]);
+    }
+    out.sort(function(a, b) {
+        var na = Number(a);
+        var nb = Number(b);
+        if (isFinite(na) && isFinite(nb)) return na - nb;
+        return String(a) < String(b) ? -1 : (String(a) > String(b) ? 1 : 0);
+    });
+    return out;
+}
+
+function _resolvedAtomicRowsFromOptions(resolvedOptions) {
+    var rows = [];
+    if (!resolvedOptions) return rows;
+    var sources = [
+        resolvedOptions.executionCandidates || [],
+        resolvedOptions.renderedFloatingItems || [],
+        resolvedOptions.objectPlans || [],
+        resolvedOptions.extractionCandidates || []
+    ];
+    var seen = {};
+    for (var si = 0; si < sources.length; si++) {
+        var list = sources[si];
+        for (var i = 0; list && i < list.length; i++) {
+            var c = list[i];
+            if (!c || c.atomicTextlessVectorContent !== true) continue;
+            var targetIds = _resolvedIdList(c.atomicExportTargetObjectIds || []);
+            if (targetIds.length === 0 && c.atomicExportTargetObjectId !== null
+                    && c.atomicExportTargetObjectId !== undefined) {
+                targetIds = _resolvedIdList([c.atomicExportTargetObjectId]);
+            }
+            if (targetIds.length === 0 && c.exportTargetObjectId !== null
+                    && c.exportTargetObjectId !== undefined) {
+                targetIds = _resolvedIdList([c.exportTargetObjectId]);
+            }
+            if (targetIds.length === 0) continue;
+            var sourceIds = _resolvedIdList(c.sourceObjectIds || c.executionSourceObjectIds || []);
+            var exportIds = _resolvedIdList(c.exportSourceObjectIds || sourceIds);
+            if (sourceIds.length === 0) sourceIds = exportIds.slice(0);
+            if (sourceIds.length <= targetIds.length) continue;
+            var hiddenIds = _resolvedIdList(c.hiddenVisualSourceObjectIds
+                    || c.hiddenTextFrameIds
+                    || c.editableTextFrameIds
+                    || []);
+            var pageIndex = c.pageIndex !== undefined ? c.pageIndex : null;
+            var key = String(pageIndex) + "|" + targetIds.join(",") + "|"
+                    + sourceIds.length + "|" + sourceIds[0];
+            if (seen[key]) continue;
+            seen[key] = true;
+            rows.push({
+                candidateId: c.candidateId || c.objectPlanId || c.id || null,
+                passId: c.passId || null,
+                pageIndex: pageIndex,
+                sourceObjectIds: sourceIds,
+                exportSourceObjectIds: exportIds,
+                hiddenVisualSourceObjectIds: hiddenIds,
+                atomicExportTargetObjectIds: targetIds
+            });
+        }
+        if (rows.length > 0) break;
+    }
+    return rows;
+}
+
+function _buildResolvedAtomicCollectionIndex(resolvedOptions) {
+    var rows = _resolvedAtomicRowsFromOptions(resolvedOptions);
+    var index = {
+        rows: rows,
+        covered: {},
+        root: {},
+        hidden: {},
+        rootInfo: {},
+        summary: {
+            enabled: rows.length > 0,
+            groupCount: rows.length,
+            coveredSourceObjectCount: 0,
+            targetRootCount: 0,
+            hiddenSourceObjectCount: 0,
+            skippedPageItemCount: 0,
+            compactRootCount: 0
+        }
+    };
+    var coveredSeen = {};
+    var rootSeen = {};
+    var hiddenSeen = {};
+    for (var ri = 0; ri < rows.length; ri++) {
+        var row = rows[ri];
+        for (var si = 0; si < row.sourceObjectIds.length; si++) {
+            var sid = String(row.sourceObjectIds[si]);
+            index.covered[sid] = true;
+            if (!coveredSeen[sid]) {
+                coveredSeen[sid] = true;
+                index.summary.coveredSourceObjectCount++;
+            }
+        }
+        for (var hi = 0; hi < row.hiddenVisualSourceObjectIds.length; hi++) {
+            var hid = String(row.hiddenVisualSourceObjectIds[hi]);
+            index.hidden[hid] = true;
+            if (!hiddenSeen[hid]) {
+                hiddenSeen[hid] = true;
+                index.summary.hiddenSourceObjectCount++;
+            }
+        }
+        for (var ti = 0; ti < row.atomicExportTargetObjectIds.length; ti++) {
+            var tid = String(row.atomicExportTargetObjectIds[ti]);
+            index.root[tid] = true;
+            if (!rootSeen[tid]) {
+                rootSeen[tid] = true;
+                index.summary.targetRootCount++;
+            }
+            index.rootInfo[tid] = {
+                candidateId: row.candidateId,
+                passId: row.passId,
+                pageIndex: row.pageIndex,
+                sourceObjectCount: row.sourceObjectIds.length,
+                exportSourceObjectCount: row.exportSourceObjectIds.length,
+                hiddenSourceObjectCount: row.hiddenVisualSourceObjectIds.length,
+                atomicExportTargetObjectIds: row.atomicExportTargetObjectIds.slice(0)
+            };
+        }
+    }
+    return index;
+}
+
+function _resolvedAtomicShouldSkipPageItem(pi, data, atomicIndex) {
+    if (!atomicIndex || !atomicIndex.summary || !atomicIndex.summary.enabled) return false;
+    if (!data || data.id === null || data.id === undefined) return false;
+    var id = String(data.id);
+    if (!atomicIndex.covered[id]) return false;
+    if (atomicIndex.root[id]) return false;
+    if (atomicIndex.hidden[id]) return false;
+    try {
+        if (pi && pi.constructor && pi.constructor.name === "TextFrame") return false;
+    } catch (e) {}
+    return true;
+}
+
+function _resolvedAtomicShouldSkipRawPageItem(pi, atomicIndex) {
+    if (!atomicIndex || !atomicIndex.summary || !atomicIndex.summary.enabled) return false;
+    var id = null;
+    try { id = pi.id; } catch (eId) {}
+    if (id === null || id === undefined) return false;
+    var key = String(id);
+    if (!atomicIndex.covered[key]) return false;
+    if (atomicIndex.root[key]) return false;
+    if (atomicIndex.hidden[key]) return false;
+    try {
+        if (pi && pi.constructor && pi.constructor.name === "TextFrame") return false;
+    } catch (eType) {}
+    return true;
+}
+
+function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems, resolvedOptions) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
+    if (!resolvedOptions) resolvedOptions = {};
+    var atomicCollectionIndex = _buildResolvedAtomicCollectionIndex(resolvedOptions);
+    resolvedOptions.atomicCollectionIndex = atomicCollectionIndex;
 
     writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
     _marker(outputDir, "10a_documentInfo");
@@ -422,7 +587,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     } catch (e) {}
     _marker(outputDir, "10f_rangeStoryIds_pageItems_done");
 
-    // SPEC-025: off-canvas TF story 도 rangeStoryIds 에 추가.
+    // source ownership policy: off-canvas TF story 도 rangeStoryIds 에 추가.
     // off-canvas TF 는 parentPage=null 이므로 위 두 수집 경로에서 모두 누락됨.
     // instanceMasterFrames 가 스토리 클론을 만들려면 원본 story 가 storyById 에 있어야 함.
     _marker(outputDir, "10g_rangeStoryIds_offCanvas");
@@ -456,7 +621,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     } catch (e) {}
     _marker(outputDir, "10g_rangeStoryIds_offCanvas_done");
 
-    // SPEC-025: 마스터 스프레드의 TextFrame 스토리도 rangeStoryIds 에 추가 (Phase 5 master instancing 용)
+    // source ownership policy: 마스터 스프레드의 TextFrame 스토리도 rangeStoryIds 에 추가 (Phase 5 master instancing 용)
     // 증분 추출에서도 마스터 스토리는 항상 수집 (변경 여부와 무관)
     _marker(outputDir, "10h_rangeStoryIds_master");
     try {
@@ -495,10 +660,10 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     var textFrames = collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems);
     _marker(outputDir, "10j_collectTextFrames_done");
 
-    // SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
+    // source ownership policy Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
     // 증분 추출에서도 실행 (마스터 인스턴스는 경량 연산)
     _marker(outputDir, "10k_instanceMasterFrames");
-    try { instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds); } catch (ePhase5) { $.writeln("[SPEC-025 Phase 5 error] " + ePhase5); }
+    try { instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds); } catch (ePhase5) { $.writeln("[source ownership policy Phase 5 error] " + ePhase5); }
     _marker(outputDir, "10k_instanceMasterFrames_done");
 
     writeProgress(outputDir, "resolved_items", 0, rangePageCount);
@@ -506,7 +671,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     var pages = collectPages(doc, startPage, endPage, skipRenderPagesMap);
     _marker(outputDir, "10l_collectPages_done");
     _marker(outputDir, "10m_collectPageItems");
-    var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems);
+    var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems, resolvedOptions);
     _marker(outputDir, "10m_collectPageItems_done");
     var nativeParentTextShellCandidates = collectNativeParentTextShellCandidates(textFrames, pageItems);
 
@@ -526,6 +691,9 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
         textFrames: textFrames,
         pages: pages,
         pageItems: pageItems,
+        atomicTextlessVectorCollectionSummary: atomicCollectionIndex.summary,
+        pageItemCollectionSummary: resolvedOptions ? resolvedOptions.pageItemSnapshot : null,
+        pageItemCollectionWarnings: resolvedOptions ? (resolvedOptions.pageItemCollectionWarnings || []) : [],
         nativeParentTextShellCandidates: nativeParentTextShellCandidates,
         fontMetrics: fontMetrics
     };
@@ -615,7 +783,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             var mtf = msItems[mi];
             try { if (mtf.constructor.name !== "TextFrame") continue; } catch (e) { continue; }
             // editable 분류만 인스턴스화 (background/renderable 은 PNG 처리)
-            // SPEC-025 Phase 5 보강: auto page number TF(ACE 18, \u0018) 및 text variable TF(\uFEFF)도
+            // source ownership policy Phase 5 보강: auto page number TF(ACE 18, \u0018) 및 text variable TF(\uFEFF)도
             // hashiraEditable=true 일 때 인스턴스화 → 하시라/페이지번호 변환 지원.
             var cls = null;
             try { cls = classifyTextFrameCached(mtf); } catch (e) {}
@@ -663,7 +831,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             if (hashiraSpecialType === "textvar") continue;
             if (cls !== "editable" && !hashiraSpecialType) continue;
             var baseId = ""; try { baseId = mtf.id.toString(); } catch (e) { continue; }
-            // SPEC-025: 마스터 TF 가 위치한 master page 의 스프레드 내 인덱스(0=LEFT,1=RIGHT) →
+            // source ownership policy: 마스터 TF 가 위치한 master page 의 스프레드 내 인덱스(0=LEFT,1=RIGHT) →
             // 동일 인덱스의 content page 에만 인스턴스 생성 (반대편 페이지로의 잘못된 복제 방지).
             // side.toString() 은 InDesign 버전마다 반환값이 달라 신뢰하지 않음 → 인덱스 비교로 대체.
             var mtfSpreadPageIdx = -1;
@@ -801,6 +969,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 } else if (hashiraSpecialType === "textvar") {
                     clone.frameVisibleText = hashiraTextVarResolved;
                 }
+                if (hashiraSpecialType) clone.masterSpecialType = hashiraSpecialType;
                 editableIds[cloneFrameId] = true;
                 textFrames.push(clone);
                 frameClones++;
@@ -853,10 +1022,10 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
         }
     }
     if (frameClones > 0 || storyClones > 0) {
-        $.writeln("[SPEC-025 Phase 5] cloned " + frameClones + " master frame instances, " + storyClones + " story copies");
+        $.writeln("[source ownership policy Phase 5] cloned " + frameClones + " master frame instances, " + storyClones + " story copies");
     }
 
-    // SPEC-025 Phase 5 보강 (2026-05-22): off-canvas master override 처리.
+    // source ownership policy Phase 5 보강 (2026-05-22): off-canvas master override 처리.
     // TF.masterPageItem 이 설정된 일반 spread item 이 parentPage=null (pasteboard 영역, y<0 등) 일 경우
     // Phase 2 가 pageIndex<0 으로 건너뜀 → 인스턴스화 안 됨.
     // 해결: 부모 spread 의 모든 doc page 에 clone (보통 1~2 페이지 spread).
@@ -907,7 +1076,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     try { __mpi = !!oTf.masterPageItem; } catch (e) {}
                     var __snippet = "";
                     try { __snippet = String(oTf.contents).substring(0, 40); } catch (e) {}
-                    $.writeln("[SPEC-025 off-canvas] id=" + oTf.id + " masterPageItem=" + __mpi + " text=" + __snippet);
+                    $.writeln("[source ownership policy off-canvas] id=" + oTf.id + " masterPageItem=" + __mpi + " text=" + __snippet);
                 } catch (e) {}
                 // 3) 텍스트 콘텐츠가 있어야 의미 있음 (background 빈칸/장식 제외).
                 //    classifyTextFrame 가 renderable 로 분류해도 master override 는 검색 가능 텍스트로 처리.
@@ -1021,9 +1190,9 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 }
             }
         }
-    } catch (eOC) { $.writeln("[SPEC-025 Phase 5 off-canvas error] " + eOC); }
+    } catch (eOC) { $.writeln("[source ownership policy Phase 5 off-canvas error] " + eOC); }
     if (offCanvasClones > 0) {
-        $.writeln("[SPEC-025 Phase 5] off-canvas overrides: " + offCanvasClones + " frame clones");
+        $.writeln("[source ownership policy Phase 5] off-canvas overrides: " + offCanvasClones + " frame clones");
     }
 }
 
@@ -1055,126 +1224,370 @@ function collectPages(doc, startPage, endPage, skipRenderPagesMap) {
 }
 
 
-function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems) {
+function _resolvedIsValidPageItem(item) {
+    if (!item) return false;
+    try {
+        if (item.isValid === false) return false;
+    } catch (eIsValid) {
+        return false;
+    }
+    return true;
+}
+
+function _resolvedMaterializePageItemArray(rawItems) {
+    var out = [];
+    if (!rawItems || typeof rawItems.length !== "number") return out;
+    for (var i = 0; i < rawItems.length; i++) {
+        var item = null;
+        try { item = rawItems[i]; } catch (eItemRead) { continue; }
+        if (!_resolvedIsValidPageItem(item)) continue;
+        out.push(item);
+    }
+    return out;
+}
+
+function _resolvedSafePageItemSnapshot(doc, cachedAllItems, resolvedOptions) {
+    var invalidCachedCount = 0;
+    var cachedCount = 0;
+    if (cachedAllItems && typeof cachedAllItems.length === "number") {
+        cachedCount = cachedAllItems.length;
+        for (var i = 0; i < cachedAllItems.length; i++) {
+            if (!_resolvedIsValidPageItem(cachedAllItems[i])) invalidCachedCount++;
+        }
+    }
+
+    if (!cachedAllItems || invalidCachedCount > 0) {
+        var freshItems = [];
+        try { freshItems = _resolvedMaterializePageItemArray(doc.allPageItems); } catch (eFresh) { freshItems = []; }
+        if (resolvedOptions) {
+            resolvedOptions.pageItemSnapshot = {
+                strategy: "fresh_doc_allPageItems",
+                cachedCount: cachedCount,
+                invalidCachedCount: invalidCachedCount,
+                freshCount: freshItems && typeof freshItems.length === "number" ? freshItems.length : 0
+            };
+        }
+        return freshItems;
+    }
+
+    var cachedItems = _resolvedMaterializePageItemArray(cachedAllItems);
+    if (resolvedOptions) {
+        resolvedOptions.pageItemSnapshot = {
+            strategy: "cached_allPageItems",
+            cachedCount: cachedCount,
+            invalidCachedCount: 0,
+            materializedCount: cachedItems.length
+        };
+    }
+    return cachedItems;
+}
+
+function _resolvedSourcePageInRange(src, startPage, endPage, skipRenderPagesMap) {
+    if (!src) return -1;
+    var pageIndex = Number(src.pageIndex);
+    if (isNaN(pageIndex)) pageIndex = Number(src.sourcePageIndex);
+    if (!isNaN(pageIndex) && pageIndex >= 0) {
+        var pageNo = pageIndex + 1;
+        if (pageNo >= startPage && pageNo <= endPage && !skipRenderPagesMap[pageNo]) {
+            return pageIndex;
+        }
+    }
+
+    var rangePages = src.rangeTargetPageIndexes || [];
+    for (var i = 0; i < rangePages.length; i++) {
+        var targetIndex = Number(rangePages[i]);
+        if (isNaN(targetIndex) || targetIndex < 0) continue;
+        var targetNo = targetIndex + 1;
+        if (targetNo < startPage || targetNo > endPage) continue;
+        if (skipRenderPagesMap[targetNo]) continue;
+        return targetIndex;
+    }
+    return -1;
+}
+
+function _resolvedSourceParentId(src) {
+    if (!src || src.parentId === null || src.parentId === undefined) return null;
+    var parentKind = src.parentKind ? String(src.parentKind) : "";
+    if (parentKind === "Spread" || parentKind === "Page" || parentKind === "MasterSpread") return null;
+    return String(src.parentId);
+}
+
+function _resolvedSourceIsInline(src) {
+    if (!src) return false;
+    if (src.storyTextInlineSlot === true) return true;
+    if (src.storyAnchorPlacement === "FLOATING_ANCHORED") return false;
+    if (src.storyAnchorPlacement === "INLINE" || src.storyAnchorPlacement === "ABOVE_LINE") return true;
+    var anchoredPosition = src.anchoredPosition ? String(src.anchoredPosition) : "";
+    return anchoredPosition === "INLINE_POSITION" || anchoredPosition === "ABOVE_LINE";
+}
+
+function _resolvedDescendantSourceIds(parentId, childIdsByParentId, out, seen) {
+    var children = childIdsByParentId ? childIdsByParentId[String(parentId)] : null;
+    for (var i = 0; children && i < children.length; i++) {
+        var childId = children[i];
+        var key = String(childId);
+        if (seen[key]) continue;
+        seen[key] = true;
+        var num = Number(childId);
+        out.push(isFinite(num) ? num : childId);
+        _resolvedDescendantSourceIds(childId, childIdsByParentId, out, seen);
+    }
+}
+
+function _resolvedDescendantSourceIdList(parentId, childIdsByParentId, memo) {
+    var key = String(parentId);
+    if (memo && memo[key]) return memo[key].slice(0);
+    var out = [];
+    _resolvedDescendantSourceIds(parentId, childIdsByParentId, out, {});
+    if (memo) memo[key] = out.slice(0);
+    return out;
+}
+
+function _collectPageItemsFromSourceItems(startPage, endPage, skipRenderPagesMap, resolvedOptions) {
+    if (!resolvedOptions || resolvedOptions.collectPageItemsFromSource === false) return null;
+    var sourceItems = resolvedOptions.sourceItems || [];
+    if (!sourceItems || sourceItems.length === 0) return null;
+
+    var indexes = null;
+    try {
+        indexes = typeof _buildSourceItemIndexes === "function"
+                ? _buildSourceItemIndexes(sourceItems)
+                : null;
+    } catch (eIndexes) {
+        indexes = null;
+    }
+    var childIdsByParentId = indexes && indexes.childIdsByParentId
+            ? indexes.childIdsByParentId
+            : {};
+    var atomicIndex = resolvedOptions.atomicCollectionIndex;
+    var items = [];
+    var descendantMemo = {};
+    var summary = {
+        strategy: "sourceItems",
+        sourceItemCount: sourceItems.length,
+        collectedCount: 0,
+        skippedAtomicCount: 0,
+        compactRootCount: 0
+    };
+
+    for (var i = 0; i < sourceItems.length; i++) {
+        try {
+            var src = sourceItems[i];
+            if (!src || src.id === null || src.id === undefined) continue;
+            var idKey = String(src.id);
+            if (atomicIndex && atomicIndex.summary && atomicIndex.summary.enabled
+                    && atomicIndex.covered[idKey] && !atomicIndex.root[idKey]
+                    && !atomicIndex.hidden[idKey] && src.kind !== "TextFrame") {
+                atomicIndex.summary.skippedPageItemCount++;
+                summary.skippedAtomicCount++;
+                continue;
+            }
+
+            var pageIndex = _resolvedSourcePageInRange(src, startPage, endPage, skipRenderPagesMap);
+            if (pageIndex < 0) continue;
+
+            var data = {
+                id: idKey,
+                type: src.kind || src.type || null,
+                name: src.name || null,
+                parentId: _resolvedSourceParentId(src),
+                pageIndex: pageIndex,
+                visible: src.visible !== false,
+                hiddenByParent: src.hiddenLayer === true,
+                layerId: src.layerId !== undefined ? src.layerId : null,
+                layerName: src.layerName || null,
+                layerIndex: src.layerIndex !== undefined ? src.layerIndex : null,
+                zOrder: src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : i,
+                anchoredPosition: src.anchoredPosition || null,
+                storyAnchorPlacement: src.storyAnchorPlacement || null,
+                storyTextInlineSlot: src.storyTextInlineSlot === true,
+                isInline: _resolvedSourceIsInline(src)
+            };
+            if (src.bounds) data.geometricBounds = arrCopy(src.bounds);
+            if (src.absoluteRotationAngle !== null && src.absoluteRotationAngle !== undefined) {
+                data.absoluteRotationAngle = src.absoluteRotationAngle;
+            }
+            if (src.fillColorName) {
+                data.fillColorName = src.fillColorName;
+                data.fillTint = src.fillTint;
+            }
+            if (src.strokeColorName) {
+                data.strokeColorName = src.strokeColorName;
+                data.strokeTint = src.strokeTint;
+                data.strokeWeight = src.strokeWeight;
+                if (src.strokeAlignment !== null && src.strokeAlignment !== undefined) {
+                    data.strokeAlignment = String(src.strokeAlignment);
+                }
+            }
+            if (src.opacity !== null && src.opacity !== undefined) data.opacity = src.opacity;
+            if (src.cornerRadius !== null && src.cornerRadius !== undefined) data.cornerRadius = src.cornerRadius;
+
+            var rootInfo = atomicIndex && atomicIndex.rootInfo ? atomicIndex.rootInfo[idKey] : null;
+            if (rootInfo) {
+                data.atomicTextlessVectorContent = true;
+                data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
+                data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
+                data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
+                data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
+                data.childIds = [];
+                data.childIdsOmittedByAtomicContent = true;
+                atomicIndex.summary.compactRootCount++;
+                summary.compactRootCount++;
+            } else if (data.type === "Group" || src.hasChildren === true) {
+                data.childIds = _resolvedDescendantSourceIdList(src.id, childIdsByParentId, descendantMemo);
+            }
+
+            items.push(data);
+        } catch (eSourceItemCollect) {
+            if (!resolvedOptions.pageItemCollectionWarnings) resolvedOptions.pageItemCollectionWarnings = [];
+            if (resolvedOptions.pageItemCollectionWarnings.length < 50) {
+                resolvedOptions.pageItemCollectionWarnings.push({
+                    index: i,
+                    sourceId: sourceItems[i] && sourceItems[i].id,
+                    message: String(eSourceItemCollect)
+                });
+            }
+        }
+    }
+
+    summary.collectedCount = items.length;
+    resolvedOptions.pageItemSnapshot = summary;
+    return items;
+}
+
+function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems, resolvedOptions) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var items = [];
-    var allItems = cachedAllItems || doc.allPageItems;
+    var atomicIndex = resolvedOptions ? resolvedOptions.atomicCollectionIndex : null;
+    var sourceItems = _collectPageItemsFromSourceItems(startPage, endPage, skipRenderPagesMap, resolvedOptions);
+    if (sourceItems) return sourceItems;
+    var allItems = _resolvedSafePageItemSnapshot(doc, cachedAllItems, resolvedOptions);
     for (var i = 0; i < allItems.length; i++) {
-        var pi = allItems[i];
-
-        // 페이지 범위 필터
-        var piPageIdx = -1;
         try {
-            var parentPage = pi.parentPage;
-            if (parentPage) piPageIdx = parentPage.documentOffset;
-        } catch (e) {}
-        // piPageIdx는 0-based, startPage/endPage는 1-based.
-        // Spread-level 또는 cross-page source는 parentPage가 범위 밖이어도
-        // requested page와 bounds가 겹치면 Stage 1 ObjectPlan의 실행 source가 될 수
-        // 있다. parentPage만으로 버리면 NATIVE_SOURCE_SHAPE plan은 남고
-        // resolved.pageItems source가 빠져 Stage 3에서 누락된다.
-        if (piPageIdx >= 0) {
-            var pgIdx1 = piPageIdx + 1;
-            if (pgIdx1 < startPage || pgIdx1 > endPage) {
-                var overlapPageIdx = _pageIndexBySpreadBounds(doc, pi, {
-                    startPage: startPage,
-                    endPage: endPage
-                });
-                if (overlapPageIdx < 0) continue;
-                piPageIdx = overlapPageIdx;
-                pgIdx1 = piPageIdx + 1;
+            var pi = allItems[i];
+            if (!_resolvedIsValidPageItem(pi)) continue;
+            if (_resolvedAtomicShouldSkipRawPageItem(pi, atomicIndex)) {
+                atomicIndex.summary.skippedPageItemCount++;
+                continue;
             }
-            if (skipRenderPagesMap[pgIdx1]) continue; // SPEC-030: 증분 추출 스킵
-        }
 
-        var data = {
-            id: pi.id.toString(),
-            type: pi.constructor.name,
-            name: null,
-            parentId: null,
-            pageIndex: piPageIdx
-        };
-        try { data.visible = (pi.visible !== false); } catch (e) { data.visible = true; }
-        try { data.hiddenByParent = isHiddenByVisibility(pi); } catch (e) { data.hiddenByParent = false; }
-
-        // 이름
-        try { data.name = pi.name; } catch (e) {}
-        _copyLayerInfo(data, pi);
-
-        // 부모 관계 (Spread/Page 직속은 null)
-        try {
-            if (pi.parent && pi.parent.constructor.name !== "Spread"
-                && pi.parent.constructor.name !== "Page"
-                && pi.parent.constructor.name !== "MasterSpread") {
-                data.parentId = pi.parent.id.toString();
-            }
-        } catch (e) {}
-
-        // 기하 — InDesign이 모든 변환 적용한 절대 좌표 (pt)
-        try { data.geometricBounds = arrCopy(pi.geometricBounds); } catch (e) {}
-        // SPEC-030: visibleBounds 제거 — Java 측에서 사용 안 함 (geometricBounds 만 사용)
-
-        // 절대 변환 — SPEC-030: rotationAngle 만 사용됨, shear/scale/flip 은 미사용 제거
-        try { data.absoluteRotationAngle = pi.absoluteRotationAngle; } catch (e) {}
-
-        // 채우기
-        try {
-            if (pi.fillColor && pi.fillColor.name !== "None") {
-                data.fillColorName = pi.fillColor.name;
-                data.fillTint = pi.fillTint;
-            }
-        } catch (e) {}
-
-        // 스트로크
-        try {
-            if (pi.strokeColor && pi.strokeColor.name !== "None") {
-                data.strokeColorName = pi.strokeColor.name;
-                data.strokeTint = pi.strokeTint;
-                data.strokeWeight = pi.strokeWeight;
-                data.strokeAlignment = pi.strokeAlignment.toString();
-            }
-        } catch (e) {}
-
-        // 투명도
-        try { data.opacity = pi.transparencySettings.blendingSettings.opacity; } catch (e) {}
-
-        // SPEC-030: 그라디언트 페더 / 드롭 섀도우 제거 — 신 파이프라인에서 pageItem 레벨 사용 안 함.
-        //   (TextFrameBlock 의 dropShadow boolean 은 별도로 transparencySettings 에서 직접 추출)
-
-        // 코너 반경
-        try {
-            if (pi.cornerRadius > 0) {
-                data.cornerRadius = pi.cornerRadius;
-            }
-        } catch (e) {}
-
-        // NEW: z-order (allPageItems 순서 = 시각적 스태킹)
-        data.zOrder = i;
-
-        data.anchoredPosition = _itemAnchoredPosition(pi);
-        data.storyAnchorPlacement = _storyAnchorPlacementForItem(doc, pi, null);
-
-        // NEW: 인라인 여부. Story에 매달린 객체라도 content box 밖에 놓인
-        // anchored visual은 page-space floating source로 보존한다.
-        data.isInline = isInlineItem(pi) && data.storyAnchorPlacement !== "FLOATING_ANCHORED";
-
-        // NEW: Group 자식 ID
-        if (pi.constructor.name === "Group") {
+            // 페이지 범위 필터
+            var piPageIdx = -1;
             try {
-                var grpChildren = pi.allPageItems;
-                var childIds = [];
-                for (var gc = 0; gc < grpChildren.length; gc++) {
-                    childIds.push(grpChildren[gc].id);
+                var parentPage = pi.parentPage;
+                if (parentPage) piPageIdx = parentPage.documentOffset;
+            } catch (ePage) {}
+            if (piPageIdx >= 0) {
+                var pgIdx1 = piPageIdx + 1;
+                if (pgIdx1 < startPage || pgIdx1 > endPage) {
+                    var overlapPageIdx = _pageIndexBySpreadBounds(doc, pi, {
+                        startPage: startPage,
+                        endPage: endPage
+                    });
+                    if (overlapPageIdx < 0) continue;
+                    piPageIdx = overlapPageIdx;
+                    pgIdx1 = piPageIdx + 1;
                 }
-                data.childIds = childIds;
-            } catch (e) {}
-            // SPEC-030: clipContent 제거 — 신 파이프라인 미사용
+                if (skipRenderPagesMap[pgIdx1]) continue;
+            }
+
+            var data = {
+                id: pi.id.toString(),
+                type: pi.constructor.name,
+                name: null,
+                parentId: null,
+                pageIndex: piPageIdx
+            };
+            try { data.visible = (pi.visible !== false); } catch (eVisible) { data.visible = true; }
+            try { data.hiddenByParent = isHiddenByVisibility(pi); } catch (eHidden) { data.hiddenByParent = false; }
+            try { data.name = pi.name; } catch (eName) {}
+            _copyLayerInfo(data, pi);
+
+            try {
+                if (pi.parent && pi.parent.constructor.name !== "Spread"
+                    && pi.parent.constructor.name !== "Page"
+                    && pi.parent.constructor.name !== "MasterSpread") {
+                    data.parentId = pi.parent.id.toString();
+                }
+            } catch (eParent) {}
+
+            try { data.geometricBounds = arrCopy(pi.geometricBounds); } catch (eBounds) {}
+            try { data.absoluteRotationAngle = pi.absoluteRotationAngle; } catch (eRotation) {}
+
+            try {
+                if (pi.fillColor && pi.fillColor.name !== "None") {
+                    data.fillColorName = pi.fillColor.name;
+                    data.fillTint = pi.fillTint;
+                }
+            } catch (eFill) {}
+
+            try {
+                if (pi.strokeColor && pi.strokeColor.name !== "None") {
+                    data.strokeColorName = pi.strokeColor.name;
+                    data.strokeTint = pi.strokeTint;
+                    data.strokeWeight = pi.strokeWeight;
+                    data.strokeAlignment = pi.strokeAlignment.toString();
+                }
+            } catch (eStroke) {}
+
+            try { data.opacity = pi.transparencySettings.blendingSettings.opacity; } catch (eOpacity) {}
+
+            try {
+                if (pi.cornerRadius > 0) {
+                    data.cornerRadius = pi.cornerRadius;
+                }
+            } catch (eCorner) {}
+
+            data.zOrder = i;
+            data.anchoredPosition = _itemAnchoredPosition(pi);
+            data.storyAnchorPlacement = _storyAnchorPlacementForItem(doc, pi, null);
+            data.storyTextInlineSlot = _itemHasDirectStoryTextInlineSlot(pi);
+            data.isInline = data.storyTextInlineSlot === true
+                    || (isInlineItem(pi) && data.storyAnchorPlacement !== "FLOATING_ANCHORED");
+
+            if (_resolvedAtomicShouldSkipPageItem(pi, data, atomicIndex)) {
+                atomicIndex.summary.skippedPageItemCount++;
+                continue;
+            }
+
+            if (pi.constructor.name === "Group") {
+                try {
+                    var rootInfo = atomicIndex && atomicIndex.rootInfo
+                            ? atomicIndex.rootInfo[String(data.id)]
+                            : null;
+                    if (rootInfo) {
+                        data.atomicTextlessVectorContent = true;
+                        data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
+                        data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
+                        data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
+                        data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
+                        data.childIds = [];
+                        data.childIdsOmittedByAtomicContent = true;
+                        atomicIndex.summary.compactRootCount++;
+                    } else {
+                        var grpChildren = _resolvedMaterializePageItemArray(pi.allPageItems);
+                        var childIds = [];
+                        for (var gc = 0; gc < grpChildren.length; gc++) {
+                            childIds.push(grpChildren[gc].id);
+                        }
+                        data.childIds = childIds;
+                    }
+                } catch (eGroup) {}
+            }
+
+            items.push(data);
+        } catch (eItemCollect) {
+            if (resolvedOptions) {
+                if (!resolvedOptions.pageItemCollectionWarnings) resolvedOptions.pageItemCollectionWarnings = [];
+                if (resolvedOptions.pageItemCollectionWarnings.length < 50) {
+                    resolvedOptions.pageItemCollectionWarnings.push({
+                        index: i,
+                        message: String(eItemCollect)
+                    });
+                }
+            }
+            continue;
         }
-
-        // SPEC-030: pageRelativeBounds 제거 (pageItems 레벨) — Java 측 신 파이프라인 미사용.
-        // TextFrame 의 pageRelativeBounds 는 별도 emission 위치(fData)에서 계속 유지.
-
-        items.push(data);
     }
     return items;
 }

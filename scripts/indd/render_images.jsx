@@ -229,6 +229,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
     var processedGroupIds = {};
     var imageExportCache = {};
     var bgPolyExportCache = {};
+    var imageRenderDiagnostics = [];
 
     function _itemForCandidate(candidate, preferredKind) {
         if (!candidate) return null;
@@ -301,6 +302,141 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
         return String(passId || "") + "|" + (isGroupRender ? "group" : "item") + "|" + String(id);
     }
 
+    function _visibleHideTargetForSourceItem(item) {
+        if (!item) return null;
+        var name = "";
+        try { name = String(item.constructor.name || ""); } catch (eName) {}
+        if (name === "Image" || name === "PDF" || name === "EPS") {
+            try { if (item.parent) return item.parent; } catch (eParent) {}
+        }
+        try {
+            var visible = item.visible;
+            return item;
+        } catch (eVisible) {}
+        try { if (item.parent) return item.parent; } catch (eParent2) {}
+        return item;
+    }
+
+    function _candidateHiddenVisualItems(candidate, rootItem) {
+        var out = [];
+        var seen = {};
+        var ids = candidate && candidate.hiddenVisualSourceObjectIds
+                ? candidate.hiddenVisualSourceObjectIds
+                : [];
+        var hiddenSet = {};
+        for (var si = 0; ids && si < ids.length; si++) hiddenSet[String(ids[si])] = true;
+        function addItem(item, fallbackId) {
+            item = _visibleHideTargetForSourceItem(item);
+            if (!item) return;
+            var key = null;
+            try { key = String(item.id); } catch (eKey) { key = String(fallbackId); }
+            if (seen[key]) return;
+            seen[key] = true;
+            out.push(item);
+        }
+        function sameItem(a, b) {
+            if (!a || !b) return false;
+            try { return String(a.id) === String(b.id); } catch (eId) {}
+            return a === b;
+        }
+        function addItemAndAncestors(item, fallbackId) {
+            item = _visibleHideTargetForSourceItem(item);
+            if (!item) return;
+            addItem(item, fallbackId);
+            var guard = 0;
+            var current = item;
+            while (current && guard++ < 16) {
+                var parent = null;
+                try { parent = current.parent; } catch (eParent) { parent = null; }
+                if (!parent || sameItem(parent, rootItem)) break;
+                var parentName = "";
+                try { parentName = String(parent.constructor.name || ""); } catch (eName) {}
+                if (parentName !== "Group"
+                        && parentName !== "Rectangle"
+                        && parentName !== "Polygon"
+                        && parentName !== "Oval") {
+                    break;
+                }
+                addItem(parent, fallbackId);
+                current = parent;
+            }
+        }
+        for (var hi = 0; ids && hi < ids.length; hi++) {
+            var item = itemById ? itemById[String(ids[hi])] : null;
+            if (!item) continue;
+            addItemAndAncestors(item, ids[hi]);
+        }
+        try {
+            var nested = rootItem && rootItem.allPageItems ? rootItem.allPageItems : [];
+            for (var ni = 0; ni < nested.length; ni++) {
+                var nestedItem = nested[ni];
+                var nestedId = null;
+                try { nestedId = String(nestedItem.id); } catch (eNestedId) {}
+                if (nestedId !== null && hiddenSet[nestedId]) addItemAndAncestors(nestedItem, nestedId);
+            }
+        } catch (eNested) {}
+        try {
+            var graphics = rootItem && rootItem.allGraphics ? rootItem.allGraphics : [];
+            for (var gi = 0; gi < graphics.length; gi++) {
+                var graphic = graphics[gi];
+                var graphicId = null;
+                try { graphicId = String(graphic.id); } catch (eGraphicId) {}
+                if (graphicId !== null && hiddenSet[graphicId]) addItemAndAncestors(graphic, graphicId);
+            }
+        } catch (eGraphics) {}
+        return out;
+    }
+
+    function _hideVisualSourceItemsForExport(items) {
+        var saved = [];
+        if (!items) return saved;
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (!item) continue;
+            var state = { item: item, mode: "visible" };
+            var changed = false;
+            try {
+                state.wasVisible = item.visible;
+                item.visible = false;
+                changed = true;
+            } catch (eVisible) {}
+            if (!changed) {
+                try {
+                    var blend = item.transparencySettings.blendingSettings;
+                    state.opacity = blend.opacity;
+                    blend.opacity = 0;
+                    state.mode = "opacity";
+                    changed = true;
+                } catch (eOpacity) {}
+            }
+            if (changed) saved.push(state);
+        }
+        return saved;
+    }
+
+    function _restoreVisualSourceItemsForExport(saved) {
+        if (!saved) return;
+        for (var i = 0; i < saved.length; i++) {
+            var state = saved[i];
+            if (!state || !state.item) continue;
+            if (state.mode === "visible") {
+                try { state.item.visible = state.wasVisible; } catch (eVisible) {}
+            } else if (state.mode === "opacity") {
+                try {
+                    state.item.transparencySettings.blendingSettings.opacity = state.opacity;
+                } catch (eOpacity) {}
+            }
+        }
+    }
+
+    function _sourceSetCachePart(ids) {
+        if (!ids || ids.length === 0) return "";
+        var copy = [];
+        for (var i = 0; i < ids.length; i++) copy.push(Number(ids[i]));
+        copy.sort(function(a, b) { return a - b; });
+        return copy.join(",");
+    }
+
     var plannedEntries = [];
     for (var gci = 0; imageGroupCandidates && gci < imageGroupCandidates.length; gci++) {
         plannedEntries.push({ candidate: imageGroupCandidates[gci], isGroupRender: true });
@@ -313,30 +449,81 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
         var planned = plannedEntries[i];
         var candidate = planned.candidate;
         var isGroupRender = planned.isGroupRender;
+        var diag = {
+            candidateId: candidate ? candidate.candidateId : null,
+            passId: candidate ? candidate.passId : null,
+            pageIndex: candidate ? candidate.pageIndex : null,
+            sourceObjectIds: candidate ? candidate.sourceObjectIds : null,
+            exportSourceObjectIds: candidate ? candidate.exportSourceObjectIds : null,
+            isGroupRender: isGroupRender,
+            stage: "start",
+            result: "pending"
+        };
         var renderTarget = isGroupRender
                 ? _itemForCandidate(candidate, "Group")
                 : _itemForCandidate(candidate, null);
-        if (!renderTarget) continue;
-        var item = renderTarget;
-        var cName = item.constructor.name;
-
-        if (isGroupRender) {
-            if (cName !== "Group") continue;
-        } else if (cName !== "Rectangle" && cName !== "Oval" && cName !== "Polygon") {
+        if (!renderTarget) {
+            diag.result = "skipped";
+            diag.stage = "resolve_target";
+            diag.reason = "render_target_not_found";
+            imageRenderDiagnostics.push(diag);
             continue;
         }
-        if (isOnHiddenLayer(item)) continue;
+        var item = renderTarget;
+        var cName = item.constructor.name;
+        diag.renderTargetId = item.id;
+        diag.renderTargetKind = cName;
+
+        if (isGroupRender) {
+            if (cName !== "Group") {
+                diag.result = "skipped";
+                diag.stage = "kind_check";
+                diag.reason = "group_candidate_target_not_group";
+                imageRenderDiagnostics.push(diag);
+                continue;
+            }
+        } else if (cName !== "Rectangle" && cName !== "Oval" && cName !== "Polygon") {
+            diag.result = "skipped";
+            diag.stage = "kind_check";
+            diag.reason = "placed_candidate_target_kind_unsupported";
+            imageRenderDiagnostics.push(diag);
+            continue;
+        }
+        if (isOnHiddenLayer(item)) {
+            diag.result = "skipped";
+            diag.stage = "visibility_check";
+            diag.reason = "hidden_layer";
+            imageRenderDiagnostics.push(diag);
+            continue;
+        }
 
         var hasPdf = _hasPlacedInItem(item, "pdf");
         var hasImage = _hasPlacedInItem(item, "image");
-        if (!hasImage && !hasPdf) continue;
+        diag.hasPdf = hasPdf;
+        diag.hasImage = hasImage;
+        if (!hasImage && !hasPdf) {
+            diag.result = "skipped";
+            diag.stage = "placed_content_check";
+            diag.reason = "no_placed_content_detected";
+            imageRenderDiagnostics.push(diag);
+            continue;
+        }
 
-        if (isGroupRender) {
-            processedGroupIds[renderTarget.id] = true;
-        } else {
+        if (!isGroupRender) {
             try {
                 if (item.parent && item.parent.constructor.name === "Group" && processedGroupIds[item.parent.id]) {
+                    if (candidate && candidate.required === true) {
+                        diag.stage = "group_dedup";
+                        diag.parentGroupId = item.parent.id;
+                        diag.groupDedupBypassed = true;
+                    } else {
+                    diag.result = "skipped";
+                    diag.stage = "group_dedup";
+                    diag.reason = "parent_group_already_rendered";
+                    diag.parentGroupId = item.parent.id;
+                    imageRenderDiagnostics.push(diag);
                     continue;
+                    }
                 }
             } catch (eProcessedGroup) {}
         }
@@ -352,21 +539,58 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 }
             } catch (e) {}
         }
-        if (!parentPage) continue;
+        if (!parentPage && candidate && candidate.pageIndex !== null && candidate.pageIndex !== undefined) {
+            try { parentPage = doc.pages[Number(candidate.pageIndex)]; } catch (eCandidateParentPage) {}
+        }
+        if (!parentPage) {
+            diag.result = "skipped";
+            diag.stage = "page_resolution";
+            diag.reason = "parent_page_not_found";
+            imageRenderDiagnostics.push(diag);
+            continue;
+        }
+        if (candidate && candidate.pageIndex !== null && candidate.pageIndex !== undefined) {
+            try {
+                var candidatePage = doc.pages[Number(candidate.pageIndex)];
+                if (candidatePage) parentPage = candidatePage;
+            } catch (eCandidatePageOverride) {}
+        }
+        try { diag.parentPageIndex = parentPage.documentOffset; } catch (eDiagParentPage) {}
 
         var domId = renderTarget.id;
         var imagePlanPassId = isGroupRender ? "pass.image_textless_groups" : "pass.image_placed_frames";
-        var imageSourceIds = isGroupRender
-                ? (candidate.sourceObjectIds || _collectSourceObjectIds(renderTarget))
-                : [domId];
-        var imageIsSourceSetCandidate = isGroupRender && imageSourceIds && imageSourceIds.length > 1;
+        var imageSourceIds = candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0
+                ? candidate.sourceObjectIds
+                : (isGroupRender ? _collectSourceObjectIds(renderTarget) : [domId]);
+        var imageIsSourceSetCandidate = imageSourceIds && imageSourceIds.length > 1;
 
         var sourceBounds = null;
         try { sourceBounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
         if (!sourceBounds) try { sourceBounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
         var pageFragments = _pageLocalVisualFragmentsForBounds(doc, parentPage, sourceBounds, startPage, endPage);
         var candidatePageFragments = _fragmentsForCandidatePage(pageFragments, candidate);
-        if (!candidatePageFragments || candidatePageFragments.length === 0) continue;
+        if ((!candidatePageFragments || candidatePageFragments.length === 0)
+                && candidate
+                && candidate.pageIndex !== null && candidate.pageIndex !== undefined
+                && candidate.bounds && candidate.bounds.length === 4) {
+            candidatePageFragments = [{
+                page: parentPage,
+                pageIndex: Number(candidate.pageIndex),
+                bounds: arrCopy(candidate.bounds),
+                cropSourceBounds: null
+            }];
+            pageFragments = candidatePageFragments.slice(0);
+            diag.fragmentFallback = "candidate_bounds";
+        }
+        diag.pageFragmentCount = pageFragments ? pageFragments.length : 0;
+        diag.candidatePageFragmentCount = candidatePageFragments ? candidatePageFragments.length : 0;
+        if (!candidatePageFragments || candidatePageFragments.length === 0) {
+            diag.result = "skipped";
+            diag.stage = "fragment_resolution";
+            diag.reason = "candidate_page_fragments_empty";
+            imageRenderDiagnostics.push(diag);
+            continue;
+        }
         var sourceNeedsPageCrop = _fragmentsNeedCropSource(candidatePageFragments);
 
         if (!isGroupRender && hasImage) {
@@ -398,7 +622,13 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                     var copyFragment = candidatePageFragments[0];
                     var copyCandidateMatch = _imageCandidateMatchForFragment(
                             imagePlanPassId, renderTarget, imageSourceIds, imageIsSourceSetCandidate, copyFragment);
-                    if (!copyCandidateMatch) continue;
+                    if (!copyCandidateMatch) {
+                        diag.result = "skipped";
+                        diag.stage = "candidate_match";
+                        diag.reason = "copy_path_candidate_match_failed";
+                        imageRenderDiagnostics.push(diag);
+                        continue;
+                    }
                     var dstFileName = "img_" + domId + "." + srcExt;
                     var dstFile = File(renderDir + "/" + dstFileName);
                     try { srcFile.copy(dstFile); } catch (e) {}
@@ -413,9 +643,14 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                         childImageIds: null
                     }, item, {
                         textOwner: "none",
-                        sourceObjectIds: [domId],
+                        sourceObjectIds: imageSourceIds,
                         reason: "standalone_image_copy"
                     }));
+                    diag.result = "rendered";
+                    diag.stage = "copy_path";
+                    diag.outputFile = dstFileName;
+                    diag.matchStrategy = copyCandidateMatch.strategy;
+                    imageRenderDiagnostics.push(diag);
                     continue;
                 }
                 // 소스 파일 없음 → exportFile fallback
@@ -433,8 +668,10 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
         var _imgHiddenTextFrameIds = [];
         var _imgTfInlineVisualIds = [];
         var hiddenTFs = [];
-        var _imgExportCacheKey = _imageExportCacheKey(imagePlanPassId, renderTarget, isGroupRender);
+        var _imgExportCacheKey = _imageExportCacheKey(imagePlanPassId, renderTarget, isGroupRender)
+                + "|hidden:" + _sourceSetCachePart(candidate ? candidate.hiddenVisualSourceObjectIds : null);
         var _imgCachedExport = imageExportCache[_imgExportCacheKey];
+        var _imgExportError = null;
         if (_imgCachedExport) {
             _marker(outputDir, "08_img_" + domId + "_cache");
             fileName = _imgCachedExport.fileName || fileName;
@@ -444,12 +681,25 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
             _imgHiddenTextFrameIds = _imgCachedExport.hiddenTextFrameIds || [];
             _imgTfInlineVisualIds = _imgCachedExport.tfInlineVisualIds || [];
             _imgExportOk = true;
+            diag.stage = "cache_hit";
         } else {
         try {
             _marker(outputDir, "08_img_" + domId + "_hide");
             _imgTfInlineVisualIds = isGroupRender ? collectTfInlineVisualIds(renderTarget) : [];
             hiddenTFs = isGroupRender ? hideTextFramesAndOwnedInlineVisuals(renderTarget) : [];
             _imgHiddenTextFrameIds = _hiddenTextFrameIdsFromSaved(hiddenTFs);
+            var _imgHiddenVisualItemsSaved = null;
+            var _imgHiddenVisualItems = [];
+            if (isGroupRender && candidate && candidate.hiddenVisualSourceObjectIds
+                    && candidate.hiddenVisualSourceObjectIds.length > 0) {
+                _imgHiddenVisualItems = _candidateHiddenVisualItems(candidate, renderTarget);
+                diag.hiddenVisualSourceObjectIds = candidate.hiddenVisualSourceObjectIds.slice(0);
+                diag.hiddenVisualItemIds = [];
+                for (var _hvi = 0; _hvi < _imgHiddenVisualItems.length; _hvi++) {
+                    try { diag.hiddenVisualItemIds.push(_imgHiddenVisualItems[_hvi].id); } catch (eHiddenDiag) {}
+                }
+                _imgHiddenVisualItemsSaved = _hideVisualSourceItemsForExport(_imgHiddenVisualItems);
+            }
 
             // 그룹 직계 자식 중 배경 폴리곤(Polygon, 배치 이미지 없음, non-None fill)을
             // 그룹 PNG 내보내기 전 임시 숨김. 배경 폴리곤을 이미지와 합성하면
@@ -485,6 +735,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
                 _imgExportOk = true;
             } catch (eExp) {
+                try { _imgExportError = String(eExp); } catch (eExpString) { _imgExportError = "export_exception"; }
                 try { _imgExportOk = outFile.exists; } catch (e2) {}
             }
             _marker(outputDir, "08_img_" + domId + "_exportDone");
@@ -503,6 +754,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 }
             }
 
+            try { if (_imgHiddenVisualItemsSaved && _imgHiddenVisualItemsSaved.length > 0) _restoreVisualSourceItemsForExport(_imgHiddenVisualItemsSaved); } catch (e) {}
             try { if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs); } catch (e) {}
 
             // 배경 폴리곤 가시성 복원
@@ -514,8 +766,10 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
             try { $.gc(); } catch (gcErr) {}  // 아이템별 GC: 누적 메모리 해제
             _marker(outputDir, "08_img_" + domId + "_gcDone");
         } catch (e) {
+            try { _imgExportError = String(e); } catch (eOuterString) { _imgExportError = "outer_export_exception"; }
             try { _imgExportOk = outFile.exists; } catch (e2) {}
             // outer catch: inner try-catch를 우회한 예외가 있어도 TF/bgPolygon 복원
+            try { if (_imgHiddenVisualItemsSaved && _imgHiddenVisualItemsSaved.length > 0) _restoreVisualSourceItemsForExport(_imgHiddenVisualItemsSaved); } catch (e3) {}
             try { if (hiddenTFs && hiddenTFs.length > 0) restoreTextFrames(hiddenTFs); } catch (e3) {}
             for (var _brf = 0; _brf < _imgBgPolygons.length; _brf++) {
                 try { _imgBgPolygons[_brf].visible = true; } catch (e3) {}
@@ -530,11 +784,15 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 hiddenTextFrameIds: _imgHiddenTextFrameIds,
                 tfInlineVisualIds: _imgTfInlineVisualIds
             };
+            if (isGroupRender) {
+                processedGroupIds[renderTarget.id] = true;
+            }
         }
         }
 
         // push는 try 블록 밖에서 실행 — restore/gc 예외가 발생해도 반드시 등록.
         if (_imgExportOk) {
+            var _imgRenderedCount = 0;
             var _imgActuallyHidText = isGroupRender && _imgHiddenTextFrameIds && _imgHiddenTextFrameIds.length > 0;
             // 그룹 항목을 배경 폴리곤보다 먼저 등록
             // BackgroundInjector.addBlockAtFront 특성상 나중 등록 항목이 XML 앞에 위치 →
@@ -544,6 +802,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 var _imgCandidateMatch = _imageCandidateMatchForFragment(
                         imagePlanPassId, renderTarget, imageSourceIds, imageIsSourceSetCandidate, _imgFragment);
                 if (!_imgCandidateMatch) continue;
+                _imgRenderedCount++;
                 var _imgEntry = {
                     id: domId,
                     planPassId: imagePlanPassId,
@@ -558,6 +817,8 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                 if (_imgFragment.cropSourceBounds) _imgEntry.cropSourceBounds = _imgFragment.cropSourceBounds;
                 renderedImageFrames.push(applyRenderOwnership(_imgEntry, renderTarget, {
                     sourceObjectIds: imageSourceIds,
+                    exportSourceObjectIds: candidate ? candidate.exportSourceObjectIds || [] : [],
+                    hiddenVisualSourceObjectIds: candidate ? candidate.hiddenVisualSourceObjectIds || [] : [],
                     textHiddenBeforeExport: _imgActuallyHidText,
                     hiddenTextFrameIds: _imgHiddenTextFrameIds,
                     tfInlineVisualIds: _imgTfInlineVisualIds,
@@ -620,9 +881,24 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage,
                     }
                 } catch (e2) {}
             }
+            diag.result = _imgRenderedCount > 0 ? "rendered" : "skipped";
+            diag.stage = "export_complete";
+            diag.outputFile = fileName;
+            diag.renderedFragmentCount = _imgRenderedCount;
+            if (_imgExportError) diag.exportError = _imgExportError;
+            if (_imgRenderedCount === 0) diag.reason = "export_ok_but_candidate_match_failed";
+            imageRenderDiagnostics.push(diag);
+        } else {
+            diag.result = "skipped";
+            diag.stage = "export_complete";
+            diag.reason = "export_failed";
+            diag.outputFile = fileName;
+            if (_imgExportError) diag.exportError = _imgExportError;
+            imageRenderDiagnostics.push(diag);
         }
     }
 
+    try { writeJson(outputDir + "/render-image-candidate-diagnostics.json", imageRenderDiagnostics); } catch (eImageDiagWrite) {}
     return renderedImageFrames;
 }
 

@@ -851,6 +851,9 @@ public final class SemanticBlockDetector {
 
         private static String visualLayerOf(RenderedGroup rg) {
             if (rg == null) return null;
+            if (rg.visualLayer() != null && !rg.visualLayer().isEmpty()) {
+                return rg.visualLayer();
+            }
             String type = safe(rg.type());
             String reason = safe(rg.reason());
             if (rg.isPageBackground() || "page_background".equals(type)) return "PAGE_BACKGROUND";

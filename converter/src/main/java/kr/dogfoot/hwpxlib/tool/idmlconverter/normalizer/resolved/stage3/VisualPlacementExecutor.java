@@ -39,10 +39,16 @@ public final class VisualPlacementExecutor {
                 || !plan.hasPositiveSize()) {
             return PlacementResult.notPlaced();
         }
+        if (!hasExecutableVisualContract(ownershipPlan)) {
+            ctx.recordRenderedDecision(rg, ownershipPlan, "Stage3.VisualBuilder.Phase6",
+                    "SKIP_INCOMPLETE_OBJECT_PLAN",
+                    "visible visual execution requires complete ObjectPlan fields");
+            return PlacementResult.notPlaced();
+        }
 
         ShellRole shellRole = ShellRole.from(ownershipPlan);
         if (shellRole != ShellRole.NONE) {
-            ASTFigure fig = buildFigure(rg, image, plan);
+            ASTFigure fig = buildFigure(rg, image, plan, ownershipPlan);
             addVisualByPlannedOrder(section, fig);
             ctx.markRenderedVisualHandled(rg.id());
             ctx.recordRenderedDecision(rg, ownershipPlan, "Stage3.VisualBuilder.Phase6",
@@ -51,7 +57,7 @@ public final class VisualPlacementExecutor {
             return PlacementResult.textShellPlaced();
         }
 
-        ASTFigure fig = buildFigure(rg, image, plan);
+        ASTFigure fig = buildFigure(rg, image, plan, ownershipPlan);
         addVisualByPlannedOrder(section, fig);
         String decision = ownershipPlan != null
                 && ownershipPlan.materialization == kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization.TEXTLESS_VISUAL_FRAGMENT
@@ -64,7 +70,8 @@ public final class VisualPlacementExecutor {
     private static ASTFigure buildFigure(
             RenderedGroup rg,
             PreparedVisualImage image,
-            VisualPlacementPlan plan) {
+            VisualPlacementPlan plan,
+            ObjectPlan ownershipPlan) {
         ASTFigure fig = new ASTFigure();
         fig.x(plan.x);
         fig.y(plan.y);
@@ -82,7 +89,21 @@ public final class VisualPlacementExecutor {
         fig.sourceLayerIndex(plan.sourceLayerIndex);
         fig.fromGroup(plan.fromGroup);
         fig.sourceId("page_obj_" + rg.id());
+        fig.extractionCandidateId(ownershipPlan != null ? ownershipPlan.candidateId : null);
+        fig.extractionPlanPassId(ownershipPlan != null ? ownershipPlan.planPassId : null);
+        fig.extractionSlotRole(ownershipPlan != null ? ownershipPlan.slotRole : null);
         return fig;
+    }
+
+    private static boolean hasExecutableVisualContract(ObjectPlan plan) {
+        return plan != null
+                && plan.hasVisibleVisual()
+                && plan.textAction != null
+                && plan.visualAction != null
+                && plan.visualLayer != null
+                && plan.placement != null
+                && plan.materialization != null
+                && plan.coordinateSpace != null;
     }
 
     private static void addVisualByPlannedOrder(ASTSection section, ASTFigure fig) {

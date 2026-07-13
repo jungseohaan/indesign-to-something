@@ -67,6 +67,7 @@ interface AppState {
   lastOutputPath: string | null;
   // SPEC-030: InDesign 추출 성능 모드. fast=150dpi, standard=220dpi, high=300dpi. PDF preview는 캐시 재사용.
   perfMode: "fast" | "standard" | "high";
+  extractMode: "spread_chunks" | "full";
   // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
   debugStartPage: number;
   debugEndPage: number;
@@ -118,6 +119,7 @@ interface AppState {
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
   setPerfMode: (v: "fast" | "standard" | "high") => void;
+  setExtractMode: (v: "spread_chunks" | "full") => void;
   setNoPreview: (v: boolean) => void;
   setDebugPageRange: (start: number, end: number) => void;
   setExtractChunkSize: (v: number) => void;
@@ -167,6 +169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   outputFormat: "hwpx",
   lastOutputPath: null,
   perfMode: (localStorage.getItem("perfMode") as "fast" | "standard" | "high") || "standard",
+  extractMode: (localStorage.getItem("extractMode") as "spread_chunks" | "full") || "spread_chunks",
   noPreview: localStorage.getItem("noPreview") === "true",
   debugStartPage: 0,
   debugEndPage: 0,
@@ -450,8 +453,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         jarPath,
       });
       set({ result, isConverting: false, lastOutputPath: outputPath });
-      const semanticBlocksPath = outputPath.replace(/\.[^.]+$/, ".semantic-blocks.json");
-      useAstStore.getState().loadSemanticBlocks(semanticBlocksPath);
 
       // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
       const { previewPdfPath } = get();
@@ -496,6 +497,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPerfMode: (v) => {
     localStorage.setItem("perfMode", v);
     set({ perfMode: v });
+  },
+  setExtractMode: (v) => {
+    localStorage.setItem("extractMode", v);
+    set({ extractMode: v });
   },
   setNoPreview: (v) => {
     localStorage.setItem("noPreview", String(v));
@@ -647,7 +652,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
 
         try {
-          const { debugStartPage, debugEndPage, perfMode, extractChunkSize } = get();
+          const { debugStartPage, debugEndPage, perfMode, extractMode, extractChunkSize } = get();
           // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
           const extractResult = await invoke<InddExtractResult>("extract_indd", {
             inddPath,
@@ -657,6 +662,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             endPage: debugEndPage,
             perfMode,
             skipPdf: false,
+            extractMode,
             chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
           });
 
@@ -743,7 +749,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             if (extractResult.resolved_json_path) {
               useAstStore.getState().loadResolved(extractResult.resolved_json_path);
             }
-            useAstStore.getState().loadSemanticBlocks(batchOutputPath.replace(/\.[^.]+$/, ".semantic-blocks.json"));
             set({
               idmlPath: extractResult.idml_path,
               resolvedJsonPath: extractResult.resolved_json_path ?? null,

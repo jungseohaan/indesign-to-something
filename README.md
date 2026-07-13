@@ -89,7 +89,7 @@ ResolvedToASTBuilder (Phase 0~6 + Stage 3)
  ├─ Stage 2.5: 시각 ownership refine (ObjectPlan 권위 확정)
  └─ Stage 3: VisualBuilder (모든 시각 배치 — 배경/플로팅/배지/renderable)
              내부: BackgroundInjector.inject + stage3/Visual* 헬퍼
-             (구 Phase 6 BackgroundInjector + Phase 7 RenderableFramePlacer 통합, SPEC-035)
+             (구 Phase 6 BackgroundInjector + Phase 7 RenderableFramePlacer 통합, source ownership policy)
 
 ASTToHwpxConverter → .hwpx
 ```

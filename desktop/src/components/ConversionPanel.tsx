@@ -20,9 +20,11 @@ export function ConversionPanel() {
     startConversion,
     noPreview,
     perfMode,
+    extractMode,
     setVectorDpi,
     setNoPreview,
     setPerfMode,
+    setExtractMode,
     clearError,
     openFontMappingModal,
     lastExtractStats,
@@ -283,7 +285,7 @@ export function ConversionPanel() {
             className="flex items-center gap-1.5 text-xs text-gray-500"
             title="INDD 추출 렌더링 모드. 빠름은 150dpi, 표준은 220dpi, 고품질은 300dpi로 PNG를 렌더링합니다. PDF preview는 생성 후 캐시됩니다."
           >
-            추출모드:
+            렌더품질:
             <select
               value={perfMode}
               onChange={(e) => setPerfMode(e.target.value as "fast" | "standard" | "high")}
@@ -292,6 +294,20 @@ export function ConversionPanel() {
               <option value="fast">빠름</option>
               <option value="standard">표준</option>
               <option value="high">고품질</option>
+            </select>
+          </label>
+          <label
+            className="flex items-center gap-1.5 text-xs text-gray-500"
+            title="full은 문서 범위를 한 번에 추출하고, spread_chunks는 스프레드 청크 단위로 추출합니다. 레이어 차이 비교용으로 전환할 수 있습니다."
+          >
+            추출방식:
+            <select
+              value={extractMode}
+              onChange={(e) => setExtractMode(e.target.value as "spread_chunks" | "full")}
+              className="border border-gray-300 rounded px-1 py-0.5 text-xs"
+            >
+              <option value="spread_chunks">spread_chunks</option>
+              <option value="full">full</option>
             </select>
           </label>
           <label className="flex items-center gap-1.5 text-sm">

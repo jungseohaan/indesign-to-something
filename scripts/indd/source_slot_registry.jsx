@@ -37,32 +37,103 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
     var shellOwnersByPage = {};
     var visualOnlyCompositeOwnersByPage = {};
     var nativeShellOwnersByPage = {};
+    var exactVisibleOwnersBySlotKey = {};
+    var exactContentOwnersByPageAndVisibleKey = {};
+    var visibleCandidateSourceIdsCache = {};
+    var exactVisibleSlotKeyCache = {};
+    var paintLeavesByCandidateKey = {};
+    var sourceLayerNameByCandidateKey = {};
+    function candidateCacheKey(candidate) {
+        if (!candidate) return "missing";
+        var id = candidate.candidateId || candidate.bundleId || "";
+        if (id) return String(id);
+        return String(candidate.passId || "UNKNOWN") + "|"
+                + String(candidate.pageIndex) + "|"
+                + _sourceSetKey(candidate.sourceObjectIds || []) + "|"
+                + _sourceSetKey(candidate.visualSourceObjectIds || []) + "|"
+                + _sourceSetKey(candidate.exportSourceObjectIds || []);
+    }
     function containsId(ids, id) {
-        for (var i = 0; ids && i < ids.length; i++) {
-            if (String(ids[i]) === String(id)) return true;
-        }
-        return false;
+        if (!ids || id === null || id === undefined) return false;
+        return _sourceSetMembership(ids)[String(id)] === true;
     }
     function containsAllIds(ownerIds, candidateIds) {
-        if (!ownerIds || !candidateIds || candidateIds.length === 0) return false;
-        for (var i = 0; i < candidateIds.length; i++) {
-            if (!containsId(ownerIds, candidateIds[i])) return false;
-        }
-        return true;
+        return _sourceSetContainsAll(ownerIds, candidateIds);
     }
     function properSubset(ownerIds, candidateIds) {
         if (!containsAllIds(ownerIds, candidateIds)) return false;
-        return _sortedNumericIds(ownerIds).length > _sortedNumericIds(candidateIds).length;
+        return _sourceSetKey(ownerIds || []) !== _sourceSetKey(candidateIds || []);
     }
     function visibleCandidateSourceIds(candidate) {
         if (!candidate) return [];
+        var cacheKey = candidateCacheKey(candidate);
+        if (visibleCandidateSourceIdsCache.hasOwnProperty(cacheKey)) {
+            return visibleCandidateSourceIdsCache[cacheKey];
+        }
+        var ids = [];
         if (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0) {
-            return _sortedNumericIds(candidate.visualSourceObjectIds);
+            ids = _internSourceSetIds(candidate.visualSourceObjectIds);
+        } else if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0) {
+            ids = _internSourceSetIds(candidate.exportSourceObjectIds);
+        } else {
+            ids = _internSourceSetIds(candidate.sourceObjectIds || []);
         }
-        if (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0) {
-            return _sortedNumericIds(candidate.exportSourceObjectIds);
+        visibleCandidateSourceIdsCache[cacheKey] = ids;
+        return ids;
+    }
+    function candidateOwnershipSlot(candidate) {
+        if (!candidate) return "UNKNOWN_SLOT";
+        if (candidate.ownershipSlot) {
+            if (candidate.ownershipSlot === "TEXTLESS_GROUP_VISUAL_SLOT") return "CONTENT_VISUAL_SLOT";
+            return candidate.ownershipSlot;
         }
-        return _sortedNumericIds(candidate.sourceObjectIds || []);
+        if (candidate.visualAction === "PLACE_TEXT_SHELL") return "SHELL_SLOT";
+        return "CONTENT_VISUAL_SLOT";
+    }
+    function exactVisibleSlotKey(candidate) {
+        if (!candidate) return null;
+        var cacheKey = candidateCacheKey(candidate);
+        if (exactVisibleSlotKeyCache.hasOwnProperty(cacheKey)) {
+            return exactVisibleSlotKeyCache[cacheKey];
+        }
+        var ids = visibleCandidateSourceIds(candidate);
+        if (!ids || ids.length === 0) return null;
+        var key = String(candidate.pageIndex) + "|"
+                + candidateOwnershipSlot(candidate) + "|"
+                + _sourceSetKey(ids);
+        exactVisibleSlotKeyCache[cacheKey] = key;
+        return key;
+    }
+    function candidatePlacement(candidate) {
+        if (!candidate) return "";
+        return String(candidate.placement || "").toUpperCase();
+    }
+    function exactContentOwnerScore(candidate) {
+        if (!candidate) return 0;
+        var score = 0;
+        if (candidate.disabled !== true) score += 100;
+        if (candidate.passId === "pass.image_placed_frames") score += 80;
+        else if (candidate.passId === "pass.image_textless_groups") score += 70;
+        else if (candidate.passId === "pass.page_textless_graphic_groups") score += 60;
+        else if (candidate.passId === "pass.complex_graphic_frames") score += 50;
+        else if (candidate.passId === "pass.vector_shape_frames") score += 40;
+        else if (candidate.passId === "pass.decoration_groups") score += 10;
+        if (candidate.candidatePurpose === "CONTENT_CANDIDATE") score += 5;
+        return score;
+    }
+    function exactVisibleOwnerScore(candidate) {
+        if (!candidate) return 0;
+        var score = exactContentOwnerScore(candidate);
+        if (candidate.slotRole === "background_shell_slot") score += 35;
+        if (candidate.slotRole === "page_background_plane") score += 45;
+        if (candidate.visualLayer === "PAGE_BACKGROUND") score += 30;
+        if (candidate.slotRole === "page_textless_graphic_group") score += 25;
+        if (candidate.slotRole === "textless_group_visual_slot") score += 20;
+        if (candidate.slotRole === "shell_slot_only") score += 10;
+        if (candidate.visualAction === "PLACE_FLOATING_PNG") score += 4;
+        if (candidate.visualAction === "PLACE_PAGE_BACKGROUND_PNG") score += 5;
+        if (candidate.visualAction === "PLACE_TEXT_SHELL") score += 3;
+        return score;
     }
     function incrementReason(reason) {
         reason = reason || "UNKNOWN";
@@ -76,12 +147,22 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
             candidateId: candidate ? candidate.candidateId || null : null,
             passId: candidate ? candidate.passId || null : null,
             pageIndex: candidate ? candidate.pageIndex : null,
+            placement: candidate ? candidate.placement || null : null,
+            ownershipSlot: candidate ? candidateOwnershipSlot(candidate) : null,
+            visualAction: candidate ? candidate.visualAction || null : null,
             reason: reason,
-            sourceObjectIds: candidate ? _sortedNumericIds(candidate.sourceObjectIds || []) : [],
+            sourceSetId: candidate ? _sourceSetId(candidate.sourceObjectIds || []) : "",
+            visibleSourceSetId: _sourceSetId(visibleCandidateSourceIds(candidate)),
+            sourceObjectIds: candidate ? _internSourceSetIds(candidate.sourceObjectIds || []) : [],
             visibleSourceObjectIds: visibleCandidateSourceIds(candidate),
             ownerCandidateId: ownerCandidate ? ownerCandidate.candidateId || null : null,
             ownerPassId: ownerCandidate ? ownerCandidate.passId || null : null,
-            ownerSourceObjectIds: ownerCandidate ? _sortedNumericIds(ownerCandidate.sourceObjectIds || []) : [],
+            ownerPlacement: ownerCandidate ? ownerCandidate.placement || null : null,
+            ownerOwnershipSlot: ownerCandidate ? candidateOwnershipSlot(ownerCandidate) : null,
+            ownerVisualAction: ownerCandidate ? ownerCandidate.visualAction || null : null,
+            ownerSourceSetId: ownerCandidate ? _sourceSetId(ownerCandidate.sourceObjectIds || []) : "",
+            ownerVisibleSourceSetId: _sourceSetId(visibleCandidateSourceIds(ownerCandidate)),
+            ownerSourceObjectIds: ownerCandidate ? _internSourceSetIds(ownerCandidate.sourceObjectIds || []) : [],
             ownerVisibleSourceObjectIds: visibleCandidateSourceIds(ownerCandidate)
         });
     }
@@ -96,11 +177,19 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         return true;
     }
     function sourceLayerNameForCandidate(candidate) {
+        var cacheKey = candidateCacheKey(candidate);
+        if (sourceLayerNameByCandidateKey.hasOwnProperty(cacheKey)) {
+            return sourceLayerNameByCandidateKey[cacheKey];
+        }
         var ids = candidate ? (candidate.sourceObjectIds || []) : [];
         for (var i = 0; i < ids.length; i++) {
             var src = sourceInfo(ids[i]);
-            if (src && src.layerName) return String(src.layerName);
+            if (src && src.layerName) {
+                sourceLayerNameByCandidateKey[cacheKey] = String(src.layerName);
+                return sourceLayerNameByCandidateKey[cacheKey];
+            }
         }
+        sourceLayerNameByCandidateKey[cacheKey] = "";
         return "";
     }
     function collectPaintLeaves(sourceId, out, seen) {
@@ -121,13 +210,19 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         }
         if (src.hasVisibleFill === true || src.hasVisibleStroke === true) {
             out.push(src);
+            return;
         }
     }
     function paintLeavesForCandidate(candidate) {
+        var cacheKey = candidateCacheKey(candidate);
+        if (paintLeavesByCandidateKey.hasOwnProperty(cacheKey)) {
+            return paintLeavesByCandidateKey[cacheKey];
+        }
         var ids = visibleCandidateSourceIds(candidate);
         var out = [];
         var seen = {};
         for (var i = 0; i < ids.length; i++) collectPaintLeaves(ids[i], out, seen);
+        paintLeavesByCandidateKey[cacheKey] = out;
         return out;
     }
     function sourceFillIsPaper(src) {
@@ -177,18 +272,46 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
     }
     for (var i = 0; i < candidates.length; i++) {
         var owner = candidates[i];
-        if (!owner || owner.passId !== "pass.decoration_groups") continue;
-        if (owner.candidatePurpose !== "SHELL_CANDIDATE") continue;
+        if (!owner) continue;
+        var ownerIsVisibleShell = candidateOwnershipSlot(owner) === "SHELL_SLOT"
+                || owner.visualAction === "PLACE_TEXT_SHELL";
+        if (!ownerIsVisibleShell) continue;
         if (owner.materialization === "HWPX_TEXT" || owner.visualAction === "DROP_VISUAL") continue;
         var pageKey = String(owner.pageIndex);
         if (!shellOwnersByPage[pageKey]) shellOwnersByPage[pageKey] = [];
         shellOwnersByPage[pageKey].push(owner);
-        if (!nativeShellOwnersByPage[pageKey]) nativeShellOwnersByPage[pageKey] = [];
-        nativeShellOwnersByPage[pageKey].push(owner);
+        if (owner.passId === "pass.decoration_groups"
+                && owner.candidatePurpose === "SHELL_CANDIDATE") {
+            if (!nativeShellOwnersByPage[pageKey]) nativeShellOwnersByPage[pageKey] = [];
+            nativeShellOwnersByPage[pageKey].push(owner);
+        }
     }
     for (var vi = 0; vi < candidates.length; vi++) {
         var visualOwner = candidates[vi];
-        if (!visualOwner || visualOwner.passId !== "pass.image_textless_groups") continue;
+        if (visualOwner && visualOwner.visualAction !== "DROP_VISUAL") {
+            var exactVisibleKey = exactVisibleSlotKey(visualOwner);
+            if (exactVisibleKey) {
+                var currentVisible = exactVisibleOwnersBySlotKey[exactVisibleKey];
+                if (!currentVisible
+                        || exactVisibleOwnerScore(visualOwner) > exactVisibleOwnerScore(currentVisible)) {
+                    exactVisibleOwnersBySlotKey[exactVisibleKey] = visualOwner;
+                }
+            }
+        }
+        if (visualOwner
+                && candidateOwnershipSlot(visualOwner) === "CONTENT_VISUAL_SLOT"
+                && visualOwner.visualAction !== "DROP_VISUAL") {
+            var exactKey = exactVisibleSlotKey(visualOwner);
+            if (exactKey) {
+                var currentExact = exactContentOwnersByPageAndVisibleKey[exactKey];
+                if (!currentExact
+                        || exactContentOwnerScore(visualOwner) > exactContentOwnerScore(currentExact)) {
+                    exactContentOwnersByPageAndVisibleKey[exactKey] = visualOwner;
+                }
+            }
+        }
+        if (!visualOwner || (visualOwner.passId !== "pass.image_textless_groups"
+                    && visualOwner.passId !== "pass.page_textless_graphic_groups")) continue;
         if (visualOwner.ownershipSlot !== "CONTENT_VISUAL_SLOT") continue;
         if (visualOwner.visualAction === "DROP_VISUAL") continue;
         if (visualOwner.ownedTextFrameIds && visualOwner.ownedTextFrameIds.length > 0) continue;
@@ -224,15 +347,59 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         }
         var compositeOwners = visualOnlyCompositeOwnersByPage[String(candidate && candidate.pageIndex)] || [];
         var candidateVisibleIds = visibleCandidateSourceIds(candidate);
+        var exactVisibleOwner = exactVisibleOwnersBySlotKey[exactVisibleSlotKey(candidate)];
+        if (exactVisibleOwner && exactVisibleOwner !== candidate) {
+            recordSuppressedCandidate(candidate, "SUBSUMED_BY_EXACT_VISIBLE_SLOT_OWNER", exactVisibleOwner);
+            continue;
+        }
+        if (candidate
+                && candidate.passId === "pass.decoration_groups"
+                && candidateOwnershipSlot(candidate) === "CONTENT_VISUAL_SLOT") {
+            var exactOwner = exactContentOwnersByPageAndVisibleKey[exactVisibleSlotKey(candidate)];
+            if (exactOwner && exactOwner !== candidate) {
+                recordSuppressedCandidate(candidate, "SUBSUMED_BY_EXACT_CONTENT_VISUAL_OWNER", exactOwner);
+                continue;
+            }
+        }
+        if (candidate && candidateOwnershipSlot(candidate) !== "SHELL_SLOT") {
+            var shellOwners = shellOwnersByPage[String(candidate.pageIndex)] || [];
+            var shellSubsumingOwner = null;
+            for (var soi = 0; soi < shellOwners.length; soi++) {
+                var shellOwner = shellOwners[soi];
+                if (!shellOwner || shellOwner === candidate) continue;
+                if (candidatePlacement(shellOwner)
+                        && candidatePlacement(candidate)
+                        && candidatePlacement(shellOwner) !== candidatePlacement(candidate)) {
+                    continue;
+                }
+                var shellVisibleIds = visibleCandidateSourceIds(shellOwner);
+                if (!candidateVisibleIds || candidateVisibleIds.length === 0) continue;
+                if (!containsAllIds(shellVisibleIds, candidateVisibleIds)) continue;
+                if (_sourceSetKey(shellVisibleIds || []) === _sourceSetKey(candidateVisibleIds || [])) continue;
+                shellSubsumingOwner = shellOwner;
+                break;
+            }
+            if (shellSubsumingOwner) {
+                recordSuppressedCandidate(candidate, "SUBSUMED_BY_TEXT_SHELL_OWNER", shellSubsumingOwner);
+                continue;
+            }
+        }
         var subsumedByVisualOnlyComposite = false;
         var subsumingComposite = null;
-        for (var coi = 0; coi < compositeOwners.length; coi++) {
-            var compositeOwner = compositeOwners[coi];
-            if (!compositeOwner || compositeOwner.candidate === candidate) continue;
-            if (properSubset(compositeOwner.sourceIds, candidateVisibleIds)) {
-                subsumedByVisualOnlyComposite = true;
-                subsumingComposite = compositeOwner.candidate;
-                break;
+        if (candidateOwnershipSlot(candidate) !== "SHELL_SLOT") {
+            for (var coi = 0; coi < compositeOwners.length; coi++) {
+                var compositeOwner = compositeOwners[coi];
+                if (!compositeOwner || compositeOwner.candidate === candidate) continue;
+                if (candidatePlacement(compositeOwner.candidate)
+                        && candidatePlacement(candidate)
+                        && candidatePlacement(compositeOwner.candidate) !== candidatePlacement(candidate)) {
+                    continue;
+                }
+                if (properSubset(compositeOwner.sourceIds, candidateVisibleIds)) {
+                    subsumedByVisualOnlyComposite = true;
+                    subsumingComposite = compositeOwner.candidate;
+                    break;
+                }
             }
         }
         if (subsumedByVisualOnlyComposite) {
@@ -242,20 +409,25 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         if (candidate && candidate.passId === "pass.editable_textframe_visual_shells"
                 && candidate.sourceObjectIds && candidate.sourceObjectIds.length === 1) {
             var textFrameId = candidate.sourceObjectIds[0];
+            var textFrameSource = sourceInfoById[String(textFrameId)];
+            var selfInlineTextFrameShell =
+                    !!textFrameSource
+                    && String(textFrameSource.kind || "") === "TextFrame"
+                    && textFrameSource.isInline === true
+                    && containsId(candidate.styleSourceObjectIds, textFrameId);
             var owners = shellOwnersByPage[String(candidate.pageIndex)] || [];
             var subsumed = false;
             var subsumingShell = null;
             for (var oi = 0; oi < owners.length; oi++) {
                 var shell = owners[oi];
-                if (!containsId(shell.sourceObjectIds, textFrameId)
-                        && !containsId(shell.exportSourceObjectIds, textFrameId)
-                        && !containsId(shell.styleSourceObjectIds, textFrameId)) {
-                    continue;
-                }
-                if (containsId(shell.styleSourceObjectIds, textFrameId)
-                        || containsId(shell.editableTextFrameIds, textFrameId)
-                        || containsId(shell.ownedTextFrameIds, textFrameId)
-                        || containsId(shell.hiddenTextFrameIds, textFrameId)) {
+                var shellVisiblyOwnsTextFrameStyle =
+                        containsId(shell.exportSourceObjectIds, textFrameId)
+                        || containsId(shell.visualSourceObjectIds, textFrameId)
+                        || containsId(shell.styleSourceObjectIds, textFrameId);
+                if (shellVisiblyOwnsTextFrameStyle) {
+                    if (selfInlineTextFrameShell) {
+                        continue;
+                    }
                     subsumed = true;
                     subsumingShell = shell;
                     break;
@@ -349,12 +521,16 @@ function _buildSourceSlotRegistryDiagnostics(plannerBundles, objectPlanDiagnosti
                 placement: _sourceSlotRegistryPlacementFromBundle(bundle),
                 coordinateSpace: _sourceSlotRegistryCoordinateSpaceFromBundle(bundle),
                 ownershipSlot: bundle.ownershipSlot || "UNKNOWN_SLOT",
-                sourceObjectIds: _sortedNumericIds(bundle.sourceObjectIds || []),
-                visualSourceObjectIds: _sortedNumericIds(bundle.visualSourceObjectIds || []),
-                styleSourceObjectIds: _sortedNumericIds(bundle.styleSourceObjectIds || []),
-                ownedTextFrameIds: _sortedNumericIds(bundle.ownedTextFrameIds || []),
-                exportSourceObjectIds: _sortedNumericIds(bundle.exportSourceObjectIds || []),
-                hiddenVisualSourceObjectIds: _sortedNumericIds(bundle.hiddenVisualSourceObjectIds || []),
+                sourceSetId: bundle.sourceSetId || _sourceSetId(bundle.sourceObjectIds || []),
+                visualSourceSetId: bundle.visualSourceSetId || _sourceSetId(bundle.visualSourceObjectIds || []),
+                exportSourceSetId: bundle.exportSourceSetId || _sourceSetId(bundle.exportSourceObjectIds || []),
+                hiddenSourceSetId: bundle.hiddenSourceSetId || _sourceSetId(bundle.hiddenVisualSourceObjectIds || []),
+                sourceObjectIds: _internSourceSetIds(bundle.sourceObjectIds || []),
+                visualSourceObjectIds: _internSourceSetIds(bundle.visualSourceObjectIds || []),
+                styleSourceObjectIds: _internSourceSetIds(bundle.styleSourceObjectIds || []),
+                ownedTextFrameIds: _internSourceSetIds(bundle.ownedTextFrameIds || []),
+                exportSourceObjectIds: _internSourceSetIds(bundle.exportSourceObjectIds || []),
+                hiddenVisualSourceObjectIds: _internSourceSetIds(bundle.hiddenVisualSourceObjectIds || []),
                 candidateCount: 0,
                 executableCandidateCount: 0,
                 canonicalBundleId: null,
@@ -397,8 +573,10 @@ function _buildSourceSlotRegistryDiagnostics(plannerBundles, objectPlanDiagnosti
                 pageIndex: bundle.pageIndex,
                 placement: _sourceSlotRegistryPlacementFromBundle(bundle),
                 ownershipSlot: bundle.ownershipSlot || "UNKNOWN_SLOT",
-                sourceRootObjectIds: _sortedNumericIds(bundle.sourceRootObjectIds || []),
-                clusterSourceObjectIds: _sortedNumericIds(bundle.clusterSourceObjectIds || []),
+                sourceRootSetId: bundle.sourceRootSetId || _sourceSetId(bundle.sourceRootObjectIds || []),
+                clusterSourceSetId: bundle.clusterSourceSetId || _sourceSetId(bundle.clusterSourceObjectIds || []),
+                sourceRootObjectIds: _internSourceSetIds(bundle.sourceRootObjectIds || []),
+                clusterSourceObjectIds: _internSourceSetIds(bundle.clusterSourceObjectIds || []),
                 candidateCount: 0,
                 executableCandidateCount: 0,
                 canonicalBundleId: null,
@@ -554,20 +732,20 @@ function _sourceSlotRegistryVisibleIds(bundle) {
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT"
             && bundle.styleSourceObjectIds
             && bundle.styleSourceObjectIds.length > 0) {
-        return _sortedNumericIds(bundle.styleSourceObjectIds);
+        return _internSourceSetIds(bundle.styleSourceObjectIds);
     }
     if (bundle.ownershipSlot === "TEXT_SLOT"
             && bundle.ownedTextFrameIds
             && bundle.ownedTextFrameIds.length > 0) {
-        return _sortedNumericIds(bundle.ownedTextFrameIds);
+        return _internSourceSetIds(bundle.ownedTextFrameIds);
     }
     if (bundle.visualSourceObjectIds && bundle.visualSourceObjectIds.length > 0) {
-        return _sortedNumericIds(bundle.visualSourceObjectIds);
+        return _internSourceSetIds(bundle.visualSourceObjectIds);
     }
     if (bundle.exportSourceObjectIds && bundle.exportSourceObjectIds.length > 0) {
-        return _sortedNumericIds(bundle.exportSourceObjectIds);
+        return _internSourceSetIds(bundle.exportSourceObjectIds);
     }
-    return _sortedNumericIds(bundle.sourceObjectIds || []);
+    return _internSourceSetIds(bundle.sourceObjectIds || []);
 }
 
 function _sourceSlotRegistryPlacementFromBundle(bundle) {

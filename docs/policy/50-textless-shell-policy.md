@@ -6,6 +6,13 @@
 ## 7. Textless Shell
 
 `PLACE_TEXT_SHELL` means the shell slot and text slot are separate.
+The shell is textless graphic material. Editable/searchable text owned by the
+same source relation is emitted separately as HWPX text/table structure above
+that graphic material. `PLACE_TEXT_SHELL` is not a request to rebuild the shell
+as HWPX fill/stroke/table style, and it is not a foreground mask over editable
+text. If the original source intentionally requires graphic pixels to cover
+editable text, Stage 1 must choose between accepting that visual loss or
+materializing the bundle as `COMPLETE_PNG`.
 
 Execution requirements:
 
@@ -48,6 +55,18 @@ Execution requirements:
   overlap. Filled backgrounds, placed images, broad masks, and fragments that
   match more than one TextFrame remain independent visual/content/background
   candidates.
+- A table/carrier sibling decoration shell is local, not page-wide. If one
+  source parent contains several visual-only decoration siblings and
+  marker-only/table-carrier TextFrames, Stage 1 must first split the visual
+  siblings into page-local connected components whose visible bounds overlap or
+  touch. A candidate may include only the marker/carrier TextFrames whose
+  bounds overlap or touch that component. Sharing the same parent, layer, or
+  table carrier alone is not enough to make distant siblings one executable
+  shell PNG.
+- Suppression for such a shell is component-local. A broad parent may keep
+  provenance in `sourceObjectIds`, but it may not suppress or absorb child
+  shell/content visual slots outside the local connected component that the
+  candidate actually exports.
 - A page/floating decoration group must not be split into inferred
   `direct_child_shell_slot` children merely because it contains several visual
   shapes and TextFrames. Group splitting is allowed only for source-declared
@@ -217,6 +236,15 @@ Execution requirements:
   direct HWPX text plans. Planner duplicate suppression must therefore evaluate
   the carrier by its visual slot and shell role, not by the mere presence of
   `ownedTextFrameIds`.
+- A visible `PLACE_TEXT_SHELL` with no `ownedTextFrameIds` is textless visual
+  material. It must use `textAction=DROP_TEXT`; it must not claim
+  `OWNED_BY_HWPX_TEXT` simply because its source role is a text shell or because
+  a nearby TextFrame exists elsewhere in the source tree.
+- A visible `PLACE_TEXT_SHELL` may switch from text-owning to visual-only when
+  every listed `ownedTextFrameId` already has a separate materialized HWPX
+  text/table owner. In that case the shell keeps the ids only as relation
+  metadata and keeps its visual shell action; it does not create another text
+  owner and does not become a complete PNG.
 - The same applies when deciding whether a parent composite is covered by direct
   child shell slots. A child carrier with `textAction=DROP_TEXT` may still list
   editable TextFrame ids as provenance; that must not exclude it from child

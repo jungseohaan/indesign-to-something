@@ -248,9 +248,10 @@ public class FlatToHwpxConverter {
         switch (node.nodeType()) {
             case TEXT_FRAME:
                 ASTTextFrameBlock tfb = adapter.toTextFrameBlock(node);
-                if (node.hasNonRectPath() && gateway.isBackgroundOnly(node)) {
-                    imageBuilder.convertNonRectBackground(para, tfb);
-                } else {
+                // Textless/background-only graphics are owned by extracted
+                // InDesign PNG plans. The flat converter must not synthesize
+                // HWP native rects or Java-rendered background PNGs.
+                if (!gateway.isBackgroundOnly(node)) {
                     textBoxBuilder.convertTextFrameBlock(para, tfb);
                 }
                 ctx.framesConverted++;

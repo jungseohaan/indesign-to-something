@@ -45,8 +45,13 @@ public class ASTFigure extends ASTBlock {
     // Group 내에서 추출된 이미지 여부
     private boolean fromGroup;
 
-    // SPEC-035 visual layer role (PAGE_BACKGROUND, LABEL_BACKDROP, CONTAINER_OUTLINE, ...)
+    // source ownership policy visual layer role (PAGE_BACKGROUND, LABEL_BACKDROP, CONTAINER_OUTLINE, ...)
     private String visualLayer;
+
+    // ExtractionPlan trace metadata.
+    private String extractionCandidateId;
+    private String extractionPlanPassId;
+    private String extractionSlotRole;
 
     // Source InDesign layer index. Smaller index means a visually higher layer.
     private int sourceLayerIndex = -1;
@@ -139,6 +144,15 @@ public class ASTFigure extends ASTBlock {
 
     public String visualLayer() { return visualLayer; }
     public void visualLayer(String v) { this.visualLayer = v; }
+
+    public String extractionCandidateId() { return extractionCandidateId; }
+    public void extractionCandidateId(String v) { this.extractionCandidateId = v; }
+
+    public String extractionPlanPassId() { return extractionPlanPassId; }
+    public void extractionPlanPassId(String v) { this.extractionPlanPassId = v; }
+
+    public String extractionSlotRole() { return extractionSlotRole; }
+    public void extractionSlotRole(String v) { this.extractionSlotRole = v; }
 
     public int sourceLayerIndex() { return sourceLayerIndex; }
     public void sourceLayerIndex(int v) { this.sourceLayerIndex = v; }

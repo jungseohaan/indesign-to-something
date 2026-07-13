@@ -28,17 +28,32 @@ Required slots:
 - `TEXT_SLOT`: HWPX paragraph/run, TextFrame text, and table text.
 - `SHELL_SLOT`: textless label/background shell, outline, callout shell, or
   container chrome.
-- `TABLE_STYLE_SLOT`: cell fill, border, inset, row/column sizing, and fixed
-  table bounds.
+- `TABLE_STRUCTURE_SLOT`: editable HWPX table structure: table object, rows,
+  columns, merged cells, fixed table bounds, row/column geometry, and cell text
+  anchoring. During migration the Java enum/value may still be named
+  `TABLE_STYLE_SLOT`; in V2 policy that name means table structure only, not
+  visual decoration.
+- `TABLE_DECORATION_SLOT`: table/cell visual decoration such as fill, border,
+  rounded cell plates, row bands, shadows, patterns, masks, and decorative
+  separators. This material is owned by textless graphic PNG/vector bundles,
+  normally through `SHELL_SLOT` or another graphic visual slot. It is not emitted
+  as HWPX table style.
 
-An IDML table whose source story is table-only owns `TABLE_STYLE_SLOT` and is
-materialized as an HWPX table unless Stage 1 assigns that same table source to a
-more specific anchored/table owner.  The table cell paragraphs remain editable
-HWPX text inside the table.  Nearby floating markers or source-positioned
-graphics keep their own `CONTENT_VISUAL_SLOT`/`SHELL_SLOT`; their placement is
-not used as a reason to dissolve the table into independent TextFrames.
+An IDML table whose source story is table-only owns the table structure slot and
+is materialized as an HWPX table unless Stage 1 assigns that same table source
+to a more specific anchored/table owner. The table cell paragraphs remain
+editable HWPX text inside the table. Nearby floating markers, cell plates, row
+bands, borders, source-positioned graphics, and other visual decoration keep
+their own textless graphic slot; their placement is not used as a reason to
+dissolve the table into independent TextFrames.
 - `CONTENT_VISUAL_SLOT`: photo, illustration, chart, QR, complete marker, or
-  graphic-only complete visual.
+  graphic-only complete visual with positive source evidence. Stage 1 may assign
+  this slot only when the source tree contains placed content (`Image`, `PDF`,
+  `EPS`, `hasPlacedVisual`, or `hasPlacedVisualInSubtree`) or the extractor has
+  explicitly declared complete-PNG ownership for a non-editable marker. Ambiguous
+  vector/group material is not promoted to `CONTENT_VISUAL_SLOT`; it remains
+  `SHELL_SLOT`, `TABLE_STYLE_SLOT`, or a validation warning until stronger
+  source metadata exists.
 
 Stroke-only leaf vector sources are shell material when their IDML source is a
 drawable line/container/grid object: `GraphicLine`, `Rectangle`, `Oval`, or
@@ -78,8 +93,8 @@ Executable owner priority:
    only as provenance.
 4. A broad parent/group candidate is executable only for residual visual
    material not owned by child slots. If child `SHELL_SLOT`, `CONTENT_VISUAL_SLOT`,
-   or `TABLE_STYLE_SLOT` owners cover all painted descendants, the parent is
-   provenance-only and must be `DROP_VISUAL`.
+   table structure, or table decoration owners cover all painted descendants,
+   the parent is provenance-only and must be `DROP_VISUAL`.
 5. If a broad parent hides a child source id in `hiddenVisualSourceObjectIds`,
    that child is absent from the parent rendered asset. A planned child
    candidate for that source remains executable and must not be suppressed by
@@ -98,11 +113,16 @@ Executable owner priority:
 Required materialization values:
 
 - `HWPX_TEXT`
-- `HWPX_TABLE_STYLE`
+- `HWPX_TABLE_STYLE` (migration name for HWPX table structure, not cell visual
+  decoration)
 - `EXTRACTED_PNG_VECTOR`
 - `TEXTLESS_VISUAL_FRAGMENT`
-- `NATIVE_SOURCE_SHAPE`
 - `COMPLETE_PNG`
+
+`NATIVE_SOURCE_SHAPE` is legacy diagnostic vocabulary and is not an executable
+visible graphic materialization. Rectangles, fills, strokes, rounded corners,
+background-only TextFrames, and vector shells must be supplied by
+InDesign-extracted image material when they are visible graphics.
 
 Slot ownership rules:
 
@@ -114,22 +134,24 @@ Slot ownership rules:
   different visible plan already owns that same `SHELL_SLOT`.
 - A visible parent composite plan may keep broad `sourceObjectIds` for tracing,
   but it must remove from `visualSourceObjectIds` every descendant source id
-  whose `TEXT_SLOT`, `SHELL_SLOT`, `TABLE_STYLE_SLOT`, or `CONTENT_VISUAL_SLOT`
-  is owned by another visible plan. If a parent PNG file still contains those
-  descendant pixels, the parent plan is not a valid visible owner for that file.
-  Stage 1 must either split the parent into source-slot owners or drop the
-  parent composite. Later stages must not rely on z-order to hide the duplicate.
+  whose `TEXT_SLOT`, `SHELL_SLOT`, table structure/decoration slot, or
+  `CONTENT_VISUAL_SLOT` is owned by another visible plan. If a parent PNG file
+  still contains those descendant pixels, the parent plan is not a valid visible
+  owner for that file. Stage 1 must either split the parent into source-slot
+  owners or drop the parent composite. Later stages must not rely on z-order to
+  hide the duplicate.
 - A parent composite whose extracted PNG bakes editable text pixels or a child
   text-shell marker into the image cannot be retained as a background/container
   visual for that same area unless Stage 1 assigns that text/marker slot to
   `OWNED_BY_PNG`. If the text/marker is HWPX-owned, the parent composite is an
   ancestry carrier only and must not emit the baked PNG.
 - A broad parent/background render is allowed only when its
-  `visualSourceObjectIds` describe a pure background/container slot after child
-  text, label, table-style, and content slots are subtracted. If subtraction
-  would require editing pixels out of an already exported PNG, that render is
-  not executable; the extractor must provide a textless/childless render or
-  Stage 1 must choose direct child slots instead.
+  `visualSourceObjectIds` describe one textless graphic slot after child text,
+  table structure, and independent content slots are subtracted. Table
+  decoration may remain in that graphic slot when it is visual-only material.
+  If subtraction would require editing pixels out of an already exported PNG,
+  that render is not executable; the extractor must provide a textless/
+  childless render or Stage 1 must choose direct child slots instead.
 - Extraction planning must prefer not creating duplicate pixels over creating
   them and deleting them later. When a parent decoration/background source owns
   a `SHELL_SLOT` but contains a child source with its own `CONTENT_VISUAL_SLOT`
@@ -147,13 +169,13 @@ Slot ownership rules:
   candidate remains executable and may materialize as one atomic textless graphic
   PNG.
 - A leaf `Polygon` vector inside a text-shell carrier may be a non-editable
-  outline glyph, for example an outlined label word converted to vector paths.
-  If its ancestor source tree contains editable TextFrames and the polygon has
-  its own `VECTOR_CANDIDATE`, Stage 1 treats that polygon as a distinct
-  `CONTENT_VISUAL_SLOT`, not as part of the carrier `SHELL_SLOT`. The parent
-  `SLOT_ONLY` shell must list that polygon in `hiddenVisualSourceObjectIds` and
-  export without those pixels; the polygon keeps its own ObjectPlan. This is a
-  source-tree slot split, not a text/content heuristic.
+  outline glyph or decorative fragment, but it is not a `CONTENT_VISUAL_SLOT`
+  merely because it has its own `VECTOR_CANDIDATE`. Without placed-content or
+  explicit complete-marker evidence, Stage 1 keeps that vector in `SHELL_SLOT`
+  when it belongs to the carrier shell, or leaves it as a validation warning if
+  no executable shell owner can be proven. This is deliberately conservative:
+  ambiguous vector/group material must not become independent content by
+  default.
 - A Rectangle/Oval/Polygon source that has nested page items is not a leaf
   vector source. It must not also emit a `pass.vector_shape_frames` candidate for
   the ancestor source. Stage 1 must choose a closed complex/content/shell
@@ -306,24 +328,33 @@ Slot ownership rules:
   faithfully as simple native geometry. Polygon source shapes are not
   materialized as HWPX native polygons; they must use `EXTRACTED_PNG_VECTOR` or
   another extracted visual owner.
-- A visible page/spread-level `Rectangle` or `Oval` source shape with no text
-  frame descendant and no placed-content descendant may be the page-local
-  `BACKGROUND` owner when its original source geometry materially intersects a
-  page. If the same source shape crosses a spread boundary, Stage 1 creates one
-  page-local `PAGE_BACKGROUND` plan per intersected page in the same spread. The
-  facing page is selected from the source page's spread-side bounds, not by
-  scanning every page whose bounds happen to overlap repeated spread
-  coordinates. Later stages must only execute those plans and must not resurrect
-  or drop the background from rendered PNG symptoms.
-- `NATIVE_SOURCE_SHAPE` is a fallback materialization for explicit shell plans
-  whose executor is guaranteed by Stage 1. It is not allowed for
-  `pass.vector_shape_frames`; visible vector source material must have an
-  extracted visual owner instead of relying on Java/HWPX stages to redraw it.
-- When duplicate visible-source-slot normalization compares an
-  `EXTRACTED_PNG_VECTOR` `SHELL_SLOT` owner with one or more
-  `NATIVE_SOURCE_SHAPE` owners for the same original source shape, the extracted
-  shell is the canonical owner. Native source shapes are executed only when no
-  extracted owner exists for that source slot.
+- A page background plane is not a source-object classifier. Stage 1 may create
+  or expand a `page_background_plane` only from page/floating
+  source-connected `SHELL_SLOT` visual components after text, content visual,
+  table-style, and story-flow inline slots have been excluded. Page-wide
+  rectangles, low z-depth, layer names, color, and large bounds are source
+  metadata only; none of them alone makes a source object a background owner.
+- A page background plane is not limited to a single leaf fill source. When the
+  source-connected `SHELL_SLOT` component uses a root plus descendant
+  fill/polygon/vector material to render one textless visual surface, Stage 1
+  keeps that component as one closed visual bundle for the plane. The planner
+  must not collapse that bundle to only the root container or to one sibling
+  fill source, because that drops authored descendant shell material before
+  execution.
+- A broad single-color fill may coexist with another source-connected shell
+  component on the same page. The fill source must not suppress, replace, or
+  make non-executable the sibling/ancestor component when that component owns
+  additional visible shell pixels. Duplicate suppression uses the declared
+  visible slot/source bundle, not a heuristic preference for one leaf fill.
+- A page background plane may include placed-content descendants only when
+  Stage 1 has classified those descendants as part of the same `SHELL_SLOT`
+  component, not as `CONTENT_VISUAL_SLOT`. If the descendant is a photo, chart,
+  QR, illustration, or other content visual owner, it stays out of the page
+  background plane even if it sits visually behind text.
+- Java/HWP native redrawing is not a fallback for missing shell material.
+  Duplicate visible-source-slot normalization must prefer the planned
+  InDesign-extracted owner and must not create a native owner for the same
+  source slot.
 - For an extracted text shell, duplicate-source-slot comparison uses executable
   visual/style claims only: `visualSourceObjectIds`, `styleSourceObjectIds`, and
   equivalent slot-owner fields declared by Stage 1. `sourceObjectIds` remain

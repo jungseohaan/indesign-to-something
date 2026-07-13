@@ -24,6 +24,51 @@ function _itemParentKind(item) {
     try { return item && item.parent && item.parent.constructor ? item.parent.constructor.name : null; } catch (e) { return null; }
 }
 
+function _itemHasDirectStoryTextInlineSlot(item) {
+    try {
+        if (!item || !item.parent) return false;
+        var parentKind = _itemParentKind(item);
+        if (parentKind === "Character") {
+            var contents = "";
+            try { contents = String(item.parent.contents || ""); } catch (eContents) {}
+            return contents.indexOf("\uFFFC") >= 0 || contents.indexOf("\u0016") >= 0;
+        }
+        if (parentKind === "InsertionPoint") {
+            try {
+                var pageItems = item.parent.pageItems;
+                for (var i = 0; pageItems && i < pageItems.length; i++) {
+                    if (_itemId(pageItems[i]) === _itemId(item)) return true;
+                }
+            } catch (ePageItems) {}
+        }
+    } catch (e) {}
+    return false;
+}
+
+function _itemContentTypeName(item) {
+    try {
+        if (!item || item.contentType === undefined || item.contentType === null) return null;
+        var value = item.contentType;
+        try {
+            if (typeof ContentType !== "undefined" && value === ContentType.GRAPHIC_TYPE) {
+                return "GRAPHIC_TYPE";
+            }
+        } catch (eEnum) {}
+        var text = String(value);
+        if (text === "1886548852" || text === "ContentType.GRAPHIC_TYPE"
+                || text === "GRAPHIC_TYPE" || text === "GraphicType") {
+            return "GRAPHIC_TYPE";
+        }
+        return text;
+    } catch (e) {
+        return null;
+    }
+}
+
+function _itemIsGraphicContentFrame(item) {
+    return _itemContentTypeName(item) === "GRAPHIC_TYPE";
+}
+
 function isInlineItem(item) {
     try {
         var cur = item.parent;
@@ -141,10 +186,15 @@ function _storyAnchorPlacementForItem(doc, item, parentStory) {
 
 function _isInlineFlowItemBySourceInfo(sourceInfo) {
     if (!sourceInfo) return false;
-    var placement = String(sourceInfo.storyAnchorPlacement || "");
-    if (placement !== "INLINE") return false;
-    return String(sourceInfo.parentKind || "") === "Character"
-            || String(sourceInfo.parentKind || "") === "InsertionPoint";
+    if (sourceInfo.storyTextInlineSlot === true) return true;
+    var placement = String(sourceInfo.storyAnchorPlacement || "").toUpperCase();
+    var anchoredPosition = String(sourceInfo.anchoredPosition || "").toUpperCase();
+    if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
+        return false;
+    }
+    return placement === "INLINE"
+            || anchoredPosition === "INLINE_POSITION"
+            || anchoredPosition === "INLINEPOSITION";
 }
 
 function _isClipCarryingShapeKind(kind) {
@@ -230,6 +280,67 @@ function _plainTextOfTextFrameForOwnership(item) {
     return String(text || "").replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC]/g, "");
 }
 
+function _isSimpleMarkerLabelTextForSourceIndex(text) {
+    text = String(text || "").replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC\uFEFF]/g, "");
+    if (!text) return false;
+    if (/^(가|나|다|라|마|바|ㄱ|ㄴ|ㄷ|ㄹ|ㅁ|ㅂ|ㅅ|ㅇ|ㅈ|ㅊ|ㅋ|ㅌ|ㅍ|ㅎ)$/.test(text)) return true;
+    if (/^[0-9]{1,2}$/.test(text)) return true;
+    if (text.length === 1) {
+        var code = text.charCodeAt(0);
+        if (code >= 0x2460 && code <= 0x2473) return true;
+    }
+    return false;
+}
+
+function _storyTableSourceObjectIds(story) {
+    var ids = [];
+    try {
+        if (!story || !story.tables) return ids;
+        var tables = story.tables.everyItem().getElements();
+        for (var i = 0; tables && i < tables.length; i++) {
+            try {
+                if (tables[i] && tables[i].id !== undefined && tables[i].id !== null) {
+                    ids.push(Number(tables[i].id));
+                }
+            } catch (eTableId) {}
+        }
+    } catch (eEveryTable) {
+        try {
+            for (var t = 0; story && story.tables && t < story.tables.length; t++) {
+                try {
+                    if (story.tables[t] && story.tables[t].id !== undefined
+                            && story.tables[t].id !== null) {
+                        ids.push(Number(story.tables[t].id));
+                    }
+                } catch (eTableIndexId) {}
+            }
+        } catch (eTableLoop) {}
+    }
+    return ids;
+}
+
+function _storyHasVisibleTableCellText(story) {
+    try {
+        if (!story || !story.tables) return false;
+        var tables = story.tables.everyItem().getElements();
+        for (var ti = 0; tables && ti < tables.length; ti++) {
+            var cells = null;
+            try { cells = tables[ti].cells.everyItem().getElements(); } catch (eCells) {}
+            for (var ci = 0; cells && ci < cells.length; ci++) {
+                var text = "";
+                try { text = String(cells[ci].texts[0].contents || ""); } catch (eText0) {}
+                if (!text) {
+                    try { text = String(cells[ci].contents || ""); } catch (eCellContents) {}
+                }
+                if (text.replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC\uFEFF]/g, "").length > 0) {
+                    return true;
+                }
+            }
+        }
+    } catch (eTableCellText) {}
+    return false;
+}
+
 function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var sourceItems = [];
     var sourceInfoById = {};
@@ -246,14 +357,73 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var textFrameIdsByKey = {};
     var editableTextOutsideByKey = {};
     var candidateVectorPaintById = {};
+    var storyTableMetaById = {};
+    var cachedSourceInfoById = ctx && ctx.spreadChunkSourceInfoById
+            ? ctx.spreadChunkSourceInfoById
+            : null;
     var stats = {
         itemCount: allItems ? allItems.length : 0,
-        kindCounts: {}
+        kindCounts: {},
+        sourceInfoCacheHits: 0,
+        sourceInfoCacheMisses: 0
     };
 
     function itemId(item) {
         try { return item && item.id !== undefined ? item.id : null; } catch (e) {}
         return null;
+    }
+
+    function canIndexMissingSourceParent(item) {
+        var kind = "";
+        try { kind = item && item.constructor ? String(item.constructor.name || "") : ""; } catch (eKind) {}
+        return kind === "Group"
+                || kind === "Rectangle"
+                || kind === "Oval"
+                || kind === "Polygon"
+                || kind === "GraphicLine"
+                || kind === "TextFrame";
+    }
+
+    function _rangeTargetPageIndexesForId(id) {
+        if (id === null || id === undefined) return [];
+        var map = ctx && ctx.rangeTargetPageIndexesBySourceId
+                ? ctx.rangeTargetPageIndexesBySourceId[String(id)]
+                : null;
+        if (!map) return [];
+        var pages = [];
+        var seen = {};
+        if (map.length !== undefined && typeof map !== "string") {
+            for (var ai = 0; ai < map.length; ai++) {
+                var pageValue = Number(map[ai]);
+                if (isNaN(pageValue) || seen[String(pageValue)]) continue;
+                pages.push(pageValue);
+                seen[String(pageValue)] = true;
+            }
+        } else {
+            for (var key in map) {
+                if (!map.hasOwnProperty(key) || map[key] !== true) continue;
+                var pageIndex = Number(key);
+                if (isNaN(pageIndex) || seen[String(pageIndex)]) continue;
+                pages.push(pageIndex);
+                seen[String(pageIndex)] = true;
+            }
+        }
+        pages.sort(function(a, b) { return a - b; });
+        return pages;
+    }
+
+    function _candidateRangePagesForInfo(info) {
+        if (!info || !info.rangeTargetPageIndexes || info.rangeTargetPageIndexes.length === 0) return [];
+        var pages = [];
+        var seen = {};
+        for (var i = 0; i < info.rangeTargetPageIndexes.length; i++) {
+            var pageIndex = Number(info.rangeTargetPageIndexes[i]);
+            if (isNaN(pageIndex) || seen[String(pageIndex)]) continue;
+            if (!_candidatePageInRange(pageIndex, ctx)) continue;
+            pages.push(pageIndex);
+            seen[String(pageIndex)] = true;
+        }
+        return pages;
     }
 
     function parentStoryOfItem(item) {
@@ -278,11 +448,111 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return null;
     }
 
+    function marker(tag) {
+        try {
+            if (ctx && ctx.outputDir && typeof _marker === "function") {
+                _marker(ctx.outputDir, tag);
+            }
+        } catch (eMarker) {}
+    }
+
+    function storyTableMeta(story, storyId) {
+        var key = storyId !== null && storyId !== undefined
+                ? String(storyId)
+                : null;
+        if (key && storyTableMetaById.hasOwnProperty(key)) {
+            var cached = storyTableMetaById[key];
+            return {
+                tableCountInStory: cached.tableCountInStory,
+                tableSourceObjectIds: cached.tableSourceObjectIds
+                        ? cached.tableSourceObjectIds.slice(0)
+                        : [],
+                storyHasVisibleTableCellText: cached.storyHasVisibleTableCellText
+            };
+        }
+        var meta = {
+            tableCountInStory: 0,
+            tableSourceObjectIds: [],
+            storyHasVisibleTableCellText: false
+        };
+        try {
+            if (story && story.tables) {
+                if (story.tables.length !== undefined && story.tables.length !== null) {
+                    meta.tableCountInStory = Number(story.tables.length || 0);
+                } else if (story.tables.count) {
+                    meta.tableCountInStory = Number(story.tables.count() || 0);
+                }
+            }
+        } catch (eStoryTableCount) {
+            meta.tableCountInStory = 0;
+        }
+        try { meta.tableSourceObjectIds = _storyTableSourceObjectIds(story); } catch (eStoryTableIds) {
+            meta.tableSourceObjectIds = [];
+        }
+        // Do not scan every table cell here. InDesign DOM table-cell reads are
+        // extremely slow on large textbook files, and Stage 1 only needs to
+        // know that the story carries a table for ownership planning.
+        meta.storyHasVisibleTableCellText = meta.tableCountInStory > 0;
+        if (key) {
+            storyTableMetaById[key] = {
+                tableCountInStory: meta.tableCountInStory,
+                tableSourceObjectIds: meta.tableSourceObjectIds.slice(0),
+                storyHasVisibleTableCellText: meta.storyHasVisibleTableCellText
+            };
+        }
+        return meta;
+    }
+
+    function cloneCachedSourceInfo(cached, id) {
+        if (!cached) return null;
+        var info = {};
+        for (var prop in cached) {
+            if (!cached.hasOwnProperty(prop)) continue;
+            var value = cached[prop];
+            if (value && typeof value !== "string"
+                    && value.length !== undefined
+                    && value.slice) {
+                info[prop] = value.slice(0);
+            } else {
+                info[prop] = value;
+            }
+        }
+        info.id = id;
+        info.sourceOrder = sourceItems.length;
+        var basePageIndex = null;
+        if (cached.sourcePageIndex !== null && cached.sourcePageIndex !== undefined) {
+            basePageIndex = Number(cached.sourcePageIndex);
+        } else if (cached.originalPageIndex !== null && cached.originalPageIndex !== undefined) {
+            basePageIndex = Number(cached.originalPageIndex);
+        } else {
+            basePageIndex = Number(cached.pageIndex);
+        }
+        info.sourcePageIndex = isNaN(basePageIndex) ? cached.pageIndex : basePageIndex;
+        info.pageIndex = info.sourcePageIndex;
+        try { delete info.originalPageIndex; } catch (eDeleteOriginalPageIndex) { info.originalPageIndex = undefined; }
+        try { delete info.reprojectedToRangePage; } catch (eDeleteReprojected) { info.reprojectedToRangePage = false; }
+        info.rangeTargetPageIndexes = _rangeTargetPageIndexesForId(id);
+        return info;
+    }
+
     function readItemInfo(item) {
         var id = itemId(item);
         if (id === null || id === undefined) return null;
         var key = String(id);
         if (sourceInfoById[key]) return sourceInfoById[key];
+        if (cachedSourceInfoById && cachedSourceInfoById[key]) {
+            var cachedInfo = cloneCachedSourceInfo(cachedSourceInfoById[key], id);
+            if (cachedInfo) {
+                var cachedKind = cachedInfo.kind || "Unknown";
+                stats.kindCounts[cachedKind] = (stats.kindCounts[cachedKind] || 0) + 1;
+                stats.sourceInfoCacheHits++;
+                sourceInfoById[key] = cachedInfo;
+                domById[key] = item;
+                sourceItems.push(cachedInfo);
+                return cachedInfo;
+            }
+        }
+        stats.sourceInfoCacheMisses++;
 
         var kind = _itemKind(item);
         stats.kindCounts[kind || "Unknown"] = (stats.kindCounts[kind || "Unknown"] || 0) + 1;
@@ -290,14 +560,17 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var textLength = null;
         var rawContents = null;
         var markerOnlyContents = null;
+        var simpleMarkerLabelContents = null;
         var storyId = null;
         var tableCountInStory = null;
-        var parentStory = null;
-        try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
-        if (parentStory) {
-            try { if (parentStory.id !== undefined) storyId = parentStory.id; } catch (eStoryId) {}
-        }
+        var tableSourceObjectIds = [];
+        var storyHasVisibleTableCellText = null;
         if (kind === "TextFrame") {
+            var parentStory = null;
+            try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
+            if (parentStory) {
+                try { if (parentStory.id !== undefined) storyId = parentStory.id; } catch (eStoryId) {}
+            }
             try { textFrameClass = classifyTextFrameCached(item); } catch (eClass) { textFrameClass = null; }
             textLength = _textLengthOfItem(item);
             try {
@@ -309,37 +582,54 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 markerOnlyContents = null;
             }
             try {
-                if (parentStory && parentStory.tables) {
-                    if (parentStory.tables.length !== undefined && parentStory.tables.length !== null) {
-                        tableCountInStory = Number(parentStory.tables.length || 0);
-                    } else if (parentStory.tables.count) {
-                        tableCountInStory = Number(parentStory.tables.count() || 0);
-                    }
-                }
+                simpleMarkerLabelContents = _isSimpleMarkerLabelTextForSourceIndex(
+                        _plainTextOfTextFrameForOwnership(item));
+            } catch (eSimpleMarkerLabel) {
+                simpleMarkerLabelContents = null;
+            }
+            try {
+                var tableMeta = storyTableMeta(parentStory, storyId);
+                tableCountInStory = tableMeta.tableCountInStory;
+                tableSourceObjectIds = tableMeta.tableSourceObjectIds;
+                storyHasVisibleTableCellText = tableMeta.storyHasVisibleTableCellText;
             } catch (eStoryMeta) {
                 tableCountInStory = tableCountInStory === null ? 0 : tableCountInStory;
+                storyHasVisibleTableCellText = storyHasVisibleTableCellText === null
+                        ? false
+                        : storyHasVisibleTableCellText;
             }
         }
+        var sourcePageIndex = _pageIndexOfItem(doc, item);
 
         var info = {
             id: id,
-            pageIndex: _pageIndexOfItem(doc, item),
+            sourcePageIndex: sourcePageIndex,
+            pageIndex: sourcePageIndex,
             kind: kind,
             parentId: _itemParentId(item),
             parentKind: _itemParentKind(item),
             bounds: _itemBounds(item),
             sourceOrder: sourceItems.length,
             zOrder: sourceItems.length,
+            name: null,
             layerName: _itemLayerName(item),
+            layerId: null,
+            layerIndex: null,
             visible: _itemVisible(item),
             hiddenLayer: false,
+            nonprinting: false,
             textFrameClass: textFrameClass,
+            contentType: _itemContentTypeName(item),
+            isGraphicContentFrame: _itemIsGraphicContentFrame(item),
             textLength: textLength,
             hasText: textLength !== null ? textLength > 0 : null,
             markerOnlyContents: markerOnlyContents,
+            simpleMarkerLabelContents: simpleMarkerLabelContents,
             storyId: storyId,
             tableCountInStory: tableCountInStory,
             hasTablesInStory: tableCountInStory !== null ? tableCountInStory > 0 : null,
+            tableSourceObjectIds: tableSourceObjectIds,
+            storyHasVisibleTableCellText: storyHasVisibleTableCellText,
             hasChildren: false,
             hasPlacedVisual: false,
             hasCandidateVectorPaint: null,
@@ -352,17 +642,33 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             strokeColorName: null,
             strokeTint: null,
             strokeWeight: null,
+            strokeAlignment: null,
+            opacity: null,
+            absoluteRotationAngle: null,
             cornerRadius: null,
             anchoredPosition: _itemAnchoredPosition(item),
-            storyAnchorPlacement: _storyAnchorPlacementForItem(doc, item, parentStory)
+            storyAnchorPlacement: _storyAnchorPlacementForItem(doc, item, parentStory),
+            storyTextInlineSlot: _itemHasDirectStoryTextInlineSlot(item),
+            recoveredMissingParent: false,
+            rangeTargetPageIndexes: _rangeTargetPageIndexesForId(id)
         };
 
+        try { info.name = item.name; } catch (eName) {}
+        try {
+            if (item.itemLayer) {
+                info.layerId = item.itemLayer.id;
+                info.layerIndex = item.itemLayer.index;
+            }
+        } catch (eLayerInfo) {}
+        try { info.absoluteRotationAngle = item.absoluteRotationAngle; } catch (eRotation) {}
+        try { info.opacity = item.transparencySettings.blendingSettings.opacity; } catch (eOpacity) {}
         try { info.hiddenLayer = isOnHiddenLayer(item); } catch (eHidden) {}
+        try { info.nonprinting = !!item.nonprinting; } catch (eNonprinting) {}
         if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
             try { info.hasPlacedVisual = _hasPlacedVisual(item); } catch (ePlaced) {}
         }
         try {
-            if (item.fillColor && item.fillColor.name !== "None" && item.fillColor.name !== "[None]") {
+            if (hasVisibleFill(item)) {
                 info.fillColor = item.fillColor.name;
                 info.fillColorName = item.fillColor.name;
                 try { info.fillTint = item.fillTint; } catch (eFillTint) {}
@@ -370,12 +676,18 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             }
         } catch (eFill) {}
         try {
-            if (item.strokeColor && item.strokeColor.name !== "None" && item.strokeColor.name !== "[None]") {
+            if (item.strokeWeight !== undefined && item.strokeWeight !== null) {
+                info.strokeWeight = Number(item.strokeWeight || 0);
+            }
+        } catch (eStrokeWeightAny) {}
+        try {
+            if (hasVisibleStroke(item)) {
                 info.strokeColor = item.strokeColor.name;
                 info.strokeColorName = item.strokeColor.name;
                 try { info.strokeTint = item.strokeTint; } catch (eStrokeTint) {}
                 try { info.strokeWeight = item.strokeWeight || 0; } catch (eStrokeWeight) {}
-                info.hasVisibleStroke = Number(info.strokeWeight || 0) > 0;
+                try { info.strokeAlignment = item.strokeAlignment.toString(); } catch (eStrokeAlignment) {}
+                info.hasVisibleStroke = true;
             }
         } catch (eStroke) {}
         try {
@@ -390,8 +702,73 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
 
     for (var i = 0; allItems && i < allItems.length; i++) {
         try { readItemInfo(allItems[i]); } catch (eReadInfo) {}
+        if (i > 0 && i % 1000 === 0) marker("03d01_readItems_" + String(i));
     }
-    normalizeSourceItemZOrder(sourceItems);
+    marker("03d01a_sourceIndex_readItems");
+    for (var parentPass = 0; parentPass < 8; parentPass++) {
+        var appendedParent = false;
+        var snapshotCount = sourceItems.length;
+        for (var spi = 0; spi < snapshotCount; spi++) {
+            var childInfo = sourceItems[spi];
+            if (!childInfo || childInfo.parentId === null || childInfo.parentId === undefined) continue;
+            if (sourceInfoById[String(childInfo.parentId)]) continue;
+            var childDom = domById[String(childInfo.id)];
+            var parentDom = null;
+            try { parentDom = childDom ? childDom.parent : null; } catch (eParentDom) {}
+            if (!parentDom || !canIndexMissingSourceParent(parentDom)) continue;
+            var parentId = itemId(parentDom);
+            if (parentId === null || parentId === undefined) continue;
+            if (String(parentId) !== String(childInfo.parentId)) continue;
+            try {
+                var parentInfo = readItemInfo(parentDom);
+                if (parentInfo) {
+                    parentInfo.recoveredMissingParent = true;
+                    if ((!parentInfo.rangeTargetPageIndexes || parentInfo.rangeTargetPageIndexes.length === 0)
+                            && childInfo.rangeTargetPageIndexes && childInfo.rangeTargetPageIndexes.length > 0) {
+                        parentInfo.rangeTargetPageIndexes = childInfo.rangeTargetPageIndexes.slice(0);
+                    }
+                    appendedParent = true;
+                }
+            } catch (eReadMissingParent) {}
+        }
+        if (!appendedParent) break;
+    }
+    marker("03d01b_sourceIndex_recoverParents");
+    var startRangePageIndex = Math.max(0, Number(ctx && ctx.startPage || 1) - 1);
+    var endRangePageIndex = Math.max(startRangePageIndex, Number(ctx && (ctx.endPage || ctx.startPage) || 1) - 1);
+    for (var rpi = 0; rpi < sourceItems.length; rpi++) {
+        var rangeInfo = sourceItems[rpi];
+        if (!rangeInfo) continue;
+        var explicitRangePages = _candidateRangePagesForInfo(rangeInfo);
+        if (explicitRangePages.length > 0
+                && (rangeInfo.pageIndex < startRangePageIndex || rangeInfo.pageIndex > endRangePageIndex)) {
+            rangeInfo.originalPageIndex = rangeInfo.pageIndex;
+            rangeInfo.pageIndex = explicitRangePages[0];
+            rangeInfo.reprojectedToRangePage = true;
+            continue;
+        }
+        if (!rangeInfo.bounds || rangeInfo.bounds.length < 4) continue;
+        if (rangeInfo.pageIndex >= startRangePageIndex && rangeInfo.pageIndex <= endRangePageIndex) continue;
+        for (var targetPageIndex = startRangePageIndex; targetPageIndex <= endRangePageIndex; targetPageIndex++) {
+            var targetBounds = pageBounds(targetPageIndex);
+            if (!_boundsOverlap(targetBounds, rangeInfo.bounds)) continue;
+            rangeInfo.originalPageIndex = rangeInfo.pageIndex;
+            rangeInfo.pageIndex = targetPageIndex;
+            rangeInfo.reprojectedToRangePage = true;
+            break;
+        }
+    }
+    marker("03d01c_sourceIndex_reprojectRange");
+    normalizeSourceItemZOrder(sourceItems, ctx);
+    marker("03d01d_sourceIndex_zOrder");
+    stats.sourceZOrderSummary = ctx && ctx.sourceZOrderSummary
+            ? ctx.sourceZOrderSummary
+            : {
+                sourceItemCount: sourceItems.length,
+                idmlZOrderAvailable: false,
+                idmlZOrderAppliedCount: 0,
+                idmlZOrderMissingCount: sourceItems.length
+            };
 
     for (var si = 0; si < sourceItems.length; si++) {
         var src = sourceItems[si];
@@ -404,6 +781,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var hasChildInfo = sourceItems[hi];
         hasChildInfo.hasChildren = !!childIdsByParentId[String(hasChildInfo.id)];
     }
+    marker("03d01e_sourceIndex_childIndex");
 
     function sourceInfo(sourceId) {
         if (sourceId === null || sourceId === undefined) return null;
@@ -475,8 +853,16 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
 
     function includeSourceOnPage(info, pageIndex) {
         if (!info) return false;
+        var rangePages = _candidateRangePagesForInfo(info);
+        if (rangePages.length > 0) {
+            for (var rpi = 0; rpi < rangePages.length; rpi++) {
+                if (rangePages[rpi] === pageIndex) return true;
+            }
+            return false;
+        }
         if (info.pageIndex < 0) return true;
         if (info.pageIndex === pageIndex) return true;
+        if (info.recoveredMissingParent === true && _boundsOverlap(pageBounds(pageIndex), info.bounds)) return true;
         if (sameSpread(info.pageIndex, pageIndex) && _boundsOverlap(pageBounds(pageIndex), info.bounds)) return true;
         return false;
     }
@@ -516,6 +902,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         }
         var key = String(sourceId);
         if (candidateVectorPaintById[key] !== undefined) return candidateVectorPaintById[key];
+        if (info.hasVisibleFill === true || info.hasVisibleStroke === true) {
+            candidateVectorPaintById[key] = true;
+            info.hasCandidateVectorPaint = true;
+            return true;
+        }
         var result = false;
         try {
             var item = domItem(sourceId);
@@ -628,6 +1019,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         if (candidatePageIndexesById[candidateKey]) return candidatePageIndexesById[candidateKey].slice(0);
         var info = sourceInfo(sourceId);
         if (!info) return [];
+        var rangePages = _candidateRangePagesForInfo(info);
+        if (rangePages.length > 0) {
+            candidatePageIndexesById[candidateKey] = rangePages.slice(0);
+            return rangePages;
+        }
         var sourcePageIndex = info.pageIndex;
         if (info.kind === "TextFrame") {
             var textPages = _candidatePageInRange(sourcePageIndex, ctx) ? [sourcePageIndex] : [];
@@ -642,7 +1038,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var pages = [];
         var seen = {};
         for (var pageIndex = ctx.startPage - 1; pageIndex <= ctx.endPage - 1; pageIndex++) {
-            if (sourcePageIndex >= 0 && !sameSpread(sourcePageIndex, pageIndex)) continue;
+            if (sourcePageIndex >= 0 && info.recoveredMissingParent !== true
+                    && !sameSpread(sourcePageIndex, pageIndex)) continue;
             if (_boundsOverlap(pageBounds(pageIndex), info.bounds) && !seen[pageIndex]) {
                 pages.push(pageIndex);
                 seen[pageIndex] = true;
@@ -694,32 +1091,762 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     };
 }
 
-function normalizeSourceItemZOrder(sourceItems) {
+function normalizeSourceItemZOrder(sourceItems, ctx) {
     if (!sourceItems || sourceItems.length === 0) return;
-    var byPage = {};
+    var idmlZOrderById = ctx && ctx.idmlZOrderBySourceObjectId
+            ? ctx.idmlZOrderBySourceObjectId
+            : null;
+    var applied = 0;
+    var missing = 0;
     for (var i = 0; i < sourceItems.length; i++) {
         var item = sourceItems[i];
         if (!item) continue;
         item.rawZOrder = item.zOrder;
-        var key = String(item.pageIndex);
-        if (!byPage[key]) byPage[key] = [];
-        byPage[key].push(item);
-    }
-    for (var pageKey in byPage) {
-        if (!byPage.hasOwnProperty(pageKey)) continue;
-        var pageItems = byPage[pageKey];
-        pageItems.sort(function(a, b) {
-            return Number(a.rawZOrder || 0) - Number(b.rawZOrder || 0);
-        });
-        var last = pageItems.length - 1;
-        for (var pi = 0; pi < pageItems.length; pi++) {
-            // InDesign exposes allPageItems in front-to-back source order for
-            // the page/spread plane used here.  ObjectPlan.zOrder is the
-            // normalized execution contract: smaller is behind, larger is in
-            // front.  Keep rawZOrder/sourceOrder for diagnostics only.
-            pageItems[pi].zOrder = last - pi;
+        var idmlZ = idmlZOrderById ? idmlZOrderById[String(item.id)] : null;
+        if (idmlZ !== null && idmlZ !== undefined) {
+            item.zOrder = Number(idmlZ);
+            item.zOrderSource = "idml_spread";
+            applied++;
+        } else {
+            item.zOrder = Number(item.rawZOrder || 0);
+            item.zOrderSource = "dom_allPageItems";
+            if (idmlZOrderById) missing++;
         }
     }
+    if (ctx) {
+        ctx.sourceZOrderSummary = {
+            sourceItemCount: sourceItems.length,
+            idmlZOrderAvailable: !!idmlZOrderById,
+            idmlZOrderAppliedCount: applied,
+            idmlZOrderMissingCount: missing
+        };
+    }
+}
+
+function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiagnostics, options) {
+    options = options || {};
+    var fullDiagnostics = options.fullDiagnostics === true;
+    var claimsBySourceId = {};
+    var claimKindsBySourceId = fullDiagnostics ? null : {};
+    var childIdsByParentId = {};
+    if (typeof _buildSourceItemIndexes === "function") {
+        try {
+            childIdsByParentId = _buildSourceItemIndexes(sourceItems || []).childIdsByParentId || {};
+        } catch (eSourceCoverageIndex) {
+            childIdsByParentId = {};
+        }
+    }
+    if (!childIdsByParentId || _sourceModelObjectKeyCount(childIdsByParentId) === 0) {
+        for (var siIndex = 0; sourceItems && siIndex < sourceItems.length; siIndex++) {
+            var sourceItem = sourceItems[siIndex];
+            if (!sourceItem || sourceItem.id === null || sourceItem.id === undefined) continue;
+            if (sourceItem.parentId !== null && sourceItem.parentId !== undefined) {
+                var parentKey = String(sourceItem.parentId);
+                if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+                childIdsByParentId[parentKey].push(sourceItem.id);
+            }
+        }
+    }
+    var plans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans
+            ? objectPlanDiagnostics.objectPlans
+            : [];
+    var summary = {
+        sourceObjectCount: sourceItems ? sourceItems.length : 0,
+        candidateCount: candidates ? candidates.length : 0,
+        objectPlanCount: plans.length,
+        statusCounts: {},
+        claimKindCounts: {},
+        unresolvedCount: 0,
+        visibleMaterialUnresolvedCount: 0,
+        droppedIntentionalCount: 0,
+        provenanceOnlyCount: 0
+    };
+
+    function addClaim(sourceId, kind, owner) {
+        if (sourceId === null || sourceId === undefined) return;
+        var key = String(sourceId);
+        if (fullDiagnostics) {
+            if (!claimsBySourceId[key]) claimsBySourceId[key] = [];
+            claimsBySourceId[key].push({
+                kind: kind,
+                ownerType: owner && owner.ownerType ? owner.ownerType : null,
+                objectPlanId: owner && owner.objectPlanId ? owner.objectPlanId : null,
+                bundleId: owner && owner.bundleId ? owner.bundleId : null,
+                candidateId: owner && owner.candidateId ? owner.candidateId : null,
+                passId: owner && owner.passId ? owner.passId : null,
+                ownershipSlot: owner && owner.ownershipSlot ? owner.ownershipSlot : null,
+                textAction: owner && owner.textAction ? owner.textAction : null,
+                visualAction: owner && owner.visualAction ? owner.visualAction : null,
+                materialization: owner && owner.materialization ? owner.materialization : null
+            });
+        } else {
+            if (!claimKindsBySourceId[key]) claimKindsBySourceId[key] = {};
+            claimKindsBySourceId[key][kind] = true;
+        }
+        _incrementSourceCoverageCount(summary.claimKindCounts, kind);
+    }
+
+    function addClaims(ids, kind, owner) {
+        for (var i = 0; ids && i < ids.length; i++) addClaim(ids[i], kind, owner);
+    }
+
+    function addVisibleClaimsWithDescendants(ids, kind, owner) {
+        var seen = {};
+        function visit(sourceId) {
+            if (sourceId === null || sourceId === undefined) return;
+            var key = String(sourceId);
+            if (seen[key]) return;
+            seen[key] = true;
+            addClaim(sourceId, kind, owner);
+            var children = childIdsByParentId[key] || [];
+            for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
+        }
+        for (var i = 0; ids && i < ids.length; i++) visit(ids[i]);
+    }
+
+    for (var p = 0; p < plans.length; p++) {
+        var plan = plans[p];
+        if (!plan) continue;
+        var owner = {
+            ownerType: "ObjectPlan",
+            objectPlanId: plan.objectPlanId || null,
+            bundleId: plan.bundleId || null,
+            candidateId: plan.candidateId || null,
+            passId: plan.passId || null,
+            ownershipSlot: plan.ownershipSlot || null,
+            textAction: plan.textAction || null,
+            visualAction: plan.visualAction || null,
+            materialization: plan.materialization || null
+        };
+        addClaims(plan.sourceObjectIds, "PROVENANCE", owner);
+        if (_sourceCoveragePlanHasVisibleVisual(plan)) {
+            addVisibleClaimsWithDescendants(plan.visualSourceObjectIds, "VISIBLE_VISUAL", owner);
+            addVisibleClaimsWithDescendants(plan.exportSourceObjectIds, "VISIBLE_EXPORT", owner);
+        }
+        if (plan.visualAction === "PLACE_TABLE_STYLE") {
+            addClaims(plan.styleSourceObjectIds, "STYLE_OWNER", owner);
+            addClaims(plan.ownedTextFrameIds, "TEXT_OWNER", owner);
+        } else {
+            addClaims(plan.styleSourceObjectIds, "STYLE_OWNER", owner);
+            if (plan.textAction === "OWNED_BY_HWPX_TEXT") {
+                addClaims(plan.ownedTextFrameIds, "TEXT_OWNER", owner);
+            } else if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) {
+                addClaims(plan.ownedTextFrameIds, "TEXT_RELATION", owner);
+            }
+        }
+        addClaims(plan.hiddenVisualSourceObjectIds, "HIDDEN_BY_OWNER", owner);
+    }
+
+    for (var c = 0; candidates && c < candidates.length; c++) {
+        var candidate = candidates[c];
+        if (!candidate) continue;
+        var candidateOwner = {
+            ownerType: "ExtractionCandidate",
+            candidateId: candidate.candidateId || null,
+            passId: candidate.passId || null,
+            ownershipSlot: candidate.ownershipSlot || null,
+            textAction: candidate.textAction || null,
+            visualAction: candidate.visualAction || null,
+            materialization: candidate.materialization || null
+        };
+        addClaims(candidate.sourceObjectIds, "CANDIDATE_PROVENANCE", candidateOwner);
+        addClaims(candidate.hiddenVisualSourceObjectIds, "CANDIDATE_HIDDEN", candidateOwner);
+    }
+
+    var rows = [];
+    var unresolvedRows = [];
+    for (var s = 0; sourceItems && s < sourceItems.length; s++) {
+        var src = sourceItems[s];
+        if (!src || src.id === null || src.id === undefined) continue;
+        var sourceKey = String(src.id);
+        var srcClaims = fullDiagnostics ? claimsBySourceId[sourceKey] || [] : [];
+        var srcClaimKindMap = fullDiagnostics ? null : claimKindsBySourceId[sourceKey] || {};
+        var status = fullDiagnostics
+                ? _sourceCoverageStatusForSource(src, srcClaims)
+                : _sourceCoverageStatusForClaimKindMap(src, srcClaimKindMap);
+        var claimKinds = fullDiagnostics
+                ? _sourceCoverageClaimKinds(srcClaims)
+                : _sourceCoverageClaimKindsFromMap(srcClaimKindMap);
+        var row = {
+            sourceObjectId: src.id,
+            coverageStatus: status,
+            kind: src.kind || null,
+            pageIndex: src.pageIndex,
+            parentId: src.parentId !== undefined ? src.parentId : null,
+            parentKind: src.parentKind || null,
+            storyId: src.storyId !== undefined ? src.storyId : null,
+            bounds: src.bounds || null,
+            zOrder: src.zOrder !== undefined ? src.zOrder : null,
+            layerName: src.layerName || null,
+            visible: src.visible,
+            hiddenLayer: src.hiddenLayer === true,
+            nonprinting: src.nonprinting === true,
+            textFrameClass: src.textFrameClass || null,
+            contentType: src.contentType || null,
+            isGraphicContentFrame: src.isGraphicContentFrame === true,
+            hasText: src.hasText,
+            hasChildren: src.hasChildren === true,
+            hasPlacedVisual: src.hasPlacedVisual === true,
+            hasCandidateVectorPaint: src.hasCandidateVectorPaint === true,
+            hasVisibleFill: src.hasVisibleFill === true,
+            hasVisibleStroke: src.hasVisibleStroke === true,
+            storyAnchorPlacement: src.storyAnchorPlacement || null,
+            storyTextInlineSlot: src.storyTextInlineSlot === true,
+            coverageClaimKinds: claimKinds
+        };
+        if (fullDiagnostics) {
+            row.claims = srcClaims;
+            rows.push(row);
+        }
+        _incrementSourceCoverageCount(summary.statusCounts, status);
+        if (status === "UNRESOLVED") {
+            summary.unresolvedCount++;
+            if (_sourceCoverageHasPotentialVisibleMaterial(src)) {
+                summary.visibleMaterialUnresolvedCount++;
+            }
+            var unresolvedRow = row;
+            if (!fullDiagnostics) {
+                unresolvedRow = _sourceCoverageProblemRow(row, srcClaims);
+                rows.push(unresolvedRow);
+            }
+            if (unresolvedRows.length < 200) unresolvedRows.push(unresolvedRow);
+        } else if (status === "DROPPED_INTENTIONAL") {
+            summary.droppedIntentionalCount++;
+        } else if (status === "PROVENANCE_ONLY") {
+            summary.provenanceOnlyCount++;
+        }
+    }
+
+    return {
+        schemaVersion: 1,
+        policy: "POLICY-source-ownership",
+        mode: fullDiagnostics
+                ? "source-coverage-diagnostics"
+                : "source-coverage-summary",
+        summary: summary,
+        fullDiagnostics: fullDiagnostics,
+        fullDiagnosticsSkipped: !fullDiagnostics,
+        unresolvedPreview: unresolvedRows,
+        sourceObjects: rows
+    };
+}
+
+function _sourceCoverageProblemRow(row, claims) {
+    var out = {};
+    for (var key in row) {
+        if (!row.hasOwnProperty(key)) continue;
+        out[key] = row[key];
+    }
+    out.claims = claims || [];
+    return out;
+}
+
+function _sourceCoveragePlanHasVisibleVisual(plan) {
+    if (!plan) return false;
+    return plan.visualAction === "PLACE_INLINE_PNG"
+            || plan.visualAction === "PLACE_FLOATING_PNG"
+            || plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
+            || plan.visualAction === "PLACE_TEXT_SHELL"
+            || plan.visualAction === "PLACE_TABLE_STYLE";
+}
+
+function _sourceCoverageStatusForSource(src, claims) {
+    if (!src) return "UNRESOLVED";
+    if (_sourceCoverageHasClaim(claims, "TEXT_OWNER")) return "TEXT_OWNED";
+    if (_sourceCoverageHasClaim(claims, "STYLE_OWNER")) return "STYLE_OWNED";
+    if (_sourceCoverageHasClaim(claims, "VISIBLE_VISUAL")
+            || _sourceCoverageHasClaim(claims, "VISIBLE_EXPORT")) {
+        return "VISIBLE_OWNED";
+    }
+    if (_sourceCoverageHasClaim(claims, "HIDDEN_BY_OWNER")
+            || _sourceCoverageHasClaim(claims, "CANDIDATE_HIDDEN")) {
+        return "HIDDEN_BY_OWNER";
+    }
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) {
+        return "DROPPED_INTENTIONAL";
+    }
+    if (_sourceCoverageHasClaim(claims, "PROVENANCE")
+            || _sourceCoverageHasClaim(claims, "CANDIDATE_PROVENANCE")) {
+        return "PROVENANCE_ONLY";
+    }
+    if (_sourceCoverageHasPotentialVisibleMaterial(src)) return "UNRESOLVED";
+    return "PROVENANCE_ONLY";
+}
+
+function _sourceCoverageStatusForClaimKindMap(src, claimKinds) {
+    if (!src) return "UNRESOLVED";
+    claimKinds = claimKinds || {};
+    if (claimKinds.TEXT_OWNER === true) return "TEXT_OWNED";
+    if (claimKinds.STYLE_OWNER === true) return "STYLE_OWNED";
+    if (claimKinds.VISIBLE_VISUAL === true || claimKinds.VISIBLE_EXPORT === true) {
+        return "VISIBLE_OWNED";
+    }
+    if (claimKinds.HIDDEN_BY_OWNER === true || claimKinds.CANDIDATE_HIDDEN === true) {
+        return "HIDDEN_BY_OWNER";
+    }
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) {
+        return "DROPPED_INTENTIONAL";
+    }
+    if (claimKinds.PROVENANCE === true || claimKinds.CANDIDATE_PROVENANCE === true) {
+        return "PROVENANCE_ONLY";
+    }
+    if (_sourceCoverageHasPotentialVisibleMaterial(src)) return "UNRESOLVED";
+    return "PROVENANCE_ONLY";
+}
+
+function _sourceCoverageHasPotentialVisibleMaterial(src) {
+    if (!src) return false;
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.pageIndex !== undefined && src.pageIndex !== null
+            && Number(src.pageIndex) < 0) {
+        return false;
+    }
+    var kind = String(src.kind || "");
+    if (kind === "TextFrame" && src.hasText === true) return true;
+    if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+    if (src.hasPlacedVisual === true) return true;
+    if (src.hasCandidateVectorPaint === true) return true;
+    if (kind === "Group" && src.hasChildren === true) return false;
+    if (src.hasVisibleFill === true || src.hasVisibleStroke === true) return true;
+    return false;
+}
+
+function _sourceCoverageHasClaim(claims, kind) {
+    for (var i = 0; claims && i < claims.length; i++) {
+        if (claims[i] && claims[i].kind === kind) return true;
+    }
+    return false;
+}
+
+function _sourceCoverageClaimKinds(claims) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; claims && i < claims.length; i++) {
+        var kind = claims[i] && claims[i].kind ? claims[i].kind : "UNKNOWN";
+        if (seen[kind]) continue;
+        seen[kind] = true;
+        out.push(kind);
+    }
+    return out;
+}
+
+function _sourceCoverageClaimKindsFromMap(claimKinds) {
+    var out = [];
+    for (var kind in claimKinds) {
+        if (!claimKinds.hasOwnProperty(kind)) continue;
+        if (claimKinds[kind] !== true) continue;
+        out.push(kind);
+    }
+    return out;
+}
+
+function _incrementSourceCoverageCount(map, key) {
+    key = key || "UNKNOWN";
+    if (!map[key]) map[key] = 0;
+    map[key]++;
+}
+
+function _buildSourceOwnershipModelDiagnostics(sourceItems, candidates, objectPlanDiagnostics, options) {
+    options = options || {};
+    var fullDiagnostics = options.fullDiagnostics === true;
+    var plans = objectPlanDiagnostics && objectPlanDiagnostics.objectPlans
+            ? objectPlanDiagnostics.objectPlans
+            : [];
+    var bundleRows = [];
+    var slotRows = [];
+    var ownerRows = [];
+    var renderUnitRows = [];
+    var seenBundleIds = {};
+    var ownerCountBySlotKey = {};
+    var summary = {
+        sourceObjectCount: sourceItems ? sourceItems.length : 0,
+        candidateCount: candidates ? candidates.length : 0,
+        objectPlanCount: plans.length,
+        bundleCount: 0,
+        slotCount: 0,
+        slotOwnerCount: 0,
+        renderUnitCount: 0,
+        bundleTypeCounts: {},
+        slotCounts: {},
+        ownerCounts: {},
+        materializationCounts: {},
+        duplicateSlotOwnerCount: 0,
+        duplicateSlotKeys: []
+    };
+
+    for (var p = 0; p < plans.length; p++) {
+        var plan = plans[p];
+        if (!plan) continue;
+        var bundle = _sourceModelBundleFromObjectPlan(plan);
+        if (!seenBundleIds[bundle.bundleId]) {
+            seenBundleIds[bundle.bundleId] = true;
+            if (fullDiagnostics) bundleRows.push(bundle);
+            _incrementSourceCoverageCount(summary.bundleTypeCounts, bundle.bundleType);
+        }
+        var slots = _sourceModelSlotsFromObjectPlan(plan);
+        for (var s = 0; s < slots.length; s++) {
+            var slot = slots[s];
+            if (fullDiagnostics) slotRows.push(slot);
+            _incrementSourceCoverageCount(summary.slotCounts, slot.ownershipSlot);
+            var owner = _sourceModelOwnerFromSlot(slot, plan);
+            if (fullDiagnostics) ownerRows.push(owner);
+            _incrementSourceCoverageCount(summary.ownerCounts, owner.owner);
+            _incrementSourceCoverageCount(summary.materializationCounts, owner.materialization);
+            if (!ownerCountBySlotKey[slot.slotIdentityKey]) ownerCountBySlotKey[slot.slotIdentityKey] = 0;
+            ownerCountBySlotKey[slot.slotIdentityKey]++;
+            var renderUnit = _sourceModelRenderUnitFromSlot(slot, plan, owner);
+            if (renderUnit) renderUnitRows.push(renderUnit);
+        }
+    }
+
+    for (var key in ownerCountBySlotKey) {
+        if (!ownerCountBySlotKey.hasOwnProperty(key)) continue;
+        if (ownerCountBySlotKey[key] > 1) {
+            summary.duplicateSlotOwnerCount++;
+            if (summary.duplicateSlotKeys.length < 100) {
+                summary.duplicateSlotKeys.push({
+                    slotIdentityKey: key,
+                    ownerCount: ownerCountBySlotKey[key]
+                });
+            }
+        }
+    }
+
+    summary.bundleCount = _sourceModelObjectKeyCount(seenBundleIds);
+    summary.slotCount = _sourceModelCountMapTotal(summary.slotCounts);
+    summary.slotOwnerCount = _sourceModelCountMapTotal(summary.ownerCounts);
+    summary.renderUnitCount = renderUnitRows.length;
+
+    return {
+        sourceBundles: {
+            schemaVersion: 1,
+            policy: "POLICY-source-ownership",
+            mode: fullDiagnostics
+                    ? "source-bundle-diagnostics"
+                    : "source-bundle-summary",
+            summary: {
+                bundleCount: summary.bundleCount,
+                bundleTypeCounts: summary.bundleTypeCounts
+            },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
+            bundles: bundleRows
+        },
+        ownershipSlots: {
+            schemaVersion: 1,
+            policy: "POLICY-source-ownership",
+            mode: fullDiagnostics
+                    ? "ownership-slot-diagnostics"
+                    : "ownership-slot-summary",
+            summary: {
+                slotCount: summary.slotCount,
+                slotCounts: summary.slotCounts,
+                duplicateSlotOwnerCount: summary.duplicateSlotOwnerCount,
+                duplicateSlotKeys: summary.duplicateSlotKeys
+            },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
+            slots: slotRows
+        },
+        slotOwners: {
+            schemaVersion: 1,
+            policy: "POLICY-source-ownership",
+            mode: fullDiagnostics
+                    ? "slot-owner-diagnostics"
+                    : "slot-owner-summary",
+            summary: {
+                slotOwnerCount: summary.slotOwnerCount,
+                ownerCounts: summary.ownerCounts,
+                materializationCounts: summary.materializationCounts
+            },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
+            owners: ownerRows
+        },
+        renderUnits: {
+            schemaVersion: 1,
+            policy: "POLICY-source-ownership",
+            mode: fullDiagnostics
+                    ? "render-unit-diagnostics"
+                    : "render-unit-compact",
+            summary: {
+                renderUnitCount: renderUnitRows.length
+            },
+            fullDiagnostics: fullDiagnostics,
+            fullDiagnosticsSkipped: !fullDiagnostics,
+            renderUnits: renderUnitRows
+        },
+        summary: summary
+    };
+}
+
+function _sourceModelObjectKeyCount(map) {
+    var count = 0;
+    for (var key in map) {
+        if (map.hasOwnProperty(key)) count++;
+    }
+    return count;
+}
+
+function _sourceModelCountMapTotal(map) {
+    var total = 0;
+    for (var key in map) {
+        if (!map.hasOwnProperty(key)) continue;
+        total += Number(map[key] || 0);
+    }
+    return total;
+}
+
+function _sourceModelBundleFromObjectPlan(plan) {
+    var bundleId = plan.bundleId || plan.objectPlanId || ("bundle.page." + plan.pageIndex + ".dom." + plan.primarySourceObjectId);
+    return {
+        bundleId: bundleId,
+        objectPlanId: plan.objectPlanId || null,
+        candidateId: plan.candidateId || null,
+        passId: plan.passId || null,
+        pageIndex: plan.pageIndex,
+        bundleType: _sourceModelBundleType(plan),
+        sourceSetId: plan.sourceSetId || _sourceSetId(plan.sourceObjectIds || []),
+        sourceRootSetId: plan.sourceRootSetId || _sourceSetId(plan.sourceRootObjectIds || []),
+        clusterSourceSetId: plan.clusterSourceSetId || _sourceSetId(plan.clusterSourceObjectIds || []),
+        sourceObjectIds: _internSourceSetIds(plan.sourceObjectIds || []),
+        sourceRootObjectIds: _internSourceSetIds(plan.sourceRootObjectIds || []),
+        clusterSourceObjectIds: _internSourceSetIds(plan.clusterSourceObjectIds || []),
+        primarySourceObjectId: plan.primarySourceObjectId !== undefined ? plan.primarySourceObjectId : null,
+        clusterRelation: plan.clusterRelation || null,
+        placement: plan.placement || null,
+        coordinateSpace: plan.coordinateSpace || null,
+        visualLayer: plan.visualLayer || null,
+        zOrder: plan.zOrder !== undefined ? plan.zOrder : null,
+        bounds: plan.bounds || null
+    };
+}
+
+function _sourceModelBundleType(plan) {
+    if (!plan) return "UNKNOWN_BUNDLE";
+    if (plan.passId === "pass.master_page_graphics") return "APPLIED_MASTER_BUNDLE";
+    if (plan.visualAction === "PLACE_TABLE_STYLE"
+            || plan.ownershipSlot === "TABLE_STYLE_SLOT") return "TABLE_STYLE_BUNDLE";
+    if (plan.placement === "INLINE") return "INLINE_ANCHOR_BUNDLE";
+    if (plan.visualAction === "PLACE_TEXT_SHELL"
+            || plan.ownershipSlot === "SHELL_SLOT") return "SHELL_BUNDLE";
+    if (plan.ownershipSlot === "CONTENT_VISUAL_SLOT") return "CONTENT_VISUAL_BUNDLE";
+    if (plan.textAction === "OWNED_BY_HWPX_TEXT") return "TEXT_BUNDLE";
+    return "PROVENANCE_BUNDLE";
+}
+
+function _sourceModelSlotsFromObjectPlan(plan) {
+    var slots = [];
+    if (!plan) return slots;
+    if (plan.textAction === "OWNED_BY_HWPX_TEXT"
+            && plan.ownedTextFrameIds
+            && plan.ownedTextFrameIds.length > 0) {
+        slots.push(_sourceModelSlotFromObjectPlan(plan, "TEXT_SLOT",
+                "HWPX_TEXT", plan.ownedTextFrameIds));
+    }
+    if (plan.visualAction === "PLACE_TABLE_STYLE") {
+        slots.push(_sourceModelSlotFromObjectPlan(plan, "TABLE_STYLE_SLOT",
+                "HWPX_TABLE_STYLE",
+                _sourceIdsUnion(plan.styleSourceObjectIds || [], plan.ownedTextFrameIds || [])));
+    }
+    if (_sourceCoveragePlanHasVisibleVisual(plan)
+            && plan.visualAction !== "PLACE_TABLE_STYLE") {
+        var slot = plan.ownershipSlot || _sourceModelVisualSlotFromPlan(plan);
+        slots.push(_sourceModelSlotFromObjectPlan(plan, slot,
+                _sourceModelVisualOwner(plan),
+                _sourceModelVisualSlotSourceIds(plan)));
+    }
+    return slots;
+}
+
+function _sourceModelSlotFromObjectPlan(plan, ownershipSlot, owner, slotSourceObjectIds) {
+    var ids = _internSourceSetIds(slotSourceObjectIds || []);
+    var slotIdentityKey = String(plan.pageIndex) + "|"
+            + String(plan.placement || "NONE") + "|"
+            + ownershipSlot + "|"
+            + _sourceSetKey(ids);
+    var slotId = "slot." + slotIdentityKey.replace(/[^A-Za-z0-9_.-]/g, "_")
+            + "." + String(plan.objectPlanId || plan.bundleId || "plan").replace(/[^A-Za-z0-9_.-]/g, "_");
+    return {
+        slotId: slotId,
+        slotIdentityKey: slotIdentityKey,
+        bundleId: plan.bundleId || plan.objectPlanId || null,
+        objectPlanId: plan.objectPlanId || null,
+        candidateId: plan.candidateId || null,
+        passId: plan.passId || null,
+        pageIndex: plan.pageIndex,
+        ownershipSlot: ownershipSlot,
+        owner: owner,
+        slotSourceSetId: _sourceSetId(ids),
+        sourceSetId: plan.sourceSetId || _sourceSetId(plan.sourceObjectIds || []),
+        visualSourceSetId: plan.visualSourceSetId || _sourceSetId(plan.visualSourceObjectIds || []),
+        exportSourceSetId: plan.exportSourceSetId || _sourceSetId(plan.exportSourceObjectIds || []),
+        hiddenSourceSetId: plan.hiddenSourceSetId || _sourceSetId(plan.hiddenVisualSourceObjectIds || []),
+        slotSourceObjectIds: ids,
+        sourceObjectIds: _internSourceSetIds(plan.sourceObjectIds || []),
+        visualSourceObjectIds: _internSourceSetIds(plan.visualSourceObjectIds || []),
+        styleSourceObjectIds: _internSourceSetIds(plan.styleSourceObjectIds || []),
+        ownedTextFrameIds: _internSourceSetIds(plan.ownedTextFrameIds || []),
+        exportSourceObjectIds: _internSourceSetIds(plan.exportSourceObjectIds || []),
+        hiddenVisualSourceObjectIds: _internSourceSetIds(plan.hiddenVisualSourceObjectIds || []),
+        hiddenTextFrameIds: _internSourceSetIds(plan.hiddenTextFrameIds || []),
+        placement: plan.placement || null,
+        coordinateSpace: plan.coordinateSpace || null,
+        visualLayer: plan.visualLayer || null,
+        policyLayer: plan.policyLayer || null,
+        zOrder: plan.zOrder !== undefined ? plan.zOrder : null,
+        materialization: plan.materialization || null,
+        textAction: plan.textAction || null,
+        visualAction: plan.visualAction || null,
+        bounds: plan.bounds || null
+    };
+}
+
+function _sourceModelOwnerFromSlot(slot, plan) {
+    return {
+        slotOwnerId: "owner." + slot.slotId,
+        slotId: slot.slotId,
+        slotIdentityKey: slot.slotIdentityKey,
+        bundleId: slot.bundleId,
+        objectPlanId: slot.objectPlanId,
+        candidateId: slot.candidateId,
+        passId: slot.passId,
+        pageIndex: slot.pageIndex,
+        ownershipSlot: slot.ownershipSlot,
+        owner: slot.owner,
+        materialization: slot.materialization,
+        textAction: slot.textAction,
+        visualAction: slot.visualAction,
+        sourceObjectIds: slot.sourceObjectIds,
+        slotSourceObjectIds: slot.slotSourceObjectIds,
+        reason: plan && plan.reason ? plan.reason : null
+    };
+}
+
+function _sourceModelRenderUnitFromSlot(slot, plan, owner) {
+    if (!slot || !plan) return null;
+    if (!(slot.owner === "TEXTLESS_PNG"
+            || slot.owner === "CONTENT_PNG"
+            || slot.owner === "PAGE_PLANE_PNG"
+            || slot.owner === "COMPLETE_PNG")) {
+        return null;
+    }
+    return {
+        renderUnitId: "renderUnit." + slot.slotId.replace(/^slot\./, ""),
+        slotId: slot.slotId,
+        slotIdentityKey: slot.slotIdentityKey,
+        bundleId: slot.bundleId,
+        objectPlanId: slot.objectPlanId,
+        candidateId: slot.candidateId,
+        passId: slot.passId,
+        pageIndex: slot.pageIndex,
+        ownershipSlot: slot.ownershipSlot,
+        owner: owner ? owner.owner : slot.owner,
+        sourceObjectIds: slot.sourceObjectIds,
+        visualSourceObjectIds: slot.visualSourceObjectIds,
+        exportSourceObjectIds: slot.exportSourceObjectIds,
+        hiddenTextFrameIds: slot.ownershipSlot === "SHELL_SLOT" ? slot.ownedTextFrameIds : [],
+        hiddenVisualSourceObjectIds: slot.hiddenVisualSourceObjectIds,
+        placement: slot.placement,
+        coordinateSpace: slot.coordinateSpace,
+        visualLayer: slot.visualLayer,
+        zOrder: slot.zOrder,
+        bounds: slot.bounds,
+        cropSourceBounds: plan.cropSourceBounds || null,
+        materialization: slot.materialization,
+        visualAction: slot.visualAction
+    };
+}
+
+function _slimRenderUnitsForWrite(renderUnitsDoc, previewLimit) {
+    var renderUnits = [];
+    var summary = {};
+    if (renderUnitsDoc && renderUnitsDoc.renderUnits) {
+        renderUnits = renderUnitsDoc.renderUnits || [];
+        summary = renderUnitsDoc.summary || {};
+    } else if (renderUnitsDoc && renderUnitsDoc.length !== undefined) {
+        renderUnits = renderUnitsDoc || [];
+    }
+    previewLimit = previewLimit === undefined || previewLimit === null ? 50 : previewLimit;
+    var preview = [];
+    for (var i = 0; i < renderUnits.length && i < previewLimit; i++) {
+        preview.push(_renderUnitPreviewRow(renderUnits[i]));
+    }
+    return {
+        schemaVersion: renderUnitsDoc && renderUnitsDoc.schemaVersion
+                ? renderUnitsDoc.schemaVersion
+                : 1,
+        policy: "POLICY-source-ownership",
+        mode: "render-unit-summary",
+        summary: {
+            renderUnitCount: summary.renderUnitCount !== undefined
+                    ? summary.renderUnitCount
+                    : renderUnits.length,
+            previewCount: preview.length
+        },
+        fullDiagnosticsSkipped: true,
+        renderUnitPreview: preview
+    };
+}
+
+function _renderUnitPreviewRow(unit) {
+    if (!unit) return unit;
+    return {
+        renderUnitId: unit.renderUnitId || null,
+        objectPlanId: unit.objectPlanId || null,
+        candidateId: unit.candidateId || null,
+        pageIndex: unit.pageIndex,
+        ownershipSlot: unit.ownershipSlot || null,
+        owner: unit.owner || null,
+        placement: unit.placement || null,
+        coordinateSpace: unit.coordinateSpace || null,
+        visualLayer: unit.visualLayer || null,
+        zOrder: unit.zOrder !== undefined ? unit.zOrder : null,
+        bounds: unit.bounds || null,
+        sourceObjectCount: unit.sourceObjectIds ? unit.sourceObjectIds.length : 0,
+        exportSourceObjectCount: unit.exportSourceObjectIds
+                ? unit.exportSourceObjectIds.length
+                : 0,
+        hiddenVisualSourceObjectCount: unit.hiddenVisualSourceObjectIds
+                ? unit.hiddenVisualSourceObjectIds.length
+                : 0,
+        hiddenTextFrameCount: unit.hiddenTextFrameIds
+                ? unit.hiddenTextFrameIds.length
+                : 0,
+        materialization: unit.materialization || null,
+        visualAction: unit.visualAction || null
+    };
+}
+
+function _sourceModelVisualSlotFromPlan(plan) {
+    if (!plan) return "CONTENT_VISUAL_SLOT";
+    if (plan.visualAction === "PLACE_PAGE_BACKGROUND_PNG") return "SHELL_SLOT";
+    if (plan.visualAction === "PLACE_TEXT_SHELL") return "SHELL_SLOT";
+    if (plan.visualAction === "PLACE_TABLE_STYLE") return "TABLE_STYLE_SLOT";
+    return "CONTENT_VISUAL_SLOT";
+}
+
+function _sourceModelVisualOwner(plan) {
+    if (!plan) return "CONTENT_PNG";
+    if (plan.materialization === "PAGE_PLANE_PNG") return "PAGE_PLANE_PNG";
+    if (plan.materialization === "COMPLETE_PNG") return "COMPLETE_PNG";
+    if (plan.materialization === "NATIVE_SOURCE_SHAPE") return "NATIVE_SOURCE_SHAPE";
+    if (plan.visualAction === "PLACE_TEXT_SHELL") return "TEXTLESS_PNG";
+    return "CONTENT_PNG";
+}
+
+function _sourceModelVisualSlotSourceIds(plan) {
+    if (!plan) return [];
+    if (plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0) {
+        return plan.visualSourceObjectIds;
+    }
+    if (plan.exportSourceObjectIds && plan.exportSourceObjectIds.length > 0) {
+        return plan.exportSourceObjectIds;
+    }
+    if (plan.styleSourceObjectIds && plan.styleSourceObjectIds.length > 0) {
+        return plan.styleSourceObjectIds;
+    }
+    return plan.sourceObjectIds || [];
 }
 
 function _sourceHasEditableTextDescendantInIndex(sourceId, sourceInfoById, childIdsByParentId, cache) {

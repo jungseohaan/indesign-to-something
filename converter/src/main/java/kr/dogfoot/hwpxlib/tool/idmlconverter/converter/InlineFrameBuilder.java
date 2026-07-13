@@ -55,7 +55,8 @@ final class InlineFrameBuilder {
     void addInlineTextFrame(Para para, ASTInlineObject obj) {
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
         boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
-        if (!hasParagraphs && !hasInlineTables) return;
+        boolean hasDrawableShell = obj.imageFillData() != null && obj.imageFillData().length > 0;
+        if (!hasParagraphs && !hasInlineTables && !hasDrawableShell) return;
 
         if (shouldFlattenToParentRuns(obj)) {
             flattenToParentRuns(para, obj);
@@ -112,6 +113,7 @@ final class InlineFrameBuilder {
 
         if (shouldUseInlineDrawTextShell(obj)) {
             addInlineExtractedShellTextFrame(para, obj, w, h, twm, tfs, useWrapping);
+            queueInlineTextShellOverlays(obj);
             ctx.currentContainerWidth = savedContainerWidth;
             return;
         }
@@ -163,7 +165,7 @@ final class InlineFrameBuilder {
                     .holdAnchorAndSOAnd(false)
                     .vertRelToAnd(VertRelTo.PARA)
                     .horzRelToAnd(HorzRelTo.PARA)
-                    .vertAlignAnd(VertAlign.CENTER)
+                    .vertAlignAnd(inlineShellVertAlign(obj))
                     .horzAlignAnd(HorzAlign.LEFT)
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
@@ -217,6 +219,33 @@ final class InlineFrameBuilder {
         ctx.currentContainerWidth = savedContainerWidth;
     }
 
+    private void queueInlineTextShellOverlays(ASTInlineObject obj) {
+        if (obj == null || obj.overlayFrames() == null || obj.overlayFrames().isEmpty()) return;
+        for (ASTInlineObject overlay : obj.overlayFrames()) {
+            if (overlay == null || overlay.paragraphs() == null || overlay.paragraphs().isEmpty()) continue;
+            HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
+            d.overlay = overlay;
+            if (ctx.insideTableCell) {
+                d.pageX = ctx.blockPageX + ctx.blockInsetLeft + overlay.overlayX();
+                d.pageY = ctx.blockPageY + ctx.blockInsetTop + ctx.cellContentYCursor + overlay.overlayY();
+            } else if (obj.resolvedPageX() >= 0 && obj.resolvedPageY() >= 0) {
+                // Inline text-shell child text must stay in the parent shell's
+                // local coordinate channel. Using the child frame's own
+                // resolved page box causes drift/duplication when the child
+                // source frame spans more than the actual shell slot.
+                d.pageX = obj.resolvedPageX() + overlay.overlayX();
+                d.pageY = obj.resolvedPageY() + overlay.overlayY();
+            } else if (overlay.resolvedPageX() >= 0 && overlay.resolvedPageY() >= 0) {
+                d.pageX = overlay.resolvedPageX();
+                d.pageY = overlay.resolvedPageY();
+            } else {
+                d.pageX = ctx.blockPageX + ctx.blockInsetLeft + overlay.overlayX();
+                d.pageY = ctx.blockPageY + ctx.blockInsetTop + ctx.cellContentYCursor + overlay.overlayY();
+            }
+            ctx.deferredOverlays.add(d);
+        }
+    }
+
     private boolean shouldUseInlineDrawTextShell(ASTInlineObject obj) {
         if (obj != null && obj.imageFillData() != null && obj.imageFillData().length > 0) {
             return true;
@@ -251,7 +280,6 @@ final class InlineFrameBuilder {
         applyShapeComponentGeometry(rect, w, h);
 
         DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromInlineObject(obj, w, h);
-        spec.nativeGraphicsAllowed = true;
         if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
             spec.imageFillData = obj.imageFillData();
             spec.forceImageFill = true;
@@ -270,7 +298,7 @@ final class InlineFrameBuilder {
                 obj.cornerRadius(),
                 h,
                 obj.shellShapeType(),
-                obj.nativeGraphicsAllowed() || obj.forceImageFill() || obj.cornerRadius() > 0);
+                false);
 
         rect.createPos();
         if (useWrapping) {
@@ -293,7 +321,7 @@ final class InlineFrameBuilder {
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PARA)
                 .horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.CENTER)
+                .vertAlignAnd(inlineShellVertAlign(obj))
                 .horzAlignAnd(HorzAlign.LEFT)
                 .vertOffsetAnd(0L)
                 .horzOffset(0L);
@@ -305,6 +333,13 @@ final class InlineFrameBuilder {
         } else {
             rect.outMargin().leftAnd(0L).rightAnd(INLINE_TEXT_FRAME_TRAILING_GAP).topAnd(0L).bottomAnd(0L);
         }
+    }
+
+    private VertAlign inlineShellVertAlign(ASTInlineObject obj) {
+        if (obj != null && obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
+            return VertAlign.TOP;
+        }
+        return VertAlign.CENTER;
     }
 
     private void applyShapeComponentGeometry(

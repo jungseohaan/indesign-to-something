@@ -8,7 +8,7 @@
 function loadConversionConfig(configPath) {
     var defaults = {
         rendering: {
-            // SPEC-025: 텍스트 이미지 렌더링 제거 (Tier A/B). false면 기존 동작.
+            // source ownership policy: 텍스트 이미지 렌더링 제거 (Tier A/B). false면 기존 동작.
             // - masterPageEditable: 조건 5 (item.masterPageItem 오버라이드) → editable
             // - hashiraEditable: 조건 6 (margin + 하시라 paragraph/character style) → editable
             // - rotationEditable: 회전 텍스트 (조건 8.5) → editable + HWPX rotation
@@ -16,7 +16,7 @@ function loadConversionConfig(configPath) {
             textFrame: { maxTextLength: 30,
                 decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 },
                 decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true },
-                // SPEC-025 추가 플래그
+                // source ownership policy 추가 플래그
                 // - inlineTextEditable: 조건 7 (isInlineItem) 에서 텍스트 콘텐츠가 있으면 editable 로
                 // - groupShortTextEditable: 조건 8 (Group 안 짧은 장식) 도 editable 로 (콘텐츠 텍스트 보존)
                 // - oneCharEditable: 조건 11 (≤1자 빈 프레임) 에서 실제 1자가 있으면 editable 로
@@ -69,7 +69,7 @@ function loadConversionConfig(configPath) {
                 ["opacityThreshold", "tintThreshold"]);
             _mergeKeys(defaults.rendering.rotation, r.rotation,
                 ["minAngle"]);
-            // SPEC-025 플래그
+            // source ownership policy 플래그
             _mergeKeys(defaults.rendering.textFrame.spec025,
                 r.textFrame && r.textFrame.spec025,
                 ["masterPageEditable", "hashiraEditable", "rotationEditable", "nonprintingEditable",
@@ -250,6 +250,7 @@ function _parseArgs(args) {
         configPath:         args[6] || null,
         perfMode:           (args[7] || "standard").toLowerCase(),
         skipRenderPagesMap: {},
+        extractScriptPath:   args[16] || null,
         // SPEC-030 B.2: "pre_scan" 모드 — 해시만 계산하고 렌더링 없이 종료
         extractMode:        (args[10] || "full").toLowerCase(),
         // 분할 추출 모드: IDML 재내보내기 생략, resolved를 resolved_START_END.json에 저장
@@ -264,6 +265,12 @@ function _parseArgs(args) {
             || args[13] === "diagnostics"
             || ctx.perfMode === "diagnostics"
             || ctx.perfMode === "debug";
+    ctx.skipValidation = args[14] === "1"
+            || args[14] === "--skip-validation"
+            || args[14] === "skip-validation";
+    ctx.reuseExistingIdml = args[15] === "1"
+            || args[15] === "--reuse-idml"
+            || args[15] === "reuse-idml";
     ctx.requestedStartPage = ctx.startPage;
     ctx.requestedEndPage = ctx.endPage;
     ctx.rangeInputMode = ctx.physicalRange ? "physical" : "auto";
@@ -290,6 +297,8 @@ function _parseArgs(args) {
         cfgLog.writeln("perfMode=" + ctx.perfMode);
         cfgLog.writeln("skipPdf=" + ctx.skipPdf);
         cfgLog.writeln("writePlannerDiagnostics=" + ctx.writePlannerDiagnostics);
+        cfgLog.writeln("skipValidation=" + ctx.skipValidation);
+        cfgLog.writeln("reuseExistingIdml=" + ctx.reuseExistingIdml);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
         try { cfgLog.writeln("moduleLoadDebug=" + _EXTRACT_MODULE_LOAD_DEBUG); } catch (eModuleDebugLog) {}
         cfgLog.close();
@@ -347,29 +356,116 @@ function _computePageRange(doc, ctx) {
     ctx.rangePageCount = ctx.endPage - ctx.startPage + 1;
 }
 
+function _linkStatusLabel(status) {
+    try {
+        if (status === LinkStatus.NORMAL) return "NORMAL";
+        if (status === LinkStatus.LINK_OUT_OF_DATE) return "LINK_OUT_OF_DATE";
+        if (status === LinkStatus.LINK_MISSING) return "LINK_MISSING";
+        if (status === LinkStatus.LINK_INACCESSIBLE) return "LINK_INACCESSIBLE";
+        if (status === LinkStatus.LINK_EMBEDDED) return "LINK_EMBEDDED";
+    } catch (eLinkStatusLabel) {}
+    return String(status);
+}
+
 // 문서의 누락/만료 링크를 갱신한다. 렌더링 전(PNG용)과 PDF 내보내기 전(고해상도용) 2회 호출된다.
-function _fixLinks(doc, inddPath) {
+function _fixLinks(doc, inddPath, outputDir, phaseName) {
     try {
         var inddParent = File(inddPath).parent;
         var linksFolders = [Folder(inddParent + "/Links"), Folder(inddParent)];
         var fixedCount = 0, missingCount = 0;
+        var phase = phaseName || "fix_links";
+        var allowOutOfDateUpdate = phase !== "render_links";
+        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+            event: "fix_links_start",
+            phase: phase,
+            inddPath: inddPath,
+            totalLinks: doc && doc.links ? doc.links.length : null,
+            allowOutOfDateUpdate: allowOutOfDateUpdate
+        });
         for (var li = 0; li < doc.links.length; li++) {
             var lnk = doc.links[li];
             try {
                 if (lnk.status === LinkStatus.NORMAL) continue;
+                appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                    event: "fix_links_candidate",
+                    phase: phase,
+                    index: li,
+                    name: lnk.name || null,
+                    status: _linkStatusLabel(lnk.status)
+                });
                 if (lnk.status === LinkStatus.LINK_OUT_OF_DATE) {
-                    lnk.update(); fixedCount++;
+                    if (allowOutOfDateUpdate) {
+                        lnk.update(); fixedCount++;
+                        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                            event: "fix_links_updated",
+                            phase: phase,
+                            index: li,
+                            name: lnk.name || null,
+                            status: _linkStatusLabel(lnk.status)
+                        });
+                    } else {
+                        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                            event: "fix_links_skip_out_of_date",
+                            phase: phase,
+                            index: li,
+                            name: lnk.name || null,
+                            status: _linkStatusLabel(lnk.status)
+                        });
+                    }
                 } else if (lnk.status === LinkStatus.LINK_MISSING) {
                     var found = false;
                     for (var fi = 0; fi < linksFolders.length; fi++) {
                         if (!linksFolders[fi].exists) continue;
                         var linkFile = File(linksFolders[fi] + "/" + lnk.name);
-                        if (linkFile.exists) { lnk.relink(linkFile); lnk.update(); fixedCount++; found = true; break; }
+                        if (linkFile.exists) {
+                            appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                                event: "fix_links_relink_attempt",
+                                phase: phase,
+                                index: li,
+                                name: lnk.name || null,
+                                targetPath: linkFile.fsName
+                            });
+                            lnk.relink(linkFile);
+                            lnk.update();
+                            fixedCount++;
+                            found = true;
+                            appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                                event: "fix_links_relink_done",
+                                phase: phase,
+                                index: li,
+                                name: lnk.name || null,
+                                targetPath: linkFile.fsName,
+                                status: _linkStatusLabel(lnk.status)
+                            });
+                            break;
+                        }
                     }
-                    if (!found) missingCount++;
+                    if (!found) {
+                        missingCount++;
+                        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                            event: "fix_links_missing_unresolved",
+                            phase: phase,
+                            index: li,
+                            name: lnk.name || null
+                        });
+                    }
                 }
-            } catch (le) {}
+            } catch (le) {
+                appendDiag(outputDir, "_open_diagnostics.jsonl", {
+                    event: "fix_links_error",
+                    phase: phase,
+                    index: li,
+                    name: (lnk && lnk.name) ? lnk.name : null,
+                    message: String(le)
+                });
+            }
         }
+        appendDiag(outputDir, "_open_diagnostics.jsonl", {
+            event: "fix_links_done",
+            phase: phase,
+            fixedCount: fixedCount,
+            missingCount: missingCount
+        });
         if (fixedCount > 0 || missingCount > 0)
             $.writeln("[Links] fixed=" + fixedCount + " missing=" + missingCount);
     } catch (e) {}

@@ -295,7 +295,42 @@ public class IDMLStoryParser {
             }
         }
 
+        collectDirectNestedTablesInCell(cellElem, doc, cell);
+
         return cell;
+    }
+
+    private static void collectDirectNestedTablesInCell(
+            Element cellElem,
+            IDMLDocument doc,
+            IDMLTableCell cell) {
+        if (cellElem == null || cell == null) return;
+        Set<String> seen = new LinkedHashSet<>();
+        collectDirectNestedTablesInNode(cellElem, doc, cell, seen);
+    }
+
+    private static void collectDirectNestedTablesInNode(
+            Element root,
+            IDMLDocument doc,
+            IDMLTableCell cell,
+            Set<String> seen) {
+        NodeList children = root.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element elem = (Element) child;
+            String tag = elem.getTagName();
+            if ("Table".equals(tag)) {
+                IDMLTable nestedTable = parseTable(elem, doc);
+                if (nestedTable != null
+                        && nestedTable.selfId() != null
+                        && seen.add(nestedTable.selfId())) {
+                    cell.addDirectNestedTable(nestedTable);
+                }
+                continue;
+            }
+            collectDirectNestedTablesInNode(elem, doc, cell, seen);
+        }
     }
 
     private static double parseCellInset(
@@ -1382,8 +1417,22 @@ public class IDMLStoryParser {
                     colorCount++;
                 }
             }
+
+            // position 상속 (CharacterStyle에서만): 화학식 H₂O 같은 단순 첨자는
+            // 수식 객체가 아니라 HWPX 문자 속성으로 보존해야 한다.
+            if (isNormalPosition(run.position()) && charStyleRef != null) {
+                String position = resolveStylePosition(charStyleRef, doc, 0);
+                if (position != null) {
+                    run.position(position);
+                }
+            }
         }
         return new int[]{fontCount, colorCount};
+    }
+
+    private static boolean isNormalPosition(String position) {
+        if (position == null || position.trim().isEmpty()) return true;
+        return position.toLowerCase(java.util.Locale.ROOT).contains("normal");
     }
 
     /**
@@ -1401,6 +1450,14 @@ public class IDMLStoryParser {
         String value = isFont ? styleDef.fontFamily() : styleDef.fillColor();
         if (value != null) return value;
         return resolveStyleProp(styleDef.basedOn(), doc, isFont, depth + 1);
+    }
+
+    private static String resolveStylePosition(String styleRef, IDMLDocument doc, int depth) {
+        if (styleRef == null || depth > 10) return null;
+        IDMLStyleDef styleDef = doc.getCharacterStyle(styleRef);
+        if (styleDef == null) return null;
+        if (styleDef.position() != null) return styleDef.position();
+        return resolveStylePosition(styleDef.basedOn(), doc, depth + 1);
     }
 
     // ===== GREP 스타일 해석 =====

@@ -70,6 +70,13 @@ public final class ResolvedZOrderNormalizer {
                 + pageItems + ", textFrames=" + textFrames + ", rendered=" + rendered);
     }
 
+    public static Map<String, Integer> readSourceZOrderMap(IDMLDocument idmlDoc) {
+        if (idmlDoc == null || idmlDoc.tempDir() == null) {
+            return java.util.Collections.emptyMap();
+        }
+        return readZOrderMap(idmlDoc);
+    }
+
     private static boolean applyRenderedZ(Map<String, Integer> zByDomId, RenderedGroup rg) {
         if (rg == null) return false;
         Integer z = zByDomId.get(String.valueOf(rg.id()));

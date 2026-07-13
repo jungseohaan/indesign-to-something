@@ -42,6 +42,22 @@ function normalizeTextFrameInsetSpacing(rawInset) {
     return [one, one, one, one];
 }
 
+function paragraphGeneratedPrefixText(para) {
+    if (!para) return "";
+    var candidates = [
+        "bulletsAndNumberingResultText",
+        "numberingResultText",
+        "bulletAndNumberingResultText"
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+        try {
+            var value = para[candidates[i]];
+            if (typeof value === "string" && value.length > 0) return value;
+        } catch (e) {}
+    }
+    return "";
+}
+
 function characterStyleChangesExportedRunProps(cs) {
     if (!cs) return false;
     try {
@@ -174,9 +190,35 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
         var rngLen = Math.min(runText.length > 0 ? runText.length : rngCharCount, paraCharCount - rngStart);
         if (rngLen <= 1) return [runData];
 
-        // DOM 접근 캐시 (동일 인덱스 재접근 방지)
-        var propsCache = {};
-        var colorCache = {};
+        // DOM 접근 캐시. 같은 문단의 여러 textStyleRange가 같은 character
+        // 속성을 반복 조회하므로, 호출 단위가 아니라 문단 단위로 공유한다.
+        var paraCacheKey = null;
+        try {
+            var storyKey = story && story.id !== undefined ? String(story.id) : "story";
+            var paraKey = para && para.index !== undefined ? String(para.index) : String(para.contents || "").length;
+            paraCacheKey = storyKey + ":" + paraKey + ":" + String(paraCharCount);
+        } catch (eParaCacheKey) {
+            paraCacheKey = null;
+        }
+        if (!splitRunByStoryChars._paraPropsCache) {
+            splitRunByStoryChars._paraPropsCache = {};
+            splitRunByStoryChars._paraPropsCacheKeys = [];
+        }
+        var sharedParaCache = null;
+        if (paraCacheKey) {
+            sharedParaCache = splitRunByStoryChars._paraPropsCache[paraCacheKey];
+            if (!sharedParaCache) {
+                sharedParaCache = { props: {}, colors: {} };
+                splitRunByStoryChars._paraPropsCache[paraCacheKey] = sharedParaCache;
+                splitRunByStoryChars._paraPropsCacheKeys.push(paraCacheKey);
+                if (splitRunByStoryChars._paraPropsCacheKeys.length > 256) {
+                    var oldKey = splitRunByStoryChars._paraPropsCacheKeys.shift();
+                    try { delete splitRunByStoryChars._paraPropsCache[oldKey]; } catch (eDeleteParaCache) {}
+                }
+            }
+        }
+        var propsCache = sharedParaCache ? sharedParaCache.props : {};
+        var colorCache = sharedParaCache ? sharedParaCache.colors : {};
         function getCharColor(absIdx) {
             if (colorCache[absIdx] !== undefined) return colorCache[absIdx];
             var color = null;
@@ -187,26 +229,44 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
         function getCharProps(absIdx) {
             if (propsCache[absIdx]) return propsCache[absIdx];
             var color = null, size = null, font = null, style = null;
+            var baselineShift = null, position = null, charStyle = null;
             color = getCharColor(absIdx);
             try { size = para.characters[absIdx].pointSize; } catch (e) {}
             try { font = para.characters[absIdx].appliedFont.fontFamily; } catch (e) {}
             try { style = para.characters[absIdx].fontStyle; } catch (e) {}
+            try { baselineShift = para.characters[absIdx].baselineShift; } catch (e) {}
+            try { position = para.characters[absIdx].position ? para.characters[absIdx].position.toString() : null; } catch (e) {}
+            try { charStyle = para.characters[absIdx].appliedCharacterStyle ? para.characters[absIdx].appliedCharacterStyle.name : null; } catch (e) {}
             // GREP 스타일로 적용된 이탤릭 감지: fontStyle이 숫자(가변 폰트 웨이트)인데
             // appliedCharacterStyle에 "이탤릭" 또는 "Italic"이 포함되면 fontStyle을 "Italic"으로 보정
             if (style && /^\d+$/.test(style)) {
                 try {
-                    var csName = para.characters[absIdx].appliedCharacterStyle.name;
+                    var csName = charStyle;
                     if (csName && (csName.indexOf("이탤릭") >= 0 || csName.toLowerCase().indexOf("italic") >= 0)) {
                         style = "Italic";
                     }
                 } catch (e2) {}
             }
-            var p = { color: color, size: size, font: font, style: style };
+            var p = {
+                color: color,
+                size: size,
+                font: font,
+                style: style,
+                baselineShift: baselineShift,
+                position: position,
+                charStyle: charStyle
+            };
             propsCache[absIdx] = p;
             return p;
         }
         function propsEqual(a, b) {
-            return a.color === b.color && a.size === b.size && a.font === b.font && a.style === b.style;
+            return a.color === b.color
+                    && a.size === b.size
+                    && a.font === b.font
+                    && a.style === b.style
+                    && a.baselineShift === b.baselineShift
+                    && a.position === b.position
+                    && a.charStyle === b.charStyle;
         }
         function addBoundary(boundaries, offset) {
             if (offset <= 0 || offset >= rngLen) return;
@@ -259,6 +319,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                     if (propsForBuild.size) builtRun.fontSize = propsForBuild.size;
                     if (propsForBuild.font) builtRun.fontFamily = propsForBuild.font;
                     if (propsForBuild.style) builtRun.fontStyle = propsForBuild.style;
+                    builtRun.baselineShift = propsForBuild.baselineShift;
+                    builtRun.position = propsForBuild.position;
+                    builtRun.charStyle = propsForBuild.charStyle;
                     builtRuns.push(builtRun);
                 }
             }
@@ -273,6 +336,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
             if (firstProps.size) runData.fontSize = firstProps.size;
             if (firstProps.font) runData.fontFamily = firstProps.font;
             if (firstProps.style) runData.fontStyle = firstProps.style;
+            runData.baselineShift = firstProps.baselineShift;
+            runData.position = firstProps.position;
+            runData.charStyle = firstProps.charStyle;
             return [runData];
         }
         var allSame = false;
@@ -328,6 +394,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                 if (firstProps.size) runData.fontSize = firstProps.size;
                 if (firstProps.font) runData.fontFamily = firstProps.font;
                 if (firstProps.style) runData.fontStyle = firstProps.style;
+                runData.baselineShift = firstProps.baselineShift;
+                runData.position = firstProps.position;
+                runData.charStyle = firstProps.charStyle;
                 return [runData];
             }
             var sampleMismatch = false;
@@ -351,6 +420,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                 if (firstProps.size) runData.fontSize = firstProps.size;
                 if (firstProps.font) runData.fontFamily = firstProps.font;
                 if (firstProps.style) runData.fontStyle = firstProps.style;
+                runData.baselineShift = firstProps.baselineShift;
+                runData.position = firstProps.position;
+                runData.charStyle = firstProps.charStyle;
                 return [runData];
             }
         }
@@ -363,6 +435,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
             if (firstProps.size) runData.fontSize = firstProps.size;
             if (firstProps.font) runData.fontFamily = firstProps.font;
             if (firstProps.style) runData.fontStyle = firstProps.style;
+            runData.baselineShift = firstProps.baselineShift;
+            runData.position = firstProps.position;
+            runData.charStyle = firstProps.charStyle;
             return [runData];
         }
 
@@ -427,6 +502,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
                 if (segProps.size) splitRun.fontSize = segProps.size;
                 if (segProps.font) splitRun.fontFamily = segProps.font;
                 if (segProps.style) splitRun.fontStyle = segProps.style;
+                splitRun.baselineShift = segProps.baselineShift;
+                splitRun.position = segProps.position;
+                splitRun.charStyle = segProps.charStyle;
                 result.push(splitRun);
             }
         }
@@ -571,9 +649,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
         }
         collected++;
         collectStats.stories++;
-        if (collected % 10 === 0) {
-            writeProgress(outputDir, "resolved_stories", collected, totalStories);
-        }
+        writeProgress(outputDir, "resolved_stories", collected, totalStories,
+                "story=" + story.id);
         var storyData = {
             id: story.id.toString(),
             length: story.length,
@@ -600,6 +677,10 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
             var para = paras[p];
             var correctionDescriptor = paragraphCharacterCorrectionDescriptorCached(para);
             var needsCharacterCorrection = !!(correctionDescriptor && correctionDescriptor.needs);
+            if ((p % 25) === 0) {
+                writeProgress(outputDir, "resolved_stories", collected, totalStories,
+                        "story=" + story.id + " para=" + (p + 1) + "/" + paraLimit);
+            }
             collectStats.paragraphs++;
             var paraStyleNameForStats = "[Unknown]";
             try { paraStyleNameForStats = para.appliedParagraphStyle.name; } catch (eStyleStatsName) {}
@@ -629,11 +710,16 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                 shadingOn: false,
                 shadingColor: null,
                 shadingTint: null,
+                generatedPrefixText: null,
                 tabStops: [],
                 runs: []
             };
 
             paraData.styleName = paraStyleNameForStats;
+            var generatedPrefix = paragraphGeneratedPrefixText(para);
+            if (generatedPrefix) {
+                paraData.generatedPrefixText = generatedPrefix;
+            }
             try { paraData.leading = para.leading; } catch (e) {}
             try { paraData.autoLeading = para.autoLeading; } catch (e) {}
             try { paraData.justification = para.justification.toString(); } catch (e) {}
@@ -731,7 +817,9 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                     try { runData.fontStyle = rng.fontStyle; } catch (e) {}
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
-                    if (needsCharacterCorrection) {
+                    var shouldRunCorrection = needsCharacterCorrection
+                            && correctionDescriptorNeedsRunScan(correctionDescriptor, runData.text || "");
+                    if (shouldRunCorrection) {
                         // GREP/Nested 스타일 색상 감지: 첫 번째 비제어 문자의 fillColor 확인
                         // textStyleRanges는 GREP 색상을 반영하지 않으므로 characters로 보정
                         try {
@@ -758,7 +846,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                     try { runData.strikeThru = rng.strikeThru; } catch (e) {}
 
                     // U+FFFC(인라인 마커) + U+0016(블록 앵커 마커) 분리
-                    // SPEC-020: InDesign이 사용자 정의 위치/Above-Line 앵커에는 \x16 을 쓰는데
+                    // inline anchor source policy: InDesign이 사용자 정의 위치/Above-Line 앵커에는 \x16 을 쓰는데
                     // 기존 로직은 \uFFFC 만 인식해서 모든 \x16 앵커가 누락됐다.
                     var runText = runData.text || "";
                     if (runText.indexOf("\uFFFC") >= 0 || runText.indexOf("\u0016") >= 0) {
@@ -775,7 +863,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                         if (anchItems.length > 0) {
                                             anchoredIds.push({
                                                 id: anchItems[0].id,
-                                                storyAnchorPlacement: _storyAnchorPlacementForItem(doc, anchItems[0], story)
+                                                storyAnchorPlacement: _storyAnchorPlacementForItem(doc, anchItems[0], story),
+                                                storyTextInlineSlot: true
                                             });
                                         } else {
                                             anchoredIds.push({ id: null, storyAnchorPlacement: null });
@@ -791,12 +880,12 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
 	                                var partRun = {};
 	                                for (var rk in runData) { partRun[rk] = runData[rk]; }
 	                                partRun.text = parts[pi2];
-                                if (needsCharacterCorrection) {
+                                if (shouldRunCorrection) {
                                     collectStats.splitCalls++;
                                     collectStats.splitCorrectionCalls++;
                                     collectStats.splitInputChars += partRun.text ? partRun.text.length : 0;
                                     var splitStartMs1 = (new Date()).getTime();
-	                                    var partSplits = splitRunByStoryChars(story, rng, partRun, para, needsCharacterCorrection, correctionDescriptor);
+	                                    var partSplits = splitRunByStoryChars(story, rng, partRun, para, shouldRunCorrection, correctionDescriptor);
                                     collectStats.splitMs += (new Date()).getTime() - splitStartMs1;
                                     collectStats.splitOutputRuns += partSplits.length;
                                     if (collectStats.correctionStyles[paraStyleNameForStats]) {
@@ -819,7 +908,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                             if (pi2 < parts.length - 1) {
                                 var anchorRecord = anchorIdx < anchoredIds.length ? anchoredIds[anchorIdx] : null;
                                 if (anchorRecord && anchorRecord.id !== null && anchorRecord.id !== undefined
-                                        && anchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED") {
+                                        && (anchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED"
+                                            || anchorRecord.storyTextInlineSlot === true)) {
                                     paraData.runs.push({
                                         type: "inline_anchor",
                                         anchoredObjectId: anchorRecord.id,
@@ -831,12 +921,12 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                         }
 	                    } else {
 	                        // GREP/중첩 스타일 보정: story.characters로 문자별 색상/크기 확인
-                        if (needsCharacterCorrection) {
+                        if (shouldRunCorrection) {
                             collectStats.splitCalls++;
                             collectStats.splitCorrectionCalls++;
                             collectStats.splitInputChars += runData.text ? runData.text.length : 0;
                             var splitStartMs2 = (new Date()).getTime();
-	                            var splitRuns = splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrection, correctionDescriptor);
+	                            var splitRuns = splitRunByStoryChars(story, rng, runData, para, shouldRunCorrection, correctionDescriptor);
                             collectStats.splitMs += (new Date()).getTime() - splitStartMs2;
                             collectStats.splitOutputRuns += splitRuns.length;
                             if (collectStats.correctionStyles[paraStyleNameForStats]) {
@@ -961,9 +1051,108 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                         // 셀 내 단락 수집
                         try {
                             var cellParas = cell.paragraphs.everyItem().getElements();
+                            var previousCellParagraphLastAnchorId = null;
+                            function cellRunHasMeaningfulTextForBoundaryDedupe(run) {
+                                var text = "";
+                                try {
+                                    if (run && run.text) {
+                                        text = String(run.text);
+                                    }
+                                } catch (eText) {}
+                                if (!text) {
+                                    return false;
+                                }
+                                text = text.replace(/[\uFFFC\u0016\r\n\t\b\u00A0\u2000-\u200B\uFEFF ]/g, "");
+                                return text.length > 0;
+                            }
+                            function cellRunsHaveMeaningfulTextForBoundaryDedupe(runs) {
+                                if (!runs) {
+                                    return false;
+                                }
+                                for (var dr = 0; dr < runs.length; dr++) {
+                                    if (runs[dr] && runs[dr].type !== "inline_anchor"
+                                            && cellRunHasMeaningfulTextForBoundaryDedupe(runs[dr])) {
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }
+                            function lastInlineAnchorIdForBoundaryDedupe(runs) {
+                                if (!runs) {
+                                    return null;
+                                }
+                                for (var lr = runs.length - 1; lr >= 0; lr--) {
+                                    if (runs[lr] && runs[lr].type === "inline_anchor"
+                                            && runs[lr].anchoredObjectId !== null
+                                            && runs[lr].anchoredObjectId !== undefined) {
+                                        return runs[lr].anchoredObjectId;
+                                    }
+                                }
+                                return null;
+                            }
+                            function shouldAppendCellInlineAnchorForBoundaryDedupe(cpData, anchorId, prevParagraphLastAnchorId) {
+                                if (anchorId === null || anchorId === undefined) {
+                                    return false;
+                                }
+                                var runs = cpData && cpData.runs ? cpData.runs : [];
+                                if (runs.length > 0) {
+                                    var lastRun = runs[runs.length - 1];
+                                    if (lastRun && lastRun.type === "inline_anchor"
+                                            && String(lastRun.anchoredObjectId) === String(anchorId)) {
+                                        return false;
+                                    }
+                                }
+                                if (!cellRunsHaveMeaningfulTextForBoundaryDedupe(runs)
+                                        && prevParagraphLastAnchorId !== null
+                                        && prevParagraphLastAnchorId !== undefined
+                                        && String(prevParagraphLastAnchorId) === String(anchorId)) {
+                                    return false;
+                                }
+                                return true;
+                            }
+                            function truncateCellParagraphRunsAtFirstHardReturn(runs) {
+                                if (!runs || runs.length === 0) {
+                                    return runs || [];
+                                }
+                                var out = [];
+                                for (var tr = 0; tr < runs.length; tr++) {
+                                    var run = runs[tr];
+                                    if (!run || run.type === "inline_anchor") {
+                                        out.push(run);
+                                        continue;
+                                    }
+                                    var text = "";
+                                    try {
+                                        text = run.text !== null && run.text !== undefined
+                                                ? String(run.text)
+                                                : "";
+                                    } catch (eText) {
+                                        text = "";
+                                    }
+                                    var hardReturn = text.indexOf("\r");
+                                    if (hardReturn < 0) {
+                                        out.push(run);
+                                        continue;
+                                    }
+                                    var copy = {};
+                                    for (var key in run) {
+                                        copy[key] = run[key];
+                                    }
+                                    copy.text = text.substring(0, hardReturn + 1);
+                                    if (copy.text.length > 0) {
+                                        out.push(copy);
+                                    }
+                                    return out;
+                                }
+                                return out;
+                            }
                             for (var cp = 0; cp < cellParas.length; cp++) {
                                 var cellPara = cellParas[cp];
                                 var cpData = { runs: [] };
+                                var cellGeneratedPrefix = paragraphGeneratedPrefixText(cellPara);
+                                if (cellGeneratedPrefix) {
+                                    cpData.generatedPrefixText = cellGeneratedPrefix;
+                                }
                                 try {
                                     var cellTSRs = cellPara.textStyleRanges.everyItem().getElements();
                                     for (var cr = 0; cr < cellTSRs.length; cr++) {
@@ -978,7 +1167,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                                 runData.fillColor = cellRng.fillColor.name;
                                             }
                                         } catch (er) {}
-                                        // SPEC-020: 셀 런도 inline anchor 마커(\uFFFC/\u0016) 분리
+                                        // inline anchor source policy: 셀 런도 inline anchor 마커(\uFFFC/\u0016) 분리
                                         var cellRunText = runData.text || "";
                                         if (cellRunText.indexOf("\uFFFC") >= 0 || cellRunText.indexOf("\u0016") >= 0) {
                                             var cellParts = cellRunText.split(/[\uFFFC\u0016]/);
@@ -993,7 +1182,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                                             if (crcAnch.length > 0) {
                                                                 cellAnchoredIds.push({
                                                                     id: crcAnch[0].id,
-                                                                    storyAnchorPlacement: _storyAnchorPlacementForItem(doc, crcAnch[0], story)
+                                                                    storyAnchorPlacement: _storyAnchorPlacementForItem(doc, crcAnch[0], story),
+                                                                    storyTextInlineSlot: true
                                                                 });
                                                             } else {
                                                                 cellAnchoredIds.push({ id: null, storyAnchorPlacement: null });
@@ -1013,7 +1203,13 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                                 if (cpi < cellParts.length - 1) {
                                                     var cellAnchorRecord = cellAnchorIdx < cellAnchoredIds.length ? cellAnchoredIds[cellAnchorIdx] : null;
                                                     if (cellAnchorRecord && cellAnchorRecord.id !== null && cellAnchorRecord.id !== undefined
-                                                            && cellAnchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED") {
+                                                            && (cellAnchorRecord.storyAnchorPlacement !== "FLOATING_ANCHORED"
+                                                                || cellAnchorRecord.storyTextInlineSlot === true)
+                                                            && shouldAppendCellInlineAnchorForBoundaryDedupe(
+                                                                cpData,
+                                                                cellAnchorRecord.id,
+                                                                previousCellParagraphLastAnchorId
+                                                            )) {
                                                         cpData.runs.push({
                                                             type: "inline_anchor",
                                                             anchoredObjectId: cellAnchorRecord.id,
@@ -1028,10 +1224,12 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                         }
                                     }
                                 } catch (ec2) {}
+                                cpData.runs = truncateCellParagraphRunsAtFirstHardReturn(cpData.runs);
+                                previousCellParagraphLastAnchorId = lastInlineAnchorIdForBoundaryDedupe(cpData.runs);
                                 cellData.paragraphs.push(cpData);
                             }
                         } catch (ec3) {}
-                        // SPEC-020: 셀 텍스트에 anchor 마커가 없어도 (IDML에 <Content>가 없고
+                        // inline anchor source policy: 셀 텍스트에 anchor 마커가 없어도 (IDML에 <Content>가 없고
                         // Group이 CharacterStyleRange에 직접 임베드된 경우) cell.allPageItems
                         // 로 fallback. 이미 paragraphs 에서 잡힌 anchor ID는 건너뛴다.
                         try {
@@ -1221,7 +1419,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
             try { fData.cornerRadius = tf.topLeftCornerRadius; } catch (e) {}
             _copyLayerInfo(fData, tf);
 
-            // SPEC-025: 진단/분류 정보 (텍스트 이미지 렌더링 제거 작업용)
+            // source ownership policy: 진단/분류 정보 (텍스트 이미지 렌더링 제거 작업용)
             // SPEC-030: classification 제거 (Java 신 파이프라인 미사용)
             try { fData.isMasterPageItem = !!tf.masterPageItem; } catch (e) { fData.isMasterPageItem = false; }
             try { fData.nonprinting = !!tf.nonprinting; } catch (e) { fData.nonprinting = false; }
@@ -1257,8 +1455,18 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
             } catch (e) {}
 
             // NEW: page-relative bounds (페이지 bounds 차감)
+            // parentPage is often null for TextFrames nested in Groups. Resolve
+            // the owning page from visible geometry so PAGE coordinate plans do
+            // not leak spread coordinates into HWPX placement.
             try {
-                var tfPage = tf.parentPage;
+                var tfPage = null;
+                try {
+                    tfPage = (typeof _resolveParentPage === "function")
+                            ? _resolveParentPage(tf, doc)
+                            : tf.parentPage;
+                } catch (eResolveParentPage) {
+                    try { tfPage = tf.parentPage; } catch (eParentPage) {}
+                }
                 if (tfPage) {
                     var pageBounds = tfPage.bounds;
                     fData.pageIndex = tfPage.documentOffset;
@@ -1331,7 +1539,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
 }
 
 /**
- * SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화한다.
+ * source ownership policy Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화한다.
  *
  * 각 master TextFrame 에 대해:
  * 1. 적용된 doc page 마다 clone TextFrame entry 추가 (synthetic id+storyId)

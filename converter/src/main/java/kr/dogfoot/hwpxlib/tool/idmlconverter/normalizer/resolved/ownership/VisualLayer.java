@@ -1,6 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 
-/** SPEC-035: HWPX 배치 평면까지 고려한 visual 역할. */
+/** Source ownership policy: visual role including the HWPX placement plane. */
 public enum VisualLayer {
     PAGE_BACKGROUND,
     CONTAINER_BACKDROP,

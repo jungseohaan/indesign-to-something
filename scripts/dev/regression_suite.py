@@ -109,8 +109,10 @@ def run_regression(
     fail_legacy_filters: bool,
 ) -> Dict[str, Any]:
     regression = load_regression_module()
+    extraction_policy = regression.extraction_policy_report(extract_dir)
     audit = regression.load_audit_module().build_report(extract_dir)
-    failures = regression.blocking_failures(audit, strict_warnings)
+    failures = regression.extraction_policy_failures(extraction_policy)
+    failures.extend(regression.blocking_failures(audit, strict_warnings))
     warnings = regression.warning_findings(audit)
     legacy_summary = legacy_normalization_summary(extract_dir)
     legacy_count = legacy_filtered_count(legacy_summary)
@@ -128,6 +130,7 @@ def run_regression(
         "generatedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
         "blockingFailures": failures,
         "warnings": warnings,
+        "extractionPolicy": extraction_policy,
         "legacyNormalizationFilterSummary": legacy_summary,
         "audit": audit,
     }

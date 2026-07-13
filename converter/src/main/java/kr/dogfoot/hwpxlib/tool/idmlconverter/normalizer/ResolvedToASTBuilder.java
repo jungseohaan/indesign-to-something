@@ -10,7 +10,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePla
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_5.BulletInserter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanValidator;
@@ -18,7 +17,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Ancho
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SideHeadFlowPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
@@ -187,7 +185,6 @@ public class ResolvedToASTBuilder {
         }
 
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.validate.ownershipPlan")) {
-            removeStage1OwnershipInvariantWarnings();
             OwnershipPlanValidator.validate(this.ctx);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.validate.writeDecisionLogs")) {
@@ -200,20 +197,6 @@ public class ResolvedToASTBuilder {
         } finally {
             totalScope.close();
         }
-    }
-
-    private void removeStage1OwnershipInvariantWarnings() {
-        if (ctx == null || ctx.ownershipWarningLines == null || ctx.ownershipWarningLines.isEmpty()) {
-            return;
-        }
-        ctx.ownershipWarningLines.removeIf(line ->
-                line != null
-                        && (line.contains("\"code\":\"DUPLICATE_VISIBLE_SOURCE\"")
-                        || line.contains("\"code\":\"CONFLICTING_TEXT_OWNER\"")
-                        || line.contains("\"code\":\"VISIBLE_VISUAL_CONTAINS_HWPX_TEXT_SOURCE\"")
-                        || line.contains("\"code\":\"INLINE_FLOATING_SAME_DOM\"")
-                        || line.contains("\"code\":\"DUPLICATE_VISIBLE_FILE_BOUNDS\"")
-                        || line.contains("\"code\":\"TEXT_SHELL_ZORDER_GE_TEXT\"")));
     }
 
     /**
@@ -244,15 +227,16 @@ public class ResolvedToASTBuilder {
     }
 
     /**
-     * Stage 1: SPEC-035 OwnershipPlanner 관찰 모드.
+     * Stage 1: source ownership policy ObjectPlan bridge.
      *
-     * <p>아직 legacy Phase 실행 결과를 바꾸지 않는다. ObjectPlan과 invariant
-     * warning만 기록해 현재 정책 충돌을 눈으로 추적할 수 있게 한다.</p>
+     * <p>추출기가 선언한 ObjectPlan을 먼저 import한 뒤, 아직 Java로 남아 있는
+     * legacy ownership bridge가 text/table 실행에 필요한 보조 plan을 보강한다.
+     * 장기 목표는 이 보강 로직을 Stage 1 추출 ObjectPlan으로 이동하고 Java
+     * OwnershipPlanner를 validate/write-only 단계로 줄이는 것이다.</p>
      */
     private void planOwnership() {
         importPlannerDeclaredObjectPlans();
         AnchoredTablePlanner.plan(this.ctx);
-        SideHeadFlowPlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
         OwnershipPlanner.runObservation(this.ctx);
         if (this.resolvedData != null) {
@@ -271,15 +255,37 @@ public class ResolvedToASTBuilder {
                     ? root.getAsJsonArray("objectPlans")
                     : null;
             if (plans == null) return;
+            Map<String, int[]> sourceSetRefs = objectPlanSourceSetRefs(root);
+            Map<String, RenderedGroup> renderedByObjectPlanId = renderedGroupsByObjectPlanId();
             Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
             Map<String, RenderedGroup> renderedByPageAndId = renderedGroupsByPageAndId();
+            Set<String> dropClipParentSourceSetCandidateIds = clipParentSourceSetDropCandidateIds(plans);
             int imported = 0;
             for (JsonElement element : plans) {
                 if (element == null || !element.isJsonObject()) continue;
                 JsonObject planJson = element.getAsJsonObject();
+                String importContractIssue = plannerDeclaredImportContractIssue(planJson);
+                if (importContractIssue != null) {
+                    warnPlannerDeclaredImportSkipped(planJson, importContractIssue);
+                    continue;
+                }
                 ObjectPlan plan = layoutOnlyInlineSlotPlanFromJson(planJson);
                 if (plan == null) {
-                    plan = renderedObjectPlanFromJson(planJson, renderedByCandidateId, renderedByPageAndId);
+                    plan = textOnlyObjectPlanFromJson(planJson);
+                }
+                if (plan == null) {
+                    plan = tableTextObjectPlanFromJson(planJson);
+                }
+                if (plan == null) {
+                    String materialIssue = plannerDeclaredRenderedMaterialIssue(
+                            planJson, renderedByObjectPlanId, renderedByCandidateId, renderedByPageAndId,
+                            dropClipParentSourceSetCandidateIds);
+                    if (materialIssue != null) {
+                        warnPlannerDeclaredImportSkipped(planJson, materialIssue);
+                        continue;
+                    }
+                    plan = renderedObjectPlanFromJson(planJson, renderedByObjectPlanId, renderedByCandidateId,
+                            renderedByPageAndId, dropClipParentSourceSetCandidateIds, sourceSetRefs);
                 }
                 if (plan == null) {
                     plan = nativeVectorShapePlanFromJson(planJson);
@@ -288,6 +294,7 @@ public class ResolvedToASTBuilder {
                 ctx.addOwnershipPlan(plan);
                 imported++;
             }
+            reportClosedInlineCarrierFlowTextPlanMismatches();
             if (imported > 0) {
                 System.err.println("[ResolvedToASTBuilder] imported planner-declared object plans=" + imported);
             }
@@ -297,13 +304,260 @@ public class ResolvedToASTBuilder {
         }
     }
 
+    private void warnPlannerDeclaredImportSkipped(JsonObject planJson, String issue) {
+        if (ctx == null || ctx.ownershipWarningLines == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_PLANNER_DECLARED_OBJECT_PLAN_IMPORT_CONTRACT_INVALID\""
+                + ",\"stage\":\"stage1\",\"detail\":\"objectPlan="
+                + ObjectPlan.escape(jsonString(planJson, "objectPlanId"))
+                + " candidateId=" + ObjectPlan.escape(jsonString(planJson, "candidateId"))
+                + " passId=" + ObjectPlan.escape(jsonString(planJson, "passId"))
+                + " issue=" + ObjectPlan.escape(issue) + "\"}");
+    }
+
+    private static String plannerDeclaredImportContractIssue(JsonObject o) {
+        if (!isPlannerDeclaredImportCandidate(o)) return null;
+        String[] required = {
+                "textAction",
+                "visualAction",
+                "materialization",
+                "placement",
+                "coordinateSpace",
+                "visualLayer"
+        };
+        for (String key : required) {
+            String value = jsonString(o, key);
+            if (value == null || value.isEmpty()) {
+                return "missing_" + key;
+            }
+        }
+        if (strictEnumValue(TextAction.class, jsonString(o, "textAction")) == null) return "invalid_textAction";
+        if (strictEnumValue(VisualAction.class, jsonString(o, "visualAction")) == null) return "invalid_visualAction";
+        if (strictEnumValue(Materialization.class, jsonString(o, "materialization")) == null) return "invalid_materialization";
+        if (strictEnumValue(Placement.class, jsonString(o, "placement")) == null) return "invalid_placement";
+        if (strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace")) == null) return "invalid_coordinateSpace";
+        if (strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer")) == null) return "invalid_visualLayer";
+        return null;
+    }
+
+    private static boolean isPlannerDeclaredImportCandidate(JsonObject o) {
+        if (o == null) return false;
+        String passId = jsonString(o, "passId");
+        if ("pass.editable_text_frames".equals(passId)
+                || "pass.visible_text_frames".equals(passId)
+                || "pass.empty_editable_text_frames".equals(passId)
+                || "pass.textframe_cleanup".equals(passId)
+                || "pass.table_only_text_frames".equals(passId)
+                || "pass.vector_shape_frames".equals(passId)) {
+            return true;
+        }
+        if (jsonBoolean(o, "layoutOnlyInlineSlot", false)) return true;
+        if ("READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))) return true;
+        if ("clip_parent_source_set".equals(jsonString(o, "compositeRole"))) return true;
+        return isPlannerDeclaredTextShellImport(o) || isPlannerDeclaredStyleOnlyImport(o);
+    }
+
+    private static String plannerDeclaredRenderedMaterialIssue(
+            JsonObject o,
+            Map<String, RenderedGroup> renderedByObjectPlanId,
+            Map<String, RenderedGroup> renderedByCandidateId,
+            Map<String, RenderedGroup> renderedByPageAndId,
+            Set<String> dropClipParentSourceSetCandidateIds) {
+        if (!requiresPlannerDeclaredRenderedMaterial(o, dropClipParentSourceSetCandidateIds)) return null;
+        RenderedGroup rg = exactRenderedGroupForPlan(
+                o, renderedByObjectPlanId, renderedByCandidateId, renderedByPageAndId);
+        if (rg == null) return "missing_exact_rendered_material";
+        if (rg.file() == null || rg.file().isEmpty()) return "missing_rendered_material_file";
+        return null;
+    }
+
+    private static boolean requiresPlannerDeclaredRenderedMaterial(
+            JsonObject o,
+            Set<String> dropClipParentSourceSetCandidateIds) {
+        if (o == null) return false;
+        if (isPlannerDeclaredStyleOnlyImport(o)) return false;
+        if ("clip_parent_source_set".equals(jsonString(o, "compositeRole"))
+                && dropClipParentSourceSetCandidateIds != null
+                && dropClipParentSourceSetCandidateIds.contains(jsonString(o, "candidateId"))) {
+            return false;
+        }
+        if ("pass.vector_shape_frames".equals(jsonString(o, "passId"))
+                && "NATIVE_SOURCE_SHAPE".equals(jsonString(o, "materialization"))) {
+            return false;
+        }
+        String visualAction = jsonString(o, "visualAction");
+        if ("ABSORB_TEXT_STYLE".equals(visualAction) || "PLACE_TABLE_STYLE".equals(visualAction)) return false;
+        if ("DROP_VISUAL".equals(visualAction)
+                && !"clip_parent_source_set".equals(jsonString(o, "compositeRole"))) {
+            return false;
+        }
+        return "READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))
+                || isPlannerDeclaredTextShellImport(o)
+                || "clip_parent_source_set".equals(jsonString(o, "compositeRole"));
+    }
+
+    private void reportClosedInlineCarrierFlowTextPlanMismatches() {
+        if (ctx == null || ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()
+                || resolvedData == null) {
+            return;
+        }
+        Set<Integer> flowTextFrameIds = closedInlineCarrierFlowTextFrameIds();
+        if (flowTextFrameIds.isEmpty()) return;
+        for (int i = 0; i < ctx.ownershipPlans.size(); i++) {
+            ObjectPlan plan = ctx.ownershipPlans.get(i);
+            if (!isFloatingHwpxTextPlan(plan)) continue;
+            if (!containsAny(plan.ownedTextFrameIds, flowTextFrameIds)
+                    && !flowTextFrameIds.contains(plan.domId)) {
+                continue;
+            }
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_IMPORTED_PLAN_INLINE_FLOW_TEXT_PLACEMENT_MISMATCH\""
+                    + ",\"stage\":\"stage1\",\"detail\":\"plan="
+                    + ObjectPlan.escape(plan.kind + ":" + plan.domId)
+                    + " placement=" + ObjectPlan.escape(String.valueOf(plan.placement))
+                    + " coordinateSpace=" + ObjectPlan.escape(String.valueOf(plan.coordinateSpace))
+                    + " expectedPlacement=INLINE expectedCoordinateSpace=STORY_FLOW\"}");
+        }
+    }
+
+    private Set<Integer> closedInlineCarrierFlowTextFrameIds() {
+        Set<Integer> out = new HashSet<>();
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null
+                    || plan.placement != Placement.INLINE
+                    || plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    || !plan.inlineSourceTreeClosed) {
+                continue;
+            }
+            if (plan.inlineFlowSourceObjectIds == null || plan.inlineFlowSourceObjectIds.length == 0) {
+                if (plan.hiddenVisualSourceObjectIds != null && plan.hiddenVisualSourceObjectIds.length > 0) {
+                    ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_CLOSED_INLINE_CARRIER_FLOW_ORDER_MISSING\""
+                            + ",\"stage\":\"stage1\",\"detail\":\"plan="
+                            + ObjectPlan.escape(plan.kind + ":" + plan.domId)
+                            + " has hiddenVisualSourceObjectIds but no inlineFlowSourceObjectIds\"}");
+                }
+                continue;
+            }
+            for (int sourceId : plan.inlineFlowSourceObjectIds) {
+                if (!contains(plan.hiddenVisualSourceObjectIds, sourceId)) continue;
+                ResolvedTextFrame tf = resolvedData.getTextFrame(String.valueOf(sourceId));
+                if (tf == null || tf.sourceHidden()) continue;
+                if (ctx.ownershipPlanPlacesInlineHwpxText(sourceId)) {
+                    out.add(sourceId);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static boolean isFloatingHwpxTextPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.DROP_VISUAL
+                && plan.materialization == Materialization.HWPX_TEXT
+                && plan.placement == Placement.FLOATING;
+    }
+
+    private static boolean containsAny(int[] ids, Set<Integer> candidates) {
+        if (ids == null || candidates == null || candidates.isEmpty()) return false;
+        for (int id : ids) {
+            if (candidates.contains(id)) return true;
+        }
+        return false;
+    }
+
+    private static boolean contains(int[] values, int target) {
+        if (values == null || values.length == 0) return false;
+        for (int value : values) {
+            if (value == target) return true;
+        }
+        return false;
+    }
+
+    private static Set<String> clipParentSourceSetDropCandidateIds(JsonArray plans) {
+        Set<String> out = new HashSet<>();
+        if (plans == null) return out;
+        List<JsonObject> objects = new ArrayList<>();
+        for (JsonElement element : plans) {
+            if (element != null && element.isJsonObject()) {
+                objects.add(element.getAsJsonObject());
+            }
+        }
+        for (JsonObject clip : objects) {
+            if (!"clip_parent_source_set".equals(jsonString(clip, "compositeRole"))) continue;
+            String candidateId = jsonString(clip, "candidateId");
+            if (candidateId == null || candidateId.isBlank()) continue;
+            int[] clipSources = jsonIntArray(clip, "sourceObjectIds");
+            if (clipSources.length == 0) continue;
+            int clipPage = jsonInt(clip, "pageIndex", -1);
+            if (clipPage < 0) continue;
+
+            Integer nearestDelta = null;
+            for (JsonObject carrier : objects) {
+                if (carrier == clip) continue;
+                if (!isDirectChildTextShellCarrierObjectPlan(carrier)) continue;
+                int carrierPage = jsonInt(carrier, "pageIndex", -1);
+                if (carrierPage < 0) continue;
+                int[] carrierSources = jsonIntArray(carrier, "sourceObjectIds");
+                if (carrierSources.length <= clipSources.length) continue;
+                if (!containsAll(carrierSources, clipSources)) continue;
+                int delta = carrierPage - clipPage;
+                if (nearestDelta == null
+                        || Math.abs(delta) < Math.abs(nearestDelta)
+                        || (Math.abs(delta) == Math.abs(nearestDelta) && delta > nearestDelta)) {
+                    nearestDelta = delta;
+                }
+            }
+
+            if (nearestDelta != null && nearestDelta >= 0) {
+                out.add(candidateId);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isDirectChildTextShellCarrierObjectPlan(JsonObject o) {
+        if (o == null) return false;
+        if (!"direct_child_shell_slot".equals(jsonString(o, "slotRole"))) return false;
+        if (!"PLACE_TEXT_SHELL".equals(jsonString(o, "visualAction"))) return false;
+        if (jsonIntArray(o, "ownedTextFrameIds").length == 0) return false;
+        String contractStatus = jsonString(o, "contractStatus");
+        return "READY_FOR_STAGE1_IMPORT".equals(contractStatus)
+                || isPlannerDeclaredTextShellImport(o);
+    }
+
+    private static boolean containsAll(int[] values, int[] candidates) {
+        if (candidates == null || candidates.length == 0) return true;
+        if (values == null || values.length == 0) return false;
+        for (int candidate : candidates) {
+            boolean found = false;
+            for (int value : values) {
+                if (value == candidate) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return false;
+        }
+        return true;
+    }
+
     private Map<String, RenderedGroup> renderedGroupsByCandidateId() {
         Map<String, RenderedGroup> out = new HashMap<>();
+        Set<String> ambiguous = new HashSet<>();
         if (resolvedData == null) return out;
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedFloatingItems());
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedGraphicFrames());
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedImageFrames());
-        indexRenderedGroupsByCandidateId(out, resolvedData.allRenderedPdfFrames());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedFloatingItems());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedGraphicFrames());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedImageFrames());
+        indexRenderedGroupsByCandidateId(out, ambiguous, resolvedData.allRenderedPdfFrames());
+        return out;
+    }
+
+    private Map<String, RenderedGroup> renderedGroupsByObjectPlanId() {
+        Map<String, RenderedGroup> out = new HashMap<>();
+        if (resolvedData == null) return out;
+        indexRenderedGroupsByObjectPlanId(out, resolvedData.allRenderedFloatingItems());
+        indexRenderedGroupsByObjectPlanId(out, resolvedData.allRenderedGraphicFrames());
+        indexRenderedGroupsByObjectPlanId(out, resolvedData.allRenderedImageFrames());
+        indexRenderedGroupsByObjectPlanId(out, resolvedData.allRenderedPdfFrames());
         return out;
     }
 
@@ -319,11 +573,52 @@ public class ResolvedToASTBuilder {
 
     private static void indexRenderedGroupsByCandidateId(
             Map<String, RenderedGroup> out,
+            Set<String> ambiguous,
+            Collection<RenderedGroup> renderedGroups) {
+        if (out == null || ambiguous == null || renderedGroups == null) return;
+        for (RenderedGroup rg : renderedGroups) {
+            if (rg == null || rg.candidateId() == null || rg.candidateId().isEmpty()) continue;
+            String candidateId = rg.candidateId();
+            if (ambiguous.contains(candidateId)) continue;
+            RenderedGroup existing = out.get(candidateId);
+            if (existing == null) {
+                out.put(candidateId, rg);
+                continue;
+            }
+            if (sameRenderedGroup(existing, rg)) continue;
+            out.remove(candidateId);
+            ambiguous.add(candidateId);
+        }
+    }
+
+    private static boolean sameRenderedGroup(RenderedGroup a, RenderedGroup b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        if (a.pageIndex() != b.pageIndex()) return false;
+        String aRenderUnitId = a.renderUnitId() != null ? a.renderUnitId() : "";
+        String bRenderUnitId = b.renderUnitId() != null ? b.renderUnitId() : "";
+        if (!aRenderUnitId.isEmpty() && aRenderUnitId.equals(bRenderUnitId)) return true;
+        String aSlotIdentity = a.renderUnitSlotIdentityKey() != null ? a.renderUnitSlotIdentityKey() : "";
+        String bSlotIdentity = b.renderUnitSlotIdentityKey() != null ? b.renderUnitSlotIdentityKey() : "";
+        if (!aSlotIdentity.isEmpty() && aSlotIdentity.equals(bSlotIdentity)) return true;
+        String aExportUnitId = a.exportUnitId() != null ? a.exportUnitId() : "";
+        String bExportUnitId = b.exportUnitId() != null ? b.exportUnitId() : "";
+        if (!aExportUnitId.isEmpty() && aExportUnitId.equals(bExportUnitId)) return true;
+        if (a.id() != b.id()) return false;
+        String aFile = a.file() != null ? a.file() : "";
+        String bFile = b.file() != null ? b.file() : "";
+        return aFile.equals(bFile);
+    }
+
+    private static void indexRenderedGroupsByObjectPlanId(
+            Map<String, RenderedGroup> out,
             Collection<RenderedGroup> renderedGroups) {
         if (out == null || renderedGroups == null) return;
         for (RenderedGroup rg : renderedGroups) {
-            if (rg == null || rg.candidateId() == null || rg.candidateId().isEmpty()) continue;
-            out.putIfAbsent(rg.candidateId(), rg);
+            if (rg == null) continue;
+            String objectPlanId = objectPlanIdFromRenderUnitId(rg.renderUnitId());
+            if (objectPlanId == null || objectPlanId.isEmpty()) continue;
+            out.putIfAbsent(objectPlanId, rg);
         }
     }
 
@@ -337,32 +632,144 @@ public class ResolvedToASTBuilder {
         }
     }
 
-    private static ObjectPlan renderedObjectPlanFromJson(
-            JsonObject o,
-            Map<String, RenderedGroup> renderedByCandidateId,
-            Map<String, RenderedGroup> renderedByPageAndId) {
+    private static ObjectPlan textOnlyObjectPlanFromJson(JsonObject o) {
         if (o == null) return null;
-        if (!"READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))
-                && !isPlannerDeclaredTextShellImport(o)) {
+        String passId = jsonString(o, "passId");
+        if (!"pass.editable_text_frames".equals(passId)
+                && !"pass.visible_text_frames".equals(passId)
+                && !"pass.empty_editable_text_frames".equals(passId)
+                && !"pass.textframe_cleanup".equals(passId)) {
             return null;
         }
-        String candidateId = jsonString(o, "candidateId");
-        RenderedGroup rg = candidateId != null && !candidateId.isEmpty() && renderedByCandidateId != null
-                ? renderedByCandidateId.get(candidateId)
-                : null;
-        if (rg == null && renderedByPageAndId != null) {
-            int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
-            int primarySourceId = jsonInt(o, "primarySourceObjectId",
-                    jsonInt(o, "domId", sourceIds.length > 0 ? sourceIds[0] : -1));
-            int pageIndex = jsonInt(o, "pageIndex", -1);
-            rg = renderedByPageAndId.get(renderedPageIdKey(pageIndex, primarySourceId));
+        String textAction = jsonString(o, "textAction");
+        if ("pass.textframe_cleanup".equals(passId)) {
+            if (!"DROP_TEXT".equals(textAction)) return null;
+        } else if (!"OWNED_BY_HWPX_TEXT".equals(textAction)) {
+            return null;
         }
+        if (!"DROP_VISUAL".equals(jsonString(o, "visualAction"))) return null;
+        if (!"HWPX_TEXT".equals(jsonString(o, "materialization"))) return null;
+        int[] ownedTextFrameIds = jsonIntArray(o, "ownedTextFrameIds");
+        if (ownedTextFrameIds.length == 0) return null;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) sourceIds = ownedTextFrameIds;
+        int domId = jsonInt(o, "primarySourceObjectId", ownedTextFrameIds[0]);
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0) return null;
+        TextAction textActionValue = strictEnumValue(TextAction.class, textAction);
+        VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
+        Placement placement = strictEnumValue(Placement.class, jsonString(o, "placement"));
+        CoordinateSpace coordinateSpace = strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"));
+        if (textActionValue == null || visualLayer == null || placement == null || coordinateSpace == null) {
+            return null;
+        }
+        return new ObjectPlan(
+                domId,
+                "planner_declared_text_frame:" + jsonString(o, "kind"),
+                pageIndex,
+                textActionValue,
+                VisualAction.DROP_VISUAL,
+                visualLayer,
+                placement,
+                null,
+                sourceIds,
+                jsonIntArray(o, "visualSourceObjectIds"),
+                jsonIntArray(o, "styleSourceObjectIds"),
+                ownedTextFrameIds,
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                Materialization.HWPX_TEXT,
+                coordinateSpace,
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                "planner_declared_text_frame",
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1));
+    }
+
+    private static ObjectPlan tableTextObjectPlanFromJson(JsonObject o) {
+        if (o == null) return null;
+        if (!"pass.table_only_text_frames".equals(jsonString(o, "passId"))) return null;
+        if (!"OWNED_BY_HWPX_TEXT".equals(jsonString(o, "textAction"))) return null;
+        if (!"DROP_VISUAL".equals(jsonString(o, "visualAction"))) return null;
+        if (!"HWPX_TEXT".equals(jsonString(o, "materialization"))) return null;
+        int[] ownedTextFrameIds = jsonIntArray(o, "ownedTextFrameIds");
+        if (ownedTextFrameIds.length == 0) return null;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) sourceIds = ownedTextFrameIds;
+        int domId = jsonInt(o, "primarySourceObjectId", ownedTextFrameIds[0]);
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0) return null;
+        VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
+        Placement placement = strictEnumValue(Placement.class, jsonString(o, "placement"));
+        CoordinateSpace coordinateSpace = strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"));
+        if (visualLayer == null || placement == null || coordinateSpace == null) return null;
+        return new ObjectPlan(
+                domId,
+                "text_frame:table_only",
+                pageIndex,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.DROP_VISUAL,
+                visualLayer,
+                placement,
+                null,
+                sourceIds,
+                jsonIntArray(o, "visualSourceObjectIds"),
+                jsonIntArray(o, "styleSourceObjectIds"),
+                ownedTextFrameIds,
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                Materialization.HWPX_TEXT,
+                coordinateSpace,
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                "planner_declared_table_text",
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1));
+    }
+
+    private ObjectPlan renderedObjectPlanFromJson(
+            JsonObject o,
+            Map<String, RenderedGroup> renderedByObjectPlanId,
+            Map<String, RenderedGroup> renderedByCandidateId,
+            Map<String, RenderedGroup> renderedByPageAndId,
+            Set<String> dropClipParentSourceSetCandidateIds,
+            Map<String, int[]> sourceSetRefs) {
+        if (o == null) return null;
+        boolean clipParentSourceSet = "clip_parent_source_set".equals(jsonString(o, "compositeRole"));
+        if (!"READY_FOR_STAGE1_IMPORT".equals(jsonString(o, "contractStatus"))
+                && !isPlannerDeclaredTextShellImport(o)
+                && !isPlannerDeclaredStyleOnlyImport(o)
+                && !clipParentSourceSet) {
+            return null;
+        }
+        VisualAction visualAction = strictEnumValue(VisualAction.class, jsonString(o, "visualAction"));
+        if (visualAction == null) return null;
+        if (visualAction == VisualAction.ABSORB_TEXT_STYLE) {
+            return styleOnlyObjectPlanFromJson(o, visualAction);
+        }
+        String candidateId = jsonString(o, "candidateId");
+        RenderedGroup rg = exactRenderedGroupForPlan(
+                o, renderedByObjectPlanId, renderedByCandidateId, renderedByPageAndId);
         if (rg == null || rg.file() == null || rg.file().isEmpty()) return null;
-        VisualAction visualAction = enumValue(VisualAction.class,
-                jsonString(o, "visualAction"), VisualAction.DROP_VISUAL);
+        if (clipParentSourceSet
+                && dropClipParentSourceSetCandidateIds != null
+                && dropClipParentSourceSetCandidateIds.contains(candidateId)) {
+            visualAction = VisualAction.DROP_VISUAL;
+        }
         if (visualAction == VisualAction.DROP_VISUAL
-                || visualAction == VisualAction.ABSORB_TEXT_STYLE
-                || visualAction == VisualAction.PLACE_TABLE_STYLE) {
+                && !clipParentSourceSet) {
+            return null;
+        }
+        if (visualAction == VisualAction.PLACE_TABLE_STYLE) {
             return null;
         }
         int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
@@ -372,17 +779,61 @@ public class ResolvedToASTBuilder {
         if (sourceIds.length == 0) return null;
         int[] visualSourceIds = jsonIntArray(o, "visualSourceObjectIds");
         if (visualSourceIds.length == 0) visualSourceIds = sourceIds;
-        Placement placement = enumValue(Placement.class, jsonString(o, "placement"), Placement.FLOATING);
-        Materialization materialization = enumValue(Materialization.class,
-                jsonString(o, "materialization"), Materialization.EXTRACTED_PNG_VECTOR);
-        double[] renderSourceBounds = rg.cropSourceBounds();
-        return new ObjectPlan(
+        TextAction textAction = strictEnumValue(TextAction.class, jsonString(o, "textAction"));
+        VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
+        Placement placement = strictEnumValue(Placement.class, jsonString(o, "placement"));
+        Materialization materialization = strictEnumValue(Materialization.class, jsonString(o, "materialization"));
+        CoordinateSpace coordinateSpace = strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"));
+        if (textAction == null || visualLayer == null || placement == null
+                || materialization == null || coordinateSpace == null) {
+            return null;
+        }
+        double[] renderSourceBounds = jsonDoubleArray(o, "renderSourceBounds");
+        double[] plannedBounds = jsonDoubleArray(o, "bounds");
+        if (plannedBounds == null || plannedBounds.length < 4) {
+            plannedBounds = rg.bounds();
+        }
+        double[] cropSourceBounds = jsonDoubleArray(o, "cropSourceBounds");
+        if ((cropSourceBounds == null || cropSourceBounds.length < 4)
+                && rg.cropSourceBounds() != null && rg.cropSourceBounds().length >= 4) {
+            cropSourceBounds = rg.cropSourceBounds();
+        }
+        String sourceLayerId = rg.layerId();
+        String sourceLayerName = rg.layerName();
+        int sourceLayerIndex = rg.layerIndex();
+        if ((sourceLayerId == null || sourceLayerId.isEmpty()
+                || sourceLayerName == null || sourceLayerName.isEmpty()
+                || sourceLayerIndex < 0)
+                && resolvedData != null) {
+            for (int sourceId : sourceIds) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem item =
+                        resolvedData.getPageItem(String.valueOf(sourceId));
+                if (item == null) continue;
+                if ((sourceLayerId == null || sourceLayerId.isEmpty())
+                        && item.layerId() != null && !item.layerId().isEmpty()) {
+                    sourceLayerId = item.layerId();
+                }
+                if ((sourceLayerName == null || sourceLayerName.isEmpty())
+                        && item.layerName() != null && !item.layerName().isEmpty()) {
+                    sourceLayerName = item.layerName();
+                }
+                if (sourceLayerIndex < 0 && item.layerIndex() >= 0) {
+                    sourceLayerIndex = item.layerIndex();
+                }
+                if (sourceLayerId != null && !sourceLayerId.isEmpty()
+                        && sourceLayerName != null && !sourceLayerName.isEmpty()
+                        && sourceLayerIndex >= 0) {
+                    break;
+                }
+            }
+        }
+        ObjectPlan plan = new ObjectPlan(
                 rg.id(),
                 "planner_declared_rendered:" + jsonString(o, "passId") + ":" + jsonString(o, "kind"),
                 rg.pageIndex(),
-                enumValue(TextAction.class, jsonString(o, "textAction"), TextAction.DROP_TEXT),
+                textAction,
                 visualAction,
-                enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.CONTENT_VISUAL),
+                visualLayer,
                 placement,
                 rg.id(),
                 sourceIds,
@@ -392,21 +843,68 @@ public class ResolvedToASTBuilder {
                 jsonIntArray(o, "descendantVisualObjectIds"),
                 jsonString(o, "bundleId"),
                 materialization,
-                enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"),
-                        placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE),
+                coordinateSpace,
                 jsonString(o, "anchorOwner"),
                 jsonInt(o, "zOrder", rg.zOrder()),
                 "planner_declared_object_plan",
                 rg.file(),
-                rg.bounds(),
+                plannedBounds,
                 renderSourceBounds,
-                rg.layerId(),
-                rg.layerName(),
-                rg.layerIndex());
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+        return plan
+                .withCropSourceBounds(cropSourceBounds)
+                .withExtractionCandidate(
+                        jsonString(o, "candidateId"),
+                        jsonString(o, "passId"),
+                        jsonString(o, "slotRole"))
+                .withExtractionSourceObjectIds(
+                        jsonIntArray(o, "exportSourceObjectIds"),
+                        jsonIntArray(o, "hiddenVisualSourceObjectIds"))
+                .withSourceTreeDiagnostics(
+                        jsonSourceSetArray(o, "sourceRootObjectIds", "sourceRootSetId", sourceSetRefs),
+                        jsonSourceSetArray(o, "clusterSourceObjectIds", "clusterSourceSetId", sourceSetRefs),
+                        jsonSourceSetArray(o, "omittedClusterSourceObjectIds", "omittedClusterSourceSetId", sourceSetRefs))
+                .withInlineFlowContract(
+                        jsonBoolean(o, "inlineSourceTreeClosed", false),
+                        jsonIntArray(o, "inlineFlowSourceObjectIds"));
+    }
+
+    private static RenderedGroup exactRenderedGroupForPlan(
+            JsonObject o,
+            Map<String, RenderedGroup> renderedByObjectPlanId,
+            Map<String, RenderedGroup> renderedByCandidateId,
+            Map<String, RenderedGroup> renderedByPageAndId) {
+        if (o == null) return null;
+        String objectPlanId = jsonString(o, "objectPlanId");
+        if (objectPlanId != null && !objectPlanId.isEmpty() && renderedByObjectPlanId != null) {
+            RenderedGroup rg = renderedByObjectPlanId.get(objectPlanId);
+            if (rg != null) return rg;
+        }
+        String candidateId = jsonString(o, "candidateId");
+        if (candidateId != null && !candidateId.isEmpty() && renderedByCandidateId != null) {
+            RenderedGroup rg = renderedByCandidateId.get(candidateId);
+            if (rg != null) return rg;
+        }
+        if (renderedByPageAndId == null) return null;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        int primarySourceId = jsonInt(o, "primarySourceObjectId",
+                jsonInt(o, "domId", sourceIds.length > 0 ? sourceIds[0] : -1));
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (primarySourceId < 0 || pageIndex < 0) return null;
+        return renderedByPageAndId.get(renderedPageIdKey(pageIndex, primarySourceId));
     }
 
     private static String renderedPageIdKey(int pageIndex, int id) {
         return pageIndex + ":" + id;
+    }
+
+    private static String objectPlanIdFromRenderUnitId(String renderUnitId) {
+        if (renderUnitId == null || renderUnitId.isEmpty()) return null;
+        int index = renderUnitId.indexOf("objectPlan.");
+        if (index < 0) return null;
+        return renderUnitId.substring(index);
     }
 
     private static boolean isPlannerDeclaredTextShellImport(JsonObject o) {
@@ -421,8 +919,77 @@ public class ResolvedToASTBuilder {
                 || jsonIntArray(o, "exportSourceObjectIds").length > 0;
     }
 
+    private static boolean isPlannerDeclaredStyleOnlyImport(JsonObject o) {
+        if (o == null) return false;
+        if (!"ABSORB_TEXT_STYLE".equals(jsonString(o, "visualAction"))) return false;
+        if (!"INLINE".equals(jsonString(o, "placement"))) return false;
+        return jsonIntArray(o, "styleSourceObjectIds").length > 0
+                || jsonIntArray(o, "sourceObjectIds").length > 0;
+    }
+
+    private static ObjectPlan styleOnlyObjectPlanFromJson(JsonObject o, VisualAction visualAction) {
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        int[] styleSourceIds = jsonIntArray(o, "styleSourceObjectIds");
+        if (sourceIds.length == 0) sourceIds = styleSourceIds;
+        if (styleSourceIds.length == 0) styleSourceIds = sourceIds;
+        if (sourceIds.length == 0) return null;
+        int domId = jsonInt(o, "primarySourceObjectId",
+                jsonInt(o, "domId", sourceIds[0]));
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0 || pageIndex < 0) return null;
+        TextAction textAction = strictEnumValue(TextAction.class, jsonString(o, "textAction"));
+        VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
+        Placement placement = strictEnumValue(Placement.class, jsonString(o, "placement"));
+        Materialization materialization = strictEnumValue(Materialization.class, jsonString(o, "materialization"));
+        CoordinateSpace coordinateSpace = strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"));
+        if (textAction == null || visualLayer == null || placement == null
+                || materialization == null || coordinateSpace == null) {
+            return null;
+        }
+        return new ObjectPlan(
+                domId,
+                "planner_declared_style_only:" + jsonString(o, "passId") + ":" + jsonString(o, "kind"),
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                null,
+                sourceIds,
+                new int[0],
+                styleSourceIds,
+                jsonIntArray(o, "ownedTextFrameIds"),
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                materialization,
+                coordinateSpace,
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                jsonString(o, "reason"),
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1))
+                .withExtractionCandidate(
+                        jsonString(o, "candidateId"),
+                        jsonString(o, "passId"),
+                        jsonString(o, "slotRole"))
+                .withExtractionSourceObjectIds(
+                        jsonIntArray(o, "exportSourceObjectIds"),
+                        jsonIntArray(o, "hiddenVisualSourceObjectIds"));
+    }
+
     private static ObjectPlan layoutOnlyInlineSlotPlanFromJson(JsonObject o) {
-        if (o == null || !jsonBoolean(o, "layoutOnlyInlineSlot", false)) return null;
+        if (o == null) return null;
+        boolean explicitLayoutOnly = jsonBoolean(o, "layoutOnlyInlineSlot", false);
+        boolean plannerInlineDropSlot = "pass.inline_objects".equals(jsonString(o, "passId"))
+                && "INLINE".equals(jsonString(o, "placement"))
+                && "STORY_FLOW".equals(jsonString(o, "coordinateSpace"))
+                && "DROP_VISUAL".equals(jsonString(o, "visualAction"))
+                && "HWPX_TEXT".equals(jsonString(o, "materialization"));
+        if (!explicitLayoutOnly && !plannerInlineDropSlot) return null;
         if (!"INLINE".equals(jsonString(o, "placement"))) return null;
         if (!"DROP_VISUAL".equals(jsonString(o, "visualAction"))) return null;
         int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
@@ -432,13 +999,21 @@ public class ResolvedToASTBuilder {
         if (domId < 0 || pageIndex < 0) return null;
         int[] visualSourceIds = jsonIntArray(o, "visualSourceObjectIds");
         if (visualSourceIds.length == 0) visualSourceIds = sourceIds;
+        TextAction textAction = strictEnumValue(TextAction.class, jsonString(o, "textAction"));
+        VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
+        Materialization materialization = strictEnumValue(Materialization.class, jsonString(o, "materialization"));
+        CoordinateSpace coordinateSpace = strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"));
+        if (textAction == null || visualLayer == null || materialization == null
+                || coordinateSpace != CoordinateSpace.STORY_FLOW) {
+            return null;
+        }
         return new ObjectPlan(
                 domId,
                 "layout_only_inline_slot:" + jsonString(o, "kind"),
                 pageIndex,
-                enumValue(TextAction.class, jsonString(o, "textAction"), TextAction.DROP_TEXT),
+                textAction,
                 VisualAction.DROP_VISUAL,
-                enumValue(VisualLayer.class, jsonString(o, "visualLayer"), VisualLayer.CONTENT_VISUAL),
+                visualLayer,
                 Placement.INLINE,
                 null,
                 sourceIds,
@@ -447,8 +1022,8 @@ public class ResolvedToASTBuilder {
                 jsonIntArray(o, "ownedTextFrameIds"),
                 jsonIntArray(o, "descendantVisualObjectIds"),
                 jsonString(o, "bundleId"),
-                Materialization.HWPX_TEXT,
-                CoordinateSpace.STORY_FLOW,
+                materialization,
+                coordinateSpace,
                 jsonString(o, "anchorOwner"),
                 jsonInt(o, "zOrder", 0),
                 "planner_declared_layout_only_inline_slot",
@@ -457,7 +1032,14 @@ public class ResolvedToASTBuilder {
                 null,
                 jsonString(o, "sourceLayerId"),
                 jsonString(o, "sourceLayerName"),
-                jsonInt(o, "sourceLayerIndex", -1));
+                jsonInt(o, "sourceLayerIndex", -1))
+                .withExtractionCandidate(
+                        jsonString(o, "candidateId"),
+                        jsonString(o, "passId"),
+                        jsonString(o, "slotRole"))
+                .withExtractionSourceObjectIds(
+                        jsonIntArray(o, "exportSourceObjectIds"),
+                        jsonIntArray(o, "hiddenVisualSourceObjectIds"));
     }
 
     private static ObjectPlan nativeVectorShapePlanFromJson(JsonObject o) {
@@ -480,21 +1062,23 @@ public class ResolvedToASTBuilder {
         if (domId < 0 || pageIndex < 0) return null;
         int[] visualSourceIds = jsonIntArray(o, "visualSourceObjectIds");
         if (visualSourceIds.length == 0) visualSourceIds = sourceIds;
-        VisualAction visualAction = enumValue(VisualAction.class, visualActionName, VisualAction.PLACE_TEXT_SHELL);
-        VisualLayer visualLayer = enumValue(
-                VisualLayer.class,
-                jsonString(o, "visualLayer"),
-                visualAction == VisualAction.PLACE_TEXT_SHELL
-                        ? VisualLayer.LABEL_BACKDROP
-                        : VisualLayer.CONTENT_VISUAL);
+        TextAction textAction = strictEnumValue(TextAction.class, jsonString(o, "textAction"));
+        VisualAction visualAction = strictEnumValue(VisualAction.class, visualActionName);
+        VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
+        Placement placement = strictEnumValue(Placement.class, jsonString(o, "placement"));
+        CoordinateSpace coordinateSpace = strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"));
+        if (textAction == null || visualAction == null || visualLayer == null
+                || placement == null || coordinateSpace == null) {
+            return null;
+        }
         return new ObjectPlan(
                 domId,
                 "native_source_shape:" + jsonString(o, "kind"),
                 pageIndex,
-                enumValue(TextAction.class, jsonString(o, "textAction"), TextAction.DROP_TEXT),
+                textAction,
                 visualAction,
                 visualLayer,
-                enumValue(Placement.class, jsonString(o, "placement"), Placement.FLOATING),
+                placement,
                 null,
                 sourceIds,
                 visualSourceIds,
@@ -503,7 +1087,7 @@ public class ResolvedToASTBuilder {
                 jsonIntArray(o, "descendantVisualObjectIds"),
                 jsonString(o, "bundleId"),
                 Materialization.NATIVE_SOURCE_SHAPE,
-                enumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"), CoordinateSpace.PAGE),
+                coordinateSpace,
                 jsonString(o, "anchorOwner"),
                 jsonInt(o, "zOrder", 0),
                 "planner_native_source_shape",
@@ -548,6 +1132,41 @@ public class ResolvedToASTBuilder {
         return out;
     }
 
+    private static int[] jsonSourceSetArray(
+            JsonObject o,
+            String arrayKey,
+            String refKey,
+            Map<String, int[]> sourceSetRefs) {
+        int[] direct = jsonIntArray(o, arrayKey);
+        if (direct.length > 0 || o == null || refKey == null || sourceSetRefs == null) {
+            return direct;
+        }
+        String ref = jsonString(o, refKey);
+        if (ref == null || ref.isEmpty()) return direct;
+        int[] resolved = sourceSetRefs.get(ref);
+        return resolved != null ? Arrays.copyOf(resolved, resolved.length) : direct;
+    }
+
+    private static Map<String, int[]> objectPlanSourceSetRefs(JsonObject root) {
+        Map<String, int[]> out = new HashMap<>();
+        if (root == null || !root.has("sourceSetRefs") || !root.get("sourceSetRefs").isJsonObject()) {
+            return out;
+        }
+        JsonObject refs = root.getAsJsonObject("sourceSetRefs");
+        if (!refs.has("sourceSets") || !refs.get("sourceSets").isJsonArray()) {
+            return out;
+        }
+        JsonArray sets = refs.getAsJsonArray("sourceSets");
+        for (JsonElement element : sets) {
+            if (element == null || !element.isJsonObject()) continue;
+            JsonObject row = element.getAsJsonObject();
+            String id = jsonString(row, "sourceSetId");
+            if (id == null || id.isEmpty()) continue;
+            out.put(id, jsonIntArray(row, "sourceObjectIds"));
+        }
+        return out;
+    }
+
     private static double[] jsonDoubleArray(JsonObject o, String key) {
         if (o == null || key == null || !o.has(key) || !o.get(key).isJsonArray()) return null;
         JsonArray arr = o.getAsJsonArray(key);
@@ -558,12 +1177,12 @@ public class ResolvedToASTBuilder {
         return out;
     }
 
-    private static <E extends Enum<E>> E enumValue(Class<E> type, String name, E fallback) {
-        if (name == null || name.isEmpty()) return fallback;
+    private static <E extends Enum<E>> E strictEnumValue(Class<E> type, String name) {
+        if (name == null || name.isEmpty()) return null;
         try {
             return Enum.valueOf(type, name);
         } catch (IllegalArgumentException e) {
-            return fallback;
+            return null;
         }
     }
 
@@ -624,11 +1243,6 @@ public class ResolvedToASTBuilder {
      * 새 visible 객체를 만들거나 ownership을 뒤집는 로직을 추가하지 않는다.</p>
      */
     private void postprocessLayout(List<ASTSection> sections) {
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.numberedSideHeadTablesBridge")) {
-            NumberedSideHeadTableNormalizer.run(this.ctx, sections);
-        }
-        tagPhase(sections, "Stage4.LayoutPostprocess.numberedSideHeadTablesBridge");
-
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.bulletInserter")) {
             BulletInserter.run(this.ctx, sections);
         }
@@ -669,6 +1283,25 @@ public class ResolvedToASTBuilder {
         ctx.rebuildOwnershipPlanLinesFromPlans();
         writeJsonLines("ownership-plan.jsonl", ctx.ownershipPlanLines, "ownership plan");
         writeJsonLines("ownership-warnings.jsonl", ctx.ownershipWarningLines, "ownership warnings");
+        writeJsonLines("ownership-legacy-bridge-added.jsonl",
+                ctx.legacyBridgeAddedPlanLines,
+                "ownership legacy bridge added plans");
+        writeJsonLines("ownership-legacy-bridge-mutated.jsonl",
+                ctx.legacyBridgeMutatedPlanLines,
+                "ownership legacy bridge mutated plans");
+        writeJsonLines("ownership-legacy-bridge-summary.jsonl",
+                ctx.legacyBridgeSummaryLines,
+                "ownership legacy bridge summary");
+        writeOwnershipTraceLog();
+    }
+
+    private void writeOwnershipTraceLog() {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        lines.add("phase\tdecision\tpageIndex\trenderId\texportUnitId\tcandidateId\tplanPassId\tslotRole\tsourceFile\thwpxFile\tobjectPlanDomId\tobjectPlanCandidateId\ttextAction\tvisualAction\tplacement\tvisualLayer\tmaterialization\tsourceObjectIds\texportSourceObjectIds\thiddenVisualSourceObjectIds\tdetail");
+        if (ctx != null && ctx.ownershipTraceLines != null) {
+            lines.addAll(ctx.ownershipTraceLines);
+        }
+        writeJsonLines("ownership-trace.tsv", lines, "ownership trace");
     }
 
     private void writeJsonLines(String fileName, java.util.List<String> lines, String label) {

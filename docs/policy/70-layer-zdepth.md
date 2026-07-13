@@ -3,27 +3,129 @@
 > This file is part of the canonical source ownership policy.
 > The canonical index is `docs/specs/POLICY-source-ownership.md`.
 
-## 9. Visual Layers
+## 9. HWPX Planes And Textless Graphic Groups
 
-Policy uses only four layers:
+V2 does not try to reproduce InDesign's arbitrary visual interleaving as HWPX
+layer policy. HWPX execution is treated as three reliable policy strata:
 
-`BACKGROUND < DECORATION < CONTENT < TEXT`
+`BACKGROUND_GRAPHIC < TEXTLESS_IMAGE_GROUP < TEXT_TABLE_STRUCTURE`
 
-Mapping:
+- `BACKGROUND_GRAPHIC`: an explicit page-local plane produced by Stage 1 from
+  source-connected floating `SHELL_SLOT` visual components. It is not inferred
+  from bounds, layer names, colors, semantic source-role names, or output
+  appearance. It is an execution grouping of already-owned textless shell
+  material, not a classifier for individual source objects.
+- `TEXTLESS_IMAGE_GROUP`: all other non-text source visual material, including
+  container faces, label shells, table/cell decoration, borders, row bands,
+  speech-bubble shells, connector lines, placed images, charts, QR, inline
+  marker images, masks, and chrome.
+- `TEXT_TABLE_STRUCTURE`: editable/searchable HWPX text, editable HWPX
+  table structure, table cell text, and transparent text/table carriers.
 
-- Page and container backgrounds: `BACKGROUND`
-- Label shells, label connectors, outlines, masks, separators, and visual
-  chrome: `DECORATION`
-- Photos, illustrations, charts, QR, complete visuals: `CONTENT`
-- HWPX text/table text: `TEXT`
+The four historical policy roles (`BACKGROUND`, `DECORATION`, `CONTENT`,
+`TEXT`) are migration labels only. They may help diagnostics and legacy enum
+mapping, but they are not allowed to create additional execution layers,
+foreground/background repairs, or role-based z-bands. If an older rule in this
+file requires a `BACKGROUND < DECORATION < CONTENT < TEXT` execution order, the
+three-strata contract above wins.
 
-Original IDML layer and z-order are ownership depth truth for non-text visual
-objects. The four policy layers describe slot role and HWPX plane behavior; they
-do not replace IDML source stacking order for graphics. A visual `BACKGROUND`,
-`DECORATION`, or `CONTENT` object may appear above or below another visual object
-only according to its IDML source depth. If that order looks wrong in HWPX, Stage
-1 must first verify source ancestry/layer/z-order and the chosen visible owner;
-it must not repair the page by policy-band promotion or demotion.
+Within the ordinary non-text visual stratum, Stage 1 must treat visible graphics
+as a single IDML source-ordered visual stream. It must not ask whether a source
+is "decoration" or "content" in order to decide front/back execution. The only
+split that affects HWPX execution is:
+
+1. `BACKGROUND_GRAPHIC`: an explicit page background plane ObjectPlan assembled
+   from source-connected floating `SHELL_SLOT` components.
+2. `TEXTLESS_IMAGE_GROUP`: every other non-text visual source, rendered in
+   source z-order after text/table sources are hidden.
+3. `TEXT_TABLE_STRUCTURE`: editable HWPX text and table structure.
+
+`DECORATION`, `CONTENT`, `LABEL_BACKDROP`, `CONTENT_VISUAL`, and similar labels
+may still describe the source role, slot, or migration origin, but they do not
+choose a different HWPX plane. If two non-background visual groups overlap, their
+relative order comes from `ObjectPlan.zOrder` derived from IDML source depth,
+not from the role label. If exact interleaving between graphics and editable
+text is required, Stage 1 must choose `COMPLETE_PNG` for that source bundle
+instead of adding a new visual foreground plane.
+
+Stage 1 treats ordinary graphic material as `TEXTLESS_IMAGE_GROUP` unless it
+has already built or expanded an explicit page background plane. Within
+`TEXTLESS_IMAGE_GROUP`, the current executable contract is one page-local
+textless visual plane per output page. The plane renders the page's top-level
+non-text source roots together as one textless asset after editable TextFrames,
+editable table structure, and story-flow inline visual objects are hidden from
+the export.
+Story-flow inline visual objects remain owned by their inline `ObjectPlan`; they
+must not be baked into the page-root textless asset and then disappear from the
+HWPX text flow. This keeps IDML source order, clipping, masks, and internal
+layer competition across the page's original source roots instead of splitting
+visual fragments and trying to reassemble them later.
+
+Stage 1 must not emit additional page-local visual-adjacency grouping candidates
+for ordinary non-text graphics while this page-root plane contract is active.
+Overlap, touch, row/column adjacency, and sibling proximity may be diagnostics,
+but they do not create competing `TEXTLESS_IMAGE_GROUP` owners. Future
+subdivision of the page-root plane is allowed only after a precise mechanical
+source-island specification is added here and proven not to recreate duplicate
+or missing ownership slots. Until then, page-root textless visual plane is the
+only ordinary page graphic grouping target. Master-page graphics are excluded
+from these ordinary page-root graphic planes and keep separate applied-master
+fragment ownership. Master-page grouping is limited to master-origin material
+whose placement owner is page/floating; master-origin story-flow inline slots
+are excluded from master graphic grouping and execute through their inline
+`ObjectPlan`.
+
+Graphic grouping rules:
+
+- `BACKGROUND_GRAPHIC` is not a source-object classifier. It exists only when
+  Stage 1 explicitly emits or expands a `page_background_plane` ObjectPlan from
+  page/floating source-connected `SHELL_SLOT` components. Page-wide source
+  objects, bottom z-depth, background layer names, single-color fill metadata,
+  and source-role labels are ordinary grouping/order metadata; none of them
+  alone promotes a source visual to `PAGE_BACKGROUND`.
+- Grouping uses source metadata to find the page root, exclude editable text and
+  story-flow inline material, preserve page/spread intersection, and preserve
+  original source z-order inside the exported textless plane.
+- Bounds overlap/touch/adjacency must not create ordinary page graphic grouping
+  candidates. Adjacency may be reported for diagnostics only.
+- Source parentage, group membership, clip parentage, or mask parentage are
+  preserved by exporting the page-root subtree. They must not be reinterpreted
+  as local grouping or splitting instructions for ordinary page graphics.
+- Table/carrier sibling decoration remains in the page-root textless visual
+  plane unless an explicit table/native structure owner consumes the editable
+  table channel. Stage 1 must not create a second image-rendered table text
+  owner from that same source bundle.
+- Table/carrier sibling decoration does not own the table carrier TextFrame's
+  text slot. A marker/table-carrier TextFrame may be recorded only as provenance
+  that the visual component decorates or aligns with that table. It must not be
+  copied into `ownedTextFrameIds`, `editableTextFrameIds`, `hiddenTextFrameIds`,
+  or `hiddenVisualSourceObjectIds` for that decoration shell. The HWPX table
+  structure owns the table text and geometry; the sibling decoration shell owns
+  only the visible non-text shell material such as background, outline, and
+  shadow sources.
+- Editable TextFrames and HWPX table structure do not split graphic groups.
+  They are hidden during graphic export and re-emitted in the
+  `TEXT_TABLE_STRUCTURE` stratum using source bounds.
+- Table/cell decoration remains part of `TEXTLESS_IMAGE_GROUP`; table
+  structure and cell text remain HWPX-owned in `TEXT_TABLE_STRUCTURE`.
+- Inline source graphics inside text flow, such as number badges, boxes,
+  checkmarks, and other non-editable markers, keep `INLINE` / `STORY_FLOW`
+  placement and use their extracted PNG/vector material. They are excluded from
+  page-root textless assets by adding the inline visual source ids to the
+  page-root plan's hidden visual sources. They are not converted to HWPX native
+  shapes.
+- A graphic that intentionally covers editable text in the InDesign source is a
+  known loss under the editable-text policy. V2 keeps editable HWPX text/table
+  structure above graphic material. If exact visual occlusion is required for that source
+  bundle, Stage 1 must choose `COMPLETE_PNG` and give up editable text for that
+  bundle; it must not add a foreground graphic exception.
+
+Original IDML layer and z-order remain source metadata for ordering and
+group-internal rendering, but they do not override the three HWPX strata. If a
+visual object appears to cover text in HWPX, Stage 1 must first verify whether
+the text/table source was correctly hidden from the graphic asset and re-emitted
+in `TEXT_TABLE_STRUCTURE`. It must not repair the page by policy-band promotion
+or demotion.
 When a rendered candidate has `sourceObjectIds`, Stage 1 must derive
 `ObjectPlan.zOrder` from those source objects before falling back to extractor
 render order. The canonical source depth is the normalized IDML/source-item rank
@@ -32,9 +134,17 @@ page/spread stacking context; larger values are visually in front. A numeric
 `zOrder` copied from an extractor or resolved cache is a fallback only when
 source-item order is unavailable, because some extractors encode that number in
 the opposite direction. Extractor render order is diagnostic/cache order, not
-ownership depth truth. If a content surface's source depth is behind a local
-HWPX-owned TextFrame that it overlaps, Stage 1 may use a behind-text content
-plane (`CONTENT_BACKDROP`) while keeping its policy layer as `CONTENT`.
+ownership depth truth. Source depth may order graphic sources inside one
+textless graphic group, but it must not place graphic material above editable
+HWPX text/table structure.
+For synthetic `PLACE_TEXT_SHELL` composites made from multiple shell sources,
+the executable `ObjectPlan.zOrder` represents the shell component as a graphic
+surface, not the foremost child fragment. Stage 1 therefore uses the lowest
+normalized source depth of the exported shell sources as the composite's
+representative depth. The extractor still renders the component internally with
+InDesign's own stacking order. A single high-z connector, outline fragment, or
+marker inside a broad shell must not pull the whole shell PNG in front of
+independent textless graphics.
 When the source collector receives a front-to-back `allPageItems` rank, it must
 keep that raw rank only as diagnostic metadata (`rawZOrder` / `sourceOrder`) and
 write `ObjectPlan.zOrder` from the normalized back-to-front rank. Later stages
@@ -57,9 +167,8 @@ the final z-depth authority. Immediately before `ObjectPlan` is written,
 Stage 1 must finalize every visible visual plan's:
 
 Initial `ObjectPlan` creation may assign a role-based provisional
-`visualLayer`, but it must not decide source-depth plane changes such as
-`CONTENT_VISUAL` versus `CONTENT_BACKDROP`. Those changes belong only to this
-final gate.
+`visualLayer`, but that value is a compatibility label. It must not decide a
+third HWPX plane such as `CONTENT_VISUAL` versus `CONTENT_BACKDROP`.
 For `PLACE_TEXT_SHELL` plans, that provisional role layer must be assigned
 through the Stage 1 text-shell layer helper. Individual restore/split passes
 must not hard-code their own label/container layer choice; they may only provide
@@ -68,13 +177,13 @@ z-order authority.
 
 - `zOrder`, from normalized IDML source depth of `visualSourceObjectIds`, then
   `sourceObjectIds`, then extractor z-order only as a last fallback.
-- `visualLayer`, only when the HWPX plane must be chosen from source-depth
-  metadata, such as a `CONTENT_VISUAL` source that is behind local editable
-  HWPX text in the same page coordinate space.
-- HWPX-owned TextFrame `zOrder` only for source-declared shell ownership: when
-  a visible front-plane text shell owns an editable TextFrame, the editable text
-  plan is placed one level above the finalized shell plan. This is part of the
-  same final depth contract, not an executor repair.
+- `visualLayer`, only as a migration/diagnostic label for the source role. It
+  must still map to one of the three policy strata: background graphic,
+  ordinary textless image group, or text/table structure.
+- HWPX-owned TextFrame/table text placement is always in
+  `TEXT_TABLE_STRUCTURE` above textless graphic material. Stage 1 may keep source
+  `zOrder` for diagnostics and intra-plane order, but it must not use visual
+  source depth to cover editable text with a graphic.
 - HWPX text-only plans do not receive a new `visualLayer` while being restored
   from a composite carrier. The owning shell/visual plan carries the visual
   layer; editable text remains in the `TEXT` policy layer and is ordered by the
@@ -99,11 +208,12 @@ executors, and validators consume the finalized contract only. If a later
 stage appears to need a layer promotion/demotion, the Stage 1 finalizer or its
 source metadata inputs are wrong.
 
-The HWPX behind-text/in-front-of-text plane mapping for finalized
-`visualLayer` values is a single Stage 1 policy table implemented by
-`VisualPlanePolicy`. Stage 3/4 adapters and Java HWPX builders may call that
-table to translate a finalized layer name into an HWPX plane, but they must not
-carry their own divergent lists of foreground/background layers.
+The HWPX execution-strata mapping for finalized visual plans is a single Stage 1
+policy table implemented by `VisualPlanePolicy`. Stage 3/4 adapters and Java
+HWPX builders may call that table to translate a finalized plan into
+`BACKGROUND_GRAPHIC`, `TEXTLESS_IMAGE_GROUP`, or `TEXT_TABLE_STRUCTURE`, but
+they must not carry their own divergent lists of
+foreground/background layers.
 
 The final gate may use only IDML/resolved source metadata: source id, parentage,
 group membership, page/spread, bounds, layer, visibility, and normalized source
@@ -112,30 +222,53 @@ occlusion, page numbers, literal text, or coordinate-specific exceptions.
 
 If the source metadata marks a visual-only page/spread object as belonging to a
 background-role layer, such as `배경`, `바탕`, `background`, `bg`, or `backdrop`, Stage 1
-must treat that layer name as a background hint, not as ownership truth. The
-visual becomes `PAGE_BACKGROUND` only when its source geometry also behaves like
-a page/spread backdrop: it covers a substantial page area, touches/bleeds from a
-page edge while spanning a major axis, or is explicitly emitted as a page
-background. Smaller circles, badges, label plates, masks, and card shells on a
-background-named layer remain `DECORATION`/shell material according to their
-source bundle role. Image/PDF/EPS descendants do not by themselves promote that
-background-layer carrier to `CONTENT_VISUAL`.
-This geometry check is performed in the same page-local coordinate space as the
-rendered candidate bounds. If page metadata has been normalized to another unit,
-Stage 1 must compare against the normalized page width/height converted back to
-the candidate's page-local unit; otherwise a full-page visual can be misread as
-small content and placed above text.
+must treat that layer name as a diagnostic hint only. It may help explain why a
+visual source sits low in the source stream, but it does not choose the HWPX
+execution stratum. The visual becomes `PAGE_BACKGROUND` only when the ObjectPlan
+is an explicit page background plane:
+`slotRole=page_background_plane` and `compositeRole=page_background_plane`.
+The executor-facing action may be the existing extracted text-shell path or a
+dedicated page-plane action, but the ownership contract is the same: the plane
+is assembled from Stage 1 source-connected page/floating non-text visual
+components.
 
-Default HWPX plane:
+A page-root background/textless plane may include only component members that
+satisfy all of the following source-owned facts:
 
-- `BACKGROUND`: behind text
-- `LABEL_BACKDROP`, `LABEL_CONNECTOR_BACKDROP`, and
-  `LABEL_OVERLAY_BACKDROP`: front object plane with the finalized
-  `ObjectPlan.zOrder`. These roles are still logical `DECORATION` and must stay
-  below their owned HWPX text by the Stage 1 text/shell z-order contract. They
-  must not be mapped to the global HWPX `BEHIND_TEXT` plane, because that plane
-  can hide local speech bubbles, labels, and connector shells behind unrelated
-  HWPX table/text carriers.
+- `placement=FLOATING` and `coordinateSpace=PAGE`;
+- visible source proof exists through `visualSourceObjectIds` or
+  `exportSourceObjectIds`;
+- the source is not story-flow inline material and has no inline anchor owner.
+
+The following source slots are always excluded from a page background plane:
+
+- `TEXT_SLOT`;
+- `TABLE_STYLE_SLOT`;
+- `COMPLETE_PNG` or `OWNED_BY_PNG` text owners;
+- story-flow inline source objects, even when their pixels are obtained through
+  a page/master export helper.
+
+When a text-owning shell component is folded into a page background plane, the
+plane owns only the visual shell slot. Its `ownedTextFrameIds`,
+`editableTextFrameIds`, and `hiddenTextFrameIds` must be copied into the plane's
+hidden-source set so the exported asset remains textless. The original HWPX text
+owners stay executable in `TEXT_TABLE_STRUCTURE`.
+
+Default HWPX strata:
+
+- `PAGE_BACKGROUND`: `BACKGROUND_GRAPHIC`.
+- All planned non-text visual material except `PAGE_BACKGROUND`, including
+  historical `BACKGROUND`,
+  `LABEL_BACKDROP`, `LABEL_CONNECTOR_BACKDROP`, `LABEL_OVERLAY_BACKDROP`,
+  `CONTENT_BACKDROP`, `CONTENT_VISUAL`, `CONTAINER_OUTLINE`, masks, and table
+  decoration: `TEXTLESS_IMAGE_GROUP`.
+- Editable HWPX text, editable HWPX table structure, and table cell text:
+  `TEXT_TABLE_STRUCTURE`.
+- Legacy layer labels may influence source grouping diagnostics, but they do
+  not select a foreground graphics plane. A local speech bubble or label shell
+  stays visible by being grouped into the correct textless graphic material and
+  by re-emitting its owned text above it, not by moving the shell above HWPX
+  text/table carriers.
 - `LABEL_CONNECTOR_BACKDROP` is for textless vector
   connector graphics inside a source composite layout that visually connect
   labels/badges. It is not selected from output occlusion or line shape alone;
@@ -158,11 +291,15 @@ Default HWPX plane:
   clusters is only pixel preparation; it must carry the source depth forward so
   a local master panel can remain above a broader master backdrop when the IDML
   source order says so.
-- A single pure `BACKGROUND` visual slot may materialize as page-local visual
-  fragments on multiple pages when the source bounds physically cross a
-  page/spread boundary. This is not a new ownership decision: every fragment
-  belongs to the same source slot, keeps the same visual layer and z-order, and
-  differs only by page-local visible bounds and extractor-rendered appearance.
+- A direct master fragment that materializes a story-flow inline source keeps
+  the inline plan's placement and coordinate space. Its master source depth is
+  diagnostic/source ordering metadata inside the extracted asset; it cannot
+  convert the fragment into a floating master-page owner.
+- A single broad visual slot may materialize as page-local visual fragments on
+  multiple pages when the source bounds physically cross a page/spread boundary.
+  This is not a new ownership decision: every fragment belongs to the same
+  source slot, keeps source z-order, and differs only by page-local visible
+  bounds and extractor-rendered appearance.
 - Page-local fragments must have page-local asset identity. If the same source
   root/source bundle is materialized on multiple pages, the extracted file path
   and `ObjectPlan.file` must be unique for each `(source bundle, pageIndex,
@@ -193,6 +330,19 @@ Default HWPX plane:
   current applied page bounds. Intersecting children are part of the same
   `BACKGROUND` slot; non-intersecting children remain source ancestry only and
   must be hidden from the current page-local fragment render.
+- Stage 1 may fold source-backed material into one page-plane owner only after
+  it has already assigned each member source bundle to a visible source slot.
+  If a `page_background_plane` ObjectPlan already exists for that page and
+  source-connected component, Stage 1 expands that plan's
+  `sourceObjectIds`, `visualSourceObjectIds`, `exportSourceObjectIds`, and
+  `hiddenVisualSourceObjectIds`. It must not create a second competing page
+  plane for the same component.
+- A page-plane background PNG is an execution grouping, not a new heuristic
+  ownership signal. Stage 1 may create or expand it only from existing
+  source-backed `SHELL_SLOT` components. It must not include
+  `CONTENT_VISUAL_SLOT`, `TABLE_STYLE_SLOT`, inline/story-flow material,
+  HWPX-owned text pixels, or complete PNG text owners merely because they
+  visually sit behind other content.
 - A background/decoration object's placement bounds may extend outside the page
   because the source artwork intentionally bleeds or lives partly on the
   pasteboard. Out-of-page bounds alone do not prove that a source fragment is
@@ -236,6 +386,18 @@ Default HWPX plane:
   vector visual so execution can place that source material in z-depth order.
   Missing extracted material is an extraction defect, not a reason for Java
   native fallback drawing.
+- `PAGE_BACKGROUND` is not a source-depth role and is not a synonym for "one big
+  fill rectangle". Broad page-local source material may be authored as a
+  composite subtree: container root, descendant fill polygon, and optional
+  placed image or mask. Unless Stage 1 emits an explicit `page_background_plane`
+  ObjectPlan, that subtree remains ordinary `TEXTLESS_IMAGE_GROUP` material and
+  keeps source z-order.
+- A sibling page-wide fill does not outrank a composite visual merely because it
+  is simpler or individually page-wide. If two broad visual bundles are
+  both valid, their source bundles remain distinct and source z-depth decides
+  paint order. Stage 1 must not drop the composite subtree by shrinking it to a
+  root-only shell or by preferring a single fill source as the sole background
+  winner.
 - A cross-page text shell whose owned editable text belongs to another applied
   page must not be dropped wholesale when the same source bundle contains
   non-text visual children on the current page. Stage 1 must split ownership:
@@ -296,10 +458,10 @@ Default HWPX plane:
   carriers are fixed-position visual/text containers and must not create an
   extra page before the section break. Real semantic tables keep their own
   table pagination policy in the table builder.
-- `CONTAINER_BACKDROP` is a `BACKGROUND` slot and must not be emitted on the
-  front-object plane merely to keep it visible. If it disappears behind a page
-  paper/background object, fix the page/background z-plane contract instead of
-  moving the carrier in front of text.
+- `CONTAINER_BACKDROP` is ordinary `TEXTLESS_IMAGE_GROUP` material, not
+  `BACKGROUND_GRAPHIC`. If it disappears behind a page paper/background object,
+  fix the source grouping/background separation contract instead of moving the
+  carrier in front of text.
 - textless label/backdrop shell: logical `DECORATION`, below its owned text and
   above container/background faces. When HWPX table carriers would occlude a
   behind-plane label shell, materialize the label shell in the front plane with a
@@ -454,6 +616,11 @@ Default HWPX plane:
   parent PNG containing that source would duplicate table text and must be
   dropped unless its visual source channel is proven to exclude the table/text
   source.
+- A slot-only shell whose `exportSourceObjectIds` and `visualSourceObjectIds`
+  are the same single parent/root id is not proof of a textless visual channel
+  when it also hides descendant TextFrames or table/style sources. Stage 1 must
+  either name the real textless visual descendants as the export/visual source
+  set, or drop the broad parent shell and keep the HWPX table/text owners.
 - When duplicate text-shell candidates own the same TextFrame ids, the smaller
   local shell may be the canonical `TEXT_SLOT` owner. A broader ancestor shell
   that loses text ownership must not be dropped if it carries independent
@@ -500,16 +667,11 @@ Default HWPX plane:
   owns only the visual `SHELL_SLOT`. Its editable child TextFrames keep direct
   HWPX text ownership, and non-executable label helper plans must drop their
   duplicate text claims.
-- HWPX execution plane and z-band must agree. A visual emitted in the page
-  background z-band is emitted behind text; it must not remain on the front
-  object plane because of a stale generic content layer.
-- `PAGE_BACKGROUND` and `CONTAINER_BACKDROP` may be mapped to the HWPX visible
-  bottom background z-band during emission. This is not a new ownership
-  decision: it only adapts the finalized background policy layer so broad
-  page/master backdrops cannot cover planned content/shell visuals in the same
-  HWPX behind-text plane. The band must remain visible in HWPX; it must not use
-  a negative/deep z-order that can place the image behind the paper itself.
-  Source order is still preserved among visuals inside each execution band.
+- HWPX execution stratum and z-band must agree. Only `PAGE_BACKGROUND` may be
+  emitted in the bottom `BACKGROUND_GRAPHIC` z-band. `CONTAINER_BACKDROP`,
+  `CONTENT_BACKDROP`, label shells, outlines, masks, content visuals, and table
+  decoration remain ordinary `TEXTLESS_IMAGE_GROUP` material ordered by source
+  depth inside that stratum.
 - HWPX placement is an execution mapping, not an ownership decision point. The
   converter may map a Stage 1 `visualLayer` to the required HWPX plane/z-band,
   but it must not solve overlap, missing, or duplicate symptoms by recalculating

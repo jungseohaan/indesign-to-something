@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
@@ -43,12 +44,8 @@ public final class SimpleButtonLabelInlineFactory {
         if (anchor == null || shell == null || plan.labelText == null || plan.labelText.isEmpty()) {
             return null;
         }
-        double[] bounds = anchor.geometricBounds();
-        if (bounds == null || bounds.length < 4) bounds = anchor.pageRelativeBounds();
-        if (bounds == null || bounds.length < 4) {
-            bounds = shell.geometricBounds();
-            if (bounds == null || bounds.length < 4) bounds = shell.pageRelativeBounds();
-        }
+        ObjectPlan objectPlan = simpleButtonLabelObjectPlan(ctx, plan.anchorDomId);
+        double[] bounds = objectPlan != null ? objectPlan.bounds : null;
         if (bounds == null || bounds.length < 4) return null;
         double w = Math.abs(bounds[3] - bounds[1]);
         double h = Math.abs(bounds[2] - bounds[0]);
@@ -101,6 +98,17 @@ public final class SimpleButtonLabelInlineFactory {
         }
         obj.addParagraph(paragraph);
         return obj;
+    }
+
+    private static ObjectPlan simpleButtonLabelObjectPlan(ResolvedBuildContext ctx, int anchorDomId) {
+        if (ctx == null || ctx.ownershipPlans == null) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.domId != anchorDomId) continue;
+            if (plan.kind == null || !plan.kind.startsWith("simple_button_label:")) continue;
+            if (plan.bounds != null && plan.bounds.length >= 4) return plan;
+        }
+        return null;
     }
 
     private static double labelFontSizePt(

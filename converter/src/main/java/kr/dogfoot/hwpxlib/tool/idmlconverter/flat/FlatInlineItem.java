@@ -37,6 +37,8 @@ public class FlatInlineItem {
     private String hwpScript;
     private String equationSourceType;
     private String equationTextColor;
+    private Integer equationPreferredBaseUnit;
+    private String equationPreferredFontFamily;
 
     // LAYOUT_REF fields
     private String layoutNodeId;
@@ -141,6 +143,12 @@ public class FlatInlineItem {
 
     public String equationTextColor() { return equationTextColor; }
     public void equationTextColor(String v) { this.equationTextColor = v; }
+
+    public Integer equationPreferredBaseUnit() { return equationPreferredBaseUnit; }
+    public void equationPreferredBaseUnit(Integer v) { this.equationPreferredBaseUnit = v; }
+
+    public String equationPreferredFontFamily() { return equationPreferredFontFamily; }
+    public void equationPreferredFontFamily(String v) { this.equationPreferredFontFamily = v; }
 
     public String layoutNodeId() { return layoutNodeId; }
     public void layoutNodeId(String v) { this.layoutNodeId = v; }

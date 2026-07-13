@@ -527,6 +527,10 @@ public class ASTSerializer {
         if (para.lineSpacing() != null) {
             first = writeBoxedIntField(sb, "lineSpacing", para.lineSpacing(), first);
         }
+        first = writeStringField(sb, "lineSpacingType", para.lineSpacingType(), first);
+        if (para.autoLeadingPercent() != null) {
+            first = writeBoxedIntField(sb, "autoLeadingPercent", para.autoLeadingPercent(), first);
+        }
         if (para.letterSpacing() != null) {
             first = writeBoxedShortField(sb, "letterSpacing", para.letterSpacing(), first);
         }
@@ -660,6 +664,9 @@ public class ASTSerializer {
         first = writeStringField(sb, "anchoredPosition", obj.anchoredPosition(), first);
         first = writeStringField(sb, "textWrapMode", obj.textWrapMode(), first);
         first = writeStringField(sb, "textWrapSide", obj.textWrapSide(), first);
+        if (!obj.affectsLineSpacing()) {
+            first = writeBooleanField(sb, "affectsLineSpacing", false, first);
+        }
         first = writeStringField(sb, "fillColor", obj.fillColor(), first);
         if (obj.fillTint() != 100.0) {
             first = writeDoubleField(sb, "fillTint", obj.fillTint(), first);
@@ -741,6 +748,8 @@ public class ASTSerializer {
         first = writeStringField(sb, "hwpScript", eq.hwpScript(), first);
         first = writeStringField(sb, "sourceType", eq.sourceType(), first);
         first = writeStringField(sb, "textColor", eq.textColor(), first);
+        first = writeBoxedIntField(sb, "preferredBaseUnit", eq.preferredBaseUnit(), first);
+        first = writeStringField(sb, "preferredFontFamily", eq.preferredFontFamily(), first);
         sb.append('}');
     }
 

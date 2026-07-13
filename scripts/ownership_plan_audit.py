@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit SPEC-035/SPEC-036 ownership output for one extract directory.
+"""Audit source ownership policy ownership output for one extract directory.
 
 The converter writes three useful JSONL files next to resolved.json:
 
@@ -62,6 +62,41 @@ def load_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def load_object_plans(extract_dir: Path) -> List[Dict[str, Any]]:
+    path = extract_dir / "object-plans.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    plans = data.get("objectPlans") or data.get("plans") or []
+    return plans if isinstance(plans, list) else []
+
+
+def load_planned_export_unit_ids(extract_dir: Path) -> set[str]:
+    path = extract_dir / "extraction-results.json"
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    rows = data.get("results") or data.get("items") or []
+    planned: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        export_unit_id = row.get("exportUnitId")
+        if not export_unit_id:
+            continue
+        if row.get("status") and row.get("status") != "OK":
+            continue
+        if row.get("renderUnitId") or row.get("objectPlanId") or row.get("renderUnitSlotIdentityKey"):
+            planned.add(str(export_unit_id))
+    return planned
+
+
 def parse_page_from_warning(row: Dict[str, Any]) -> Optional[int]:
     if row.get("pageIndex") is not None:
         return row.get("pageIndex")
@@ -76,6 +111,17 @@ def parse_page_from_warning(row: Dict[str, Any]) -> Optional[int]:
 
 
 def plan_key(plan: Dict[str, Any]) -> str:
+    if plan.get("objectPlanId") or plan.get("bundleId"):
+        return "/".join(
+            str(part)
+            for part in (
+                plan.get("objectPlanId") or plan.get("bundleId") or plan.get("candidateId") or "",
+                plan.get("kind") or plan.get("passId") or "",
+                plan.get("visualAction") or "",
+                plan.get("visualLayer") or plan.get("policyLayer") or "",
+                plan.get("placement") or "",
+            )
+        )
     return "/".join(
         str(plan.get(k, ""))
         for k in ("domId", "kind", "visualAction", "policyLayer", "placement")
@@ -83,6 +129,9 @@ def plan_key(plan: Dict[str, Any]) -> str:
 
 
 def visual_sources(plan: Dict[str, Any]) -> List[int]:
+    if plan.get("objectPlanId") or plan.get("bundleId"):
+        sources = plan.get("visualSourceObjectIds") or []
+        return [int(source) for source in sources]
     sources = plan.get("visualSourceObjectIds") or plan.get("sourceObjectIds") or []
     return [int(source) for source in sources]
 
@@ -158,7 +207,10 @@ def group_render_decisions(rows: Iterable[Dict[str, Any]]) -> Dict[Tuple[Any, An
     return grouped
 
 
-def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+def audit_execution(
+    rows: Iterable[Dict[str, Any]],
+    planned_export_unit_ids: Optional[set[str]] = None,
+) -> Dict[str, Any]:
     grouped = group_render_decisions(rows)
     dropped_despite_plan = []
     outside_page_despite_plan = []
@@ -166,6 +218,7 @@ def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     planned_non_floating_routes = []
     placed_despite_drop = []
     no_object_plan = []
+    planned_render_unit_lookup_miss = []
     cross = Counter()
 
     for (dom_id, item_type, page), entry in grouped.items():
@@ -198,7 +251,12 @@ def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         if plan == "DROP_VISUAL" and placed:
             placed_despite_drop.append(sample)
         if any(d == "SKIP_NO_OBJECT_PLAN" for d in decisions):
-            no_object_plan.append(sample)
+            export_unit_id = next((r.get("exportUnitId") for r in entry["rows"] if r.get("exportUnitId")), None)
+            if export_unit_id and planned_export_unit_ids and str(export_unit_id) in planned_export_unit_ids:
+                sample["exportUnitId"] = export_unit_id
+                planned_render_unit_lookup_miss.append(sample)
+            else:
+                no_object_plan.append(sample)
 
     return {
         "cross": cross,
@@ -208,6 +266,7 @@ def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "planned_non_floating_routes": planned_non_floating_routes,
         "placed_despite_drop": placed_despite_drop,
         "no_object_plan": no_object_plan,
+        "planned_render_unit_lookup_miss": planned_render_unit_lookup_miss,
     }
 
 
@@ -253,25 +312,30 @@ def print_samples(title: str, rows: List[Dict[str, Any]], limit: int = 12) -> No
 
 def build_report(extract_dir: Path) -> Dict[str, Any]:
     plans = load_jsonl(extract_dir / "ownership-plan.jsonl")
+    object_plans = load_object_plans(extract_dir)
+    plans_for_policy = object_plans or plans
     warnings = load_jsonl(extract_dir / "ownership-warnings.jsonl")
     decisions = load_jsonl(extract_dir / "render-decisions.jsonl")
+    planned_export_unit_ids = load_planned_export_unit_ids(extract_dir)
 
-    plan_action_counts = Counter(p.get("visualAction") for p in plans)
-    plan_text_counts = Counter(p.get("textAction") for p in plans)
-    plan_layer_counts = Counter(p.get("policyLayer") for p in plans)
+    plan_action_counts = Counter(p.get("visualAction") for p in plans_for_policy)
+    plan_text_counts = Counter(p.get("textAction") for p in plans_for_policy)
+    plan_layer_counts = Counter(p.get("visualLayer") or p.get("policyLayer") for p in plans_for_policy)
     warning_counts = Counter(w.get("code") for w in warnings)
     warning_page_counts = Counter(parse_page_from_warning(w) for w in warnings)
     warning_page_counts.pop(None, None)
 
-    duplicates = audit_plan_duplicates(plans)
-    text_conflicts = audit_text_owner_conflicts(plans)
-    execution = audit_execution(decisions)
+    duplicates = audit_plan_duplicates(plans_for_policy)
+    text_conflicts = audit_text_owner_conflicts(plans_for_policy)
+    execution = audit_execution(decisions, planned_export_unit_ids)
     page_scores = top_pages(warnings, duplicates, execution)
 
     return {
         "extractDir": str(extract_dir),
         "counts": {
-            "plans": len(plans),
+            "plans": len(plans_for_policy),
+            "ownershipPlanRows": len(plans),
+            "objectPlanRows": len(object_plans),
             "warnings": len(warnings),
             "renderDecisionRows": len(decisions),
             "duplicateVisibleVisualSourceRefs": len(duplicates),
@@ -282,6 +346,7 @@ def build_report(extract_dir: Path) -> Dict[str, Any]:
             "plannedNonFloatingRoutes": len(execution["planned_non_floating_routes"]),
             "placedDespiteDrop": len(execution["placed_despite_drop"]),
             "noObjectPlan": len(execution["no_object_plan"]),
+            "plannedRenderUnitLookupMiss": len(execution["planned_render_unit_lookup_miss"]),
         },
         "planVisualActionCounts": dict(plan_action_counts),
         "planTextActionCounts": dict(plan_text_counts),
@@ -297,6 +362,7 @@ def build_report(extract_dir: Path) -> Dict[str, Any]:
         "plannedNonFloatingRoutes": execution["planned_non_floating_routes"][:100],
         "placedDespiteDrop": execution["placed_despite_drop"][:100],
         "noObjectPlan": execution["no_object_plan"][:100],
+        "plannedRenderUnitLookupMiss": execution["planned_render_unit_lookup_miss"][:100],
         "executionCross": {
             "|".join(str(part) for part in key): value
             for key, value in execution["cross"].items()

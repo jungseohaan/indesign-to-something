@@ -91,6 +91,29 @@ public final class StoryConverter {
         return Math.round(nanos / 10000.0) / 100.0;
     }
 
+    private static boolean isStandaloneBlockTextOwnedByInlineShell(
+            ResolvedBuildContext ctx,
+            String domId) {
+        if (ctx == null || domId == null || domId.isEmpty()) return false;
+        try {
+            int id = Integer.parseInt(domId);
+            if (ctx.ownershipPlans == null) return false;
+            for (ObjectPlan plan : ctx.ownershipPlans) {
+                if (plan == null) continue;
+                if (plan.placement != Placement.INLINE) continue;
+                if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+                if (!ShellRole.isTextShell(plan)) continue;
+                if (plan.ownedTextFrameIds == null) continue;
+                for (int ownedId : plan.ownedTextFrameIds) {
+                    if (ownedId == id) return true;
+                }
+            }
+            return false;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
     /** ParagraphStyle에서 미리 구한 스타일 속성 (런에서 없을 때 폴백용) */
     static class StyleContext {
         final String fillColor;
@@ -166,9 +189,10 @@ public final class StoryConverter {
                         continue;
                     }
                     // sourceId → DOM decimal → textFrame → storyId
-                    // SPEC-025: master instance ("_pi" 접미사) 도 처리
+                    // source ownership policy: master instance ("_pi" 접미사) 도 처리
                     String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
                     if (domId == null) continue;
+                    if (isStandaloneBlockTextOwnedByInlineShell(ctx, domId)) continue;
                     if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) continue;
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {
@@ -1317,6 +1341,17 @@ public final class StoryConverter {
         }
     }
 
+    private static void warnUnplannedInlineAnchorSkipped(
+            ResolvedBuildContext ctx,
+            String storyId,
+            int anchoredId) {
+        if (ctx == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_UNPLANNED_INLINE_ANCHOR_SKIPPED\""
+                + ",\"storyId\":\"" + ObjectPlan.escape(storyId) + "\""
+                + ",\"anchoredObjectId\":" + anchoredId
+                + ",\"detail\":\"StoryConverter did not synthesize inline material without a Stage 1 ObjectPlan\"}");
+    }
+
     private static boolean hasStandaloneStoryText(IDMLStory story) {
         if (story == null || story.paragraphs() == null) return false;
         for (IDMLParagraph paragraph : story.paragraphs()) {
@@ -1348,6 +1383,10 @@ public final class StoryConverter {
     private static void preserveComposedLineBreaksForTrailingAnswerVisuals(
             ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
         if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        if (hasStage1ObjectPlans(ctx)) {
+            warnTrailingAnswerLineBreakHeuristicSuppressed(ctx, blocks);
+            return;
+        }
         for (ASTTextFrameBlock block : blocks) {
             if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
             String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
@@ -1377,6 +1416,46 @@ public final class StoryConverter {
             // reserved for source single-line labels and would force body text
             // into one visual line.
         }
+    }
+
+    private static void warnTrailingAnswerLineBreakHeuristicSuppressed(
+            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null || ctx.ownershipWarningLines == null) return;
+        int suppressed = 0;
+        StringBuilder ids = new StringBuilder("[");
+        double scale = ctx.resolvedData.scaleFactor();
+        if (scale <= 0.0) scale = 1.0;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null) continue;
+            String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) continue;
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara =
+                    composedLinesByParagraph(tf);
+            for (List<ResolvedTextFrame.ComposedLine> lines : linesByPara.values()) {
+                if (!looksLikeTrailingAnswerLineBySourceComposition(lines, scale)) continue;
+                if (suppressed > 0 && suppressed < 20) ids.append(',');
+                if (suppressed < 20) ids.append(tf.id());
+                suppressed++;
+            }
+        }
+        if (suppressed == 0) return;
+        ids.append(']');
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_TRAILING_ANSWER_LINE_BREAK_HEURISTIC_SUPPRESSED\""
+                + ",\"count\":" + suppressed
+                + ",\"textFrameIds\":" + ids
+                + ",\"detail\":\"Stage 1 ObjectPlans are present; trailing-answer line-break preservation must be declared from source ownership/style facts, not rendered visual overlap\"}");
+    }
+
+    private static boolean looksLikeTrailingAnswerLineBySourceComposition(
+            List<ResolvedTextFrame.ComposedLine> lines,
+            double scale) {
+        if (lines == null || lines.size() < 2) return false;
+        ResolvedTextFrame.ComposedLine last = lines.get(lines.size() - 1);
+        if (last == null) return false;
+        if (!hasTrailingAnswerLineMarker(last.text())) return false;
+        double normalizedScale = scale > 0.0 ? scale : 1.0;
+        return last.wrapIndentRight() / normalizedScale >= 8.0;
     }
 
     private static Map<Integer, List<ResolvedTextFrame.ComposedLine>> composedLinesByParagraph(
@@ -1669,11 +1748,6 @@ public final class StoryConverter {
         List<Integer> ids = new ArrayList<>();
         if (ctx == null || owner == null || owner.tfInlineVisualIds() == null) return ids;
         for (int inlineId : owner.tfInlineVisualIds()) {
-            // nativeFillChildIds(대형 배경)는 FramePlacer가 네이티브 셀 fill로 흡수 →
-            // 인라인 이미지로 렌더하면 본문 위에 통이미지가 떠 가린다. 인라인에서 제외.
-            if (ownerContainsId(owner.nativeFillChildIds(), inlineId)) {
-                continue;
-            }
             RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
             if (inlineRg == null
                     || !ctx.hasOwnershipPlan(inlineRg)
@@ -1706,25 +1780,23 @@ public final class StoryConverter {
         return ctx != null ? ctx.tfInlineVisualOwnerForTextFrame(domId) : null;
     }
 
-    private static boolean ownerContainsId(int[] ids, int value) {
-        if (ids == null) return false;
-        for (int id : ids) {
-            if (id == value) return true;
-        }
-        return false;
-    }
-
     private static ASTInlineObject loadTfInlineVisual(ResolvedBuildContext ctx, int inlineId) {
         RenderedGroup rg = findRenderedGroup(ctx, inlineId);
-        if (rg == null || rg.file() == null || ctx.basePath == null) return null;
-        if (ctx.shellRoleByOwnershipPlan(rg) != ShellRole.NONE
-                && ctx.placementByOwnershipPlan(rg) == Placement.INLINE) {
+        if (rg == null || ctx.basePath == null) return null;
+        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+        if (plan == null || plan.placement != Placement.INLINE) return null;
+        if (ShellRole.isTextShell(plan)) {
             return InlineFrameHandler.loadInlineObject(ctx, inlineId);
         }
-        File pngFile = new File(ctx.basePath, rg.file());
+        if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                || plan.file == null || plan.file.isEmpty()
+                || plan.bounds == null || plan.bounds.length < 4) {
+            return null;
+        }
+        File pngFile = new File(ctx.basePath, plan.file);
         if (!pngFile.exists()) return null;
         try {
-            byte[] data = loadRenderedPng(ctx, rg, "phase3.tfInlinePng");
+            byte[] data = loadPlannedPng(ctx, plan, "phase3.tfInlinePng");
             int[] dims = readPngDimensions(data);
             if (dims == null) {
                 BufferedImage img = decodePngBytes(data, "phase3.tfInlinePng");
@@ -1741,31 +1813,25 @@ public final class StoryConverter {
             obj.pixelWidth(dims[0]);
             obj.pixelHeight(dims[1]);
             obj.keepInline(true);
-            double[] b = rg.bounds();
-            if (b != null && b.length >= 4) {
-                obj.boundsX(b[1]);
-                double bw = Math.abs(b[3] - b[1]) * ctx.scaleFactor;
-                double bh = Math.abs(b[2] - b[0]) * ctx.scaleFactor;
-                if (bw > 0 && bh > 0) {
-                    obj.width(CoordinateConverter.pointsToHwpunits(bw));
-                    obj.height(CoordinateConverter.pointsToHwpunits(bh));
-                }
+            double[] b = plan.bounds;
+            obj.boundsX(b[1]);
+            double bw = Math.abs(b[3] - b[1]) * ctx.scaleFactor;
+            double bh = Math.abs(b[2] - b[0]) * ctx.scaleFactor;
+            if (bw <= 0 || bh <= 0) {
+                return null;
             }
-            if (obj.width() <= 0 || obj.height() <= 0) {
-                double dpi = ctx.pngExportDpi > 0 ? ctx.pngExportDpi : 220.0;
-                obj.width(CoordinateConverter.pointsToHwpunits(dims[0] * 72.0 / dpi));
-                obj.height(CoordinateConverter.pointsToHwpunits(dims[1] * 72.0 / dpi));
-            }
+            obj.width(CoordinateConverter.pointsToHwpunits(bw));
+            obj.height(CoordinateConverter.pointsToHwpunits(bh));
             return obj;
         } catch (Exception e) {
             return null;
         }
     }
 
-    private static byte[] loadRenderedPng(ResolvedBuildContext ctx, RenderedGroup rg, String metricPrefix) {
-        if (ctx == null || rg == null || rg.file() == null || ctx.basePath == null) return null;
+    private static byte[] loadPlannedPng(ResolvedBuildContext ctx, ObjectPlan plan, String metricPrefix) {
+        if (ctx == null || plan == null || plan.file == null || ctx.basePath == null) return null;
         try {
-            File pngFile = new File(ctx.basePath, rg.file());
+            File pngFile = new File(ctx.basePath, plan.file);
             if (!pngFile.exists()) return null;
             String key = pngFile.getAbsolutePath();
             byte[] cached = ctx.renderedPngByteCache.get(key);
@@ -2641,7 +2707,8 @@ public final class StoryConverter {
         // 중복 단락 제거: InDesign의 overset/threaded frame에서
         // story.paragraphs가 중복 텍스트를 가진 단락을 반환하는 경우 감지
         String prevParaText = "";
-        for (ResolvedParagraph rp : story.paragraphs()) {
+        for (int paragraphIndex = 0; paragraphIndex < story.paragraphs().size(); paragraphIndex++) {
+            ResolvedParagraph rp = story.paragraphs().get(paragraphIndex);
             // 현재 단락 텍스트 추출
             // ExtendScript에서 paragraph.textStyleRanges[k].contents가 단락 경계를
             // 넘어 다음 단락 내용까지 포함한 경우를 대비: \r 이후 내용은 다음 단락 소속이므로 잘라냄
@@ -2689,11 +2756,15 @@ public final class StoryConverter {
                 if (styleJust != null) para.alignment(styleJust);
             }
             Double fixedLeading = rp.fixedLeading();
+            if (rp.autoLeading() != null && rp.autoLeading() > 0) {
+                para.autoLeadingPercent((int) Math.round(rp.autoLeading()));
+            }
             if (fixedLeading != null && fixedLeading > 0) {
                 // InDesign Leading(pt) → HWPX 고정 줄간격(HWPUNIT)
                 para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
                 para.lineSpacingType("fixed");
             }
+            StoryLoader.applyComposedLinePitchFallback(para, ctx, story, paragraphIndex);
             if (rp.spaceBefore() != null && rp.spaceBefore() > 0) {
                 para.spaceBefore(CoordinateConverter.pointsToHwpunits(rp.spaceBefore()));
             }
@@ -2727,10 +2798,11 @@ public final class StoryConverter {
             // 런 변환 (ResolvedParagraph → runs 직접)
             boolean stopAfterThisRun = false;
             boolean firstTextRunAfterLeadingAnchor = false;
-            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 의 너비를 paragraph leftMargin 으로
+            // source ownership policy: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 의 너비를 paragraph leftMargin 으로
             // 적용해 InDesign 의 "1 ←여기부터 내려쓰기" 효과 재현 (예: 페이지 32 "가 같은 사건을..." 발문)
             ResolvedTextFrame firstAnchorTf = null;
             List<ResolvedRun> runs = rp.runs();
+            appendGeneratedParagraphPrefix(ctx, rp, para);
             if (runs != null) {
                 int runIndex = -1;
                 for (ResolvedRun run : runs) {
@@ -2766,88 +2838,14 @@ public final class StoryConverter {
                                     InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId,
                                             prevRunText, nextRunText);
                             if (plannedItems != null) {
+                                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, para);
                                 for (ASTInlineItem item : plannedItems) para.addItem(item);
                                 continue;
                             }
                             if (InlineFrameHandler.hasOwnershipPlanForAnchorBundle(ctx, anchoredId)) {
                                 continue;
                             }
-                            ASTInlineObject earlyGroupShell =
-                                    InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, anchoredId);
-                            if (earlyGroupShell != null) {
-                                para.addItem(earlyGroupShell);
-                                continue;
-                            }
-                            if (InlineFrameHandler.hasTextBlockPlacedDescendant(ctx, anchoredId)) {
-                                continue;
-                            }
-                            // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
-                            if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, anchoredId)
-                                    && InlineFrameHandler.isAnchoredOutsideParent(ctx, anchoredId, story.id())) {
-                                continue;
-                            }
-                            // 다수 박스(예: ㅍ ㅎ ㅂ ㅅ 자모 배지) → 각 TF 를 박스 스타일 INLINE_TEXT_FRAME 으로 분해
-                            List<ASTInlineObject> boxList =
-                                    InlineFrameHandler.tryInlineGroupAsBoxList(ctx, anchoredId);
-                            if (boxList != null && !boxList.isEmpty()) {
-                                for (ASTInlineObject box : boxList) para.addItem(box);
-                                continue;
-                            }
-                            ASTInlineObject shapeShell =
-                                    InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, anchoredId);
-                            if (shapeShell != null) {
-                                para.addItem(shapeShell);
-                                continue;
-                            }
-                            if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, anchoredId)) {
-                                ASTInlineObject inlineObj =
-                                        SimpleButtonLabelInlineFactory.create(ctx, anchoredId);
-                                if (inlineObj != null) {
-                                    para.addItem(inlineObj);
-                                    continue;
-                                }
-                            }
-                            // 배경 도형 + 단일 짧은 텍스트프레임 (예: "가" / "나" 캡슐 배지)
-                            // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
-                            ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, anchoredId);
-                            if (singleBadge != null) {
-                                para.addItem(singleBadge);
-                                continue;
-                            }
-                            // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
-                            // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
-                            List<ASTInlineItem> nestedItems =
-                                    InlineFrameHandler.tryInlineTextFrameAsItems(ctx, anchoredId,
-                                            prevRunText, nextRunText);
-                            if (nestedItems != null && !nestedItems.isEmpty()) {
-                                for (ASTInlineItem item : nestedItems) para.addItem(item);
-                                continue;
-                            }
-                            // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환.
-                            // 배경+텍스트 배지는 위에서 먼저 처리해 ORC 텍스트가 일반 런으로 중복 삽입되지 않게 한다.
-                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId,
-                                    prevRunText, nextRunText);
-                            if (textRun != null) {
-                                if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, anchoredId, prevRunText, nextRunText)) {
-                                    maybeInsertDecorativeLeaderTab(ctx, rp, anchoredId, para);
-                                }
-                                para.addItem(textRun);
-                                continue;
-                            }
-                            if (InlineFrameHandler.isInlineTextShellCompanionForEditableText(ctx, anchoredId)) {
-                                continue;
-                            }
-                            ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, anchoredId);
-                            if (inlineObj != null) {
-                                para.addItem(inlineObj);
-                                continue;
-                            }
-                            // PNG도 텍스트도 없는 인라인 앵커 → 빈칸 공백으로 대체
-                            ASTTextRun spaceRun = InlineFrameHandler.createSpaceRunForEmptyAnchor(ctx, anchoredId);
-                            if (spaceRun != null) {
-                                para.addItem(spaceRun);
-                                continue;
-                            }
+                            warnUnplannedInlineAnchorSkipped(ctx, story.id(), anchoredId);
                         }
                         continue; // 로드 실패 시 건너뜀
                     }
@@ -2867,7 +2865,7 @@ public final class StoryConverter {
                         if (firstTextRunAfterLeadingAnchor && !preserveUnderlineBlank) {
                             runText = stripLeadingAnchorLayoutSpaces(runText);
                         }
-                        // SPEC-025: ACE 7 (IndentToHere, \u0007 or \u0008) 감지 — 첫 inline anchor 이후
+                        // source ownership policy: ACE 7 (IndentToHere, \u0007 or \u0008) 감지 — 첫 inline anchor 이후
                         // 처음 등장한 위치에서 후속 줄 좌측 들여쓰기를 위해 paragraph leftMargin 적용
                         if (firstAnchorTf != null && para.leftMargin() == null) {
                             int aceIdx = runText.indexOf('\u0007');
@@ -2906,8 +2904,10 @@ public final class StoryConverter {
                 }
             }
 
-            // 인라인 객체 boundsX 기반 재정렬
-            ASTTableConverter.reorderInlineObjectsByBoundsX(para);
+            // Legacy-only: Stage 1 ObjectPlan이 있으면 source/story order가 실행 계약이다.
+            if (!hasStage1ObjectPlans(ctx)) {
+                ASTTableConverter.reorderInlineObjectsByBoundsX(para);
+            }
 
             applyTrailingPageNumberLeader(para, rp);
             paragraphs.add(para);
@@ -2940,6 +2940,10 @@ public final class StoryConverter {
         if (paragraphs == null || paragraphs.isEmpty()) return null;
         postprocessResolvedStoryParagraphs(ctx, storyId, paragraphs);
         return paragraphs;
+    }
+
+    private static boolean hasStage1ObjectPlans(ResolvedBuildContext ctx) {
+        return ctx != null && ctx.ownershipPlans != null && !ctx.ownershipPlans.isEmpty();
     }
 
     private static boolean isSafeTextOnlyTextFlowUnit(TextFlowDocument.TextFlowUnit unit) {
@@ -3072,9 +3076,10 @@ public final class StoryConverter {
             if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
             if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) return;
 
-            String text = ((ASTTextRun) item).text();
+            ASTTextRun textRun = (ASTTextRun) item;
+            String text = textRun.text();
             if (text == null || text.trim().isEmpty()) continue;
-            if (!isPageNumberText(text)) return;
+            if (!isPageNumberTextRun(textRun)) return;
             if (TextFlowTabPolicy.hasTabImmediatelyBefore(items, i)) return;
             if (!enableRightmostDotLeader(para, rp)) return;
 
@@ -3090,29 +3095,23 @@ public final class StoryConverter {
         if (text == null || text.isEmpty()) return text;
 
         int i = 0;
+        boolean sawAnchorLayoutControl = false;
+        boolean sawLeadingSpace = false;
         while (i < text.length()) {
             char ch = text.charAt(i);
             if (ch == ' ' || ch == '\t' || ch == '\u00A0') {
+                sawLeadingSpace = true;
+                i++;
+            } else if (isAnchorLayoutControl(ch)) {
+                sawAnchorLayoutControl = true;
                 i++;
             } else {
                 break;
             }
         }
-        if (i == 0 || i >= text.length()) return text;
-
-        if (isAnchorLayoutControl(text.charAt(i))) {
-            int j = i;
-            while (j < text.length()) {
-                char ch = text.charAt(j);
-                if (isAnchorLayoutControl(ch) || ch == ' ' || ch == '\t' || ch == '\u00A0') {
-                    j++;
-                } else {
-                    break;
-                }
-            }
-            return " " + text.substring(j);
-        }
-        return text;
+        if (!sawAnchorLayoutControl) return text;
+        if (i >= text.length()) return "";
+        return sawLeadingSpace ? " " + text.substring(i) : text.substring(i);
     }
 
     private static boolean isAnchorLayoutControl(char ch) {
@@ -3123,6 +3122,49 @@ public final class StoryConverter {
         if (text == null) return false;
         String cleaned = text.replace("\r", "").replace("\n", "").trim();
         return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean isPageNumberTextRun(ASTTextRun run) {
+        if (run == null || !isPageNumberText(run.text())) return false;
+        if (run.subscript() || run.superscript()) return false;
+        String style = run.characterStyleRef();
+        if (style != null) {
+            String lower = style.toLowerCase(java.util.Locale.ROOT)
+                    .replace("%3a", ":")
+                    .replace("%25", "%");
+            if (lower.contains("subscript") || lower.contains("superscript")
+                    || lower.contains("하부자") || lower.contains("상부자")
+                    || lower.contains("아래첨자") || lower.contains("위첨자")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void appendGeneratedParagraphPrefix(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph resolvedParagraph,
+            ASTParagraph para) {
+        if (ctx == null || resolvedParagraph == null || para == null) return;
+        String prefix = ResolvedTextFlowAstConverter.generatedPrefixToInsert(resolvedParagraph);
+        if (prefix == null || prefix.trim().isEmpty()) return;
+        ResolvedRun styleRun = ResolvedTextFlowAstConverter.firstVisibleResolvedRun(resolvedParagraph);
+        if (styleRun == null) return;
+        TextStyleApplicator.ResolvedStyleOptions styleOptions =
+                new TextStyleApplicator.ResolvedStyleOptions();
+        styleOptions.proportionalScaleAsFontSize = true;
+        styleOptions.applyVerticalScale = false;
+        List<ASTTextRun> textRuns = ResolvedTextFlowAstConverter.convertRunText(
+                prefix,
+                styleRun,
+                para,
+                ResolvedTextFlowAstConverter.options()
+                        .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
+                        .styleOptions(styleOptions)
+                        .truncateAtParagraphBreak(false));
+        for (ASTTextRun textRun : textRuns) {
+            para.addItem(textRun);
+        }
     }
 
     private static boolean hasVisibleText(ASTParagraph para) {
@@ -3152,8 +3194,23 @@ public final class StoryConverter {
     }
 
     private static boolean isResolvedPageNumberFrame(ResolvedBuildContext ctx, int anchoredId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredId));
         if (tf == null) return false;
+        if (hasStage1ObjectPlans(ctx)) {
+            if (hasSourceAutoPageNumberMarker(ctx, tf)) return true;
+            if (legacyLooksLikeResolvedPageNumberFrame(ctx, tf)) {
+                warnPageNumberRoleHeuristicSuppressed(ctx, anchoredId, "resolved_story");
+            }
+            return false;
+        }
+        return legacyLooksLikeResolvedPageNumberFrame(ctx, tf);
+    }
+
+    private static boolean legacyLooksLikeResolvedPageNumberFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || tf == null) return false;
         String text = tf.frameVisibleText();
         if ((text == null || text.trim().isEmpty()) && tf.storyId() != null) {
             ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
@@ -3176,6 +3233,36 @@ public final class StoryConverter {
         double w = Math.abs(gb[3] - gb[1]);
         double h = Math.abs(gb[2] - gb[0]);
         return w <= 40.0 && h <= 25.0;
+    }
+
+    private static boolean hasSourceAutoPageNumberMarker(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        if (containsAutoPageNumberMarker(tf.frameVisibleText())) return true;
+        if (ctx == null || ctx.resolvedData == null || tf.storyId() == null) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph rp : story.paragraphs()) {
+            if (rp == null || rp.runs() == null) continue;
+            for (ResolvedRun run : rp.runs()) {
+                if (run != null && containsAutoPageNumberMarker(run.text())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsAutoPageNumberMarker(String text) {
+        return text != null && text.indexOf('\u0018') >= 0;
+    }
+
+    private static void warnPageNumberRoleHeuristicSuppressed(
+            ResolvedBuildContext ctx,
+            int anchoredId,
+            String surface) {
+        if (ctx == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_PAGE_NUMBER_ROLE_HEURISTIC_SUPPRESSED\""
+                + ",\"anchoredObjectId\":" + anchoredId
+                + ",\"surface\":\"" + ObjectPlan.escape(surface) + "\""
+                + ",\"detail\":\"Stage 1 ObjectPlans are present; page-number role must come from source metadata, not digit text or frame bounds\"}");
     }
 
     private static boolean hasDecorativeResolvedParagraphRule(ResolvedBuildContext ctx, ResolvedParagraph rp) {

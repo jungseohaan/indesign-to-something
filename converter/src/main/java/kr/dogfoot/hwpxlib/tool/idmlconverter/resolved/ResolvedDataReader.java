@@ -19,13 +19,14 @@ public class ResolvedDataReader {
      * resolved.json 파일을 읽어 ResolvedData로 변환한다.
      */
     public static ResolvedData read(String filePath) throws IOException {
+        boolean preserveRenderedMaterialForObjectPlans = hasSiblingObjectPlans(filePath);
         // 파일을 직접 스트리밍 파싱 (String 중간 변환 없이 메모리 절감)
         JsonReader reader = new JsonReader(new BufferedReader(new InputStreamReader(
                 new FileInputStream(filePath), "UTF-8"), 65536));
         try {
             reader.setLenient(true);
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-            return fromJsonObject(root);
+            return fromJsonObject(root, preserveRenderedMaterialForObjectPlans);
         } finally {
             reader.close();
         }
@@ -37,7 +38,7 @@ public class ResolvedDataReader {
         try {
         reader.setLenient(true);
         JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-        return fromJsonObject(root);
+        return fromJsonObject(root, false);
         } finally {
             try { reader.close(); } catch (IOException e) {
                 System.err.println("[ResolvedDataReader] JSON reader close 실패: " + e.getMessage());
@@ -46,7 +47,14 @@ public class ResolvedDataReader {
     }
 
     private static ResolvedData fromJsonObject(JsonObject root) {
+        return fromJsonObject(root, false);
+    }
+
+    private static ResolvedData fromJsonObject(
+            JsonObject root,
+            boolean preserveRenderedMaterialForObjectPlans) {
         ResolvedData data = new ResolvedData();
+        data.preserveRenderedFloatingItemsForObjectPlans(preserveRenderedMaterialForObjectPlans);
 
         // colors → colorHexMap.
         // CMYK 스와치는 추출 시점의 naive 수식 hex 대신 ICC 프로파일 변환으로 재계산한다
@@ -160,7 +168,7 @@ public class ResolvedDataReader {
             JsonArray arr = root.getAsJsonArray("editableTextFrameIds");
             Set<String> ids = new java.util.HashSet<>();
             for (int i = 0; i < arr.size(); i++) {
-                // SPEC-025: synthetic master instance IDs (예: "2453_pi20") 는 문자열로 그대로 사용
+                // source ownership policy: synthetic master instance IDs (예: "2453_pi20") 는 문자열로 그대로 사용
                 ids.add(arr.get(i).getAsString());
             }
             data.editableTextFrameIds(ids);
@@ -187,6 +195,13 @@ public class ResolvedDataReader {
         }
 
         return data;
+    }
+
+    private static boolean hasSiblingObjectPlans(String filePath) {
+        if (filePath == null || filePath.isEmpty()) return false;
+        File resolved = new File(filePath);
+        File parent = resolved.getParentFile();
+        return parent != null && new File(parent, "object-plans.json").isFile();
     }
 
     private static ResolvedTextFrame parseTextFrame(JsonObject o) {
@@ -295,6 +310,7 @@ public class ResolvedDataReader {
         tf.hiddenByParent(getBool(o, "hiddenByParent", tf.hiddenByParent()));
         tf.masterSourceId(getString(o, "masterSourceId"));
         tf.isMasterInstance(getBool(o, "isMasterInstance", false));
+        tf.masterSpecialType(getString(o, "masterSpecialType"));
         tf.layerId(getString(o, "layerId"));
         tf.layerName(getString(o, "layerName"));
         tf.layerIndex(getInt(o, "layerIndex", -1));
@@ -377,6 +393,7 @@ public class ResolvedDataReader {
         para.shadingOn(getBoxedBool(o, "shadingOn"));
         para.shadingColor(getString(o, "shadingColor"));
         para.shadingTint(getBoxedDouble(o, "shadingTint"));
+        para.generatedPrefixText(replaceInDesignSpecialCharCodes(getString(o, "generatedPrefixText")));
         para.justification(getString(o, "justification"));
 
         // leading: can be number or string "Auto"
@@ -538,6 +555,7 @@ public class ResolvedDataReader {
         item.isInline(getBool(o, "isInline", false));
         item.anchoredPosition(getString(o, "anchoredPosition"));
         item.storyAnchorPlacement(getString(o, "storyAnchorPlacement"));
+        item.storyTextInlineSlot(getBool(o, "storyTextInlineSlot", false));
         item.clipContent(getBool(o, "clipContent", false));
         if (o.has("childIds") && !o.get("childIds").isJsonNull()) {
             item.childIds(parseIntArray(o.getAsJsonArray("childIds")));
@@ -577,16 +595,27 @@ public class ResolvedDataReader {
         group.pdfPageIndex(getInt(o, "pdfPageIndex", -1));
         // z-order (InDesign allPageItems 인덱스: 0=앞, 큰 값=뒤)
         group.zOrder(getInt(o, "zOrder", 0));
+        group.zOrderKnown(getBool(o, "zOrderKnown", false));
         String itemType = getString(o, "itemType");
         if (itemType == null || itemType.isEmpty()) {
             itemType = group.type();
         }
         group.itemType(itemType);
+        group.exportUnitId(getString(o, "exportUnitId"));
+        group.renderUnitId(getString(o, "renderUnitId"));
+        group.renderUnitSlotIdentityKey(getString(o, "renderUnitSlotIdentityKey"));
         group.planPassId(getString(o, "planPassId"));
         group.candidateId(getString(o, "candidateId"));
         group.compositeRole(getString(o, "compositeRole"));
         group.slotRole(getString(o, "slotRole"));
         group.placementRole(getString(o, "placementRole"));
+        String visualLayer = getString(o, "visualLayer");
+        if ((visualLayer == null || visualLayer.isEmpty())
+                && ("page_background_plane".equals(group.slotRole())
+                    || "page_background_plane".equals(group.compositeRole()))) {
+            visualLayer = "PAGE_BACKGROUND";
+        }
+        group.visualLayer(visualLayer);
         group.imageFormat(getString(o, "imageFormat"));
         group.whiteStroke(getBool(o, "whiteStroke", false));
         // badge_group: PNG 내보내기 전 TF 텍스트를 숨겼는지 여부

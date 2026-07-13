@@ -195,23 +195,46 @@ public class ASTStoryConverter {
                 }
             }
 
+            String runText = run.content();
+            boolean orcOnly = runText != null && !runText.isEmpty()
+                    && runText.replace("\uFFFC", "").isEmpty();
+            boolean formulaClusterRun =
+                    ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+
+            if (orcOnly && formulaClusterRun) {
+                if (!npMathGroup.isEmpty()) {
+                    ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
+                    npMathGroup.clear();
+                    npMathGroupFractions.clear();
+                }
+                if (!ehMathGroup.isEmpty()) {
+                    ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
+                    ehMathGroup.clear();
+                    ehMathGroupFractions.clear();
+                }
+                mathGroup.add(ASTMathGrouper.formulaAnswerBoxRun(run));
+                continue;
+            }
+
             // EH 수식 그룹 진입 여부 판단
             boolean enterEHMathGroup = false;
-            if (run.isEHFont()) {
+            if (!orcOnly && run.isEHFont()) {
                 enterEHMathGroup = true;
-            } else if (EHFontGlyphMap.containsEHEncodedChars(run.content())) {
+            } else if (!orcOnly && EHFontGlyphMap.containsEHEncodedChars(run.content())) {
                 // 폰트 미지정이지만 EH 인코딩 패턴(Û` 등) 포함 → EH 그룹으로 진입
                 enterEHMathGroup = true;
-            } else if (EHFontGlyphMap.containsEHFractionPattern(run.content())) {
+            } else if (!orcOnly && EHFontGlyphMap.containsEHFractionPattern(run.content())) {
                 // 폰트 미지정이지만 ;...; 분수 GREP 패턴 포함 → EH 그룹으로 진입
                 enterEHMathGroup = true;
-            } else if (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx)) {
+            } else if (!orcOnly && !ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx)) {
                 enterEHMathGroup = true;
             }
 
             // NP 수식 그룹 진입 여부 판단
             boolean enterNPMathGroup = false;
-            if (!enterEHMathGroup) {
+            if (!enterEHMathGroup && !orcOnly) {
                 if (run.isNPFont()) {
                     enterNPMathGroup = true;
                 } else if (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx)) {
@@ -228,7 +251,7 @@ public class ASTStoryConverter {
 
             // BT 수식 그룹 진입 여부 판단
             boolean enterMathGroup = false;
-            if (!enterEHMathGroup && !enterNPMathGroup) {
+            if (!enterEHMathGroup && !enterNPMathGroup && !orcOnly) {
                 if ((run.isBTFont() || run.grepMathFont())
                         && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
                         && !ASTMathGrouper.isPlainAlphanumericRun(run)) {
@@ -236,6 +259,8 @@ public class ASTStoryConverter {
                 } else if (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx)) {
                     enterMathGroup = true;
                 } else if (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content())) {
+                    enterMathGroup = true;
+                } else if (formulaClusterRun) {
                     enterMathGroup = true;
                 }
             }
@@ -377,9 +402,10 @@ public class ASTStoryConverter {
             ASTInlineItem item = items.get(i);
             if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
             if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                String text = ((ASTTextRun) item).text();
+                ASTTextRun textRun = (ASTTextRun) item;
+                String text = textRun.text();
                 if (text == null || text.trim().isEmpty()) continue;
-                if (!isPageNumberText(text)) return;
+                if (!isPageNumberTextRun(textRun)) return;
             } else if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
                 if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return;
@@ -428,6 +454,23 @@ public class ASTStoryConverter {
         if (text == null) return false;
         String cleaned = text.replace("\r", "").replace("\n", "").trim();
         return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean isPageNumberTextRun(ASTTextRun run) {
+        if (run == null || !isPageNumberText(run.text())) return false;
+        if (run.subscript() || run.superscript()) return false;
+        String style = run.characterStyleRef();
+        if (style != null) {
+            String lower = style.toLowerCase(java.util.Locale.ROOT)
+                    .replace("%3a", ":")
+                    .replace("%25", "%");
+            if (lower.contains("subscript") || lower.contains("superscript")
+                    || lower.contains("하부자") || lower.contains("상부자")
+                    || lower.contains("아래첨자") || lower.contains("위첨자")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean enableRightmostDotLeader(ASTParagraph para,
@@ -792,12 +835,20 @@ public class ASTStoryConverter {
     }
 
     private static boolean isOwnedByRenderedTextlessShell(IDMLTextFrame tf, ResolvedData resolvedData) {
-        if (tf == null || resolvedData == null || resolvedData.allRenderedFloatingItems() == null) {
+        if (tf == null || resolvedData == null) {
             return false;
         }
         String domId = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers
                 .domIdFromSourceId(tf.selfId());
         if (domId == null) return false;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                storyBridgeContext(resolvedData);
+        boolean hasStage1ObjectPlans = ctx.ownershipPlans != null && !ctx.ownershipPlans.isEmpty();
+        int tfDomId = parseDomIdOrNeg(domId);
+        if (hasStage1ObjectPlans) {
+            return isTextFrameOwnedByPlannedTextShell(tfDomId, ctx);
+        }
+        if (resolvedData.allRenderedFloatingItems() == null) return false;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
                 : resolvedData.allRenderedFloatingItems()) {
             if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
@@ -816,6 +867,57 @@ public class ASTStoryConverter {
                     if (domId.equals(String.valueOf(id))) return true;
                 }
             }
+        }
+        return false;
+    }
+
+    private static boolean isTextFrameOwnedByPlannedTextShell(
+            int textFrameDomId,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx) {
+        if (textFrameDomId < 0 || ctx == null || ctx.ownershipPlans == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan
+                : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.textAction
+                    != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction.OWNED_BY_HWPX_TEXT) {
+                continue;
+            }
+            if (!kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole.isTextShell(plan)) {
+                continue;
+            }
+            if (containsInt(plan.ownedTextFrameIds, textFrameDomId)) return true;
+        }
+        return false;
+    }
+
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext storyBridgeContext(
+            ResolvedData resolvedData) {
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
+        if (resolvedData != null) {
+            ctx.resolvedData = resolvedData;
+            ctx.basePath = resolvedData.basePath();
+            ctx.scaleFactor = resolvedData.scaleFactor();
+            if (resolvedData.ownershipPlans() != null) {
+                ctx.ownershipPlans.addAll(resolvedData.ownershipPlans());
+            }
+        }
+        return ctx;
+    }
+
+    private static int parseDomIdOrNeg(String id) {
+        if (id == null) return -1;
+        try {
+            return Integer.parseInt(id);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static boolean containsInt(int[] ids, int target) {
+        if (ids == null) return false;
+        for (int id : ids) {
+            if (id == target) return true;
         }
         return false;
     }

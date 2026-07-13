@@ -164,11 +164,11 @@ public class EHFontEquationConverter {
             case '\u22EF': return "CDOTS";       // ⋯
             case '\u22EE': return "VDOTS";       // ⋮
             case '\u22F1': return "DDOTS";       // ⋱
-            case '\u2190': return "LEFT";        // ←
-            case '\u2192': return "RIGHT";       // →
-            case '\u2194': return "LEFTRIGHTARROW"; // ↔
-            case '\u21D2': return "DARROW";      // ⇒
-            case '\u21D4': return "DLARROW";     // ⇔
+            case '\u2190': return "larrow";     // ←
+            case '\u2192': return "rarrow";     // →
+            case '\u2194': return "lrarrow";    // ↔
+            case '\u21D2': return "rarrow";     // ⇒
+            case '\u21D4': return "lrarrow";    // ⇔
             case '\u2220': return "angle";       // ∠
             case '\u22A5': return "bot";         // ⊥
             case '\u2225': return "parallel";    // ∥

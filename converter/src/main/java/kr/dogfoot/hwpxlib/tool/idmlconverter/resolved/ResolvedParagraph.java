@@ -20,6 +20,7 @@ public class ResolvedParagraph {
     private Boolean shadingOn;
     private String shadingColor;   // 색상 이름 (hex 아님)
     private Double shadingTint;
+    private String generatedPrefixText;
     private List<ResolvedTabStop> tabStops;
     private final List<ResolvedRun> runs = new ArrayList<>();
 
@@ -70,6 +71,9 @@ public class ResolvedParagraph {
 
     public Double shadingTint() { return shadingTint; }
     public void shadingTint(Double v) { this.shadingTint = v; }
+
+    public String generatedPrefixText() { return generatedPrefixText; }
+    public void generatedPrefixText(String v) { this.generatedPrefixText = v; }
 
     public List<ResolvedTabStop> tabStops() { return tabStops; }
     public boolean hasTabStops() { return tabStops != null && !tabStops.isEmpty(); }
