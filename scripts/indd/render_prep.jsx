@@ -156,7 +156,9 @@ function hideOneTextFrameContent(tf, opts) {
             return { tf: tf, mode: "visible", wasVisible: wasVisibleForced };
         } catch (eForceVisible) {}
     }
-    var preferTextPaintOnly = opts.preferTextPaintOnly === true;
+    var preserveFrameVisual = opts.preserveFrameVisual === true
+            && textFrameHasVisibleContainerVisual(tf);
+    var preferTextPaintOnly = opts.preferTextPaintOnly === true || preserveFrameVisual;
     var doc = null;
     try { doc = app.activeDocument; } catch (eDoc) {}
     var noneSwatch = null;
@@ -164,6 +166,13 @@ function hideOneTextFrameContent(tf, opts) {
         try { noneSwatch = doc.swatches.itemByName("None"); } catch (eNone) {}
         if (!noneSwatch) {
             try { noneSwatch = doc.swatches.itemByName("[None]"); } catch (eBracketNone) {}
+        }
+    }
+    var blackSwatch = null;
+    if (doc) {
+        try { blackSwatch = doc.swatches.itemByName("Black"); } catch (eBlack) {}
+        if (!blackSwatch) {
+            try { blackSwatch = doc.swatches.itemByName("[Black]"); } catch (eBracketBlack) {}
         }
     }
 
@@ -179,10 +188,14 @@ function hideOneTextFrameContent(tf, opts) {
     function hideTextPaintTarget(target) {
         var state = { target: target };
         var changed = false;
+        var hidGlyphPaint = false;
         try { state.fillColor = target.fillColor; } catch (eFillRead) {}
         try { state.fillTint = target.fillTint; } catch (eFillTintRead) {}
         try { state.strokeColor = target.strokeColor; } catch (eStrokeRead) {}
         try { state.strokeTint = target.strokeTint; } catch (eStrokeTintRead) {}
+        try { state.opacity = target.transparencySettings.blendingSettings.opacity; } catch (eOpacityRead) {}
+        try { state.fillOpacity = target.fillTransparencySettings.blendingSettings.opacity; } catch (eFillOpacityRead) {}
+        try { state.strokeOpacity = target.strokeTransparencySettings.blendingSettings.opacity; } catch (eStrokeOpacityRead) {}
         try { state.underline = target.underline; } catch (eUnderlineRead) {}
         try { state.underlineColor = target.underlineColor; } catch (eUnderlineColorRead) {}
         try { state.underlineTint = target.underlineTint; } catch (eUnderlineTintRead) {}
@@ -191,14 +204,23 @@ function hideOneTextFrameContent(tf, opts) {
         try { state.strikeThroughTint = target.strikeThroughTint; } catch (eStrikeTintRead) {}
 
         if (noneSwatch) {
-            try { target.fillColor = noneSwatch; changed = true; } catch (eFillWrite) {}
-            try { target.strokeColor = noneSwatch; changed = true; } catch (eStrokeWrite) {}
+            try { target.fillColor = noneSwatch; changed = true; hidGlyphPaint = true; } catch (eFillWrite) {}
+            try { target.strokeColor = noneSwatch; changed = true; hidGlyphPaint = true; } catch (eStrokeWrite) {}
             try { target.underlineColor = noneSwatch; } catch (eUnderlineColorWrite) {}
             try { target.strikeThroughColor = noneSwatch; } catch (eStrikeColorWrite) {}
         }
+        if (blackSwatch) {
+            try { target.fillColor = blackSwatch; changed = true; hidGlyphPaint = true; } catch (eBlackFillWrite) {}
+            try { target.strokeColor = blackSwatch; changed = true; hidGlyphPaint = true; } catch (eBlackStrokeWrite) {}
+        }
+        try { target.fillTint = 0; changed = true; hidGlyphPaint = true; } catch (eFillTintWrite) {}
+        try { target.strokeTint = 0; changed = true; hidGlyphPaint = true; } catch (eStrokeTintWrite) {}
+        try { target.transparencySettings.blendingSettings.opacity = 0; changed = true; hidGlyphPaint = true; } catch (eOpacityWrite) {}
+        try { target.fillTransparencySettings.blendingSettings.opacity = 0; changed = true; hidGlyphPaint = true; } catch (eFillOpacityWrite) {}
+        try { target.strokeTransparencySettings.blendingSettings.opacity = 0; changed = true; hidGlyphPaint = true; } catch (eStrokeOpacityWrite) {}
         try { target.underline = false; changed = true; } catch (eUnderlineWrite) {}
         try { target.strikeThru = false; changed = true; } catch (eStrikeWrite) {}
-        return changed ? state : null;
+        return changed && hidGlyphPaint ? state : null;
     }
 
     try {
@@ -240,7 +262,7 @@ function hideOneTextFrameContent(tf, opts) {
         }
     } catch (eTextStyleRanges) {}
 
-    if (opts.preserveFrameVisual === true) {
+    if (preserveFrameVisual === true) {
         return null;
     }
 
@@ -252,6 +274,84 @@ function hideOneTextFrameContent(tf, opts) {
         } catch (eVisible) {}
     } catch (eOpacity) {}
     return null;
+}
+
+function textFrameHasVisibleContainerVisual(tf) {
+    if (!tf) return false;
+    if (hasVisibleFramePaint(tf)) return true;
+    if (hasVisibleTablePaint(tf)) return true;
+    return false;
+}
+
+function swatchLooksNone(value) {
+    if (value === null || value === undefined) return true;
+    var name = null;
+    try { name = String(value.name || ""); } catch (eName) {}
+    if (name === null || name === "") {
+        try { name = String(value); } catch (eString) {}
+    }
+    if (name === null) return false;
+    return name === "None" || name === "[None]" || name === "$ID/[None]";
+}
+
+function numericOrZero(value) {
+    var num = Number(value);
+    if (isNaN(num)) return 0;
+    return num;
+}
+
+function hasVisibleFramePaint(item) {
+    if (!item) return false;
+    try {
+        if (!swatchLooksNone(item.fillColor)) return true;
+    } catch (eFill) {}
+    try {
+        if (numericOrZero(item.strokeWeight) > 0
+                && !swatchLooksNone(item.strokeColor)) {
+            return true;
+        }
+    } catch (eStroke) {}
+    return false;
+}
+
+function hasVisibleTablePaint(tf) {
+    try {
+        var tables = tf.tables.everyItem().getElements();
+        for (var ti = 0; ti < tables.length; ti++) {
+            if (hasVisibleTableObjectPaint(tables[ti])) return true;
+            var cells = tables[ti].cells.everyItem().getElements();
+            for (var ci = 0; ci < cells.length; ci++) {
+                if (hasVisibleTableObjectPaint(cells[ci])) return true;
+            }
+        }
+    } catch (eTables) {}
+    return false;
+}
+
+function hasVisibleTableObjectPaint(item) {
+    if (!item) return false;
+    try {
+        if (!swatchLooksNone(item.fillColor)) return true;
+    } catch (eFill) {}
+    var sides = ["top", "left", "bottom", "right"];
+    for (var i = 0; i < sides.length; i++) {
+        var side = sides[i];
+        var weightName = side + "EdgeStrokeWeight";
+        var colorName = side + "EdgeStrokeColor";
+        try {
+            if (numericOrZero(item[weightName]) > 0
+                    && !swatchLooksNone(item[colorName])) {
+                return true;
+            }
+        } catch (eSide) {}
+    }
+    try {
+        if (numericOrZero(item.strokeWeight) > 0
+                && !swatchLooksNone(item.strokeColor)) {
+            return true;
+        }
+    } catch (eStroke) {}
+    return false;
 }
 
 function hideTextFrames(renderTarget, opts) {
@@ -737,6 +837,9 @@ function restoreTextFrames(saved) {
                     try { if (state.fillTint !== undefined) target.fillTint = state.fillTint; } catch (eFillTint) {}
                     try { if (state.strokeColor !== undefined) target.strokeColor = state.strokeColor; } catch (eStroke) {}
                     try { if (state.strokeTint !== undefined) target.strokeTint = state.strokeTint; } catch (eStrokeTint) {}
+                    try { if (state.opacity !== undefined) target.transparencySettings.blendingSettings.opacity = state.opacity; } catch (eOpacity) {}
+                    try { if (state.fillOpacity !== undefined) target.fillTransparencySettings.blendingSettings.opacity = state.fillOpacity; } catch (eFillOpacity) {}
+                    try { if (state.strokeOpacity !== undefined) target.strokeTransparencySettings.blendingSettings.opacity = state.strokeOpacity; } catch (eStrokeOpacity) {}
                     try { if (state.underline !== undefined) target.underline = state.underline; } catch (eUnderline) {}
                     try { if (state.underlineColor !== undefined) target.underlineColor = state.underlineColor; } catch (eUnderlineColor) {}
                     try { if (state.underlineTint !== undefined) target.underlineTint = state.underlineTint; } catch (eUnderlineTint) {}

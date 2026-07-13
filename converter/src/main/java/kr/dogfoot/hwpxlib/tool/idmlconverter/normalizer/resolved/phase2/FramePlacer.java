@@ -287,6 +287,14 @@ public final class FramePlacer {
                     h = minTextAxis;
                     fontAxisExpanded = true;
                 }
+                if (!verticalComposedText
+                        && isSingleVisibleGlyphTextFrame(tf)
+                        && w < minTextAxis) {
+                    double delta = minTextAxis - w;
+                    x -= delta / 2.0;
+                    w = minTextAxis;
+                    fontAxisExpanded = true;
+                }
             }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
@@ -1060,6 +1068,10 @@ public final class FramePlacer {
 
     private static boolean isVerticalComposedTextFrame(ResolvedTextFrame tf) {
         if (tf == null || tf.composedLines() == null || tf.composedLines().isEmpty()) return false;
+        // A narrow one-glyph marker can compose as a tall ink box even when the
+        // source story is ordinary horizontal text.  Do not infer vertical
+        // writing from geometry alone for such marker frames.
+        if (isSingleVisibleGlyphTextFrame(tf)) return false;
         double[] frameBounds = tf.pageRelativeBounds();
         if (frameBounds == null || frameBounds.length < 4) frameBounds = tf.geometricBounds();
         if (frameBounds == null || frameBounds.length < 4) return false;
@@ -1083,6 +1095,11 @@ public final class FramePlacer {
             }
         }
         return checked > 0 && verticalLike == checked;
+    }
+
+    private static boolean isSingleVisibleGlyphTextFrame(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        return visibleTextLength(tf.frameVisibleText()) == 1;
     }
 
     private static double maxFontSizePt(ResolvedBuildContext ctx, ResolvedTextFrame tf) {

@@ -103,6 +103,12 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var nestedInlineTextShellResolution =
+            _resolveObjectPlanNestedInlineTextShellOwners(objectPlans);
+    _recordObjectPlanTiming("resolveNestedInlineTextShellOwners", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var inlineCompletePngTextOwnerResolution =
             _resolveObjectPlanDuplicateInlineCompletePngTextOwners(objectPlans, sourceById);
     _recordObjectPlanTiming("resolveDuplicateInlineCompletePngTextOwners", _timingStartedAt, {
@@ -180,6 +186,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     summary.pngOwnedTextFrameCleanup = pngOwnedTextFrameCleanup.summary;
     summary.textOwnershipResolution = textOwnershipResolution.summary;
     summary.visibleVisualSourceResolution = visibleVisualSourceResolution.summary;
+    summary.nestedInlineTextShellResolution = nestedInlineTextShellResolution.summary;
     summary.inlineCompletePngTextOwnerResolution = inlineCompletePngTextOwnerResolution.summary;
     summary.inlineVisualInventory = inlineVisualInventory.summary;
     summary.layoutOnlyInlineSlots = layoutOnlyInlineSlots.summary;
@@ -1421,6 +1428,7 @@ function _objectPlanAllOwnedTextFramesIn(plan, ownedTextFrameIds) {
 function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
     if (!objectPlans || !sourceItems) return;
     var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
+    var sourceById = _objectPlanSourceInfoById(sourceItems);
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || String(src.kind || "") !== "TextFrame") continue;
@@ -1434,10 +1442,33 @@ function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
         if (_objectPlanDecisionIndexHasTableStyleDecision(decisionIndex, id)) continue;
         var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
         var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
-        var tablePlan = _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder);
+        var anchoredNestedTable =
+                _isTableOnlyTextFrameNestedInInlineShell(src, sourceById);
+        var tablePlan = _tableOnlyTextFrameObjectPlan(
+                src,
+                id,
+                pageIndex,
+                zOrder,
+                anchoredNestedTable ? "DROP_TEXT" : null,
+                anchoredNestedTable ? "owned_by_anchored_table_plan" : null);
         objectPlans.push(tablePlan);
         _addObjectPlanToDecisionIndex(decisionIndex, tablePlan);
     }
+}
+
+function _isTableOnlyTextFrameNestedInInlineShell(src, sourceById) {
+    if (!src || !sourceById) return false;
+    var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+    if (placement !== "INLINE") return false;
+    if (src.parentId === null || src.parentId === undefined || String(src.parentId) === "") return false;
+    var parent = sourceById[String(src.parentId)];
+    if (!parent) return false;
+    var parentKind = String(parent.kind || parent.type || "");
+    if (parentKind === "TextFrame") return false;
+    var parentPlacement = String(parent.storyAnchorPlacement || "").toUpperCase();
+    return parentPlacement === "INLINE"
+            || parent.storyTextInlineSlot === true
+            || parent.isInline === true;
 }
 
 function _appendTableOnlyTextFrameShellObjectPlans(objectPlans, sourceItems) {
@@ -1562,9 +1593,10 @@ function _textFrameCleanupObjectPlan(src, id, pageIndex, zOrder, reason) {
     return plan;
 }
 
-function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder) {
+function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder, textActionOverride, reasonOverride) {
     var tableIds = _sortedNumericIds(src.tableSourceObjectIds || []);
     var sourceIds = _sortedNumericIds([id].concat(tableIds));
+    var textAction = textActionOverride || "OWNED_BY_HWPX_TEXT";
     return {
         objectPlanId: "objectPlan.table_only_text_frame." + String(id),
         bundleId: "textFrame.tableOnly." + String(id),
@@ -1598,13 +1630,13 @@ function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder) {
         exportSourceObjectIds: [],
         hiddenVisualSourceObjectIds: [],
         materialization: "HWPX_TEXT",
-        textAction: "OWNED_BY_HWPX_TEXT",
+        textAction: textAction,
         visualAction: "DROP_VISUAL",
         placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
         coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
         visualLayer: "CONTENT_VISUAL",
         zOrder: zOrder,
-        reason: "table_only_text_frame",
+        reason: reasonOverride || "table_only_text_frame",
         bounds: src.bounds || null,
         ownershipSlot: "TEXT_SLOT",
         policyLayer: "TEXT",
@@ -2148,6 +2180,147 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _resolveObjectPlanNestedInlineTextShellOwners(objectPlans) {
+    var plans = objectPlans || [];
+    var droppedPlanCount = 0;
+    var droppedObjectPlanIds = [];
+    var nestedShellDuplicateCount = 0;
+    var anchoredTableStyleShellCount = 0;
+
+    var anchoredTableTextFrameIds = {};
+    for (var a = 0; a < plans.length; a++) {
+        var anchoredTableTextPlan = plans[a];
+        if (!anchoredTableTextPlan
+                || anchoredTableTextPlan.reason !== "owned_by_anchored_table_plan"
+                || !anchoredTableTextPlan.ownedTextFrameIds) {
+            continue;
+        }
+        for (var ai = 0; ai < anchoredTableTextPlan.ownedTextFrameIds.length; ai++) {
+            anchoredTableTextFrameIds[String(anchoredTableTextPlan.ownedTextFrameIds[ai])] = true;
+        }
+    }
+
+    for (var s = 0; s < plans.length; s++) {
+        var shell = plans[s];
+        if (!_objectPlanIsAnchoredTableStyleShell(shell, anchoredTableTextFrameIds)) continue;
+        anchoredTableStyleShellCount++;
+        shell.hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                shell.hiddenVisualSourceObjectIds || [],
+                _sourceIdsUnion(
+                        shell.visualSourceObjectIds || [],
+                        shell.exportSourceObjectIds || []));
+        shell.visualSourceObjectIds = [];
+        shell.exportSourceObjectIds = [];
+        shell.visualAction = "DROP_VISUAL";
+        shell.materialization = "HWPX_TABLE_STYLE";
+        shell.anchoredTableStyleShellResolution = "DROPPED_SHELL_TABLE_STYLE_OWNED_BY_HWPX_TABLE";
+        shell.reason = String(shell.reason || "")
+                + ":anchored_table_style_owned_by_hwpx_table";
+        droppedPlanCount++;
+        droppedObjectPlanIds.push(
+                shell.objectPlanId || shell.bundleId || shell.candidateId
+                        || ("anchored.table.style.shell.plan." + String(s)));
+    }
+
+    for (var i = 0; i < plans.length; i++) {
+        var child = plans[i];
+        if (!_objectPlanIsDirectChildInlineTextShell(child)) continue;
+        var parent = _objectPlanFindContainingInlineTextShellPlan(child, plans);
+        if (!parent) continue;
+        nestedShellDuplicateCount++;
+        child.hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                child.hiddenVisualSourceObjectIds || [],
+                _sourceIdsUnion(
+                        child.visualSourceObjectIds || [],
+                        child.exportSourceObjectIds || []));
+        child.visualSourceObjectIds = [];
+        child.exportSourceObjectIds = [];
+        child.visualAction = "DROP_VISUAL";
+        child.materialization = "HWPX_TEXT";
+        child.nestedInlineTextShellResolution = "DROPPED_NESTED_DIRECT_CHILD_SHELL";
+        child.nestedInlineTextShellResolutionReason =
+                "same_inline_text_shell_slot_is_covered_by_containing_parent_shell_source_bundle";
+        child.nestedInlineTextShellCanonicalObjectPlanId =
+                parent.objectPlanId || parent.bundleId || parent.candidateId || null;
+        child.reason = String(child.reason || "")
+                + ":nested_inline_text_shell_owner_resolved";
+        droppedPlanCount++;
+        droppedObjectPlanIds.push(
+                child.objectPlanId || child.bundleId || child.candidateId
+                        || ("nested.inline.shell.plan." + String(i)));
+    }
+
+    return {
+        summary: {
+            anchoredTableStyleShellCount: anchoredTableStyleShellCount,
+            nestedShellDuplicateCount: nestedShellDuplicateCount,
+            droppedPlanCount: droppedPlanCount,
+            droppedObjectPlanIds: droppedObjectPlanIds
+        }
+    };
+}
+
+function _objectPlanIsAnchoredTableStyleShell(plan, anchoredTableTextFrameIds) {
+    if (!plan || plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+    if (!anchoredTableTextFrameIds) return false;
+    if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
+    if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return false;
+    for (var i = 0; i < plan.ownedTextFrameIds.length; i++) {
+        if (anchoredTableTextFrameIds[String(plan.ownedTextFrameIds[i])]) return true;
+    }
+    return false;
+}
+
+function _objectPlanFindContainingInlineTextShellPlan(child, plans) {
+    var best = null;
+    for (var i = 0; plans && i < plans.length; i++) {
+        var parent = plans[i];
+        if (parent === child) continue;
+        if (!_objectPlanIsVisibleInlineTextShell(parent)) continue;
+        if (parent.pageIndex !== child.pageIndex) continue;
+        if (!_objectPlanOwnedTextFramesOverlap(parent, child)) continue;
+        if (!_objectPlanSourceIdsContainAll(parent.sourceObjectIds || [], child.sourceObjectIds || [])) continue;
+        if ((parent.sourceObjectIds || []).length <= (child.sourceObjectIds || []).length) continue;
+        if (!best || (parent.sourceObjectIds || []).length > (best.sourceObjectIds || []).length) {
+            best = parent;
+        }
+    }
+    return best;
+}
+
+function _objectPlanIsDirectChildInlineTextShell(plan) {
+    if (!_objectPlanIsVisibleInlineTextShell(plan)) return false;
+    return plan.slotRole === "direct_child_shell_slot"
+            || plan.compositeRole === "direct_child_shell_slot";
+}
+
+function _objectPlanIsVisibleInlineTextShell(plan) {
+    return !!(plan
+            && plan.passId === "pass.inline_objects"
+            && plan.placement === "INLINE"
+            && plan.coordinateSpace === "STORY_FLOW"
+            && plan.visualAction === "PLACE_TEXT_SHELL"
+            && plan.ownedTextFrameIds
+            && plan.ownedTextFrameIds.length > 0);
+}
+
+function _objectPlanOwnedTextFramesOverlap(a, b) {
+    var ids = _sourceIdSet(a && a.ownedTextFrameIds ? a.ownedTextFrameIds : []);
+    for (var i = 0; b && b.ownedTextFrameIds && i < b.ownedTextFrameIds.length; i++) {
+        if (ids[String(b.ownedTextFrameIds[i])]) return true;
+    }
+    return false;
+}
+
+function _objectPlanSourceIdsContainAll(parentIds, childIds) {
+    if (!parentIds || !childIds || childIds.length === 0) return false;
+    var parentSet = _sourceIdSet(parentIds);
+    for (var i = 0; i < childIds.length; i++) {
+        if (!parentSet[String(childIds[i])]) return false;
+    }
+    return true;
 }
 
 function _resolveObjectPlanDuplicateInlineCompletePngTextOwners(objectPlans, sourceById) {
@@ -3764,6 +3937,7 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
         createdPlaneCount: 0,
         visualSourceCount: 0,
         excludedInlineSourceCount: 0,
+        textFrameStyleSourceCount: 0,
         createdObjectPlanIds: []
     };
     if (!objectPlans || !sourceItems || sourceItems.length === 0) return { summary: summary };
@@ -3771,6 +3945,7 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
 
     var visualByPage = {};
     var inlineByPage = {};
+    var textFrameStyleByPage = {};
     var boundsByPage = {};
 
     function sourceKind(src) {
@@ -3789,6 +3964,11 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
                 || src.hasVisibleFill === true
                 || src.hasVisibleStroke === true
                 || src.hasCandidateVectorPaint === true));
+    }
+
+    function isVisibleTextFramePaintSource(src) {
+        return sourceKind(src) === "TextFrame"
+                && (src.hasVisibleFill === true || src.hasVisibleStroke === true);
     }
 
     function isInlineSourceOrDescendant(src) {
@@ -3831,7 +4011,7 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
         var src = sourceItems[i];
         if (!src || src.id === null || src.id === undefined) continue;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
-        if (sourceKind(src) === "TextFrame") continue;
+        if (sourceKind(src) === "TextFrame" && !isVisibleTextFramePaintSource(src)) continue;
         if (isMasterSource(src)) continue;
         if (!hasDirectVisibleMaterial(src)) continue;
         var pageIndex = numericPageIndex(src);
@@ -3847,6 +4027,11 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
         }
         if (!visualByPage[pageKey]) visualByPage[pageKey] = [];
         visualByPage[pageKey].push(id);
+        if (isVisibleTextFramePaintSource(src)) {
+            if (!textFrameStyleByPage[pageKey]) textFrameStyleByPage[pageKey] = [];
+            textFrameStyleByPage[pageKey].push(id);
+            summary.textFrameStyleSourceCount++;
+        }
         boundsByPage[pageKey] = unionBounds(boundsByPage[pageKey], src.bounds);
         summary.visualSourceCount++;
     }
@@ -3858,6 +4043,8 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
         var pageIndexNum = Number(key);
         var excludedInlineSourceObjectIds = _internSourceSetIds(
                 _sortedNumericIds(inlineByPage[key] || []));
+        var styleSourceObjectIds = _internSourceSetIds(
+                _sortedNumericIds(textFrameStyleByPage[key] || []));
         var sourceSetId = _sourceSetId(visualSourceObjectIds);
         var objectPlanId = "object-plan.page-root-textless-plane." + key + ".h" + sourceSetId;
         var candidateId = "cand.pass.page_textless_graphic_groups.page." + key
@@ -3896,11 +4083,11 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
             omittedClusterSourceObjectIds: [],
             omittedClusterKindCounts: {},
             clusterHasEditableText: false,
-            clusterHasTextFrame: false,
+            clusterHasTextFrame: styleSourceObjectIds.length > 0,
             clusterHasPlacedContent: true,
             clusterHasVisualSource: true,
             visualSourceObjectIds: visualSourceObjectIds,
-            styleSourceObjectIds: [],
+            styleSourceObjectIds: styleSourceObjectIds,
             ownedTextFrameIds: [],
             exportSourceObjectIds: visualSourceObjectIds,
             exportTargetObjectId: null,
@@ -3929,6 +4116,7 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
             migrationBlocker: "NONE",
             migrationBlockerDetail: {
                 sourceInventoryVisualCount: visualSourceObjectIds.length,
+                textFrameStyleSourceCount: styleSourceObjectIds.length,
                 excludedInlineSourceCount: excludedInlineSourceObjectIds.length
             },
             executable: true,

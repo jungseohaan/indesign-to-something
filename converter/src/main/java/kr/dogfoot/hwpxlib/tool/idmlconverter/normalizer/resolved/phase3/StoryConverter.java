@@ -794,6 +794,7 @@ public final class StoryConverter {
                 if (table == null) continue;
                 boolean wrapperFlowTable = isWrapperFlowTable(table, plan);
                 if (!wrapperFlowTable && hasInlineTable(block.paragraphs(), plan.nestedTableId)) continue;
+                removeAnchoredTableShellInlineObjects(block.paragraphs(), ctx, plan);
                 ASTTable astTable = TableBuilder.buildPreparedAstTable(ctx, table, 0, 0, 0);
                 if (astTable == null) continue;
                 applyAnchoredTableBounds(ctx, plan, astTable);
@@ -819,6 +820,75 @@ public final class StoryConverter {
                 }
             }
         }
+    }
+
+    private static void removeAnchoredTableShellInlineObjects(
+            List<ASTParagraph> paragraphs,
+            ResolvedBuildContext ctx,
+            AnchoredTablePlan anchoredPlan) {
+        if (paragraphs == null || paragraphs.isEmpty() || ctx == null || anchoredPlan == null) return;
+        Set<String> shellSourceIds = anchoredTableShellSourceIds(ctx, anchoredPlan);
+        if (shellSourceIds.isEmpty()) return;
+        Iterator<ASTParagraph> paragraphIterator = paragraphs.iterator();
+        while (paragraphIterator.hasNext()) {
+            ASTParagraph paragraph = paragraphIterator.next();
+            if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            boolean removed = false;
+            Iterator<ASTInlineItem> itemIterator = paragraph.items().iterator();
+            while (itemIterator.hasNext()) {
+                ASTInlineItem item = itemIterator.next();
+                if (!(item instanceof ASTInlineObject)) continue;
+                if (!inlineObjectSourceMatches((ASTInlineObject) item, shellSourceIds)) continue;
+                itemIterator.remove();
+                removed = true;
+            }
+            if (removed && isMarkerOnlyParagraph(paragraph)) {
+                paragraphIterator.remove();
+            }
+        }
+    }
+
+    private static Set<String> anchoredTableShellSourceIds(
+            ResolvedBuildContext ctx,
+            AnchoredTablePlan anchoredPlan) {
+        Set<String> ids = new HashSet<>();
+        if (anchoredPlan == null) return ids;
+        ids.add(String.valueOf(anchoredPlan.anchoredTextFrameDomId));
+        if (ctx == null || ctx.resolvedData == null) return ids;
+        ResolvedPageItem textFrameItem =
+                ctx.resolvedData.getPageItem(String.valueOf(anchoredPlan.anchoredTextFrameDomId));
+        if (textFrameItem != null && textFrameItem.parentId() != null && !textFrameItem.parentId().isEmpty()) {
+            ids.add(textFrameItem.parentId());
+        }
+        for (ObjectPlan objectPlan : ctx.resolvedData.ownershipPlans()) {
+            if (objectPlan == null || objectPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!containsInt(objectPlan.ownedTextFrameIds, anchoredPlan.anchoredTextFrameDomId)) continue;
+            ids.add(String.valueOf(objectPlan.domId));
+            addIds(ids, objectPlan.sourceObjectIds);
+            addIds(ids, objectPlan.visualSourceObjectIds);
+        }
+        return ids;
+    }
+
+    private static boolean inlineObjectSourceMatches(ASTInlineObject obj, Set<String> sourceIds) {
+        if (obj == null || sourceIds == null || sourceIds.isEmpty()) return false;
+        String sourceId = obj.sourceId();
+        if (sourceId != null && sourceIds.contains(sourceId)) return true;
+        String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
+        return domId != null && sourceIds.contains(domId);
+    }
+
+    private static boolean containsInt(int[] values, int needle) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == needle) return true;
+        }
+        return false;
+    }
+
+    private static void addIds(Set<String> target, int[] values) {
+        if (target == null || values == null) return;
+        for (int value : values) target.add(String.valueOf(value));
     }
 
     private static List<ASTParagraph> wrapperFlowParagraphs(
@@ -1042,6 +1112,10 @@ public final class StoryConverter {
         if (nestedTable == null) return null;
         ASTTable nestedAst = TableBuilder.buildPreparedAstTable(ctx, nestedTable, 0, 0, 0);
         if (nestedAst == null) return null;
+        ResolvedTextFrame owner = ctx.resolvedData != null
+                ? ctx.resolvedData.getTextFrame(String.valueOf(plan.anchoredTextFrameDomId))
+                : null;
+        TableBuilder.absorbTextFrameOutlineIntoTable(ctx, owner, nestedAst);
         ASTParagraph paragraph = new ASTParagraph();
         paragraph.inlineTable(nestedAst);
         return paragraph;

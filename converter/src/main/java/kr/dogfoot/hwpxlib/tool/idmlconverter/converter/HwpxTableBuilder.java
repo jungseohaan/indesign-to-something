@@ -573,9 +573,67 @@ public class HwpxTableBuilder {
     // ── 셀 BorderFill 생성 ──
 
     String createCellBorderFill(ASTTableCell cell) {
-        // Source ownership policy: HWPX tables own editable structure only.
-        // Cell fill/border/diagonal decoration is textless graphic material.
-        return "1";
+        // Source ownership policy: table/cell fill, border, and inset belong to
+        // TABLE_STYLE_SLOT when Stage 1 keeps the table as editable HWPX.
+        if (!hasCellDecoration(cell)) {
+            return "1";
+        }
+
+        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
+        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
+
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        bf.createSlash();
+        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        bf.createBackSlash();
+        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+
+        bf.createLeftBorder();
+        applyCellBorder(bf.leftBorder(), cell.leftBorder());
+        bf.createRightBorder();
+        applyCellBorder(bf.rightBorder(), cell.rightBorder());
+        bf.createTopBorder();
+        applyCellBorder(bf.topBorder(), cell.topBorder());
+        bf.createBottomBorder();
+        applyCellBorder(bf.bottomBorder(), cell.bottomBorder());
+
+        bf.createDiagonal();
+        if ((cell.topLeftDiagonalLine() || cell.topRightDiagonalLine()) && cell.diagonalBorder() != null) {
+            applyCellBorder(bf.diagonal(), cell.diagonalBorder());
+        } else {
+            bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        }
+
+        String fill = cell.fillColor();
+        if (fill != null && fill.startsWith("#")) {
+            bf.createFillBrush();
+            bf.fillBrush().createWinBrush();
+            bf.fillBrush().winBrush()
+                    .faceColorAnd(fill)
+                    .hatchColorAnd("#FF000000")
+                    .alphaAnd(0f);
+        }
+
+        return bfId;
+    }
+
+    private static boolean hasCellDecoration(ASTTableCell cell) {
+        if (cell == null) return false;
+        String fill = cell.fillColor();
+        if (fill != null && fill.startsWith("#")) return true;
+        if (isVisibleBorder(cell.topBorder())
+                || isVisibleBorder(cell.bottomBorder())
+                || isVisibleBorder(cell.leftBorder())
+                || isVisibleBorder(cell.rightBorder())) {
+            return true;
+        }
+        return (cell.topLeftDiagonalLine() || cell.topRightDiagonalLine())
+                && isVisibleBorder(cell.diagonalBorder());
     }
 
     private String createTableOuterBorderFill(ASTTable table) {
