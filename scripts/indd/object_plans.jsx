@@ -3363,6 +3363,7 @@ function _objectPlanPromotePageRootPlacedImageAtoms(
     var sourceSet = _objectPlanSourceSetMembership(sourceObjectIds || []);
     var visualSet = _objectPlanSourceSetMembership(visualSourceObjectIds || []);
     var inlineExcludedSet = _objectPlanSourceSetMembership(excludedInlineSourceObjectIds || []);
+    var childrenByParent = null;
 
     function sourceInfo(sourceId) {
         return sourceById ? sourceById[String(sourceId)] || null : null;
@@ -3379,6 +3380,30 @@ function _objectPlanPromotePageRootPlacedImageAtoms(
     function isPlacedGraphicLeaf(src) {
         var kind = sourceKind(src);
         return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    function buildChildrenByParent() {
+        if (childrenByParent !== null) return;
+        childrenByParent = {};
+        if (!sourceById) return;
+        try {
+            if (sourceById.__objectPlanChildrenByParentId) {
+                childrenByParent = sourceById.__objectPlanChildrenByParentId;
+                return;
+            }
+        } catch (eCachedChildrenRead) {}
+        for (var key in sourceById) {
+            if (!sourceById.hasOwnProperty(key)) continue;
+            if (String(key).indexOf("__objectPlan") === 0) continue;
+            var src = sourceById[key];
+            if (!src || src.id === null || src.id === undefined) continue;
+            var parentId = src.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") continue;
+            var parentKey = String(parentId);
+            if (!childrenByParent[parentKey]) childrenByParent[parentKey] = [];
+            childrenByParent[parentKey].push(src);
+        }
+        try { sourceById.__objectPlanChildrenByParentId = childrenByParent; } catch (eCachedChildrenWrite) {}
     }
 
     function isInlineExcluded(sourceId) {
@@ -3434,7 +3459,29 @@ function _objectPlanPromotePageRootPlacedImageAtoms(
             _pushUniqueId(out, seen, sourceId);
         }
     }
+
+    buildChildrenByParent();
+    var carrierIds = _sourceIdsUnion(sourceObjectIds || [], visualSourceObjectIds || []);
+    for (var ci = 0; carrierIds && ci < carrierIds.length; ci++) {
+        promotePlacedDescendants(carrierIds[ci], 0);
+    }
     return _sortedNumericIds(out);
+
+    function promotePlacedDescendants(rootId, guard) {
+        if (rootId === null || rootId === undefined || guard > 64) return;
+        if (isInlineExcluded(rootId)) return;
+        var children = childrenByParent ? childrenByParent[String(rootId)] || [] : [];
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (!child || child.id === null || child.id === undefined) continue;
+            if (isInlineExcluded(child.id)) continue;
+            if (isPlacedGraphicLeaf(child)) {
+                _pushUniqueId(out, seen, child.id);
+                _pushUniqueId(out, seen, rootId);
+            }
+            promotePlacedDescendants(child.id, guard + 1);
+        }
+    }
 }
 
 function _objectPlanPromotePageRootVisibleExportSources(
