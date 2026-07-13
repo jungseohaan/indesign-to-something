@@ -1412,22 +1412,15 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     basePerfMarker("03d05b_base_indexes_ready");
     basePerfWrite("indexes_ready", -1);
 
-    for (var predeclareIndex = 0; predeclareIndex < predeclareCandidateInfos.length; predeclareIndex++) {
-        basePerfStats.predeclareItemCount++;
-        if (predeclareIndex > 0 && predeclareIndex % 250 === 0) {
-            basePerfWrite("predeclare", predeclareIndex);
-        }
-        var predeclareInfo = predeclareCandidateInfos[predeclareIndex];
-        var predeclarePageIndexes = candidatePageIndexesForBase(predeclareInfo.id);
-        if (!predeclarePageIndexes || predeclarePageIndexes.length === 0) continue;
-        for (var predeclarePageCursor = 0; predeclarePageCursor < predeclarePageIndexes.length; predeclarePageCursor++) {
-            basePerfStats.predeclarePageCount++;
-            var predeclarePageIndex = predeclarePageIndexes[predeclarePageCursor];
-            var predeclareSourceIds = pageLocalSourceObjectIdsForBase(predeclareInfo.id, predeclarePageIndex);
-            if (!sourceSetHasExecutableShellMaterial(predeclareSourceIds)) continue;
-            predeclareDecorationSourceSet(predeclarePageIndex, predeclareSourceIds);
-        }
-    }
+    // Legacy pre-declaration of broad decoration source sets used to scan
+    // candidate page-local descendants before ObjectPlan ownership existed.
+    // With page-root textless planes, this creates a second hidden owner for
+    // the same visual material and can force expensive DOM subtree queries on
+    // large textbook files. Stage 1 now emits the canonical page/textless
+    // visual candidates, so keep this pass closed and let later planning use
+    // only source-index metadata.
+    basePerfStats.predeclareItemCount = predeclareCandidateInfos.length;
+    basePerfStats.predeclarePageCount = 0;
 
     basePerfMarker("03d05c_base_predeclare_done");
     basePerfWrite("predeclare_done", sourceItems.length);

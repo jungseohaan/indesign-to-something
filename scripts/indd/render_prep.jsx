@@ -581,6 +581,10 @@ function hideOneTextFrameContent(tf, opts) {
         }
     } catch (eTextStyleRanges) {}
 
+    if (opts.preserveFrameVisual === true) {
+        return null;
+    }
+
     try {
         try {
             var wasVisible = tf.visible;

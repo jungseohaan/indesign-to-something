@@ -876,244 +876,121 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
     } catch (eMasterCompositeCandidates) {}
 }
 
-function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates, seen, planCache) {
-    var inlineScanFrames = [];
-    var inlineScanFrameIds = {};
-    var inlineItemById = {};
-    try {
-        for (var mapIdx = 0; mapIdx < allItems.length; mapIdx++) {
-            try {
-                if (allItems[mapIdx] && allItems[mapIdx].id !== undefined && allItems[mapIdx].id !== null) {
-                    inlineItemById[String(allItems[mapIdx].id)] = allItems[mapIdx];
-                }
-            } catch (eMapItem) {}
-        }
-    } catch (eInlineMap) {}
-    function isOffCanvasInlineStoryCarrier(tf) {
-        try {
-            if (!tf || tf.constructor.name !== "TextFrame") return false;
-        } catch (eType) { return false; }
-        try {
-            var parentPage = tf.parentPage;
-            if (parentPage) return false;
-        } catch (ePage) {}
-        try {
-            if (isInlineItem(tf)) return false;
-        } catch (eInlineTf) {}
-        try {
-            var cur = tf.parent;
-            var hop = 0;
-            while (cur && hop < 8) {
-                var name = "";
-                try { name = cur.constructor.name; } catch (eName) {}
-                if (name === "Cell") return false;
-                if (name === "Spread") break;
-                if (name === "MasterSpread") return false;
-                try { cur = cur.parent; } catch (eParent) { break; }
-                hop++;
-            }
-            if (!cur || cur.constructor.name !== "Spread") return false;
-        } catch (eParentChain) {
-            return false;
-        }
-        try {
-            var text = String(tf.contents || "").replace(/[\s﻿\r\n\u0016\u0018\uFFFC]/g, "");
-            if (text.length === 0) return false;
-        } catch (eText) {
-            return false;
-        }
-        try {
-            var storyItems = tf.parentStory.allPageItems;
-            for (var si = 0; si < storyItems.length; si++) {
-                if (storyItems[si] && storyItems[si].id !== tf.id) return true;
-            }
-        } catch (eStoryItems) {}
-        return false;
-    }
-    try {
-        for (var ti = 0; ti < allItems.length; ti++) {
-            var tf = allItems[ti];
-            try {
-                if (classifyTextFrameCached(tf) !== "editable"
-                        && !isOffCanvasInlineStoryCarrier(tf)) continue;
-                inlineScanFrames.push(tf);
-                inlineScanFrameIds[tf.id] = true;
-            } catch (eTf) {}
-        }
-    } catch (eAllTf) {}
-    try {
-        var masterSpreads = doc.masterSpreads.everyItem().getElements();
-        for (var msi = 0; msi < masterSpreads.length; msi++) {
-            var masterItems = [];
-            try { masterItems = masterSpreads[msi].allPageItems; } catch (eMsItems) {}
-            for (var mii = 0; mii < masterItems.length; mii++) {
-                var masterTf = masterItems[mii];
-                try {
-                    if (masterTf.constructor.name !== "TextFrame") continue;
-                    if (classifyTextFrameCached(masterTf) !== "editable") continue;
-                    if (inlineScanFrameIds[masterTf.id]) continue;
-                    inlineScanFrames.push(masterTf);
-                    inlineScanFrameIds[masterTf.id] = true;
-                } catch (eMasterTf) {}
-            }
-        }
-    } catch (eMasterScan) {}
-
-    var processedStoryIds = {};
-    for (var ei = 0; ei < inlineScanFrames.length; ei++) {
-        var eTf = inlineScanFrames[ei];
-        try {
-            var story = eTf.parentStory;
-            var storyKey = story.id.toString();
-            if (processedStoryIds[storyKey]) continue;
-            processedStoryIds[storyKey] = true;
-            var pageIndex = -1;
-            try {
-                var tfPage = eTf.parentPage;
-                if (tfPage) pageIndex = tfPage.documentOffset;
-            } catch (eTfPage) {}
-            if (pageIndex < 0) pageIndex = _pageIndexBySpreadBounds(doc, eTf, ctx);
-            var storyItems = story.allPageItems;
-            for (var si = 0; si < storyItems.length; si++) {
-                var inItem = storyItems[si];
-                try {
-	                    if (inItem.constructor.name === "TextFrame") continue;
-	                    if (!isInlineItem(inItem)) continue;
-	                    var inItemInfo = planCache ? planCache.itemInfo(inItem) : null;
-	                    if (inItemInfo && !_isInlineFlowItemBySourceInfo(inItemInfo)) continue;
-	                    var inlinePageIndex = _pageIndexOfItem(doc, inItem);
-                    if (inlinePageIndex === null || inlinePageIndex === undefined || inlinePageIndex < 0) {
-                        inlinePageIndex = pageIndex;
-                    }
-                    if (inlinePageIndex === null || inlinePageIndex === undefined || inlinePageIndex < 0) {
-                        inlinePageIndex = _pageIndexBySpreadBounds(doc, inItem, ctx);
-                    }
-                    if (inlinePageIndex >= 0 && !_candidatePageInRange(inlinePageIndex, ctx)) continue;
-                    var inParent = inItem.parent;
-                    if (inParent && inParent.constructor.name === "Group" && isInlineItem(inParent)) continue;
-                    if (inParent && inParent.constructor.name === "Rectangle" && isInlineItem(inParent)) continue;
-                    var inlineSourceIds = null;
-                    try {
-                        inlineSourceIds = planCache ? planCache.sourceObjectIds(inItem) : _collectSourceObjectIds(inItem);
-                    } catch (eInlineSourceIds) {}
-                    var inlineEditableTextFrameIds = [];
-                    try {
-                        inlineEditableTextFrameIds = planCache ? planCache.textFrameIds(inItem, true, true) : _collectTextFrameIds(inItem, true, true);
-                    } catch (eInlineEditableIds) {}
-                    var inlineVisualSourceIds = (inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0)
-                            ? []
-                            : _inlineCarrierVisualSourceObjectIds(inItem, inItemInfo, inlineSourceIds);
-                    var inlineRequiresTextHidden = inlineEditableTextFrameIds.length > 0;
-                    _pushExtractionCandidate(candidates, seen, "pass.inline_objects", inItem, {
-                        sourceObjectIds: inlineSourceIds,
-                        exportSourceObjectIds: inlineVisualSourceIds,
-                        visualSourceObjectIds: inlineVisualSourceIds,
-                        pageIndex: inlinePageIndex,
-                        unit: "INLINE_OBJECT",
-                        mode: "TEXTLESS_CANDIDATE",
-                        candidatePurpose: "INLINE_CANDIDATE",
-                        editableTextFrameIds: inlineEditableTextFrameIds,
-                        hiddenTextFrameIds: inlineRequiresTextHidden ? inlineEditableTextFrameIds : [],
-                        requiresTextHidden: inlineRequiresTextHidden,
-                        textOwner: inlineRequiresTextHidden ? "hwpx_tf" : "none",
-                        containsEditableText: false,
-                        completePngTextAllowed: false,
-                        materialization: null,
-                        textAction: inlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null
-                    });
-                } catch (eInlineCandidate) {}
-            }
-        } catch (eStory) {}
+function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems, candidates, seen, planCache) {
+    // Inline ownership is Stage 0 metadata. Do not rescan Story.allPageItems here:
+    // that path is slow on large documents and can reinterpret anchored/floating
+    // placement after source_index.jsx has already resolved it.
+    var stats = {
+        sourceItemCount: sourceItems ? sourceItems.length : 0,
+        consideredInlineFlow: 0,
+        skippedTextFrame: 0,
+        skippedParentInlineCarrier: 0,
+        skippedPageRange: 0,
+        skippedNoDomItem: 0,
+        skippedNoVisualSource: 0,
+        emitted: 0
+    };
+    var sourceInfoById = {};
+    for (var ii = 0; sourceItems && ii < sourceItems.length; ii++) {
+        var info = sourceItems[ii];
+        if (!info || info.id === null || info.id === undefined) continue;
+        sourceInfoById[String(info.id)] = info;
     }
 
-    try {
-        for (var ni = 0; ni < allItems.length; ni++) {
-            var nativeInlineShell = allItems[ni];
-            try {
-                var nativeKind = nativeInlineShell.constructor.name;
-                if (nativeKind !== "Rectangle" && nativeKind !== "Oval" && nativeKind !== "Polygon") continue;
-                var nativeInlineInfo = planCache ? planCache.itemInfo(nativeInlineShell) : null;
-                var nativeInlineParentKind = nativeInlineInfo ? String(nativeInlineInfo.parentKind || "") : "";
-	                if (!isInlineItem(nativeInlineShell) && !_isInlineFlowItemBySourceInfo(nativeInlineInfo)) continue;
-	                if (nativeInlineInfo && !_isInlineFlowItemBySourceInfo(nativeInlineInfo)) continue;
-                var nativeParent = nativeInlineShell.parent;
-                if (nativeParent && nativeParent.constructor.name === "Group" && isInlineItem(nativeParent)) continue;
-                if (nativeParent && nativeParent.constructor.name === "Rectangle" && isInlineItem(nativeParent)) continue;
+    function pageIndexInCurrentExtraction(pageIndex) {
+        if (pageIndex === null || pageIndex === undefined || pageIndex < 0) return false;
+        return _candidatePageInRange(pageIndex, ctx);
+    }
 
-                var nativeInlinePageIndex = _pageIndexOfItem(doc, nativeInlineShell);
-                if (nativeInlinePageIndex === null || nativeInlinePageIndex === undefined || nativeInlinePageIndex < 0) {
-                    nativeInlinePageIndex = _pageIndexBySpreadBounds(doc, nativeInlineShell, ctx);
-                }
-                if (nativeInlineInfo && nativeInlineInfo.pageIndex !== null
-                        && nativeInlineInfo.pageIndex !== undefined
-                        && nativeInlineInfo.pageIndex >= 0) {
-                    nativeInlinePageIndex = nativeInlineInfo.pageIndex;
-                }
-                if (nativeInlinePageIndex >= 0
-                        && !_candidatePageInRange(nativeInlinePageIndex, ctx)
-                        && !(nativeInlinePageIndex < ctx.rangePageCount)) {
-                    continue;
-                }
+    function hasInlineCarrierParent(sourceInfo) {
+        if (!sourceInfo || sourceInfo.parentId === null || sourceInfo.parentId === undefined) return false;
+        var parent = sourceInfoById[String(sourceInfo.parentId)];
+        if (!parent || !_isInlineFlowItemBySourceInfo(parent)) return false;
+        var parentKind = String(parent.kind || "");
+        return parentKind === "Group" || parentKind === "Rectangle";
+    }
 
-                var nativeInlineEditableTextFrameIds = [];
-                try {
-                    nativeInlineEditableTextFrameIds = planCache
-                            ? planCache.textFrameIds(nativeInlineShell, true, true)
-                            : _collectTextFrameIds(nativeInlineShell, true, true);
-                } catch (eNativeInlineEditable) {}
+    function candidateKindCanBeInlineVisual(kind) {
+        kind = String(kind || "");
+        return kind === "Group" || kind === "Rectangle" || kind === "Oval"
+                || kind === "Polygon" || kind === "GraphicLine" || kind === "Image"
+                || kind === "PDF" || kind === "EPS";
+    }
 
-                var nativeInlineSourceIds = null;
-                try {
-                    nativeInlineSourceIds = planCache
-                            ? planCache.sourceObjectIds(nativeInlineShell)
-                            : _collectSourceObjectIds(nativeInlineShell);
-                } catch (eNativeInlineSourceIds) {}
-                if (!nativeInlineEditableTextFrameIds || nativeInlineEditableTextFrameIds.length === 0) {
-                    var nativeInlineVisualSourceIds = _inlineCarrierVisualSourceObjectIds(
-                            nativeInlineShell, nativeInlineInfo, nativeInlineSourceIds);
-                    if (!nativeInlineVisualSourceIds || nativeInlineVisualSourceIds.length === 0) continue;
-                    _pushExtractionCandidate(candidates, seen, "pass.inline_objects", nativeInlineShell, {
-                        sourceObjectIds: nativeInlineSourceIds,
-                        exportSourceObjectIds: nativeInlineVisualSourceIds,
-                        visualSourceObjectIds: nativeInlineVisualSourceIds,
-                        pageIndex: nativeInlinePageIndex,
-                        unit: "INLINE_OBJECT",
-                        mode: "TEXTLESS_CANDIDATE",
-                        candidatePurpose: "INLINE_CANDIDATE",
-                        editableTextFrameIds: [],
-                        hiddenTextFrameIds: [],
-                        requiresTextHidden: false,
-                        textOwner: "none",
-                        containsEditableText: false,
-                        completePngTextAllowed: false,
-                        compositeRole: "inline_textless_native_shape",
-                        slotRole: "inline_textless_native_shape"
-                    });
-                    continue;
-                }
-                var nativeInlineCompleteVisualSourceIds = [];
-                var nativeInlineRequiresTextHidden = nativeInlineEditableTextFrameIds.length > 0;
-                _pushExtractionCandidate(candidates, seen, "pass.inline_objects", nativeInlineShell, {
-                    sourceObjectIds: nativeInlineSourceIds,
-                    exportSourceObjectIds: nativeInlineCompleteVisualSourceIds,
-                    visualSourceObjectIds: nativeInlineCompleteVisualSourceIds,
-                    pageIndex: nativeInlinePageIndex,
-                    unit: "INLINE_OBJECT",
-                    mode: "TEXTLESS_CANDIDATE",
-                    candidatePurpose: "INLINE_CANDIDATE",
-                    editableTextFrameIds: nativeInlineEditableTextFrameIds,
-                    ownedTextFrameIds: [],
-                    hiddenTextFrameIds: nativeInlineRequiresTextHidden ? nativeInlineEditableTextFrameIds : [],
-                    requiresTextHidden: nativeInlineRequiresTextHidden,
-                    textOwner: nativeInlineRequiresTextHidden ? "hwpx_tf" : "none",
-                    containsEditableText: false,
-                    completePngTextAllowed: false,
-                    materialization: null,
-                    textAction: nativeInlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null
-                });
-            } catch (eNativeInlineCandidate) {}
+    for (var si = 0; sourceItems && si < sourceItems.length; si++) {
+        var sourceInfo = sourceItems[si];
+        if (!sourceInfo || sourceInfo.id === null || sourceInfo.id === undefined) continue;
+        if (!_isInlineFlowItemBySourceInfo(sourceInfo)) continue;
+        stats.consideredInlineFlow++;
+        if (sourceInfo.kind === "TextFrame") {
+            stats.skippedTextFrame++;
+            continue;
         }
-    } catch (eNativeInlineScan) {}
+        if (!candidateKindCanBeInlineVisual(sourceInfo.kind)) continue;
+        if (hasInlineCarrierParent(sourceInfo)) {
+            stats.skippedParentInlineCarrier++;
+            continue;
+        }
+        var inlinePageIndex = sourceInfo.pageIndex;
+        if (!pageIndexInCurrentExtraction(inlinePageIndex)) {
+            stats.skippedPageRange++;
+            continue;
+        }
+        var inlineItem = planCache && planCache.domItem ? planCache.domItem(sourceInfo.id) : null;
+        if (!inlineItem) {
+            stats.skippedNoDomItem++;
+            continue;
+        }
+
+        var inlineSourceIds = [];
+        try {
+            inlineSourceIds = planCache ? planCache.sourceObjectIds(inlineItem) : _collectSourceObjectIds(inlineItem);
+        } catch (eInlineSourceIds) {}
+        var inlineEditableTextFrameIds = [];
+        try {
+            inlineEditableTextFrameIds = planCache
+                    ? planCache.textFrameIds(inlineItem, true, true)
+                    : _collectTextFrameIds(inlineItem, true, true);
+        } catch (eInlineEditableIds) {}
+
+        var inlineRequiresTextHidden = inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0;
+        var inlineVisualSourceIds = inlineRequiresTextHidden
+                ? []
+                : _inlineCarrierVisualSourceObjectIds(inlineItem, sourceInfo, inlineSourceIds);
+        if (!inlineRequiresTextHidden
+                && (!inlineVisualSourceIds || inlineVisualSourceIds.length === 0)) {
+            stats.skippedNoVisualSource++;
+            continue;
+        }
+
+        var attrs = {
+            sourceObjectIds: inlineSourceIds,
+            exportSourceObjectIds: inlineVisualSourceIds,
+            visualSourceObjectIds: inlineVisualSourceIds,
+            pageIndex: inlinePageIndex,
+            unit: "INLINE_OBJECT",
+            mode: "TEXTLESS_CANDIDATE",
+            candidatePurpose: "INLINE_CANDIDATE",
+            editableTextFrameIds: inlineEditableTextFrameIds,
+            ownedTextFrameIds: [],
+            hiddenTextFrameIds: inlineRequiresTextHidden ? inlineEditableTextFrameIds : [],
+            requiresTextHidden: inlineRequiresTextHidden,
+            textOwner: inlineRequiresTextHidden ? "hwpx_tf" : "none",
+            containsEditableText: false,
+            completePngTextAllowed: false,
+            materialization: null,
+            textAction: inlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null
+        };
+        if (!inlineRequiresTextHidden) {
+            attrs.compositeRole = "inline_textless_native_shape";
+            attrs.slotRole = "inline_textless_native_shape";
+        }
+        var before = candidates ? candidates.length : 0;
+        _pushExtractionCandidate(candidates, seen, "pass.inline_objects", inlineItem, attrs);
+        if (candidates && candidates.length > before) stats.emitted++;
+    }
+
+    try { writeJson(ctx.outputDir + "/_inline_candidate_source_scan_stats.json", stats); } catch (eStats) {}
 }
 
 function _includeOwnedInlineVisualsInTextlessShellCandidates(candidates, allItems, planCache, sourceItems) {
@@ -3314,11 +3191,16 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                 pages[pageKey] = {
                     pageIndex: pageIndex,
                     rootIds: [],
+                    rootSeen: {},
                     sourceObjectIds: [],
+                    sourceSeen: {},
                     excludedInlineSourceObjectIds: [],
                     exportSourceObjectIds: [],
+                    exportSeen: {},
                     hiddenVisualSourceObjectIds: [],
+                    hiddenVisualSeen: {},
                     hiddenTextFrameIds: [],
+                    hiddenTextFrameSeen: {},
                     visualBounds: null,
                     minZOrder: null
                 };
@@ -3326,16 +3208,16 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             return pages[pageKey];
         }
         function candidatePageIndexesForSourceId(sourceId) {
+            var src = info(sourceId);
             var pages = [];
-            try {
-                if (sourceIndex && sourceIndex.candidatePageIndexes) {
-                    pages = sourceIndex.candidatePageIndexes(sourceId) || [];
+            if (src && src.rangeTargetPageIndexes && src.rangeTargetPageIndexes.length > 0) {
+                for (var ri = 0; ri < src.rangeTargetPageIndexes.length; ri++) {
+                    pages.push(Number(src.rangeTargetPageIndexes[ri]));
                 }
-            } catch (eCandidatePages) {
-                pages = [];
-            }
-            if ((!pages || pages.length === 0)) {
-                var pi = sourcePageIndex(sourceId);
+            } else {
+                var pi = src && src.pageIndex !== undefined && src.pageIndex !== null
+                        ? Number(src.pageIndex)
+                        : sourcePageIndex(sourceId);
                 if (pi !== null && pi !== undefined && !isNaN(Number(pi))) pages = [Number(pi)];
             }
             var out = [];
@@ -3350,15 +3232,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             return out;
         }
         function pageLocalSourceObjectIdsForSource(sourceId, pageIndex, fallbackIds) {
-            var ids = null;
-            try {
-                if (sourceIndex && sourceIndex.pageLocalSourceObjectIds) {
-                    ids = sourceIndex.pageLocalSourceObjectIds(sourceId, pageIndex);
-                }
-            } catch (ePageLocalIds) {
-                ids = null;
-            }
-            return _sortedNumericIds(ids && ids.length > 0 ? ids : (fallbackIds || []));
+            return _sortedNumericIds(fallbackIds && fallbackIds.length > 0
+                    ? fallbackIds
+                    : [sourceId]);
         }
         function topPageLocalRootId(sourceId, pageIndex) {
             var cur = info(sourceId);
@@ -3429,13 +3305,11 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             return false;
         }
         function addPageRootPlaneSources(pageEntry, rootIds, sourceIds, exportIds, hiddenVisualIds, hiddenTextFrameIds, visualBounds, minZOrder) {
-            pageEntry.rootIds = unionSourceIds(pageEntry.rootIds, rootIds || []);
-            pageEntry.sourceObjectIds = unionSourceIds(pageEntry.sourceObjectIds, sourceIds || []);
-            pageEntry.exportSourceObjectIds = unionSourceIds(pageEntry.exportSourceObjectIds, exportIds || []);
-            pageEntry.hiddenVisualSourceObjectIds = unionSourceIds(
-                    pageEntry.hiddenVisualSourceObjectIds, hiddenVisualIds || []);
-            pageEntry.hiddenTextFrameIds = unionSourceIds(
-                    pageEntry.hiddenTextFrameIds, hiddenTextFrameIds || []);
+            mergeIds(pageEntry.rootIds, pageEntry.rootSeen, rootIds || []);
+            mergeIds(pageEntry.sourceObjectIds, pageEntry.sourceSeen, sourceIds || []);
+            mergeIds(pageEntry.exportSourceObjectIds, pageEntry.exportSeen, exportIds || []);
+            mergeIds(pageEntry.hiddenVisualSourceObjectIds, pageEntry.hiddenVisualSeen, hiddenVisualIds || []);
+            mergeIds(pageEntry.hiddenTextFrameIds, pageEntry.hiddenTextFrameSeen, hiddenTextFrameIds || []);
             pageEntry.visualBounds = unionBounds(pageEntry.visualBounds, visualBounds);
             if (minZOrder !== null && minZOrder !== undefined) {
                 pageEntry.minZOrder = pageEntry.minZOrder === null
@@ -3443,59 +3317,9 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                         : Math.min(pageEntry.minZOrder, minZOrder);
             }
         }
-        for (var si = 0; sourceItems && si < sourceItems.length; si++) {
-            var root = sourceItems[si];
-            if (!root || root.id === null || root.id === undefined) continue;
-            if (!sourceIsPageRootCandidate(root)) continue;
-            if (root.visible === false || root.hiddenLayer === true || root.nonprinting === true) continue;
-            if (sourceIsTextLike(root.id)) continue;
-            var rootPages = candidatePageIndexesForSourceId(root.id);
-            for (var rpi = 0; rpi < rootPages.length; rpi++) {
-                var pageIndex = Number(rootPages[rpi]);
-                if (isNaN(pageIndex) || pageIndex < 0) continue;
-                var localDescendantIds = pageLocalSourceObjectIdsForSource(
-                        root.id, pageIndex, descendantIds(root.id));
-                var subtreeIds = filterPageTextlessGroupSourceIds(localDescendantIds, pageIndex);
-                if (!subtreeIds || subtreeIds.length < 2) continue;
-                var rootVisibleIds = visiblePaintSourceIds(subtreeIds, pageIndex);
-                if (!rootVisibleIds || rootVisibleIds.length < 1) continue;
-                var pageKey = String(pageIndex);
-                var pageEntry = ensurePageEntry(pageIndex);
-                var textFrameSplit = splitTextFrameIdsForPageTextlessGroup(subtreeIds);
-                var hiddenTextFrameIds = unionSourceIds(
-                        textFrameSplit.hiddenTextFrameIds || [],
-                        textFrameSplit.pngOwnedTextFrameIds || []);
-                var hiddenInlineVisualIds = inlineVisualSourceIdsForPageTextlessGroup(subtreeIds, pageIndex);
-                var hiddenVisualIds = hiddenTextFrameIds;
-                var exportExcludedIds = unionSourceIds(hiddenTextFrameIds, hiddenInlineVisualIds);
-                var exportIds = rootVisibleIds;
-                exportIds = subtractSourceIds(exportIds, exportExcludedIds);
-                if (!exportIds || exportIds.length < 1) continue;
-                var visualBounds = null;
-                for (var bi = 0; bi < exportIds.length; bi++) {
-                    var exportSource = info(exportIds[bi]);
-                    if (!exportSource || !exportSource.bounds || exportSource.bounds.length < 4) continue;
-                    visualBounds = unionBounds(visualBounds, exportSource.bounds);
-                }
-                if (!visualBounds || sourceBoundsArea(visualBounds) <= 0) continue;
-                if (!rootSeen[pageKey + "|" + String(root.id)]) {
-                    rootSeen[pageKey + "|" + String(root.id)] = true;
-                    addPageRootPlaneSources(pageEntry, [root.id], [], [], [], [], null, null);
-                }
-                pageEntry.excludedInlineSourceObjectIds = unionSourceIds(
-                        pageEntry.excludedInlineSourceObjectIds, hiddenInlineVisualIds);
-                var rootZ = root.zOrder !== undefined && root.zOrder !== null ? Number(root.zOrder) : 0;
-                addPageRootPlaneSources(
-                        pageEntry,
-                        [],
-                        exportIds,
-                        exportIds,
-                        hiddenVisualIds,
-                        hiddenTextFrameIds,
-                        visualBounds,
-                        rootZ);
-            }
-        }
+        // Legacy descendant-closure page grouping is intentionally disabled.
+        // Page-root planes are built mechanically from visible non-text,
+        // non-inline source items below.
         for (var psi = 0; sourceItems && psi < sourceItems.length; psi++) {
             var src = sourceItems[psi];
             if (!src || src.id === null || src.id === undefined) continue;
@@ -3508,7 +3332,6 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
             for (var spi2 = 0; spi2 < srcPages.length; spi2++) {
                 var srcPageIndex = Number(srcPages[spi2]);
                 if (isNaN(srcPageIndex) || srcPageIndex < 0) continue;
-                if (sourceHasCrossPageClipParent(src.id, srcPageIndex)) continue;
                 var localIds = pageLocalSourceObjectIdsForSource(src.id, srcPageIndex, [src.id]);
                 for (var li = 0; li < localIds.length; li++) {
                     var localId = localIds[li];
@@ -3519,11 +3342,10 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     if (!sourceHasVisiblePaint(localId)) continue;
                     if (sourceIsInlineFlow(localId)) continue;
                     if (sourceIsStoryAnchoredMaterial(localId)) continue;
-                    if (sourceHasCrossPageClipParent(localId, srcPageIndex)) continue;
                     var srcBounds = localSrc.bounds && localSrc.bounds.length >= 4 ? localSrc.bounds : null;
                     if (!srcBounds || sourceBoundsArea(srcBounds) <= 0) continue;
                     var localPageEntry = ensurePageEntry(srcPageIndex);
-                    var localRootId = topPageLocalRootId(localId, srcPageIndex);
+                    var localRootId = localId;
                     var srcZ = localSrc.zOrder !== undefined && localSrc.zOrder !== null ? Number(localSrc.zOrder) : 0;
                     addPageRootPlaneSources(
                             localPageEntry,
@@ -3540,6 +3362,11 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
         for (var pageKey in pages) {
             if (!pages.hasOwnProperty(pageKey)) continue;
             var pageEntry = pages[pageKey];
+            pageEntry.rootIds = _sortedNumericIds(pageEntry.rootIds);
+            pageEntry.sourceObjectIds = _sortedNumericIds(pageEntry.sourceObjectIds);
+            pageEntry.exportSourceObjectIds = _sortedNumericIds(pageEntry.exportSourceObjectIds);
+            pageEntry.hiddenVisualSourceObjectIds = _sortedNumericIds(pageEntry.hiddenVisualSourceObjectIds);
+            pageEntry.hiddenTextFrameIds = _sortedNumericIds(pageEntry.hiddenTextFrameIds);
             if (!pageEntry.rootIds || pageEntry.rootIds.length < 1) continue;
             if (!pageEntry.exportSourceObjectIds || pageEntry.exportSourceObjectIds.length < 1) continue;
             if (!pageEntry.visualBounds || sourceBoundsArea(pageEntry.visualBounds) <= 0) continue;
@@ -3552,6 +3379,10 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     pageEntry.pageIndex,
                     pageEntry.rootIds,
                     "page_root_textless_visual_plane");
+            var sourceIdsForCandidate = unionSourceIds(
+                    pageEntry.sourceObjectIds,
+                    unionSourceIds(pageEntry.hiddenVisualSourceObjectIds,
+                            pageEntry.excludedInlineSourceObjectIds));
             var sourceVisualBounds = pageEntry.visualBounds ? pageEntry.visualBounds.slice(0) : null;
             var pageLocalBounds = sourceVisualBounds;
             var cropSourceBounds = null;
@@ -3572,16 +3403,64 @@ function _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, cand
                     }
                 }
             }
+            rootCandidates.push({
+                candidateId: candidateId,
+                passId: "pass.page_textless_graphic_groups",
+                sourceObjectIds: sourceIdsForCandidate,
+                executionSourceObjectIds: sourceIdsForCandidate.slice(0),
+                primarySourceObjectId: pageEntry.rootIds.length > 0 ? pageEntry.rootIds[0] : null,
+                pageIndex: pageEntry.pageIndex,
+                kind: "PageRootTextlessVisualPlane",
+                unit: "PAGE_GRAPHIC_GROUP",
+                mode: "TEXTLESS_CANDIDATE",
+                candidatePurpose: "CONTENT_CANDIDATE",
+                bounds: pageLocalBounds || pageEntry.visualBounds,
+                sourceBounds: sourceVisualBounds,
+                cropSourceBounds: cropSourceBounds,
+                parentId: null,
+                parentKind: "Page",
+                anchoredPosition: null,
+                storyAnchorPlacement: null,
+                composite: true,
+                compositeRole: "page_root_textless_visual_plane",
+                slotRole: "page_root_textless_visual_plane",
+                exportSourceObjectIds: pageEntry.exportSourceObjectIds.slice(0),
+                exportTargetObjectId: null,
+                hiddenVisualSourceObjectIds: unionSourceIds(
+                        pageEntry.hiddenVisualSourceObjectIds,
+                        pageEntry.excludedInlineSourceObjectIds),
+                visualSourceObjectIds: pageEntry.exportSourceObjectIds.slice(0),
+                styleSourceObjectIds: [],
+                ownedTextFrameIds: [],
+                editableTextFrameIds: pageEntry.hiddenTextFrameIds.slice(0),
+                hiddenTextFrameIds: pageEntry.hiddenTextFrameIds.slice(0),
+                requiresTextHidden: pageEntry.hiddenTextFrameIds.length > 0,
+                textOwner: pageEntry.hiddenTextFrameIds.length > 0 ? "hwpx_tf" : "none",
+                containsEditableText: false,
+                completePngTextAllowed: false,
+                ownershipSlot: "SHELL_SLOT",
+                materialization: "EXTRACTED_PNG_VECTOR",
+                textAction: pageEntry.hiddenTextFrameIds.length > 0 ? "OWNED_BY_HWPX_TEXT" : "DROP_TEXT",
+                visualAction: "PLACE_PAGE_BACKGROUND_PNG",
+                visualLayer: "PAGE_BACKGROUND",
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                zOrder: pageEntry.minZOrder !== null && pageEntry.minZOrder !== undefined
+                        ? pageEntry.minZOrder
+                        : 0,
+                required: false,
+                reason: "page_root_textless_visual_plane"
+            });
             rootDiagnostics.push({
                 candidateId: candidateId,
                 pageIndex: pageEntry.pageIndex,
                 rootSourceObjectIds: pageEntry.rootIds,
-                sourceObjectCount: pageEntry.sourceObjectIds.length,
+                sourceObjectCount: sourceIdsForCandidate.length,
                 exportSourceObjectCount: pageEntry.exportSourceObjectIds.length,
                 hiddenTextFrameCount: pageEntry.hiddenTextFrameIds.length,
                 bounds: pageEntry.visualBounds,
-                emitted: false,
-                reason: "page_root_textless_visual_plane_disabled"
+                emitted: true,
+                reason: "page_root_textless_visual_plane"
             });
         }
         for (var ri = 0; ri < rootCandidates.length; ri++) {
@@ -7155,6 +7034,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     var candidates = [];
     var candidateSeen = {};
     var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
+    ctx._sourceIndexForRender = sourceIndex;
     var sourceItems = sourceIndex.sourceItems;
     try { writeJson(ctx.outputDir + "/_source_index_stats.json", sourceIndex.stats || {}); } catch (eSourceIndexStats) {}
     _marker(ctx.outputDir, "03d02_plan_sourceItems");
@@ -7170,7 +7050,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d05a_plan_textFrameStyleShellCandidates");
 
     var planCache = _createExtractionPlanSourceIndexCache(doc, sourceIndex);
-    _appendInlineObjectExtractionCandidates(doc, ctx, allItems, candidates, candidateSeen, planCache);
+    _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d06_plan_inlineCandidates");
     _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d07_plan_declaredInlineShells");

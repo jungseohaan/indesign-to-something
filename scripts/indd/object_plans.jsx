@@ -743,8 +743,10 @@ function _slimObjectPlanForWrite(plan) {
         "atomicTextlessVectorContent",
         "atomicContentVisualSlot",
         "hiddenVisualSourceObjectIds",
+        "hiddenTextFrameIds",
         "excludedInlineSourceObjectIds",
         "hiddenVisualSourceSetId",
+        "hiddenTextFrameSetId",
         "materialization",
         "textAction",
         "visualAction",
@@ -1830,7 +1832,9 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plan.unit = "MASTER_ITEM";
             plan.zOrder = OBJECT_PLAN_MASTER_PLANE_Z_ORDER;
         } else {
+            plan.passId = "pass.page_textless_graphic_groups";
             plan.candidatePurpose = "SHELL_CANDIDATE";
+            plan.unit = "PAGE_GRAPHIC_GROUP";
             plan.zOrder = OBJECT_PLAN_PAGE_BACKGROUND_PLANE_Z_ORDER;
         }
         plan.sourceSetId = _sourceSetId(plan.sourceObjectIds || []);
@@ -1924,6 +1928,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         var visualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "visualSourceObjectIds");
         var exportSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "exportSourceObjectIds");
         var hiddenVisualSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenVisualSourceObjectIds");
+        var hiddenTextFrameIds = _objectPlanUnionPlanIds(sourceMembers, "hiddenTextFrameIds");
         var excludedInlineSourceObjectIds = _objectPlanUnionPlanIds(sourceMembers, "excludedInlineSourceObjectIds");
         exportSourceObjectIds = _objectPlanPromotePageRootVisibleExportSources(
                 sourceObjectIds, visualSourceObjectIds, exportSourceObjectIds, sourceById);
@@ -1935,13 +1940,20 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 exportSourceObjectIds,
                 excludedInlineSourceObjectIds,
                 sourceById);
+        hiddenTextFrameIds = _sourceIdsUnion(
+                hiddenTextFrameIds, _objectPlanUnionPlanIds(sourceMembers, "ownedTextFrameIds"));
+        hiddenTextFrameIds = _sourceIdsUnion(
+                hiddenTextFrameIds, _objectPlanUnionPlanIds(sourceMembers, "editableTextFrameIds"));
+        var visibleTextFrameShellIds = _objectPlanVisibleTextFrameShellIds(sourceObjectIds, sourceById);
+        hiddenTextFrameIds = _sourceIdsUnion(hiddenTextFrameIds, visibleTextFrameShellIds);
+        exportSourceObjectIds = _sourceIdsUnion(exportSourceObjectIds, visibleTextFrameShellIds);
+        visualSourceObjectIds = _sourceIdsUnion(visualSourceObjectIds, visibleTextFrameShellIds);
         hiddenVisualSourceObjectIds = _sourceIdsUnion(
-                hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "ownedTextFrameIds"));
-        hiddenVisualSourceObjectIds = _sourceIdsUnion(
-                hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "editableTextFrameIds"));
-        hiddenVisualSourceObjectIds = _sourceIdsUnion(
-                hiddenVisualSourceObjectIds, _objectPlanUnionPlanIds(sourceMembers, "hiddenTextFrameIds"));
+                hiddenVisualSourceObjectIds,
+                _objectPlanSourceIdsMinus(hiddenTextFrameIds, visibleTextFrameShellIds));
         if (exportSourceObjectIds.length === 0) exportSourceObjectIds = sourceRootObjectIds.slice(0);
+        exportSourceObjectIds = _objectPlanPruneExportSourcesWithHiddenDescendants(
+                exportSourceObjectIds, hiddenVisualSourceObjectIds, sourceById);
         if (visualSourceObjectIds.length === 0) visualSourceObjectIds = exportSourceObjectIds.slice(0);
         if (sourceObjectIds.length === 0) sourceObjectIds = visualSourceObjectIds.slice(0);
         var nonExportSourceObjectIds = _objectPlanSourceIdsMinus(sourceObjectIds, exportSourceObjectIds);
@@ -1950,7 +1962,11 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 _objectPlanSourceIdsMinus(nonExportSourceObjectIds, excludedInlineSourceObjectIds));
         hiddenVisualSourceObjectIds = _objectPlanSourceIdsMinus(
                 hiddenVisualSourceObjectIds, exportSourceObjectIds);
+        hiddenVisualSourceObjectIds = _objectPlanSourceIdsMinus(
+                hiddenVisualSourceObjectIds, visibleTextFrameShellIds);
         hiddenVisualSourceObjectIds = _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(
+                hiddenVisualSourceObjectIds, exportSourceObjectIds, sourceById);
+        hiddenVisualSourceObjectIds = _objectPlanHiddenSourceIdsMinusExportAncestors(
                 hiddenVisualSourceObjectIds, exportSourceObjectIds, sourceById);
         var hiddenPlacedVisualIds = _objectPlanHiddenPlacedVisualLeafIds(
                 hiddenVisualSourceObjectIds, excludedInlineSourceObjectIds, sourceById);
@@ -1970,7 +1986,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 : "object-plan.page-background-plane." + String(pageIndex) + "." + componentIdPart;
         var candidateId = plane && plane.candidateId
                 ? plane.candidateId
-                : "cand.pass.decoration_groups.page." + String(pageIndex)
+                : "cand.pass.page_textless_graphic_groups.page." + String(pageIndex)
                         + "." + componentIdPart
                         + ".page_background_plane.n" + String(exportSourceObjectIds.length)
                         + ".h" + _sourceSetId(exportSourceObjectIds);
@@ -1982,6 +1998,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plane.visualSourceSetId = _sourceSetId(visualSourceObjectIds);
             plane.exportSourceSetId = _sourceSetId(exportSourceObjectIds);
             plane.hiddenSourceSetId = _sourceSetId(hiddenVisualSourceObjectIds);
+            plane.hiddenTextFrameSetId = _sourceSetId(hiddenTextFrameIds);
             plane.excludedInlineSourceObjectIds = _internSourceSetIds(excludedInlineSourceObjectIds);
             plane.sourceObjectIds = _internSourceSetIds(sourceObjectIds);
             plane.sourceRootObjectIds = _internSourceSetIds(sourceRootObjectIds);
@@ -1989,6 +2006,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
             plane.visualSourceObjectIds = _internSourceSetIds(visualSourceObjectIds);
             plane.exportSourceObjectIds = _internSourceSetIds(exportSourceObjectIds);
             plane.hiddenVisualSourceObjectIds = _internSourceSetIds(hiddenVisualSourceObjectIds);
+            plane.hiddenTextFrameIds = _internSourceSetIds(hiddenTextFrameIds);
             plane.pageBackgroundHiddenPlacedVisualIds = _internSourceSetIds(hiddenPlacedVisualIds);
             plane.pageBackgroundHiddenPlacedVisualWarning = hiddenPlacedVisualIds.length > 0
                     ? "page_background_hidden_placed_visual"
@@ -2032,7 +2050,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 objectPlanId: planeObjectPlanId,
                 bundleId: "bundle.page-background-plane." + String(pageIndex) + "." + componentIdPart,
                 candidateId: planeCandidateId,
-                passId: "pass.decoration_groups",
+                passId: "pass.page_textless_graphic_groups",
                 pageIndex: pageIndex,
                 kind: "PAGE_BACKGROUND_PLANE",
                 mode: "TEXTLESS_CANDIDATE",
@@ -2053,6 +2071,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 visualSourceSetId: _sourceSetId(visualSourceObjectIds),
                 exportSourceSetId: _sourceSetId(exportSourceObjectIds),
                 hiddenSourceSetId: _sourceSetId(hiddenVisualSourceObjectIds),
+                hiddenTextFrameSetId: _sourceSetId(hiddenTextFrameIds),
                 ownedByNativeShellSourceObjectIds: [],
                 sourceObjectIds: _internSourceSetIds(sourceObjectIds),
                 sourceRootObjectIds: _internSourceSetIds(sourceRootObjectIds),
@@ -2074,6 +2093,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
                 atomicTextlessVectorContent: false,
                 atomicContentVisualSlot: false,
                 hiddenVisualSourceObjectIds: _internSourceSetIds(hiddenVisualSourceObjectIds),
+                hiddenTextFrameIds: _internSourceSetIds(hiddenTextFrameIds),
                 pageBackgroundHiddenPlacedVisualIds: _internSourceSetIds(hiddenPlacedVisualIds),
                 pageBackgroundHiddenPlacedVisualWarning: hiddenPlacedVisualIds.length > 0
                         ? "page_background_hidden_placed_visual"
@@ -2530,6 +2550,157 @@ function _objectPlanHiddenSourceIdsMinusExportedPlacedChildren(hiddenSourceObjec
     return _sortedNumericIds(out);
 }
 
+function _objectPlanHiddenSourceIdsMinusExportAncestors(hiddenSourceObjectIds, exportSourceObjectIds, sourceById) {
+    if (!hiddenSourceObjectIds || hiddenSourceObjectIds.length === 0
+            || !exportSourceObjectIds || exportSourceObjectIds.length === 0
+            || !sourceById) {
+        return _sortedNumericIds(hiddenSourceObjectIds || []);
+    }
+    var exportAncestorSet = {};
+    var out = [];
+    var seen = {};
+
+    function sourceInfo(sourceId) {
+        return sourceById ? sourceById[String(sourceId)] || null : null;
+    }
+
+    for (var ei = 0; ei < exportSourceObjectIds.length; ei++) {
+        var exportId = Number(exportSourceObjectIds[ei]);
+        if (isNaN(exportId)) continue;
+        var current = sourceInfo(exportId);
+        var guard = 0;
+        while (current && guard++ < 64) {
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") break;
+            exportAncestorSet[String(parentId)] = true;
+            current = sourceInfo(parentId);
+        }
+    }
+
+    for (var i = 0; i < hiddenSourceObjectIds.length; i++) {
+        var sourceId = hiddenSourceObjectIds[i];
+        if (exportAncestorSet[String(sourceId)] === true) continue;
+        _pushUniqueId(out, seen, sourceId);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanVisibleTextFrameShellIds(sourceObjectIds, sourceById) {
+    var out = [];
+    var seen = {};
+    if (!sourceObjectIds || sourceObjectIds.length === 0 || !sourceById) return out;
+    for (var i = 0; i < sourceObjectIds.length; i++) {
+        var sourceId = Number(sourceObjectIds[i]);
+        if (isNaN(sourceId)) continue;
+        var src = sourceById[String(sourceId)] || null;
+        if (!src) continue;
+        var kind = String(src.kind || src.type || src.itemType || "");
+        if (kind !== "TextFrame") continue;
+        if (src.hasVisibleFill === true || src.hasVisibleStroke === true) {
+            _pushUniqueId(out, seen, sourceId);
+        }
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanPruneExportSourcesWithHiddenDescendants(exportSourceObjectIds, hiddenSourceObjectIds, sourceById) {
+    var hiddenSet = _objectPlanSourceSetMembership(hiddenSourceObjectIds || []);
+    var childrenByParent = {};
+    var out = [];
+    var seen = {};
+
+    function sourceInfo(sourceId) {
+        return sourceById ? sourceById[String(sourceId)] || null : null;
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function isTextSource(src) {
+        return sourceKind(src) === "TextFrame";
+    }
+
+    function sourceSortValue(src) {
+        if (!src) return 0;
+        var z = Number(src.zOrder);
+        if (!isNaN(z)) return z;
+        var id = Number(src.id);
+        return isNaN(id) ? 0 : id;
+    }
+
+    function buildChildrenIndex() {
+        if (childrenByParent.__built === true) return;
+        for (var key in sourceById) {
+            if (!sourceById.hasOwnProperty(key)) continue;
+            var src = sourceById[key];
+            if (!src || src.id === null || src.id === undefined) continue;
+            var parentId = src.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") continue;
+            var parentKey = String(parentId);
+            if (!childrenByParent[parentKey]) childrenByParent[parentKey] = [];
+            childrenByParent[parentKey].push(src);
+        }
+        for (var parentKey2 in childrenByParent) {
+            if (!childrenByParent.hasOwnProperty(parentKey2)) continue;
+            if (parentKey2 === "__built") continue;
+            childrenByParent[parentKey2].sort(function(a, b) {
+                var az = sourceSortValue(a);
+                var bz = sourceSortValue(b);
+                if (az !== bz) return az - bz;
+                var ai = Number(a && a.id);
+                var bi = Number(b && b.id);
+                if (isNaN(ai)) ai = 0;
+                if (isNaN(bi)) bi = 0;
+                return ai - bi;
+            });
+        }
+        childrenByParent.__built = true;
+    }
+
+    function hasHiddenDescendant(sourceId) {
+        var children = childrenByParent[String(sourceId)] || [];
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (!child || child.id === null || child.id === undefined) continue;
+            if (hiddenSet[String(child.id)] === true) return true;
+            if (hasHiddenDescendant(child.id)) return true;
+        }
+        return false;
+    }
+
+    function emitVisibleExportBranch(sourceId, guard) {
+        if (sourceId === null || sourceId === undefined) return;
+        if (guard > 64) return;
+        var src = sourceInfo(sourceId);
+        if (!src) return;
+        if (hiddenSet[String(sourceId)] === true) return;
+        if (isTextSource(src)) return;
+        if (!hasHiddenDescendant(sourceId)) {
+            _pushUniqueId(out, seen, sourceId);
+            return;
+        }
+        var children = childrenByParent[String(sourceId)] || [];
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (!child || child.id === null || child.id === undefined) continue;
+            emitVisibleExportBranch(child.id, guard + 1);
+        }
+    }
+
+    if (!exportSourceObjectIds || exportSourceObjectIds.length === 0
+            || !hiddenSourceObjectIds || hiddenSourceObjectIds.length === 0
+            || !sourceById) {
+        return _sortedNumericIds(exportSourceObjectIds || []);
+    }
+
+    buildChildrenIndex();
+    for (var i = 0; i < exportSourceObjectIds.length; i++) {
+        emitVisibleExportBranch(exportSourceObjectIds[i], 0);
+    }
+    return _sortedNumericIds(out);
+}
+
 function _objectPlanMemberIds(plans) {
     var ids = [];
     for (var i = 0; plans && i < plans.length; i++) {
@@ -2791,14 +2962,14 @@ function _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourc
                 _sortedNumericIds(inlineByPage[key] || []));
         var sourceSetId = _sourceSetId(visualSourceObjectIds);
         var objectPlanId = "object-plan.page-root-textless-plane." + key + ".h" + sourceSetId;
-        var candidateId = "cand.pass.decoration_groups.page." + key
+        var candidateId = "cand.pass.page_textless_graphic_groups.page." + key
                 + ".page_root_textless_plane.n" + String(visualSourceObjectIds.length)
                 + ".h" + sourceSetId;
         var plan = {
             objectPlanId: objectPlanId,
             bundleId: "bundle.page-root-textless-plane." + key + ".h" + sourceSetId,
             candidateId: candidateId,
-            passId: "pass.decoration_groups",
+            passId: "pass.page_textless_graphic_groups",
             pageIndex: pageIndexNum,
             kind: "PAGE_BACKGROUND_PLANE",
             mode: "TEXTLESS_CANDIDATE",

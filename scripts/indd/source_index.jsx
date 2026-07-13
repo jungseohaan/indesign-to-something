@@ -357,6 +357,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var textFrameIdsByKey = {};
     var editableTextOutsideByKey = {};
     var candidateVectorPaintById = {};
+    var storyTableMetaById = {};
     var cachedSourceInfoById = ctx && ctx.spreadChunkSourceInfoById
             ? ctx.spreadChunkSourceInfoById
             : null;
@@ -447,6 +448,61 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return null;
     }
 
+    function marker(tag) {
+        try {
+            if (ctx && ctx.outputDir && typeof _marker === "function") {
+                _marker(ctx.outputDir, tag);
+            }
+        } catch (eMarker) {}
+    }
+
+    function storyTableMeta(story, storyId) {
+        var key = storyId !== null && storyId !== undefined
+                ? String(storyId)
+                : null;
+        if (key && storyTableMetaById.hasOwnProperty(key)) {
+            var cached = storyTableMetaById[key];
+            return {
+                tableCountInStory: cached.tableCountInStory,
+                tableSourceObjectIds: cached.tableSourceObjectIds
+                        ? cached.tableSourceObjectIds.slice(0)
+                        : [],
+                storyHasVisibleTableCellText: cached.storyHasVisibleTableCellText
+            };
+        }
+        var meta = {
+            tableCountInStory: 0,
+            tableSourceObjectIds: [],
+            storyHasVisibleTableCellText: false
+        };
+        try {
+            if (story && story.tables) {
+                if (story.tables.length !== undefined && story.tables.length !== null) {
+                    meta.tableCountInStory = Number(story.tables.length || 0);
+                } else if (story.tables.count) {
+                    meta.tableCountInStory = Number(story.tables.count() || 0);
+                }
+            }
+        } catch (eStoryTableCount) {
+            meta.tableCountInStory = 0;
+        }
+        try { meta.tableSourceObjectIds = _storyTableSourceObjectIds(story); } catch (eStoryTableIds) {
+            meta.tableSourceObjectIds = [];
+        }
+        // Do not scan every table cell here. InDesign DOM table-cell reads are
+        // extremely slow on large textbook files, and Stage 1 only needs to
+        // know that the story carries a table for ownership planning.
+        meta.storyHasVisibleTableCellText = meta.tableCountInStory > 0;
+        if (key) {
+            storyTableMetaById[key] = {
+                tableCountInStory: meta.tableCountInStory,
+                tableSourceObjectIds: meta.tableSourceObjectIds.slice(0),
+                storyHasVisibleTableCellText: meta.storyHasVisibleTableCellText
+            };
+        }
+        return meta;
+    }
+
     function cloneCachedSourceInfo(cached, id) {
         if (!cached) return null;
         var info = {};
@@ -509,12 +565,12 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var tableCountInStory = null;
         var tableSourceObjectIds = [];
         var storyHasVisibleTableCellText = null;
-        var parentStory = null;
-        try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
-        if (parentStory) {
-            try { if (parentStory.id !== undefined) storyId = parentStory.id; } catch (eStoryId) {}
-        }
         if (kind === "TextFrame") {
+            var parentStory = null;
+            try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
+            if (parentStory) {
+                try { if (parentStory.id !== undefined) storyId = parentStory.id; } catch (eStoryId) {}
+            }
             try { textFrameClass = classifyTextFrameCached(item); } catch (eClass) { textFrameClass = null; }
             textLength = _textLengthOfItem(item);
             try {
@@ -532,15 +588,10 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 simpleMarkerLabelContents = null;
             }
             try {
-                if (parentStory && parentStory.tables) {
-                    if (parentStory.tables.length !== undefined && parentStory.tables.length !== null) {
-                        tableCountInStory = Number(parentStory.tables.length || 0);
-                    } else if (parentStory.tables.count) {
-                        tableCountInStory = Number(parentStory.tables.count() || 0);
-                    }
-                }
-                tableSourceObjectIds = _storyTableSourceObjectIds(parentStory);
-                storyHasVisibleTableCellText = _storyHasVisibleTableCellText(parentStory);
+                var tableMeta = storyTableMeta(parentStory, storyId);
+                tableCountInStory = tableMeta.tableCountInStory;
+                tableSourceObjectIds = tableMeta.tableSourceObjectIds;
+                storyHasVisibleTableCellText = tableMeta.storyHasVisibleTableCellText;
             } catch (eStoryMeta) {
                 tableCountInStory = tableCountInStory === null ? 0 : tableCountInStory;
                 storyHasVisibleTableCellText = storyHasVisibleTableCellText === null
@@ -651,7 +702,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
 
     for (var i = 0; allItems && i < allItems.length; i++) {
         try { readItemInfo(allItems[i]); } catch (eReadInfo) {}
+        if (i > 0 && i % 1000 === 0) marker("03d01_readItems_" + String(i));
     }
+    marker("03d01a_sourceIndex_readItems");
     for (var parentPass = 0; parentPass < 8; parentPass++) {
         var appendedParent = false;
         var snapshotCount = sourceItems.length;
@@ -680,6 +733,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         }
         if (!appendedParent) break;
     }
+    marker("03d01b_sourceIndex_recoverParents");
     var startRangePageIndex = Math.max(0, Number(ctx && ctx.startPage || 1) - 1);
     var endRangePageIndex = Math.max(startRangePageIndex, Number(ctx && (ctx.endPage || ctx.startPage) || 1) - 1);
     for (var rpi = 0; rpi < sourceItems.length; rpi++) {
@@ -704,7 +758,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             break;
         }
     }
+    marker("03d01c_sourceIndex_reprojectRange");
     normalizeSourceItemZOrder(sourceItems, ctx);
+    marker("03d01d_sourceIndex_zOrder");
     stats.sourceZOrderSummary = ctx && ctx.sourceZOrderSummary
             ? ctx.sourceZOrderSummary
             : {
@@ -725,6 +781,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var hasChildInfo = sourceItems[hi];
         hasChildInfo.hasChildren = !!childIdsByParentId[String(hasChildInfo.id)];
     }
+    marker("03d01e_sourceIndex_childIndex");
 
     function sourceInfo(sourceId) {
         if (sourceId === null || sourceId === undefined) return null;
@@ -1632,6 +1689,7 @@ function _sourceModelSlotFromObjectPlan(plan, ownershipSlot, owner, slotSourceOb
         ownedTextFrameIds: _internSourceSetIds(plan.ownedTextFrameIds || []),
         exportSourceObjectIds: _internSourceSetIds(plan.exportSourceObjectIds || []),
         hiddenVisualSourceObjectIds: _internSourceSetIds(plan.hiddenVisualSourceObjectIds || []),
+        hiddenTextFrameIds: _internSourceSetIds(plan.hiddenTextFrameIds || []),
         placement: plan.placement || null,
         coordinateSpace: plan.coordinateSpace || null,
         visualLayer: plan.visualLayer || null,

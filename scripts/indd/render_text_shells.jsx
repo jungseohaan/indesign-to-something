@@ -572,6 +572,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                     : ""),
             _sourceSetKey(visualIds),
             _sourceSetKey(slotPlan.excludedInlineSourceObjectIds || []),
+            _sourceSetKey(slotPlan.hiddenTextFrameIds || []),
             _decoBoundsCacheKey(slotPlan.bounds || [])
         ].join("|");
     }
@@ -1582,6 +1583,110 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 ? _pageBackgroundPlaneCompositeCacheKey(slotPlan)
                 : null;
 
+        function pageRelativeBoundsForPageSnapshot() {
+            var pageBounds = null;
+            try { pageBounds = page && page.bounds ? arrCopy(page.bounds) : null; } catch (ePageBounds) {}
+            if (!pageBounds || pageBounds.length < 4) return slotPlan.bounds ? arrCopy(slotPlan.bounds) : null;
+            return [
+                0,
+                0,
+                Number(pageBounds[2]) - Number(pageBounds[0]),
+                Number(pageBounds[3]) - Number(pageBounds[1])
+            ];
+        }
+
+        function renderPageBackgroundPlaneSnapshot() {
+            if (!isPageBackgroundPlane) return false;
+            if (slotPlan.passId !== "pass.page_textless_graphic_groups") return false;
+            var savedText = [];
+            var savedHiddenVisuals = [];
+            var snapshotStartedAt = _decoPerfNow();
+            try {
+                var hiddenVisualIds = _sortedNumericIds(_sourceIdsUnion(
+                        slotPlan.hiddenVisualSourceObjectIds || [],
+                        slotPlan.excludedInlineSourceObjectIds || []));
+                var hiddenItems = [];
+                var hiddenSeen = {};
+                for (var hvi = 0; hvi < hiddenVisualIds.length; hvi++) {
+                    var hiddenItem = null;
+                    try { hiddenItem = itemById ? itemById[String(hiddenVisualIds[hvi])] : null; } catch (eHiddenLookup) {}
+                    if (!hiddenItem) continue;
+                    var hiddenKey = String(hiddenVisualIds[hvi]);
+                    if (hiddenSeen[hiddenKey]) continue;
+                    hiddenSeen[hiddenKey] = true;
+                    hiddenItems.push(hiddenItem);
+                }
+                if (hiddenItems.length > 0) savedHiddenVisuals = _hideItemsForExport(hiddenItems);
+                try {
+                    savedText = hideTextFrames(page, {
+                        preferTextPaintOnly: true,
+                        preserveFrameVisual: true
+                    });
+                } catch (eHidePageText) {
+                    savedText = [];
+                }
+                try { page.exportFile(ExportFormat.PNG_FORMAT, outFile, false); } catch (ePageExport) {}
+                if (!outFile.exists || outFile.length < 512) {
+                    return fail("page_background_plane_snapshot_export_too_small", {
+                        fileName: fileName,
+                        fileExists: outFile.exists,
+                        fileBytes: outFile.exists ? outFile.length : 0,
+                        exportSourceObjectIds: exportIds
+                    });
+                }
+                var bounds = pageRelativeBoundsForPageSnapshot();
+                var z = zOrderForComposite();
+                var opts = ownershipOptsForComposite();
+                var entryId = -930000000 + (Number(slotPlan.primarySourceObjectId || exportIds[0]) || 0);
+                var entry = {
+                    id: entryId,
+                    file: "rendered_frames/" + fileName,
+                    bounds: bounds,
+                    pageIndex: page.documentOffset,
+                    candidateId: slotPlan.candidateId || null,
+                    candidateMatchStrategy: "planned_page_background_plane_snapshot",
+                    zOrder: z,
+                    exportSanity: {
+                        fileBytes: outFile.length,
+                        sourceSetComposite: true,
+                        pageBackgroundPlane: true,
+                        pageBackgroundPlaneSnapshot: true,
+                        pageTextlessGraphicGroup: true,
+                        exportSourceObjectIds: exportIds,
+                        pageRelativeBounds: bounds,
+                        exportPageRelativeBounds: bounds,
+                        exportFullPageRelativeBounds: bounds,
+                        hiddenVisualSourceObjectIds: hiddenVisualIds,
+                        hiddenTextFrameIds: slotPlan.hiddenTextFrameIds || []
+                    }
+                };
+                results.push(applyRenderOwnership(entry, sourceItems[0], opts));
+                renderedPageKeys[renderKey] = true;
+                markCompositeSourcesRendered();
+                if (pagePlaneCacheKey) {
+                    pageBackgroundPlaneCompositeFileCache[pagePlaneCacheKey] = {
+                        fileName: fileName,
+                        bounds: bounds ? arrCopy(bounds) : null,
+                        cropSourceBounds: null,
+                        exportFullBounds: bounds ? arrCopy(bounds) : null
+                    };
+                }
+                _decoPerfRecord("page_background_plane_snapshot", page, page, ownershipOpts, snapshotStartedAt, {
+                    result: "rendered",
+                    passId: slotPlan.passId || null,
+                    candidatePurpose: slotPlan.candidatePurpose || null,
+                    compositeRole: slotPlan.compositeRole || null,
+                    exportSourceObjectCount: exportIds.length,
+                    hiddenVisualCount: hiddenVisualIds.length,
+                    fileName: fileName
+                });
+                return true;
+            } finally {
+                try { if (savedText && savedText.length > 0) restoreTextFrames(savedText); } catch (eRestorePageText) {}
+                try { if (savedHiddenVisuals && savedHiddenVisuals.length > 0) _restoreItemsForExport(savedHiddenVisuals); } catch (eRestorePageVisuals) {}
+            }
+        }
+
         function zOrderForComposite() {
             if (slotPlan.zOrder !== undefined && slotPlan.zOrder !== null) {
                 return slotPlan.zOrder;
@@ -1597,6 +1702,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             }
             opts.sourceObjectIds = slotPlan.sourceObjectIds || ownershipOpts.sourceObjectIds || exportIds;
             opts.exportSourceObjectIds = exportIds;
+            opts.hiddenTextFrameIds = slotPlan.hiddenTextFrameIds
+                    || ownershipOpts.hiddenTextFrameIds
+                    || [];
             opts.excludedInlineSourceObjectIds = slotPlan.excludedInlineSourceObjectIds
                     || ownershipOpts.excludedInlineSourceObjectIds
                     || [];
@@ -1619,6 +1727,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
             for (var rsi = 0; rsi < renderedSourceIds.length; rsi++) {
                 renderedIds[renderedSourceIds[rsi]] = true;
             }
+        }
+
+        if (renderPageBackgroundPlaneSnapshot()) {
+            return true;
         }
 
         if (pagePlaneCacheKey) {
@@ -1811,6 +1923,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
         var dups = [];
         var tempGroup = null;
         var savedOutOfScope = [];
+        var savedHiddenTextFramesForComposite = [];
+        var savedHiddenTextFrameSeen = {};
         // For planner-owned page textless graphic groups, Stage 1 already chose the
         // exact export source set. Re-collapsing roots here can merge split local
         // non-shell components back together and send InDesign into unstable
@@ -1854,6 +1968,25 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 if (seen[key]) continue;
                 seen[key] = true;
                 out.push(hiddenItem);
+            }
+        }
+        function appendHiddenTextFramesForItem(item, out, seen) {
+            var ids = slotPlan.hiddenTextFrameIds || [];
+            if (!item || !ids || ids.length === 0) return;
+            for (var hti = 0; hti < ids.length; hti++) {
+                var hiddenTextId = ids[hti];
+                var tf = null;
+                try { tf = _decoFindNestedPageItemById(item, hiddenTextId); } catch (eFindHiddenText) {}
+                if (!tf) continue;
+                try {
+                    if (!tf.constructor || tf.constructor.name !== "TextFrame") continue;
+                } catch (eHiddenTextKind) {
+                    continue;
+                }
+                var key = String(hiddenTextId);
+                if (seen[key]) continue;
+                seen[key] = true;
+                out.push(tf);
             }
         }
         function groupItemsInParent(items, parentItem) {
@@ -1903,16 +2036,36 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 	                } catch (eHiddenVisualForItem) {}
 	                _perfHiddenCollectMs += _decoPerfNow() - _perfHiddenCollectStartedAt;
 	                try { _hiddenForItemCount += hiddenForItem ? hiddenForItem.length : 0; } catch (eHiddenCount) {}
-	                if (hiddenForItem && hiddenForItem.length > 0) {
-	                    var _perfHiddenHideStartedAt = _decoPerfNow();
-	                    var savedForItem = _hideItemsForExport(hiddenForItem);
-	                    _perfHiddenHideMs += _decoPerfNow() - _perfHiddenHideStartedAt;
-	                    for (var si = 0; savedForItem && si < savedForItem.length; si++) {
-	                        savedOutOfScope.push(savedForItem[si]);
-	                    }
-	                }
-	                var _perfDuplicateStartedAt = _decoPerfNow();
-	                var dup = ordered[i].duplicate();
+		                if (hiddenForItem && hiddenForItem.length > 0) {
+		                    var _perfHiddenHideStartedAt = _decoPerfNow();
+		                    var savedForItem = _hideItemsForExport(hiddenForItem);
+		                    _perfHiddenHideMs += _decoPerfNow() - _perfHiddenHideStartedAt;
+		                    for (var si = 0; savedForItem && si < savedForItem.length; si++) {
+		                        savedOutOfScope.push(savedForItem[si]);
+		                    }
+		                }
+                    var hiddenTextFramesForItem = [];
+                    try {
+                        appendHiddenTextFramesForItem(
+                                ordered[i],
+                                hiddenTextFramesForItem,
+                                savedHiddenTextFrameSeen);
+                    } catch (eCollectHiddenTextFramesForItem) {}
+                    if (hiddenTextFramesForItem.length > 0) {
+                        var _perfHiddenTextStartedAt = _decoPerfNow();
+                        for (var htf = 0; htf < hiddenTextFramesForItem.length; htf++) {
+                            try {
+                                var savedTextFrame = hideOneTextFrameContent(hiddenTextFramesForItem[htf], {
+                                    preferTextPaintOnly: true,
+                                    preserveFrameVisual: true
+                                });
+                                if (savedTextFrame) savedHiddenTextFramesForComposite.push(savedTextFrame);
+                            } catch (eHideTextFrameForComposite) {}
+                        }
+                        _perfHiddenHideMs += _decoPerfNow() - _perfHiddenTextStartedAt;
+                    }
+		                var _perfDuplicateStartedAt = _decoPerfNow();
+		                var dup = ordered[i].duplicate();
 	                _perfDuplicateMs += _decoPerfNow() - _perfDuplicateStartedAt;
 	                if (slotPlan.textAction !== "OWNED_BY_PNG"
 	                        && slotPlan.completePngTextAllowed !== true) {
@@ -2148,16 +2301,21 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
 	                    _restoreItemsForExport(savedOutOfScope);
                 }
             } catch (eRestoreOutOfScope) {}
+	            try {
+	                if (tempGroup) tempGroup.remove();
+	                else {
+	                    for (var di = 0; di < dups.length; di++) {
+	                        try { dups[di].remove(); } catch (eDup) {}
+		                    }
+		                }
+		            } catch (eCleanup) {}
             try {
-                if (tempGroup) tempGroup.remove();
-                else {
-                    for (var di = 0; di < dups.length; di++) {
-                        try { dups[di].remove(); } catch (eDup) {}
-	                    }
-	                }
-	            } catch (eCleanup) {}
-	            _perfCleanupMs += _decoPerfNow() - _perfCleanupStartedAt;
-	        }
+                if (savedHiddenTextFramesForComposite && savedHiddenTextFramesForComposite.length > 0) {
+                    restoreTextFrames(savedHiddenTextFramesForComposite);
+                }
+            } catch (eRestoreHiddenTextFramesForComposite) {}
+		            _perfCleanupMs += _decoPerfNow() - _perfCleanupStartedAt;
+		        }
     }
 
     function _boundsOfItem(item) {
@@ -2409,6 +2567,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage,
                 candidateId: slotPlan.candidateId || null,
                 sourceObjectIds: slotPlan.sourceObjectIds || [],
                 hiddenVisualSourceObjectIds: slotPlan.hiddenVisualSourceObjectIds || [],
+                hiddenTextFrameIds: slotPlan.hiddenTextFrameIds || [],
                 exportSourceObjectIds: slotPlan.exportSourceObjectIds || [],
                 exportTargetObjectId: slotPlan.exportTargetObjectId !== undefined ? slotPlan.exportTargetObjectId : null,
                 renderObjectId: _plannedSlotRenderObjectId(slotPlan),

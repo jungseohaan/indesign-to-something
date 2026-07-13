@@ -486,6 +486,9 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
         candidate.ownedTextFrameIds = _sortedNumericIds(objectPlan.ownedTextFrameIds);
         candidate.editableTextFrameIds = _sortedNumericIds(objectPlan.ownedTextFrameIds);
     }
+    if (objectPlan.hiddenTextFrameIds) {
+        candidate.hiddenTextFrameIds = _sortedNumericIds(objectPlan.hiddenTextFrameIds);
+    }
     if ((!candidate.ownedTextFrameIds || candidate.ownedTextFrameIds.length === 0)
             && candidate.textAction === "OWNED_BY_HWPX_TEXT") {
         candidate.ownedTextFrameIds = _sortedNumericIds(
@@ -566,6 +569,10 @@ function _objectPlanExecutionSourceObjectIds(objectPlan) {
 
 function _objectPlanExecutionHiddenVisualSourceObjectIds(objectPlan, executionSourceObjectIds, exportSourceObjectIds) {
     if (!objectPlan) return [];
+    if (objectPlan.slotRole === "page_background_plane"
+            || objectPlan.compositeRole === "page_background_plane") {
+        return _sortedNumericIds(objectPlan.hiddenVisualSourceObjectIds || []);
+    }
     if (objectPlan.visualAction === "PLACE_TEXT_SHELL") {
         return _sortedNumericIds(_executionCandidateIdsUnion(
                 objectPlan.hiddenVisualSourceObjectIds || [],

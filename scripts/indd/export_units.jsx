@@ -78,6 +78,10 @@ function _exportUnitContract(item, planCandidate) {
             item && item.hiddenVisualSourceObjectIds && item.hiddenVisualSourceObjectIds.length
                     ? item.hiddenVisualSourceObjectIds
                     : (planCandidate ? planCandidate.hiddenVisualSourceObjectIds : null));
+    var hiddenTextFrameIds = _exportUnitSortedIds(
+            item && item.hiddenTextFrameIds && item.hiddenTextFrameIds.length
+                    ? item.hiddenTextFrameIds
+                    : (planCandidate ? planCandidate.hiddenTextFrameIds : null));
     var excludedInlineSourceObjectIds = _exportUnitSortedIds(
             item && item.excludedInlineSourceObjectIds && item.excludedInlineSourceObjectIds.length
                     ? item.excludedInlineSourceObjectIds
@@ -97,6 +101,7 @@ function _exportUnitContract(item, planCandidate) {
         exportSourceObjectIds.join(","),
         sourceObjectIds.join(","),
         hiddenVisualSourceObjectIds.join(","),
+        hiddenTextFrameIds.join(","),
         excludedInlineSourceObjectIds.join(","),
         editableTextFrameIds.join(",")
     ].join("|");
@@ -109,6 +114,7 @@ function _exportUnitContract(item, planCandidate) {
         sourceObjectIds: sourceObjectIds,
         exportSourceObjectIds: exportSourceObjectIds,
         hiddenVisualSourceObjectIds: hiddenVisualSourceObjectIds,
+        hiddenTextFrameIds: hiddenTextFrameIds,
         excludedInlineSourceObjectIds: excludedInlineSourceObjectIds,
         editableTextFrameIds: editableTextFrameIds,
         contractKey: idSeed,
@@ -316,6 +322,7 @@ function _buildExportUnitsFromExtractionResults(extractionResults) {
                 sourceObjectIds: row.sourceObjectIds || [],
                 exportSourceObjectIds: row.exportSourceObjectIds || [],
                 hiddenVisualSourceObjectIds: row.hiddenVisualSourceObjectIds || [],
+                hiddenTextFrameIds: row.hiddenTextFrameIds || [],
                 excludedInlineSourceObjectIds: row.excludedInlineSourceObjectIds || [],
                 editableTextFrameIds: row.editableTextFrameIds || [],
                 files: [],

@@ -685,7 +685,9 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d_buildExtractionPlan_done");
     _extractionCandidateLookup = _buildExtractionCandidateLookup(ctx.extractionPlan);
     _marker(ctx.outputDir, "03e_buildCandidateLookup_done");
-    var extractionItemById = _buildItemById(allItems);
+    var extractionItemById = ctx._sourceIndexForRender && ctx._sourceIndexForRender.domById
+            ? ctx._sourceIndexForRender.domById
+            : _buildItemById(allItems);
     _marker(ctx.outputDir, "03f_buildItemById_done");
     writeJson(ctx.outputDir + "/extraction-plan.json",
             ctx.writePlannerDiagnostics === true
