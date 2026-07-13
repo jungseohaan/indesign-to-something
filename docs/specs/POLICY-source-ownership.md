@@ -200,6 +200,29 @@ Older code and diagnostics may still mention four visual roles:
 `BACKGROUND`, `DECORATION`, `CONTENT`, and `TEXT`. They are source-role
 diagnostics only. They do not create four HWPX execution layers.
 
+## Canonical Graphic Materialization Path
+
+The default graphic materialization path is `single-textless-plane`.
+For every page in the extraction range, Stage 3 exports one page-sized PNG that
+contains page/floating textless visual source material with editable text
+hidden. HWPX text and table text remain owned by `TEXT_TABLE_STRUCTURE`.
+
+This page plane is the main execution path, not an experimental fallback. It
+replaces per-object page/floating vector export for ordinary page graphics.
+The legacy per-object `policy` graphics path may remain available only for
+comparison, debugging, or rollback while migration is in progress.
+
+The page plane must not absorb:
+
+- editable/searchable `TEXT_SLOT` content;
+- `TABLE_STYLE_SLOT` content that is represented by HWPX table structure;
+- story-flow inline or anchored images that must travel with text;
+- complete marker PNGs that intentionally own their own tiny text marker.
+
+If one of those exclusions is violated, the fix belongs in Stage 1 source-slot
+ownership or in the page-plane export mask. It must not be patched with
+page/text/coordinate exceptions after extraction.
+
 The executable HWPX policy has exactly three strata:
 
 1. `BACKGROUND_GRAPHIC`: an explicit page-root textless plane ObjectPlan

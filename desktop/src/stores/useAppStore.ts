@@ -68,6 +68,7 @@ interface AppState {
   // SPEC-030: InDesign 추출 성능 모드. fast=150dpi, standard=220dpi, high=300dpi. PDF preview는 캐시 재사용.
   perfMode: "fast" | "standard" | "high";
   extractMode: "spread_chunks" | "full";
+  graphicsMode: "policy" | "single-textless-plane";
   // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
   debugStartPage: number;
   debugEndPage: number;
@@ -120,6 +121,7 @@ interface AppState {
   setLayoutMode: (v: "preserve" | "editable") => void;
   setPerfMode: (v: "fast" | "standard" | "high") => void;
   setExtractMode: (v: "spread_chunks" | "full") => void;
+  setGraphicsMode: (v: "policy" | "single-textless-plane") => void;
   setNoPreview: (v: boolean) => void;
   setDebugPageRange: (start: number, end: number) => void;
   setExtractChunkSize: (v: number) => void;
@@ -133,6 +135,17 @@ interface AppState {
   startBatch: (selectedPaths: string[]) => Promise<void>;
   closeBatchModal: () => void;
   cancelBatch: () => void;
+}
+
+function initialGraphicsMode(): "policy" | "single-textless-plane" {
+  const stored = localStorage.getItem("graphicsMode");
+  const migrated = localStorage.getItem("graphicsModeDefaultMigrated") === "true";
+  if (!migrated) {
+    localStorage.setItem("graphicsModeDefaultMigrated", "true");
+    localStorage.setItem("graphicsMode", "single-textless-plane");
+    return "single-textless-plane";
+  }
+  return stored === "policy" || stored === "single-textless-plane" ? stored : "single-textless-plane";
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -170,6 +183,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastOutputPath: null,
   perfMode: (localStorage.getItem("perfMode") as "fast" | "standard" | "high") || "standard",
   extractMode: (localStorage.getItem("extractMode") as "spread_chunks" | "full") || "spread_chunks",
+  graphicsMode: initialGraphicsMode(),
   noPreview: localStorage.getItem("noPreview") === "true",
   debugStartPage: 0,
   debugEndPage: 0,
@@ -502,6 +516,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem("extractMode", v);
     set({ extractMode: v });
   },
+  setGraphicsMode: (v) => {
+    localStorage.setItem("graphicsMode", v);
+    set({ graphicsMode: v });
+  },
   setNoPreview: (v) => {
     localStorage.setItem("noPreview", String(v));
     set({ noPreview: v });
@@ -652,7 +670,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
 
         try {
-          const { debugStartPage, debugEndPage, perfMode, extractMode, extractChunkSize } = get();
+          const { debugStartPage, debugEndPage, perfMode, extractMode, graphicsMode, extractChunkSize } = get();
           // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
           const extractResult = await invoke<InddExtractResult>("extract_indd", {
             inddPath,
@@ -663,6 +681,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             perfMode,
             skipPdf: false,
             extractMode,
+            graphicsMode,
             chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
           });
 

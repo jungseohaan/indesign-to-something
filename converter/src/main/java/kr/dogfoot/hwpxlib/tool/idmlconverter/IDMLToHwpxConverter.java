@@ -138,6 +138,7 @@ public class IDMLToHwpxConverter {
                             .debugAst(options.debugAst())
                             .tableQualityGate(options.config().tableQualityGate())
                             .build();
+                    injectOrphanRenderedGraphics(astDoc, resolvedData, options);
                 } else {
                     // 레거시: IDML 기반 4단계 정규화 + Resolved 보강
                     astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
@@ -512,6 +513,7 @@ public class IDMLToHwpxConverter {
                         .debugAst(options.debugAst())
                         .tableQualityGate(options.config().tableQualityGate())
                         .build();
+                injectOrphanRenderedGraphics(astDoc, resolvedData, options);
             } else {
                 List<String> earlyWarnings = new ArrayList<>();
                 astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
@@ -746,6 +748,11 @@ public class IDMLToHwpxConverter {
         // (인라인 처리된 배지는 isConsumedRenderedGraphic으로 건너뜀)
         java.util.List<RenderedGroup> orphanTargets = new java.util.ArrayList<>(
                 resolvedData.allRenderedGraphicFrames());
+        for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+            if (isSingleTextlessPagePlane(rg)) {
+                orphanTargets.add(rg);
+            }
+        }
         // PDF 배치 프레임도 orphan 대상에 추가 (IDML에서 PDF 링크를 직접 변환하지 못하므로)
         orphanTargets.addAll(resolvedData.allRenderedPdfFrames());
 
@@ -786,6 +793,8 @@ public class IDMLToHwpxConverter {
 
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
+            boolean singleTextlessPagePlane = isSingleTextlessPagePlane(rg);
 
             kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage resolvedPage =
                     resolvedData.getPage(pageIdx);
@@ -804,21 +813,31 @@ public class IDMLToHwpxConverter {
                 // 위치/크기 계산 (ExtendScript에서 이미 pageBounds를 뺀 페이지 상대 좌표)
                 double[] bounds = rg.bounds();
                 long figX, figY, figW, figH;
-                figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                        .pointsToHwpunits(bounds[1]);
-                figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                        .pointsToHwpunits(bounds[0]);
-                figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                        .pointsToHwpunits(bounds[3] - bounds[1]);
-                figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                        .pointsToHwpunits(bounds[2] - bounds[0]);
-                // PNG 비율로 높이 보정
-                if (img.getWidth() > 0) {
-                    long geoBottom = figY + figH;
-                    figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
-                    // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
-                    if (figY < 0) {
-                        figY = geoBottom - figH;
+                if (singleTextlessPagePlane
+                        && section.layout() != null
+                        && section.layout().pageWidth() > 0
+                        && section.layout().pageHeight() > 0) {
+                    figX = 0;
+                    figY = 0;
+                    figW = section.layout().pageWidth();
+                    figH = section.layout().pageHeight();
+                } else {
+                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[1]);
+                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[0]);
+                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[3] - bounds[1]);
+                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[2] - bounds[0]);
+                    // PNG 비율로 높이 보정
+                    if (img.getWidth() > 0) {
+                        long geoBottom = figY + figH;
+                        figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
+                        // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
+                        if (figY < 0) {
+                            figY = geoBottom - figH;
+                        }
                     }
                 }
 
@@ -892,10 +911,10 @@ public class IDMLToHwpxConverter {
                 // HwpxImageBuilder가 hasCrop일 때 x<0, y<0을 자동 클램핑하므로
                 // 원래 크기를 유지하고 fraction만 설정
                 double cropLeft = 0, cropTop = 0;
-                if (figX < 0) {
+                if (!singleTextlessPagePlane && figX < 0) {
                     cropLeft = (double) (-figX) / figW;
                 }
-                if (figY < 0) {
+                if (!singleTextlessPagePlane && figY < 0) {
                     cropTop = (double) (-figY) / figH;
                 }
 
@@ -917,7 +936,6 @@ public class IDMLToHwpxConverter {
 
                 // z-order: IDML 스프레드 파싱 시 할당된 원본 z-order 사용
                 // (AST 텍스트 프레임과 동일한 스케일 → inFrontBlocks 정렬에서 올바른 스태킹)
-                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
                 java.util.Map<String, Integer> zMap = astDoc.idmlZOrders();
                 Integer idmlZ = rg.zOrderKnown() ? rg.zOrder() : null;
                 if (idmlZ == null) {
@@ -952,7 +970,7 @@ public class IDMLToHwpxConverter {
                 }
 
                 // === 스프레드 걸침 감지: 그래픽이 인접 페이지까지 확장되면 추가 배치 ===
-                if (resolvedPage != null && resolvedPage.bounds() != null) {
+                if (!singleTextlessPagePlane && resolvedPage != null && resolvedPage.bounds() != null) {
                     double pageRight = resolvedPage.bounds()[3];  // 현재 페이지 오른쪽 끝 (spread coords, pt)
                     double graphicRight = bounds[3];              // 그래픽 오른쪽 끝
                     int adjPageIdx = pageIdx + 1;
@@ -1168,6 +1186,14 @@ public class IDMLToHwpxConverter {
                 // skip
             }
         }
+    }
+
+    private static boolean isSingleTextlessPagePlane(RenderedGroup rg) {
+        if (rg == null || rg.file() == null) return false;
+        if (!"PAGE_BACKGROUND".equals(rg.visualLayer())) return false;
+        if (rg.file().contains("page_textless_plane")) return true;
+        return rg.reason() != null
+                && rg.reason().contains("single_textless_plane");
     }
 
     /** 문서 전체 페이지 인덱스(0-based)로 IDMLPage를 찾는다. */

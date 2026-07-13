@@ -10,6 +10,292 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage,
     return { items: [] };
 }
 
+function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
+                                        allItems, itemById, inlineCandidates) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var savedRes = null;
+    var savedTransparent = null;
+    var savedQuality = null;
+    var savedSpread = null;
+    var savedPageString = null;
+    var savedDisplayPerf = null;
+    var hadPageString = false;
+    var results = [];
+    var diagnostics = [];
+    var startedAt = (new Date()).getTime();
+
+    function nowMs() {
+        try { return (new Date()).getTime(); } catch (eNow) { return 0; }
+    }
+
+    function pageLocalBounds(page) {
+        try {
+            var pb = page.bounds;
+            return [0, 0, Number(pb[2]) - Number(pb[0]), Number(pb[3]) - Number(pb[1])];
+        } catch (eBounds) {}
+        return null;
+    }
+
+    function inlineItemForCandidate(candidate) {
+        if (!candidate || !itemById) return null;
+        if (candidate.exportTargetObjectId !== null && candidate.exportTargetObjectId !== undefined) {
+            var exportTarget = itemById[String(candidate.exportTargetObjectId)];
+            if (exportTarget) return exportTarget;
+        }
+        if (candidate.primarySourceObjectId !== null && candidate.primarySourceObjectId !== undefined) {
+            var primary = itemById[String(candidate.primarySourceObjectId)];
+            if (primary) return primary;
+        }
+        var sourceIds = candidate.sourceObjectIds || [];
+        for (var si = 0; si < sourceIds.length; si++) {
+            var item = itemById[String(sourceIds[si])];
+            if (item) return item;
+        }
+        return null;
+    }
+
+    function collectInlineItemsToHide() {
+        var items = [];
+        var seen = {};
+        for (var i = 0; inlineCandidates && i < inlineCandidates.length; i++) {
+            var c = inlineCandidates[i];
+            if (!c || c.visualAction === "DROP_VISUAL") continue;
+            if (c.materialization === "HWPX_TEXT" || c.materialization === "HWPX_TABLE_STYLE") continue;
+            var item = inlineItemForCandidate(c);
+            if (!item) continue;
+            try {
+                if (item.constructor && item.constructor.name === "TextFrame") continue;
+            } catch (eCtor) {}
+            var id = null;
+            try { id = item.id; } catch (eId) {}
+            var key = id !== null && id !== undefined ? String(id) : String(items.length);
+            if (seen[key]) continue;
+            seen[key] = true;
+            items.push(item);
+        }
+        return items;
+    }
+
+    function textItemKey(item) {
+        try {
+            if (item.id !== undefined && item.id !== null) {
+                var ctor = item.constructor && item.constructor.name
+                        ? item.constructor.name : "TextItem";
+                return ctor + ":" + String(item.id);
+            }
+        } catch (eId) {}
+        return null;
+    }
+
+    function isTextItem(item) {
+        if (!item) return false;
+        var name = null;
+        try {
+            name = item.constructor && item.constructor.name
+                    ? item.constructor.name : null;
+        } catch (eCtor) {}
+        return name === "TextFrame" || name === "TextPath";
+    }
+
+    function collectDocumentTextItemsToHide() {
+        var items = [];
+        var seen = {};
+
+        function add(item) {
+            if (!isTextItem(item)) return;
+            var key = textItemKey(item);
+            if (key === null) key = "idx:" + String(items.length);
+            if (seen[key]) return;
+            seen[key] = true;
+            items.push(item);
+        }
+
+        function addFromItems(items) {
+            if (!items) return;
+            for (var ii = 0; ii < items.length; ii++) add(items[ii]);
+        }
+
+        try { addFromItems(doc.textFrames.everyItem().getElements()); } catch (eDocTextFrames) {}
+        try { addFromItems(doc.textPaths.everyItem().getElements()); } catch (eDocTextPaths) {}
+        try { addFromItems(doc.allPageItems); } catch (eDocAllPageItems) {}
+        try {
+            var spreads = doc.spreads.everyItem().getElements();
+            for (var si = 0; si < spreads.length; si++) {
+                try { addFromItems(spreads[si].allPageItems); } catch (eSpreadItems) {}
+            }
+        } catch (eSpreads) {}
+        try {
+            var masters = doc.masterSpreads.everyItem().getElements();
+            for (var mi = 0; mi < masters.length; mi++) {
+                try { addFromItems(masters[mi].allPageItems); } catch (eMasterItems) {}
+            }
+        } catch (eMasters) {}
+        try {
+            var pageItems = doc.allPageItems;
+            for (var pi = 0; pi < pageItems.length; pi++) {
+                try { addFromItems(pageItems[pi].textPaths.everyItem().getElements()); } catch (eItemTextPaths) {}
+            }
+        } catch (eAllItemTextPaths) {}
+        return items;
+    }
+
+    function hideCollectedTextItems(items) {
+        var saved = [];
+        var seen = {};
+        for (var fi = 0; items && fi < items.length; fi++) {
+            var textItem = items[fi];
+            var key = textItemKey(textItem);
+            if (key === null) key = "idx:" + String(fi);
+            if (seen[key]) continue;
+            seen[key] = true;
+            try {
+                var itemSaved = hideOneTextFrameContent(textItem, { forceHidden: true });
+                if (itemSaved) saved.push(itemSaved);
+            } catch (eHide) {}
+            try {
+                if (!itemSaved && textItem.parent && textItem.parent.visible !== undefined) {
+                    var parentKey = textItemKey(textItem.parent) || ("parent:" + String(fi));
+                    if (!seen[parentKey]) {
+                        seen[parentKey] = true;
+                        var wasParentVisible = textItem.parent.visible;
+                        textItem.parent.visible = false;
+                        saved.push({
+                            tf: textItem.parent,
+                            mode: "visible",
+                            wasVisible: wasParentVisible
+                        });
+                    }
+                }
+            } catch (eHideParent) {}
+        }
+        return saved;
+    }
+
+    function exportPage(page, outFile) {
+        try {
+            page.exportFile(ExportFormat.PNG_FORMAT, outFile, false);
+            return outFile.exists;
+        } catch (ePageExport) {}
+        try {
+            hadPageString = true;
+            savedPageString = app.pngExportPreferences.pageString;
+        } catch (ePageStringRead) {
+            hadPageString = false;
+        }
+        try {
+            app.pngExportPreferences.pageString = String(page.name);
+            doc.exportFile(ExportFormat.PNG_FORMAT, outFile, false);
+            return outFile.exists;
+        } catch (eDocExport) {
+            diagnostics.push({
+                accepted: false,
+                reason: "single_textless_page_plane_export_failed",
+                pageIndex: page && page.documentOffset !== undefined ? page.documentOffset : -1,
+                error: String(eDocExport)
+            });
+        } finally {
+            try {
+                if (hadPageString) app.pngExportPreferences.pageString = savedPageString;
+            } catch (ePageStringRestore) {}
+        }
+        return false;
+    }
+
+    var savedInlineItems = [];
+    var savedDocumentTextFrames = [];
+    try {
+        try { savedRes = app.pngExportPreferences.exportResolution; } catch (eRes) {}
+        try { savedTransparent = app.pngExportPreferences.transparentBackground; } catch (eTrans) {}
+        try { savedQuality = app.pngExportPreferences.pngQuality; } catch (eQuality) {}
+        try { savedSpread = app.pngExportPreferences.exportingSpread; } catch (eSpread) {}
+        try { savedDisplayPerf = doc.viewPreferences.displayPerformance; } catch (eDisplay) {}
+        try { app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220; } catch (eSetRes) {}
+        try { app.pngExportPreferences.antiAlias = true; } catch (eAntiAlias) {}
+        try { app.pngExportPreferences.transparentBackground = false; } catch (eSetTrans) {}
+        try { app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM; } catch (eSetQuality) {}
+        try { app.pngExportPreferences.exportingSpread = false; } catch (eSetSpread) {}
+        try { doc.viewPreferences.displayPerformance = ViewDisplaySettings.HIGH_QUALITY; } catch (eSetDisplay) {}
+
+        savedInlineItems = _hideItemsForExport(collectInlineItemsToHide());
+        savedDocumentTextFrames = hideCollectedTextItems(collectDocumentTextItemsToHide());
+
+        for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
+            var pageIndex = pageNumber - 1;
+            var page = null;
+            try { page = doc.pages[pageIndex]; } catch (ePage) {}
+            if (!page) continue;
+            var pageStart = nowMs();
+            var fileName = "page_textless_plane_p" + String(pageIndex + 1) + ".png";
+            var outFile = File(renderDir + "/" + fileName);
+            var ok = exportPage(page, outFile);
+            var bounds = pageLocalBounds(page);
+            diagnostics.push({
+                accepted: ok === true,
+                reason: ok ? "single_textless_page_plane_exported"
+                        : "single_textless_page_plane_missing_file",
+                pageIndex: page.documentOffset,
+                file: ok ? "rendered_frames/" + fileName : null,
+                bounds: bounds,
+                elapsedMs: nowMs() - pageStart
+            });
+            if (!ok) continue;
+            results.push({
+                id: -940000000 + pageIndex,
+                type: "page_textless_plane",
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: page.documentOffset,
+                zOrder: -900000,
+                zOrderKnown: true,
+                visualLayer: "PAGE_BACKGROUND",
+                policyLayer: "BACKGROUND",
+                visualOwner: "indesign_png",
+                textOwner: "none",
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                reason: "single_textless_plane_experiment_text_frames_hidden_page_export",
+                sourceObjectIds: [],
+                exportSourceObjectIds: [],
+                hiddenTextFrameIds: _hiddenTextFrameIdsFromSaved(savedDocumentTextFrames),
+                exportSanity: {
+                    singleTextlessPagePlane: true,
+                    fileBytes: outFile.exists ? outFile.length : 0,
+                    pageRelativeBounds: bounds,
+                    hiddenInlineItemCount: savedInlineItems.length,
+                    hiddenTextFrameCount: savedDocumentTextFrames.length
+                }
+            });
+        }
+    } finally {
+        try { restoreTextFrames(savedDocumentTextFrames); } catch (eRestoreTextFrames) {}
+        try { _restoreItemsForExport(savedInlineItems); } catch (eRestoreInline) {}
+        try { if (savedRes !== null) app.pngExportPreferences.exportResolution = savedRes; } catch (eRestoreRes) {}
+        try { if (savedTransparent !== null) app.pngExportPreferences.transparentBackground = savedTransparent; } catch (eRestoreTrans) {}
+        try { if (savedQuality !== null) app.pngExportPreferences.pngQuality = savedQuality; } catch (eRestoreQuality) {}
+        try { if (savedSpread !== null) app.pngExportPreferences.exportingSpread = savedSpread; } catch (eRestoreSpread) {}
+        try { if (savedDisplayPerf !== null) doc.viewPreferences.displayPerformance = savedDisplayPerf; } catch (eRestoreDisplay) {}
+    }
+
+    try {
+        writeJson(outputDir + "/single-textless-page-plane-export.json", {
+            schemaVersion: 1,
+            mode: "single-textless-plane",
+            elapsedMs: nowMs() - startedAt,
+            pageCount: results.length,
+            hiddenInlineItemCount: savedInlineItems.length,
+            diagnostics: diagnostics
+        });
+    } catch (eWriteSinglePlaneDiag) {}
+
+    return {
+        frames: results,
+        textlessShellDiagnostics: diagnostics,
+        childIds: {}
+    };
+}
+
 /**
  * Story-anchored inline object extraction.
  *

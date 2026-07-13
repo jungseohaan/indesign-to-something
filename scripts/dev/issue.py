@@ -227,6 +227,7 @@ def write_applescript(
     extract_config: str,
     extract_mode: str,
     reuse_existing_idml: bool,
+    graphics_mode: str,
 ) -> None:
     args = [
         str(indd_path),
@@ -246,6 +247,7 @@ def write_applescript(
         "",
         "1" if reuse_existing_idml else "0",
         str(EXTRACT_JSX),
+        graphics_mode,
     ]
     quoted_args = ", ".join(json.dumps(a, ensure_ascii=False) for a in args)
     script = f'''using terms from application "{app_name}"
@@ -643,6 +645,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     )
     parser.add_argument("--extract-mode", default="full", help="Extractor mode, e.g. full or spread_chunks.")
     parser.add_argument(
+        "--graphics-mode",
+        default="single-textless-plane",
+        choices=("policy", "single-textless-plane"),
+        help="Visual materialization mode. Defaults to single-textless-plane for script issue/full extraction.",
+    )
+    parser.add_argument(
         "--reuse-idml",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -701,6 +709,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             args.extract_config,
             args.extract_mode,
             bool(idml_cache_restore.get("hit")),
+            args.graphics_mode,
         )
     else:
         idml_cache_restore = {
@@ -713,6 +722,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     print(f"[issue] case={args.case} book={book_key} unit={unit_key} page={args.page}..{end_page}")
     print(f"[issue] extract-local-page={extract_range['extractStartPage']}..{extract_range['extractEndPage']} mode={extract_range['pageRangeMode']}")
+    print(f"[issue] extract-mode={args.extract_mode} graphics-mode={args.graphics_mode}")
     print(f"[issue] idml-cache={idml_cache_restore.get('reason')} hit={idml_cache_restore.get('hit')} dir={idml_cache_restore.get('cacheDir')}")
     print(f"[issue] output={issue_dir}")
     ensure_indesign_running(args.app, issue_dir, args.dry_run)
@@ -724,6 +734,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "book": book_key,
             "unit": unit_key,
             "sourceINDD": str(indd_path),
+            "extractMode": args.extract_mode,
+            "graphicsMode": args.graphics_mode,
             "idmlCache": idml_cache_restore,
             **extract_range,
         }

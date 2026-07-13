@@ -497,6 +497,13 @@ function classifyTextFrameCached(item) {
 
 function hideOneTextFrameContent(tf, opts) {
     opts = opts || {};
+    if (opts.forceHidden === true) {
+        try {
+            var wasVisibleForced = tf.visible;
+            tf.visible = false;
+            return { tf: tf, mode: "visible", wasVisible: wasVisibleForced };
+        } catch (eForceVisible) {}
+    }
     var preferTextPaintOnly = opts.preferTextPaintOnly === true;
     var doc = null;
     try { doc = app.activeDocument; } catch (eDoc) {}

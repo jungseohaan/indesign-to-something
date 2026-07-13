@@ -108,8 +108,20 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var pageRootTextlessPlaneInventory =
-            _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourceById);
+    var singleTextlessPlaneMode = false;
+    try { singleTextlessPlaneMode = CANONICAL_GRAPHICS_MODE === "single-textless-plane"; } catch (eGraphicsMode) {}
+    var pageRootTextlessPlaneInventory = singleTextlessPlaneMode
+            ? {
+                summary: {
+                    createdPlaneCount: 0,
+                    visualSourceCount: 0,
+                    excludedInlineSourceCount: 0,
+                    createdObjectPlanIds: [],
+                    skippedByGraphicsMode: "single-textless-plane",
+                    reason: "page_visuals_are_exported_by_canonical_single_textless_page_plane"
+                }
+            }
+            : _appendPageRootTextlessPlaneObjectPlans(objectPlans, sourceItems, sourceById);
     _recordObjectPlanTiming("appendPageRootTextlessPlanePlans", _timingStartedAt, {
         objectPlanCount: objectPlans.length
     });

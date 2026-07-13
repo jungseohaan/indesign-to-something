@@ -485,7 +485,8 @@ async fn rerun_osascript_after_indesign_restart(
             continue;
         }
         if open_stalled || no_progress_stalled {
-            let diagnostics = collect_open_stall_diagnostics(app_name, progress_path, output_dir).await;
+            let diagnostics =
+                collect_open_stall_diagnostics(app_name, progress_path, output_dir).await;
             let _ = child.kill().await;
             let _ = child.wait().await;
             let _ = tokio::process::Command::new("killall")
@@ -533,6 +534,7 @@ pub async fn run_extraction(
     perf_mode: &str,
     skip_pdf: bool,
     extract_mode: &str,
+    graphics_mode: &str,
     physical_range: bool,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
@@ -563,14 +565,19 @@ pub async fn run_extraction(
     } else {
         extract_mode
     };
+    let graphics_mode = if graphics_mode.trim().is_empty() {
+        "single-textless-plane"
+    } else {
+        graphics_mode
+    };
     // config 파일: 번들 리소스에서 찾거나 빈 문자열
     let config_path = find_bundled_config(&app);
     // 디버그 로그: config 경로를 추출 디렉토리에 기록
     let _ = std::fs::write(
         output_dir.join("_config_debug.log"),
         format!(
-            "config_path={}\nperfMode={}\nskipPdf={}\nextractMode={}\nskipValidation={}\n",
-            config_path, perf_mode, skip_pdf, extract_mode, skip_validation_flag
+            "config_path={}\nperfMode={}\nskipPdf={}\nextractMode={}\ngraphicsMode={}\nskipValidation={}\n",
+            config_path, perf_mode, skip_pdf, extract_mode, graphics_mode, skip_validation_flag
         ),
     );
     let applescript_args = vec![
@@ -591,6 +598,7 @@ pub async fn run_extraction(
         skip_validation_flag.to_string(),
         "0".to_string(),
         jsx_path.to_string(),
+        graphics_mode.to_string(),
     ];
     let applescript = build_extract_applescript(&app_name, jsx_path, &applescript_args, 3600);
 
@@ -842,7 +850,13 @@ pub async fn run_extraction(
                         emit_progress(app, phase, &display);
                     } else if matches!(
                         step,
-                        "pdf" | "idml" | "open" | "close_docs" | "spread_chunk" | "fix_links" | "pdf_fix_links"
+                        "pdf"
+                            | "idml"
+                            | "open"
+                            | "close_docs"
+                            | "spread_chunk"
+                            | "fix_links"
+                            | "pdf_fix_links"
                     ) && last_heartbeat_at.elapsed().as_secs() >= 10
                     {
                         let stale = last_progress_at.elapsed().as_secs();
@@ -1039,6 +1053,7 @@ pub async fn run_extraction_with_skip(
     perf_mode: &str,
     skip_pdf: bool,
     skip_render_pages_json: &str,
+    graphics_mode: &str,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
     // InDesign 2026 동적 SDEF: 컴파일 전에 앱이 실행 중이어야 `using terms from` 성공
@@ -1048,6 +1063,11 @@ pub async fn run_extraction_with_skip(
     let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
     let skip_validation_flag = "1";
     let config_path = find_bundled_config(app);
+    let graphics_mode = if graphics_mode.trim().is_empty() {
+        "single-textless-plane"
+    } else {
+        graphics_mode
+    };
     // arguments[9] = skipRenderPages JSON, arguments[10] = mode "full", arguments[14] = skipValidation
     let applescript_args = vec![
         indd_path.to_string(),
@@ -1067,6 +1087,7 @@ pub async fn run_extraction_with_skip(
         skip_validation_flag.to_string(),
         "0".to_string(),
         jsx_path.to_string(),
+        graphics_mode.to_string(),
     ];
     let applescript = build_extract_applescript(&app_name, jsx_path, &applescript_args, 3600);
     emit_progress(app, "exporting", "부분 재추출 중 (변경 페이지만)...");
@@ -1428,6 +1449,7 @@ pub async fn run_extraction_chunked(
     perf_mode: &str,
     skip_pdf: bool,
     chunk_size: i32,
+    graphics_mode: &str,
 ) -> Result<InddExtractResult, String> {
     // ── 청크 1: 정상 추출 (IDML + 렌더링 + resolved.json) ─────────────────
     emit_progress(
@@ -1447,6 +1469,7 @@ pub async fn run_extraction_chunked(
         perf_mode,
         skip_pdf,
         "full",
+        graphics_mode,
         true,
     )
     .await?;
@@ -1489,6 +1512,7 @@ pub async fn run_extraction_chunked(
             spread_mode,
             perf_mode,
             skip_pdf,
+            graphics_mode,
         )
         .await?;
         start = end + 1;
@@ -1550,6 +1574,7 @@ async fn run_extraction_followup_chunk(
     spread_mode: bool,
     perf_mode: &str,
     skip_pdf: bool,
+    graphics_mode: &str,
 ) -> Result<(), String> {
     let app_name = app_name_from_path(indesign_app_path);
     ensure_indesign_running(&app_name, output_dir).await;
@@ -1558,6 +1583,11 @@ async fn run_extraction_followup_chunk(
     let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
     let skip_validation_flag = "1";
     let config_path = find_bundled_config(app);
+    let graphics_mode = if graphics_mode.trim().is_empty() {
+        "single-textless-plane"
+    } else {
+        graphics_mode
+    };
     // args[9]="" (no skip pages), args[10]="full", args[11]="1" (chunkMode), args[12]="1" (physicalRange), args[14]="1" (skipValidation)
     let applescript_args = vec![
         indd_path.to_string(),
@@ -1577,6 +1607,7 @@ async fn run_extraction_followup_chunk(
         skip_validation_flag.to_string(),
         "0".to_string(),
         jsx_path.to_string(),
+        graphics_mode.to_string(),
     ];
     let applescript = build_extract_applescript(&app_name, jsx_path, &applescript_args, 3600);
     let script_file = output_dir.join(format!(

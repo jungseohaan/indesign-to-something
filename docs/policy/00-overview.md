@@ -47,6 +47,10 @@ consolidated here.
     it remains top-aligned unless Stage 1 has an explicit source-style owner
     that says otherwise. `composedLines` may be used to preserve source line
     geometry or to validate overlap, but not to rewrite alignment by heuristic.
+14. The canonical page/floating graphic path is `single-textless-plane`: one
+    page-sized textless PNG per page plus HWPX-owned editable text/table
+    structure. Per-object page/floating graphic export is legacy fallback for
+    comparison and rollback, not the default ownership route.
 
 ## 1.1 Refactoring Direction
 

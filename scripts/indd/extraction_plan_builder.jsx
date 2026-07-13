@@ -7029,8 +7029,29 @@ function _candidateListHasObjectPlanLikeExecutionFields(candidates) {
     return checked > 0;
 }
 
+function _singleTextlessPlaneEmptyDiagnostics(candidates, mode, reason) {
+    return {
+        candidates: candidates || [],
+        appendedCount: 0,
+        appended: [],
+        assignedCount: 0,
+        assigned: [],
+        componentCount: 0,
+        components: [],
+        mergedCount: 0,
+        merged: [],
+        suppressedCount: 0,
+        suppressed: [],
+        warningCount: 0,
+        warnings: [],
+        skippedByGraphicsMode: mode || null,
+        reason: reason || "single_textless_plane_owns_page_visuals"
+    };
+}
+
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
+    var singleTextlessPlaneMode = ctx && ctx.graphicsMode === "single-textless-plane";
     var candidates = [];
     var candidateSeen = {};
     var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
@@ -7044,9 +7065,25 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     var sourceClusterDiagnostics = _buildSourceClusters(sourceItems);
     var sourceClusterIndex = _createSourceClusterIndex(sourceItems, sourceClusterDiagnostics);
     _marker(ctx.outputDir, "03d04_plan_sourceClusters");
-    _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceClusterIndex, candidates, candidateSeen);
+    if (!singleTextlessPlaneMode) {
+        _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceClusterIndex, candidates, candidateSeen);
+    } else {
+        try {
+            writeJson(ctx.outputDir + "/_base_candidate_perf.json", {
+                stage: "03d05_plan_baseCandidates",
+                sourceItemCount: sourceItems ? sourceItems.length : 0,
+                candidateCountAtStart: 0,
+                candidateCountAtEnd: 0,
+                elapsedMs: 0,
+                skippedByGraphicsMode: ctx.graphicsMode,
+                reason: "single_textless_plane_exports_page_visuals_without_per_object_graphic_candidates"
+            });
+        } catch (eSinglePlaneBasePerf) {}
+    }
     _marker(ctx.outputDir, "03d05_plan_baseCandidates");
-    _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
+    if (!singleTextlessPlaneMode) {
+        _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
+    }
     _marker(ctx.outputDir, "03d05a_plan_textFrameStyleShellCandidates");
 
     var planCache = _createExtractionPlanSourceIndexCache(doc, sourceIndex);
@@ -7054,7 +7091,9 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d06_plan_inlineCandidates");
     _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d07_plan_declaredInlineShells");
-    _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
+    if (!singleTextlessPlaneMode) {
+        _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
+    }
     _marker(ctx.outputDir, "03d08_plan_textOwningShellGroups");
     var inlineFlowVisualRootDiagnostics =
             _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidateSeen, {
@@ -7068,7 +7107,9 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     }
     _marker(ctx.outputDir, "03d08i_plan_inlineFlowVisualRoots");
 
-    _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, candidateSeen, planCache);
+    if (!singleTextlessPlaneMode) {
+        _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, candidateSeen, planCache);
+    }
     _marker(ctx.outputDir, "03d09_plan_masterComposite");
     candidates = _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems);
     try {
@@ -7082,56 +7123,84 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         } catch (eInlineFlowRootAfterNormalizeWrite) {}
     }
     _marker(ctx.outputDir, "03d10_plan_normalizeSlots");
-    _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
+    if (!singleTextlessPlaneMode) {
+        _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
+    }
     _marker(ctx.outputDir, "03d10a_plan_restoreTextFrameStyleShellCandidates");
     candidates = _includeOwnedInlineVisualsInTextlessShellCandidates(candidates, allItems, planCache, sourceItems);
     _marker(ctx.outputDir, "03d11_plan_includeInlineVisuals");
     candidates = _absorbInlineDecorationDescendantsIntoTextShellCandidates(candidates, sourceItems);
     _marker(ctx.outputDir, "03d11a_plan_absorbInlineTextShellDecorationDescendants");
-    _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
+    if (!singleTextlessPlaneMode) {
+        _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
+    }
     _marker(ctx.outputDir, "03d12_plan_multiTextParentGroups");
-    var tableCarrierTextlessShellDiagnostics =
-            _appendTableCarrierTextlessShellCandidates(sourceItems, candidates, candidateSeen);
+    var tableCarrierTextlessShellDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "table_carrier_visual_shell_covered_by_page_plane")
+            : _appendTableCarrierTextlessShellCandidates(sourceItems, candidates, candidateSeen);
     _marker(ctx.outputDir, "03d12a0_plan_tableCarrierTextlessShells");
-    var tableCarrierSiblingDecorationDiagnostics =
-            _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates, candidateSeen);
+    var tableCarrierSiblingDecorationDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "table_carrier_sibling_decoration_covered_by_page_plane")
+            : _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates, candidateSeen);
     _marker(ctx.outputDir, "03d12a1_plan_tableCarrierSiblingDecorations");
-    var pageTextlessGraphicGroupDiagnostics =
-            _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
+    var pageTextlessGraphicGroupDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "page_textless_group_candidates_replaced_by_single_page_plane_export")
+            : _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
     _marker(ctx.outputDir, "03d12b_plan_pageTextlessGraphicGroups");
-    var pageTextlessGraphicGroupMergeDiagnostics =
-            _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceItems);
+    var pageTextlessGraphicGroupMergeDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "no_page_textless_group_candidates_to_merge")
+            : _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceItems);
     candidates = pageTextlessGraphicGroupMergeDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1_plan_mergeOverlappingPageTextlessGraphicGroups");
-    var inlineCarrierPageVisualDiagnostics =
-            _assignInlineCarrierPageVisuals(candidates, sourceItems);
+    var inlineCarrierPageVisualDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "floating_page_visuals_covered_by_page_plane")
+            : _assignInlineCarrierPageVisuals(candidates, sourceItems);
     candidates = inlineCarrierPageVisualDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1a_plan_assignInlineCarrierPageVisuals");
-    var protectedDecorationPageGroupExclusionDiagnostics =
-            _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates);
+    var protectedDecorationPageGroupExclusionDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "no_page_textless_group_candidates_to_exclude")
+            : _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates);
     candidates = protectedDecorationPageGroupExclusionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1b_plan_excludeProtectedDecorationFromPageGroups");
-    var crossPageClipParentDecorationSuppressionDiagnostics =
-            _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItems);
+    var crossPageClipParentDecorationSuppressionDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "cross_page_clip_parent_decorations_covered_by_page_plane")
+            : _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItems);
     candidates = crossPageClipParentDecorationSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b2_plan_suppressCrossPageClipParentDecorations");
-    var pageTextlessGraphicGroupSuppressionDiagnostics =
-            _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sourceItems);
+    var pageTextlessGraphicGroupSuppressionDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "no_page_textless_group_children_to_suppress")
+            : _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sourceItems);
     candidates = pageTextlessGraphicGroupSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12c_plan_suppressPageTextlessGraphicGroupChildren");
-    var preObjectPlanTextlessShellSuppressionDiagnostics =
-            _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourceItems);
+    var preObjectPlanTextlessShellSuppressionDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "page_level_textless_shell_suppression_not_needed")
+            : _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourceItems);
     candidates = preObjectPlanTextlessShellSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12a_plan_suppressTextlessGroupChildrenBeforeObjectPlans");
-    var unclaimedVisibleVectorOwnershipDiagnostics =
-            _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
+    var unclaimedVisibleVectorOwnershipDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "unclaimed_floating_vectors_covered_by_page_plane")
+            : _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
     _marker(ctx.outputDir, "03d12d_plan_unclaimedVisibleVectorOwnership");
-    var protectedDecorationPageGroupExclusionAfterUnclaimedDiagnostics =
-            _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates);
+    var protectedDecorationPageGroupExclusionAfterUnclaimedDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "no_unclaimed_page_textless_group_candidates_to_exclude")
+            : _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates);
     candidates = protectedDecorationPageGroupExclusionAfterUnclaimedDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12d1_plan_excludeProtectedDecorationFromPageGroupsAfterUnclaimed");
-    var pageTextlessGraphicGroupSuppressionAfterUnclaimedDiagnostics =
-            _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sourceItems);
+    var pageTextlessGraphicGroupSuppressionAfterUnclaimedDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+                    "no_unclaimed_page_textless_group_children_to_suppress")
+            : _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sourceItems);
     candidates = pageTextlessGraphicGroupSuppressionAfterUnclaimedDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12d2_plan_suppressPageTextlessGraphicGroupChildrenAfterUnclaimed");
     var sourceClusterQueryDiagnostics = _buildSourceClusterQueryDiagnostics(sourceClusterIndex, candidates);
@@ -7140,7 +7209,9 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
     candidates = _normalizePageCoordinateCandidateBounds(candidates, sourceIndex);
     _marker(ctx.outputDir, "03d13b_plan_normalizePageCoordinateBounds");
-    candidates = _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex);
+    if (!singleTextlessPlaneMode) {
+        candidates = _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex);
+    }
     _marker(ctx.outputDir, "03d13b1_plan_expandCrossPageFloatingVisuals");
     var preObjectPlanSourceSlotCanonicalizationDiagnostics = null;
     if (_candidateListHasObjectPlanLikeExecutionFields(candidates)) {
@@ -7290,16 +7361,20 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     }
     executionCandidates = _backfillVisibleCandidateVisualSources(executionCandidates, sourceItems);
     _marker(ctx.outputDir, "03d16g0b_plan_backfillExecutionVisualSources");
-    var unclaimedVisibleVectorFallbackDiagnostics =
-            _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems, sourceIndex);
+    var unclaimedVisibleVectorFallbackDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(executionCandidates, ctx.graphicsMode,
+                    "unclaimed_visible_vector_execution_fallback_replaced_by_page_plane")
+            : _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems, sourceIndex);
     _marker(ctx.outputDir, "03d16g1_plan_warnUnclaimedVisibleVectors");
     var sourceCoverageOptions = {
         fullDiagnostics: ctx.writePlannerDiagnostics === true
     };
     var sourceCoverageDiagnostics = _buildSourceCoverageDiagnostics(
             sourceItems, executionCandidates, objectPlanDiagnostics, sourceCoverageOptions);
-    var unresolvedVisibleVectorCoverageDiagnostics =
-            _reportUnresolvedVisibleVectorCoverage(
+    var unresolvedVisibleVectorCoverageDiagnostics = singleTextlessPlaneMode
+            ? _singleTextlessPlaneEmptyDiagnostics(executionCandidates, ctx.graphicsMode,
+                    "image_validation_disabled_for_single_textless_plane_experiment")
+            : _reportUnresolvedVisibleVectorCoverage(
                     executionCandidates, sourceCoverageDiagnostics, sourceItems, objectPlanDiagnostics);
     _marker(ctx.outputDir, "03d16g6_plan_warnUnresolvedVisibleVectors");
     _marker(ctx.outputDir, "03d16h0_plan_sourceCoverageBuild");
