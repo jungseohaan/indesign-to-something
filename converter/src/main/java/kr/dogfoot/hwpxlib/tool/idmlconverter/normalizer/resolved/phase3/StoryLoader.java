@@ -933,6 +933,7 @@ public class StoryLoader {
                 if (targetIndex < 0 || targetIndex >= paragraphs.size()) continue;
 
                 ASTParagraph target = paragraphs.get(targetIndex);
+                if (paragraphsAlreadyContainInlineObject(paragraphs, anchoredId)) continue;
                 if (paragraphAlreadyContainsInlineObject(target, anchoredId)) continue;
                 String previousText = nearestResolvedText(runs, i - 1, -1);
                 String nextText = nearestResolvedText(runs, i + 1, 1);
@@ -1042,6 +1043,14 @@ public class StoryLoader {
             return plan;
         }
         return null;
+    }
+
+    private static boolean paragraphsAlreadyContainInlineObject(List<ASTParagraph> paragraphs, int domId) {
+        if (paragraphs == null || paragraphs.isEmpty() || domId <= 0) return false;
+        for (ASTParagraph para : paragraphs) {
+            if (paragraphAlreadyContainsInlineObject(para, domId)) return true;
+        }
+        return false;
     }
 
     private static boolean paragraphAlreadyContainsInlineObject(ASTParagraph para, int domId) {

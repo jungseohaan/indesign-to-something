@@ -21,6 +21,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryFlowAssembler;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.GroupedFlowStackPolicy;
@@ -78,6 +79,7 @@ public final class TableBuilder {
         int pngMissingFallback;         // 인라인 있지만 PNG 없어서 ASTTable로 떨어진 케이스 (배지 중복 위험)
         int detachedInlinePageLevel;    // table-only inline TF → page-level table
         int tableOnlyPlansPlaced;       // ObjectPlan(text_frame:table_only) → ASTTable
+        int tableOnlyPlansSkippedAnchored;
         int duplicateInlineTablesRemoved;
         int total;
         int textFramesScanned;
@@ -352,6 +354,10 @@ public final class TableBuilder {
             if (tf == null || tf.storyId() == null) continue;
             IDMLStory idmlStory = ctx.loadIDMLStory.apply(tf.storyId());
             if (!TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, idmlStory)) continue;
+            if (isConsumedByAnchoredTablePlan(ctx, plan, tf, idmlStory)) {
+                report.tableOnlyPlansSkippedAnchored++;
+                continue;
+            }
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
@@ -409,6 +415,30 @@ public final class TableBuilder {
                 report.total++;
             }
         }
+    }
+
+    private static boolean isConsumedByAnchoredTablePlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            ResolvedTextFrame tf,
+            IDMLStory idmlStory) {
+        if (ctx == null) return false;
+        int tfDomId = tf != null ? parseId(tf.id()) : -1;
+        if (tfDomId < 0 && plan != null) tfDomId = plan.domId;
+        if (tfDomId >= 0) {
+            for (AnchoredTablePlan anchoredPlan : ctx.anchoredTablePlans()) {
+                if (anchoredPlan != null && anchoredPlan.anchoredTextFrameDomId == tfDomId) {
+                    return true;
+                }
+            }
+        }
+        if (idmlStory == null || idmlStory.tables() == null) return false;
+        for (IDMLTable table : idmlStory.tables()) {
+            if (table != null && ctx.isAnchoredNestedTableSource(table.selfId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isNestedTableInSameStory(IDMLStory story, IDMLTable table) {
@@ -552,6 +582,7 @@ public final class TableBuilder {
         ConversionTiming.metric(prefix + "storyTablesAlreadyProcessed", report.storyTablesAlreadyProcessed);
         ConversionTiming.metric(prefix + "tablesPlaced", report.total);
         ConversionTiming.metric(prefix + "tableOnlyPlansPlaced", report.tableOnlyPlansPlaced);
+        ConversionTiming.metric(prefix + "tableOnlyPlansSkippedAnchored", report.tableOnlyPlansSkippedAnchored);
         ConversionTiming.metric(prefix + "tableOnlyPlansMs", millis(report.tableOnlyPlansNanos));
         ConversionTiming.metric(prefix + "storyLoadMs", millis(report.storyLoadNanos));
         ConversionTiming.metric(prefix + "storyTableSetupMs", millis(report.storyTableSetupNanos));
@@ -571,6 +602,16 @@ public final class TableBuilder {
             long x,
             long y,
             int zOrder) {
+        return buildPreparedAstTable(ctx, idmlTable, x, y, zOrder, false);
+    }
+
+    private static ASTTable buildPreparedAstTable(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            long x,
+            long y,
+            int zOrder,
+            boolean preserveNestedTableStyleSlot) {
         final ResolvedBuildContext cellCtx = ctx;
         ASTTable astTable = ASTTableConverter.convertTableSimple(
                 idmlTable, x, y, zOrder,
@@ -582,8 +623,34 @@ public final class TableBuilder {
         inlineNestedTextFrameParagraphsInCells(ctx, astTable);
 
         ASTTable result = astTable;
-        stripTableCellDecoration(result);
+        if (shouldPreserveTableStyleSlot(ctx, idmlTable, preserveNestedTableStyleSlot)) {
+            ResolvedTextFrame owner = anchoredNestedTableTextFrame(ctx, idmlTable);
+            absorbTextFrameOutlineIntoTable(ctx, owner, result);
+            suppressRenderedVisualsOwnedByAnchoredNestedTable(ctx, owner, idmlTable, result);
+        } else {
+            stripTableCellDecoration(result);
+        }
         return result;
+    }
+
+    private static boolean shouldPreserveTableStyleSlot(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            boolean preserveNestedTableStyleSlot) {
+        if (preserveNestedTableStyleSlot) return true;
+        if (idmlTable == null) return false;
+        return ctx != null
+                && idmlTable.selfId() != null
+                && ctx.isAnchoredNestedTableSource(idmlTable.selfId());
+    }
+
+    private static ResolvedTextFrame anchoredNestedTableTextFrame(ResolvedBuildContext ctx, IDMLTable idmlTable) {
+        if (ctx == null || ctx.resolvedData == null || idmlTable == null || idmlTable.selfId() == null) return null;
+        for (AnchoredTablePlan plan : ctx.anchoredTablePlans()) {
+            if (plan == null || !idmlTable.selfId().equals(plan.nestedTableId)) continue;
+            return ctx.resolvedData.getTextFrame(String.valueOf(plan.anchoredTextFrameDomId));
+        }
+        return null;
     }
 
     private static void stripTableCellDecoration(ASTTable table) {
@@ -875,7 +942,44 @@ public final class TableBuilder {
                 || plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
     }
 
+    private static void suppressRenderedVisualsOwnedByAnchoredNestedTable(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            IDMLTable idmlTable,
+            ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || idmlTable == null) return;
+        int tfId = parseId(tf.id());
+        int tableId = parseFlexibleId(idmlTable.selfId());
+        if (tfId < 0 && tableId < 0) return;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!planOwnsAnchoredNestedTableShell(plan, rg, tfId, tableId)) continue;
+            ctx.markRenderedVisualHandled(rg.id());
+            if (ctx.debugAst && table != null) {
+                table.debugOrNew().note("anchored nested table shell suppressed: rendered " + rg.id());
+            }
+        }
+    }
+
+    private static boolean planOwnsAnchoredNestedTableShell(
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int tfId,
+            int tableId) {
+        return containsSourceId(plan.ownedTextFrameIds, tfId)
+                || containsSourceId(plan.sourceObjectIds, tfId)
+                || containsSourceId(plan.sourceObjectIds, tableId)
+                || containsSourceId(plan.visualSourceObjectIds, tfId)
+                || containsSourceId(plan.styleSourceObjectIds, tfId)
+                || containsSourceId(plan.styleSourceObjectIds, tableId)
+                || containsSourceId(rg != null ? rg.sourceObjectIds() : null, tfId)
+                || containsSourceId(rg != null ? rg.sourceObjectIds() : null, tableId);
+    }
+
     private static boolean containsSourceId(int[] sourceIds, int id) {
+        if (id < 0) return false;
         if (sourceIds == null) return false;
         for (int sourceId : sourceIds) {
             if (sourceId == id) return true;
@@ -958,16 +1062,16 @@ public final class TableBuilder {
                 int physicalRowEnd = physicalRowIndex + Math.max(1, cell.rowSpan()) - 1;
                 int physicalColEnd = physicalColIndex + Math.max(1, cell.columnSpan()) - 1;
                 if (rowStart <= 0 || physicalRowIndex <= 0) {
-                    cell.topBorder(preferExistingBorder(cell.topBorder(), border));
+                    cell.topBorder(preferOuterBorder(cell.topBorder(), border));
                 }
                 if (rowEnd >= lastRow || physicalRowEnd >= physicalRowCount - 1) {
-                    cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
+                    cell.bottomBorder(preferOuterBorder(cell.bottomBorder(), border));
                 }
                 if (colStart <= 0 || physicalColIndex <= 0) {
-                    cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
+                    cell.leftBorder(preferOuterBorder(cell.leftBorder(), border));
                 }
                 if (colEnd >= lastCol || physicalColEnd >= physicalColCount - 1) {
-                    cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
+                    cell.rightBorder(preferOuterBorder(cell.rightBorder(), border));
                 }
                 physicalColIndex++;
             }
@@ -975,11 +1079,13 @@ public final class TableBuilder {
         }
     }
 
-    private static ASTTableCell.CellBorder preferExistingBorder(
+    private static ASTTableCell.CellBorder preferOuterBorder(
             ASTTableCell.CellBorder existing,
-            ASTTableCell.CellBorder fallback) {
-        if (isVisibleCellBorder(existing)) return existing;
-        return cloneBorder(fallback);
+            ASTTableCell.CellBorder outer) {
+        if (!isVisibleCellBorder(outer)) return existing;
+        if (!isVisibleCellBorder(existing)) return cloneBorder(outer);
+        if (outer.weight() >= existing.weight()) return cloneBorder(outer);
+        return existing;
     }
 
     private static boolean isVisibleCellBorder(ASTTableCell.CellBorder border) {
@@ -1114,14 +1220,11 @@ public final class TableBuilder {
                             ctx.loadIDMLStory.apply(storyRef);
                     if (nestedStory == null) continue;
                     if (!nestedStory.hasTables()) continue;
+                    ResolvedTextFrame nestedOwner = nestedTextFrameOwnerForStory(ctx, storyRef);
                     for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable nestedTable : nestedStory.tables()) {
-                        final ResolvedBuildContext nestedCtx = ctx;
-                        ASTTable nestedAst = ASTTableConverter.convertTableSimple(
-                                nestedTable, 0, 0, 0, null, null, null,
-                                ctx.resolvedData, ctx.styleResolver,
-                                nestedCtx == null ? null : ((table, nestedCell) -> StoryFlowAssembler.buildCellFlow(nestedCtx, table, nestedCell)));
+                        ASTTable nestedAst = buildPreparedAstTable(ctx, nestedTable, 0, 0, 0, true);
                         if (nestedAst == null) continue;
-                        restoreNestedTextFrameTables(ctx, nestedAst, nestedTable);
+                        absorbTextFrameOutlineIntoTable(ctx, nestedOwner, nestedAst);
                         ASTParagraph paragraph = new ASTParagraph();
                         paragraph.inlineTable(nestedAst);
                         astCell.addParagraph(paragraph);
@@ -1129,6 +1232,22 @@ public final class TableBuilder {
                 }
             }
         }
+    }
+
+    private static ResolvedTextFrame nestedTextFrameOwnerForStory(
+            ResolvedBuildContext ctx,
+            String storyRef) {
+        if (ctx == null || ctx.resolvedData == null || storyRef == null) return null;
+        String decimalStoryId = toDecimalStoryId(storyRef);
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(decimalStoryId);
+        if (frames == null || frames.isEmpty()) {
+            frames = ctx.resolvedData.getTextFramesForStory(storyRef);
+        }
+        if (frames == null || frames.isEmpty()) return null;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf != null && tf.isInline()) return tf;
+        }
+        return frames.get(0);
     }
 
     private static boolean isStoryOwnedByPlacedTextFrame(ResolvedBuildContext ctx, String storyRef) {
@@ -1659,6 +1778,10 @@ public final class TableBuilder {
         if (r.tableOnlyPlansPlaced > 0) {
             System.err.println("  · " + r.tableOnlyPlansPlaced
                     + " table-only ownership plans placed as ASTTable");
+        }
+        if (r.tableOnlyPlansSkippedAnchored > 0) {
+            System.err.println("  · " + r.tableOnlyPlansSkippedAnchored
+                    + " table-only ownership plans skipped because anchored table plans own them");
         }
         if (r.duplicateInlineTablesRemoved > 0) {
             System.err.println("  · " + r.duplicateInlineTablesRemoved
