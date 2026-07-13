@@ -216,12 +216,29 @@ public final class TextStyleApplicator {
             target.strikeThrough(true);
         }
         String position = resolvedRun.position();
+        boolean positionKnown = false;
         if (opts.applyPosition && position != null) {
             String p = position.toLowerCase(Locale.ROOT);
-            if (p.contains("superscript")) target.superscript(true);
-            if (p.contains("subscript")) target.subscript(true);
+            // InDesign DOM 이 실제 조판 상태를 알려준 것이므로 이 값이 권위다.
+            // NORMAL 도 "첨자 아님"이라는 명시적 정보다.
+            if (p.contains("superscript")) {
+                target.superscript(true);
+                positionKnown = true;
+            } else if (p.contains("subscript")) {
+                target.subscript(true);
+                positionKnown = true;
+            } else if (p.contains("normal")) {
+                positionKnown = true;
+            }
         }
-        if (opts.applyPosition && resolvedRun.charStyle() != null) {
+        // charStyle 이름 추론은 position 정보가 없을 때만 쓰는 폴백이다.
+        //
+        // position 이 NORMAL 인데도 스타일 이름으로 첨자를 강제하면, 같은 문자
+        // 스타일을 공유하는 이웃 런까지 첨자가 되어 버린다.
+        // 실제 회귀: 화학식 "2Mg + O₂ → 2MgO" 에서 계수 2(position=NORMAL)가
+        // 아래첨자 2(O₂)와 같은 "00_수식(첨자-하부자)" 스타일에 매칭되면서
+        // 계수까지 아래첨자로 작아졌다.
+        if (opts.applyPosition && !positionKnown && resolvedRun.charStyle() != null) {
             String style = normalizeStyleRef(resolvedRun.charStyle());
             if (style.contains("superscript") || style.contains("상부자") || style.contains("위첨자")) {
                 target.superscript(true);

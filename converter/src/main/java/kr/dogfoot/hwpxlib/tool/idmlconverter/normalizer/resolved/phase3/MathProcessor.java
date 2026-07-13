@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHGrepFractionConverter;
@@ -41,6 +42,32 @@ class MathProcessor {
     static void convertMathRunsInParagraph(ResolvedBuildContext ctx, ASTParagraph para) {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
+
+        // 화학 반응식은 HWP 수식으로 만들지 않는다.
+        //
+        // 한글 수식 편집기가 BT 계열 폰트 글리프를 렌더링하지 못해 깨진 글자("갤")가
+        // 나온다(과학 교과서 p20). 화학식은 분수/루트 같은 구조가 없고 "원소기호 +
+        // 아래첨자 + 연산자/화살표" 뿐이라 일반 텍스트 + 아래첨자로 충분하다.
+        //
+        // 이 메서드가 근본 차단 지점이다. 화학식은 여러 경로(일반 문단 StoryLoader,
+        // 표 셀 ASTTableConverter → ASTStoryConverter, resolved-only 후처리)로
+        // 만들어지는데, 모두 완성된 AST 문단을 들고 여기를 지나간다. 상류에서 IDML
+        // 런을 아무리 텍스트로 바꿔놔도 여기서 AST 런을 다시 스캔해
+        // (collectFormulaEquationCluster / collapseMixedFormulaEquationClusters)
+        // ASTEquation("CHEM_FORMULA")으로 되돌려버리기 때문에, 차단은 여기서 해야 한다.
+        //
+        // 차단만으로는 부족하다. 상류 경로에 따라 화살표 글리프(@C/?C)가 치환되지
+        // 않았거나 아래첨자가 유실된 채 도착하기도 하므로, 여기서 함께 정리한다.
+        // 화살표 글리프(@C/?C)는 화학식 여부와 무관하게 항상 실제 화살표로 바꾼다.
+        // 반응식을 표로 조판하면 화살표만 홀로 든 셀/문단이 생기는데, 그 문단에는
+        // 원소기호가 없어 화학식 판정을 통과하지 못한다. 그대로 두면 화면에 "@C" 가
+        // 그대로 노출된다(실측: ParagraphStyle=00_컷사식(중앙), 내용이 "@C" 뿐인 문단).
+        replaceArrowGlyphsInTextRuns(items);
+
+        if (isChemicalFormulaAstParagraph(items)) {
+            normalizeChemicalFormulaRuns(items);
+            return;
+        }
 
         // IDML 경로에서 이미 ASTEquation으로 변환된 단락은 건너뜀 (중복 변환 방지)
         boolean hasEquation = false;
@@ -101,6 +128,22 @@ class MathProcessor {
                 flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
                 mathGroup.clear();
                 mathType = null;
+                newItems.add(item);
+                continue;
+            }
+
+            // "BT수식H" 계열은 이름만 수식이고, 실제로는 본문 속 영문/숫자/기호를
+            // 조판하는 폰트다(GREP 스타일 "00_영문", "00_숫자"가 적용). 실측:
+            //   BT수식H-분수N   (356회)  "1-1", "1.", "2.", "H", "O", "2"
+            //   BT수식H-편한글씨 (48회)   ":"  (비율 표기)
+            // 수식 구조(분수/루트/시그마)가 전혀 없다.
+            //
+            // 이런 런을 무조건 수식 그룹에 넣으면 한글 문장 속 원소기호나 번호까지
+            // HWP 수식(이탤릭)이 된다 — "수소 원자(H)" 의 H, "1." 같은 항목 번호.
+            // → 수식 구조 문자가 없는 평범한 텍스트면 수식 그룹에 넣지 않는다.
+            if (currentType != null && mathGroup.isEmpty()
+                    && BTFontGlyphMap.isBTBodyTextFont(ff)
+                    && !looksLikeMathContent(tr.text())) {
                 newItems.add(item);
                 continue;
             }
@@ -866,6 +909,71 @@ class MathProcessor {
         }
     }
 
+    /**
+     * 이 AST 문단은 HWP 수식이 아니라 일반 텍스트로 내보내야 하는가?
+     *
+     * <p><b>원리</b> — HWP 수식이 <i>필요한</i> 것은 2차원 구조뿐이다:
+     * 분수, 루트, 시그마, 적분, 지수(위첨자) 같은 것들. 이런 구조가 없다면
+     * 원소기호·숫자·아래첨자·연산자·화살표는 전부 일반 텍스트 런으로 표현된다.
+     *
+     * <p>화학식(H₂O, NH₃, 2Mg + O₂ → 2MgO)이 정확히 그런 경우다. 이걸 수식으로
+     * 만들면 한글 수식 편집기가 BT 계열 폰트 글리프를 렌더링하지 못해 깨진
+     * 글자("갤")가 나온다(과학 교과서 p20/p46에서 확인).
+     *
+     * <p>그래서 묻는 것은 "화학식인가?"가 아니라 <b>"수학 구조가 있는가?"</b>다.
+     * 원소기호가 있고 수학 구조가 없으면 텍스트로 내보낸다. 화살표나 아래첨자의
+     * 유무는 조건이 아니다 — H₂O 처럼 화살표 없는 화학식도, 아래첨자가 AST 까지
+     * 실려오지 못한 화학식도 똑같이 텍스트여야 하기 때문이다.
+     *
+     * <p>수학 수식을 텍스트로 오판하면 수학 교과서가 깨지므로, 수학 구조 문자가
+     * 하나라도 보이면 수식 경로를 유지한다(보수적).
+     */
+    private static boolean isChemicalFormulaAstParagraph(List<ASTInlineItem> items) {
+        if (items == null || items.isEmpty()) return false;
+
+        StringBuilder joined = new StringBuilder();
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTTextRun)) continue;
+            String t = ((ASTTextRun) item).text();
+            if (t != null) joined.append(t);
+        }
+        String text = joined.toString();
+
+        // 원소기호가 없으면 화학식이 아니다.
+        if (!containsKnownChemicalElementText(text)) return false;
+        // 수학 구조가 있으면 HWP 수식이 필요하다 → 수식 경로 유지.
+        return !containsMathStructureText(text);
+    }
+
+    private static boolean containsKnownChemicalElementText(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            if (isLikelyChemicalElementAt(text, i)) return true;
+        }
+        return false;
+    }
+
+    /** 수학 구조 문자가 있으면 화학식이 아니라 수학 수식이다. */
+    private static boolean containsMathStructureText(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '=' || c == '<' || c == '>' || c == '^' || c == '_'
+                    || c == '√'   // √
+                    || c == '∑'   // ∑
+                    || c == '∫'   // ∫
+                    || c == 'π'   // π
+                    || c == '∞'   // ∞
+                    || c == '≤' || c == '≥'   // ≤ ≥
+                    || c == '×' || c == '÷'   // × ÷
+                    || c == '/' || c == '\\'
+                    || c == '{' || c == '}' || c == '[' || c == ']') {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isChemicalFormulaTextRun(
             List<ASTInlineItem> items,
             int index,
@@ -944,6 +1052,163 @@ class MathProcessor {
         if (buf.length() > 0) {
             out.add(copyTextRun(source, buf.toString(), bufSubscript));
         }
+    }
+
+    /**
+     * 화학식 문단의 AST 런을 정리한다 — 화살표 치환 + 아래첨자 복원.
+     *
+     * <p>상류 경로에 따라 화학식이 온전하지 않은 상태로 도착한다:
+     * <ul>
+     *   <li>화살표 글리프(@C / ?C)가 치환되지 않은 채 남아 있다 (resolved-only 경로)</li>
+     *   <li>아래첨자가 유실되어 O₂ 의 2 가 정상 크기로 온다</li>
+     * </ul>
+     * 여기서 문단 텍스트를 다시 조립해 바로잡는다. 아래첨자 판정 규칙은 단순하다:
+     * <b>원소기호(영문자) 바로 뒤의 숫자만 아래첨자</b>. 앞에 오는 숫자는 계수다.
+     * <pre>
+     *   2 Mg + O 2 → 2 MgO
+     *   ↑계수      ↑아래첨자  ↑계수
+     * </pre>
+     */
+    /**
+     * AST 텍스트 런의 화살표 글리프 코드(@C / ?C)를 실제 화살표(→)로 치환한다.
+     *
+     * <p>화학식 여부와 무관하게 적용한다. 반응식을 표로 조판하면 화살표만 홀로 든
+     * 문단이 생기는데(실측: 내용이 "@C" 뿐인 문단), 원소기호가 없어 화학식 판정을
+     * 통과하지 못하고 "@C" 가 그대로 화면에 노출됐다.
+     *
+     * <p>일반 영문 텍스트에 우연히 "@C" 가 있을 수 있으므로, 수식 폰트가 적용된
+     * 런에서만 치환한다. 치환 후에는 폰트를 벗겨 본문 폰트로 렌더되게 한다
+     * (수식 폰트를 그대로 두면 한글이 글리프를 렌더링하지 못한다).
+     */
+    private static void replaceArrowGlyphsInTextRuns(List<ASTInlineItem> items) {
+        if (items == null) return;
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun tr = (ASTTextRun) item;
+            String text = tr.text();
+            if (text == null || text.isEmpty()) continue;
+            if (text.indexOf("@C") < 0 && text.indexOf("?C") < 0
+                    && text.indexOf("@c") < 0 && text.indexOf("?c") < 0) {
+                continue;
+            }
+            String ff = tr.fontFamily();
+            boolean mathFont = ff != null
+                    && (BTFontGlyphMap.isBTFontFamily(ff)
+                        || BTFontGlyphMap.isBTArrowFont(ff)
+                        || EHFontGlyphMap.isEHFontFamily(ff)
+                        || NPFontGlyphMap.isNPFont(ff));
+            if (!mathFont && !tr.grepMathFont()) continue;
+
+            tr.text(text.replace("@C", "\u2192").replace("@c", "\u2192")
+                        .replace("?C", "\u2192").replace("?c", "\u2192"));
+            tr.fontFamily(null);
+            tr.fontStyle(null);
+            tr.grepMathFont(false);
+            tr.subscript(false);
+            tr.superscript(false);
+        }
+    }
+
+    static void normalizeChemicalFormulaRuns(List<ASTInlineItem> items) {
+        if (items == null || items.isEmpty()) return;
+
+        List<ASTInlineItem> rebuilt = new ArrayList<>();
+        char prev = 0;
+
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTTextRun)) {
+                rebuilt.add(item);
+                continue;
+            }
+            ASTTextRun src = (ASTTextRun) item;
+            String text = src.text();
+            if (text == null || text.isEmpty()) {
+                rebuilt.add(item);
+                continue;
+            }
+
+            // 화살표 글리프 코드를 실제 화살표로 치환.
+            // 문서마다 코드가 다르다(관측: "@C", "?C", 접두문자 없는 "C").
+            text = text.replace("@C", "→").replace("@c", "→")
+                       .replace("?C", "→").replace("?c", "→");
+
+            // 아래첨자 경계로 쪼개면서 런을 다시 만든다.
+            StringBuilder buf = new StringBuilder();
+            boolean bufSubscript = false;
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                boolean subscriptDigit = Character.isDigit(c) && isAsciiLetter(prev);
+                if (buf.length() > 0 && bufSubscript != subscriptDigit) {
+                    rebuilt.add(chemicalRun(src, buf.toString(), bufSubscript));
+                    buf.setLength(0);
+                }
+                buf.append(c);
+                bufSubscript = subscriptDigit;
+                if (!isFormulaSpaceChar(c)) prev = c;
+            }
+            if (buf.length() > 0) {
+                rebuilt.add(chemicalRun(src, buf.toString(), bufSubscript));
+            }
+        }
+
+        items.clear();
+        items.addAll(rebuilt);
+    }
+
+    /**
+     * 화학식 런 생성 — 아래첨자는 "원소기호 뒤 숫자" 규칙이 <b>권위</b>다.
+     *
+     * <p>copyTextRun 은 {@code subscript || source.subscript()} 로 원본 값을 OR 하므로,
+     * 원본이 잘못 아래첨자로 표시된 계수(2MgO 의 2)를 되살려버린다. 여기서는 규칙이
+     * 정한 값으로 덮어쓴다.
+     */
+    private static ASTTextRun chemicalRun(ASTTextRun source, String text, boolean subscript) {
+        ASTTextRun run = copyTextRun(source, text, subscript);
+        run.subscript(subscript);
+        run.superscript(false);
+        // 수식 폰트를 그대로 두면 한글에서 글리프가 깨진다. 본문 폰트 매핑에 맡긴다.
+        run.fontFamily(null);
+        run.grepMathFont(false);
+        return run;
+    }
+
+    /**
+     * 이 텍스트가 수식처럼 보이는가? (수식 구조 문자를 담고 있는가)
+     *
+     * <p>"BT수식H" 계열 폰트 런이 수식 그룹에 들어갈지 판단하는 데 쓴다. 그 폰트는
+     * 본문 영문/숫자 조판용이라, 내용을 봐야 수식인지 알 수 있다:
+     * <pre>
+     *   "H", "O", "1.", "2", ":"   → 평범한 텍스트 (수식 아님)
+     *   "x+1", "a^2", "n_1"        → 수식
+     * </pre>
+     */
+    private static boolean looksLikeMathContent(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '+' || c == '=' || c == '<' || c == '>' || c == '^' || c == '_'
+                    || c == '√'   // √
+                    || c == '∑'   // ∑
+                    || c == '∫'   // ∫
+                    || c == 'π'   // π
+                    || c == '∞'   // ∞
+                    || c == '≤' || c == '≥'   // ≤ ≥
+                    || c == '±'                     // ±
+                    || c == '×' || c == '÷'   // × ÷
+                    || c == '²' || c == '³') { // ² ³
+                return true;
+            }
+        }
+        return BTFontEquationConverter.containsGreekKeyword(text);
+    }
+
+    /** 화학식 조판에 쓰이는 공백류(일반/얇은/헤어 스페이스 등). */
+    private static boolean isFormulaSpaceChar(char c) {
+        return Character.isWhitespace(c)
+                || c == '\u2005'   // four-per-em space
+                || c == '\u2007'   // figure space
+                || c == '\u2009'   // thin space
+                || c == '\u200A';  // hair space
     }
 
     private static ASTTextRun copyTextRun(ASTTextRun source, String text, boolean subscript) {

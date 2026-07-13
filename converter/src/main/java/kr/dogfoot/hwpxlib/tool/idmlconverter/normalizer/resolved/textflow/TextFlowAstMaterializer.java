@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
@@ -145,7 +146,29 @@ public final class TextFlowAstMaterializer {
             } else {
                 runs = ResolvedTextFlowAstConverter.convertSyntheticText(text, null, target);
             }
+
+            // 화살표 글리프(@C / ?C / C)를 실제 화살표로 치환한다.
+            //
+            // 이 경로(TextFlow → AST)는 IDML 런을 거치지 않아 StoryLoader 의
+            // isStandaloneBtArrowGlyphRun 분기를 타지 못한다. sourceRun 의 폰트가
+            // 살아있는 마지막 지점이 여기다. 놓치면 하류에서는 폰트가 이미 벗겨져
+            // 있어(함초롬돋움) 화살표인지 알 수 없고, 반응식을 표로 조판한 셀에
+            // "@C" 가 그대로 노출된다.
+            //
+            // 글리프 코드는 문서마다 다르므로(관측: "@C", "?C", 접두문자 없는 "C")
+            // 텍스트가 아니라 폰트로 판정한다.
+            boolean arrowRun = textAtom.sourceRun != null
+                    && BTFontGlyphMap.isBTArrowFont(textAtom.sourceRun.fontFamily());
+
             for (ASTTextRun run : runs) {
+                if (arrowRun) {
+                    run.text("→");
+                    run.fontFamily(null);
+                    run.fontStyle(null);
+                    run.grepMathFont(false);
+                    run.subscript(false);
+                    run.superscript(false);
+                }
                 target.addItem(run);
                 appended = true;
             }
