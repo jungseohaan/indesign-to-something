@@ -389,6 +389,7 @@ public final class ResolvedBuildContext {
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByVisualSourceObjectId;
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByStyleSourceObjectId;
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByOwnedTextFrameId;
+    private java.util.Map<String, java.util.List<ObjectPlan>> ownershipPlansByOwnedTextFrameKey;
     private java.util.Map<Integer, java.util.List<ObjectPlan>> ownershipPlansByAnyObjectId;
     private final java.util.Map<String, java.util.Set<String>> descendantSetCache = new java.util.HashMap<>();
     private boolean ownershipPlanIndexDirty = true;
@@ -517,6 +518,7 @@ public final class ResolvedBuildContext {
         ownershipPlansByVisualSourceObjectId = null;
         ownershipPlansByStyleSourceObjectId = null;
         ownershipPlansByOwnedTextFrameId = null;
+        ownershipPlansByOwnedTextFrameKey = null;
         ownershipPlansByAnyObjectId = null;
     }
 
@@ -619,6 +621,23 @@ public final class ResolvedBuildContext {
         return fallback;
     }
 
+    public ObjectPlan findAnyTextFrameOwnershipPlan(String textFrameId) {
+        Integer parsed = parseDecimalId(textFrameId);
+        if (parsed != null) return findAnyTextFrameOwnershipPlan(parsed);
+        if (textFrameId == null || textFrameId.isEmpty()) return null;
+        ObjectPlan fallback = null;
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> candidates = ownershipPlansByOwnedTextFrameKey.get(textFrameId);
+        if (candidates == null || candidates.isEmpty()) return null;
+        for (ObjectPlan plan : candidates) {
+            if (plan == null) continue;
+            if (!isTextFrameOwnershipPlan(plan, textFrameId)) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return plan;
+            if (fallback == null) fallback = plan;
+        }
+        return fallback;
+    }
+
     public ObjectPlan findHwpxTextFrameOwnershipPlan(int domId) {
         if (domId < 0) return null;
         ensureOwnershipPlanIndexes();
@@ -627,6 +646,21 @@ public final class ResolvedBuildContext {
         for (ObjectPlan plan : candidates) {
             if (plan == null) continue;
             if (!isTextFrameOwnershipPlan(plan, domId)) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return plan;
+        }
+        return null;
+    }
+
+    public ObjectPlan findHwpxTextFrameOwnershipPlan(String textFrameId) {
+        Integer parsed = parseDecimalId(textFrameId);
+        if (parsed != null) return findHwpxTextFrameOwnershipPlan(parsed);
+        if (textFrameId == null || textFrameId.isEmpty()) return null;
+        ensureOwnershipPlanIndexes();
+        java.util.List<ObjectPlan> candidates = ownershipPlansByOwnedTextFrameKey.get(textFrameId);
+        if (candidates == null || candidates.isEmpty()) return null;
+        for (ObjectPlan plan : candidates) {
+            if (plan == null) continue;
+            if (!isTextFrameOwnershipPlan(plan, textFrameId)) continue;
             if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return plan;
         }
         return null;
@@ -655,6 +689,15 @@ public final class ResolvedBuildContext {
                 && plan.sourceBundleKey.equals("textFrame." + domId);
     }
 
+    private static boolean isTextFrameOwnershipPlan(ObjectPlan plan, String textFrameId) {
+        if (plan == null || textFrameId == null || textFrameId.isEmpty()) return false;
+        Integer parsed = parseDecimalId(textFrameId);
+        if (parsed != null) return isTextFrameOwnershipPlan(plan, parsed);
+        if (containsString(plan.ownedTextFrameIdKeys, textFrameId)) return true;
+        return plan.sourceBundleKey != null
+                && plan.sourceBundleKey.equals("textFrame." + textFrameId);
+    }
+
     public boolean ownershipPlanPlacesFloatingHwpxText(int domId) {
         if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.INLINE)) {
             return false;
@@ -663,6 +706,15 @@ public final class ResolvedBuildContext {
             return true;
         }
         ObjectPlan plan = findHwpxTextFrameOwnershipPlan(domId);
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.placement == Placement.FLOATING;
+    }
+
+    public boolean ownershipPlanPlacesFloatingHwpxText(String textFrameId) {
+        Integer parsed = parseDecimalId(textFrameId);
+        if (parsed != null) return ownershipPlanPlacesFloatingHwpxText(parsed);
+        ObjectPlan plan = findHwpxTextFrameOwnershipPlan(textFrameId);
         return plan != null
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.placement == Placement.FLOATING;
@@ -1000,6 +1052,7 @@ public final class ResolvedBuildContext {
         ownershipPlansByVisualSourceObjectId = new java.util.HashMap<>();
         ownershipPlansByStyleSourceObjectId = new java.util.HashMap<>();
         ownershipPlansByOwnedTextFrameId = new java.util.HashMap<>();
+        ownershipPlansByOwnedTextFrameKey = new java.util.HashMap<>();
         ownershipPlansByAnyObjectId = new java.util.HashMap<>();
         java.util.Map<String, RenderedGroup> renderedByCandidateId = renderedGroupsByCandidateId();
         for (ObjectPlan plan : ownershipPlans) {
@@ -1017,6 +1070,7 @@ public final class ResolvedBuildContext {
             indexPlanArray(ownershipPlansByStyleSourceObjectId, plan.styleSourceObjectIds, plan);
             indexPlanArray(ownershipPlansByAnyObjectId, plan.styleSourceObjectIds, plan);
             indexPlanArray(ownershipPlansByOwnedTextFrameId, plan.ownedTextFrameIds, plan);
+            indexPlanStringArray(ownershipPlansByOwnedTextFrameKey, plan.ownedTextFrameIdKeys, plan);
             indexPlanArray(ownershipPlansByAnyObjectId, plan.ownedTextFrameIds, plan);
             RenderedGroup rendered = plan.candidateId != null
                     ? renderedByCandidateId.get(plan.candidateId)
@@ -1307,6 +1361,35 @@ public final class ResolvedBuildContext {
         for (int id : ids) {
             indexPlan(index, id, plan);
         }
+    }
+
+    private static void indexPlanStringArray(
+            java.util.Map<String, java.util.List<ObjectPlan>> index,
+            String[] ids,
+            ObjectPlan plan) {
+        if (index == null || ids == null || plan == null) return;
+        for (String id : ids) {
+            if (id == null || id.isEmpty()) continue;
+            java.util.List<ObjectPlan> plans = index.computeIfAbsent(id, k -> new java.util.ArrayList<>());
+            if (!plans.contains(plan)) plans.add(plan);
+        }
+    }
+
+    private static Integer parseDecimalId(String value) {
+        if (value == null || value.isEmpty()) return null;
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static boolean containsString(String[] values, String expected) {
+        if (values == null || expected == null) return false;
+        for (String value : values) {
+            if (expected.equals(value)) return true;
+        }
+        return false;
     }
 
     private static void addPlans(

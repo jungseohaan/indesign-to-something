@@ -1016,12 +1016,14 @@ public class ResolvedData {
     }
 
     private boolean hasTextOwnerPlanForFrame(String textFrameId, TextAction textAction) {
+        if (textFrameId == null || textFrameId.isEmpty() || textAction == null || ownershipPlans == null) return false;
         Integer parsed = parseDecimalId(textFrameId);
-        if (parsed == null || textAction == null || ownershipPlans == null) return false;
-        int target = parsed;
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null || plan.textAction != textAction) continue;
-            if (plan.domId == target || containsId(plan.ownedTextFrameIds, target)) {
+            if (parsed != null && (plan.domId == parsed || containsId(plan.ownedTextFrameIds, parsed))) {
+                return true;
+            }
+            if (containsString(plan.ownedTextFrameIdKeys, textFrameId)) {
                 return true;
             }
         }

@@ -704,6 +704,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         try { readItemInfo(allItems[i]); } catch (eReadInfo) {}
         if (i > 0 && i % 1000 === 0) marker("03d01_readItems_" + String(i));
     }
+    appendMasterTextFrameInstanceSourceItems();
     marker("03d01a_sourceIndex_readItems");
     for (var parentPass = 0; parentPass < 8; parentPass++) {
         var appendedParent = false;
@@ -1065,6 +1066,269 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return null;
     }
 
+    function appendMasterTextFrameInstanceSourceItems() {
+        var appended = 0;
+        var masterToPages = {};
+        try {
+            for (var pp = 0; pp < doc.pages.length; pp++) {
+                var pgNo = pp + 1;
+                if (ctx && (pgNo < ctx.startPage || pgNo > ctx.endPage)) continue;
+                var appliedMaster = null;
+                try { appliedMaster = doc.pages[pp].appliedMaster; } catch (eAppliedMaster) {}
+                if (!appliedMaster) continue;
+                var masterId = null;
+                try { masterId = String(appliedMaster.id); } catch (eMasterId) {}
+                if (!masterId) continue;
+                var spreadPageIdx = -1;
+                try {
+                    var spreadPages = doc.pages[pp].parent.pages.everyItem().getElements();
+                    for (var spi = 0; spi < spreadPages.length; spi++) {
+                        if (spreadPages[spi].id === doc.pages[pp].id) {
+                            spreadPageIdx = spi;
+                            break;
+                        }
+                    }
+                } catch (eSpreadPageIndex) {}
+                if (!masterToPages[masterId]) masterToPages[masterId] = [];
+                masterToPages[masterId].push({ docIdx: pp, spreadPageIdx: spreadPageIdx });
+            }
+        } catch (eMasterMap) {}
+
+        var pageOverrideMap = {};
+        try {
+            for (var op = 0; op < doc.pages.length; op++) {
+                var opNo = op + 1;
+                if (ctx && (opNo < ctx.startPage || opNo > ctx.endPage)) continue;
+                var pageItems = doc.pages[op].allPageItems;
+                for (var oi = 0; pageItems && oi < pageItems.length; oi++) {
+                    try {
+                        var masterPageItem = pageItems[oi].masterPageItem;
+                        if (!masterPageItem) continue;
+                        if (!pageOverrideMap[op]) pageOverrideMap[op] = {};
+                        pageOverrideMap[op][String(masterPageItem.id)] = true;
+                    } catch (eOverrideItem) {}
+                }
+            }
+        } catch (eOverrideMap) {}
+
+        var masterSpreads = [];
+        try { masterSpreads = doc.masterSpreads.everyItem().getElements(); } catch (eMasterSpreads) {}
+        for (var ms = 0; ms < masterSpreads.length; ms++) {
+            var masterSpread = masterSpreads[ms];
+            var spreadId = null;
+            try { spreadId = String(masterSpread.id); } catch (eSpreadId) {}
+            var appliedPages = spreadId ? masterToPages[spreadId] || [] : [];
+            if (appliedPages.length === 0) continue;
+            var masterPageIndexById = {};
+            try {
+                var masterPages = masterSpread.pages.everyItem().getElements();
+                for (var mp = 0; mp < masterPages.length; mp++) {
+                    masterPageIndexById[String(masterPages[mp].id)] = mp;
+                }
+            } catch (eMasterPageIndex) {}
+
+            var masterItems = [];
+            try { masterItems = masterSpread.allPageItems; } catch (eMasterItems) {}
+            for (var mi = 0; mi < masterItems.length; mi++) {
+                var mtf = masterItems[mi];
+                try { if (!mtf || mtf.constructor.name !== "TextFrame") continue; } catch (eKind) { continue; }
+                var cls = null;
+                try { cls = classifyTextFrameCached(mtf); } catch (eClass) {}
+                var rawContents = "";
+                try { rawContents = String(mtf.parentStory.contents || ""); } catch (eRawContents) {}
+                var textVariableCount = 0;
+                try { textVariableCount = mtf.parentStory.textVariableInstances.length || 0; } catch (eTextVarCount) {}
+                var isPageNumber = rawContents.indexOf("\u0018") >= 0 && textVariableCount === 0;
+                var isTextVariableOnly = textVariableCount > 0
+                        && rawContents.replace(/\uFEFF/g, "").replace(/\uFFFC/g, "")
+                                .replace(/\u0016/g, "").replace(/\u0018/g, "")
+                                .replace(/[\s\r\n]/g, "").length === 0;
+                if (isTextVariableOnly) continue;
+                if (cls !== "editable" && !isPageNumber) continue;
+
+                var baseId = null;
+                try { baseId = String(mtf.id); } catch (eBaseId) {}
+                if (!baseId) continue;
+                var masterFramePageIdx = -1;
+                try {
+                    masterFramePageIdx = masterPageIndexById[String(mtf.parentPage.id)];
+                    if (masterFramePageIdx === undefined) masterFramePageIdx = -1;
+                } catch (eFramePageIndex) {}
+                var storyId = null;
+                try { storyId = String(mtf.parentStory.id); } catch (eStoryId) {}
+                var bounds = null;
+                try {
+                    var gb = mtf.geometricBounds;
+                    bounds = [gb[0], gb[1], gb[2], gb[3]];
+                } catch (eBounds) {}
+                var textLength = _textLengthOfItem(mtf);
+                var zOrderBase = sourceItems.length;
+                var masterInlineItems = [];
+                try { masterInlineItems = mtf.allPageItems; } catch (eMasterInlineItems) {}
+
+                for (var ap = 0; ap < appliedPages.length; ap++) {
+                    var pageEntry = appliedPages[ap];
+                    if (masterFramePageIdx >= 0 && pageEntry.spreadPageIdx >= 0
+                            && masterFramePageIdx !== pageEntry.spreadPageIdx) {
+                        continue;
+                    }
+                    if (pageOverrideMap[pageEntry.docIdx] && pageOverrideMap[pageEntry.docIdx][baseId]) continue;
+                    var cloneId = baseId + "_pi" + pageEntry.docIdx;
+                    if (sourceInfoById[cloneId]) continue;
+                    var cloneStoryId = storyId ? storyId + "_pi" + pageEntry.docIdx : null;
+                    var info = {
+                        id: cloneId,
+                        sourcePageIndex: pageEntry.docIdx,
+                        pageIndex: pageEntry.docIdx,
+                        kind: "TextFrame",
+                        parentId: null,
+                        parentKind: "MasterTextFrameInstance",
+                        bounds: bounds ? bounds.slice(0) : null,
+                        sourceOrder: sourceItems.length,
+                        zOrder: zOrderBase + appended,
+                        name: null,
+                        layerName: _itemLayerName(mtf),
+                        layerId: null,
+                        layerIndex: null,
+                        visible: true,
+                        hiddenLayer: false,
+                        nonprinting: false,
+                        textFrameClass: "editable",
+                        contentType: _itemContentTypeName(mtf),
+                        isGraphicContentFrame: false,
+                        textLength: textLength,
+                        hasText: textLength !== null ? textLength > 0 : true,
+                        markerOnlyContents: isPageNumber,
+                        simpleMarkerLabelContents: false,
+                        storyId: cloneStoryId,
+                        tableCountInStory: 0,
+                        hasTablesInStory: false,
+                        tableSourceObjectIds: [],
+                        storyHasVisibleTableCellText: false,
+                        hasChildren: false,
+                        hasPlacedVisual: false,
+                        hasCandidateVectorPaint: false,
+                        hasVisibleFill: false,
+                        hasVisibleStroke: false,
+                        fillColor: null,
+                        fillColorName: null,
+                        fillTint: null,
+                        strokeColor: null,
+                        strokeColorName: null,
+                        strokeTint: null,
+                        strokeWeight: null,
+                        strokeAlignment: null,
+                        opacity: null,
+                        absoluteRotationAngle: null,
+                        cornerRadius: null,
+                        anchoredPosition: null,
+                        storyAnchorPlacement: "FLOATING",
+                        storyTextInlineSlot: false,
+                        recoveredMissingParent: false,
+                        isMasterInstance: true,
+                        masterSourceId: baseId,
+                        masterSpecialType: isPageNumber ? "pagenum" : null,
+                        rangeTargetPageIndexes: [pageEntry.docIdx]
+                    };
+                    try { info.hiddenLayer = isOnHiddenLayer(mtf); } catch (eHidden) {}
+                    try { info.nonprinting = !!mtf.nonprinting; } catch (eNonprinting) {}
+                    try { info.opacity = mtf.transparencySettings.blendingSettings.opacity; } catch (eOpacity) {}
+                    sourceInfoById[cloneId] = info;
+                    sourceItems.push(info);
+                    appended++;
+
+                    for (var ii = 0; ii < masterInlineItems.length; ii++) {
+                        var inlineItem = masterInlineItems[ii];
+                        var inlineId = itemId(inlineItem);
+                        if (inlineId === null || inlineId === undefined) continue;
+                        var inlineKey = String(inlineId);
+                        if (inlineKey === baseId || sourceInfoById[inlineKey]) continue;
+                        var inlineKind = _itemKind(inlineItem);
+                        if (String(inlineKind || "") === "TextFrame") continue;
+                        var inlineInfo = {
+                            id: inlineId,
+                            sourcePageIndex: pageEntry.docIdx,
+                            pageIndex: pageEntry.docIdx,
+                            kind: inlineKind,
+                            parentId: cloneId,
+                            parentKind: "MasterTextFrameInstance",
+                            bounds: _itemBounds(inlineItem),
+                            sourceOrder: sourceItems.length,
+                            zOrder: zOrderBase + appended,
+                            name: null,
+                            layerName: _itemLayerName(inlineItem),
+                            layerId: null,
+                            layerIndex: null,
+                            visible: _itemVisible(inlineItem),
+                            hiddenLayer: false,
+                            nonprinting: false,
+                            textFrameClass: null,
+                            contentType: _itemContentTypeName(inlineItem),
+                            isGraphicContentFrame: _itemIsGraphicContentFrame(inlineItem),
+                            textLength: null,
+                            hasText: false,
+                            markerOnlyContents: false,
+                            simpleMarkerLabelContents: false,
+                            storyId: cloneStoryId,
+                            tableCountInStory: 0,
+                            hasTablesInStory: false,
+                            tableSourceObjectIds: [],
+                            storyHasVisibleTableCellText: false,
+                            hasChildren: false,
+                            hasPlacedVisual: false,
+                            hasCandidateVectorPaint: null,
+                            hasVisibleFill: false,
+                            hasVisibleStroke: false,
+                            fillColor: null,
+                            fillColorName: null,
+                            fillTint: null,
+                            strokeColor: null,
+                            strokeColorName: null,
+                            strokeTint: null,
+                            strokeWeight: null,
+                            strokeAlignment: null,
+                            opacity: null,
+                            absoluteRotationAngle: null,
+                            cornerRadius: null,
+                            anchoredPosition: _itemAnchoredPosition(inlineItem),
+                            storyAnchorPlacement: "INLINE",
+                            storyTextInlineSlot: true,
+                            recoveredMissingParent: false,
+                            isMasterInlineInstance: true,
+                            masterTextFrameInstanceId: cloneId,
+                            rangeTargetPageIndexes: [pageEntry.docIdx]
+                        };
+                        try { inlineInfo.hasPlacedVisual = _hasPlacedVisual(inlineItem); } catch (eInlinePlaced) {}
+                        try { inlineInfo.hasCandidateVectorPaint = _hasCandidateVectorPaint(inlineItem); } catch (eInlinePaint) {}
+                        try {
+                            if (hasVisibleFill(inlineItem)) {
+                                inlineInfo.hasVisibleFill = true;
+                                inlineInfo.fillColor = inlineItem.fillColor.name;
+                                inlineInfo.fillColorName = inlineItem.fillColor.name;
+                            }
+                        } catch (eInlineFill) {}
+                        try {
+                            if (hasVisibleStroke(inlineItem)) {
+                                inlineInfo.hasVisibleStroke = true;
+                                inlineInfo.strokeColor = inlineItem.strokeColor.name;
+                                inlineInfo.strokeColorName = inlineItem.strokeColor.name;
+                                inlineInfo.strokeWeight = inlineItem.strokeWeight || 0;
+                            }
+                        } catch (eInlineStroke) {}
+                        try { inlineInfo.hiddenLayer = isOnHiddenLayer(inlineItem); } catch (eInlineHidden) {}
+                        try { inlineInfo.nonprinting = !!inlineItem.nonprinting; } catch (eInlineNonprinting) {}
+                        try { inlineInfo.opacity = inlineItem.transparencySettings.blendingSettings.opacity; } catch (eInlineOpacity) {}
+                        sourceInfoById[inlineKey] = inlineInfo;
+                        domById[inlineKey] = inlineItem;
+                        sourceItems.push(inlineInfo);
+                        appended++;
+                    }
+                }
+            }
+        }
+        stats.masterTextFrameInstanceSourceItemCount = appended;
+    }
+
     return {
         sourceItems: sourceItems,
         sourceInfoById: sourceInfoById,
@@ -1220,8 +1484,11 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
         };
         addClaims(plan.sourceObjectIds, "PROVENANCE", owner);
         if (_sourceCoveragePlanHasVisibleVisual(plan)) {
-            addVisibleClaimsWithDescendants(plan.visualSourceObjectIds, "VISIBLE_VISUAL", owner);
-            addVisibleClaimsWithDescendants(plan.exportSourceObjectIds, "VISIBLE_EXPORT", owner);
+            var coverageIds = plan.coverageSourceObjectIds && plan.coverageSourceObjectIds.length > 0
+                    ? plan.coverageSourceObjectIds
+                    : null;
+            addVisibleClaimsWithDescendants(coverageIds || plan.visualSourceObjectIds, "VISIBLE_VISUAL", owner);
+            addVisibleClaimsWithDescendants(coverageIds || plan.exportSourceObjectIds, "VISIBLE_EXPORT", owner);
         }
         if (plan.visualAction === "PLACE_TABLE_STYLE") {
             addClaims(plan.styleSourceObjectIds, "STYLE_OWNER", owner);

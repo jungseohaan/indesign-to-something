@@ -857,153 +857,28 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "04c_inlineObjects");
 
     var renderedImageFrames = [];
-    var imgRenderedIds = {};
     var pageTextlessGroupResult = { frames: [], textlessShellDiagnostics: [], childIds: {} };
-    var decoResult = { frames: [], textlessShellDiagnostics: [], childIds: {} };
-    var decoChildIds = {};
     var renderedGraphicFrames = [];
-    var renderedVectorFrames = { frames: [] };
+    var renderedVectorFrames = [];
     var renderedMasterGraphics = [];
     var tfShellFrames = [];
-    var singleTextlessPlaneMode = ctx.graphicsMode === "single-textless-plane";
-
-    // 2.14. 이미지 프레임 개별 렌더링 (Rectangle/Oval/Polygon에 place된 이미지)
-    _marker(ctx.outputDir, "06_imgFrames");
-    if (!singleTextlessPlaneMode) {
-        _requireExtractionPass(ctx, "pass.image_placed_frames");
-        _requireExtractionPass(ctx, "pass.image_textless_groups");
-        renderedImageFrames = exportImagePlacedFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-                extractionItemById,
-                _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.image_textless_groups"),
-                _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.image_placed_frames"));
-        _addRenderMeta(renderedImageFrames, "page_object", "pass.image_placed_frames");
-        for (var ii = 0; ii < renderedImageFrames.length; ii++) renderedFloatingItems.push(renderedImageFrames[ii]);
-        try { $.gc(); } catch (e) {}
-
-        // 2.15. 장식 그룹 렌더링 — exportImagePlacedFrames에서 처리된 ID 제외
-        for (var iri = 0; iri < renderedImageFrames.length; iri++) imgRenderedIds[renderedImageFrames[iri].id] = true;
-    }
 
     _marker(ctx.outputDir, "06b_pageTextlessGroups");
-    if (singleTextlessPlaneMode) {
-        pageTextlessGroupResult = exportSingleTextlessPagePlanes(
-                doc,
-                ctx.outputDir,
-                ctx.startPage,
-                ctx.endPage,
-                allItems,
-                extractionItemById,
-                inlinePngCandidates);
-    } else {
-        _requireExtractionPass(ctx, "pass.page_textless_graphic_groups");
-        var pageTextlessGroupPngCandidates =
-                _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.page_textless_graphic_groups");
-        pageTextlessGroupResult = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-                extractionItemById,
-                pageTextlessGroupPngCandidates,
-                imgRenderedIds,
-                ctx.extractionPlan.sourceItems);
-    }
+    pageTextlessGroupResult = exportSingleTextlessPagePlanes(
+            doc,
+            ctx.outputDir,
+            ctx.startPage,
+            ctx.endPage,
+            allItems,
+            extractionItemById,
+            inlinePngCandidates);
     _marker(ctx.outputDir, "06b1_pageTextlessGroups_exportDone");
     _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
     _marker(ctx.outputDir, "06b2_pageTextlessGroups_metaDone");
     for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
         renderedFloatingItems.push(pageTextlessGroupResult.frames[ptgi]);
-        imgRenderedIds[pageTextlessGroupResult.frames[ptgi].id] = true;
     }
     _marker(ctx.outputDir, "06b3_pageTextlessGroups_pushDone");
-
-    _marker(ctx.outputDir, "07_decoGroups");
-    _marker(ctx.outputDir, "07a_decoGroups_beforeCandidateFilter");
-    var decoPngCandidates = [];
-    var decoNonPngCandidates = [];
-    if (!singleTextlessPlaneMode) {
-        _requireExtractionPass(ctx, "pass.decoration_groups");
-        decoPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.decoration_groups");
-        decoNonPngCandidates = _nonPngExtractionCandidatesForPass(ctx.extractionPlan, "pass.decoration_groups");
-    }
-    _marker(ctx.outputDir, "07b_decoGroups_afterCandidateFilter");
-    try {
-        writeJson(ctx.outputDir + "/decoration-non-png-export-skip.json", {
-            schemaVersion: 1,
-            policy: "POLICY-source-ownership",
-            passId: "pass.decoration_groups",
-            skippedPngExportCount: decoNonPngCandidates ? decoNonPngCandidates.length : 0,
-            candidatePreview: decoNonPngCandidates ? decoNonPngCandidates.slice(0, 20) : [],
-            candidatesOmitted: decoNonPngCandidates && decoNonPngCandidates.length > 20,
-            reason: "non_png_materialization_uses_object_plan_source_item"
-        });
-    } catch (eDecoNonPngStats) {}
-    _marker(ctx.outputDir, "07c_decoGroups_afterNonPngStats");
-    if (!singleTextlessPlaneMode) {
-        decoResult  = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-                extractionItemById,
-                decoPngCandidates,
-                imgRenderedIds,
-                ctx.extractionPlan.sourceItems);
-    }
-    _marker(ctx.outputDir, "07d_decoGroups_exportDone");
-    decoChildIds = decoResult.childIds || {};
-    _addRenderMeta(decoResult.frames, "page_object", "pass.decoration_groups");
-    for (var di = 0; di < decoResult.frames.length; di++) renderedFloatingItems.push(decoResult.frames[di]);
-    try { $.gc(); } catch (e) {}
-
-    // 2.16. 복합 그래픽 프레임 렌더링
-    _marker(ctx.outputDir, "08_complexFrames");
-    if (!singleTextlessPlaneMode) {
-        _requireExtractionPass(ctx, "pass.complex_graphic_frames");
-        var complexPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.complex_graphic_frames");
-        renderedGraphicFrames = complexPngCandidates && complexPngCandidates.length > 0
-                ? exportComplexGraphicFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-                        extractionItemById, complexPngCandidates)
-                : [];
-    }
-    _addRenderMeta(renderedGraphicFrames, "page_object", "pass.complex_graphic_frames");
-    for (var ci = 0; ci < renderedGraphicFrames.length; ci++) renderedFloatingItems.push(renderedGraphicFrames[ci]);
-    try { $.gc(); } catch (e) {}
-
-    // 2.17. 벡터 도형 렌더링
-    // 보이는 leaf vector source는 Stage 1 plan이 선언한 source set을
-    // 그대로 추출한다. Java/HWPX 단계에서 bounds/style로 다시 그리는
-    // native fallback은 source visual 실행 산출물이 아니므로 사용하지 않는다.
-    _marker(ctx.outputDir, "09_shapeFrames");
-    if (!singleTextlessPlaneMode) {
-        _requireExtractionPass(ctx, "pass.vector_shape_frames");
-        renderedVectorFrames = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-                extractionItemById,
-                _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.vector_shape_frames"),
-                imgRenderedIds,
-                ctx.extractionPlan.sourceItems);
-    }
-    _addRenderMeta(renderedVectorFrames.frames, "page_object", "pass.vector_shape_frames");
-    for (var vsi = 0; vsi < renderedVectorFrames.frames.length; vsi++) renderedFloatingItems.push(renderedVectorFrames.frames[vsi]);
-    try { $.gc(); } catch (e) {}
-
-    // 2.18. 마스터 스프레드 그래픽 렌더링
-    _marker(ctx.outputDir, "09b_masterGraphics");
-    if (!singleTextlessPlaneMode) {
-        _requireExtractionPass(ctx, "pass.master_page_graphics");
-        var masterPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.master_page_graphics");
-        renderedMasterGraphics = exportMasterPageGraphics(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-                masterPngCandidates,
-                inlinePngCandidates);
-    }
-    _addRenderMeta(renderedMasterGraphics, null, "pass.master_page_graphics");
-    for (var mgi = 0; mgi < renderedMasterGraphics.length; mgi++) renderedFloatingItems.push(renderedMasterGraphics[mgi]);
-    try { $.gc(); } catch (e) {}
-
-    // 2.19. editable TextFrame의 시각 껍데기 렌더링 (fill/stroke만 PNG, 텍스트는 HWPX TF)
-    _marker(ctx.outputDir, "09c_editableTFVisualShells");
-    if (!singleTextlessPlaneMode) {
-        _requireExtractionPass(ctx, "pass.editable_textframe_visual_shells");
-        tfShellFrames = exportEditableTextFrameVisualShells(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-                decoChildIds, editableFrameIds, extractionItemById,
-                _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.editable_textframe_visual_shells"),
-                allItems);
-    }
-    _addRenderMeta(tfShellFrames, "page_object", "pass.editable_textframe_visual_shells");
-    for (var otfi = 0; otfi < tfShellFrames.length; otfi++) renderedFloatingItems.push(tfShellFrames[otfi]);
-    try { $.gc(); } catch (e) {}
 
     try {
         _marker(ctx.outputDir, "09d_extractionResults");
@@ -1012,10 +887,8 @@ function _runRenderPhases(doc, ctx, allItems) {
         try {
             textlessDiagnostics = textlessDiagnostics.concat(
                     pageTextlessGroupResult.textlessShellDiagnostics || []);
-            textlessDiagnostics = textlessDiagnostics.concat(
-                    decoResult.textlessShellDiagnostics || []);
         } catch (eTextlessDiagMerge) {
-            textlessDiagnostics = decoResult.textlessShellDiagnostics || [];
+            textlessDiagnostics = [];
         }
         var extractionResults = _buildExtractionResults(ctx, renderedFloatingItems,
                 renderedImageFrames, renderedGraphicFrames, renderedVectorFrames,
@@ -1063,11 +936,11 @@ function _runRenderPhases(doc, ctx, allItems) {
             range_input_mode: ctx.rangeInputMode,
             resolved_range_mode: ctx.resolvedRangeMode,
 
-            deco_group_count: decoResult.frames.length,
-            image_frame_count: renderedImageFrames.length,
-            complex_frame_count: renderedGraphicFrames.length,
-            shape_count: renderedVectorFrames.length,
-            master_graphic_count: renderedMasterGraphics.length,
+            deco_group_count: 0,
+            image_frame_count: 0,
+            complex_frame_count: 0,
+            shape_count: 0,
+            master_graphic_count: 0,
             inline_object_count: _inlineCount
         };
         var _sf = File(ctx.outputDir + "/_extract_stats.json");
@@ -1105,13 +978,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     resolved.renderedGraphicFrames = renderedGraphicFrames;
     resolved.renderedImageFrames   = renderedImageFrames;
     resolved.renderedFloatingItems = renderedFloatingItems;
-    try {
-        resolved.textlessShellDiagnostics = []
-                .concat(pageTextlessGroupResult.textlessShellDiagnostics || [])
-                .concat(decoResult.textlessShellDiagnostics || []);
-    } catch (eResolvedTextlessDiagMerge) {
-        resolved.textlessShellDiagnostics = decoResult.textlessShellDiagnostics || [];
-    }
+    resolved.textlessShellDiagnostics = pageTextlessGroupResult.textlessShellDiagnostics || [];
     try {
         var _diagFile = File(ctx.outputDir + "/textless-shell-diagnostics.jsonl");
         _diagFile.encoding = "UTF-8";

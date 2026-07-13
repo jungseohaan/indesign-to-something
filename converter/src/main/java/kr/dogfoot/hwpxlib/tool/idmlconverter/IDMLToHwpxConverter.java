@@ -586,537 +586,28 @@ public class IDMLToHwpxConverter {
                 earlyWarnings.add("[Resolved] overlay 보강 실패: " + e.getMessage());
             }
         }
-        // source ownership policy: source ownership/placement is decided by ObjectPlan only.
-        // Legacy floating-image merge mutates text-frame geometry after planning,
-        // so it is intentionally disabled.
-        // Phase 2.10: orphan 렌더 그래픽 주입
+        // Canonical page/floating graphics path: inject only the page-sized
+        // textless plane produced by Stage 3. Inline/anchored images are built
+        // through text flow; per-object floating graphics fallback is retired.
         if (resolvedData != null) {
             injectOrphanRenderedGraphics(astDoc, resolvedData, options);
         }
     }
 
-    private static void collectInlineSourceIds(
-            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph> paragraphs,
-            java.util.Set<String> usedSourceIds) {
-        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para : paragraphs) {
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem item : para.items()) {
-                if (item.itemType() == kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem.ItemType.INLINE_OBJECT) {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject obj =
-                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject) item;
-                    if (obj.sourceId() != null) {
-                        usedSourceIds.add(obj.sourceId());
-                    }
-                }
-            }
-        }
-    }
-
-    private static java.util.Set<Integer> collectRenderedCoverageForUsedSources(
-            ResolvedData resolvedData, java.util.Set<String> usedSourceIds) {
-        java.util.Set<Integer> coveredIds = new java.util.HashSet<>();
-        if (resolvedData == null || usedSourceIds == null || usedSourceIds.isEmpty()) {
-            return coveredIds;
-        }
-
-        java.util.List<RenderedGroup> groups = new java.util.ArrayList<>();
-        groups.addAll(resolvedData.allRenderedFloatingItems());
-        groups.addAll(resolvedData.allRenderedGraphicFrames());
-        groups.addAll(resolvedData.allRenderedImageFrames());
-        groups.addAll(resolvedData.allRenderedPdfFrames());
-
-        boolean changed;
-        do {
-            int before = coveredIds.size();
-            for (RenderedGroup rg : groups) {
-                if (rg == null) continue;
-                if (isRenderedSourceUsed(rg, usedSourceIds) || coveredIds.contains(rg.id())) {
-                    addRenderedCoverageIds(rg, coveredIds);
-                }
-            }
-            changed = coveredIds.size() != before;
-        } while (changed);
-        return coveredIds;
-    }
-
-    private static boolean isRenderedSourceUsed(
-            RenderedGroup rg, java.util.Set<String> usedSourceIds) {
-        if (rg == null || usedSourceIds == null) return false;
-        return usedSourceIds.contains("u" + Integer.toHexString(rg.id()))
-                || usedSourceIds.contains("page_obj_" + rg.id());
-    }
-
-    private static void addRenderedCoverageIds(
-            RenderedGroup rg, java.util.Set<Integer> coveredIds) {
-        if (rg == null || coveredIds == null) return;
-        coveredIds.add(rg.id());
-        addAllIds(rg.sourceObjectIds(), coveredIds);
-        addAllIds(rg.childIds(), coveredIds);
-        addAllIds(rg.childImageIds(), coveredIds);
-        addAllIds(rg.visualOnlyChildIds(), coveredIds);
-        addAllIds(rg.tfInlineVisualIds(), coveredIds);
-    }
-
-    private static void addAllIds(int[] ids, java.util.Set<Integer> target) {
-        if (ids == null || target == null) return;
-        for (int id : ids) {
-            target.add(id);
-        }
-    }
-
-    private static boolean isRenderedCoveredByUsedSource(
-            RenderedGroup rg, java.util.Set<Integer> coveredIds) {
-        if (rg == null || coveredIds == null || coveredIds.isEmpty()) return false;
-        if (coveredIds.contains(rg.id())) return true;
-        if (containsAny(coveredIds, rg.sourceObjectIds())) return true;
-        if (containsAny(coveredIds, rg.childIds())) return true;
-        if (containsAny(coveredIds, rg.childImageIds())) return true;
-        if (containsAny(coveredIds, rg.visualOnlyChildIds())) return true;
-        return containsAny(coveredIds, rg.tfInlineVisualIds());
-    }
-
-    private static boolean containsAny(java.util.Set<Integer> haystack, int[] needles) {
-        if (haystack == null || haystack.isEmpty() || needles == null) return false;
-        for (int id : needles) {
-            if (haystack.contains(id)) return true;
-        }
-        return false;
-    }
-
-    /**
-     * VectorShape로 등록되지 않은 렌더 그래픽 프레임을 AST에 주입한다.
-     * 깊이 중첩된 IDML 구조(TextFrame 내부 Oval 등)는 VectorShape 풀에 등록되지 않아
-     * ASTFigureBuilder에서 처리되지 못한다. 이들 중 렌더링된 PNG가 있으면 직접 주입한다.
-     */
+    /** Stage 3가 생성한 페이지 단위 textless plane PNG를 AST에 주입한다. */
     static void injectOrphanRenderedGraphics(
             ASTDocument astDoc, ResolvedData resolvedData, ConvertOptions options) {
         String resolvedDir = getResolvedDir(options);
         if (resolvedDir == null) return;
 
-        // 이미 AST에 사용된 rendered graphic sourceId 수집
-        java.util.Set<String> usedSourceIds = new java.util.HashSet<>();
-        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : sec.blocks()) {
-                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure
-                        && blk.sourceId() != null) {
-                    usedSourceIds.add(blk.sourceId());
-                }
-                // TextFrameBlock 내 인라인 객체 sourceId 수집
-                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock tfb =
-                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) blk;
-                    collectInlineSourceIds(tfb.paragraphs(), usedSourceIds);
-                }
-                // 테이블 셀 내 인라인 객체 sourceId 수집
-                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable tbl =
-                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) blk;
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow row : tbl.rows()) {
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell cell : row.cells()) {
-                            collectInlineSourceIds(cell.paragraphs(), usedSourceIds);
-                        }
-                    }
-                }
-            }
-        }
-        java.util.Set<Integer> usedRenderedCoverageIds =
-                collectRenderedCoverageForUsedSources(resolvedData, usedSourceIds);
-
-        // 페이지 bounds 캐시 (pageIndex → resolvedPage)
         List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection> sections = astDoc.sections();
-
-        // 페이지별 기존 ASTFigure + ASTTable bounds 수집 (orphan 중복 주입 방지용)
-        Map<Integer, java.util.List<long[]>> pageFigureBounds = new java.util.HashMap<>();
-        for (int si = 0; si < sections.size(); si++) {
-            java.util.List<long[]> bounds = new java.util.ArrayList<>();
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : sections.get(si).blocks()) {
-                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
-                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
-                    bounds.add(new long[]{fig.x(), fig.y(), fig.x() + fig.width(), fig.y() + fig.height()});
-                }
-                // 테이블 영역도 수집: 테이블과 동일 위치의 그래픽 프레임 중복 주입 방지
-                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable tbl =
-                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) blk;
-                    bounds.add(new long[]{tbl.x(), tbl.y(), tbl.x() + tbl.width(), tbl.y() + tbl.height()});
-                }
-            }
-            pageFigureBounds.put(si, bounds);
-        }
-
-        // 배지 그룹을 OrphanGraphic 대상에 추가
-        // (인라인 처리된 배지는 isConsumedRenderedGraphic으로 건너뜀)
-        java.util.List<RenderedGroup> orphanTargets = new java.util.ArrayList<>(
-                resolvedData.allRenderedGraphicFrames());
         for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
-            if (isSingleTextlessPagePlane(rg)) {
-                orphanTargets.add(rg);
-            }
-        }
-        // PDF 배치 프레임도 orphan 대상에 추가 (IDML에서 PDF 링크를 직접 변환하지 못하므로)
-        orphanTargets.addAll(resolvedData.allRenderedPdfFrames());
-
-        // 부모-자식 관계: childIds에 포함된 ID는 부모 렌더링에 이미 포함되므로 건너뜀
-        // 단, 부모 자체가 렌더 가능한 파일을 가진 경우에만 (부모가 필터되면 자식 허용)
-        java.util.Set<Integer> orphanChildIdSet = new java.util.HashSet<>();
-        for (RenderedGroup rg : orphanTargets) {
-            if (rg.childIds() != null && rg.file() != null) {
-                for (int cid : rg.childIds()) {
-                    orphanChildIdSet.add(cid);
-                }
-            }
-        }
-
-        Map<Integer, Integer> pageOrphanZCounter = new java.util.HashMap<>();
-        // 페이지별 주입된 orphan bounds 추적 (자식 포함 관계 중복 방지)
-        Map<Integer, java.util.List<long[]>> pageOrphanBounds = new java.util.HashMap<>();
-        // 주입된 orphan의 childIds 집합 (배지 중복 방지)
-        java.util.Set<Integer> placedOrphanChildIds = new java.util.HashSet<>();
-        for (RenderedGroup rg : orphanTargets) {
+            if (!isSingleTextlessPagePlane(rg)) continue;
             if (rg.file() == null || rg.bounds() == null) continue;
-
-            // 부모 그룹의 childIds에 포함된 자식은 건너뜀 (부모가 전체 렌더링)
-            if (orphanChildIdSet.contains(rg.id())) continue;
-
-            // DOM ID → IDML hex ID 변환하여 이미 사용된 것인지 확인
-            String idmlHexId = "u" + Integer.toHexString(rg.id());
-            if (usedSourceIds.contains(idmlHexId)) continue;
-            // BackgroundInjector가 page_obj_N 형식으로 이미 배치한 항목 스킵
-            if (usedSourceIds.contains("page_obj_" + rg.id())) continue;
-            if (isRenderedCoveredByUsedSource(rg, usedRenderedCoverageIds)) continue;
-
-            // vectorShapes 처리 대상 및 클리핑 자식 건너뜀 (중복 주입 방지)
-            if (astDoc.orphanExcludeIds().contains(idmlHexId)) continue;
-
-            // 인라인 그래픽으로 이미 처리된 deco 건너뜀 (중복 주입 방지)
-            if (resolvedData.isConsumedRenderedGraphic(String.valueOf(rg.id()))) continue;
 
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
             kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
-            boolean singleTextlessPagePlane = isSingleTextlessPagePlane(rg);
-
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage resolvedPage =
-                    resolvedData.getPage(pageIdx);
-
-            // PNG 로드
-            java.io.File pngFile = new java.io.File(resolvedDir, rg.file());
-            if (!pngFile.exists()) {
-                continue;
-            }
-
-            try {
-                byte[] data = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-                if (img == null) continue;
-
-                // 위치/크기 계산 (ExtendScript에서 이미 pageBounds를 뺀 페이지 상대 좌표)
-                double[] bounds = rg.bounds();
-                long figX, figY, figW, figH;
-                if (singleTextlessPagePlane
-                        && section.layout() != null
-                        && section.layout().pageWidth() > 0
-                        && section.layout().pageHeight() > 0) {
-                    figX = 0;
-                    figY = 0;
-                    figW = section.layout().pageWidth();
-                    figH = section.layout().pageHeight();
-                } else {
-                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[1]);
-                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[0]);
-                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[3] - bounds[1]);
-                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[2] - bounds[0]);
-                    // PNG 비율로 높이 보정
-                    if (img.getWidth() > 0) {
-                        long geoBottom = figY + figH;
-                        figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
-                        // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
-                        if (figY < 0) {
-                            figY = geoBottom - figH;
-                        }
-                    }
-                }
-
-                // 기존 ASTFigure/ASTTable과 겹치는 도형 건너뜀 (중복 방지)
-                // 양방향 겹침: orphan과 기존 figure 모두 50% 이상 겹쳐야 중복으로 판단
-                // (배경 도형은 기존 figure보다 훨씬 크므로 단방향이면 잘못 필터됨)
-                boolean overlapsExisting = false;
-                long figArea = figW * figH;
-                java.util.List<long[]> existingBounds = pageFigureBounds.get(pageIdx);
-                if (existingBounds != null && figArea > 0) {
-                    for (long[] eb : existingBounds) {
-                        long overlapLeft = Math.max(figX, eb[0]);
-                        long overlapTop = Math.max(figY, eb[1]);
-                        long overlapRight = Math.min(figX + figW, eb[2]);
-                        long overlapBottom = Math.min(figY + figH, eb[3]);
-                        if (overlapLeft < overlapRight && overlapTop < overlapBottom) {
-                            long overlapArea = (overlapRight - overlapLeft) * (overlapBottom - overlapTop);
-                            double orphanRatio = (double) overlapArea / figArea;
-                            long ebArea = (eb[2] - eb[0]) * (eb[3] - eb[1]);
-                            double existingRatio = ebArea > 0 ? (double) overlapArea / ebArea : 0;
-                            // 양쪽 모두 50% 이상 겹쳐야 중복 (같은 크기/위치의 객체)
-                            // 단, 한쪽이 다른 쪽을 거의 완전히 포함(>90%)하면
-                            // 배경/컨테이너 관계이므로 중복 아님
-                            boolean isContainment = (existingRatio > 0.9 && orphanRatio < 0.9)
-                                    || (orphanRatio > 0.9 && existingRatio < 0.9);
-                            if (orphanRatio > 0.7 && existingRatio > 0.7 && !isContainment) {
-                                overlapsExisting = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (overlapsExisting) continue;
-
-                // 같은 페이지에 이미 주입된 orphan에 포함되는 자식 건너뜀
-                // (부모 그룹의 렌더 이미지가 자식을 포함하므로 자식은 중복)
-                boolean containedByOrphan = false;
-                java.util.List<long[]> existingOrphans = pageOrphanBounds.get(pageIdx);
-                if (existingOrphans != null && figArea > 0) {
-                    for (long[] ob : existingOrphans) {
-                        long obW = ob[2] - ob[0];
-                        long obH = ob[3] - ob[1];
-                        long obArea = obW * obH;
-                        // ob가 현재 orphan을 80% 이상 포함하면 건너뜀
-                        long oLeft = Math.max(figX, ob[0]);
-                        long oTop = Math.max(figY, ob[1]);
-                        long oRight = Math.min(figX + figW, ob[2]);
-                        long oBottom = Math.min(figY + figH, ob[3]);
-                        if (oLeft < oRight && oTop < oBottom) {
-                            long oArea = (oRight - oLeft) * (oBottom - oTop);
-                            double containRatio = (double) oArea / figArea;
-                            if (containRatio > 0.8) {
-                                // 크기가 비슷하면 동일 객체 중복 → 건너뜀
-                                // 크기가 크게 다르면 배경-컨텐츠 레이어 관계 → 유지
-                                long minArea = Math.min(figArea, obArea);
-                                long maxArea = Math.max(figArea, obArea);
-                                double sizeRatio = maxArea > 0 ? (double) minArea / maxArea : 0;
-                                if (sizeRatio > 0.9) {
-                                    // 면적 비 90% 이상 → 거의 같은 크기 → 중복
-                                    containedByOrphan = true;
-                                    break;
-                                }
-                                // 면적 비 90% 미만 → 배경 위 컨텐츠 레이어 → 유지
-                            }
-                        }
-                    }
-                }
-                if (containedByOrphan) continue;
-
-                // 페이지 밖 음수 좌표 → crop fraction 설정
-                // HwpxImageBuilder가 hasCrop일 때 x<0, y<0을 자동 클램핑하므로
-                // 원래 크기를 유지하고 fraction만 설정
-                double cropLeft = 0, cropTop = 0;
-                if (!singleTextlessPagePlane && figX < 0) {
-                    cropLeft = (double) (-figX) / figW;
-                }
-                if (!singleTextlessPagePlane && figY < 0) {
-                    cropTop = (double) (-figY) / figH;
-                }
-
-                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
-                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
-                fig.x(figX);
-                fig.y(figY);
-                fig.width(figW);
-                fig.height(figH);
-                fig.imageData(data);
-                fig.imageFormat("png");
-                fig.pixelWidth(img.getWidth());
-                fig.pixelHeight(img.getHeight());
-                fig.sourceId(idmlHexId);
-                if (cropLeft > 0 || cropTop > 0) {
-                    fig.cropLeftFraction(cropLeft);
-                    fig.cropTopFraction(cropTop);
-                }
-
-                // z-order: IDML 스프레드 파싱 시 할당된 원본 z-order 사용
-                // (AST 텍스트 프레임과 동일한 스케일 → inFrontBlocks 정렬에서 올바른 스태킹)
-                java.util.Map<String, Integer> zMap = astDoc.idmlZOrders();
-                Integer idmlZ = rg.zOrderKnown() ? rg.zOrder() : null;
-                if (idmlZ == null) {
-                    idmlZ = (zMap != null) ? zMap.get(idmlHexId) : null;
-                }
-                if (idmlZ == null) {
-                    // 폴백: 순차 카운터
-                    Integer orphanZ = pageOrphanZCounter.get(pageIdx);
-                    if (orphanZ == null) orphanZ = 0;
-                    idmlZ = orphanZ;
-                    pageOrphanZCounter.put(pageIdx, orphanZ + 1);
-                }
-                fig.zOrder(idmlZ);
-                fig.visualLayer(rg.visualLayer());
-                fig.sourceLayerIndex(rg.layerIndex());
-                fig.fromGroup(!"PAGE_BACKGROUND".equals(rg.visualLayer()));
-
-                section.addBlock(fig);
-
-                // 주입된 orphan bounds 추적
-                java.util.List<long[]> orphanList = pageOrphanBounds.get(pageIdx);
-                if (orphanList == null) {
-                    orphanList = new java.util.ArrayList<>();
-                    pageOrphanBounds.put(pageIdx, orphanList);
-                }
-                orphanList.add(new long[]{figX, figY, figX + figW, figY + figH});
-                // 주입된 orphan의 자식 ID 기록 (자식 배지 중복 방지)
-                if (rg.childIds() != null) {
-                    for (int cid : rg.childIds()) {
-                        placedOrphanChildIds.add(cid);
-                    }
-                }
-
-                // === 스프레드 걸침 감지: 그래픽이 인접 페이지까지 확장되면 추가 배치 ===
-                if (!singleTextlessPagePlane && resolvedPage != null && resolvedPage.bounds() != null) {
-                    double pageRight = resolvedPage.bounds()[3];  // 현재 페이지 오른쪽 끝 (spread coords, pt)
-                    double graphicRight = bounds[3];              // 그래픽 오른쪽 끝
-                    int adjPageIdx = pageIdx + 1;
-                    // 그래픽이 현재 페이지를 넘어서고 다음 페이지가 존재하면
-                    if (graphicRight > pageRight + 10 && adjPageIdx < sections.size()) {
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage adjPage =
-                                resolvedData.getPage(adjPageIdx);
-                        if (adjPage != null && adjPage.bounds() != null) {
-                            double adjPageLeft = adjPage.bounds()[1];
-                            double graphicLeft = bounds[1];
-                            double totalW = graphicRight - graphicLeft;  // 전체 그래픽 폭
-                            double totalH = bounds[2] - bounds[0];
-                            if (totalW > 0 && totalH > 0) {
-                                // 인접 페이지 상대 좌표
-                                double adjRelX = graphicLeft - adjPageLeft;  // 음수 (페이지 왼쪽 바깥)
-                                double adjRelY = bounds[0] - adjPage.bounds()[0];
-                                long adjFigX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                        .pointsToHwpunits(adjRelX);
-                                long adjFigY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                        .pointsToHwpunits(adjRelY);
-                                long adjFigW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                        .pointsToHwpunits(totalW);
-                                long adjFigH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                        .pointsToHwpunits(totalH);
-                                // PNG 비율 보정
-                                if (img.getWidth() > 0) {
-                                    adjFigH = Math.round(adjFigW * ((double) img.getHeight() / img.getWidth()));
-                                }
-                                // crop fraction (왼쪽 부분 = 이전 페이지 영역)
-                                double adjCropLeft = 0, adjCropTop = 0;
-                                if (adjFigX < 0) {
-                                    adjCropLeft = (double) (-adjFigX) / adjFigW;
-                                }
-                                if (adjFigY < 0) {
-                                    adjCropTop = (double) (-adjFigY) / adjFigH;
-                                }
-
-                                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure adjFig =
-                                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
-                                adjFig.x(adjFigX);
-                                adjFig.y(adjFigY);
-                                adjFig.width(adjFigW);
-                                adjFig.height(adjFigH);
-                                adjFig.imageData(data);
-                                adjFig.imageFormat("png");
-                                adjFig.pixelWidth(img.getWidth());
-                                adjFig.pixelHeight(img.getHeight());
-                                adjFig.sourceId(idmlHexId + "_adj");
-                                adjFig.visualLayer(rg.visualLayer());
-                                adjFig.sourceLayerIndex(rg.layerIndex());
-                                adjFig.fromGroup(!"PAGE_BACKGROUND".equals(rg.visualLayer()));
-                                if (adjCropLeft > 0 || adjCropTop > 0) {
-                                    adjFig.cropLeftFraction(adjCropLeft);
-                                    adjFig.cropTopFraction(adjCropTop);
-                                }
-                                adjFig.zOrder(idmlZ);
-                                sections.get(adjPageIdx).addBlock(adjFig);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                // skip
-            }
-        }
-
-        // === 렌더링된 이미지 프레임 orphan 주입 ===
-        // renderedGraphicFrame이 이미 같은 영역을 커버하면 이미지 프레임 스킵
-        // (graphic 렌더는 배경 이미지까지 포함하므로 image 렌더가 중복됨)
-        Map<Integer, java.util.List<double[]>> graphicBoundsPerPage = new java.util.HashMap<>();
-        for (RenderedGroup gfx : resolvedData.allRenderedGraphicFrames()) {
-            if (gfx.bounds() != null && gfx.pageIndex() >= 0) {
-                graphicBoundsPerPage.computeIfAbsent(gfx.pageIndex(), k -> new java.util.ArrayList<>())
-                        .add(gfx.bounds());
-            }
-        }
-        java.util.Set<Integer> coveredChildIds = new java.util.HashSet<>();
-        // 자식 수 내림차순 정렬 → 큰 그룹 먼저 처리
-        java.util.List<RenderedGroup> sortedImgFrames = new java.util.ArrayList<>(
-                resolvedData.allRenderedImageFrames());
-        sortedImgFrames.sort((a, b) -> {
-            int aLen = a.childImageIds() != null ? a.childImageIds().length : 0;
-            int bLen = b.childImageIds() != null ? b.childImageIds().length : 0;
-            return Integer.compare(bLen, aLen);
-        });
-
-        for (RenderedGroup rg : sortedImgFrames) {
-            if (rg.file() == null || rg.bounds() == null) continue;
-
-            String idmlHexId = "u" + Integer.toHexString(rg.id());
-            if (usedSourceIds.contains(idmlHexId)) continue;
-            // BackgroundInjector가 page_obj_N 형식으로 이미 배치한 항목 스킵
-            if (usedSourceIds.contains("page_obj_" + rg.id())) continue;
-            if (isRenderedCoveredByUsedSource(rg, usedRenderedCoverageIds)) continue;
-
-            // 자식 이미지가 이미 사용되었거나 상위 그룹에 의해 커버됨
-            if (rg.childImageIds() != null) {
-                boolean anyChildUsed = false;
-                for (int childId : rg.childImageIds()) {
-                    String childHex = "u" + Integer.toHexString(childId);
-                    if (usedSourceIds.contains(childHex) || coveredChildIds.contains(childId)) {
-                        anyChildUsed = true;
-                        break;
-                    }
-                }
-                if (anyChildUsed) continue;
-            }
-
-            // 이 그룹 자체가 상위 그룹에 의해 이미 커버된 경우
-            if (coveredChildIds.contains(rg.id())) continue;
-
-            int pageIdx = rg.pageIndex();
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
-
-            // 같은 페이지의 renderedGraphicFrame이 이 이미지와 대부분 겹치면 스킵
-            // (graphic 렌더는 배경 이미지까지 포함하므로 image 렌더가 중복됨)
-            if (rg.bounds() != null) {
-                java.util.List<double[]> gfxBounds = graphicBoundsPerPage.get(pageIdx);
-                if (gfxBounds != null) {
-                    boolean coveredByGraphic = false;
-                    double[] ib = rg.bounds(); // [top, left, bottom, right]
-                    double imgArea = (ib[2] - ib[0]) * (ib[3] - ib[1]);
-                    if (imgArea > 0) {
-                        for (double[] gb : gfxBounds) {
-                            // overlap 영역 계산
-                            double oTop = Math.max(gb[0], ib[0]);
-                            double oLeft = Math.max(gb[1], ib[1]);
-                            double oBottom = Math.min(gb[2], ib[2]);
-                            double oRight = Math.min(gb[3], ib[3]);
-                            if (oBottom > oTop && oRight > oLeft) {
-                                double overlapArea = (oBottom - oTop) * (oRight - oLeft);
-                                if (overlapArea / imgArea > 0.7) {
-                                    coveredByGraphic = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (coveredByGraphic) {
-                        continue;
-                    }
-                }
-            }
-
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage resolvedPage =
-                    resolvedData.getPage(pageIdx);
 
             java.io.File pngFile = new java.io.File(resolvedDir, rg.file());
             if (!pngFile.exists()) continue;
@@ -1126,19 +617,16 @@ public class IDMLToHwpxConverter {
                 java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
                 if (img == null) continue;
 
-                double[] bounds = rg.bounds();
                 long figX, figY, figW, figH;
-                if (resolvedPage != null && resolvedPage.bounds() != null) {
-                    double[] rel = resolvedPage.spreadBoundsToPageRelative(bounds);
-                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(rel[0]);
-                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(rel[1]);
-                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[3] - bounds[1]);
-                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[2] - bounds[0]);
+                if (section.layout() != null
+                        && section.layout().pageWidth() > 0
+                        && section.layout().pageHeight() > 0) {
+                    figX = 0;
+                    figY = 0;
+                    figW = section.layout().pageWidth();
+                    figH = section.layout().pageHeight();
                 } else {
+                    double[] bounds = rg.bounds();
                     figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                             .pointsToHwpunits(bounds[1]);
                     figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
@@ -1147,17 +635,10 @@ public class IDMLToHwpxConverter {
                             .pointsToHwpunits(bounds[3] - bounds[1]);
                     figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                             .pointsToHwpunits(bounds[2] - bounds[0]);
+                    if (img.getWidth() > 0) {
+                        figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
+                    }
                 }
-                if (img.getWidth() > 0) {
-                    figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
-                }
-
-                // 음수 좌표 클램프: HWPX는 음수 오프셋을 지원하지 않음
-                // 크기는 유지하여 페이지 전체를 덮도록 함 (bleed 영역은 페이지 밖으로 확장)
-                if (figX < 0) figX = 0;
-                if (figY < 0) figY = 0;
-
-                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
 
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
                         new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
@@ -1169,19 +650,15 @@ public class IDMLToHwpxConverter {
                 fig.imageFormat("png");
                 fig.pixelWidth(img.getWidth());
                 fig.pixelHeight(img.getHeight());
-                fig.sourceId(idmlHexId);
+                fig.sourceId("page_plane_" + (pageIdx + 1));
+                Integer idmlZ = rg.zOrderKnown() ? rg.zOrder() : null;
+                if (idmlZ == null) idmlZ = 0;
+                fig.zOrder(idmlZ);
                 fig.visualLayer(rg.visualLayer());
                 fig.sourceLayerIndex(rg.layerIndex());
-                fig.zOrder(rg.zOrder());
-                fig.fromGroup(!"PAGE_BACKGROUND".equals(rg.visualLayer()));
+                fig.fromGroup(false);
 
                 section.addBlock(fig);
-                // 이 그룹의 자식 ID를 커버 목록에 추가 (하위 그룹 중복 방지)
-                if (rg.childImageIds() != null) {
-                    for (int childId : rg.childImageIds()) {
-                        coveredChildIds.add(childId);
-                    }
-                }
             } catch (Exception e) {
                 // skip
             }

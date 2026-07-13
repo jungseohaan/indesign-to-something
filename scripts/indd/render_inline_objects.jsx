@@ -241,9 +241,19 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 elapsedMs: nowMs() - pageStart
             });
             if (!ok) continue;
+            var syntheticSourceId = typeof _canonicalPagePlaneSyntheticSourceId === "function"
+                    ? _canonicalPagePlaneSyntheticSourceId(page.documentOffset)
+                    : (-940000000 + pageIndex);
+            var candidateId = typeof _canonicalPagePlaneCandidateId === "function"
+                    ? _canonicalPagePlaneCandidateId(page.documentOffset)
+                    : ("cand.pass.page_textless_graphic_groups.page."
+                        + String(page.documentOffset)
+                        + ".single_textless_page_plane");
             results.push({
-                id: -940000000 + pageIndex,
+                id: syntheticSourceId,
                 type: "page_textless_plane",
+                candidateId: candidateId,
+                candidateMatchStrategy: "page_plane_direct",
                 file: "rendered_frames/" + fileName,
                 bounds: bounds,
                 pageIndex: page.documentOffset,
@@ -255,10 +265,14 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 textOwner: "none",
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
-                reason: "single_textless_plane_experiment_text_frames_hidden_page_export",
-                sourceObjectIds: [],
-                exportSourceObjectIds: [],
-                hiddenTextFrameIds: _hiddenTextFrameIdsFromSaved(savedDocumentTextFrames),
+                materialization: "PAGE_PLANE_PNG",
+                slotRole: "page_textless_plane",
+                ownershipSlot: "CONTENT_VISUAL_SLOT",
+                reason: "canonical_single_textless_page_plane_export",
+                sourceObjectIds: [syntheticSourceId],
+                visualSourceObjectIds: [syntheticSourceId],
+                exportSourceObjectIds: [syntheticSourceId],
+                hiddenTextFrameIds: [],
                 exportSanity: {
                     singleTextlessPagePlane: true,
                     fileBytes: outFile.exists ? outFile.length : 0,

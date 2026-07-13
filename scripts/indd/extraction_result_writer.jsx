@@ -78,7 +78,12 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
             reason: item.reason || null,
             visualOwner: item.visualOwner || null,
             textOwner: item.textOwner || null,
+            materialization: item.materialization || (planCandidate ? planCandidate.materialization : null) || null,
+            ownershipSlot: item.ownershipSlot || (planCandidate ? planCandidate.ownershipSlot : null) || null,
             sourceObjectIds: item.sourceObjectIds || [],
+            visualSourceObjectIds: item.visualSourceObjectIds
+                    || (planCandidate ? planCandidate.visualSourceObjectIds : null)
+                    || [],
             executionSourceObjectIds: item.executionSourceObjectIds || item.sourceObjectIds || [],
             exportSourceObjectIds: item.exportSourceObjectIds || [],
             exportTargetObjectId: item.exportTargetObjectId || null,
@@ -109,7 +114,7 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
         schemaVersion: 1,
         policy: "POLICY-extraction-planning",
         scriptVersion: EXTRACT_SCRIPT_VERSION,
-        mode: "legacy-pass-candidate-results",
+        mode: "canonical-page-plane-results",
         sourceDocument: ctx.inddPath,
         outputDir: ctx.outputDir,
         pageRange: {
@@ -154,6 +159,7 @@ function _slimExtractionPlanForWrite(plan) {
         sourceClusterQuerySummary: plan.sourceClusterQuerySummary,
         plannerBundleSummary: plan.plannerBundleSummary,
         objectPlanSummary: plan.objectPlanSummary,
+        pagePlaneObjectPlanSummary: plan.pagePlaneObjectPlanSummary,
         sourceCoverageSummary: plan.sourceCoverageSummary,
         sourceOwnershipModelSummary: plan.sourceOwnershipModelSummary,
         sourceOwnershipStageGateSummary: plan.sourceOwnershipStageGateSummary,

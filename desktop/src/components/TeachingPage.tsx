@@ -252,7 +252,6 @@ export function TeachingPage() {
 
     try {
       const extractMode = useAppStore.getState().extractMode;
-      const graphicsMode = useAppStore.getState().graphicsMode;
       const result = await invoke<InddExtractResult>("extract_indd", {
         inddPath: path,
         jarPath,
@@ -262,7 +261,6 @@ export function TeachingPage() {
         perfMode: "fast",
         skipPdf: true,
         extractMode,
-        graphicsMode,
         chunkSize: null,
       });
       setIsExtracting(false);

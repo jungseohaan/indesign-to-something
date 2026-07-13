@@ -7049,9 +7049,151 @@ function _singleTextlessPlaneEmptyDiagnostics(candidates, mode, reason) {
     };
 }
 
+function _canonicalPagePlaneSyntheticSourceId(pageIndex) {
+    return -940000000 + Number(pageIndex || 0);
+}
+
+function _canonicalPagePlaneCandidateId(pageIndex) {
+    return "cand.pass.page_textless_graphic_groups.page."
+            + String(pageIndex)
+            + ".single_textless_page_plane";
+}
+
+function _canonicalPagePlaneObjectPlanId(pageIndex) {
+    return "objectPlan.page_textless_plane.page." + String(pageIndex);
+}
+
+function _canonicalPagePlaneBundleId(pageIndex) {
+    return "bundle.page_textless_plane.page." + String(pageIndex);
+}
+
+function _canonicalPagePlaneBounds(doc, pageIndex) {
+    try {
+        var page = doc.pages[pageIndex];
+        var pb = page.bounds;
+        return [0, 0, Number(pb[2]) - Number(pb[0]), Number(pb[3]) - Number(pb[1])];
+    } catch (ePagePlaneBounds) {}
+    return null;
+}
+
+function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagnostics) {
+    if (!objectPlanDiagnostics || !objectPlanDiagnostics.objectPlans) {
+        return { appendedCount: 0, appended: [] };
+    }
+    var objectPlans = objectPlanDiagnostics.objectPlans;
+    var claimedVisibleSourceIds = {};
+    function markIds(ids) {
+        for (var i = 0; ids && i < ids.length; i++) {
+            if (ids[i] === null || ids[i] === undefined) continue;
+            claimedVisibleSourceIds[String(ids[i])] = true;
+        }
+    }
+    for (var pi = 0; pi < objectPlans.length; pi++) {
+        var existing = objectPlans[pi];
+        if (!existing || existing.materialization === "PAGE_PLANE_PNG") continue;
+        if (!_sourceCoveragePlanHasVisibleVisual(existing)) continue;
+        markIds(existing.sourceObjectIds || []);
+        markIds(existing.visualSourceObjectIds || []);
+        markIds(existing.exportSourceObjectIds || []);
+        markIds(existing.hiddenVisualSourceObjectIds || []);
+    }
+
+    var coverageByPage = {};
+    for (var si = 0; sourceItems && si < sourceItems.length; si++) {
+        var src = sourceItems[si];
+        if (!src || src.id === null || src.id === undefined) continue;
+        if (claimedVisibleSourceIds[String(src.id)]) continue;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        if (src.pageIndex === null || src.pageIndex === undefined || Number(src.pageIndex) < 0) continue;
+        if (src.storyTextInlineSlot === true) continue;
+        if (src.storyAnchorPlacement && String(src.storyAnchorPlacement) !== "PAGE") continue;
+        if (!_sourceCoverageHasPotentialVisibleMaterial(src)) continue;
+        var pageKey = String(src.pageIndex);
+        if (!coverageByPage[pageKey]) coverageByPage[pageKey] = [];
+        coverageByPage[pageKey].push(src.id);
+    }
+
+    var appended = [];
+    for (var pageKey in coverageByPage) {
+        if (!coverageByPage.hasOwnProperty(pageKey)) continue;
+        var pageIndex = Number(pageKey);
+        var coverageIds = _sortedNumericIds(coverageByPage[pageKey]);
+        if (coverageIds.length === 0) continue;
+        var syntheticSourceId = _canonicalPagePlaneSyntheticSourceId(pageIndex);
+        var plan = {
+            objectPlanId: _canonicalPagePlaneObjectPlanId(pageIndex),
+            bundleId: _canonicalPagePlaneBundleId(pageIndex),
+            candidateId: _canonicalPagePlaneCandidateId(pageIndex),
+            passId: "pass.page_textless_graphic_groups",
+            pageIndex: pageIndex,
+            kind: "PAGE_TEXTLESS_PLANE",
+            unit: "PAGE",
+            mode: "TEXTLESS_PAGE_PLANE",
+            candidatePurpose: "PAGE_PLANE",
+            compositeRole: "single_textless_page_plane",
+            slotRole: "page_textless_plane",
+            primarySourceObjectId: syntheticSourceId,
+            sourceObjectIds: [syntheticSourceId],
+            sourceRootObjectIds: [syntheticSourceId],
+            clusterSourceObjectIds: [syntheticSourceId],
+            visualSourceObjectIds: [syntheticSourceId],
+            exportSourceObjectIds: [syntheticSourceId],
+            coverageSourceObjectIds: coverageIds,
+            materialization: "PAGE_PLANE_PNG",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_FLOATING_PNG",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            visualLayer: "PAGE_BACKGROUND",
+            policyLayer: "BACKGROUND",
+            zOrder: -900000,
+            reason: "canonical_single_textless_page_plane_owns_page_floating_visual_sources",
+            bounds: _canonicalPagePlaneBounds(doc, pageIndex),
+            ownershipSlot: "CONTENT_VISUAL_SLOT",
+            contractStatus: "READY_FOR_STAGE1_IMPORT",
+            migrationStatus: "READY_EXACT_CLUSTER",
+            migrationBlocker: "NONE",
+            executable: true,
+            required: true,
+            requiredSlot: "CONTENT_VISUAL_SLOT",
+            requiredSlotReason: "page_plane_canonical_visual_owner"
+        };
+        objectPlans.push(plan);
+        appended.push({
+            pageIndex: pageIndex,
+            objectPlanId: plan.objectPlanId,
+            candidateId: plan.candidateId,
+            syntheticSourceObjectId: syntheticSourceId,
+            coverageSourceCount: coverageIds.length
+        });
+    }
+
+    if (objectPlanDiagnostics.summary) {
+        objectPlanDiagnostics.summary.planCount = objectPlans.length;
+        objectPlanDiagnostics.summary.objectPlanCount = objectPlans.length;
+        objectPlanDiagnostics.summary.executablePlanCount =
+                (objectPlanDiagnostics.summary.executablePlanCount || 0) + appended.length;
+        objectPlanDiagnostics.summary.importReadyPlanCount =
+                (objectPlanDiagnostics.summary.importReadyPlanCount || 0) + appended.length;
+        if (!objectPlanDiagnostics.summary.materializationCounts) {
+            objectPlanDiagnostics.summary.materializationCounts = {};
+        }
+        objectPlanDiagnostics.summary.materializationCounts.PAGE_PLANE_PNG =
+                (objectPlanDiagnostics.summary.materializationCounts.PAGE_PLANE_PNG || 0)
+                + appended.length;
+        objectPlanDiagnostics.summary.pagePlaneMaterialization = {
+            appendedCount: appended.length,
+            appended: appended
+        };
+    }
+    return {
+        appendedCount: appended.length,
+        appended: appended
+    };
+}
+
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
-    var singleTextlessPlaneMode = ctx && ctx.graphicsMode === "single-textless-plane";
     var candidates = [];
     var candidateSeen = {};
     var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
@@ -7065,25 +7207,17 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     var sourceClusterDiagnostics = _buildSourceClusters(sourceItems);
     var sourceClusterIndex = _createSourceClusterIndex(sourceItems, sourceClusterDiagnostics);
     _marker(ctx.outputDir, "03d04_plan_sourceClusters");
-    if (!singleTextlessPlaneMode) {
-        _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceClusterIndex, candidates, candidateSeen);
-    } else {
-        try {
-            writeJson(ctx.outputDir + "/_base_candidate_perf.json", {
-                stage: "03d05_plan_baseCandidates",
-                sourceItemCount: sourceItems ? sourceItems.length : 0,
-                candidateCountAtStart: 0,
-                candidateCountAtEnd: 0,
-                elapsedMs: 0,
-                skippedByGraphicsMode: ctx.graphicsMode,
-                reason: "single_textless_plane_exports_page_visuals_without_per_object_graphic_candidates"
-            });
-        } catch (eSinglePlaneBasePerf) {}
-    }
+    try {
+        writeJson(ctx.outputDir + "/_base_candidate_perf.json", {
+            stage: "03d05_plan_baseCandidates",
+            sourceItemCount: sourceItems ? sourceItems.length : 0,
+            candidateCountAtStart: 0,
+            candidateCountAtEnd: 0,
+            elapsedMs: 0,
+            reason: "page_visuals_are_exported_by_single_textless_page_plane"
+        });
+    } catch (eSinglePlaneBasePerf) {}
     _marker(ctx.outputDir, "03d05_plan_baseCandidates");
-    if (!singleTextlessPlaneMode) {
-        _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
-    }
     _marker(ctx.outputDir, "03d05a_plan_textFrameStyleShellCandidates");
 
     var planCache = _createExtractionPlanSourceIndexCache(doc, sourceIndex);
@@ -7091,9 +7225,6 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d06_plan_inlineCandidates");
     _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d07_plan_declaredInlineShells");
-    if (!singleTextlessPlaneMode) {
-        _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
-    }
     _marker(ctx.outputDir, "03d08_plan_textOwningShellGroups");
     var inlineFlowVisualRootDiagnostics =
             _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidateSeen, {
@@ -7107,14 +7238,13 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     }
     _marker(ctx.outputDir, "03d08i_plan_inlineFlowVisualRoots");
 
-    if (!singleTextlessPlaneMode) {
-        _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, candidateSeen, planCache);
-    }
     _marker(ctx.outputDir, "03d09_plan_masterComposite");
     candidates = _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems);
     try {
         writeJson(ctx.outputDir + "/legacy-normalization-filters.json",
-                _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS || {});
+                typeof _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS !== "undefined"
+                        ? _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS || {}
+                        : {});
     } catch (eLegacyNormalizationFiltersWrite) {}
     if (ctx.writePlannerDiagnostics === true) {
         try {
@@ -7123,84 +7253,54 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         } catch (eInlineFlowRootAfterNormalizeWrite) {}
     }
     _marker(ctx.outputDir, "03d10_plan_normalizeSlots");
-    if (!singleTextlessPlaneMode) {
-        _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
-    }
     _marker(ctx.outputDir, "03d10a_plan_restoreTextFrameStyleShellCandidates");
     candidates = _includeOwnedInlineVisualsInTextlessShellCandidates(candidates, allItems, planCache, sourceItems);
     _marker(ctx.outputDir, "03d11_plan_includeInlineVisuals");
     candidates = _absorbInlineDecorationDescendantsIntoTextShellCandidates(candidates, sourceItems);
     _marker(ctx.outputDir, "03d11a_plan_absorbInlineTextShellDecorationDescendants");
-    if (!singleTextlessPlaneMode) {
-        _appendMultiTextParentGroupExportCandidatesFromSourceItems(sourceItems, candidates, candidateSeen);
-    }
     _marker(ctx.outputDir, "03d12_plan_multiTextParentGroups");
-    var tableCarrierTextlessShellDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "table_carrier_visual_shell_covered_by_page_plane")
-            : _appendTableCarrierTextlessShellCandidates(sourceItems, candidates, candidateSeen);
+    var tableCarrierTextlessShellDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "table_carrier_visual_shell_covered_by_page_plane");
     _marker(ctx.outputDir, "03d12a0_plan_tableCarrierTextlessShells");
-    var tableCarrierSiblingDecorationDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "table_carrier_sibling_decoration_covered_by_page_plane")
-            : _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates, candidateSeen);
+    var tableCarrierSiblingDecorationDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "table_carrier_sibling_decoration_covered_by_page_plane");
     _marker(ctx.outputDir, "03d12a1_plan_tableCarrierSiblingDecorations");
-    var pageTextlessGraphicGroupDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "page_textless_group_candidates_replaced_by_single_page_plane_export")
-            : _appendPageTextlessGraphicGroupCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
+    var pageTextlessGraphicGroupDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "page_textless_group_candidates_replaced_by_single_page_plane_export");
     _marker(ctx.outputDir, "03d12b_plan_pageTextlessGraphicGroups");
-    var pageTextlessGraphicGroupMergeDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "no_page_textless_group_candidates_to_merge")
-            : _mergeOverlappingPageTextlessGraphicGroupCandidates(candidates, sourceItems);
+    var pageTextlessGraphicGroupMergeDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "no_page_textless_group_candidates_to_merge");
     candidates = pageTextlessGraphicGroupMergeDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1_plan_mergeOverlappingPageTextlessGraphicGroups");
-    var inlineCarrierPageVisualDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "floating_page_visuals_covered_by_page_plane")
-            : _assignInlineCarrierPageVisuals(candidates, sourceItems);
+    var inlineCarrierPageVisualDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "floating_page_visuals_covered_by_page_plane");
     candidates = inlineCarrierPageVisualDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1a_plan_assignInlineCarrierPageVisuals");
-    var protectedDecorationPageGroupExclusionDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "no_page_textless_group_candidates_to_exclude")
-            : _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates);
+    var protectedDecorationPageGroupExclusionDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "no_page_textless_group_candidates_to_exclude");
     candidates = protectedDecorationPageGroupExclusionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b1b_plan_excludeProtectedDecorationFromPageGroups");
-    var crossPageClipParentDecorationSuppressionDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "cross_page_clip_parent_decorations_covered_by_page_plane")
-            : _suppressCrossPageClipParentSourceSetDecorations(candidates, sourceItems);
+    var crossPageClipParentDecorationSuppressionDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "cross_page_clip_parent_decorations_covered_by_page_plane");
     candidates = crossPageClipParentDecorationSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12b2_plan_suppressCrossPageClipParentDecorations");
-    var pageTextlessGraphicGroupSuppressionDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "no_page_textless_group_children_to_suppress")
-            : _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sourceItems);
+    var pageTextlessGraphicGroupSuppressionDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "no_page_textless_group_children_to_suppress");
     candidates = pageTextlessGraphicGroupSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12c_plan_suppressPageTextlessGraphicGroupChildren");
-    var preObjectPlanTextlessShellSuppressionDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "page_level_textless_shell_suppression_not_needed")
-            : _suppressChildExportsCoveredByTextlessGroupCandidates(candidates, sourceItems);
+    var preObjectPlanTextlessShellSuppressionDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "page_level_textless_shell_suppression_not_needed");
     candidates = preObjectPlanTextlessShellSuppressionDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12a_plan_suppressTextlessGroupChildrenBeforeObjectPlans");
-    var unclaimedVisibleVectorOwnershipDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "unclaimed_floating_vectors_covered_by_page_plane")
-            : _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItems, candidateSeen, sourceIndex);
+    var unclaimedVisibleVectorOwnershipDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "unclaimed_floating_vectors_covered_by_page_plane");
     _marker(ctx.outputDir, "03d12d_plan_unclaimedVisibleVectorOwnership");
-    var protectedDecorationPageGroupExclusionAfterUnclaimedDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "no_unclaimed_page_textless_group_candidates_to_exclude")
-            : _excludeProtectedDecorationSourcesFromPageTextlessGroups(candidates);
+    var protectedDecorationPageGroupExclusionAfterUnclaimedDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "no_unclaimed_page_textless_group_candidates_to_exclude");
     candidates = protectedDecorationPageGroupExclusionAfterUnclaimedDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12d1_plan_excludeProtectedDecorationFromPageGroupsAfterUnclaimed");
-    var pageTextlessGraphicGroupSuppressionAfterUnclaimedDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
-                    "no_unclaimed_page_textless_group_children_to_suppress")
-            : _suppressChildExportsCoveredByPageTextlessGraphicGroups(candidates, sourceItems);
+    var pageTextlessGraphicGroupSuppressionAfterUnclaimedDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
+            "no_unclaimed_page_textless_group_children_to_suppress");
     candidates = pageTextlessGraphicGroupSuppressionAfterUnclaimedDiagnostics.candidates;
     _marker(ctx.outputDir, "03d12d2_plan_suppressPageTextlessGraphicGroupChildrenAfterUnclaimed");
     var sourceClusterQueryDiagnostics = _buildSourceClusterQueryDiagnostics(sourceClusterIndex, candidates);
@@ -7209,9 +7309,6 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
     candidates = _normalizePageCoordinateCandidateBounds(candidates, sourceIndex);
     _marker(ctx.outputDir, "03d13b_plan_normalizePageCoordinateBounds");
-    if (!singleTextlessPlaneMode) {
-        candidates = _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex);
-    }
     _marker(ctx.outputDir, "03d13b1_plan_expandCrossPageFloatingVisuals");
     var preObjectPlanSourceSlotCanonicalizationDiagnostics = null;
     if (_candidateListHasObjectPlanLikeExecutionFields(candidates)) {
@@ -7239,6 +7336,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     }
     _marker(ctx.outputDir, "03d14_plan_plannerBundles");
     var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
+    var canonicalPagePlaneObjectPlanDiagnostics =
+            _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagnostics);
     _marker(ctx.outputDir, "03d15_plan_objectPlans");
     if (ctx.writePlannerDiagnostics === true) {
         try {
@@ -7361,21 +7460,16 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     }
     executionCandidates = _backfillVisibleCandidateVisualSources(executionCandidates, sourceItems);
     _marker(ctx.outputDir, "03d16g0b_plan_backfillExecutionVisualSources");
-    var unclaimedVisibleVectorFallbackDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(executionCandidates, ctx.graphicsMode,
-                    "unclaimed_visible_vector_execution_fallback_replaced_by_page_plane")
-            : _appendUnclaimedVisibleVectorExecutionCandidates(executionCandidates, sourceItems, sourceIndex);
+    var unclaimedVisibleVectorFallbackDiagnostics = _singleTextlessPlaneEmptyDiagnostics(executionCandidates, ctx.graphicsMode,
+            "unclaimed_visible_vector_execution_fallback_replaced_by_page_plane");
     _marker(ctx.outputDir, "03d16g1_plan_warnUnclaimedVisibleVectors");
     var sourceCoverageOptions = {
         fullDiagnostics: ctx.writePlannerDiagnostics === true
     };
     var sourceCoverageDiagnostics = _buildSourceCoverageDiagnostics(
             sourceItems, executionCandidates, objectPlanDiagnostics, sourceCoverageOptions);
-    var unresolvedVisibleVectorCoverageDiagnostics = singleTextlessPlaneMode
-            ? _singleTextlessPlaneEmptyDiagnostics(executionCandidates, ctx.graphicsMode,
-                    "image_validation_disabled_for_single_textless_plane_experiment")
-            : _reportUnresolvedVisibleVectorCoverage(
-                    executionCandidates, sourceCoverageDiagnostics, sourceItems, objectPlanDiagnostics);
+    var unresolvedVisibleVectorCoverageDiagnostics = _singleTextlessPlaneEmptyDiagnostics(executionCandidates, ctx.graphicsMode,
+            "page_floating_graphics_are_validated_through_single_textless_page_plane");
     _marker(ctx.outputDir, "03d16g6_plan_warnUnresolvedVisibleVectors");
     _marker(ctx.outputDir, "03d16h0_plan_sourceCoverageBuild");
     try { writeJson(ctx.outputDir + "/source-coverage.json", sourceCoverageDiagnostics); } catch (eSourceCoverageWrite) {}
@@ -7430,7 +7524,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         schemaVersion: 1,
         policy: "POLICY-extraction-planning",
         scriptVersion: EXTRACT_SCRIPT_VERSION,
-        mode: "legacy-pass-candidate-plan",
+        mode: "canonical-single-textless-page-plane-plan",
         sourceDocument: ctx.inddPath,
         outputDir: ctx.outputDir,
         pageRange: {
@@ -7456,6 +7550,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         sourceClusterQuerySummary: sourceClusterQueryDiagnostics.summary,
         plannerBundleSummary: plannerBundleDiagnostics.summary,
         objectPlanSummary: objectPlanDiagnostics.summary,
+        pagePlaneObjectPlanSummary: canonicalPagePlaneObjectPlanDiagnostics,
         sourceCoverageSummary: sourceCoverageDiagnostics.summary,
         sourceOwnershipModelSummary: sourceOwnershipModelDiagnostics.summary,
         renderUnits: sourceOwnershipModelDiagnostics.renderUnits
@@ -7496,10 +7591,12 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         },
         sourceSlotCanonicalizationSummary: sourceSlotCanonicalizationDiagnostics.diagnostics.summary,
         executionCandidateContractSummary: executionCandidateContractDiagnostics.summary,
-        legacyNormalizationFilterSummary: _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS
+        legacyNormalizationFilterSummary: typeof _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS !== "undefined"
+                && _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS
                 ? _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS.summary
                 : null,
-        exactShellSlotDuplicateSummary: _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS
+        exactShellSlotDuplicateSummary: typeof _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS !== "undefined"
+                && _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS
                 ? _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS.summary
                 : null,
         sourceSlotRegistrySummary: sourceSlotRegistryDiagnostics.summary,
@@ -7511,6 +7608,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         sourceClusterQueryDiagnostics: sourceClusterQueryDiagnostics,
         plannerBundleDiagnostics: plannerBundleDiagnostics,
         objectPlanDiagnostics: objectPlanDiagnostics,
+        pagePlaneObjectPlanDiagnostics: canonicalPagePlaneObjectPlanDiagnostics,
         sourceCoverageDiagnostics: sourceCoverageDiagnostics,
         sourceOwnershipModelDiagnostics: sourceOwnershipModelDiagnostics,
         preObjectPlanTextlessShellSuppressionDiagnostics:
@@ -7530,8 +7628,14 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         },
         sourceSlotCanonicalizationDiagnostics: sourceSlotCanonicalizationDiagnostics.diagnostics,
         executionCandidateContractDiagnostics: executionCandidateContractDiagnostics,
-        legacyNormalizationFilterDiagnostics: _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS,
-        exactShellSlotDuplicateDiagnostics: _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS,
+        legacyNormalizationFilterDiagnostics:
+                typeof _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS !== "undefined"
+                        ? _LEGACY_NORMALIZATION_FILTER_DIAGNOSTICS
+                        : null,
+        exactShellSlotDuplicateDiagnostics:
+                typeof _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS !== "undefined"
+                        ? _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS
+                        : null,
         sourceSlotRegistryDiagnostics: sourceSlotRegistryDiagnostics
     };
     return plan;

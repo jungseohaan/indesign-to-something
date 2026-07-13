@@ -650,12 +650,14 @@ public class ResolvedToASTBuilder {
         if (!"DROP_VISUAL".equals(jsonString(o, "visualAction"))) return null;
         if (!"HWPX_TEXT".equals(jsonString(o, "materialization"))) return null;
         int[] ownedTextFrameIds = jsonIntArray(o, "ownedTextFrameIds");
-        if (ownedTextFrameIds.length == 0) return null;
+        String[] ownedTextFrameIdKeys = jsonStringArray(o, "ownedTextFrameIdKeys");
+        if (ownedTextFrameIds.length == 0 && ownedTextFrameIdKeys.length == 0) return null;
         int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
         if (sourceIds.length == 0) sourceIds = ownedTextFrameIds;
-        int domId = jsonInt(o, "primarySourceObjectId", ownedTextFrameIds[0]);
+        int domId = jsonInt(o, "primarySourceObjectId",
+                ownedTextFrameIds.length > 0 ? ownedTextFrameIds[0] : -1);
         int pageIndex = jsonInt(o, "pageIndex", -1);
-        if (domId < 0) return null;
+        if (domId < 0 && ownedTextFrameIdKeys.length == 0) return null;
         TextAction textActionValue = strictEnumValue(TextAction.class, textAction);
         VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
         Placement placement = strictEnumValue(Placement.class, jsonString(o, "placement"));
@@ -688,7 +690,8 @@ public class ResolvedToASTBuilder {
                 null,
                 jsonString(o, "sourceLayerId"),
                 jsonString(o, "sourceLayerName"),
-                jsonInt(o, "sourceLayerIndex", -1));
+                jsonInt(o, "sourceLayerIndex", -1))
+                .withOwnedTextFrameIdKeys(ownedTextFrameIdKeys);
     }
 
     private static ObjectPlan tableTextObjectPlanFromJson(JsonObject o) {
@@ -1130,6 +1133,19 @@ public class ResolvedToASTBuilder {
             out[i] = arr.get(i).isJsonNull() ? 0 : arr.get(i).getAsInt();
         }
         return out;
+    }
+
+    private static String[] jsonStringArray(JsonObject o, String key) {
+        if (o == null || key == null || !o.has(key) || !o.get(key).isJsonArray()) return new String[0];
+        JsonArray arr = o.getAsJsonArray(key);
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (int i = 0; i < arr.size(); i++) {
+            if (arr.get(i).isJsonNull()) continue;
+            String value = arr.get(i).getAsString();
+            if (value == null || value.isEmpty()) continue;
+            out.add(value);
+        }
+        return out.toArray(new String[0]);
     }
 
     private static int[] jsonSourceSetArray(

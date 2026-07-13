@@ -34,8 +34,6 @@ pub async fn extract_indd(
     skip_pdf: Option<bool>,
     // extractor mode. 기본은 spread_chunks이며, 필요 시 "full"로 legacy 단일 범위 추출을 강제할 수 있다.
     extract_mode: Option<String>,
-    // graphics mode. 기본은 single-textless-plane이며, policy는 비교/디버그용 fallback.
-    graphics_mode: Option<String>,
     // 분할 추출: chunk_size > 0 이면 해당 페이지 수 단위로 청크 추출.
     // debug page range(start_page/end_page)가 지정된 경우 무시.
     chunk_size: Option<i32>,
@@ -51,9 +49,6 @@ pub async fn extract_indd(
     let sk = skip_pdf.unwrap_or(false);
     let extract_mode_normalized = extract_mode
         .unwrap_or_else(|| "spread_chunks".to_string())
-        .to_lowercase();
-    let graphics_mode_normalized = graphics_mode
-        .unwrap_or_else(|| "single-textless-plane".to_string())
         .to_lowercase();
 
     // 0. INDD 경로 준비. 같은 폴더의 같은 basename IDML은 JSX 단계에서
@@ -93,7 +88,6 @@ pub async fn extract_indd(
         &pm_normalized,
         sk,
         &extract_mode_normalized,
-        &graphics_mode_normalized,
         sibling_idml_path_for_indd(indd).as_deref(),
     );
 
@@ -135,7 +129,6 @@ pub async fn extract_indd(
             sm,
             &pm_normalized,
             sk,
-            &graphics_mode_normalized,
         )
         .await
     } else {
@@ -159,7 +152,6 @@ pub async fn extract_indd(
                 &pm_normalized,
                 sk,
                 cs,
-                &graphics_mode_normalized,
             )
             .await
             .map_err(|e| {
@@ -179,7 +171,6 @@ pub async fn extract_indd(
                 &pm_normalized,
                 sk,
                 &extract_mode_normalized,
-                &graphics_mode_normalized,
                 debug_range,
             )
             .await
@@ -333,7 +324,6 @@ async fn try_partial_extraction(
     spread_mode: bool,
     perf_mode: &str,
     skip_pdf: bool,
-    graphics_mode: &str,
 ) -> Option<crate::indesign::InddExtractResult> {
     // 1. 이전 캐시 키 조회
     let indd = std::path::Path::new(indd_path);
@@ -398,7 +388,6 @@ async fn try_partial_extraction(
         perf_mode,
         skip_pdf,
         &skip_json,
-        graphics_mode,
     )
     .await
     .ok()?;

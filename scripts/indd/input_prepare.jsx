@@ -240,7 +240,7 @@ function buildPageData(doc, startPage, endPage, allItems) {
 
 // args 배열을 파싱해 ctx 객체를 반환하고 전역 CONFIG를 초기화한다.
 function _parseArgs(args) {
-    var graphicsMode = (args[17] || "single-textless-plane").toLowerCase();
+    var graphicsMode = "single-textless-plane";
     try { CANONICAL_GRAPHICS_MODE = graphicsMode; } catch (eGraphicsModeGlobal) {}
     var ctx = {
         inddPath:           args[0],

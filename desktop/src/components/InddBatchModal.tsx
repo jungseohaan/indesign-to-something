@@ -32,8 +32,6 @@ export function InddBatchModal() {
     setPerfMode,
     extractMode,
     setExtractMode,
-    graphicsMode,
-    setGraphicsMode,
     extractChunkSize,
     setExtractChunkSize,
     outputFormat,
@@ -373,20 +371,6 @@ export function InddBatchModal() {
                 >
                   <option value="spread_chunks">spread_chunks</option>
                   <option value="full">full</option>
-                </select>
-              </label>
-              <label
-                className="flex items-center gap-1.5 text-xs text-gray-600"
-                title="그래픽 추출 정책. single_textless는 페이지 그래픽을 텍스트 없는 통 PNG로 추출하는 기본 경로입니다."
-              >
-                그래픽:
-                <select
-                  value={graphicsMode}
-                  onChange={(e) => setGraphicsMode(e.target.value as "policy" | "single-textless-plane")}
-                  className="border border-gray-300 rounded px-1 py-0.5 text-xs"
-                >
-                  <option value="single-textless-plane">single_textless</option>
-                  <option value="policy">policy_legacy</option>
                 </select>
               </label>
               <label

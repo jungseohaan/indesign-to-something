@@ -187,7 +187,6 @@ pub fn compute_cache_key(
     perf_mode: &str,
     skip_pdf: bool,
     extract_mode: &str,
-    graphics_mode: &str,
     sibling_idml_path: Option<&Path>,
 ) -> String {
     let mut hasher = Sha256::new();
@@ -229,8 +228,6 @@ pub fn compute_cache_key(
     hasher.update(if skip_pdf { b"1|" } else { b"0|" });
     hasher.update(b"|extractMode:");
     hasher.update(extract_mode.as_bytes());
-    hasher.update(b"|graphicsMode:");
-    hasher.update(graphics_mode.as_bytes());
     hasher.update(b"|");
 
     let digest = hasher.finalize();
