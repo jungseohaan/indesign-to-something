@@ -434,7 +434,11 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         && (inlineCandidate.slotRole === "direct_child_shell_slot"
                             || inlineCandidate.compositeRole === "direct_child_shell_slot")
                         && (inlineCandidate.exportSourceObjectIds && inlineCandidate.exportSourceObjectIds.length > 0);
-                if (inItem.constructor.name === "TextFrame" && !plannedTextFrameShell) {
+                var plannedInlineTextFrameVisual = inlineCandidate.visualAction === "PLACE_INLINE_PNG"
+                        && inlineCandidate.placement === "INLINE"
+                        && inlineCandidate.compositeRole === "empty_inline_textframe_visual"
+                        && (inlineCandidate.exportSourceObjectIds && inlineCandidate.exportSourceObjectIds.length > 0);
+                if (inItem.constructor.name === "TextFrame" && !plannedTextFrameShell && !plannedInlineTextFrameVisual) {
                     inlineStats.textFrameSkipped++;
                     continue;
                 }

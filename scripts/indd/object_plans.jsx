@@ -530,6 +530,13 @@ function _objectPlanTextFrameIdValue(src) {
     return null;
 }
 
+function _objectPlanEmptyInlineTextFrameHasVisibleFramePaint(src) {
+    if (!src || String(src.kind || "") !== "TextFrame") return false;
+    if (src.storyAnchorPlacement !== "INLINE" && src.storyTextInlineSlot !== true) return false;
+    if (src.hasVisibleFill === true || src.hasVisibleStroke === true) return true;
+    return false;
+}
+
 function _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems) {
     if (!objectPlans || !sourceItems) return;
     var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
@@ -559,6 +566,12 @@ function _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems) {
                     "empty_text_frame_visual_source");
             objectPlans.push(visualCleanupPlan);
             _addObjectPlanToDecisionIndex(decisionIndex, visualCleanupPlan);
+            continue;
+        }
+        if (_objectPlanEmptyInlineTextFrameHasVisibleFramePaint(src)) {
+            var inlineVisualPlan = _emptyInlineTextFrameVisualObjectPlan(src, id, pageIndex, zOrder);
+            objectPlans.push(inlineVisualPlan);
+            _addObjectPlanToDecisionIndex(decisionIndex, inlineVisualPlan);
             continue;
         }
         if (_objectPlanDecisionIndexHasTextDecision(decisionIndex, id)) continue;
@@ -1478,6 +1491,80 @@ function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
         migrationStatus: "READY_TEXT_ONLY",
         migrationBlocker: "NONE",
         migrationBlockerDetail: {},
+        executable: true,
+        required: true
+    };
+}
+
+function _emptyInlineTextFrameVisualObjectPlan(src, id, pageIndex, zOrder) {
+    var sourceIds = _internSourceSetIds([id]);
+    var sourceSetId = _sourceSetId(sourceIds);
+    return {
+        objectPlanId: "objectPlan.empty_inline_textframe_visual." + String(id),
+        bundleId: "textFrame.emptyInlineVisual." + String(id),
+        candidateId: _candidateId("pass.inline_objects", id, pageIndex),
+        passId: "pass.inline_objects",
+        pageIndex: pageIndex,
+        kind: "TextFrame",
+        unit: "INLINE_OBJECT",
+        mode: "TEXTLESS_CANDIDATE",
+        candidatePurpose: "INLINE_CANDIDATE",
+        compositeRole: "empty_inline_textframe_visual",
+        slotRole: "content_visual_slot",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: true,
+        inlineCompositeLayoutDescendant: false,
+        inlineAnchorSourceObjectId: id,
+        inlineSourceTreeClosed: true,
+        inlineFlowSourceObjectIds: sourceIds,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: id,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: sourceSetId,
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: sourceSetId,
+        exportSourceSetId: sourceSetId,
+        hiddenSourceSetId: _sourceSetId([]),
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: sourceIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: { TextFrame: 1 },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: false,
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: true,
+        visualSourceObjectIds: sourceIds,
+        styleSourceObjectIds: sourceIds,
+        ownedTextFrameIds: [],
+        exportSourceObjectIds: sourceIds,
+        exportTargetObjectId: id,
+        atomicExportTargetObjectId: id,
+        atomicExportTargetObjectIds: sourceIds,
+        atomicTextlessVectorContent: true,
+        atomicContentVisualSlot: true,
+        hiddenVisualSourceObjectIds: [],
+        excludedInlineSourceObjectIds: [],
+        materialization: "EXTRACTED_PNG_VECTOR",
+        textAction: "DROP_TEXT",
+        visualAction: "PLACE_INLINE_PNG",
+        placement: "INLINE",
+        coordinateSpace: "STORY_FLOW",
+        visualLayer: "CONTENT_VISUAL",
+        zOrder: zOrder,
+        reason: "empty_inline_text_frame_visible_frame_paint",
+        bounds: src.bounds || null,
+        renderSourceBounds: src.bounds || null,
+        cropSourceBounds: src.bounds || null,
+        ownershipSlot: "CONTENT_VISUAL_SLOT",
+        policyLayer: "CONTENT",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_EXACT_CLUSTER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
         executable: true,
         required: true
     };
