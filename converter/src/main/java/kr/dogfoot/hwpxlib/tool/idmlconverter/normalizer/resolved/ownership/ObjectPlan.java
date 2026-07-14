@@ -4,6 +4,7 @@ import java.util.Arrays;
 
 /** Source ownership policy object plan. */
 public final class ObjectPlan {
+    public String objectPlanId;
     public final int domId;
     public final String kind;
     public final String candidateId;
@@ -237,6 +238,7 @@ public final class ObjectPlan {
             String sourceLayerName,
             int sourceLayerIndex) {
         this.domId = domId;
+        this.objectPlanId = null;
         this.kind = kind;
         this.candidateId = candidateId;
         this.planPassId = planPassId;
@@ -302,6 +304,7 @@ public final class ObjectPlan {
             boolean inlineSourceTreeClosed,
             int[] inlineFlowSourceObjectIds) {
         this.domId = base.domId;
+        this.objectPlanId = base.objectPlanId;
         this.kind = base.kind;
         this.candidateId = base.candidateId;
         this.planPassId = base.planPassId;
@@ -1191,8 +1194,14 @@ public final class ObjectPlan {
     }
 
     private ObjectPlan withCurrentInlineFlow(ObjectPlan plan) {
-        return plan.withOwnedTextFrameIdKeys(ownedTextFrameIdKeys)
+        return plan.withObjectPlanId(objectPlanId)
+                .withOwnedTextFrameIdKeys(ownedTextFrameIdKeys)
                 .withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds);
+    }
+
+    public ObjectPlan withObjectPlanId(String id) {
+        this.objectPlanId = id;
+        return this;
     }
 
     public ObjectPlan withOwnedTextFrameIdKeys(String[] keys) {
@@ -1348,6 +1357,7 @@ public final class ObjectPlan {
     public String toJson() {
         StringBuilder sb = new StringBuilder(320);
         sb.append('{')
+                .append("\"objectPlanId\":\"").append(escape(objectPlanId)).append("\",")
                 .append("\"domId\":").append(domId).append(',')
                 .append("\"kind\":\"").append(escape(kind)).append("\",")
                 .append("\"candidateId\":\"").append(escape(candidateId)).append("\",")

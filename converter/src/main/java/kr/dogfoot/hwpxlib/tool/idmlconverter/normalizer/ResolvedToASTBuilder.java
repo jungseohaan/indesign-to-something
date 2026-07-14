@@ -291,6 +291,7 @@ public class ResolvedToASTBuilder {
                     plan = nativeVectorShapePlanFromJson(planJson);
                 }
                 if (plan == null) continue;
+                plan.withObjectPlanId(jsonString(planJson, "objectPlanId"));
                 if (isSupersededMasterInstanceTextPlan(plan)) {
                     warnSupersededMasterInstanceTextPlanSkipped(plan);
                     continue;

@@ -1403,6 +1403,7 @@ function _slimObjectPlanForWrite(plan) {
         "slotRole",
         "layoutOnlyInlineSlot",
         "sourceInlineFlow",
+        "pagePositionedAnchoredSource",
         "inlineCompositeLayoutDescendant",
         "inlineAnchorSourceObjectId",
         "inlineSourceTreeClosed",
@@ -1488,6 +1489,7 @@ function _objectPlanSlimFieldIsWriteOnlyDiagnostic(key, plan) {
             || key === "omittedClusterSourceSetId")
             && !_objectPlanSlimPlanNeedsDiagnosticSourceSets(plan)) return true;
     if (key === "sourceInlineFlow") return true;
+    if (key === "pagePositionedAnchoredSource") return true;
     if (key === "inlineCompositeLayoutDescendant") return true;
     if (key === "connectorDecorationVisual") return true;
     if (key === "clusterHasEditableText") return true;
@@ -3047,6 +3049,7 @@ function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceB
         if (plan.placement !== "FLOATING" || plan.coordinateSpace !== "PAGE") return false;
         if (plan.layoutOnlyInlineSlot === true
                 || plan.sourceInlineFlow === true
+                || plan.pagePositionedAnchoredSource === true
                 || plan.inlineCompositeLayoutDescendant === true
                 || plan.inlineAnchorSourceObjectId !== null
                         && plan.inlineAnchorSourceObjectId !== undefined) {
@@ -3475,6 +3478,7 @@ function _objectPlanEligibleForPageBackgroundPlane(plan) {
     if (plan.placement !== "FLOATING" || plan.coordinateSpace !== "PAGE") return false;
     if (plan.layoutOnlyInlineSlot === true
             || plan.sourceInlineFlow === true
+            || plan.pagePositionedAnchoredSource === true
             || plan.inlineCompositeLayoutDescendant === true
             || plan.inlineAnchorSourceObjectId !== null
                     && plan.inlineAnchorSourceObjectId !== undefined) return false;
@@ -4512,6 +4516,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         slotRole: bundle.slotRole || null,
         layoutOnlyInlineSlot: bundle.layoutOnlyInlineSlot === true,
         sourceInlineFlow: bundle.sourceInlineFlow === true,
+        pagePositionedAnchoredSource: bundle.pagePositionedAnchoredSource === true,
         inlineCompositeLayoutDescendant: bundle.inlineCompositeLayoutDescendant === true,
         inlineAnchorSourceObjectId: placement === "INLINE"
                 ? (bundle.inlineAnchorSourceObjectId || null)
@@ -5140,12 +5145,13 @@ function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
 }
 
 function _objectPlanPlacement(bundle) {
-    if (bundle && bundle.inlineAnchorSourceObjectId && bundle.sourceInlineFlow === true) return "INLINE";
+    if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
     if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
     if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";
     if (bundle && bundle.passId === "pass.inline_objects") {
         var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
+        if (bundle.pagePositionedAnchoredSource === true) return "FLOATING";
         if (bundle.sourceInlineFlow === true && bundle.inlineAnchorSourceObjectId) return "INLINE";
         if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
             return "FLOATING";

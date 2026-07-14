@@ -287,7 +287,11 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
                 declaredCandidate, slotSources);
     }
     var zOrder = _plannerBundleZOrder(candidate, primarySourceObjectId, clusterIndex);
-    var sourceInlineFlow = _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex);
+    var pagePositionedAnchoredSource = _plannerBundleSourceSetHasPagePositionedAnchor(
+            sourceIds, clusterIndex);
+    var sourceInlineFlow = pagePositionedAnchoredSource
+            ? false
+            : _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex);
     var inlineAnchorSourceObjectId = candidate.inlineAnchorSourceObjectId
             || _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex);
     var inlineCompositeLayoutDescendant = _plannerBundleIsInsideInlineCompositeLayout(
@@ -355,6 +359,7 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         executable: executable,
         required: candidate.required === true,
         sourceInlineFlow: sourceInlineFlow,
+        pagePositionedAnchoredSource: pagePositionedAnchoredSource,
         inlineCompositeLayoutDescendant: inlineCompositeLayoutDescendant,
         inlineAnchorSourceObjectId: inlineAnchorSourceObjectId || null,
         inlineSourceTreeClosed: candidate.inlineSourceTreeClosed === true,
@@ -606,6 +611,26 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
     }
     cache[cacheKey] = sawInline;
     return cache[cacheKey];
+}
+
+function _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex) {
+    if (!sourceIds || sourceIds.length === 0 || !clusterIndex || !clusterIndex.sourceInfo) {
+        return false;
+    }
+    var cache = _plannerBundleCache(clusterIndex, "pagePositionedAnchorBySourceSet");
+    var cacheKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
+    for (var i = 0; i < sourceIds.length; i++) {
+        var src = clusterIndex.sourceInfo(sourceIds[i]);
+        if (!src) continue;
+        if (String(src.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED"
+                || String(src.anchoredPosition || "").toUpperCase() === "ANCHORED") {
+            cache[cacheKey] = true;
+            return true;
+        }
+    }
+    cache[cacheKey] = false;
+    return false;
 }
 
 function _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex) {

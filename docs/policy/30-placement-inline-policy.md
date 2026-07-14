@@ -65,10 +65,13 @@ Placement and coordinate space are a single source decision.
   Stage 0 `storyTextInlineSlot=true` fact obtained from an actual story anchor
   marker (`U+FFFC` or `U+0016`) that directly owns the source object.
   `parentKind=Character` / `InsertionPoint` alone is never sufficient because a
-  floating anchored object also has a story character anchor. If the source is
-  `FLOATING_ANCHORED` / `Anchored` without `storyTextInlineSlot=true`,
-  Stage 1 must use `placement=FLOATING` and Story/Text Builder must not insert
-  the PNG into the paragraph flow.
+  floating anchored object also has a story character anchor. Explicit
+  page-positioned source metadata wins over the marker: if the same source
+  bundle contains `storyAnchorPlacement=FLOATING_ANCHORED` or
+  `AnchoredPosition="Anchored"`, Stage 1 must use `placement=FLOATING` and
+  `coordinateSpace=PAGE`, even when `storyTextInlineSlot=true` is present for
+  the anchored object. Story/Text Builder must not insert that PNG into the
+  paragraph flow.
 - An empty inline TextFrame with only frame paint is not automatically
   `CONTENT_VISUAL_SLOT`. When the same source pattern appears as a repeated
   baseline run of small empty inline frames, the run represents a text-flow
