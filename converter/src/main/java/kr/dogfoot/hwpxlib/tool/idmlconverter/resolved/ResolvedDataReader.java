@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 
 import com.google.gson.JsonArray;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -423,10 +424,29 @@ public class ResolvedDataReader {
 
         if (o.has("runs")) {
             for (JsonElement e : o.getAsJsonArray("runs")) {
-                para.addRun(parseRun(e.getAsJsonObject()));
+                ResolvedRun run = parseRun(e.getAsJsonObject());
+
+                // 하나의 화살표 글리프가 여러 런으로 쪼개져 들어오기도 한다.
+                // 실측(resolved.json): 문단 "@C" 가 런 '@' + 런 'C' 로 분리되어 있고,
+                // 둘 다 fontFamily=BT화살표 다. 각각 "→" 로 정규화하면 "→→" 가 된다.
+                // → 직전 런이 이미 화살표면 같은 글리프의 나머지 조각이므로 버린다.
+                if (isArrowRun(run) && lastRunIsArrow(para)) {
+                    continue;
+                }
+                para.addRun(run);
             }
         }
         return para;
+    }
+
+    /** 화살표로 정규화된 런인가 (parseRun 이 이미 "→" 로 바꿔둔 상태). */
+    private static boolean isArrowRun(ResolvedRun run) {
+        return run != null && BTFontGlyphMap.ARROW.equals(run.text());
+    }
+
+    private static boolean lastRunIsArrow(ResolvedParagraph para) {
+        if (para == null || para.runs() == null || para.runs().isEmpty()) return false;
+        return isArrowRun(para.runs().get(para.runs().size() - 1));
     }
 
     private static ResolvedRun parseRun(JsonObject o) {
@@ -444,6 +464,16 @@ public class ResolvedDataReader {
         run.position(getString(o, "position"));
         run.underline(getBoxedBool(o, "underline"));
         run.strikeThru(getBoxedBool(o, "strikeThru"));
+
+        // 화살표 글리프 정규화 — 파싱 직후 한 번만.
+        //
+        // InDesign 은 화학 반응식의 화살표를 "BT화살표" 전용 폰트로 조판한다. 그 폰트는
+        // 특정 글자 자리에 화살표 모양을 그려둔 것이라, 저장된 실제 글자가 제각각이다
+        // (실측: 같은 문서에 "C" 5회, "@" 4회, "@C" 3회, "?C" 2회).
+        // 여기서 "→" 로 통일해두면 하류는 평범한 텍스트로 다루면 된다.
+        run.text(BTFontGlyphMap.normalizeArrowGlyphText(
+                run.fontFamily(), run.charStyle(), run.text()));
+
         // IDML-Free: inline_anchor
         run.type(getString(o, "type"));
         run.storyAnchorPlacement(getString(o, "storyAnchorPlacement"));

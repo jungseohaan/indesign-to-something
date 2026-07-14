@@ -147,28 +147,14 @@ public final class TextFlowAstMaterializer {
                 runs = ResolvedTextFlowAstConverter.convertSyntheticText(text, null, target);
             }
 
-            // 화살표 글리프(@C / ?C / C)를 실제 화살표로 치환한다.
-            //
-            // 이 경로(TextFlow → AST)는 IDML 런을 거치지 않아 StoryLoader 의
-            // isStandaloneBtArrowGlyphRun 분기를 타지 못한다. sourceRun 의 폰트가
-            // 살아있는 마지막 지점이 여기다. 놓치면 하류에서는 폰트가 이미 벗겨져
-            // 있어(함초롬돋움) 화살표인지 알 수 없고, 반응식을 표로 조판한 셀에
-            // "@C" 가 그대로 노출된다.
-            //
-            // 글리프 코드는 문서마다 다르므로(관측: "@C", "?C", 접두문자 없는 "C")
-            // 텍스트가 아니라 폰트로 판정한다.
+            // 화살표 런: 텍스트는 ResolvedDataReader 가 파싱 직후 이미 "→" 로
+            // 정규화했다. 여기서는 폰트만 벗긴다 — BT화살표 폰트를 그대로 두면
+            // 한글이 글리프를 렌더링하지 못한다.
             boolean arrowRun = textAtom.sourceRun != null
                     && BTFontGlyphMap.isBTArrowFont(textAtom.sourceRun.fontFamily());
 
-            boolean arrowEmitted = false;
             for (ASTTextRun run : runs) {
                 if (arrowRun) {
-                    // convertRunText 는 런 하나를 여러 ASTTextRun 으로 쪼갤 수 있다.
-                    // 각각에 화살표를 넣으면 "→→" 가 된다(실측: 화살표 단독 셀 8곳).
-                    // → 화살표는 딱 한 번만 내보내고, 나머지 조각은 버린다.
-                    if (arrowEmitted) continue;
-                    arrowEmitted = true;
-                    run.text("→");
                     run.fontFamily(null);
                     run.fontStyle(null);
                     run.grepMathFont(false);

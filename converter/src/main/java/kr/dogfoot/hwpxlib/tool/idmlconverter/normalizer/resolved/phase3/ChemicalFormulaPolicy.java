@@ -155,20 +155,13 @@ public final class ChemicalFormulaPolicy {
         for (IDMLCharacterRun run : runs) {
             if (run == null) continue;
 
-            // 화살표 런: 글리프 코드를 실제 화살표 문자로 바꾼다.
+            // 화살표 런: 텍스트는 IDMLStoryParser 가 파싱 직후 이미 "→" 로 정규화했다.
+            // 여기서는 폰트/스타일만 벗긴다.
             //
-            // 길이를 보존한다. IDML 런 ↔ resolved 런 매칭이 텍스트 길이 기준이라,
-            // "@C"(2자)를 "→"(1자)로 줄이면 이후 매칭이 밀려 아래첨자가 엉뚱한 런에
-            // 붙는다(실측: 2MgO 의 계수 2 가 아래첨자가 됨).
-            //
-            // 글리프 코드는 문서마다 다르다(관측: "@C", "?C", 접두문자 없는 "C").
-            // 텍스트가 아니라 폰트/스타일로 판정해야 "C" 단독도 잡힌다.
+            // 예전에는 여기서 텍스트도 치환했는데, IDML 런 ↔ resolved 런 매칭이 텍스트
+            // 기준이라 매칭이 어긋나 뒤따르는 글자를 먹었다(실측: "Ca(OH)₂" → "a(OH)₂").
+            // 파싱 단계에서 양쪽(IDML/resolved)을 동시에 정규화하므로 그 문제가 없다.
             if (isArrowGlyphRun(run)) {
-                String orig = run.content();
-                int len = orig == null ? 1 : orig.length();
-                StringBuilder sb = new StringBuilder(ARROW);
-                while (sb.length() < len) sb.append(' ');
-                run.content(sb.toString());
                 run.fontFamily(null);
                 run.fontStyle(null);
                 run.appliedCharacterStyle(null);
@@ -221,7 +214,9 @@ public final class ChemicalFormulaPolicy {
         for (IDMLCharacterRun run : runs) {
             if (run == null) continue;
             if (!isArrowGlyphRun(run)) continue;
-            run.content(ARROW);
+            // 텍스트는 IDMLStoryParser 가 파싱 직후 이미 "→" 로 정규화했다.
+            // 여기서는 폰트/스타일만 벗긴다 — BT화살표 폰트를 그대로 두면
+            // 한글이 글리프를 렌더링하지 못한다.
             run.fontFamily(null);
             run.fontStyle(null);
             run.appliedCharacterStyle(null);
