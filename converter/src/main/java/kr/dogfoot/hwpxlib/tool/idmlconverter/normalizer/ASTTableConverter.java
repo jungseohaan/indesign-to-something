@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
@@ -752,6 +753,11 @@ public class ASTTableConverter {
 
         if (idmlCell.fillColor() != null) {
             cell.fillColor(resolveTableColor(resolvedData, idmlCell.fillColor(), idmlCell.fillTint()));
+        } else {
+            ResolvedTable.Cell resolvedCell = findResolvedCell(resolvedData, idmlTable, idmlCell);
+            if (resolvedCell != null && !isNoneColor(resolvedCell.fillColor())) {
+                cell.fillColor(resolveTableColor(resolvedData, resolvedCell.fillColor(), resolvedCell.fillTint()));
+            }
         }
         cell.verticalAlign(idmlCell.verticalJustification());
         cell.firstBaselineOffset(idmlCell.firstBaselineOffset());
@@ -1196,6 +1202,21 @@ public class ASTTableConverter {
         String hex = resolvedData.resolveColorHex(color);
         if (hex == null) return color;
         return ColorResolver.applyTintToHex(hex, tint);
+    }
+
+    private static ResolvedTable.Cell findResolvedCell(
+            ResolvedData resolvedData,
+            IDMLTable idmlTable,
+            IDMLTableCell idmlCell) {
+        if (resolvedData == null || idmlCell == null) return null;
+        ResolvedTable resolvedTable = idmlTable != null
+                ? resolvedData.getTableByIdOrSourceId(idmlTable.selfId())
+                : null;
+        if (resolvedTable == null && idmlCell.selfId() != null) {
+            resolvedTable = resolvedData.getTableByIdOrSourceId(idmlCell.selfId());
+        }
+        if (resolvedTable == null) return null;
+        return resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex());
     }
 
     // ── 그리드 TextFrame 감지 및 ASTTable 변환 ──

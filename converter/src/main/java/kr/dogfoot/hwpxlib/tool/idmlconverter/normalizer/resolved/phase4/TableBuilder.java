@@ -641,7 +641,8 @@ public final class TableBuilder {
         if (idmlTable == null) return false;
         return ctx != null
                 && idmlTable.selfId() != null
-                && ctx.isAnchoredNestedTableSource(idmlTable.selfId());
+                && (ctx.isAnchoredNestedTableSource(idmlTable.selfId())
+                || ctx.isTableStyleOwnedByObjectPlan(idmlTable.selfId()));
     }
 
     private static ResolvedTextFrame anchoredNestedTableTextFrame(ResolvedBuildContext ctx, IDMLTable idmlTable) {

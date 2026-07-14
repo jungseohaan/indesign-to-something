@@ -756,7 +756,7 @@ public class ResolvedToASTBuilder {
         }
         VisualAction visualAction = strictEnumValue(VisualAction.class, jsonString(o, "visualAction"));
         if (visualAction == null) return null;
-        if (visualAction == VisualAction.ABSORB_TEXT_STYLE) {
+        if (isPlannerDeclaredStyleOnlyImport(o)) {
             return styleOnlyObjectPlanFromJson(o, visualAction);
         }
         String candidateId = jsonString(o, "candidateId");
@@ -924,8 +924,13 @@ public class ResolvedToASTBuilder {
 
     private static boolean isPlannerDeclaredStyleOnlyImport(JsonObject o) {
         if (o == null) return false;
-        if (!"ABSORB_TEXT_STYLE".equals(jsonString(o, "visualAction"))) return false;
-        if (!"INLINE".equals(jsonString(o, "placement"))) return false;
+        String visualAction = jsonString(o, "visualAction");
+        String materialization = jsonString(o, "materialization");
+        boolean absorbTextStyle = "ABSORB_TEXT_STYLE".equals(visualAction);
+        boolean tableStyle = "HWPX_TABLE_STYLE".equals(materialization)
+                && ("DROP_VISUAL".equals(visualAction) || "PLACE_TABLE_STYLE".equals(visualAction));
+        if (!absorbTextStyle && !tableStyle) return false;
+        if (absorbTextStyle && !"INLINE".equals(jsonString(o, "placement"))) return false;
         return jsonIntArray(o, "styleSourceObjectIds").length > 0
                 || jsonIntArray(o, "sourceObjectIds").length > 0;
     }
