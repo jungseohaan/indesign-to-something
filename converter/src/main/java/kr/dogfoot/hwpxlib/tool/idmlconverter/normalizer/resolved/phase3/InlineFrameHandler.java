@@ -3499,13 +3499,14 @@ public class InlineFrameHandler {
 
                     ASTInlineObject obj = new ASTInlineObject();
                     obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+                    obj.keepInline(true);
                     obj.imageData(imageData);
                     obj.imageFormat("png");
                     obj.pixelWidth(img.getWidth());
                     obj.pixelHeight(img.getHeight());
 
                     // 크기: bounds [top, left, bottom, right]
-                    double[] bounds = effectiveBounds;
+                    double[] bounds = normalizeInlineBoundsToPageLocal(ctx, plan.pageIndex, effectiveBounds);
                     if (bounds != null && bounds.length >= 4) {
                         obj.boundsX(bounds[1]); // rendered X 좌표 (인라인 정렬용)
                         double pxPt = bounds[1] * ctx.scaleFactor;
@@ -4462,6 +4463,26 @@ public class InlineFrameHandler {
             out[2] -= pageTop;
         }
         return out;
+    }
+
+    private static double[] normalizeInlineBoundsToPageLocal(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] bounds) {
+        if (!validBounds(bounds)) return bounds;
+        double[] page = pageBounds(ctx, pageIndex);
+        if (page == null || page.length < 4) {
+            return new double[] { bounds[0], bounds[1], bounds[2], bounds[3] };
+        }
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double pageWidth = Math.abs(page[3] - page[1]) / scale;
+        double pageHeight = Math.abs(page[2] - page[0]) / scale;
+        if (pageWidth > 0.0 && pageHeight > 0.0
+                && bounds[1] >= -1.0 && bounds[3] <= pageWidth + 1.0
+                && bounds[0] >= -1.0 && bounds[2] <= pageHeight + 1.0) {
+            return new double[] { bounds[0], bounds[1], bounds[2], bounds[3] };
+        }
+        return normalizeSpreadBoundsToPageLocal(ctx, pageIndex, bounds);
     }
 
     private static double[] normalizeShellBoundsToTextFramePageLocal(

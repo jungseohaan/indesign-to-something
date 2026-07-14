@@ -131,6 +131,7 @@ final class InlineItemDispatcher {
     }
 
     private boolean isPagePositionedNonFlowImage(ASTInlineObject obj) {
+        if (obj.keepInline()) return false;
         if (isNonFlowHorizontalLine(obj)) return true;
         String wrapMode = obj.textWrapMode();
         boolean hasExplicitWrap = wrapMode != null && !"None".equals(wrapMode);

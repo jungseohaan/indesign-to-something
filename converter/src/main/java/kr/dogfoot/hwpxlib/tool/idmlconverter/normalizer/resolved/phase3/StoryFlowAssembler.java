@@ -4,6 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
@@ -42,7 +43,7 @@ public final class StoryFlowAssembler {
             IDMLTable idmlTable,
             IDMLTableCell idmlCell) {
         List<ASTParagraph> cellFlow = StoryLoader.astParagraphsForCell(ctx, idmlTable, idmlCell, null);
-        if (cellFlow != null && !cellFlow.isEmpty()) {
+        if (hasMeaningfulFlowContent(cellFlow)) {
             return cellFlow;
         }
         List<ASTParagraph> directNestedTableFlow = buildDirectNestedTableFlow(ctx, idmlCell);
@@ -55,6 +56,38 @@ public final class StoryFlowAssembler {
         }
         List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
         return inlineShellFlow != null ? inlineShellFlow : new ArrayList<ASTParagraph>();
+    }
+
+    private static boolean hasMeaningfulFlowContent(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return false;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null) return true;
+            if (paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item == null) continue;
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (hasMeaningfulText(text)) return true;
+                    continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasMeaningfulText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        String normalized = text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .trim();
+        return !normalized.isEmpty();
     }
 
     private static List<ASTParagraph> buildDirectNestedTableFlow(
