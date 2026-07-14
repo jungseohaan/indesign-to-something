@@ -42,6 +42,7 @@ public final class ObjectPlan {
     public final int sourceLayerIndex;
     public final boolean inlineSourceTreeClosed;
     public final int[] inlineFlowSourceObjectIds;
+    public TextLayoutContract textLayoutContract;
 
     public static ObjectPlan legacyDefaulted(
             int domId,
@@ -297,6 +298,7 @@ public final class ObjectPlan {
         this.sourceLayerIndex = sourceLayerIndex;
         this.inlineSourceTreeClosed = false;
         this.inlineFlowSourceObjectIds = new int[0];
+        this.textLayoutContract = null;
     }
 
     private ObjectPlan(
@@ -353,6 +355,9 @@ public final class ObjectPlan {
         this.inlineFlowSourceObjectIds = inlineFlowSourceObjectIds != null
                 ? Arrays.copyOf(inlineFlowSourceObjectIds, inlineFlowSourceObjectIds.length)
                 : new int[0];
+        this.textLayoutContract = base.textLayoutContract != null
+                ? base.textLayoutContract.copy()
+                : null;
     }
 
     private static VisualLayer legacyDefaultVisualLayer(VisualLayer visualLayer) {
@@ -1193,10 +1198,16 @@ public final class ObjectPlan {
         return new ObjectPlan(this, newInlineSourceTreeClosed, newInlineFlowSourceObjectIds);
     }
 
+    public ObjectPlan withTextLayoutContract(TextLayoutContract contract) {
+        this.textLayoutContract = contract != null ? contract.copy() : null;
+        return this;
+    }
+
     private ObjectPlan withCurrentInlineFlow(ObjectPlan plan) {
         return plan.withObjectPlanId(objectPlanId)
                 .withOwnedTextFrameIdKeys(ownedTextFrameIdKeys)
-                .withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds);
+                .withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds)
+                .withTextLayoutContract(textLayoutContract);
     }
 
     public ObjectPlan withObjectPlanId(String id) {
@@ -1413,6 +1424,10 @@ public final class ObjectPlan {
                     .append(cropSourceBounds[1]).append(',')
                     .append(cropSourceBounds[2]).append(',')
                     .append(cropSourceBounds[3]).append(']');
+        }
+        if (textLayoutContract != null) {
+            sb.append(",\"textLayoutContract\":")
+                    .append(textLayoutContract.toJson());
         }
         sb.append('}');
         return sb.toString();

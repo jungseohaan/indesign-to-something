@@ -1,0 +1,112 @@
+# Source Ownership Policy: TextWrap
+
+> This file is part of the canonical source ownership policy.
+> The canonical index is `docs/specs/POLICY-source-ownership.md`.
+
+## 6.5 TextWrap
+
+`TextWrap` is a source-layout execution feature for `TEXT_SLOT`. It is not a
+new visual owner, not a duplicate text channel, and not permission for executors
+to infer layout from visible symptoms.
+
+TextWrap is one of the primary reasons the pipeline treats `resolved.json` as
+canonical source metadata. IDML source structure can identify a floating group
+and a body TextFrame, but it does not by itself provide the final composed line
+geometry after InDesign applies text wrap, font metrics, inset, leading, and
+composition. `resolved.composedLines` is therefore required source truth for
+wrapped text reproduction.
+
+### Source Truth
+
+Stage 1 may declare `TextWrap` only from source layout metadata:
+
+- the `HWPX_TEXT` TextFrame has `resolved.composedLines`;
+- one or more composed lines have non-neutral `wrapIndentLeft` or
+  `wrapIndentRight`, or their line bounds are narrower than the source
+  TextFrame bounds;
+- the narrowed side corresponds to a source page-level obstacle such as a
+  floating group, anchored object, or placed visual whose source bounds overlap
+  the TextFrame's source bounds in the affected vertical band;
+- the obstacle relationship is proven from IDML/resolved source ids, bounds,
+  z-order, page index, and placement metadata, not from rendered pixels or a
+  page-specific phrase.
+
+When those facts exist, the source `composedLines` are authoritative evidence
+that InDesign already composed the text around the obstacle. The HWPX converter
+does not need to rediscover the wrap. It needs to approximate the source
+composed line geometry.
+
+### Ownership
+
+TextWrap does not change ownership:
+
+- the wrapped paragraph text remains `OWNED_BY_HWPX_TEXT`;
+- the obstacle visual keeps its own planned owner, usually page-plane PNG,
+  floating content PNG, or shell/content visual;
+- the obstacle must not be converted to an inline spacer merely to push text;
+- no text may be moved into the obstacle PNG unless Stage 1 separately assigns
+  that text to `OWNED_BY_PNG` under the normal text policy.
+
+The `TextWrap` execution contract belongs to the wrapped `HWPX_TEXT` plan as a
+layout hint. It may reference the obstacle source ids/render unit ids, but it
+does not make the obstacle part of the text bundle.
+
+### Stage Responsibilities
+
+Stage 1:
+
+- detects source-composed wrap from `composedLines` and overlapping source
+  obstacles;
+- records the wrap contract on the `HWPX_TEXT` ObjectPlan or an equivalent
+  Stage 1 text layout plan;
+- records source proof: wrapped TextFrame id, obstacle source ids, affected
+  composed line indices, original frame bounds, line bounds, and wrap indents;
+- chooses no new visual ownership while doing this.
+
+Stage 2:
+
+- emits the original text as HWPX text;
+- may split the HWPX paragraph into source-composed line segments only when
+  Stage 1 declares TextWrap for that TextFrame;
+- may use HWPX paragraph/table/text-box primitives to approximate the source
+  line widths and left/right wrap indents;
+- must preserve source reading order and searchable text;
+- must not create page/text/coordinate/literal-string exceptions.
+
+Stage 3:
+
+- places the obstacle visual exactly as planned by its own ObjectPlan;
+- must not change the obstacle from floating/page placement to inline placement
+  just to simulate wrapping;
+- must not add a second visual spacer for the same obstacle.
+
+Stage 4:
+
+- validates that the wrapped text remains single-owned as `HWPX_TEXT`;
+- validates that the obstacle visual keeps its own planned slot owner;
+- checks approximate line geometry against source `composedLines` within a
+  documented tolerance;
+- reports missing TextWrap contracts when a source TextFrame has composed wrap
+  evidence but no Stage 1 layout plan.
+
+### Forbidden Implementations
+
+- Do not infer TextWrap from screenshots, occlusion, color, page number, literal
+  text, or a one-off coordinate patch.
+- Do not narrow or shift a TextFrame in Stage 2/3 unless Stage 1 has declared
+  TextWrap.
+- Do not insert spacer images/tables as an unplanned workaround.
+- Do not rely on HWPX floating image wrap to reproduce InDesign wrap unless
+  Stage 1 explicitly selects that as the TextWrap implementation strategy and
+  validation proves it is stable for the source layout.
+- Do not merge the wrapped body TextFrame with the floating figure, and do not
+  convert a page-level floating figure into story-flow inline material.
+
+### Example Pattern
+
+If a page-level floating group overlaps the right side of a body TextFrame and
+the TextFrame's `composedLines` show the first seven lines ending at the
+floating group's left edge, Stage 1 declares TextWrap on the body TextFrame.
+The floating group remains page-level visual material. Stage 2 approximates the
+seven narrowed text lines from the source composed-line data, then resumes full
+TextFrame width for the later lines.
