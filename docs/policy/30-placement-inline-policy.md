@@ -69,6 +69,15 @@ Placement and coordinate space are a single source decision.
   `FLOATING_ANCHORED` / `Anchored` without `storyTextInlineSlot=true`,
   Stage 1 must use `placement=FLOATING` and Story/Text Builder must not insert
   the PNG into the paragraph flow.
+- An empty inline TextFrame with only frame paint is not automatically
+  `CONTENT_VISUAL_SLOT`. When the same source pattern appears as a repeated
+  baseline run of small empty inline frames, the run represents a text-flow
+  blank/underline placeholder rather than independent content images. Stage 1
+  must assign those frames to layout/text ownership (`DROP_VISUAL` or an
+  explicit HWPX underline representation) instead of exporting each frame as a
+  separate `PLACE_INLINE_PNG`. Isolated empty inline markers such as checkboxes
+  may still own `CONTENT_VISUAL_SLOT` when source metadata does not show a
+  repeated placeholder run.
 - A table-cell inline anchor is not sufficient when the anchored source is a
   text-shell label whose source-positioned bounds sit outside the table cell's
   content area while the cell also contains real text runs. In that case the

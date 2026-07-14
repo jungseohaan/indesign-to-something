@@ -73,6 +73,13 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var repeatedEmptyInlineTextFramePlaceholders =
+            _resolveRepeatedEmptyInlineTextFramePlaceholders(objectPlans);
+    _recordObjectPlanTiming("resolveRepeatedEmptyInlineTextFramePlaceholders", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        mutatedPlanCount: repeatedEmptyInlineTextFramePlaceholders.mutatedPlanCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems);
     _recordObjectPlanTiming("appendTableOnlyTextFramePlans", _timingStartedAt, {
         objectPlanCount: objectPlans.length
@@ -611,6 +618,156 @@ function _objectPlanEmptyInlineTextFrameHasVisibleFramePaint(src) {
     return false;
 }
 
+function _objectPlanIsRepeatedEmptyInlineTextFramePlaceholder(src, sourceItems) {
+    if (!_objectPlanEmptyInlineTextFrameHasVisibleFramePaint(src)) return false;
+    if (!sourceItems || !src.bounds || src.bounds.length < 4) return false;
+    if (src.hasText === true || Number(src.textLength || 0) !== 0) return false;
+    if (src.hasPlacedVisual === true || src.hasChildren === true) return false;
+    var metrics = _objectPlanSourceBoundsMetrics(src.bounds);
+    if (!metrics) return false;
+    var width = metrics.width;
+    var height = metrics.height;
+    if (width <= 0 || height <= 0) return false;
+
+    // Empty inline frame paint can be either a real marker (for example a
+    // checkbox) or a repeated placeholder run that composes a blank/underline
+    // slot.  Only the repeated baseline run is layout-owned; isolated markers
+    // keep their own visual slot.
+    if (width > 12 || height > 12) return false;
+    var pageIndex = String(src.pageIndex);
+    var centerY = metrics.centerY;
+    var baselineTolerance = Math.max(1.25, height * 0.55);
+    var sizeTolerance = Math.max(1.0, Math.max(width, height) * 0.35);
+    var minRunCount = 4;
+    var count = 0;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var other = sourceItems[i];
+        if (!other || other === src) continue;
+        if (!_objectPlanEmptyInlineTextFrameHasVisibleFramePaint(other)) continue;
+        if (other.hasText === true || Number(other.textLength || 0) !== 0) continue;
+        if (other.hasPlacedVisual === true || other.hasChildren === true) continue;
+        if (String(other.pageIndex) !== pageIndex) continue;
+        var om = _objectPlanSourceBoundsMetrics(other.bounds);
+        if (!om) continue;
+        var ow = om.width;
+        var oh = om.height;
+        if (ow <= 0 || oh <= 0 || ow > 12 || oh > 12) continue;
+        if (Math.abs(om.centerY - centerY) > baselineTolerance) continue;
+        if (Math.abs(ow - width) > sizeTolerance) continue;
+        if (Math.abs(oh - height) > sizeTolerance) continue;
+        count++;
+        if (count + 1 >= minRunCount) return true;
+    }
+    return false;
+}
+
+function _objectPlanSourceBoundsMetrics(bounds) {
+    if (!bounds || bounds.length < 4) return null;
+    var top = Number(bounds[0]);
+    var left = Number(bounds[1]);
+    var bottom = Number(bounds[2]);
+    var right = Number(bounds[3]);
+    if (isNaN(left) || isNaN(top) || isNaN(right) || isNaN(bottom)) return null;
+    return {
+        left: Math.min(left, right),
+        top: Math.min(top, bottom),
+        right: Math.max(left, right),
+        bottom: Math.max(top, bottom),
+        width: Math.abs(right - left),
+        height: Math.abs(bottom - top),
+        centerX: (left + right) / 2.0,
+        centerY: (top + bottom) / 2.0
+    };
+}
+
+function _resolveRepeatedEmptyInlineTextFramePlaceholders(objectPlans) {
+    var summary = {
+        mutatedPlanCount: 0,
+        mutatedObjectPlanIds: []
+    };
+    if (!objectPlans || objectPlans.length === 0) return summary;
+    var candidates = [];
+    for (var i = 0; i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!_objectPlanIsEmptyInlineTextFrameVisualPlan(plan)) continue;
+        var metrics = _objectPlanSourceBoundsMetrics(plan.bounds);
+        if (!metrics) continue;
+        var width = metrics.width;
+        var height = metrics.height;
+        if (width <= 0 || height <= 0 || width > 12 || height > 12) continue;
+        candidates.push({
+            plan: plan,
+            bounds: plan.bounds,
+            width: width,
+            height: height,
+            centerY: metrics.centerY,
+            pageIndex: String(plan.pageIndex)
+        });
+    }
+    for (var j = 0; j < candidates.length; j++) {
+        var current = candidates[j];
+        var runCount = 1;
+        var baselineTolerance = Math.max(1.25, current.height * 0.55);
+        var sizeTolerance = Math.max(1.0, Math.max(current.width, current.height) * 0.35);
+        for (var k = 0; k < candidates.length; k++) {
+            if (k === j) continue;
+            var other = candidates[k];
+            if (other.pageIndex !== current.pageIndex) continue;
+            if (Math.abs(other.centerY - current.centerY) > baselineTolerance) continue;
+            if (Math.abs(other.width - current.width) > sizeTolerance) continue;
+            if (Math.abs(other.height - current.height) > sizeTolerance) continue;
+            runCount++;
+            if (runCount >= 4) break;
+        }
+        if (runCount < 4) continue;
+        _mutateEmptyInlineTextFrameVisualPlanToLayoutOnly(current.plan);
+        summary.mutatedPlanCount++;
+        summary.mutatedObjectPlanIds.push(current.plan.objectPlanId || null);
+    }
+    return summary;
+}
+
+function _objectPlanIsEmptyInlineTextFrameVisualPlan(plan) {
+    return !!plan
+            && plan.reason === "empty_inline_text_frame_visible_frame_paint"
+            && plan.kind === "TextFrame"
+            && plan.placement === "INLINE"
+            && plan.coordinateSpace === "STORY_FLOW"
+            && plan.visualAction === "PLACE_INLINE_PNG"
+            && plan.materialization === "EXTRACTED_PNG_VECTOR";
+}
+
+function _mutateEmptyInlineTextFrameVisualPlanToLayoutOnly(plan) {
+    if (!plan) return;
+    plan.mode = "LAYOUT_ONLY";
+    plan.candidatePurpose = "INLINE_LAYOUT_SLOT";
+    plan.compositeRole = "repeated_empty_inline_text_frame_placeholder";
+    plan.slotRole = "layout_only_inline_slot";
+    plan.layoutOnlyInlineSlot = true;
+    plan.layoutFootprintExpanded = false;
+    plan.layoutFootprintReason = "repeated_empty_inline_text_frame_placeholder";
+    plan.layoutFootprintSourceObjectIds = [];
+    plan.layoutFootprintClusterBounds = null;
+    plan.layoutFootprintOverlapRatio = null;
+    plan.layoutFootprintFlowClearance = null;
+    plan.clusterHasVisualSource = false;
+    plan.visualSourceObjectIds = [];
+    plan.styleSourceObjectIds = [];
+    plan.exportSourceObjectIds = [];
+    plan.visualSourceSetId = _sourceSetId([]);
+    plan.exportSourceSetId = _sourceSetId([]);
+    plan.atomicTextlessVectorContent = false;
+    plan.atomicContentVisualSlot = false;
+    plan.materialization = "HWPX_TEXT";
+    plan.textAction = "DROP_TEXT";
+    plan.visualAction = "DROP_VISUAL";
+    plan.ownershipSlot = "CONTENT_VISUAL_SLOT";
+    plan.policyLayer = "CONTENT";
+    plan.migrationStatus = "READY_LAYOUT_ONLY_INLINE_SLOT";
+    plan.reason = "repeated_empty_inline_text_frame_placeholder";
+    plan.contractStatus = "READY_FOR_STAGE1_IMPORT";
+}
+
 function _appendLayoutOnlyInlineSlotObjectPlans(objectPlans, sourceItems) {
     var summary = {
         createdPlanCount: 0,
@@ -885,6 +1042,20 @@ function _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems) {
             continue;
         }
         if (_objectPlanEmptyInlineTextFrameHasVisibleFramePaint(src)) {
+            if (_objectPlanIsRepeatedEmptyInlineTextFramePlaceholder(src, sourceItems)) {
+                var placeholderPlan = _layoutOnlyInlineSlotObjectPlan(src, id, pageIndex, zOrder, {
+                    bounds: src.bounds || null,
+                    sourceObjectIds: [],
+                    expanded: false,
+                    reason: "repeated_empty_inline_text_frame_placeholder"
+                });
+                placeholderPlan.compositeRole = "repeated_empty_inline_text_frame_placeholder";
+                placeholderPlan.layoutFootprintReason = "repeated_empty_inline_text_frame_placeholder";
+                placeholderPlan.reason = "repeated_empty_inline_text_frame_placeholder";
+                objectPlans.push(placeholderPlan);
+                _addObjectPlanToDecisionIndex(decisionIndex, placeholderPlan);
+                continue;
+            }
             var inlineVisualPlan = _emptyInlineTextFrameVisualObjectPlan(src, id, pageIndex, zOrder);
             objectPlans.push(inlineVisualPlan);
             _addObjectPlanToDecisionIndex(decisionIndex, inlineVisualPlan);

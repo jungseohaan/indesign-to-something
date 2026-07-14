@@ -80,22 +80,42 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         }
         if ((!inlineCandidates || inlineCandidates.length === 0)
                 && opts.inlineFallbackAllItems === true) {
-            for (var ai = 0; allItems && ai < allItems.length; ai++) {
-                var fallbackItem = allItems[ai];
+            function addFallbackInlineItem(fallbackItem) {
                 try {
-                    if (!isPagePlaneInlineVisualItem(fallbackItem)) continue;
+                    if (!isPagePlaneInlineVisualItem(fallbackItem)) return;
                 } catch (eInlineFallback) {
-                    continue;
+                    return;
                 }
                 var fallbackId = null;
                 try { fallbackId = fallbackItem.id; } catch (eFallbackId) {}
                 var fallbackKey = fallbackId !== null && fallbackId !== undefined
                         ? String(fallbackId)
                         : "fallback:" + String(items.length);
-                if (seen[fallbackKey]) continue;
+                if (seen[fallbackKey]) return;
                 seen[fallbackKey] = true;
                 items.push(fallbackItem);
             }
+            for (var ai = 0; allItems && ai < allItems.length; ai++) {
+                addFallbackInlineItem(allItems[ai]);
+            }
+            try {
+                var textFrames = doc.textFrames.everyItem().getElements();
+                for (var tf = 0; textFrames && tf < textFrames.length; tf++) {
+                    addFallbackInlineItem(textFrames[tf]);
+                }
+            } catch (eFallbackDocTextFrames) {}
+            try {
+                var pageItems = doc.allPageItems;
+                for (var dpi = 0; pageItems && dpi < pageItems.length; dpi++) {
+                    addFallbackInlineItem(pageItems[dpi]);
+                    try {
+                        var nestedTextFrames = pageItems[dpi].textFrames.everyItem().getElements();
+                        for (var ntf = 0; nestedTextFrames && ntf < nestedTextFrames.length; ntf++) {
+                            addFallbackInlineItem(nestedTextFrames[ntf]);
+                        }
+                    } catch (eNestedTextFrames) {}
+                }
+            } catch (eFallbackDocPageItems) {}
         }
         return items;
     }
@@ -105,10 +125,20 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         if (_isTopLevelInlineVisualItem(item)) return true;
         try {
             if (item.constructor && item.constructor.name === "TextFrame"
-                    && isInlineItem(item)) {
+                    && (isInlineItem(item) || isStoryAnchoredInlineItem(item))) {
                 return true;
             }
         } catch (eTextFrameInline) {}
+        return false;
+    }
+
+    function isStoryAnchoredInlineItem(item) {
+        try {
+            var parent = item && item.parent;
+            var parentName = parent && parent.constructor && parent.constructor.name
+                    ? String(parent.constructor.name) : "";
+            return parentName === "Character" || parentName === "InsertionPoint";
+        } catch (eStoryAnchoredInline) {}
         return false;
     }
 

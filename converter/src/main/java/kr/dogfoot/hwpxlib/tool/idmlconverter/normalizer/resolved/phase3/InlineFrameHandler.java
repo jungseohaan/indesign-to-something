@@ -3481,7 +3481,11 @@ public class InlineFrameHandler {
 
         // Phase 2 가 floating text box 로 승격한 inline TF → inline PNG 도 억제 (28pt PNG가 행간 팽창하는 것 방지).
         if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
-        if (hasDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId)) {
+        ObjectPlan dropOnlyInlinePlan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
+        if (isRepeatedEmptyInlineTextFramePlaceholderPlan(dropOnlyInlinePlan)) {
+            return null;
+        }
+        if (dropOnlyInlinePlan != null) {
             return createLayoutOnlyInlineSpacer(ctx, anchoredObjectId);
         }
 
@@ -3902,7 +3906,12 @@ public class InlineFrameHandler {
             return items;
         }
 
-        if (hasDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId)) {
+        ObjectPlan dropOnlyInlinePlan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
+        if (isRepeatedEmptyInlineTextFramePlaceholderPlan(dropOnlyInlinePlan)) {
+            items.add(createSpaceRunForEmptyAnchor(ctx, anchoredObjectId));
+            return items;
+        }
+        if (dropOnlyInlinePlan != null) {
             ASTInlineObject spacer = createLayoutOnlyInlineSpacer(ctx, anchoredObjectId);
             if (spacer != null) {
                 items.add(spacer);
@@ -4228,6 +4237,10 @@ public class InlineFrameHandler {
             }
         }
         return dropOnly ? dropPlan : null;
+    }
+
+    private static boolean isRepeatedEmptyInlineTextFramePlaceholderPlan(ObjectPlan plan) {
+        return plan != null && "repeated_empty_inline_text_frame_placeholder".equals(plan.reason);
     }
 
     private static ASTInlineObject createLayoutOnlyInlineSpacer(

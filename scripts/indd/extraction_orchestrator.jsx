@@ -662,7 +662,10 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
     try {
         _marker(ctx.outputDir, "03a_globalSingleTextlessPagePlanes_start");
         allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
-        var itemById = _buildItemById(allItems);
+        var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
+        var itemById = sourceIndex && sourceIndex.domById ? sourceIndex.domById : _buildItemById(allItems);
+        var inlineCandidates = _globalSingleTextlessInlineHideCandidates(
+                sourceIndex && sourceIndex.sourceItems ? sourceIndex.sourceItems : []);
         var result = exportSingleTextlessPagePlanes(
                 doc,
                 ctx.outputDir,
@@ -670,7 +673,7 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
                 ctx.endPage,
                 allItems,
                 itemById,
-                [],
+                inlineCandidates,
                 {
                     globalPreExport: true,
                     inlineFallbackAllItems: true
@@ -698,6 +701,41 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
         allItems = null;
         try { $.gc(); } catch (eGc) {}
     }
+}
+
+function _globalSingleTextlessInlineHideCandidates(sourceItems) {
+    var candidates = [];
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        if (String(src.kind || "") !== "TextFrame") continue;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        var inline =
+                src.storyTextInlineSlot === true
+                || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                || String(src.parentKind || "") === "Character"
+                || String(src.parentKind || "") === "InsertionPoint";
+        if (!inline) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        candidates.push({
+            candidateId: "global.single_textless.inline_hide." + String(id),
+            passId: "pass.inline_objects",
+            pageIndex: src.pageIndex,
+            kind: "TextFrame",
+            primarySourceObjectId: id,
+            exportTargetObjectId: id,
+            sourceObjectIds: [id],
+            exportSourceObjectIds: [id],
+            visualAction: "PLACE_INLINE_PNG",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            placement: "INLINE",
+            coordinateSpace: "STORY_FLOW",
+            compositeRole: "global_single_textless_inline_hide",
+            slotRole: "inline_hide"
+        });
+    }
+    return candidates;
 }
 
 function _runSpreadChunkExtraction(doc, ctx) {
@@ -938,11 +976,12 @@ function _runRenderPhases(doc, ctx, allItems) {
     var tfShellFrames = [];
 
     _marker(ctx.outputDir, "06b_pageTextlessGroups");
-    var pagePlaneExportOptions = null;
+    var pagePlaneExportOptions = {
+        inlineFallbackAllItems: true
+    };
     if (ctx.globalSingleTextlessPagePlanesByPageIndex) {
-        pagePlaneExportOptions = {
-            precomputedPagePlanesByPageIndex: ctx.globalSingleTextlessPagePlanesByPageIndex
-        };
+        pagePlaneExportOptions.precomputedPagePlanesByPageIndex =
+                ctx.globalSingleTextlessPagePlanesByPageIndex;
     }
     pageTextlessGroupResult = exportSingleTextlessPagePlanes(
             doc,
