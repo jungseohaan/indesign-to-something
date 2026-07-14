@@ -205,6 +205,57 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         return items;
     }
 
+    function collectRangeTextItemsToHide() {
+        var items = [];
+        var seen = {};
+
+        function add(item) {
+            if (!isTextItem(item)) return;
+            var key = textItemKey(item);
+            if (key === null) key = "idx:" + String(items.length);
+            if (seen[key]) return;
+            seen[key] = true;
+            items.push(item);
+        }
+
+        function addFromItems(list) {
+            if (!list) return;
+            for (var ii = 0; ii < list.length; ii++) add(list[ii]);
+        }
+
+        function addNestedTextItems(root) {
+            if (!root) return;
+            add(root);
+            try { addFromItems(root.allPageItems); } catch (eAllPageItems) {}
+            try { addFromItems(root.textFrames.everyItem().getElements()); } catch (eTextFrames) {}
+            try { addFromItems(root.textPaths.everyItem().getElements()); } catch (eTextPaths) {}
+            try {
+                var nested = root.allPageItems;
+                for (var ni = 0; nested && ni < nested.length; ni++) {
+                    try { addFromItems(nested[ni].textPaths.everyItem().getElements()); } catch (eNestedTextPaths) {}
+                }
+            } catch (eNested) {}
+        }
+
+        for (var ai = 0; allItems && ai < allItems.length; ai++) {
+            addNestedTextItems(allItems[ai]);
+        }
+
+        for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
+            var page = null;
+            try { page = doc.pages[pageNumber - 1]; } catch (ePage) { page = null; }
+            if (!page) continue;
+            addNestedTextItems(page);
+
+            // Applied master text can appear in page PNG export even when it is
+            // not returned as an ordinary page item. Keep this scoped to the
+            // selected page's master spread instead of scanning every page.
+            try { addNestedTextItems(page.appliedMaster); } catch (eMaster) {}
+        }
+
+        return items;
+    }
+
     function hideCollectedTextItems(items) {
         var saved = [];
         var seen = {};
@@ -382,8 +433,15 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         _tHideInline = nowMs() - _t0;
 
         _t0 = nowMs();
-        var _textToHide = collectDocumentTextItemsToHide();
-        _tCollectText = nowMs() - _t0;   // ← 문서 전체 5회 순회 + allPageItems 중첩 루프
+        var _textHideScope = opts.documentWideTextHide === true ? "document" : "range";
+        var _textToHide = opts.documentWideTextHide === true
+                ? collectDocumentTextItemsToHide()
+                : collectRangeTextItemsToHide();
+        if ((!_textToHide || _textToHide.length === 0) && opts.documentWideTextHide !== true) {
+            _textHideScope = "document-fallback";
+            _textToHide = collectDocumentTextItemsToHide();
+        }
+        _tCollectText = nowMs() - _t0;
 
         _t0 = nowMs();
         savedDocumentTextFrames = hideCollectedTextItems(_textToHide);
@@ -473,13 +531,14 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         var _perfBreakdown = {
             collectInlineMs: _tCollectInline,
             hideInlineMs: _tHideInline,
-            collectTextMs: _tCollectText,        // 문서 전체 5회 순회 + 중첩 allPageItems
+            collectTextMs: _tCollectText,
             hideTextMs: _tHideText,
             prepTotalMs: _tPrepTotal,
-            exportLoopMs: _tExportLoop,          // 실제 PNG export 42장
+            exportLoopMs: _tExportLoop,
             restoreMs: _tRestore,
             hiddenTextItemCount: savedDocumentTextFrames.length,
-            hiddenInlineItemCount: savedInlineItems.length
+            hiddenInlineItemCount: savedInlineItems.length,
+            textHideScope: _textHideScope
         };
         writeJson(outputDir + "/single-textless-page-plane-export.json", {
             schemaVersion: 1,
