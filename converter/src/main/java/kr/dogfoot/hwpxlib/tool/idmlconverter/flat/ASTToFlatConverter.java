@@ -516,6 +516,13 @@ public class ASTToFlatConverter {
         }
     }
 
+    private static int plannedZOrder(ASTInlineObject inObj) {
+        if (inObj == null || inObj.plannedZOrder() == Integer.MIN_VALUE) {
+            return 0;
+        }
+        return inObj.plannedZOrder();
+    }
+
     // ---- IMAGE ----
 
     private static void convertInlineImage(ASTInlineObject inObj, FlatComponent parentComp,
@@ -529,6 +536,7 @@ public class ASTToFlatConverter {
         node.sourceId(inObj.sourceId());
         node.parentComponentId(parentComp.componentId());
         node.insertionIndex(insertionIdx);
+        node.zOrder(plannedZOrder(inObj));
 
         // Figure kind
         node.figureKind("IMAGE");
@@ -619,6 +627,7 @@ public class ASTToFlatConverter {
         node.sourceId(inObj.sourceId());
         node.parentComponentId(parentComp.componentId());
         node.insertionIndex(insertionIdx);
+        node.zOrder(plannedZOrder(inObj));
 
         // Figure kind
         node.figureKind("RENDERED_GROUP");
@@ -686,6 +695,7 @@ public class ASTToFlatConverter {
         node.sourceId(inObj.sourceId());
         node.parentComponentId(parentComp.componentId());
         node.insertionIndex(insertionIdx);
+        node.zOrder(plannedZOrder(inObj));
 
         // Size
         node.width(inObj.width());
@@ -748,6 +758,15 @@ public class ASTToFlatConverter {
 
         // Recursively convert paragraphs inside the inline text frame
         convertParagraphs(inObj.paragraphs(), node, page, flat, idGen);
+
+        // Text-shell inline frames can own only the visual shell while child TFs
+        // remain editable overlays. Preserve that channel through Flat so Stage 4
+        // executes the Stage 1 ownership decision instead of dropping textless shells.
+        if (inObj.overlayFrames() != null) {
+            for (ASTInlineObject overlayObj : inObj.overlayFrames()) {
+                convertOverlayFrame(overlayObj, node, page, flat, idGen);
+            }
+        }
 
         // Convert inline tables (if any) — set parentComponentId to first component
         // so FlatToASTConverter can find them and restore inlineTables
@@ -815,6 +834,7 @@ public class ASTToFlatConverter {
         node.sourceId(inObj.sourceId());
         node.parentComponentId(parentComp.componentId());
         node.insertionIndex(insertionIdx);
+        node.zOrder(plannedZOrder(inObj));
 
         // Size
         node.width(inObj.width());
@@ -868,6 +888,7 @@ public class ASTToFlatConverter {
         node.positioning(FlatLayoutNode.PositioningMode.OVERLAY);
         node.pageId(page.pageId());
         node.sourceId(overlayObj.sourceId());
+        node.zOrder(plannedZOrder(overlayObj));
 
         // Overlay parent reference
         node.overlayParentId(imageNode.nodeId());
@@ -888,6 +909,7 @@ public class ASTToFlatConverter {
 
         // Frame style
         node.fillColor(overlayObj.fillColor());
+        node.imageFillData(overlayObj.imageFillData());
         node.fillTint(overlayObj.fillTint());
         node.strokeColor(overlayObj.strokeColor());
         node.strokeWeight(overlayObj.strokeWeight());

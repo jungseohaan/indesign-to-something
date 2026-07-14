@@ -1373,12 +1373,23 @@ public class InlineFrameHandler {
             ResolvedPageItem anchorItem,
             java.util.List<ResolvedTextFrame> childTfs,
             RenderedGroup shell) {
+        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTfs, shell, null);
+    }
+
+    private static ASTInlineObject buildInlineShellObject(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedPageItem anchorItem,
+            java.util.List<ResolvedTextFrame> childTfs,
+            RenderedGroup shell,
+            ObjectPlan explicitShellPlan) {
         if (childTfs == null || childTfs.isEmpty()) return null;
-        if (shell == null || ctx.basePath == null) return null;
-        if (childTfs.size() == 1 && editableTextFrameIds(ctx, shell).length > 1) return null;
-        ObjectPlan shellPlan = findInlineTextShellOwnerPlan(ctx, shell, childTfs);
+        if (ctx == null || ctx.basePath == null) return null;
+        if (shell != null && childTfs.size() == 1 && editableTextFrameIds(ctx, shell).length > 1) return null;
+        ObjectPlan shellPlan = explicitShellPlan != null
+                ? explicitShellPlan
+                : findInlineTextShellOwnerPlan(ctx, shell, childTfs);
         if (shellPlan == null) return null;
-        if (ctx.isRenderedDisposed(shell.id(), FrameDisposition.TEXT_BLOCK_PLACED)) return null;
         String shellFile = materialFile(shellPlan);
         if (shellFile == null || shellFile.isEmpty()) return null;
         if (shellPlan.bounds == null || shellPlan.bounds.length < 4) return null;
@@ -1440,10 +1451,11 @@ public class InlineFrameHandler {
                     markInlineShellChildTextPlaced(ctx, childTf);
                 }
             }
-            ctx.markRenderedVisualHandled(shell.id());
-            ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
-                    "PLACE_INLINE_TEXT_SHELL",
-                    "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
+            if (shell != null) {
+                ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
+                        "PLACE_INLINE_TEXT_SHELL",
+                        "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
+            }
             return obj;
         } catch (Exception e) {
             return null;
@@ -1979,6 +1991,19 @@ public class InlineFrameHandler {
             java.util.List<ResolvedTextFrame> childTfs) {
         if (shellPlan == null || childTfs == null || childTfs.isEmpty()) return false;
         if (shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
+        if (isShellPlanWithOwnedTextFrameChannel(shellPlan)) {
+            for (ResolvedTextFrame childTf : childTfs) {
+                if (childTf == null || childTf.id() == null) return false;
+                int childId;
+                try {
+                    childId = Integer.parseInt(childTf.id());
+                } catch (NumberFormatException e) {
+                    return false;
+                }
+                if (!containsInt(shellPlan.ownedTextFrameIds, childId)) return false;
+            }
+            return true;
+        }
         if (ctx == null || ctx.ownershipPlans == null) return false;
         for (ResolvedTextFrame childTf : childTfs) {
             if (childTf == null || childTf.id() == null) return false;
@@ -2001,6 +2026,7 @@ public class InlineFrameHandler {
             return false;
         }
         if (shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
+        if (isShellPlanWithOwnedTextFrameChannel(shellPlan)) return true;
         if (ctx == null || ctx.ownershipPlans == null) return false;
         for (int textFrameDomId : shellPlan.ownedTextFrameIds) {
             if (!hasHwpxTextOwnershipForTextFrame(ctx, textFrameDomId)) return false;
@@ -2016,6 +2042,14 @@ public class InlineFrameHandler {
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0
                 && hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan);
+    }
+
+    private static boolean isShellPlanWithOwnedTextFrameChannel(ObjectPlan plan) {
+        return plan != null
+                && ShellRole.isTextShell(plan)
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL;
     }
 
     private static boolean hasHwpxTextOwnershipForTextFrame(ResolvedBuildContext ctx, int textFrameDomId) {
@@ -2034,6 +2068,10 @@ public class InlineFrameHandler {
     }
 
     private static boolean isExecutableTextlessShellCarrier(ObjectPlan plan, RenderedGroup shell) {
+        return isExecutableTextlessShellCarrier(plan);
+    }
+
+    private static boolean isExecutableTextlessShellCarrier(ObjectPlan plan) {
         if (plan == null) return false;
         return ShellRole.isTextShell(plan)
                 && plan.hasVisibleVisual();
@@ -4275,9 +4313,9 @@ public class InlineFrameHandler {
         }
 
         RenderedGroup shell = findRenderedGroupForDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
-        if (shell == null) return null;
-        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
-        return buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell);
+        int shellId = shell != null ? shell.id() : plan.domId;
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shellId));
+        return buildInlineShellObject(ctx, shellId, anchorItem, childTfs, shell, plan);
     }
 
     public static List<ASTInlineObject> loadPlannedInlineTextShellsForAnchor(
@@ -4306,9 +4344,9 @@ public class InlineFrameHandler {
                 item = buildNativeInlineShellObject(ctx, plan, anchoredObjectId, childTfs);
             } else {
                 RenderedGroup shell = findRenderedGroupForDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
-                if (shell == null) return null;
-                ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
-                item = buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell);
+                int shellId = shell != null ? shell.id() : plan.domId;
+                ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shellId));
+                item = buildInlineShellObject(ctx, shellId, anchorItem, childTfs, shell, plan);
             }
             if (item == null) return null;
             item.keepInline(true);
@@ -4327,7 +4365,6 @@ public class InlineFrameHandler {
             return null;
         }
         if (!isExecutableNativeInlineShellPlan(shellPlan)) return null;
-        if (ctx.isRenderedDisposed(shellPlan.domId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
         ResolvedPageItem shellItem = findNativeInlineShellStyleItem(ctx, shellPlan, anchoredObjectId);
         if (shellItem == null) return null;
         double[] shellBounds = shellPlan.bounds;
@@ -4363,7 +4400,6 @@ public class InlineFrameHandler {
             }
         }
         if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return null;
-        ctx.markRenderedVisualHandled(shellPlan.domId);
         return obj;
     }
 
@@ -4582,8 +4618,7 @@ public class InlineFrameHandler {
             if (!ShellRole.isTextShell(plan)) continue;
             if (!hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan)) continue;
             if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
-            RenderedGroup rendered = findRenderedGroupForDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
-            if (!isExecutableTextlessShellCarrier(plan, rendered)) continue;
+            if (!isExecutableTextlessShellCarrier(plan)) continue;
             String key = ownedTextFrameKey(plan);
             ObjectPlan existing = byOwnedText.get(key);
             if (existing == null || inlineTextShellPlanPriority(plan) > inlineTextShellPlanPriority(existing)) {

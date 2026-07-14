@@ -3017,7 +3017,12 @@ public final class StoryConverter {
                 ResolvedTextFlowAstConverter.options()
                         .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
                         .styleOptions(styleOptions)
-                        .truncateAtParagraphBreak(false));
+                        .truncateAtParagraphBreak(false),
+                atom -> {
+                    if (atom == null || atom.anchoredObjectId == null) return null;
+                    return InlineFrameHandler.loadPlannedInlineAnchorItems(
+                            ctx, atom.anchoredObjectId, null, null);
+                });
         if (paragraphs == null || paragraphs.isEmpty()) return null;
         postprocessResolvedStoryParagraphs(ctx, storyId, paragraphs);
         return paragraphs;
@@ -3070,6 +3075,7 @@ public final class StoryConverter {
             String storyId,
             List<ASTParagraph> paragraphs) {
         if (paragraphs == null) return;
+        ParagraphDistributor.repairInlineOnlyTextFlowParagraphs(ctx, storyId, paragraphs);
         for (ASTParagraph para : paragraphs) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             RunPostProcessor.splitOverlineRuns(para);

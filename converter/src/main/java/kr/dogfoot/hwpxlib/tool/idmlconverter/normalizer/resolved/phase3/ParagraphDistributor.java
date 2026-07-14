@@ -2,8 +2,10 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -49,6 +51,7 @@ class ParagraphDistributor {
 
         // 다중 프레임: frameVisibleText 기반 분배
         List<ASTTextFrameBlock> ordered = InlineFrameHandler.orderByThreadChain(ctx, blocks);
+        repairInlineOnlyTextFlowParagraphs(ctx, storyId, paragraphs);
 
         // 전체 IDML 단락 텍스트를 하나의 연속 문자열로 합침
         StringBuilder storyTextBuilder = new StringBuilder();
@@ -64,6 +67,7 @@ class ParagraphDistributor {
         // 각 프레임의 첫 frameParaText를 storyText에서 검색하여 정확한 범위 결정
         // 프레임별 (startOffset, endOffset) 계산
         int[][] frameRanges = new int[ordered.size()][2];
+        boolean[] frameStartsWithInlineObject = new boolean[ordered.size()];
         int searchFrom = 0;
         for (int fi = 0; fi < ordered.size(); fi++) {
             ASTTextFrameBlock block = ordered.get(fi);
@@ -76,6 +80,8 @@ class ParagraphDistributor {
             if (visibleText == null) {
                 visibleText = (rtf != null) ? rtf.frameVisibleText() : null;
             }
+            String rawVisibleText = visibleText;
+            frameStartsWithInlineObject[fi] = startsWithInlineObjectOrBoundary(rawVisibleText);
             if (visibleText != null) {
                 visibleText = normalizeFrameTextForRangeMatching(ctx, rtf, visibleText);
             }
@@ -95,6 +101,16 @@ class ParagraphDistributor {
             if (visibleText == null || visibleText.isEmpty()) {
                 frameRanges[fi][0] = searchFrom;
                 frameRanges[fi][1] = (fi == ordered.size() - 1) ? storyText.length() : searchFrom;
+                continue;
+            }
+
+            if (hasResolvedFrameCharacterRange(rtf)
+                    && startsWithInlineObjectOrBoundary(rawVisibleText)) {
+                int resolvedStart = clamp(rtf.paragraphStart(), 0, storyText.length());
+                int resolvedEnd = clamp(rtf.paragraphEnd(), resolvedStart, storyText.length());
+                frameRanges[fi][0] = Math.max(0, resolvedStart);
+                frameRanges[fi][1] = Math.max(frameRanges[fi][0], resolvedEnd);
+                searchFrom = frameRanges[fi][1];
                 continue;
             }
 
@@ -121,6 +137,7 @@ class ParagraphDistributor {
             searchFrom = frameRanges[fi][1];
         }
         closeThreadedStoryRangeGaps(frameRanges, storyText.length());
+        includeLeadingInlineObjectAtFrameStarts(frameRanges, frameStartsWithInlineObject, storyText);
         alignThreadedFrameRangesToTokenBoundaries(frameRanges, storyText);
 
         // 프레임별 단락 할당
@@ -157,7 +174,10 @@ class ParagraphDistributor {
 
                 if (paraStart >= frameStart && paraEnd <= frameEnd) {
                     // 단락이 프레임 안에 완전히 포함
-                    block.addParagraph(paragraphs.get(i));
+                    ASTParagraph paragraph = paragraphs.get(i);
+                    ASTTextFrameBlock targetBlock =
+                            sourceFrameForInlineOnlyParagraph(ctx, paragraph, ordered, block);
+                    targetBlock.addParagraph(paragraph);
                 } else if (paraStart < frameEnd && paraEnd > frameEnd) {
                     // 단락이 프레임 경계에 걸침 → 앞부분만 (cutLen 글자)
                     int cutLen = frameEnd - paraStart;
@@ -195,6 +215,262 @@ class ParagraphDistributor {
         }
     }
 
+    private static void includeLeadingInlineObjectAtFrameStarts(
+            int[][] frameRanges,
+            boolean[] frameStartsWithInlineObject,
+            String storyText) {
+        if (frameRanges == null || frameStartsWithInlineObject == null || storyText == null) return;
+        int count = Math.min(frameRanges.length, frameStartsWithInlineObject.length);
+        for (int i = 0; i < count; i++) {
+            if (!frameStartsWithInlineObject[i]) continue;
+            int start = clamp(frameRanges[i][0], 0, storyText.length());
+            if (start <= 0 || storyText.charAt(start - 1) != '\uFFFC') continue;
+            int adjustedStart = start - 1;
+            frameRanges[i][0] = adjustedStart;
+            if (i > 0 && frameRanges[i - 1][1] >= start) {
+                frameRanges[i - 1][1] = adjustedStart;
+            }
+        }
+    }
+
+    private static ASTTextFrameBlock sourceFrameForInlineOnlyParagraph(
+            ResolvedBuildContext ctx,
+            ASTParagraph paragraph,
+            List<ASTTextFrameBlock> ordered,
+            ASTTextFrameBlock fallback) {
+        if (ctx == null || ctx.resolvedData == null || paragraph == null
+                || ordered == null || ordered.isEmpty()) {
+            return fallback;
+        }
+        ObjectPlan plan = inlineOnlyObjectPlan(ctx, paragraph);
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return fallback;
+        double cy = (plan.bounds[0] + plan.bounds[2]) / 2.0;
+        double cx = (plan.bounds[1] + plan.bounds[3]) / 2.0;
+        ASTTextFrameBlock best = null;
+        double bestArea = Double.MAX_VALUE;
+        double bestOverlap = 0.0;
+        for (ASTTextFrameBlock block : ordered) {
+            ResolvedTextFrame tf = resolvedTextFrame(ctx, block);
+            if (tf == null) continue;
+            if (plan.pageIndex >= 0 && tf.pageIndex() >= 0 && plan.pageIndex != tf.pageIndex()) continue;
+            double[] bounds = tf.pageRelativeBounds();
+            if (bounds == null || bounds.length < 4) bounds = tf.geometricBounds();
+            if (bounds == null || bounds.length < 4) continue;
+            double area = Math.max(0.1, Math.abs(bounds[2] - bounds[0]) * Math.abs(bounds[3] - bounds[1]));
+            if (containsPoint(bounds, cy, cx)) {
+                if (area < bestArea) {
+                    best = block;
+                    bestArea = area;
+                }
+                continue;
+            }
+            double overlap = overlapArea(bounds, plan.bounds);
+            if (best == null && overlap > bestOverlap) {
+                best = block;
+                bestOverlap = overlap;
+            }
+        }
+        return best != null ? best : fallback;
+    }
+
+    private static ObjectPlan inlineOnlyObjectPlan(ResolvedBuildContext ctx, ASTParagraph paragraph) {
+        if (paragraph.inlineTable() != null || paragraph.items() == null || paragraph.items().isEmpty()) return null;
+        if (isSimpleInlineMarkerParagraph(paragraph)) {
+            return firstPlannedInlineObjectPlan(ctx, paragraph);
+        }
+        ObjectPlan plan = null;
+        boolean sawInline = false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null
+                        && !text.replace("\uFFFC", "")
+                        .replace("\r", "")
+                        .replace("\n", "")
+                        .trim().isEmpty()) {
+                    return null;
+                }
+                continue;
+            }
+            if (!(item instanceof ASTInlineObject)) return null;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            Integer domId = sourceIdToDomId(obj.sourceId());
+            if (domId == null) return null;
+            ObjectPlan itemPlan = ctx.findOwnershipPlanForDomId(domId);
+            if (itemPlan == null || itemPlan.bounds == null || itemPlan.bounds.length < 4) return null;
+            if (plan == null) {
+                plan = itemPlan;
+            } else if (plan.pageIndex != itemPlan.pageIndex) {
+                return null;
+            }
+            sawInline = true;
+        }
+        return sawInline ? plan : null;
+    }
+
+    private static boolean isSimpleInlineMarkerParagraph(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return false;
+        boolean hasInline = false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTInlineObject) {
+                hasInline = true;
+            }
+        }
+        if (!hasInline) return false;
+        String text = ParagraphTextHelpers.getParaPlainText(paragraph);
+        if (text == null) return false;
+        String compact = text.replace("\uFFFC", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .replaceAll("\\s+", "");
+        if (compact.isEmpty() || compact.length() > 16) return false;
+        return compact.matches("[0-9pP.]+");
+    }
+
+    private static ObjectPlan firstPlannedInlineObjectPlan(ResolvedBuildContext ctx, ASTParagraph paragraph) {
+        if (ctx == null || paragraph == null || paragraph.items() == null) return null;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            Integer domId = sourceIdToDomId(obj.sourceId());
+            if (domId == null) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForDomId(domId);
+            if (plan != null && plan.bounds != null && plan.bounds.length >= 4) return plan;
+        }
+        return null;
+    }
+
+    private static ResolvedTextFrame resolvedTextFrame(ResolvedBuildContext ctx, ASTTextFrameBlock block) {
+        if (ctx == null || ctx.resolvedData == null || block == null) return null;
+        String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+        if (domId == null) domId = block.sourceId();
+        return ctx.resolvedData.getTextFrame(domId);
+    }
+
+    private static Integer sourceIdToDomId(String sourceId) {
+        String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
+        if (domId == null || domId.isEmpty()) return null;
+        try {
+            return Integer.parseInt(domId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static boolean containsPoint(double[] bounds, double y, double x) {
+        double tolerance = 0.5;
+        return y >= Math.min(bounds[0], bounds[2]) - tolerance
+                && y <= Math.max(bounds[0], bounds[2]) + tolerance
+                && x >= Math.min(bounds[1], bounds[3]) - tolerance
+                && x <= Math.max(bounds[1], bounds[3]) + tolerance;
+    }
+
+    private static double overlapArea(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return 0.0;
+        double top = Math.max(Math.min(a[0], a[2]), Math.min(b[0], b[2]));
+        double left = Math.max(Math.min(a[1], a[3]), Math.min(b[1], b[3]));
+        double bottom = Math.min(Math.max(a[0], a[2]), Math.max(b[0], b[2]));
+        double right = Math.min(Math.max(a[1], a[3]), Math.max(b[1], b[3]));
+        return Math.max(0.0, bottom - top) * Math.max(0.0, right - left);
+    }
+
+    static void repairInlineOnlyTextFlowParagraphs(
+            ResolvedBuildContext ctx,
+            String storyId,
+            List<ASTParagraph> paragraphs) {
+        if (ctx == null || ctx.textFlowDocument == null || storyId == null || paragraphs == null) return;
+        TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(storyId);
+        if (unit == null || unit.paragraphs == null || unit.paragraphs.isEmpty()) return;
+        List<TextFlowDocument.TextFlowParagraph> inlineOnlyFlowParagraphs =
+                inlineOnlyFlowParagraphs(unit);
+        int inlineOnlyIndex = 0;
+        int count = Math.min(paragraphs.size(), unit.paragraphs.size());
+        for (int i = 0; i < paragraphs.size(); i++) {
+            ASTParagraph paragraph = paragraphs.get(i);
+            if (!isObjectReplacementOnlyParagraph(paragraph)) continue;
+            TextFlowDocument.TextFlowParagraph flowParagraph = i < count ? unit.paragraphs.get(i) : null;
+            List<ASTInlineItem> repaired = plannedInlineItemsForFlowParagraph(ctx, flowParagraph);
+            if ((repaired == null || repaired.isEmpty())
+                    && inlineOnlyIndex < inlineOnlyFlowParagraphs.size()) {
+                repaired = plannedInlineItemsForFlowParagraph(
+                        ctx, inlineOnlyFlowParagraphs.get(inlineOnlyIndex++));
+            }
+            if (repaired == null || repaired.isEmpty()) continue;
+            paragraph.items().clear();
+            for (ASTInlineItem item : repaired) {
+                if (item == null) continue;
+                paragraph.addItem(item);
+            }
+        }
+    }
+
+    private static boolean isObjectReplacementOnlyParagraph(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return false;
+        String text = ParagraphTextHelpers.getParaPlainText(paragraph);
+        if (text == null || text.isEmpty()) return false;
+        String normalized = text
+                .replace("\uFFFC", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+        return normalized.isEmpty() && text.indexOf('\uFFFC') >= 0;
+    }
+
+    private static List<TextFlowDocument.TextFlowParagraph> inlineOnlyFlowParagraphs(
+            TextFlowDocument.TextFlowUnit unit) {
+        List<TextFlowDocument.TextFlowParagraph> out = new ArrayList<>();
+        if (unit == null || unit.paragraphs == null) return out;
+        for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
+            if (isInlineOnlyFlowParagraph(paragraph)) out.add(paragraph);
+        }
+        return out;
+    }
+
+    private static boolean isInlineOnlyFlowParagraph(TextFlowDocument.TextFlowParagraph paragraph) {
+        if (paragraph == null || paragraph.atoms == null || paragraph.atoms.isEmpty()) return false;
+        boolean hasInline = false;
+        for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+            if (atom instanceof TextFlowDocument.InlineSlotAtom) {
+                hasInline = true;
+                continue;
+            }
+            if (atom instanceof TextFlowDocument.TextAtom) {
+                String text = ((TextFlowDocument.TextAtom) atom).text;
+                if (text != null
+                        && !text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().isEmpty()) {
+                    return false;
+                }
+            }
+        }
+        return hasInline;
+    }
+
+    private static List<ASTInlineItem> plannedInlineItemsForFlowParagraph(
+            ResolvedBuildContext ctx,
+            TextFlowDocument.TextFlowParagraph flowParagraph) {
+        if (flowParagraph == null || flowParagraph.atoms == null) return null;
+        List<ASTInlineItem> out = new ArrayList<>();
+        boolean sawInlineSlot = false;
+        for (TextFlowDocument.TextFlowAtom atom : flowParagraph.atoms) {
+            if (atom instanceof TextFlowDocument.TextAtom) {
+                String text = ((TextFlowDocument.TextAtom) atom).text;
+                if (text != null
+                        && !text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().isEmpty()) {
+                    return null;
+                }
+                continue;
+            }
+            if (!(atom instanceof TextFlowDocument.InlineSlotAtom)) continue;
+            TextFlowDocument.InlineSlotAtom slot = (TextFlowDocument.InlineSlotAtom) atom;
+            if (slot.anchoredObjectId == null) continue;
+            sawInlineSlot = true;
+            List<ASTInlineItem> items = InlineFrameHandler.loadPlannedInlineAnchorItems(
+                    ctx, slot.anchoredObjectId, null, null);
+            if (items != null) out.addAll(items);
+        }
+        return sawInlineSlot ? out : null;
+    }
+
     /**
      * InDesign can expose linked-frame visible ranges at a glyph boundary inside
      * one lexical token.  If execution materializes each linked frame as an
@@ -223,12 +499,18 @@ class ParagraphDistributor {
 
     private static boolean isInsideToken(String text, int index) {
         if (text == null || index <= 0 || index >= text.length()) return false;
+        char prev = text.charAt(index - 1);
+        char curr = text.charAt(index);
+        if (isOpeningAttachedTokenPunctuation(prev) && isTokenCoreChar(curr)) return true;
         return isTokenCoreChar(text.charAt(index - 1))
                 && isTokenCoreChar(text.charAt(index));
     }
 
     private static int nextTokenBoundary(String text, int index) {
         int i = Math.max(0, Math.min(index, text.length()));
+        while (i < text.length() && isOpeningAttachedTokenPunctuation(text.charAt(i))) {
+            i++;
+        }
         while (i < text.length() && isTokenCoreChar(text.charAt(i))) {
             i++;
         }
@@ -250,6 +532,21 @@ class ParagraphDistributor {
                 || c == '\u2019';
     }
 
+    private static boolean isOpeningAttachedTokenPunctuation(char c) {
+        switch (c) {
+            case '(':
+            case '[':
+            case '{':
+            case '"':
+            case '\'':
+            case '\u2018':
+            case '\u201C':
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private static boolean isAttachedTokenPunctuation(char c) {
         switch (c) {
             case ')':
@@ -269,6 +566,24 @@ class ParagraphDistributor {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static boolean hasResolvedFrameCharacterRange(ResolvedTextFrame frame) {
+        return frame != null && frame.paragraphStart() >= 0 && frame.paragraphEnd() >= frame.paragraphStart();
+    }
+
+    private static boolean startsWithInlineObjectOrBoundary(String text) {
+        if (text == null || text.isEmpty()) return false;
+        int i = 0;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (c == '\uFEFF' || Character.isWhitespace(c) || Character.isISOControl(c)) {
+                i++;
+                continue;
+            }
+            return c == '\uFFFC';
+        }
+        return false;
     }
 
     private static int findFrameStart(String storyText, String visibleText, int searchFrom) {
@@ -351,7 +666,7 @@ class ParagraphDistributor {
                 if (plan != null && plan.labelText != null && !plan.labelText.isEmpty()) {
                     texts.add(plan.labelText);
                 } else {
-                    texts.add("");
+                    texts.add("\uFFFC");
                 }
             }
         }

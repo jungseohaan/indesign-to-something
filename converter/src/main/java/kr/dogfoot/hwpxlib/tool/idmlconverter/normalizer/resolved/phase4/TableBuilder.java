@@ -1364,14 +1364,21 @@ public final class TableBuilder {
                     removed += before - after;
                 }
                 removed += removeInlineTablesFromParagraphs(obj.paragraphs(), sourceIds);
-                if ((obj.paragraphs() == null || obj.paragraphs().isEmpty())
-                        && (obj.inlineTables() == null || obj.inlineTables().isEmpty())
-                        && obj.imageData() == null && obj.imagePath() == null) {
+                if (isEmptyInlineObjectAfterTableRemoval(obj)) {
                     it.remove();
                 }
             }
         }
         return removed;
+    }
+
+    private static boolean isEmptyInlineObjectAfterTableRemoval(ASTInlineObject obj) {
+        if (obj == null) return true;
+        if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) return false;
+        if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
+        if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) return false;
+        if (obj.imageData() != null || obj.imagePath() != null || obj.imageFillData() != null) return false;
+        return true;
     }
 
     private static void restoreNestedTextFrameTables(
