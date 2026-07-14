@@ -119,6 +119,7 @@ public final class StoryConverter {
         final String fillColor;
         final Double tracking;
         final String fontFamily;
+        final String fontStyle;
         final Double fontSize;
         final Double horizontalScale;
         final String underlineColor;
@@ -126,9 +127,15 @@ public final class StoryConverter {
 
         StyleContext(String fillColor, Double tracking, String fontFamily, Double fontSize,
                      Double horizontalScale, String underlineColor) {
+            this(fillColor, tracking, fontFamily, null, fontSize, horizontalScale, underlineColor);
+        }
+
+        StyleContext(String fillColor, Double tracking, String fontFamily, String fontStyle, Double fontSize,
+                     Double horizontalScale, String underlineColor) {
             this.fillColor = fillColor;
             this.tracking = tracking;
             this.fontFamily = fontFamily;
+            this.fontStyle = fontStyle;
             this.fontSize = fontSize;
             this.horizontalScale = horizontalScale;
             this.underlineColor = underlineColor;

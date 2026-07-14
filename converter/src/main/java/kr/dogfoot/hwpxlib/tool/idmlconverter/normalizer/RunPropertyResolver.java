@@ -124,7 +124,7 @@ public final class RunPropertyResolver {
     /**
      * SPEC-016: 매칭 신뢰도를 고려한 fontFamily 해석.
      *
-     * <p>HIGH: resolved 우선. MEDIUM/LOW: IDML CR 우선 (기존 동작).
+     * <p>HIGH/MEDIUM: resolved 우선. LOW: IDML CR 우선 (기존 동작).
      */
     public static String resolveFontFamilyWithConfidence(
             ResolvedRun rr,
@@ -132,12 +132,46 @@ public final class RunPropertyResolver {
             String paragraphStyleFontFamily,
             String text,
             MatchConfidence confidence) {
-        if (confidence == MatchConfidence.HIGH && rr != null) {
+        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM) && rr != null) {
             String ff = rr.fontFamily();
             if (ff != null && passesFontFilter(ff, text)) return ff;
         }
-        // IDML CR 우선 (MEDIUM/LOW 또는 HIGH에서 resolved가 없을 때)
+        // IDML CR 우선 (LOW 또는 resolved가 없을 때)
         return resolveFontFamily(rr, cr, paragraphStyleFontFamily, text);
+    }
+
+    /**
+     * fontStyle 우선순위 해석.
+     *
+     * <p>fontFamily와 같은 우선순위를 사용해야 HWPX font mapping 단계에서
+     * family/style 조합이 서로 다른 출처에서 섞이지 않는다.
+     */
+    public static String resolveFontStyle(
+            ResolvedRun rr,
+            IDMLCharacterRun cr,
+            String paragraphStyleFontStyle) {
+        if (cr != null && cr.fontStyle() != null) return cr.fontStyle();
+        if (rr != null && rr.fontStyle() != null) return rr.fontStyle();
+        return paragraphStyleFontStyle;
+    }
+
+    /**
+     * SPEC-016: 매칭 신뢰도를 고려한 fontStyle 해석.
+     *
+     * <p>HIGH/MEDIUM에서는 resolved의 effective style을 우선한다. LOW에서는
+     * IDML CharacterRun을 우선해 잘못 매칭된 resolved run이 원본 style을 덮지
+     * 못하게 한다.
+     */
+    public static String resolveFontStyleWithConfidence(
+            ResolvedRun rr,
+            IDMLCharacterRun cr,
+            String paragraphStyleFontStyle,
+            MatchConfidence confidence) {
+        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
+                && rr != null && rr.fontStyle() != null) {
+            return rr.fontStyle();
+        }
+        return resolveFontStyle(rr, cr, paragraphStyleFontStyle);
     }
 
     /**

@@ -17,6 +17,30 @@
       "spacing": 0,
       "scaleAdjust": 5
     },
+    "Helvetica": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0,
+      "scaleAdjust": 5
+    },
+    "Helvetica LT Std": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0,
+      "scaleAdjust": 5
+    },
+    "Helvetica Neue LT Std": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0,
+      "scaleAdjust": 5
+    },
+    "Helvetica Neue LT Pro": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0,
+      "scaleAdjust": 5
+    },
     "Times New Roman": {
       "ko": "한컴바탕",
       "en": "Times New Roman",

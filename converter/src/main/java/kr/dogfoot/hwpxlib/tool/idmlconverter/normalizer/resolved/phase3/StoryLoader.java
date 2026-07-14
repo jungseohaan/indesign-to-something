@@ -16,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTStoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextFlowTabPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
@@ -469,7 +470,11 @@ public class StoryLoader {
                                     ResolvedRun matchedRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
                                     if (matchedRR != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
                                     long createStart = System.nanoTime();
-                                    ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, partText, matchedRR != null ? matchedRR : defaultRR, sc);
+                                    MatchConfidence confidence = matchedRR != null
+                                            ? RunBuilder.confidenceForResolvedRunMatch(matchedRR, partText)
+                                            : MatchConfidence.LOW;
+                                    ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, partText,
+                                            matchedRR != null ? matchedRR : defaultRR, sc, confidence);
                                     ConversionTiming.addCounter(perfPrefix + ".createRunNanos",
                                             System.nanoTime() - createStart);
                                     if (!RunBuilder.splitBulletRun(ctx, tr, para)) {
@@ -530,7 +535,11 @@ public class StoryLoader {
                             ResolvedRun matchedRR2 = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, text);
                             if (matchedRR2 != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
                             long createStart = System.nanoTime();
-                            ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, text, matchedRR2 != null ? matchedRR2 : defaultRR, sc);
+                            MatchConfidence confidence = matchedRR2 != null
+                                    ? RunBuilder.confidenceForResolvedRunMatch(matchedRR2, text)
+                                    : MatchConfidence.LOW;
+                            ASTTextRun tr = RunBuilder.createRunFromIDML(ctx, run, text,
+                                    matchedRR2 != null ? matchedRR2 : defaultRR, sc, confidence);
                             ConversionTiming.addCounter(perfPrefix + ".createRunNanos",
                                     System.nanoTime() - createStart);
                             // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
@@ -668,17 +677,40 @@ public class StoryLoader {
                 return resolvedCellParagraphs;
             }
         }
+        if (resolvedCell != null
+                && resolvedCell.hasTextRuns()) {
+            List<ASTParagraph> resolvedCellParagraphs =
+                    astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
+            if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
+                return resolvedCellParagraphs;
+            }
+        }
+        ResolvedStory cellResolvedStory = findResolvedStoryForCell(ctx, idmlCell, cellStoryId);
+        String effectiveCellStoryId = cellStoryId != null ? cellStoryId : firstCellStoryId(idmlCell);
         int paraIndex = 0;
         for (IDMLParagraph ip : idmlCell.paragraphs()) {
             if (ip == null) { paraIndex++; continue; }
             ASTParagraph para = new ASTParagraph();
+            ResolvedParagraph resolvedParagraph = (cellResolvedStory != null
+                    && cellResolvedStory.paragraphs() != null
+                    && paraIndex < cellResolvedStory.paragraphs().size())
+                    ? cellResolvedStory.paragraphs().get(paraIndex)
+                    : null;
+            if (resolvedParagraph == null
+                    && resolvedCell != null
+                    && resolvedCell.paragraphs() != null
+                    && paraIndex < resolvedCell.paragraphs().size()) {
+                resolvedParagraph = resolvedCell.paragraphs().get(paraIndex);
+            }
             if (ip.appliedParagraphStyle() != null) {
                 para.paragraphStyleRef(ip.appliedParagraphStyle());
             }
-            ParagraphPropertyResolver.apply(para, ip, null, ctx, null);
+            ParagraphPropertyResolver.apply(para, ip, resolvedParagraph, ctx, null);
             StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
             sc.hasTabStops = para.hasTabStops();
-            buildParagraphContent(ctx, ip, null, null, cellStoryId, paraIndex, sc, para);
+            List<ResolvedRun> resolvedRuns = resolvedParagraph != null ? resolvedParagraph.runs() : null;
+            buildParagraphContent(ctx, ip, resolvedParagraph, resolvedRuns,
+                    effectiveCellStoryId, paraIndex, sc, para);
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             result.add(para);
             ConversionTiming.addCounter("phase3.storyLoader.cell.paragraphs", 1);
@@ -695,6 +727,48 @@ public class StoryLoader {
             return new ArrayList<>();
         }
         return result;
+    }
+
+    private static ResolvedStory findResolvedStoryForCell(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+            String explicitStoryId) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null) return null;
+        if (explicitStoryId != null) {
+            ResolvedStory explicit = ctx.resolvedData.getStory(explicitStoryId);
+            if (explicit != null) return explicit;
+        }
+        if (idmlCell.textFrameStoryRefs() == null || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return null;
+        }
+        String cellText = normalizedCellText(idmlCell);
+        ResolvedStory first = null;
+        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            String storyId = toDecimalStoryId(storyRef);
+            ResolvedStory story = storyId != null ? ctx.resolvedData.getStory(storyId) : null;
+            if (story == null && storyRef != null) {
+                story = ctx.resolvedData.getStory(storyRef);
+            }
+            if (story == null) continue;
+            if (first == null) first = story;
+            String storyText = normalizedResolvedStoryText(story);
+            if (!cellText.isEmpty() && !storyText.isEmpty()
+                    && (cellText.equals(storyText)
+                    || storyText.startsWith(cellText)
+                    || cellText.startsWith(storyText))) {
+                return story;
+            }
+        }
+        return first;
+    }
+
+    private static String firstCellStoryId(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (idmlCell == null || idmlCell.textFrameStoryRefs() == null
+                || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return null;
+        }
+        return toDecimalStoryId(idmlCell.textFrameStoryRefs().get(0));
     }
 
     private static boolean hasMeaningfulCellParagraphContent(List<ASTParagraph> paragraphs) {
@@ -738,8 +812,7 @@ public class StoryLoader {
         ResolvedTable.Cell resolvedCell = findResolvedCell(ctx, idmlTable, idmlCell);
         if (resolvedCell == null
                 || resolvedCell.paragraphs() == null
-                || resolvedCell.paragraphs().isEmpty()
-                || !resolvedCellHasInlineAnchors(resolvedCell)) {
+                || resolvedCell.paragraphs().isEmpty()) {
             return result;
         }
         boolean includeResolvedText = hasDirectVisibleCellText(idmlCell);
@@ -824,8 +897,55 @@ public class StoryLoader {
         if (resolvedTable == null && idmlCell.selfId() != null) {
             resolvedTable = ctx.resolvedData.getTableByIdOrSourceId(idmlCell.selfId());
         }
-        if (resolvedTable == null) return null;
-        return resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex());
+        ResolvedTable.Cell cell = resolvedTable != null
+                ? resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex())
+                : null;
+        if (cell != null && resolvedCellTextCompatible(idmlCell, cell)) return cell;
+        return findResolvedCellByText(ctx, idmlCell);
+    }
+
+    private static boolean resolvedCellTextCompatible(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+            ResolvedTable.Cell cell) {
+        String idmlText = normalizedCellText(idmlCell);
+        String resolvedText = normalizedResolvedCellText(cell);
+        if (idmlText.isEmpty() || resolvedText.isEmpty()) return true;
+        return idmlText.equals(resolvedText)
+                || resolvedText.startsWith(idmlText)
+                || idmlText.startsWith(resolvedText);
+    }
+
+    private static ResolvedTable.Cell findResolvedCellByText(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        String cellText = normalizedCellText(idmlCell);
+        if (cellText.isEmpty() || ctx == null || ctx.resolvedData == null) return null;
+        for (ResolvedTable table : ctx.resolvedData.tables()) {
+            if (table == null || table.cells() == null) continue;
+            for (ResolvedTable.Cell cell : table.cells()) {
+                String resolvedText = normalizedResolvedCellText(cell);
+                if (resolvedText.isEmpty()) continue;
+                if (cellText.equals(resolvedText)
+                        || resolvedText.startsWith(cellText)
+                        || cellText.startsWith(resolvedText)) {
+                    return cell;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String normalizedResolvedCellText(ResolvedTable.Cell cell) {
+        if (cell == null || cell.paragraphs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.isInlineAnchor()) continue;
+                sb.append(normalizeCellOwnershipText(run.text()));
+            }
+        }
+        return sb.toString();
     }
 
     private static boolean resolvedCellHasInlineAnchors(ResolvedTable.Cell cell) {
@@ -1253,6 +1373,7 @@ public class StoryLoader {
                     RunBuilder.getStyleFillColor(ctx, styleRef),
                     RunBuilder.getStyleTracking(ctx, styleRef),
                     RunBuilder.getStyleFontFamily(ctx, styleRef),
+                    RunBuilder.getStyleFontStyle(ctx, styleRef),
                     RunBuilder.getStyleFontSize(ctx, styleRef),
                     RunBuilder.getStyleHorizontalScale(ctx, styleRef),
                     RunBuilder.getStyleUnderlineColor(ctx, styleRef));
@@ -1262,6 +1383,7 @@ public class StoryLoader {
                 cached.fillColor,
                 cached.tracking,
                 cached.fontFamily,
+                cached.fontStyle,
                 cached.fontSize,
                 cached.horizontalScale,
                 cached.underlineColor);

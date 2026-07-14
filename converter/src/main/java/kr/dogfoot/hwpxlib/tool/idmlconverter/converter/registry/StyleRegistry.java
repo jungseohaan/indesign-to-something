@@ -222,7 +222,7 @@ public class StyleRegistry {
         boolean strikeThrough = Boolean.TRUE.equals(styleDef.strikeThrough());
         LineType3 ulShape = mapIdmlUnderlineType(styleDef.underlineType());
         CharPrBuilder.build(charPr, id, height, textColor,
-                styleDef.fontFamily(), fontRegistry,
+                styleDef.fontFamily(), styleDef.fontStyle(), fontRegistry,
                 styleDef.letterSpacing(),
                 bold, italic,
                 false, false,

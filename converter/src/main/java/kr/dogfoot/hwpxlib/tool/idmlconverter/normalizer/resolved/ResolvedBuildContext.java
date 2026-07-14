@@ -175,15 +175,17 @@ public final class ResolvedBuildContext {
         public final String fillColor;
         public final Double tracking;
         public final String fontFamily;
+        public final String fontStyle;
         public final Double fontSize;
         public final Double horizontalScale;
         public final String underlineColor;
 
         public ParagraphStyleContext(String fillColor, Double tracking, String fontFamily,
-                                     Double fontSize, Double horizontalScale, String underlineColor) {
+                                     String fontStyle, Double fontSize, Double horizontalScale, String underlineColor) {
             this.fillColor = fillColor;
             this.tracking = tracking;
             this.fontFamily = fontFamily;
+            this.fontStyle = fontStyle;
             this.fontSize = fontSize;
             this.horizontalScale = horizontalScale;
             this.underlineColor = underlineColor;
