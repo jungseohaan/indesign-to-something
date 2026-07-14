@@ -431,6 +431,9 @@ public class FlatNodeAdapter {
         }
 
         obj.sourceId(node.sourceId());
+        if (node.zOrder() != 0) {
+            obj.plannedZOrder(node.zOrder());
+        }
 
         // Size
         obj.width(node.width());
@@ -474,7 +477,7 @@ public class FlatNodeAdapter {
         obj.resolvedWidth(node.resolvedWidth());
         obj.resolvedHeight(node.resolvedHeight());
 
-        // Overlay frames (IMAGE kind only)
+        // Overlay frames (image visual with editable child text)
         if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
             List<FlatLayoutNode> overlays = gateway.overlayChildren(node.nodeId());
             for (FlatLayoutNode overlayNode : overlays) {
@@ -496,6 +499,9 @@ public class FlatNodeAdapter {
             obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         }
         obj.sourceId(node.sourceId());
+        if (node.zOrder() != 0) {
+            obj.plannedZOrder(node.zOrder());
+        }
 
         // Size
         obj.width(node.width());
@@ -503,6 +509,7 @@ public class FlatNodeAdapter {
 
         // Frame style
         obj.fillColor(node.fillColor());
+        obj.imageFillData(node.imageFillData());
         obj.fillTint(node.fillTint());
         obj.strokeColor(node.strokeColor());
         obj.strokeWeight(node.strokeWeight());
@@ -546,6 +553,12 @@ public class FlatNodeAdapter {
         List<ASTParagraph> paragraphs = toParagraphs(node.componentIds());
         obj.paragraphs(paragraphs);
 
+        List<FlatLayoutNode> overlays = gateway.overlayChildren(node.nodeId());
+        for (FlatLayoutNode overlayNode : overlays) {
+            ASTInlineObject overlayObj = toOverlayFrame(overlayNode);
+            obj.addOverlayFrame(overlayObj);
+        }
+
         // Find inline TABLE children
         Set<String> myComponentIds = new HashSet<String>(node.componentIds());
         myComponentIds.add(node.nodeId());
@@ -567,6 +580,9 @@ public class FlatNodeAdapter {
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
         obj.sourceId(node.sourceId());
+        if (node.zOrder() != 0) {
+            obj.plannedZOrder(node.zOrder());
+        }
 
         // Size
         obj.width(node.width());
@@ -607,6 +623,9 @@ public class FlatNodeAdapter {
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         obj.sourceId(node.sourceId());
         obj.isOverlay(true);
+        if (node.zOrder() != 0) {
+            obj.plannedZOrder(node.zOrder());
+        }
 
         // Size
         obj.width(node.width());
@@ -614,6 +633,7 @@ public class FlatNodeAdapter {
 
         // Frame style
         obj.fillColor(node.fillColor());
+        obj.imageFillData(node.imageFillData());
         obj.fillTint(node.fillTint());
         obj.strokeColor(node.strokeColor());
         obj.strokeWeight(node.strokeWeight());

@@ -119,6 +119,7 @@ public final class StoryConverter {
         final String fillColor;
         final Double tracking;
         final String fontFamily;
+        final String fontStyle;
         final Double fontSize;
         final Double horizontalScale;
         final String underlineColor;
@@ -126,9 +127,15 @@ public final class StoryConverter {
 
         StyleContext(String fillColor, Double tracking, String fontFamily, Double fontSize,
                      Double horizontalScale, String underlineColor) {
+            this(fillColor, tracking, fontFamily, null, fontSize, horizontalScale, underlineColor);
+        }
+
+        StyleContext(String fillColor, Double tracking, String fontFamily, String fontStyle, Double fontSize,
+                     Double horizontalScale, String underlineColor) {
             this.fillColor = fillColor;
             this.tracking = tracking;
             this.fontFamily = fontFamily;
+            this.fontStyle = fontStyle;
             this.fontSize = fontSize;
             this.horizontalScale = horizontalScale;
             this.underlineColor = underlineColor;
@@ -3010,7 +3017,12 @@ public final class StoryConverter {
                 ResolvedTextFlowAstConverter.options()
                         .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
                         .styleOptions(styleOptions)
-                        .truncateAtParagraphBreak(false));
+                        .truncateAtParagraphBreak(false),
+                atom -> {
+                    if (atom == null || atom.anchoredObjectId == null) return null;
+                    return InlineFrameHandler.loadPlannedInlineAnchorItems(
+                            ctx, atom.anchoredObjectId, null, null);
+                });
         if (paragraphs == null || paragraphs.isEmpty()) return null;
         postprocessResolvedStoryParagraphs(ctx, storyId, paragraphs);
         return paragraphs;
@@ -3063,6 +3075,7 @@ public final class StoryConverter {
             String storyId,
             List<ASTParagraph> paragraphs) {
         if (paragraphs == null) return;
+        ParagraphDistributor.repairInlineOnlyTextFlowParagraphs(ctx, storyId, paragraphs);
         for (ASTParagraph para : paragraphs) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             RunPostProcessor.splitOverlineRuns(para);

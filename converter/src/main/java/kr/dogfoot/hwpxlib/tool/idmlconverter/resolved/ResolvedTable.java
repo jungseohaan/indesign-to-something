@@ -11,6 +11,8 @@ public class ResolvedTable {
     public static class Cell {
         private int row;
         private int col;
+        private String fillColor;
+        private double fillTint = 100;
         private final List<ResolvedParagraph> paragraphs = new ArrayList<>();
         private final List<Integer> inlineAnchorIds = new ArrayList<>();
         private boolean hasTextRuns;
@@ -20,6 +22,12 @@ public class ResolvedTable {
 
         public int col() { return col; }
         public void col(int v) { this.col = v; }
+
+        public String fillColor() { return fillColor; }
+        public void fillColor(String v) { this.fillColor = v; }
+
+        public double fillTint() { return fillTint; }
+        public void fillTint(double v) { this.fillTint = v; }
 
         public List<ResolvedParagraph> paragraphs() { return paragraphs; }
         public void addParagraph(ResolvedParagraph v) { if (v != null) paragraphs.add(v); }

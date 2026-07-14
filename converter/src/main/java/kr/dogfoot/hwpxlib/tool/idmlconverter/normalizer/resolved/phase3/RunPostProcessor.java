@@ -235,7 +235,7 @@ class RunPostProcessor {
         mathRuns.clear();
     }
 
-    /** 이탤릭 수학 런 판별: Italic 또는 EH수식 폰트 + 라틴 알파벳/숫자/수학 기호만 포함 */
+    /** 이탤릭 수학 런 판별: 수식 전용 폰트/기호/짧은 변수 런만 수식으로 승격한다. */
     private static boolean isItalicMathRun(ASTTextRun tr) {
         String text = tr.text();
         if (text == null || text.isEmpty()) return false;
@@ -251,12 +251,66 @@ class RunPostProcessor {
         String ff = tr.fontFamily();
         boolean isEHFont = ff != null && EHFontGlyphMap.isEHFontFamily(ff);
         if (!isItalic && !isEHFont) return false;
-        // EH 폰트 런은 길이와 무관하게 수식으로 간주 (backtick, 연산자 포함)
-        if (isEHFont) return true;
-        // 이탤릭 런: 2자 이상이면 수식으로 간주
-        if (text.length() >= 2) return true;
+
+        if (hasLongLatinWord(text, 3) && !hasMathSyntax(text)
+                && !EHFontGlyphMap.containsEHEncodedChars(text)
+                && !EHFontGlyphMap.containsEHFractionPattern(text)) {
+            return false;
+        }
+
+        if (isEHFont) {
+            return true;
+        }
+        if (hasMathSyntax(text)) {
+            return true;
+        }
+
         // 단일 문자: 알파벳이면 수식 변수
         char c0 = text.charAt(0);
-        return (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z');
+        if (text.length() == 1) {
+            return (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z');
+        }
+        return isShortLatinVariableCluster(text);
+    }
+
+    private static boolean hasMathSyntax(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ("+=<>≤≥±×÷√²³^_π∑∫∞{}[]()/".indexOf(c) >= 0) {
+                return true;
+            }
+            if (c == '\uE000' || c == '\uE001') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasLongLatinWord(String text, int minLen) {
+        int streak = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isLetter(c) && c < 0x100) {
+                streak++;
+                if (streak >= minLen) return true;
+            } else {
+                streak = 0;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isShortLatinVariableCluster(String text) {
+        String compact = text.replace("`", "").replace(" ", "")
+                .replace("\u2009", "").replace("\u2005", "");
+        if (compact.isEmpty() || compact.length() > 4) return false;
+        for (int i = 0; i < compact.length(); i++) {
+            char c = compact.charAt(i);
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || Character.isDigit(c))) {
+                return false;
+            }
+        }
+        return true;
     }
 }

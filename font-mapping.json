@@ -14,8 +14,27 @@
     "Helvetica Neue": {
       "ko": "한컴돋움",
       "en": "Arial",
-      "spacing": 0,
-      "scaleAdjust": 5
+      "spacing": 0
+    },
+    "Helvetica": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0
+    },
+    "Helvetica LT Std": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0
+    },
+    "Helvetica Neue LT Std": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0
+    },
+    "Helvetica Neue LT Pro": {
+      "ko": "한컴돋움",
+      "en": "Arial",
+      "spacing": 0
     },
     "Times New Roman": {
       "ko": "한컴바탕",
@@ -38,14 +57,12 @@
       "ko": "함초롬돋움",
       "en": "함초롬돋움",
       "spacing": 0,
-      "scaleAdjust": -9,
       "forceNormalStyle": true
     },
     "DX경필고딕B": {
       "ko": "함초롬돋움",
       "en": "함초롬돋움",
       "spacing": 0,
-      "scaleAdjust": -9,
       "forceNormalStyle": true
     },
     "Sandoll 고딕Neo1": {
@@ -263,14 +280,12 @@
     "강원교육새음 OTF": {
       "ko": "한컴돋움",
       "en": "한컴돋움",
-      "spacing": -5,
-      "scaleAdjust": -20
+      "spacing": -5
     },
     "Sandoll 고딕NeoRound": {
       "ko": "한컴돋움",
       "en": "한컴돋움",
-      "spacing": 0,
-      "scaleAdjust": 5
+      "spacing": 0
     },
     "Sandoll 고고Round": {
       "ko": "한컴돋움",

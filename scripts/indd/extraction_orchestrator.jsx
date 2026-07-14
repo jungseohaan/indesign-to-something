@@ -282,6 +282,7 @@ function _cloneContextForSpreadChunk(ctx, chunk, chunkDir) {
 
 function _copyAndRewriteChunkFilePath(row, field, rootOutputDir, chunkDir, chunkLabel) {
     if (!row || !row[field]) return;
+    if (row.globalRenderedFrame === true) return;
     var rel = String(row[field]);
     if (rel.indexOf("rendered_frames/") !== 0) return;
     var slash = rel.lastIndexOf("/");
@@ -627,6 +628,116 @@ function _prepareSpreadChunkSourceInfoCache(doc, ctx) {
     }
 }
 
+function _indexSingleTextlessPagePlaneFrames(result) {
+    var byPageIndex = {};
+    var frames = result && result.frames ? result.frames : [];
+    for (var i = 0; i < frames.length; i++) {
+        var frame = frames[i];
+        if (!frame || frame.pageIndex === null || frame.pageIndex === undefined) continue;
+        byPageIndex[String(frame.pageIndex)] = {
+            file: frame.file || null,
+            bounds: frame.bounds || null,
+            fileBytes: frame.exportSanity ? frame.exportSanity.fileBytes || 0 : 0
+        };
+    }
+    return byPageIndex;
+}
+
+function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
+    if (!ctx || ctx.globalSingleTextlessPagePlanesByPageIndex) return;
+    if (ctx.graphicsMode && ctx.graphicsMode !== "single-textless-plane") return;
+    var startedAt = (new Date()).getTime();
+    var allItems = null;
+    var summary = {
+        schemaVersion: 1,
+        mode: "global-single-textless-page-plane-preexport",
+        status: "skipped",
+        elapsedMs: null,
+        pageCount: 0,
+        renderedFrameCount: 0,
+        hiddenTextItemCount: 0,
+        hiddenInlineItemCount: 0,
+        perfBreakdown: null
+    };
+    try {
+        _marker(ctx.outputDir, "03a_globalSingleTextlessPagePlanes_start");
+        allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
+        var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
+        var itemById = sourceIndex && sourceIndex.domById ? sourceIndex.domById : _buildItemById(allItems);
+        var inlineCandidates = _globalSingleTextlessInlineHideCandidates(
+                sourceIndex && sourceIndex.sourceItems ? sourceIndex.sourceItems : []);
+        var result = exportSingleTextlessPagePlanes(
+                doc,
+                ctx.outputDir,
+                ctx.startPage,
+                ctx.endPage,
+                allItems,
+                itemById,
+                inlineCandidates,
+                {
+                    globalPreExport: true,
+                    inlineFallbackAllItems: true
+                });
+        ctx.globalSingleTextlessPagePlanesByPageIndex =
+                _indexSingleTextlessPagePlaneFrames(result);
+        summary.status = "ok";
+        summary.pageCount = ctx.rangePageCount;
+        summary.renderedFrameCount = result && result.frames ? result.frames.length : 0;
+        var diag = readJson(ctx.outputDir + "/single-textless-page-plane-export.json") || {};
+        summary.perfBreakdown = diag.perfBreakdown || null;
+        if (summary.perfBreakdown) {
+            summary.hiddenTextItemCount = summary.perfBreakdown.hiddenTextItemCount || 0;
+            summary.hiddenInlineItemCount = summary.perfBreakdown.hiddenInlineItemCount || 0;
+        }
+        _marker(ctx.outputDir, "03a_globalSingleTextlessPagePlanes_done");
+    } catch (eGlobalSinglePlane) {
+        ctx.globalSingleTextlessPagePlanesByPageIndex = null;
+        summary.status = "fallback";
+        summary.error = String(eGlobalSinglePlane);
+        try { _marker(ctx.outputDir, "03a_globalSingleTextlessPagePlanes_fallback"); } catch (eMarker) {}
+    } finally {
+        summary.elapsedMs = (new Date()).getTime() - startedAt;
+        try { writeJson(ctx.outputDir + "/global-single-textless-page-plane-preexport.json", summary); } catch (eWriteGlobalPlane) {}
+        allItems = null;
+        try { $.gc(); } catch (eGc) {}
+    }
+}
+
+function _globalSingleTextlessInlineHideCandidates(sourceItems) {
+    var candidates = [];
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        if (String(src.kind || "") !== "TextFrame") continue;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        var inline =
+                src.storyTextInlineSlot === true
+                || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                || String(src.parentKind || "") === "Character"
+                || String(src.parentKind || "") === "InsertionPoint";
+        if (!inline) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) continue;
+        candidates.push({
+            candidateId: "global.single_textless.inline_hide." + String(id),
+            passId: "pass.inline_objects",
+            pageIndex: src.pageIndex,
+            kind: "TextFrame",
+            primarySourceObjectId: id,
+            exportTargetObjectId: id,
+            sourceObjectIds: [id],
+            exportSourceObjectIds: [id],
+            visualAction: "PLACE_INLINE_PNG",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            placement: "INLINE",
+            coordinateSpace: "STORY_FLOW",
+            compositeRole: "global_single_textless_inline_hide",
+            slotRole: "inline_hide"
+        });
+    }
+    return candidates;
+}
+
 function _runSpreadChunkExtraction(doc, ctx) {
     var chunks = _selectedSpreadChunks(doc, ctx);
     if (!chunks || chunks.length === 0) {
@@ -634,6 +745,7 @@ function _runSpreadChunkExtraction(doc, ctx) {
     }
     _ensureFolder(ctx.outputDir + "/chunks");
     _prepareSpreadChunkSourceInfoCache(doc, ctx);
+    _prepareGlobalSingleTextlessPagePlanes(doc, ctx);
     for (var ci = 0; ci < chunks.length; ci++) {
         var chunk = chunks[ci];
         var chunkLabel = "spread_" + _spreadChunkSafeName(chunk.spreadKey);
@@ -864,6 +976,13 @@ function _runRenderPhases(doc, ctx, allItems) {
     var tfShellFrames = [];
 
     _marker(ctx.outputDir, "06b_pageTextlessGroups");
+    var pagePlaneExportOptions = {
+        inlineFallbackAllItems: true
+    };
+    if (ctx.globalSingleTextlessPagePlanesByPageIndex) {
+        pagePlaneExportOptions.precomputedPagePlanesByPageIndex =
+                ctx.globalSingleTextlessPagePlanesByPageIndex;
+    }
     pageTextlessGroupResult = exportSingleTextlessPagePlanes(
             doc,
             ctx.outputDir,
@@ -871,7 +990,8 @@ function _runRenderPhases(doc, ctx, allItems) {
             ctx.endPage,
             allItems,
             extractionItemById,
-            inlinePngCandidates);
+            inlinePngCandidates,
+            pagePlaneExportOptions);
     _marker(ctx.outputDir, "06b1_pageTextlessGroups_exportDone");
     _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
     _marker(ctx.outputDir, "06b2_pageTextlessGroups_metaDone");

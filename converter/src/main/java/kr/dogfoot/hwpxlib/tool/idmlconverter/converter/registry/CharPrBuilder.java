@@ -100,15 +100,6 @@ public final class CharPrBuilder {
             charPr.createItalic();
         }
 
-        // scaleAdjust → height(글자 크기)에도 적용: 원본 폰트 em-box 크기 차이 보정
-        int fontScaleAdjust = fontRegistry.lastScaleAdjust();
-        if (fontScaleAdjust != 0) {
-            int adjustedHeight = (int) (height * (100 + fontScaleAdjust) / 100.0);
-            if (adjustedHeight >= 100) {
-                charPr.heightAnd(adjustedHeight);
-            }
-        }
-
         short ratio = (horizontalScale != null) ? horizontalScale : 100;
         // 장평 비율 적용 (폰트 매핑에서 원본보다 넓은 폰트로 매핑 시 축소)
         double fontRatio = fontRegistry.lastFontRatio();

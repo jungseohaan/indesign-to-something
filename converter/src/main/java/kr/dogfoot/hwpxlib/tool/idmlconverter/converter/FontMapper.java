@@ -60,7 +60,6 @@ public class FontMapper {
                         me.ko = val.has("ko") ? val.get("ko").getAsString() : DEFAULT_SANS;
                         me.en = val.has("en") ? val.get("en").getAsString() : me.ko;
                         me.spacing = val.has("spacing") ? val.get("spacing").getAsInt() : 0;
-                        me.scaleAdjust = val.has("scaleAdjust") ? val.get("scaleAdjust").getAsInt() : 0;
                         me.ratio = val.has("ratio") ? val.get("ratio").getAsDouble() : 1.0;
                         me.forceNormalStyle = val.has("forceNormalStyle") && val.get("forceNormalStyle").getAsBoolean();
                         externalMappings.put(entry.getKey(), me);
@@ -188,7 +187,7 @@ public class FontMapper {
         // [1] 외부 JSON 명시적 매핑: exact font mappings의 단일 소스
         MappingEntry ext = externalMappings.get(idmlFontFamily);
         if (ext != null) {
-            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, ext.ratio, ext.forceNormalStyle);
+            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.ratio, ext.forceNormalStyle);
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
         // [2] 카테고리/키워드 폴백 (이름 기반)
@@ -258,7 +257,7 @@ public class FontMapper {
         System.out.printf("[FontMap] \"%s\" → ko=\"%s\"(%.3f) en=\"%s\"(%.3f) 자간=%+d%% 장평=%.3f\n",
                 idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing, fontRatio);
 
-        return new MappingResult(bestKoFont, bestEnFont, spacing, 0, fontRatio);
+        return new MappingResult(bestKoFont, bestEnFont, spacing, fontRatio);
     }
 
     /**
@@ -411,7 +410,7 @@ public class FontMapper {
         if (lower.startsWith("hu") || lower.startsWith("rix") || lower.startsWith("sd ")
                 || lower.contains("상상토끼") || lower.contains("둘기마요")) {
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" (카테고리폴백: korean-decorative, ratio=0.9)");
-            return new MappingResult(configSansKo, configSansKo, 0, 0, 0.9);
+            return new MappingResult(configSansKo, configSansKo, 0, 0.9);
         }
 
         // 서양 폰트 기본 → 산세리프
@@ -573,30 +572,23 @@ public class FontMapper {
         public final String koFont;
         public final String enFont;
         public final int spacingAdjustPercent;
-        /** horizontalScale 보정값 (예: 5 → IDML 95% → HWPX 100%) */
-        public final int scaleAdjust;
         /** 장평 비율: 원본 폰트 대비 HWPX 폰트의 폭 비율. 1.0 미만이면 글자 폭 축소 필요 (예: 0.82 → 82%) */
         public final double ratio;
         /** true이면 원본 Bold/Italic style을 HWPX CharPr에 반영하지 않는다. */
         public final boolean forceNormalStyle;
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent) {
-            this(koFont, enFont, spacingAdjustPercent, 0, 1.0);
+            this(koFont, enFont, spacingAdjustPercent, 1.0);
         }
 
-        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust) {
-            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, 1.0);
+        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, double ratio) {
+            this(koFont, enFont, spacingAdjustPercent, ratio, false);
         }
 
-        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double ratio) {
-            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, ratio, false);
-        }
-
-        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double ratio, boolean forceNormalStyle) {
+        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, double ratio, boolean forceNormalStyle) {
             this.koFont = koFont;
             this.enFont = enFont;
             this.spacingAdjustPercent = spacingAdjustPercent;
-            this.scaleAdjust = scaleAdjust;
             this.ratio = ratio;
             this.forceNormalStyle = forceNormalStyle;
         }
@@ -606,7 +598,6 @@ public class FontMapper {
         String ko;
         String en;
         int spacing;
-        int scaleAdjust;
         double ratio;
         boolean forceNormalStyle;
     }

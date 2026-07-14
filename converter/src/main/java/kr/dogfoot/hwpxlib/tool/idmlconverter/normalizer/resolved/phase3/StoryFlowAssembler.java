@@ -4,6 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
@@ -18,6 +19,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -42,7 +44,7 @@ public final class StoryFlowAssembler {
             IDMLTable idmlTable,
             IDMLTableCell idmlCell) {
         List<ASTParagraph> cellFlow = StoryLoader.astParagraphsForCell(ctx, idmlTable, idmlCell, null);
-        if (cellFlow != null && !cellFlow.isEmpty()) {
+        if (hasMeaningfulFlowContent(cellFlow)) {
             return cellFlow;
         }
         List<ASTParagraph> directNestedTableFlow = buildDirectNestedTableFlow(ctx, idmlCell);
@@ -55,6 +57,38 @@ public final class StoryFlowAssembler {
         }
         List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
         return inlineShellFlow != null ? inlineShellFlow : new ArrayList<ASTParagraph>();
+    }
+
+    private static boolean hasMeaningfulFlowContent(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return false;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null) return true;
+            if (paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item == null) continue;
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (hasMeaningfulText(text)) return true;
+                    continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasMeaningfulText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        String normalized = text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .trim();
+        return !normalized.isEmpty();
     }
 
     private static List<ASTParagraph> buildDirectNestedTableFlow(
@@ -97,7 +131,7 @@ public final class StoryFlowAssembler {
         if (idmlCell.textFrameStoryRefs() == null || idmlCell.textFrameStoryRefs().isEmpty()) {
             return paragraphs;
         }
-        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+        for (String storyRef : orderedTextFrameStoryRefsForCellFlow(ctx, idmlCell)) {
             if (storyRef == null) continue;
             String storyId = toDecimalStoryId(storyRef);
             List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
@@ -274,7 +308,7 @@ public final class StoryFlowAssembler {
             return null;
         }
         List<ASTParagraph> merged = new ArrayList<>();
-        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+        for (String storyRef : orderedTextFrameStoryRefsForCellFlow(ctx, idmlCell)) {
             if (storyRef == null) continue;
             if (!shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef)
                     && isStoryOwnedByPlacedTextFrame(ctx, storyRef)) {
@@ -293,6 +327,72 @@ public final class StoryFlowAssembler {
             }
         }
         return merged.isEmpty() ? null : merged;
+    }
+
+    private static List<String> orderedTextFrameStoryRefsForCellFlow(
+            ResolvedBuildContext ctx,
+            IDMLTableCell idmlCell) {
+        List<String> refs = new ArrayList<>();
+        if (idmlCell == null || idmlCell.textFrameStoryRefs() == null) return refs;
+        refs.addAll(idmlCell.textFrameStoryRefs());
+        if (ctx == null || ctx.resolvedData == null || refs.size() < 2) return refs;
+        refs.sort(new Comparator<String>() {
+            @Override
+            public int compare(String a, String b) {
+                ResolvedTextFrame fa = firstInlineFrameForStory(ctx, a);
+                ResolvedTextFrame fb = firstInlineFrameForStory(ctx, b);
+                if (fa == null || fb == null) return 0;
+                return compareInlineFrameFlowPosition(fa, fb);
+            }
+        });
+        return refs;
+    }
+
+    private static ResolvedTextFrame firstInlineFrameForStory(ResolvedBuildContext ctx, String storyRef) {
+        if (ctx == null || ctx.resolvedData == null || storyRef == null) return null;
+        String storyId = toDecimalStoryId(storyRef);
+        List<ResolvedTextFrame> frames = storyId != null
+                ? ctx.resolvedData.getTextFramesForStory(storyId)
+                : null;
+        if ((frames == null || frames.isEmpty()) && !storyRef.equals(storyId)) {
+            frames = ctx.resolvedData.getTextFramesForStory(storyRef);
+        }
+        if (frames == null || frames.isEmpty()) return null;
+        ResolvedTextFrame best = null;
+        for (ResolvedTextFrame frame : frames) {
+            if (frame == null || !frame.isInline() || !validBounds(frame.pageRelativeBounds())) continue;
+            if (best == null || compareInlineFrameFlowPosition(frame, best) < 0) {
+                best = frame;
+            }
+        }
+        return best;
+    }
+
+    private static int compareInlineFrameFlowPosition(ResolvedTextFrame a, ResolvedTextFrame b) {
+        int page = Integer.compare(a.pageIndex(), b.pageIndex());
+        if (page != 0) return page;
+        double[] ab = a.pageRelativeBounds();
+        double[] bb = b.pageRelativeBounds();
+        int top = Double.compare(ab[0], bb[0]);
+        if (top != 0) return top;
+        int left = Double.compare(ab[1], bb[1]);
+        if (left != 0) return left;
+        int z = Integer.compare(a.zOrder(), b.zOrder());
+        if (z != 0) return z;
+        return safeString(a.id()).compareTo(safeString(b.id()));
+    }
+
+    private static boolean validBounds(double[] bounds) {
+        return bounds != null
+                && bounds.length >= 4
+                && Double.isFinite(bounds[0])
+                && Double.isFinite(bounds[1])
+                && Double.isFinite(bounds[2])
+                && Double.isFinite(bounds[3]);
+    }
+
+    private static String safeString(String value) {
+        return value != null ? value : "";
     }
 
     public static boolean shouldCellConsumeNestedStoryRef(

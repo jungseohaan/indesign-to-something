@@ -175,15 +175,17 @@ public final class ResolvedBuildContext {
         public final String fillColor;
         public final Double tracking;
         public final String fontFamily;
+        public final String fontStyle;
         public final Double fontSize;
         public final Double horizontalScale;
         public final String underlineColor;
 
         public ParagraphStyleContext(String fillColor, Double tracking, String fontFamily,
-                                     Double fontSize, Double horizontalScale, String underlineColor) {
+                                     String fontStyle, Double fontSize, Double horizontalScale, String underlineColor) {
             this.fillColor = fillColor;
             this.tracking = tracking;
             this.fontFamily = fontFamily;
+            this.fontStyle = fontStyle;
             this.fontSize = fontSize;
             this.horizontalScale = horizontalScale;
             this.underlineColor = underlineColor;
@@ -398,6 +400,38 @@ public final class ResolvedBuildContext {
         return ownershipPlans != null && !ownershipPlans.isEmpty();
     }
 
+    /**
+     * Stage 1 ObjectPlan이 있는 실행에서는 synthetic master/off-canvas clone
+     * TextFrame을 실행 단계 fallback만으로 살리지 않는다.
+     *
+     * <p>Clone id는 보통 {@code 2453_pi20}, {@code 17037_oc24}처럼 비숫자
+     * key를 갖는다. Stage 1이 {@code ownedTextFrameIdKeys} 또는
+     * {@code sourceBundleKey}로 명시한 plan이 있으면 그대로 실행하고, plan이
+     * 없으면 visible HWPX text owner가 아니므로 skip한다. 단, extractor가
+     * {@code masterSpecialType=pagenum}으로 확정한 페이지 번호 clone은 source
+     * metadata의 진실로 보존한다.</p>
+     */
+    public boolean shouldSkipPlanlessSyntheticCloneTextFrame(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame tf) {
+        if (tf == null || !hasStage1ObjectPlans()) return false;
+        String textFrameId = tf.id();
+        if (!isSyntheticCloneTextFrameId(textFrameId)) return false;
+        if (isSyntheticPageNumberClone(tf)) return false;
+        if (findAnyTextFrameOwnershipPlan(textFrameId) != null) return false;
+        return tf.isMasterInstance() || textFrameId.contains("_oc");
+    }
+
+    private static boolean isSyntheticCloneTextFrameId(String textFrameId) {
+        if (textFrameId == null || textFrameId.isEmpty()) return false;
+        return textFrameId.contains("_pi") || textFrameId.contains("_oc");
+    }
+
+    private static boolean isSyntheticPageNumberClone(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        return "pagenum".equals(tf.masterSpecialType());
+    }
+
     /** Stage 1 simple marker label plans. Key: inline anchor DOM id. */
     public final java.util.Map<Integer, SimpleButtonLabelPlan> simpleButtonLabelPlans =
             new java.util.LinkedHashMap<>();
@@ -468,6 +502,38 @@ public final class ResolvedBuildContext {
 
     public boolean isAnchoredNestedTableSource(String tableSourceId) {
         return tableSourceId != null && anchoredNestedTableSourceIds.contains(tableSourceId);
+    }
+
+    public boolean isTableStyleOwnedByObjectPlan(String tableSourceId) {
+        Integer parsed = parseDecimalId(tableSourceId);
+        if (parsed == null || ownershipPlans == null || ownershipPlans.isEmpty()) return false;
+        ensureOwnershipPlanIndexes();
+        if (hasTableStylePlan(ownershipPlansBySourceObjectId.get(parsed), parsed)) return true;
+        if (hasTableStylePlan(ownershipPlansByStyleSourceObjectId.get(parsed), parsed)) return true;
+        if (hasTableStylePlan(ownershipPlansByAnyObjectId.get(parsed), parsed)) return true;
+        return false;
+    }
+
+    private static boolean hasTableStylePlan(java.util.List<ObjectPlan> plans, int sourceId) {
+        if (plans == null || plans.isEmpty()) return false;
+        for (ObjectPlan plan : plans) {
+            if (!isTableStyleObjectPlan(plan)) continue;
+            if (plan.domId == sourceId
+                    || (plan.renderId != null && plan.renderId == sourceId)) {
+                return true;
+            }
+            if (containsInt(plan.sourceObjectIds, sourceId)) return true;
+            if (containsInt(plan.visualSourceObjectIds, sourceId)) return true;
+            if (containsInt(plan.styleSourceObjectIds, sourceId)) return true;
+            if (containsInt(plan.ownedTextFrameIds, sourceId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isTableStyleObjectPlan(ObjectPlan plan) {
+        return plan != null
+                && (plan.materialization == Materialization.HWPX_TABLE_STYLE
+                || plan.visualAction == VisualAction.PLACE_TABLE_STYLE);
     }
 
     private void addAnchoredTableSourceId(String tableSourceId) {
@@ -622,11 +688,18 @@ public final class ResolvedBuildContext {
     }
 
     public ObjectPlan findAnyTextFrameOwnershipPlan(String textFrameId) {
+        if (textFrameId == null || textFrameId.isEmpty()) return null;
+        ensureOwnershipPlanIndexes();
+        ObjectPlan byKey = findAnyTextFrameOwnershipPlanByKey(textFrameId);
+        if (byKey != null) return byKey;
         Integer parsed = parseDecimalId(textFrameId);
         if (parsed != null) return findAnyTextFrameOwnershipPlan(parsed);
+        return null;
+    }
+
+    private ObjectPlan findAnyTextFrameOwnershipPlanByKey(String textFrameId) {
         if (textFrameId == null || textFrameId.isEmpty()) return null;
         ObjectPlan fallback = null;
-        ensureOwnershipPlanIndexes();
         java.util.List<ObjectPlan> candidates = ownershipPlansByOwnedTextFrameKey.get(textFrameId);
         if (candidates == null || candidates.isEmpty()) return null;
         for (ObjectPlan plan : candidates) {
@@ -652,10 +725,17 @@ public final class ResolvedBuildContext {
     }
 
     public ObjectPlan findHwpxTextFrameOwnershipPlan(String textFrameId) {
-        Integer parsed = parseDecimalId(textFrameId);
-        if (parsed != null) return findHwpxTextFrameOwnershipPlan(parsed);
         if (textFrameId == null || textFrameId.isEmpty()) return null;
         ensureOwnershipPlanIndexes();
+        ObjectPlan byKey = findHwpxTextFrameOwnershipPlanByKey(textFrameId);
+        if (byKey != null) return byKey;
+        Integer parsed = parseDecimalId(textFrameId);
+        if (parsed != null) return findHwpxTextFrameOwnershipPlan(parsed);
+        return null;
+    }
+
+    private ObjectPlan findHwpxTextFrameOwnershipPlanByKey(String textFrameId) {
+        if (textFrameId == null || textFrameId.isEmpty()) return null;
         java.util.List<ObjectPlan> candidates = ownershipPlansByOwnedTextFrameKey.get(textFrameId);
         if (candidates == null || candidates.isEmpty()) return null;
         for (ObjectPlan plan : candidates) {
@@ -1377,6 +1457,30 @@ public final class ResolvedBuildContext {
 
     private static Integer parseDecimalId(String value) {
         if (value == null || value.isEmpty()) return null;
+        int hexStart = -1;
+        int iIdx = value.indexOf('i');
+        if (iIdx >= 0 && iIdx + 1 < value.length()) {
+            hexStart = iIdx + 1;
+        } else if (value.charAt(0) == 'u' || value.charAt(0) == 'U') {
+            hexStart = 1;
+        }
+        if (hexStart >= 0) {
+            int end = hexStart;
+            while (end < value.length()) {
+                char c = value.charAt(end);
+                boolean hex = (c >= '0' && c <= '9')
+                        || (c >= 'a' && c <= 'f')
+                        || (c >= 'A' && c <= 'F');
+                if (!hex) break;
+                end++;
+            }
+            if (end <= hexStart) return null;
+            try {
+                return Integer.parseInt(value.substring(hexStart, end), 16);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
         try {
             return Integer.parseInt(value);
         } catch (NumberFormatException e) {
@@ -1388,6 +1492,14 @@ public final class ResolvedBuildContext {
         if (values == null || expected == null) return false;
         for (String value : values) {
             if (expected.equals(value)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsInt(int[] values, int expected) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == expected) return true;
         }
         return false;
     }

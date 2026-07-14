@@ -71,10 +71,18 @@ public final class ParagraphTextHelpers {
     }
 
     private static void appendInlineObjectPlainText(StringBuilder sb, ASTInlineObject obj) {
-        if (obj == null || obj.paragraphs() == null || obj.paragraphs().isEmpty()) return;
+        if (obj == null) return;
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) {
+            sb.append('\uFFFC');
+            return;
+        }
+        int before = sb.length();
         for (ASTParagraph childPara : obj.paragraphs()) {
             if (childPara == null) continue;
             sb.append(getParaPlainText(childPara));
+        }
+        if (sb.length() == before) {
+            sb.append('\uFFFC');
         }
     }
 

@@ -148,14 +148,13 @@ class RunBuilder {
             tr.shadeColor(resolvedShadeColor);
         }
 
-        // fontStyle: IDML CR이 EH/BT 수식 폰트를 한국어에 잘못 적용한 경우 리셋
-        if (cr.fontStyle() != null) {
-            String crFf = cr.fontFamily();
-            boolean crIsEHOrBT = crFf != null && (EHFontGlyphMap.isEHFontFamily(crFf) || crFf.contains("BT수식"));
-            if (crIsEHOrBT && text != null && EHTextClassifier.isKoreanOnly(text)) {
-                // 한국어 텍스트에 EH/BT 폰트의 fontStyle 적용 안 함
-            } else {
-                tr.fontStyle(cr.fontStyle());
+        String resolvedFontStyle = RunPropertyResolver.resolveFontStyleWithConfidence(
+                rr, cr, sc.fontStyle, confidence);
+        if (resolvedFontStyle != null) {
+            String styleFontFamily = resolvedFontFamily != null ? resolvedFontFamily
+                    : (cr.fontFamily() != null ? cr.fontFamily() : (rr != null ? rr.fontFamily() : null));
+            if (shouldApplyFontStyle(styleFontFamily, resolvedFontStyle, text)) {
+                tr.fontStyle(resolvedFontStyle);
             }
         }
         // InDesign Tracking → HWPX 자간
@@ -211,20 +210,9 @@ class RunBuilder {
                 tr.baselineShift(bsPct);
             }
         }
-        // resolved에서만 가져오는 보조 속성: fontStyle / horizontalScale / underline / strikeThrough
-        // (fontFamily/fontSize/textColor는 위쪽에서 RunPropertyResolver로 이미 처리됨)
+        // resolved에서만 가져오는 보조 속성: underline / strikeThrough
+        // (fontFamily/fontStyle/fontSize/textColor는 위쪽에서 RunPropertyResolver로 이미 처리됨)
         if (rr != null) {
-            if (rr.fontStyle() != null) {
-                String rrStyle = rr.fontStyle().toLowerCase();
-                boolean isItalic = rrStyle.contains("italic") || rrStyle.contains("oblique");
-                boolean isEHorBT = rr.fontFamily() != null
-                        && (EHFontGlyphMap.isEHFontFamily(rr.fontFamily()) || rr.fontFamily().contains("BT수식"));
-                // EH/BT 수식 폰트라도 Italic이면 적용 (GREP 이탤릭 스타일)
-                // 숫자 전용 fontStyle(예: "30")은 무시
-                if (!isEHorBT || isItalic) {
-                    tr.fontStyle(rr.fontStyle());
-                }
-            }
             // horizontalScale is an IDML text style property. Resolved-only
             // scale can include frame/group render scale and must not be
             // injected into editable text runs.
@@ -486,6 +474,12 @@ class RunBuilder {
         return resolved != null ? resolved.fontFamily() : null;
     }
 
+    static String getStyleFontStyle(ResolvedBuildContext ctx, String styleRef) {
+        if (ctx.styleResolver == null) return null;
+        IDMLStyleDef resolved = ctx.styleResolver.getResolvedParagraphStyle(styleRef);
+        return resolved != null ? resolved.fontStyle() : null;
+    }
+
     static Double getStyleFontSize(ResolvedBuildContext ctx, String styleRef) {
         if (ctx.styleResolver == null) return null;
         IDMLStyleDef resolved = ctx.styleResolver.getResolvedParagraphStyle(styleRef);
@@ -505,6 +499,16 @@ class RunBuilder {
             return resolveColorToHex(ctx, resolved.underlineColor());
         }
         return null;
+    }
+
+    private static boolean shouldApplyFontStyle(String fontFamily, String fontStyle, String text) {
+        if (fontStyle == null || fontStyle.isEmpty()) return false;
+        boolean isEHorBT = fontFamily != null
+                && (EHFontGlyphMap.isEHFontFamily(fontFamily) || fontFamily.contains("BT수식"));
+        if (!isEHorBT) return true;
+        String lower = fontStyle.toLowerCase(Locale.ROOT);
+        boolean isItalic = lower.contains("italic") || lower.contains("oblique");
+        return isItalic || text == null || !EHTextClassifier.isKoreanOnly(text);
     }
 
     private static String resolveCharacterShadeColor(ResolvedBuildContext ctx, IDMLCharacterRun cr,
@@ -1067,5 +1071,17 @@ class RunBuilder {
             }
         }
         return null;
+    }
+
+    static MatchConfidence confidenceForResolvedRunMatch(ResolvedRun run, String text) {
+        if (run == null || text == null || text.isEmpty()) return MatchConfidence.LOW;
+        String idmlText = normalizeComparableText(normalizeSpaces(text));
+        String resolvedText = normalizeComparableText(normalizeSpaces(run.text()));
+        if (idmlText.isEmpty() || resolvedText.isEmpty()) return MatchConfidence.LOW;
+        if (idmlText.equals(resolvedText)) return MatchConfidence.HIGH;
+        if (resolvedText.startsWith(idmlText) || idmlText.startsWith(resolvedText)) {
+            return MatchConfidence.MEDIUM;
+        }
+        return MatchConfidence.LOW;
     }
 }

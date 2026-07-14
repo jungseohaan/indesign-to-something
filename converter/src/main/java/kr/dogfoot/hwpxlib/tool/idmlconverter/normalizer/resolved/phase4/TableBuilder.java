@@ -81,6 +81,7 @@ public final class TableBuilder {
         int tableOnlyPlansPlaced;       // ObjectPlan(text_frame:table_only) → ASTTable
         int tableOnlyPlansSkippedAnchored;
         int duplicateInlineTablesRemoved;
+        int nestedTableBlocksAbsorbed;
         int total;
         int textFramesScanned;
         int textFramesSkippedBeforeStoryLoad;
@@ -333,6 +334,7 @@ public final class TableBuilder {
 
         report.duplicateInlineTablesRemoved =
                 removeInlineTablesBySourceId(sections, pageLevelTableSourceIds);
+        report.nestedTableBlocksAbsorbed = absorbNestedTableBlocksIntoEmptyCells(ctx, sections);
         recordTiming(report);
         printReport(report);
     }
@@ -583,6 +585,7 @@ public final class TableBuilder {
         ConversionTiming.metric(prefix + "tablesPlaced", report.total);
         ConversionTiming.metric(prefix + "tableOnlyPlansPlaced", report.tableOnlyPlansPlaced);
         ConversionTiming.metric(prefix + "tableOnlyPlansSkippedAnchored", report.tableOnlyPlansSkippedAnchored);
+        ConversionTiming.metric(prefix + "nestedTableBlocksAbsorbed", report.nestedTableBlocksAbsorbed);
         ConversionTiming.metric(prefix + "tableOnlyPlansMs", millis(report.tableOnlyPlansNanos));
         ConversionTiming.metric(prefix + "storyLoadMs", millis(report.storyLoadNanos));
         ConversionTiming.metric(prefix + "storyTableSetupMs", millis(report.storyTableSetupNanos));
@@ -641,7 +644,8 @@ public final class TableBuilder {
         if (idmlTable == null) return false;
         return ctx != null
                 && idmlTable.selfId() != null
-                && ctx.isAnchoredNestedTableSource(idmlTable.selfId());
+                && (ctx.isAnchoredNestedTableSource(idmlTable.selfId())
+                || ctx.isTableStyleOwnedByObjectPlan(idmlTable.selfId()));
     }
 
     private static ResolvedTextFrame anchoredNestedTableTextFrame(ResolvedBuildContext ctx, IDMLTable idmlTable) {
@@ -1146,6 +1150,175 @@ public final class TableBuilder {
         return removed;
     }
 
+    private static final class EmptyCellPlacement {
+        final ASTTable ownerTable;
+        final ASTTableCell cell;
+        final long left;
+        final long top;
+        final long right;
+        final long bottom;
+
+        EmptyCellPlacement(ASTTable ownerTable, ASTTableCell cell,
+                           long left, long top, long right, long bottom) {
+            this.ownerTable = ownerTable;
+            this.cell = cell;
+            this.left = left;
+            this.top = top;
+            this.right = right;
+            this.bottom = bottom;
+        }
+    }
+
+    /**
+     * Some IDML table-in-table structures arrive as two native HWPX table blocks:
+     * an outer carrier table with an intentionally empty cell, and the real nested
+     * table placed in that cell's page-space bounds. Stage 1 already decided both
+     * sides as HWPX table/style owners; this pass only restores the parent/child
+     * AST structure so the nested table flows inside the carrier cell.
+     */
+    private static int absorbNestedTableBlocksIntoEmptyCells(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections) {
+        if (ctx == null || sections == null) return 0;
+        int absorbed = 0;
+        for (ASTSection section : sections) {
+            if (section == null || section.blocks() == null || section.blocks().isEmpty()) continue;
+            List<ASTBlock> blocks = section.blocks();
+            List<ASTTable> tables = new ArrayList<>();
+            for (ASTBlock block : blocks) {
+                if (block instanceof ASTTable) tables.add((ASTTable) block);
+            }
+            if (tables.size() < 2) continue;
+
+            List<EmptyCellPlacement> emptyCells = emptyCellPlacements(tables);
+            if (emptyCells.isEmpty()) continue;
+
+            Iterator<ASTBlock> it = blocks.iterator();
+            while (it.hasNext()) {
+                ASTBlock block = it.next();
+                if (!(block instanceof ASTTable)) continue;
+                ASTTable child = (ASTTable) block;
+                if (!isNestedTableBlockCandidate(ctx, child)) continue;
+                EmptyCellPlacement target = findContainingEmptyCell(child, emptyCells);
+                if (target == null || target.ownerTable == child) continue;
+
+                ASTParagraph paragraph = new ASTParagraph();
+                normalizeNestedInlineTable(child);
+                paragraph.inlineTable(child);
+                removeEmptyPlaceholderParagraphs(target.cell);
+                target.cell.addParagraph(paragraph);
+                it.remove();
+                absorbed++;
+                if (ctx.debugAst) {
+                    target.ownerTable.debugOrNew().note("nested table block absorbed into empty cell: "
+                            + child.sourceId());
+                    child.debugOrNew().note("absorbed as inline table into carrier table cell");
+                }
+            }
+        }
+        return absorbed;
+    }
+
+    private static void removeEmptyPlaceholderParagraphs(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null || cell.paragraphs().isEmpty()) return;
+        cell.paragraphs().removeIf(TableBuilder::isEmptyPlaceholderParagraph);
+    }
+
+    private static boolean isEmptyPlaceholderParagraph(ASTParagraph paragraph) {
+        if (paragraph == null) return true;
+        if (paragraph.inlineTable() != null) return false;
+        if (paragraph.items() == null || paragraph.items().isEmpty()) return true;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item == null) continue;
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.replace("\r", "").replace("\n", "").trim().isEmpty()) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isNestedTableBlockCandidate(ResolvedBuildContext ctx, ASTTable table) {
+        if (table == null) return false;
+        String sourceId = table.sourceId();
+        if (sourceId != null && (ctx.isAnchoredNestedTableSource(sourceId)
+                || ctx.isTableStyleOwnedByObjectPlan(sourceId))) {
+            return true;
+        }
+        return table.flowWithText() || table.anchoredFlowWithText();
+    }
+
+    private static List<EmptyCellPlacement> emptyCellPlacements(List<ASTTable> tables) {
+        List<EmptyCellPlacement> result = new ArrayList<>();
+        if (tables == null) return result;
+        for (ASTTable table : tables) {
+            if (table == null || table.rows() == null || table.columnWidths() == null) continue;
+            long rowTop = table.y();
+            for (ASTTableRow row : table.rows()) {
+                if (row == null || row.cells() == null) continue;
+                long rowHeight = Math.max(0L, row.rowHeight());
+                for (ASTTableCell cell : row.cells()) {
+                    if (cell == null || cellHasVisibleContent(cell)) continue;
+                    int startCol = Math.max(0, cell.columnIndex());
+                    int endCol = startCol + Math.max(1, cell.columnSpan());
+                    long left = table.x() + columnWidthSum(table.columnWidths(), 0, startCol);
+                    long width = cell.width() > 0
+                            ? cell.width()
+                            : columnWidthSum(table.columnWidths(), startCol, endCol);
+                    long height = cell.height() > 0
+                            ? cell.height()
+                            : rowHeight * Math.max(1, cell.rowSpan());
+                    if (width <= 0 || height <= 0) continue;
+                    result.add(new EmptyCellPlacement(
+                            table, cell, left, rowTop, left + width, rowTop + height));
+                }
+                rowTop += rowHeight;
+            }
+        }
+        return result;
+    }
+
+    private static EmptyCellPlacement findContainingEmptyCell(
+            ASTTable child,
+            List<EmptyCellPlacement> emptyCells) {
+        if (child == null || emptyCells == null || emptyCells.isEmpty()) return null;
+        long left = child.x();
+        long top = child.y();
+        long width = child.width() > 0 ? child.width() : tableWidth(child);
+        long height = child.height() > 0 ? child.height() : tableHeight(child);
+        long right = left + Math.max(0L, width);
+        long bottom = top + Math.max(0L, height);
+        long tolerance = CoordinateConverter.pointsToHwpunits(1.5);
+        EmptyCellPlacement best = null;
+        long bestArea = Long.MAX_VALUE;
+        for (EmptyCellPlacement cell : emptyCells) {
+            if (cell == null || cell.ownerTable == child) continue;
+            if (left < cell.left - tolerance) continue;
+            if (top < cell.top - tolerance) continue;
+            if (right > cell.right + tolerance) continue;
+            if (bottom > cell.bottom + tolerance) continue;
+            long area = Math.max(1L, cell.right - cell.left) * Math.max(1L, cell.bottom - cell.top);
+            if (area < bestArea) {
+                best = cell;
+                bestArea = area;
+            }
+        }
+        return best;
+    }
+
+    private static void normalizeNestedInlineTable(ASTTable table) {
+        if (table == null) return;
+        table.x(0);
+        table.y(0);
+        table.flowWithText(true);
+        table.anchoredFlowWithText(true);
+        table.fixedOuterBounds(false);
+    }
+
     private static int removeInlineTablesFromBlock(ASTBlock block, Set<String> sourceIds) {
         if (block instanceof ASTTextFrameBlock) {
             return removeInlineTablesFromParagraphs(((ASTTextFrameBlock) block).paragraphs(), sourceIds);
@@ -1191,14 +1364,21 @@ public final class TableBuilder {
                     removed += before - after;
                 }
                 removed += removeInlineTablesFromParagraphs(obj.paragraphs(), sourceIds);
-                if ((obj.paragraphs() == null || obj.paragraphs().isEmpty())
-                        && (obj.inlineTables() == null || obj.inlineTables().isEmpty())
-                        && obj.imageData() == null && obj.imagePath() == null) {
+                if (isEmptyInlineObjectAfterTableRemoval(obj)) {
                     it.remove();
                 }
             }
         }
         return removed;
+    }
+
+    private static boolean isEmptyInlineObjectAfterTableRemoval(ASTInlineObject obj) {
+        if (obj == null) return true;
+        if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) return false;
+        if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
+        if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) return false;
+        if (obj.imageData() != null || obj.imagePath() != null || obj.imageFillData() != null) return false;
+        return true;
     }
 
     private static void restoreNestedTextFrameTables(
@@ -1786,6 +1966,10 @@ public final class TableBuilder {
         if (r.duplicateInlineTablesRemoved > 0) {
             System.err.println("  · " + r.duplicateInlineTablesRemoved
                     + " duplicate inline tables removed by source ownership");
+        }
+        if (r.nestedTableBlocksAbsorbed > 0) {
+            System.err.println("  · " + r.nestedTableBlocksAbsorbed
+                    + " nested table blocks absorbed into empty carrier cells");
         }
         if (r.pngMissingFallback > 0) {
             System.err.println("  · WARNING: " + r.pngMissingFallback

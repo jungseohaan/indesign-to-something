@@ -75,6 +75,7 @@ function _buildExtractionResults(ctx, renderedFloatingItems, renderedImageFrames
             renderSourceBounds: item.renderSourceBounds || null,
             cropSourceBounds: item.cropSourceBounds || null,
             exportSanity: item.exportSanity || null,
+            globalRenderedFrame: item.globalRenderedFrame === true,
             reason: item.reason || null,
             visualOwner: item.visualOwner || null,
             textOwner: item.textOwner || null,

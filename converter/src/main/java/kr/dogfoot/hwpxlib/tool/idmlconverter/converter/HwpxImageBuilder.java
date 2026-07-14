@@ -165,6 +165,7 @@ public class HwpxImageBuilder {
         // ShapePosition
         pic.createPos();
         if (useWrapping) {
+            HorzAlign wrapHorzAlign = wrappingHorizontalAlign(obj);
             // 어울리기/자리차지 — 단락 기준 플로팅
             pic.pos().treatAsCharAnd(false)
                     .affectLSpacingAnd(false)
@@ -174,7 +175,7 @@ public class HwpxImageBuilder {
                     .vertRelToAnd(VertRelTo.PARA)
                     .horzRelToAnd(HorzRelTo.PARA)
                     .vertAlignAnd(VertAlign.TOP)
-                    .horzAlignAnd(HorzAlign.CENTER)
+                    .horzAlignAnd(wrapHorzAlign)
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
         } else {
@@ -231,6 +232,15 @@ public class HwpxImageBuilder {
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
 
         ctx.imagesConverted++;
+    }
+
+    private static HorzAlign wrappingHorizontalAlign(ASTInlineObject obj) {
+        if (obj == null) return HorzAlign.CENTER;
+        long left = Math.max(0L, obj.textWrapLeft());
+        long right = Math.max(0L, obj.textWrapRight());
+        if (left > right) return HorzAlign.RIGHT;
+        if (right > left) return HorzAlign.LEFT;
+        return HorzAlign.CENTER;
     }
 
     void addPageLevelInlineImage(Para para, ASTInlineObject obj) {

@@ -80,7 +80,7 @@ final class InlineItemDispatcher {
         } else if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
             if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
                 paragraphBuilder.imageBuilder.addInlineImageWithOverlays(para, obj, paragraphBuilder.textBoxBuilder, paragraphBuilder);
-            } else if (isNonFlowHorizontalLine(obj)) {
+            } else if (isPagePositionedNonFlowImage(obj)) {
                 paragraphBuilder.imageBuilder.addPageLevelInlineImage(para, obj);
             } else {
                 paragraphBuilder.imageBuilder.addInlineImage(para, obj);
@@ -126,6 +126,21 @@ final class InlineItemDispatcher {
                 && obj.width() > 8000
                 && obj.height() > 0
                 && obj.height() <= 250
+                && obj.resolvedPageX() >= 0
+                && obj.resolvedPageY() >= 0;
+    }
+
+    private boolean isPagePositionedNonFlowImage(ASTInlineObject obj) {
+        if (obj.keepInline()) return false;
+        if (isNonFlowHorizontalLine(obj)) return true;
+        String wrapMode = obj.textWrapMode();
+        boolean hasExplicitWrap = wrapMode != null && !"None".equals(wrapMode);
+        if (hasExplicitWrap) return false;
+        return obj.imageData() != null
+                && !obj.affectsLineSpacing()
+                && "Anchored".equals(obj.anchoredPosition())
+                && obj.width() > 0
+                && obj.height() > 0
                 && obj.resolvedPageX() >= 0
                 && obj.resolvedPageY() >= 0;
     }
