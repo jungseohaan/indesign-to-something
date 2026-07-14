@@ -18,6 +18,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Coord
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextLayoutContract;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
@@ -239,6 +240,7 @@ public class ResolvedToASTBuilder {
         AnchoredTablePlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
         OwnershipPlanner.runObservation(this.ctx);
+        applyResolvedTextWrapContracts();
         if (this.resolvedData != null) {
             this.resolvedData.ownershipPlans(this.ctx.ownershipPlans);
         }
@@ -291,6 +293,8 @@ public class ResolvedToASTBuilder {
                     plan = nativeVectorShapePlanFromJson(planJson);
                 }
                 if (plan == null) continue;
+                plan.withObjectPlanId(jsonString(planJson, "objectPlanId"));
+                plan.withTextLayoutContract(textLayoutContractFromJson(planJson));
                 if (isSupersededMasterInstanceTextPlan(plan)) {
                     warnSupersededMasterInstanceTextPlanSkipped(plan);
                     continue;
@@ -305,6 +309,160 @@ public class ResolvedToASTBuilder {
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] object-plans import skipped: "
                     + e.getMessage());
+        }
+    }
+
+    private void applyResolvedTextWrapContracts() {
+        if (ctx == null || resolvedData == null || ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()) {
+            return;
+        }
+        int attached = 0;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.textLayoutContract != null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                    || plan.visualAction != VisualAction.DROP_VISUAL
+                    || plan.materialization != Materialization.HWPX_TEXT) {
+                continue;
+            }
+            int textFrameId = primaryOwnedTextFrameId(plan);
+            if (textFrameId < 0) continue;
+            ResolvedTextFrame tf = resolvedData.getTextFrame(String.valueOf(textFrameId));
+            TextLayoutContract contract = sourceTextWrapContractFor(plan, tf);
+            if (contract == null) continue;
+            plan.withTextLayoutContract(contract);
+            attached++;
+        }
+        if (attached > 0) {
+            System.err.println("[ResolvedToASTBuilder] attached source TextWrap contracts=" + attached);
+        }
+    }
+
+    private int primaryOwnedTextFrameId(ObjectPlan plan) {
+        if (plan == null) return -1;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) {
+            return plan.ownedTextFrameIds[0];
+        }
+        if (plan.domId >= 0) return plan.domId;
+        return -1;
+    }
+
+    private TextLayoutContract sourceTextWrapContractFor(ObjectPlan textPlan, ResolvedTextFrame tf) {
+        if (textPlan == null || tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) {
+            return null;
+        }
+        double scale = resolvedData != null && resolvedData.scaleFactor() > 0.0 ? resolvedData.scaleFactor() : 1.0;
+        int rightWrapped = 0;
+        int leftWrapped = 0;
+        final double threshold = 6.0;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null) continue;
+            if (line.wrapIndentRight() / scale >= threshold) rightWrapped++;
+            if (line.wrapIndentLeft() / scale >= threshold) leftWrapped++;
+        }
+        if (rightWrapped == 0 && leftWrapped == 0) return null;
+        String wrapSide = rightWrapped >= leftWrapped ? "RIGHT_OBSTACLE" : "LEFT_OBSTACLE";
+        int[] obstacleIds = overlappingTextWrapObstacleSourceIds(tf, wrapSide);
+        if (obstacleIds.length == 0) {
+            return null;
+        }
+        return new TextLayoutContract(
+                TextLayoutContract.SOURCE_TEXT_WRAP,
+                "resolved.composedLines",
+                parseInt(tf.id(), primaryOwnedTextFrameId(textPlan)),
+                wrapSide,
+                obstacleIds,
+                objectPlanIdsForSources(obstacleIds),
+                tf.composedLines().size(),
+                "resolved_composed_lines_wrap_indent_with_overlapping_source_visual");
+    }
+
+    private int[] overlappingTextWrapObstacleSourceIds(ResolvedTextFrame tf, String wrapSide) {
+        if (tf == null || resolvedData == null || resolvedData.pageItems() == null) return new int[0];
+        double[] tfBounds = tf.geometricBounds();
+        if (!validBounds(tfBounds)) tfBounds = tf.pageRelativeBounds();
+        if (!validBounds(tfBounds)) return new int[0];
+        double tfCenter = (tfBounds[1] + tfBounds[3]) / 2.0;
+        List<ObstacleCandidate> candidates = new ArrayList<>();
+        for (ResolvedPageItem item : resolvedData.pageItems()) {
+            if (!isSourceTextWrapObstacleCandidate(tf, item)) continue;
+            double[] itemBounds = item.geometricBounds();
+            if (!validBounds(itemBounds)) itemBounds = item.pageRelativeBounds();
+            if (!validBounds(itemBounds)) continue;
+            double overlap = objectPlanOverlapArea(tfBounds, itemBounds);
+            if (overlap <= 0.0) continue;
+            double itemCenter = (itemBounds[1] + itemBounds[3]) / 2.0;
+            if ("RIGHT_OBSTACLE".equals(wrapSide) && itemCenter <= tfCenter) continue;
+            if ("LEFT_OBSTACLE".equals(wrapSide) && itemCenter >= tfCenter) continue;
+            int id = parseInt(item.id(), -1);
+            if (id < 0) continue;
+            candidates.add(new ObstacleCandidate(id, overlap));
+        }
+        if (candidates.isEmpty()) return new int[0];
+        candidates.sort((a, b) -> Double.compare(b.overlapArea, a.overlapArea));
+        int limit = Math.min(8, candidates.size());
+        int[] out = new int[limit];
+        for (int i = 0; i < limit; i++) out[i] = candidates.get(i).sourceId;
+        return out;
+    }
+
+    private boolean isSourceTextWrapObstacleCandidate(ResolvedTextFrame tf, ResolvedPageItem item) {
+        if (tf == null || item == null) return false;
+        if (item.sourceHidden()) return false;
+        if (item.pageIndex() != tf.pageIndex()) return false;
+        if ("TextFrame".equals(item.type())) return false;
+        if (item.isInline() || item.storyTextInlineSlot()) return false;
+        String anchored = item.anchoredPosition();
+        if (anchored != null && anchored.toUpperCase(Locale.ROOT).contains("INLINE")) return false;
+        String storyPlacement = item.storyAnchorPlacement();
+        if (storyPlacement != null && storyPlacement.toUpperCase(Locale.ROOT).contains("INLINE")) return false;
+        if (item.parentId() != null && !item.parentId().isEmpty()) return false;
+        return item.zOrder() > tf.zOrder();
+    }
+
+    private String[] objectPlanIdsForSources(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0 || ctx == null || ctx.ownershipPlans == null) {
+            return new String[0];
+        }
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.objectPlanId == null || !plan.hasVisibleVisual()) continue;
+            if (containsAny(plan.sourceObjectIds, sourceIds)
+                    || containsAny(plan.visualSourceObjectIds, sourceIds)
+                    || containsAny(plan.exportSourceObjectIds, sourceIds)
+                    || containsAny(plan.hiddenVisualSourceObjectIds, sourceIds)
+                    || containsAny(plan.clusterSourceObjectIds, sourceIds)) {
+                out.add(plan.objectPlanId);
+            }
+        }
+        return out.toArray(new String[0]);
+    }
+
+    private static boolean containsAny(int[] a, int[] b) {
+        if (a == null || b == null || a.length == 0 || b.length == 0) return false;
+        for (int av : a) {
+            for (int bv : b) {
+                if (av == bv) return true;
+            }
+        }
+        return false;
+    }
+
+    private static int parseInt(String value, int fallback) {
+        if (value == null) return fallback;
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static final class ObstacleCandidate {
+        final int sourceId;
+        final double overlapArea;
+
+        ObstacleCandidate(int sourceId, double overlapArea) {
+            this.sourceId = sourceId;
+            this.overlapArea = overlapArea;
         }
     }
 
@@ -1222,6 +1380,28 @@ public class ResolvedToASTBuilder {
     private static String jsonString(JsonObject o, String key) {
         if (o == null || key == null || !o.has(key) || o.get(key).isJsonNull()) return null;
         return o.get(key).getAsString();
+    }
+
+    private static TextLayoutContract textLayoutContractFromJson(JsonObject o) {
+        if (o == null || !o.has("textLayoutContract") || o.get("textLayoutContract").isJsonNull()) {
+            return null;
+        }
+        JsonElement element = o.get("textLayoutContract");
+        if (element == null || !element.isJsonObject()) return null;
+        JsonObject contract = element.getAsJsonObject();
+        String type = jsonString(contract, "type");
+        if (!TextLayoutContract.SOURCE_TEXT_WRAP.equals(type)) return null;
+        int textFrameId = jsonInt(contract, "textFrameId", -1);
+        if (textFrameId < 0) return null;
+        return new TextLayoutContract(
+                type,
+                jsonString(contract, "source"),
+                textFrameId,
+                jsonString(contract, "wrapSide"),
+                jsonIntArray(contract, "obstacleSourceObjectIds"),
+                jsonStringArray(contract, "obstacleObjectPlanIds"),
+                jsonInt(contract, "lineCount", 0),
+                jsonString(contract, "reason"));
     }
 
     private static int jsonInt(JsonObject o, String key, int fallback) {

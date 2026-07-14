@@ -640,7 +640,11 @@ public class ResolvedDataReader {
         group.candidateId(getString(o, "candidateId"));
         group.compositeRole(getString(o, "compositeRole"));
         group.slotRole(getString(o, "slotRole"));
-        group.placementRole(getString(o, "placementRole"));
+        String placementRole = getString(o, "placementRole");
+        if (placementRole == null || placementRole.isEmpty()) {
+            placementRole = getString(o, "placement");
+        }
+        group.placementRole(placementRole);
         String visualLayer = getString(o, "visualLayer");
         if ((visualLayer == null || visualLayer.isEmpty())
                 && ("page_background_plane".equals(group.slotRole())

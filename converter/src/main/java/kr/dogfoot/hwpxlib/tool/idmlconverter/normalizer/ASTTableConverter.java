@@ -42,16 +42,22 @@ public class ASTTableConverter {
         table.sourceId(idmlTable.selfId());
         table.zOrder(zOrder);
 
-        // 테이블 위치: resolved.json의 테이블 bounds 우선, 없으면 TextFrame 좌표 폴백
+        // 테이블 위치: resolved table bounds는 table content의 실제 bounds다.
+        // table-only owner TextFrame fallback은 anchor일 뿐이므로 내부 column width를
+        // 그 bounds에 맞춰 다시 스케일하면 안 된다.
         double[] resolvedTableBounds = null;
+        double[] placementBounds = null;
         if (resolvedData != null) {
-            resolvedTableBounds = tableAnchorBounds(resolvedData, idmlTable.selfId());
+            resolvedTableBounds = resolvedData.getTableBounds(idmlTable.selfId());
+            placementBounds = hasValidBounds(resolvedTableBounds)
+                    ? resolvedTableBounds
+                    : resolvedData.getTablePlacementBounds(idmlTable.selfId());
         }
-        if (resolvedTableBounds != null) {
+        if (placementBounds != null) {
             // resolved placement bounds는 page-relative (mm 단위 → scale 적용 필요)
             double scale = resolvedData != null ? resolvedData.scaleFactor() : 2.8346;
-            table.x(CoordinateConverter.pointsToHwpunits(resolvedTableBounds[1] * scale));
-            table.y(CoordinateConverter.pointsToHwpunits(resolvedTableBounds[0] * scale));
+            table.x(CoordinateConverter.pointsToHwpunits(placementBounds[1] * scale));
+            table.y(CoordinateConverter.pointsToHwpunits(placementBounds[0] * scale));
         } else {
             // 폴백: TextFrame 좌표
             double[] relPos = IDMLGeometry.pageRelativePosition(
@@ -130,14 +136,20 @@ public class ASTTableConverter {
 
         // 빈 스페이서 행을 위 행에 여백으로 흡수
         ASTTableSpacerMerger.merge(table);
-        boolean hasPlacementBounds = hasValidBounds(resolvedTableBounds);
-        applyPlacementBounds(table, resolvedTableBounds,
-                resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
-        table.fixedOuterBounds(hasPlacementBounds);
-        if (hasPlacementBounds) {
+        removeDuplicatedTextFromSpacerCells(table);
+        boolean hasResolvedTableBounds = hasValidBounds(resolvedTableBounds);
+        if (hasResolvedTableBounds) {
+            applyPlacementBounds(table, resolvedTableBounds,
+                    resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
+        } else if (hasValidBounds(placementBounds)) {
+            applyPlacementOrigin(table, placementBounds,
+                    resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
+        }
+        table.fixedOuterBounds(hasResolvedTableBounds);
+        if (hasResolvedTableBounds) {
             lockFixedOuterBoundsRows(table);
         }
-        if (!hasPlacementBounds) {
+        if (!hasResolvedTableBounds) {
             ensureRowsFitVisibleCellContent(table);
         }
         return table;
@@ -348,16 +360,27 @@ public class ASTTableConverter {
         normalizeInheritedTableBorders(table);
         clearHorizontalInsetsForEmptyColumns(table);
         ASTTableSpacerMerger.merge(table);
+        removeDuplicatedTextFromSpacerCells(table);
+        double[] resolvedTableBounds = resolvedData != null
+                ? resolvedData.getTableBounds(idmlTable.selfId()) : null;
         double[] placementBounds = resolvedData != null
-                ? tableAnchorBounds(resolvedData, idmlTable.selfId()) : null;
-        boolean hasPlacementBounds = hasValidBounds(placementBounds);
-        applyPlacementBounds(table, placementBounds,
-                resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
-        table.fixedOuterBounds(hasPlacementBounds);
-        if (hasPlacementBounds) {
+                ? (hasValidBounds(resolvedTableBounds)
+                        ? resolvedTableBounds
+                        : resolvedData.getTablePlacementBounds(idmlTable.selfId()))
+                : null;
+        boolean hasResolvedTableBounds = hasValidBounds(resolvedTableBounds);
+        if (hasResolvedTableBounds) {
+            applyPlacementBounds(table, resolvedTableBounds,
+                    resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
+        } else if (hasValidBounds(placementBounds)) {
+            applyPlacementOrigin(table, placementBounds,
+                    resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
+        }
+        table.fixedOuterBounds(hasResolvedTableBounds);
+        if (hasResolvedTableBounds) {
             lockFixedOuterBoundsRows(table);
         }
-        if (!hasPlacementBounds) {
+        if (!hasResolvedTableBounds) {
             ensureRowsFitVisibleCellContent(table);
         }
         return table;
@@ -400,13 +423,6 @@ public class ASTTableConverter {
             return false;
         }
         return bounds[3] > bounds[1] && bounds[2] > bounds[0];
-    }
-
-    private static double[] tableAnchorBounds(ResolvedData resolvedData, String tableId) {
-        if (resolvedData == null || tableId == null) return null;
-        double[] placement = resolvedData.getTablePlacementBounds(tableId);
-        if (hasValidBounds(placement)) return placement;
-        return resolvedData.getTableBounds(tableId);
     }
 
     private static void lockFixedOuterBoundsRows(ASTTable table) {
@@ -545,6 +561,14 @@ public class ASTTableConverter {
         recalcCellSizes(table);
     }
 
+    public static void applyPlacementOrigin(ASTTable table, double[] bounds, double scale) {
+        if (table == null || bounds == null || bounds.length < 4) return;
+        if (!Double.isFinite(bounds[0]) || !Double.isFinite(bounds[1])) return;
+        double s = scale > 0 ? scale : 1.0;
+        table.x(CoordinateConverter.pointsToHwpunits(bounds[1] * s));
+        table.y(CoordinateConverter.pointsToHwpunits(bounds[0] * s));
+    }
+
     private static void scaleColumnsToWidth(ASTTable table, long targetWidth) {
         if (table.columnWidths() == null || table.columnWidths().isEmpty()) return;
         long current = 0;
@@ -613,6 +637,123 @@ public class ASTTableConverter {
                     cellHeight += table.rows().get(r).rowHeight();
                 }
                 cell.height(cellHeight);
+            }
+        }
+    }
+
+    private static void removeDuplicatedTextFromSpacerCells(ASTTable table) {
+        if (table == null || table.rows() == null || table.columnWidths() == null
+                || table.columnWidths().isEmpty()) {
+            return;
+        }
+        long totalWidth = 0;
+        for (Long width : table.columnWidths()) {
+            if (width != null) totalWidth += Math.max(0L, width);
+        }
+        if (totalWidth <= 0) return;
+
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null || row.cells().size() < 2) continue;
+            for (ASTTableCell narrow : row.cells()) {
+                if (!isNarrowSpacerCell(table, narrow, totalWidth)) continue;
+                String signature = visibleTextSignature(narrow);
+                if (signature.length() < 4) continue;
+                ASTTableCell widerOwner = duplicatedWiderTextOwner(row, narrow, signature);
+                if (widerOwner != null) {
+                    narrow.paragraphs().clear();
+                }
+            }
+        }
+    }
+
+    private static boolean isNarrowSpacerCell(ASTTable table, ASTTableCell cell, long totalWidth) {
+        if (table == null || cell == null || totalWidth <= 0) return false;
+        long width = cell.width();
+        if (width <= 0 && table.columnWidths() != null) {
+            int start = Math.max(0, cell.columnIndex());
+            int end = Math.min(table.columnWidths().size(), start + Math.max(1, cell.columnSpan()));
+            for (int c = start; c < end; c++) {
+                Long colWidth = table.columnWidths().get(c);
+                if (colWidth != null) width += Math.max(0L, colWidth);
+            }
+        }
+        return width > 0 && width * 100 <= totalWidth * 18;
+    }
+
+    private static ASTTableCell duplicatedWiderTextOwner(
+            ASTTableRow row,
+            ASTTableCell narrow,
+            String signature) {
+        if (row == null || narrow == null || signature == null || signature.isEmpty()) return null;
+        long narrowWidth = Math.max(1L, narrow.width());
+        for (ASTTableCell candidate : row.cells()) {
+            if (candidate == null || candidate == narrow) continue;
+            if (candidate.width() <= narrowWidth * 2) continue;
+            if (isDuplicatedTextSignature(signature, visibleTextSignature(candidate))) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isDuplicatedTextSignature(String a, String b) {
+        if (a == null || b == null) return false;
+        if (a.isEmpty() || b.isEmpty()) return false;
+        if (a.equals(b)) return true;
+        int prefix = commonPrefixLength(a, b);
+        int shorter = Math.min(a.length(), b.length());
+        return prefix >= 16 && prefix * 2 >= shorter;
+    }
+
+    private static int commonPrefixLength(String a, String b) {
+        int len = Math.min(a != null ? a.length() : 0, b != null ? b.length() : 0);
+        int i = 0;
+        while (i < len && a.charAt(i) == b.charAt(i)) {
+            i++;
+        }
+        return i;
+    }
+
+    private static String visibleTextSignature(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null || cell.paragraphs().isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            appendVisibleText(sb, paragraph);
+        }
+        return sb.toString().replaceAll("\\s+", " ").trim();
+    }
+
+    private static void appendVisibleText(StringBuilder sb, ASTParagraph paragraph) {
+        if (sb == null || paragraph == null || paragraph.items() == null) return;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.isEmpty()) sb.append(text);
+            } else if (item instanceof ASTInlineObject) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.paragraphs() != null) {
+                    for (ASTParagraph nested : obj.paragraphs()) {
+                        appendVisibleText(sb, nested);
+                    }
+                }
+                if (obj.inlineTables() != null) {
+                    for (ASTTable table : obj.inlineTables()) {
+                        appendVisibleText(sb, table);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void appendVisibleText(StringBuilder sb, ASTTable table) {
+        if (sb == null || table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                for (ASTParagraph paragraph : cell.paragraphs()) {
+                    appendVisibleText(sb, paragraph);
+                }
             }
         }
     }

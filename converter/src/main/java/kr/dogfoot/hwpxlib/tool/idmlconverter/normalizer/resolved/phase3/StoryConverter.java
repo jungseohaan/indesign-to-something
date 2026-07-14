@@ -32,6 +32,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Place
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextLayoutContract;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowAstMaterializer;
@@ -349,6 +350,7 @@ public final class StoryConverter {
             restoreTfInlineVisuals(ctx, blocks);
             restoreInlineNanos += System.nanoTime() - stepStart;
             stepStart = System.nanoTime();
+            applySourceTextWrapContracts(ctx, blocks);
             preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
             replaceDottedInlineImagesWithTabLeaders(ctx, blocks);
             coalesceDotLeaderAnswerVisualBreaks(blocks);
@@ -1499,6 +1501,103 @@ public final class StoryConverter {
         }
     }
 
+    private static void applySourceTextWrapContracts(
+            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null || blocks.isEmpty()) return;
+        int applied = 0;
+        int unmatched = 0;
+        int failed = 0;
+        Set<Integer> failedTextFrameIds = new LinkedHashSet<>();
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            int textFrameId = parseTextFrameBlockSourceId(block.sourceId());
+            if (textFrameId < 0) continue;
+            TextLayoutContract contract = sourceTextWrapContractForTextFrame(ctx, textFrameId);
+            if (contract == null || !contract.isSourceTextWrap()) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) continue;
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara =
+                    composedLinesByParagraph(tf);
+            if (linesByPara.isEmpty()) continue;
+            Set<ASTParagraph> processed = new HashSet<>();
+            for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : linesByPara.entrySet()) {
+                int paraIndex = entry.getKey();
+                List<ResolvedTextFrame.ComposedLine> lines = entry.getValue();
+                if (lines == null || lines.size() < 2) continue;
+                if (!hasComposedWrapIndent(lines)) continue;
+                ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
+                if (para == null) {
+                    para = paragraphAtComposedParaIndex(block.paragraphs(), paraIndex, processed);
+                }
+                if (para == null) {
+                    para = soleUnprocessedParagraph(block.paragraphs(), processed);
+                }
+                if (para == null) {
+                    unmatched++;
+                    continue;
+                }
+                if (insertComposedLineBreaks(para, lines)) {
+                    para.alignment("left");
+                    processed.add(para);
+                    applied++;
+                } else {
+                    failed++;
+                    failedTextFrameIds.add(textFrameId);
+                }
+            }
+        }
+        if (applied > 0) {
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.appliedParagraphs", applied);
+        }
+        if (failed > 0) {
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.failedParagraphs", failed);
+        }
+        if (unmatched > 0 && ctx.ownershipWarningLines != null) {
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_PARAGRAPH_MATCH_MISSING\""
+                    + ",\"count\":" + unmatched
+                    + ",\"detail\":\"Stage 1 TextWrap contracts existed, but some composed-line paragraphs did not match AST paragraphs\"}");
+        }
+        if (failed > 0 && ctx.ownershipWarningLines != null) {
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_LINE_BREAK_INSERT_FAILED\""
+                    + ",\"count\":" + failed
+                    + ",\"textFrameIds\":\"" + failedTextFrameIds
+                    + "\",\"detail\":\"Stage 1 TextWrap contracts matched AST paragraphs, but source composed-line breaks could not be inserted\"}");
+        }
+    }
+
+    private static TextLayoutContract sourceTextWrapContractForTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameId) {
+        if (ctx == null || ctx.ownershipPlans == null || textFrameId < 0) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.textLayoutContract == null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (!containsInt(plan.ownedTextFrameIds, textFrameId) && plan.domId != textFrameId) continue;
+            return plan.textLayoutContract;
+        }
+        return null;
+    }
+
+    private static int parseTextFrameBlockSourceId(String sourceId) {
+        String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
+        if (domId == null || domId.isEmpty()) domId = sourceId;
+        if (domId == null || domId.isEmpty()) return -1;
+        try {
+            return Integer.parseInt(domId);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static boolean hasComposedWrapIndent(List<ResolvedTextFrame.ComposedLine> lines) {
+        if (lines == null) return false;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null) continue;
+            if (line.wrapIndentLeft() >= 0.5 || line.wrapIndentRight() >= 0.5) return true;
+        }
+        return false;
+    }
+
     private static void warnTrailingAnswerLineBreakHeuristicSuppressed(
             ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
         if (ctx == null || ctx.resolvedData == null || blocks == null || ctx.ownershipWarningLines == null) return;
@@ -1557,17 +1656,47 @@ public final class StoryConverter {
         if (paragraphs == null || lines == null || lines.isEmpty()) return null;
         String expected = normalizeForParagraphMatch(combinedComposedLineText(lines));
         if (expected.isEmpty()) return null;
+        ASTParagraph best = null;
+        int bestScore = Integer.MAX_VALUE;
         for (ASTParagraph para : paragraphs) {
             if (para == null || (processed != null && processed.contains(para))) continue;
             String actual = normalizeForParagraphMatch(ParagraphTextHelpers.getParaPlainText(para));
             if (actual.isEmpty()) continue;
-            if (actual.equals(expected)
-                    || actual.contains(expected)
-                    || (actual.length() >= 6 && expected.contains(actual))) {
-                return para;
+            int score = Integer.MAX_VALUE;
+            if (actual.equals(expected)) {
+                score = 0;
+            } else if (actual.contains(expected)) {
+                score = 1000 + Math.max(0, actual.length() - expected.length());
+            } else if (actual.length() >= 6 && expected.contains(actual)) {
+                score = 2000 + Math.max(0, expected.length() - actual.length());
+            }
+            if (score < bestScore) {
+                bestScore = score;
+                best = para;
             }
         }
-        return null;
+        return best;
+    }
+
+    private static ASTParagraph paragraphAtComposedParaIndex(
+            List<ASTParagraph> paragraphs,
+            int paraIndex,
+            Set<ASTParagraph> processed) {
+        if (paragraphs == null || paraIndex < 0 || paraIndex >= paragraphs.size()) return null;
+        ASTParagraph para = paragraphs.get(paraIndex);
+        if (para == null) return null;
+        if (processed != null && processed.contains(para)) return null;
+        return para;
+    }
+
+    private static ASTParagraph soleUnprocessedParagraph(
+            List<ASTParagraph> paragraphs,
+            Set<ASTParagraph> processed) {
+        if (paragraphs == null || paragraphs.size() != 1) return null;
+        ASTParagraph para = paragraphs.get(0);
+        if (para == null) return null;
+        if (processed != null && processed.contains(para)) return null;
+        return para;
     }
 
     private static String combinedComposedLineText(List<ResolvedTextFrame.ComposedLine> lines) {
@@ -1694,15 +1823,70 @@ public final class StoryConverter {
             String lineText = normalizeForParagraphMatch(lines.get(i).text());
             if (lineText.isEmpty()) return false;
             int found = paraMap.normalized.indexOf(lineText, searchFrom);
-            if (found < 0) return false;
+            if (found < 0) {
+                return insertComposedLineBreaksByCumulativeOffsets(para, lines, paraMap);
+            }
             int breakNormOffset = found + lineText.length();
+            if (breakNormOffset <= 0 || breakNormOffset >= paraMap.textOffsetsAfterNormalizedChars.length) {
+                return insertComposedLineBreaksByCumulativeOffsets(para, lines, paraMap);
+            }
+            int textOffset = paraMap.textOffsetsAfterNormalizedChars[breakNormOffset];
+            if (textOffset <= 0 || textOffset >= paraMap.textLength) {
+                return insertComposedLineBreaksByCumulativeOffsets(para, lines, paraMap);
+            }
+            offsets.add((trailingObjectReplacementCount(lines.get(i).text()) << 24) | textOffset);
+            searchFrom = breakNormOffset;
+        }
+        for (int i = offsets.size() - 1; i >= 0; i--) {
+            int packed = offsets.get(i);
+            int trailingObjects = packed >>> 24;
+            int textOffset = packed & 0x00ffffff;
+            insertBreakAtTextOffset(para, textOffset, trailingObjects);
+        }
+        return !offsets.isEmpty();
+    }
+
+    private static boolean insertComposedLineBreaksByCumulativeOffsets(
+            ASTParagraph para,
+            List<ResolvedTextFrame.ComposedLine> lines,
+            NormalizedTextMap paraMap) {
+        if (para == null || lines == null || lines.size() < 2
+                || paraMap == null || paraMap.normalized.isEmpty()) return false;
+        StringBuilder expected = new StringBuilder();
+        List<Integer> breakNormOffsets = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String lineText = normalizeForParagraphMatch(lines.get(i) != null ? lines.get(i).text() : null);
+            if (lineText.isEmpty()) return false;
+            expected.append(lineText);
+            if (i < lines.size() - 1) {
+                breakNormOffsets.add(expected.length());
+            }
+        }
+        String expectedText = expected.toString();
+        int baseNormOffset = 0;
+        if (paraMap.normalized.equals(expectedText)) {
+            baseNormOffset = 0;
+        } else if (paraMap.normalized.contains(expectedText)) {
+            baseNormOffset = paraMap.normalized.indexOf(expectedText);
+        } else if (expectedText.contains(paraMap.normalized)) {
+            baseNormOffset = 0;
+        } else {
+            // The TextWrap contract already came from resolved.composedLines
+            // for this source TextFrame. If styling/inline normalization makes
+            // the full strings differ, keep the source line lengths as the
+            // fallback as long as every break offset maps inside the paragraph.
+            baseNormOffset = 0;
+        }
+
+        List<Integer> offsets = new ArrayList<>();
+        for (int i = 0; i < breakNormOffsets.size(); i++) {
+            int breakNormOffset = baseNormOffset + breakNormOffsets.get(i);
             if (breakNormOffset <= 0 || breakNormOffset >= paraMap.textOffsetsAfterNormalizedChars.length) {
                 return false;
             }
             int textOffset = paraMap.textOffsetsAfterNormalizedChars[breakNormOffset];
             if (textOffset <= 0 || textOffset >= paraMap.textLength) return false;
             offsets.add((trailingObjectReplacementCount(lines.get(i).text()) << 24) | textOffset);
-            searchFrom = breakNormOffset;
         }
         for (int i = offsets.size() - 1; i >= 0; i--) {
             int packed = offsets.get(i);

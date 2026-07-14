@@ -287,7 +287,16 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
                 declaredCandidate, slotSources);
     }
     var zOrder = _plannerBundleZOrder(candidate, primarySourceObjectId, clusterIndex);
-    var sourceInlineFlow = _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex);
+    var tableCellInlineAnchorSource = _plannerBundleSourceSetHasTableCellInlineAnchor(
+            sourceIds, clusterIndex);
+    var pagePositionedAnchoredSource = tableCellInlineAnchorSource
+            ? false
+            : _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex);
+    var sourceInlineFlow = tableCellInlineAnchorSource
+            ? true
+            : (pagePositionedAnchoredSource
+                    ? false
+                    : _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex));
     var inlineAnchorSourceObjectId = candidate.inlineAnchorSourceObjectId
             || _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex);
     var inlineCompositeLayoutDescendant = _plannerBundleIsInsideInlineCompositeLayout(
@@ -355,6 +364,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         executable: executable,
         required: candidate.required === true,
         sourceInlineFlow: sourceInlineFlow,
+        tableCellInlineAnchorSource: tableCellInlineAnchorSource,
+        pagePositionedAnchoredSource: pagePositionedAnchoredSource,
         inlineCompositeLayoutDescendant: inlineCompositeLayoutDescendant,
         inlineAnchorSourceObjectId: inlineAnchorSourceObjectId || null,
         inlineSourceTreeClosed: candidate.inlineSourceTreeClosed === true,
@@ -606,6 +617,86 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
     }
     cache[cacheKey] = sawInline;
     return cache[cacheKey];
+}
+
+function _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex) {
+    if (!sourceIds || sourceIds.length === 0 || !clusterIndex || !clusterIndex.sourceInfo) {
+        return false;
+    }
+    var cache = _plannerBundleCache(clusterIndex, "pagePositionedAnchorBySourceSet");
+    var cacheKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
+    for (var i = 0; i < sourceIds.length; i++) {
+        var src = clusterIndex.sourceInfo(sourceIds[i]);
+        if (!src) continue;
+        if (String(src.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED"
+                || String(src.anchoredPosition || "").toUpperCase() === "ANCHORED") {
+            cache[cacheKey] = true;
+            return true;
+        }
+    }
+    cache[cacheKey] = false;
+    return false;
+}
+
+function _plannerBundleSourceSetHasTableCellInlineAnchor(sourceIds, clusterIndex) {
+    if (!sourceIds || sourceIds.length === 0 || !clusterIndex || !clusterIndex.sourceInfo) {
+        return false;
+    }
+    var cache = _plannerBundleCache(clusterIndex, "tableCellInlineAnchorBySourceSet");
+    var cacheKey = _plannerBundleSourceSetKey(sourceIds, clusterIndex);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
+    var tableCellAnchorRoots = {};
+    var sawTableCellInlineAnchor = false;
+    for (var i = 0; i < sourceIds.length; i++) {
+        var src = clusterIndex.sourceInfo(sourceIds[i]);
+        if (!src) continue;
+        if (src.tableCellStoryTextInlineSlot === true) {
+            tableCellAnchorRoots[String(src.id)] = true;
+            sawTableCellInlineAnchor = true;
+        }
+    }
+    if (!sawTableCellInlineAnchor) {
+        cache[cacheKey] = false;
+        return false;
+    }
+    for (var j = 0; j < sourceIds.length; j++) {
+        var src = clusterIndex.sourceInfo(sourceIds[j]);
+        if (!src) continue;
+        var kind = String(src.kind || "");
+        if (kind === "Story" || kind === "Character" || kind === "InsertionPoint" || kind === "Cell") {
+            continue;
+        }
+        if (src.tableCellStoryTextInlineSlot === true) {
+            continue;
+        }
+        if (_plannerBundleSourceHasAncestorInSet(src.id, tableCellAnchorRoots, clusterIndex)) {
+            continue;
+        }
+        if (src.storyTextInlineSlot === true || src.isInline === true || src.inline === true
+                || src.anchored === true) {
+            continue;
+        }
+        cache[cacheKey] = false;
+        return false;
+    }
+    cache[cacheKey] = sawTableCellInlineAnchor;
+    return cache[cacheKey];
+}
+
+function _plannerBundleSourceHasAncestorInSet(sourceId, ancestorSet, clusterIndex) {
+    if (sourceId === null || sourceId === undefined || !ancestorSet
+            || !clusterIndex || !clusterIndex.sourceInfo) return false;
+    var current = clusterIndex.sourceInfo(sourceId);
+    var guard = 0;
+    while (current && guard < 32) {
+        guard++;
+        var parentId = current.parentId;
+        if (parentId === null || parentId === undefined) return false;
+        if (ancestorSet[String(parentId)]) return true;
+        current = clusterIndex.sourceInfo(parentId);
+    }
+    return false;
 }
 
 function _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex) {

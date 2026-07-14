@@ -65,6 +65,11 @@ Extraction is not ownership.
   `TABLE_STYLE_SLOT`, and `CONTENT_VISUAL_SLOT` owners.
 - The extractor must not silently replace, suppress, or reinterpret export
   units after the plan is written.
+- `resolved.json` is canonical source metadata for final text composition facts.
+  E0 must preserve TextFrame `composedLines`, line bounds, wrap indents, inset,
+  leading, story ids, page indexes, and source bounds needed by TextWrap policy.
+  These fields must not be discarded as diagnostics-only data, because Stage 1
+  may need them to declare source-composed TextWrap contracts.
 
 ## 2. Pipeline
 

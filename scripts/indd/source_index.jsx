@@ -45,6 +45,50 @@ function _itemHasDirectStoryTextInlineSlot(item) {
     return false;
 }
 
+function _itemDirectStoryTextInlineCarrierCell(item) {
+    if (!_itemHasDirectStoryTextInlineSlot(item)) return null;
+    try {
+        var cur = item ? item.parent : null;
+        while (cur) {
+            var kind = "";
+            try { kind = cur.constructor ? String(cur.constructor.name || "") : ""; } catch (eKind) {}
+            if (kind === "Cell") return cur;
+            if (kind === "TextFrame" || kind === "Story"
+                    || kind === "Spread" || kind === "Page" || kind === "Document") {
+                return null;
+            }
+            try { cur = cur.parent; } catch (eParent) { break; }
+        }
+    } catch (e) {}
+    return null;
+}
+
+function _rawBoundsOfDomObject(obj) {
+    try {
+        var b = obj && (obj.visibleBounds || obj.geometricBounds);
+        if (!b || b.length < 4) return null;
+        return [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
+    } catch (e) {
+        return null;
+    }
+}
+
+function _boundsOverlapLoose(a, b, eps) {
+    if (!a || !b || a.length < 4 || b.length < 4) return false;
+    eps = eps || 0;
+    return Math.min(a[3], b[3]) > Math.max(a[1], b[1]) - eps
+            && Math.min(a[2], b[2]) > Math.max(a[0], b[0]) - eps;
+}
+
+function _itemHasDirectTableCellStoryTextInlineSlot(item) {
+    var cell = _itemDirectStoryTextInlineCarrierCell(item);
+    if (!cell) return false;
+    var itemBounds = _itemBounds(item);
+    var cellBounds = _rawBoundsOfDomObject(cell);
+    if (!itemBounds || !cellBounds) return false;
+    return _boundsOverlapLoose(itemBounds, cellBounds, 0.5);
+}
+
 function _itemContentTypeName(item) {
     try {
         if (!item || item.contentType === undefined || item.contentType === null) return null;
@@ -358,6 +402,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var editableTextOutsideByKey = {};
     var candidateVectorPaintById = {};
     var storyTableMetaById = {};
+    var tableCellInlineAnchorIdsByStoryId = {};
     var cachedSourceInfoById = ctx && ctx.spreadChunkSourceInfoById
             ? ctx.spreadChunkSourceInfoById
             : null;
@@ -503,6 +548,59 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return meta;
     }
 
+    function storyTableCellInlineAnchorIdSet(story, storyId) {
+        var key = storyId !== null && storyId !== undefined
+                ? String(storyId)
+                : "__story_object__";
+        if (tableCellInlineAnchorIdsByStoryId.hasOwnProperty(key)) {
+            return tableCellInlineAnchorIdsByStoryId[key];
+        }
+        var ids = {};
+        try {
+            if (!story || !story.tables) {
+                tableCellInlineAnchorIdsByStoryId[key] = ids;
+                return ids;
+            }
+            var tables = story.tables.everyItem().getElements();
+            for (var ti = 0; tables && ti < tables.length; ti++) {
+                var cells = null;
+                try { cells = tables[ti].cells.everyItem().getElements(); } catch (eCells) {}
+                for (var ci = 0; cells && ci < cells.length; ci++) {
+                    var cell = cells[ci];
+                    var cellBounds = _rawBoundsOfDomObject(cell);
+                    var ranges = null;
+                    try { ranges = cell.textStyleRanges.everyItem().getElements(); } catch (eRanges) {}
+                    for (var ri = 0; ranges && ri < ranges.length; ri++) {
+                        var rangeText = "";
+                        try { rangeText = String(ranges[ri].contents || ""); } catch (eRangeText) {}
+                        if (rangeText.indexOf("\uFFFC") < 0 && rangeText.indexOf("\u0016") < 0) continue;
+                        var chars = null;
+                        try { chars = ranges[ri].characters.everyItem().getElements(); } catch (eChars) {}
+                        for (var chi = 0; chars && chi < chars.length; chi++) {
+                            var ch = "";
+                            try { ch = String(chars[chi].contents || ""); } catch (eCharContents) {}
+                            if (ch !== "\uFFFC" && ch !== "\u0016") continue;
+                            var directAnchors = null;
+                            try { directAnchors = chars[chi].allPageItems; } catch (ePageItems) {}
+                            if (!directAnchors || directAnchors.length === 0) continue;
+                            var anchored = directAnchors[0];
+                            var anchorId = _itemId(anchored);
+                            if (anchorId === null || anchorId === undefined) continue;
+                            var anchorBounds = _itemBounds(anchored);
+                            if (cellBounds && anchorBounds
+                                    && !_boundsOverlapLoose(anchorBounds, cellBounds, 0.5)) {
+                                continue;
+                            }
+                            ids[String(anchorId)] = true;
+                        }
+                    }
+                }
+            }
+        } catch (eStoryTableInlineAnchors) {}
+        tableCellInlineAnchorIdsByStoryId[key] = ids;
+        return ids;
+    }
+
     function cloneCachedSourceInfo(cached, id) {
         if (!cached) return null;
         var info = {};
@@ -565,12 +663,12 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var tableCountInStory = null;
         var tableSourceObjectIds = [];
         var storyHasVisibleTableCellText = null;
+        var parentStory = null;
+        try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
+        if (parentStory) {
+            try { if (parentStory.id !== undefined) storyId = parentStory.id; } catch (eStoryIdAny) {}
+        }
         if (kind === "TextFrame") {
-            var parentStory = null;
-            try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
-            if (parentStory) {
-                try { if (parentStory.id !== undefined) storyId = parentStory.id; } catch (eStoryId) {}
-            }
             try { textFrameClass = classifyTextFrameCached(item); } catch (eClass) { textFrameClass = null; }
             textLength = _textLengthOfItem(item);
             try {
@@ -600,6 +698,12 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             }
         }
         var sourcePageIndex = _pageIndexOfItem(doc, item);
+        var storyTextInlineSlot = _itemHasDirectStoryTextInlineSlot(item);
+        var tableCellStoryTextInlineSlot = false;
+        if (storyTextInlineSlot === true && parentStory) {
+            var inlineAnchorIds = storyTableCellInlineAnchorIdSet(parentStory, storyId);
+            tableCellStoryTextInlineSlot = inlineAnchorIds[String(id)] === true;
+        }
 
         var info = {
             id: id,
@@ -648,7 +752,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             cornerRadius: null,
             anchoredPosition: _itemAnchoredPosition(item),
             storyAnchorPlacement: _storyAnchorPlacementForItem(doc, item, parentStory),
-            storyTextInlineSlot: _itemHasDirectStoryTextInlineSlot(item),
+            storyTextInlineSlot: storyTextInlineSlot,
+            tableCellStoryTextInlineSlot: tableCellStoryTextInlineSlot,
             recoveredMissingParent: false,
             rangeTargetPageIndexes: _rangeTargetPageIndexesForId(id)
         };
@@ -1224,6 +1329,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         anchoredPosition: null,
                         storyAnchorPlacement: "FLOATING",
                         storyTextInlineSlot: false,
+                        tableCellStoryTextInlineSlot: false,
                         recoveredMissingParent: false,
                         isMasterInstance: true,
                         masterSourceId: baseId,
@@ -1293,6 +1399,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                             anchoredPosition: _itemAnchoredPosition(inlineItem),
                             storyAnchorPlacement: "INLINE",
                             storyTextInlineSlot: true,
+                            tableCellStoryTextInlineSlot: false,
                             recoveredMissingParent: false,
                             isMasterInlineInstance: true,
                             masterTextFrameInstanceId: cloneId,
@@ -1559,6 +1666,7 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
             hasVisibleStroke: src.hasVisibleStroke === true,
             storyAnchorPlacement: src.storyAnchorPlacement || null,
             storyTextInlineSlot: src.storyTextInlineSlot === true,
+            tableCellStoryTextInlineSlot: src.tableCellStoryTextInlineSlot === true,
             coverageClaimKinds: claimKinds
         };
         if (fullDiagnostics) {

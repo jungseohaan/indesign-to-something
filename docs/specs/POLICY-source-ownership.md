@@ -36,11 +36,14 @@ policy; their usable rules have been consolidated here.
 6. [Text](../policy/40-text-policy.md)
    - HWPX text ownership
    - TextFrame merge/layout constraints
-7. [Textless Shells](../policy/50-textless-shell-policy.md)
+7. [TextWrap](../policy/45-text-wrap-policy.md)
+   - resolved composed-line wrap
+   - source floating obstacle wrap contracts
+8. [Textless Shells](../policy/50-textless-shell-policy.md)
    - native/extracted shell ownership
    - direct child/sibling shell slots
    - text-owning shell execution requirements
-8. [Table Structure](../policy/60-table-policy.md)
+9. [Table Structure](../policy/60-table-policy.md)
    - table structure ownership
    - table decoration visual ownership
    - table-like carrier rules

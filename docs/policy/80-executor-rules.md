@@ -156,10 +156,10 @@ Text Builder:
   because it is anchored in story flow.
 - Text Builder must not split, shrink, or horizontally shift a TextFrame from
   `composedLines`, `wrapIndentLeft`, `wrapIndentRight`, paragraph Y offsets, or
-  line-gap measurements. Those are extractor diagnostics for validation and
-  planning only. If source text must avoid an obstacle, Stage 1 must express the
-  carrier structure through source story/thread/table/anchor metadata or an
-  explicit `ObjectPlan`; executors do not invent `_g`/wrap-split carriers.
+  line-gap measurements unless Stage 1 has declared a TextWrap contract under
+  [`45-text-wrap-policy.md`](45-text-wrap-policy.md). Without that contract,
+  those fields remain source diagnostics for validation/planning only.
+  Executors do not invent `_g`/wrap-split carriers.
 - Text Builder must not suppress paragraph left indent or skip paragraph content
   from ORC/inline-object detection, partial-left-wrap detection, or rendered
   overlap heuristics. If a paragraph style must change because of a source
@@ -176,11 +176,13 @@ Text Builder:
   "single-line guarantee" heuristic. Source single-line intent is executed
   through source-derived no-wrap/SQUEEZE flags and source bounds, not through a
   Stage 4 geometry rewrite.
-- Text Builder must not narrow or offset a TextFrame because a floating image
-  appears beside or over it. HWPX text-wrap limitations are handled by Stage 1
-  source placement/materialization planning or validation, not by
-  `narrowedWidth`, `narrowedXOffset`, spacer insertion, or legacy
-  `FloatingImageMerger` recovery.
+- Text Builder must not narrow or offset a TextFrame merely because a floating
+  image appears beside or over it. It may approximate source-composed line
+  geometry only when Stage 1 has declared TextWrap from `resolved.composedLines`
+  and source obstacle metadata. HWPX text-wrap limitations are handled by that
+  Stage 1 contract or by validation, not by ad hoc `narrowedWidth`,
+  `narrowedXOffset`, spacer insertion, or legacy `FloatingImageMerger`
+  recovery.
 - HWPX drawText carriers use the same positive source-derived height for
   `orgSz`, `curSz`, corner points, and `sz`. `curSz height=0` is not an
   auto-height policy; some renderers treat it as an invisible zero-height

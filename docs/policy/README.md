@@ -14,6 +14,7 @@ That file links to these modules and makes them canonical by reference.
 - [20-object-plan.md](20-object-plan.md): ObjectPlan contract and Stage 1 decision order
 - [30-placement-inline-policy.md](30-placement-inline-policy.md): page/story placement and inline ownership
 - [40-text-policy.md](40-text-policy.md): HWPX text ownership and TextFrame layout constraints
+- [45-text-wrap-policy.md](45-text-wrap-policy.md): resolved composed-line TextWrap contracts
 - [50-textless-shell-policy.md](50-textless-shell-policy.md): native/extracted textless shell rules
 - [60-table-policy.md](60-table-policy.md): editable table structure and textless table decoration rules
 - [70-layer-zdepth.md](70-layer-zdepth.md): background graphics, textless image grouping, text/table structure, and source z-depth

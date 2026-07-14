@@ -380,6 +380,7 @@ public final class ResolvedBuildContext {
     private java.util.Map<String, ObjectPlan> ownershipPlanByRenderKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByCandidateKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByCandidateId;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByObjectPlanId;
     private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
@@ -573,6 +574,7 @@ public final class ResolvedBuildContext {
         ownershipPlanByRenderKey = null;
         ownershipPlanByCandidateKey = null;
         ownershipPlanByCandidateId = null;
+        ownershipPlanByObjectPlanId = null;
         ownershipPlanByDomKey = null;
         ownershipPlanByFileBoundsKey = null;
         ownershipPlanByFileKey = null;
@@ -946,7 +948,10 @@ public final class ResolvedBuildContext {
         Placement placement = placementOf(rg);
         boolean ambiguousCandidate = isAmbiguousRenderedCandidate(rg.candidateId());
         boolean ambiguousRenderUnit = isAmbiguousRenderedRenderUnit(rg.renderUnitId());
-        ObjectPlan plan = plannerDeclaredCandidatePlanForRendered(rg, placement);
+        ObjectPlan plan = plannerDeclaredRenderUnitPlanForRendered(rg, placement);
+        if (plan == null) {
+            plan = plannerDeclaredCandidatePlanForRendered(rg, placement);
+        }
         if (plan == null) {
             plan = findRenderedPlanForPlacement(rg, placement, false);
         }
@@ -966,6 +971,22 @@ public final class ResolvedBuildContext {
         plan = localizeRenderedPlan(plan, rg, ambiguousCandidate || ambiguousRenderUnit);
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
+    }
+
+    private ObjectPlan plannerDeclaredRenderUnitPlanForRendered(RenderedGroup rg, Placement placement) {
+        if (rg == null || placement == null) return null;
+        String objectPlanId = objectPlanIdFromRenderUnitId(rg.renderUnitId());
+        if (objectPlanId == null || objectPlanId.isEmpty()) return null;
+        ObjectPlan plan = renderedOnly(ownershipPlanByObjectPlanId.get(objectPlanId));
+        if (plan == null) {
+            plan = renderedOnly(ownershipPlanByObjectPlanId.get(sourceBundleKeyFromObjectPlanId(objectPlanId)));
+        }
+        if (isPlannerDeclaredOwnershipPlan(plan)
+                && plan.placement == placement
+                && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
+            return plan;
+        }
+        return null;
     }
 
     private ObjectPlan plannerDeclaredCandidatePlanForRendered(RenderedGroup rg, Placement placement) {
@@ -1121,6 +1142,7 @@ public final class ResolvedBuildContext {
         ownershipPlanByRenderKey = new java.util.HashMap<>();
         ownershipPlanByCandidateKey = new java.util.HashMap<>();
         ownershipPlanByCandidateId = new java.util.HashMap<>();
+        ownershipPlanByObjectPlanId = new java.util.HashMap<>();
         ownershipPlanByDomKey = new java.util.HashMap<>();
         ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
         ownershipPlanByFileKey = new java.util.HashMap<>();
@@ -1175,6 +1197,7 @@ public final class ResolvedBuildContext {
             putPreferred(ownershipPlanByCandidateId,
                     candidateIdKey(plan.candidateId),
                     plan);
+            indexObjectPlanIdAliases(ownershipPlanByObjectPlanId, plan);
             putPreferred(ownershipPlanByDomKey, domKey(plan.pageIndex, plan.placement, plan.domId), plan);
             putPreferred(ownershipPlanByFileBoundsKey,
                     fileBoundsKey(plan.pageIndex, plan.placement, plan.file, plan.bounds),
@@ -1575,6 +1598,31 @@ public final class ResolvedBuildContext {
         }
     }
 
+    private static void indexObjectPlanIdAliases(java.util.Map<String, ObjectPlan> map, ObjectPlan plan) {
+        if (map == null || plan == null) return;
+        putPreferred(map, plan.objectPlanId, plan);
+        String sourceBundleKey = plan.sourceBundleKey;
+        if (sourceBundleKey == null || sourceBundleKey.isEmpty()) return;
+        putPreferred(map, sourceBundleKey, plan);
+        putPreferred(map, "objectPlan." + sourceBundleKey, plan);
+    }
+
+    private static String objectPlanIdFromRenderUnitId(String renderUnitId) {
+        if (renderUnitId == null || renderUnitId.isEmpty()) return null;
+        int index = renderUnitId.indexOf("objectPlan.");
+        if (index < 0) return null;
+        return renderUnitId.substring(index);
+    }
+
+    private static String sourceBundleKeyFromObjectPlanId(String objectPlanId) {
+        if (objectPlanId == null || objectPlanId.isEmpty()) return null;
+        String prefix = "objectPlan.";
+        if (objectPlanId.startsWith(prefix)) {
+            return objectPlanId.substring(prefix.length());
+        }
+        return objectPlanId;
+    }
+
     private static boolean shouldPreferOwnershipPlan(ObjectPlan candidate, ObjectPlan existing) {
         if (candidate == null) return false;
         if (existing == null) return true;
@@ -1691,6 +1739,14 @@ public final class ResolvedBuildContext {
     }
 
     private static Placement placementOf(RenderedGroup rg) {
+        String placement = nullSafe(rg != null ? rg.placementRole() : null)
+                .toUpperCase(java.util.Locale.ROOT);
+        if ("INLINE".equals(placement)) return Placement.INLINE;
+        if ("FLOATING".equals(placement)) return Placement.FLOATING;
+        String renderUnitId = nullSafe(rg != null ? rg.renderUnitId() : null)
+                .toUpperCase(java.util.Locale.ROOT);
+        if (renderUnitId.contains("_INLINE_")) return Placement.INLINE;
+        if (renderUnitId.contains("_FLOATING_")) return Placement.FLOATING;
         if (rg != null && ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType()))) {
             return Placement.INLINE;
         }

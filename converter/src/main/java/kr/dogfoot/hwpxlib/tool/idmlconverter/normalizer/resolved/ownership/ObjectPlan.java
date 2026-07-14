@@ -4,6 +4,7 @@ import java.util.Arrays;
 
 /** Source ownership policy object plan. */
 public final class ObjectPlan {
+    public String objectPlanId;
     public final int domId;
     public final String kind;
     public final String candidateId;
@@ -41,6 +42,7 @@ public final class ObjectPlan {
     public final int sourceLayerIndex;
     public final boolean inlineSourceTreeClosed;
     public final int[] inlineFlowSourceObjectIds;
+    public TextLayoutContract textLayoutContract;
 
     public static ObjectPlan legacyDefaulted(
             int domId,
@@ -237,6 +239,7 @@ public final class ObjectPlan {
             String sourceLayerName,
             int sourceLayerIndex) {
         this.domId = domId;
+        this.objectPlanId = null;
         this.kind = kind;
         this.candidateId = candidateId;
         this.planPassId = planPassId;
@@ -295,6 +298,7 @@ public final class ObjectPlan {
         this.sourceLayerIndex = sourceLayerIndex;
         this.inlineSourceTreeClosed = false;
         this.inlineFlowSourceObjectIds = new int[0];
+        this.textLayoutContract = null;
     }
 
     private ObjectPlan(
@@ -302,6 +306,7 @@ public final class ObjectPlan {
             boolean inlineSourceTreeClosed,
             int[] inlineFlowSourceObjectIds) {
         this.domId = base.domId;
+        this.objectPlanId = base.objectPlanId;
         this.kind = base.kind;
         this.candidateId = base.candidateId;
         this.planPassId = base.planPassId;
@@ -350,6 +355,9 @@ public final class ObjectPlan {
         this.inlineFlowSourceObjectIds = inlineFlowSourceObjectIds != null
                 ? Arrays.copyOf(inlineFlowSourceObjectIds, inlineFlowSourceObjectIds.length)
                 : new int[0];
+        this.textLayoutContract = base.textLayoutContract != null
+                ? base.textLayoutContract.copy()
+                : null;
     }
 
     private static VisualLayer legacyDefaultVisualLayer(VisualLayer visualLayer) {
@@ -1190,9 +1198,21 @@ public final class ObjectPlan {
         return new ObjectPlan(this, newInlineSourceTreeClosed, newInlineFlowSourceObjectIds);
     }
 
+    public ObjectPlan withTextLayoutContract(TextLayoutContract contract) {
+        this.textLayoutContract = contract != null ? contract.copy() : null;
+        return this;
+    }
+
     private ObjectPlan withCurrentInlineFlow(ObjectPlan plan) {
-        return plan.withOwnedTextFrameIdKeys(ownedTextFrameIdKeys)
-                .withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds);
+        return plan.withObjectPlanId(objectPlanId)
+                .withOwnedTextFrameIdKeys(ownedTextFrameIdKeys)
+                .withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds)
+                .withTextLayoutContract(textLayoutContract);
+    }
+
+    public ObjectPlan withObjectPlanId(String id) {
+        this.objectPlanId = id;
+        return this;
     }
 
     public ObjectPlan withOwnedTextFrameIdKeys(String[] keys) {
@@ -1348,6 +1368,7 @@ public final class ObjectPlan {
     public String toJson() {
         StringBuilder sb = new StringBuilder(320);
         sb.append('{')
+                .append("\"objectPlanId\":\"").append(escape(objectPlanId)).append("\",")
                 .append("\"domId\":").append(domId).append(',')
                 .append("\"kind\":\"").append(escape(kind)).append("\",")
                 .append("\"candidateId\":\"").append(escape(candidateId)).append("\",")
@@ -1403,6 +1424,10 @@ public final class ObjectPlan {
                     .append(cropSourceBounds[1]).append(',')
                     .append(cropSourceBounds[2]).append(',')
                     .append(cropSourceBounds[3]).append(']');
+        }
+        if (textLayoutContract != null) {
+            sb.append(",\"textLayoutContract\":")
+                    .append(textLayoutContract.toJson());
         }
         sb.append('}');
         return sb.toString();

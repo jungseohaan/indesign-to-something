@@ -65,10 +65,16 @@ Placement and coordinate space are a single source decision.
   Stage 0 `storyTextInlineSlot=true` fact obtained from an actual story anchor
   marker (`U+FFFC` or `U+0016`) that directly owns the source object.
   `parentKind=Character` / `InsertionPoint` alone is never sufficient because a
-  floating anchored object also has a story character anchor. If the source is
-  `FLOATING_ANCHORED` / `Anchored` without `storyTextInlineSlot=true`,
-  Stage 1 must use `placement=FLOATING` and Story/Text Builder must not insert
-  the PNG into the paragraph flow.
+  floating anchored object also has a story character anchor. Explicit
+  page-positioned source metadata normally wins over a generic marker: if the
+  same source bundle contains `storyAnchorPlacement=FLOATING_ANCHORED` or
+  `AnchoredPosition="Anchored"`, Stage 1 uses `placement=FLOATING` and
+  `coordinateSpace=PAGE` unless Stage 0 also records a more specific
+  `tableCellStoryTextInlineSlot=true` fact. That fact is only valid when the
+  direct story anchor is in a table cell and the source bounds overlap the cell
+  carrier bounds. In that case the table cell flow owns the slot, Stage 1 writes
+  `placement=INLINE` / `coordinateSpace=STORY_FLOW`, and Story/Text Builder may
+  insert the PNG at that table-cell paragraph position.
 - An empty inline TextFrame with only frame paint is not automatically
   `CONTENT_VISUAL_SLOT`. When the same source pattern appears as a repeated
   baseline run of small empty inline frames, the run represents a text-flow
@@ -90,9 +96,10 @@ Placement and coordinate space are a single source decision.
 - If the canonical material for that inline-anchored source is available through
   a `page_object` extracted shell channel, Stage 1 still writes
   `placement=INLINE` and `coordinateSpace=STORY_FLOW` unless source metadata
-  marks the object as page-positioned, including explicit
-  `AnchoredPosition="Anchored"` or the table-cell external label condition
-  above.
+  marks the object as page-positioned. `AnchoredPosition="Anchored"` is
+  page-positioned evidence for generic story anchors, but not for a source with
+  valid `tableCellStoryTextInlineSlot=true`; the table-cell external label
+  condition above remains page-positioned.
 - The same rule applies when the source object is authored on a master spread.
   Master authorship is provenance. If IDML story tokens or resolved story flow
   declare the source as the direct inline slot owner, `pass.inline_objects`
@@ -111,6 +118,8 @@ Placement and coordinate space are a single source decision.
   `placement=INLINE` and `coordinateSpace=STORY_FLOW` unless source metadata
   explicitly marks the shell as page-positioned, such as
   `AnchoredPosition="Anchored"` or the table-cell external label rule below.
+  A valid `tableCellStoryTextInlineSlot=true` fact is inline source ownership,
+  not page-positioned shell evidence.
   This rule is based on source inline ownership, not on the rendered pass or
   file prefix that supplied the shell PNG.
 - When a visible `PLACE_TEXT_SHELL` owns an editable TextFrame, that TextFrame's
