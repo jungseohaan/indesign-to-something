@@ -1429,8 +1429,21 @@ public class InlineFrameHandler {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            BufferedImage shellImage = VisualCropper.knockOutPaperLikeFill(img);
+            if (shouldPreserveTransparentInlineShell(shellImage)) {
+                ASTInlineObject transparentShell = buildTransparentInlineShellImageObject(
+                        ctx, anchoredObjectId, shellPlan, shellBounds, childTfs, shellImage);
+                if (transparentShell != null) {
+                    if (shell != null) {
+                        ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
+                                "PLACE_INLINE_TEXT_SHELL_AS_IMAGE",
+                                "placed transparent inline textless shell as alpha PNG with HWPX text overlays");
+                    }
+                    return transparentShell;
+                }
+            }
             boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
-            imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
+            imageData = prepareInlineTextShellImageData(shellImage, preserveSourceCanvas);
             int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
             boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
             if (visibleShellTextFrameCount > 1 || separatedHwpxTextChannel) {
@@ -1456,6 +1469,57 @@ public class InlineFrameHandler {
                 ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
                         "PLACE_INLINE_TEXT_SHELL",
                         "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
+            }
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static ASTInlineObject buildTransparentInlineShellImageObject(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ObjectPlan shellPlan,
+            double[] shellBounds,
+            java.util.List<ResolvedTextFrame> childTfs,
+            BufferedImage shellImage) {
+        if (ctx == null || shellPlan == null || shellImage == null) return null;
+        try {
+            double[] bounds = shellPlan.bounds;
+            if (!validBounds(bounds)) return null;
+            double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+            double w = Math.abs(bounds[3] - bounds[1]) * scale;
+            double h = Math.abs(bounds[2] - bounds[0]) * scale;
+            if (w <= 0 || h <= 0) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+            obj.imageData(VisualCropper.encodePng(shellImage));
+            obj.imageFormat("png");
+            obj.pixelWidth(shellImage.getWidth());
+            obj.pixelHeight(shellImage.getHeight());
+            obj.width(CoordinateConverter.pointsToHwpunits(w));
+            obj.height(CoordinateConverter.pointsToHwpunits(h));
+            obj.resolvedWidth(obj.width());
+            obj.resolvedHeight(obj.height());
+            obj.keepInline(true);
+            obj.noAutoLineWrap(childTfs != null
+                    && childTfs.size() == 1
+                    && shouldUseNoAutoLineWrap(childTfs.get(0), true));
+            applyPlannedInlineExecutionHints(obj, shellPlan);
+
+            double[] pageLocal = normalizeInlineBoundsToPageLocal(ctx, shellPlan.pageIndex, bounds);
+            if (validBounds(pageLocal)) {
+                obj.boundsX(pageLocal[1]);
+                obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(pageLocal[1] * scale));
+                obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pageLocal[0] * scale));
+            }
+
+            attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
+            if (obj.overlayFrames() == null || obj.overlayFrames().isEmpty()) return null;
+            for (ResolvedTextFrame childTf : childTfs) {
+                markInlineShellChildTextPlaced(ctx, childTf);
             }
             return obj;
         } catch (Exception e) {
@@ -2099,6 +2163,44 @@ public class InlineFrameHandler {
     private static byte[] prepareInlineTextShellImageData(BufferedImage img, boolean preserveSourceCanvas) throws Exception {
         BufferedImage shell = VisualCropper.knockOutPaperLikeFill(img);
         return flattenOntoWhite(shell);
+    }
+
+    private static boolean shouldPreserveTransparentInlineShell(BufferedImage img) {
+        if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) return false;
+        long total = (long) img.getWidth() * (long) img.getHeight();
+        if (total <= 0) return false;
+
+        long transparent = 0;
+        long translucent = 0;
+        long visible = 0;
+        long opaquePaperLike = 0;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >>> 24) & 0xFF;
+                if (a <= 8) {
+                    transparent++;
+                    continue;
+                }
+                visible++;
+                if (a < 245) translucent++;
+                int r = (argb >>> 16) & 0xFF;
+                int g = (argb >>> 8) & 0xFF;
+                int b = argb & 0xFF;
+                if (a >= 245 && r >= 245 && g >= 245 && b >= 245) {
+                    opaquePaperLike++;
+                }
+            }
+        }
+        if (transparent == 0 && translucent == 0) return false;
+
+        double visibleRatio = (double) visible / (double) total;
+        double paperRatio = (double) opaquePaperLike / (double) total;
+        if (paperRatio >= 0.10) return false;
+
+        // Sparse inline shells such as horizontal rules, outlines, and callout tails rely on
+        // transparent canvas. Flattening them paints a white rectangle over page graphics.
+        return visibleRatio > 0.002 && visibleRatio <= 0.35;
     }
 
     private static boolean shouldPreserveInlineShellSourceCanvas(
