@@ -121,6 +121,7 @@ class ParagraphDistributor {
             searchFrom = frameRanges[fi][1];
         }
         closeThreadedStoryRangeGaps(frameRanges, storyText.length());
+        alignThreadedFrameRangesToTokenBoundaries(frameRanges, storyText);
 
         // 프레임별 단락 할당
         for (int fi = 0; fi < ordered.size(); fi++) {
@@ -191,6 +192,78 @@ class ParagraphDistributor {
             if (nextStart < frameRanges[i][1]) {
                 frameRanges[i][1] = nextStart;
             }
+        }
+    }
+
+    /**
+     * InDesign can expose linked-frame visible ranges at a glyph boundary inside
+     * one lexical token.  If execution materializes each linked frame as an
+     * independent HWPX text box, keeping that raw boundary creates paragraphs
+     * starting with token tails such as "stralia)" after a previous frame ended
+     * at "Au".  Keep the source story order, but move such internal boundaries to
+     * the next safe token boundary so later stages do not invent a mid-word start.
+     */
+    private static void alignThreadedFrameRangesToTokenBoundaries(
+            int[][] frameRanges,
+            String storyText) {
+        if (frameRanges == null || frameRanges.length <= 1 || storyText == null
+                || storyText.isEmpty()) {
+            return;
+        }
+        int storyLength = storyText.length();
+        for (int i = 0; i < frameRanges.length - 1; i++) {
+            int boundary = clamp(frameRanges[i][1], 0, storyLength);
+            if (!isInsideToken(storyText, boundary)) continue;
+            int aligned = nextTokenBoundary(storyText, boundary);
+            if (aligned <= boundary || aligned > storyLength) continue;
+            frameRanges[i][1] = aligned;
+            frameRanges[i + 1][0] = aligned;
+        }
+    }
+
+    private static boolean isInsideToken(String text, int index) {
+        if (text == null || index <= 0 || index >= text.length()) return false;
+        return isTokenCoreChar(text.charAt(index - 1))
+                && isTokenCoreChar(text.charAt(index));
+    }
+
+    private static int nextTokenBoundary(String text, int index) {
+        int i = Math.max(0, Math.min(index, text.length()));
+        while (i < text.length() && isTokenCoreChar(text.charAt(i))) {
+            i++;
+        }
+        // Keep immediately attached punctuation with the word, but never cross
+        // whitespace or control characters into the next lexical unit.
+        int punctuationBudget = 4;
+        while (i < text.length() && punctuationBudget-- > 0) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c) || Character.isISOControl(c)) break;
+            if (!isAttachedTokenPunctuation(c)) break;
+            i++;
+        }
+        return i;
+    }
+
+    private static boolean isTokenCoreChar(char c) {
+        return Character.isLetterOrDigit(c)
+                || c == '\''
+                || c == '\u2019';
+    }
+
+    private static boolean isAttachedTokenPunctuation(char c) {
+        switch (c) {
+            case ')':
+            case ']':
+            case '}':
+            case ':':
+            case ';':
+            case ',':
+            case '.':
+            case '?':
+            case '!':
+                return true;
+            default:
+                return false;
         }
     }
 

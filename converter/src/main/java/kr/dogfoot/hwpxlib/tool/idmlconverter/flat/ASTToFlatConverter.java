@@ -693,6 +693,7 @@ public class ASTToFlatConverter {
 
         // Frame style
         node.fillColor(inObj.fillColor());
+        node.imageFillData(inObj.imageFillData());
         node.fillTint(inObj.fillTint());
         node.strokeColor(inObj.strokeColor());
         node.strokeWeight(inObj.strokeWeight());

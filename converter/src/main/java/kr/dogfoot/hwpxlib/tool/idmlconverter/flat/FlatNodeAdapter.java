@@ -503,6 +503,7 @@ public class FlatNodeAdapter {
 
         // Frame style
         obj.fillColor(node.fillColor());
+        obj.imageFillData(node.imageFillData());
         obj.fillTint(node.fillTint());
         obj.strokeColor(node.strokeColor());
         obj.strokeWeight(node.strokeWeight());
