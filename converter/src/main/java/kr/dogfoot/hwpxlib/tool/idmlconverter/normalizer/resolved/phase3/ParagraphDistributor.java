@@ -3,12 +3,9 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextFrameRangeOwnershipPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocument;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
@@ -21,8 +18,6 @@ import java.util.List;
  * StoryConverter에서 분리됨.
  */
 class ParagraphDistributor {
-
-    private static final int FRAME_RANGE_REWIND_TOLERANCE = 32;
 
     private ParagraphDistributor() {}
 
@@ -64,87 +59,14 @@ class ParagraphDistributor {
         }
         String storyText = storyTextBuilder.toString();
 
-        // 각 프레임의 첫 frameParaText를 storyText에서 검색하여 정확한 범위 결정
-        // 프레임별 (startOffset, endOffset) 계산
-        int[][] frameRanges = new int[ordered.size()][2];
-        boolean[] frameStartsWithInlineObject = new boolean[ordered.size()];
-        int searchFrom = 0;
-        for (int fi = 0; fi < ordered.size(); fi++) {
-            ASTTextFrameBlock block = ordered.get(fi);
-            String sid2 = block.sourceId();
-            String domId = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers.domIdFromSourceId(sid2);
-            if (domId == null) domId = sid2;
-            ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
-            // wrap 분할 블록은 블록 자체의 frameVisibleText 우선
-            String visibleText = block.frameVisibleText();
-            if (visibleText == null) {
-                visibleText = (rtf != null) ? rtf.frameVisibleText() : null;
-            }
-            String rawVisibleText = visibleText;
-            frameStartsWithInlineObject[fi] = startsWithInlineObjectOrBoundary(rawVisibleText);
-            if (visibleText != null) {
-                visibleText = normalizeFrameTextForRangeMatching(ctx, rtf, visibleText);
-            }
-
-            if (visibleText == null || visibleText.isEmpty()) {
-                // frameVisibleText가 없으면 frameParaTexts 폴백
-                java.util.List<String> frameTexts = (rtf != null) ? rtf.frameParaTexts() : null;
-                if (frameTexts != null && !frameTexts.isEmpty()) {
-                    StringBuilder sb = new StringBuilder();
-                    for (String ft : frameTexts) {
-                        if (ft != null) sb.append(normalizeFrameTextForRangeMatching(ctx, rtf, ft));
-                    }
-                    visibleText = sb.toString();
-                }
-            }
-
-            if (visibleText == null || visibleText.isEmpty()) {
-                frameRanges[fi][0] = searchFrom;
-                frameRanges[fi][1] = (fi == ordered.size() - 1) ? storyText.length() : searchFrom;
-                continue;
-            }
-
-            if (hasResolvedFrameCharacterRange(rtf)
-                    && startsWithInlineObjectOrBoundary(rawVisibleText)) {
-                int resolvedStart = clamp(rtf.paragraphStart(), 0, storyText.length());
-                int resolvedEnd = clamp(rtf.paragraphEnd(), resolvedStart, storyText.length());
-                frameRanges[fi][0] = Math.max(0, resolvedStart);
-                frameRanges[fi][1] = Math.max(frameRanges[fi][0], resolvedEnd);
-                searchFrom = frameRanges[fi][1];
-                continue;
-            }
-
-            // visibleText의 앞부분을 storyText에서 검색하여 시작 위치 결정.
-            // Frame boundaries can contain paragraph-boundary spacing/control chars that are
-            // normalized differently from the AST story text, so progressively shorten the
-            // prefix before falling back to resolved offsets.
-            int foundStart = findFrameStart(storyText, visibleText, searchFrom);
-            if (foundStart < 0) {
-                foundStart = resolvedFrameStartOffset(rtf, searchFrom, storyText.length());
-            }
-
-            // visibleText의 끝부분을 storyText에서 검색하여 종료 위치 결정
-            String endKey = visibleText.length() > 20 ? visibleText.substring(visibleText.length() - 20) : visibleText;
-            int foundEnd = storyText.indexOf(endKey, foundStart);
-            if (foundEnd >= 0) {
-                foundEnd += endKey.length();
-            } else {
-                foundEnd = foundStart + visibleText.length();
-            }
-
-            frameRanges[fi][0] = foundStart;
-            frameRanges[fi][1] = Math.min(foundEnd, storyText.length());
-            searchFrom = frameRanges[fi][1];
-        }
-        closeThreadedStoryRangeGaps(frameRanges, storyText.length());
-        includeLeadingInlineObjectAtFrameStarts(frameRanges, frameStartsWithInlineObject, storyText);
-        alignThreadedFrameRangesToTokenBoundaries(frameRanges, storyText);
+        TextFrameRangeOwnershipPlanner.FrameRangePlan frameRangePlan =
+                TextFrameRangeOwnershipPlanner.plan(ctx, ordered, storyText);
 
         // 프레임별 단락 할당
         for (int fi = 0; fi < ordered.size(); fi++) {
             ASTTextFrameBlock block = ordered.get(fi);
-            int frameStart = frameRanges[fi][0];
-            int frameEnd = frameRanges[fi][1];
+            int frameStart = frameRangePlan.start(fi);
+            int frameEnd = frameRangePlan.end(fi);
             String sid3 = block.sourceId();
             String domId3 = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers.domIdFromSourceId(sid3);
             if (domId3 == null) domId3 = sid3;
@@ -197,38 +119,6 @@ class ParagraphDistributor {
                         block.addParagraph(continuation);
                     }
                 }
-            }
-        }
-    }
-
-    private static void closeThreadedStoryRangeGaps(int[][] frameRanges, int storyLength) {
-        if (frameRanges == null || frameRanges.length <= 1 || storyLength <= 0) return;
-        for (int i = 0; i < frameRanges.length - 1; i++) {
-            int currentEnd = clamp(frameRanges[i][1], 0, storyLength);
-            int nextStart = clamp(frameRanges[i + 1][0], 0, storyLength);
-            if (nextStart > currentEnd) {
-                frameRanges[i][1] = nextStart;
-            }
-            if (nextStart < frameRanges[i][1]) {
-                frameRanges[i][1] = nextStart;
-            }
-        }
-    }
-
-    private static void includeLeadingInlineObjectAtFrameStarts(
-            int[][] frameRanges,
-            boolean[] frameStartsWithInlineObject,
-            String storyText) {
-        if (frameRanges == null || frameStartsWithInlineObject == null || storyText == null) return;
-        int count = Math.min(frameRanges.length, frameStartsWithInlineObject.length);
-        for (int i = 0; i < count; i++) {
-            if (!frameStartsWithInlineObject[i]) continue;
-            int start = clamp(frameRanges[i][0], 0, storyText.length());
-            if (start <= 0 || storyText.charAt(start - 1) != '\uFFFC') continue;
-            int adjustedStart = start - 1;
-            frameRanges[i][0] = adjustedStart;
-            if (i > 0 && frameRanges[i - 1][1] >= start) {
-                frameRanges[i - 1][1] = adjustedStart;
             }
         }
     }
@@ -471,211 +361,4 @@ class ParagraphDistributor {
         return sawInlineSlot ? out : null;
     }
 
-    /**
-     * InDesign can expose linked-frame visible ranges at a glyph boundary inside
-     * one lexical token.  If execution materializes each linked frame as an
-     * independent HWPX text box, keeping that raw boundary creates paragraphs
-     * starting with token tails such as "stralia)" after a previous frame ended
-     * at "Au".  Keep the source story order, but move such internal boundaries to
-     * the next safe token boundary so later stages do not invent a mid-word start.
-     */
-    private static void alignThreadedFrameRangesToTokenBoundaries(
-            int[][] frameRanges,
-            String storyText) {
-        if (frameRanges == null || frameRanges.length <= 1 || storyText == null
-                || storyText.isEmpty()) {
-            return;
-        }
-        int storyLength = storyText.length();
-        for (int i = 0; i < frameRanges.length - 1; i++) {
-            int boundary = clamp(frameRanges[i][1], 0, storyLength);
-            if (!isInsideToken(storyText, boundary)) continue;
-            int aligned = nextTokenBoundary(storyText, boundary);
-            if (aligned <= boundary || aligned > storyLength) continue;
-            frameRanges[i][1] = aligned;
-            frameRanges[i + 1][0] = aligned;
-        }
-    }
-
-    private static boolean isInsideToken(String text, int index) {
-        if (text == null || index <= 0 || index >= text.length()) return false;
-        char prev = text.charAt(index - 1);
-        char curr = text.charAt(index);
-        if (isOpeningAttachedTokenPunctuation(prev) && isTokenCoreChar(curr)) return true;
-        return isTokenCoreChar(text.charAt(index - 1))
-                && isTokenCoreChar(text.charAt(index));
-    }
-
-    private static int nextTokenBoundary(String text, int index) {
-        int i = Math.max(0, Math.min(index, text.length()));
-        while (i < text.length() && isOpeningAttachedTokenPunctuation(text.charAt(i))) {
-            i++;
-        }
-        while (i < text.length() && isTokenCoreChar(text.charAt(i))) {
-            i++;
-        }
-        // Keep immediately attached punctuation with the word, but never cross
-        // whitespace or control characters into the next lexical unit.
-        int punctuationBudget = 4;
-        while (i < text.length() && punctuationBudget-- > 0) {
-            char c = text.charAt(i);
-            if (Character.isWhitespace(c) || Character.isISOControl(c)) break;
-            if (!isAttachedTokenPunctuation(c)) break;
-            i++;
-        }
-        return i;
-    }
-
-    private static boolean isTokenCoreChar(char c) {
-        return Character.isLetterOrDigit(c)
-                || c == '\''
-                || c == '\u2019';
-    }
-
-    private static boolean isOpeningAttachedTokenPunctuation(char c) {
-        switch (c) {
-            case '(':
-            case '[':
-            case '{':
-            case '"':
-            case '\'':
-            case '\u2018':
-            case '\u201C':
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    private static boolean isAttachedTokenPunctuation(char c) {
-        switch (c) {
-            case ')':
-            case ']':
-            case '}':
-            case ':':
-            case ';':
-            case ',':
-            case '.':
-            case '?':
-            case '!':
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    private static int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private static boolean hasResolvedFrameCharacterRange(ResolvedTextFrame frame) {
-        return frame != null && frame.paragraphStart() >= 0 && frame.paragraphEnd() >= frame.paragraphStart();
-    }
-
-    private static boolean startsWithInlineObjectOrBoundary(String text) {
-        if (text == null || text.isEmpty()) return false;
-        int i = 0;
-        while (i < text.length()) {
-            char c = text.charAt(i);
-            if (c == '\uFEFF' || Character.isWhitespace(c) || Character.isISOControl(c)) {
-                i++;
-                continue;
-            }
-            return c == '\uFFFC';
-        }
-        return false;
-    }
-
-    private static int findFrameStart(String storyText, String visibleText, int searchFrom) {
-        if (storyText == null || visibleText == null || visibleText.isEmpty()) return -1;
-        int from = Math.max(0, searchFrom - FRAME_RANGE_REWIND_TOLERANCE);
-        int maxLen = Math.min(20, visibleText.length());
-        for (int len = maxLen; len >= 4; len--) {
-            String key = trimTrailingFrameBoundaryChars(visibleText.substring(0, len));
-            if (key.length() < 4) continue;
-            int found = storyText.indexOf(key, from);
-            if (found >= 0) return found;
-        }
-        return -1;
-    }
-
-    private static String trimTrailingFrameBoundaryChars(String text) {
-        if (text == null || text.isEmpty()) return text;
-        int end = text.length();
-        while (end > 0) {
-            char c = text.charAt(end - 1);
-            if (Character.isWhitespace(c) || Character.isISOControl(c)
-                    || c == '\u2003' || c == '\u2007' || c == '\u2009' || c == '\u00A0') {
-                end--;
-            } else {
-                break;
-            }
-        }
-        return text.substring(0, end);
-    }
-
-    private static String normalizeFrameTextForRangeMatching(
-            ResolvedBuildContext ctx,
-            ResolvedTextFrame frame,
-            String text) {
-        if (text == null || text.isEmpty()) return text;
-        List<String> inlineAnchorTexts = semanticInlineAnchorTexts(ctx, frame);
-        int inlineAnchorIndex = 0;
-        StringBuilder sb = new StringBuilder(text.length());
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '\uFFFC') {
-                String replacement = inlineAnchorIndex < inlineAnchorTexts.size()
-                        ? inlineAnchorTexts.get(inlineAnchorIndex)
-                        : null;
-                inlineAnchorIndex++;
-                if (replacement != null && !replacement.isEmpty()) {
-                    sb.append(replacement);
-                }
-                continue;
-            }
-            if (c == '\n' || c == '\r') {
-                continue;
-            }
-            // InDesign frameVisibleText can include layout/object sentinels such as
-            // U+0016 or U+0018 that are not part of the Story text. Keeping them
-            // shifts frame ranges and can make the next linked frame's first
-            // characters belong to the previous frame.
-            if (Character.isISOControl(c) && c != '\t' && c != '\u0007' && c != '\u0008') {
-                continue;
-            }
-            sb.append(c);
-        }
-        return sb.toString();
-    }
-
-    private static List<String> semanticInlineAnchorTexts(
-            ResolvedBuildContext ctx,
-            ResolvedTextFrame frame) {
-        List<String> texts = new ArrayList<>();
-        if (ctx == null || ctx.resolvedData == null || frame == null || frame.storyId() == null) {
-            return texts;
-        }
-        ResolvedStory story = ctx.resolvedData.getStory(frame.storyId());
-        if (story == null || story.paragraphs() == null) return texts;
-        for (ResolvedParagraph paragraph : story.paragraphs()) {
-            if (paragraph == null || paragraph.runs() == null) continue;
-            for (ResolvedRun run : paragraph.runs()) {
-                if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
-                SimpleButtonLabelPlan plan = ctx.simpleButtonLabelPlan(run.anchoredObjectId());
-                if (plan != null && plan.labelText != null && !plan.labelText.isEmpty()) {
-                    texts.add(plan.labelText);
-                } else {
-                    texts.add("\uFFFC");
-                }
-            }
-        }
-        return texts;
-    }
-
-    private static int resolvedFrameStartOffset(ResolvedTextFrame frame, int fallback, int storyLength) {
-        if (frame == null || frame.paragraphStart() < 0) return fallback;
-        int resolvedStart = clamp(frame.paragraphStart(), 0, storyLength);
-        return resolvedStart >= fallback ? resolvedStart : fallback;
-    }
 }
