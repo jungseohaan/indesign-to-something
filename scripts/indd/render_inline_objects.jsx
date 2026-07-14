@@ -83,7 +83,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             for (var ai = 0; allItems && ai < allItems.length; ai++) {
                 var fallbackItem = allItems[ai];
                 try {
-                    if (!_isTopLevelInlineVisualItem(fallbackItem)) continue;
+                    if (!isPagePlaneInlineVisualItem(fallbackItem)) continue;
                 } catch (eInlineFallback) {
                     continue;
                 }
@@ -98,6 +98,18 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             }
         }
         return items;
+    }
+
+    function isPagePlaneInlineVisualItem(item) {
+        if (!item) return false;
+        if (_isTopLevelInlineVisualItem(item)) return true;
+        try {
+            if (item.constructor && item.constructor.name === "TextFrame"
+                    && isInlineItem(item)) {
+                return true;
+            }
+        } catch (eTextFrameInline) {}
+        return false;
     }
 
     function textItemKey(item) {

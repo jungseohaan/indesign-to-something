@@ -625,6 +625,19 @@ function _hideItemsForExport(items) {
     if (!items) return saved;
     for (var i = 0; i < items.length; i++) {
         var item = items[i];
+        try {
+            if (item && item.constructor && item.constructor.name === "TextFrame") {
+                var wasVisibleTf = item.visible;
+                item.visible = false;
+                saved.push({
+                    item: item,
+                    mode: "visible",
+                    wasVisible: wasVisibleTf,
+                    reason: "planned_inline_textframe_hidden_for_page_plane"
+                });
+                continue;
+            }
+        } catch (eTextFrameVisible) {}
         var state = { item: item, mode: "cellBg" };
         var changed = false;
         try { state.fillColor = item.fillColor; item.fillColor = app.activeDocument.swatches.itemByName("None"); changed = true; }
