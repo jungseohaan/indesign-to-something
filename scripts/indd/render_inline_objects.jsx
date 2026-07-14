@@ -11,7 +11,8 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage,
 }
 
 function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
-                                        allItems, itemById, inlineCandidates) {
+                                        allItems, itemById, inlineCandidates, opts) {
+    opts = opts || {};
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -74,6 +75,25 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             if (seen[key]) continue;
             seen[key] = true;
             items.push(item);
+        }
+        if ((!inlineCandidates || inlineCandidates.length === 0)
+                && opts.inlineFallbackAllItems === true) {
+            for (var ai = 0; allItems && ai < allItems.length; ai++) {
+                var fallbackItem = allItems[ai];
+                try {
+                    if (!_isTopLevelInlineVisualItem(fallbackItem)) continue;
+                } catch (eInlineFallback) {
+                    continue;
+                }
+                var fallbackId = null;
+                try { fallbackId = fallbackItem.id; } catch (eFallbackId) {}
+                var fallbackKey = fallbackId !== null && fallbackId !== undefined
+                        ? String(fallbackId)
+                        : "fallback:" + String(items.length);
+                if (seen[fallbackKey]) continue;
+                seen[fallbackKey] = true;
+                items.push(fallbackItem);
+            }
         }
         return items;
     }
@@ -196,6 +216,104 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     var _tCollectInline = 0, _tHideInline = 0, _tCollectText = 0, _tHideText = 0;
     var _tPrepTotal = 0, _tExportLoop = 0, _tRestore = 0;
     var _exportLoopStart = 0;
+    if (opts.precomputedPagePlanesByPageIndex) {
+        var _reuseStartedAt = nowMs();
+        for (var reusePageNumber = startPage; reusePageNumber <= endPage; reusePageNumber++) {
+            var reusePageIndex = reusePageNumber - 1;
+            var reuseEntry = opts.precomputedPagePlanesByPageIndex[String(reusePageIndex)];
+            var reusePage = null;
+            try { reusePage = doc.pages[reusePageIndex]; } catch (eReusePage) {}
+            var reuseBounds = reuseEntry && reuseEntry.bounds ? reuseEntry.bounds
+                    : (reusePage ? pageLocalBounds(reusePage) : null);
+            if (!reuseEntry || !reuseEntry.file) {
+                diagnostics.push({
+                    accepted: false,
+                    reason: "single_textless_page_plane_precomputed_missing",
+                    pageIndex: reusePageIndex,
+                    file: null,
+                    bounds: reuseBounds,
+                    elapsedMs: 0
+                });
+                continue;
+            }
+            diagnostics.push({
+                accepted: true,
+                reason: "single_textless_page_plane_reused",
+                pageIndex: reusePageIndex,
+                file: reuseEntry.file,
+                bounds: reuseBounds,
+                elapsedMs: 0,
+                globalRenderedFrame: true
+            });
+            var reuseSyntheticSourceId = typeof _canonicalPagePlaneSyntheticSourceId === "function"
+                    ? _canonicalPagePlaneSyntheticSourceId(reusePageIndex)
+                    : (-940000000 + reusePageIndex);
+            var reuseCandidateId = typeof _canonicalPagePlaneCandidateId === "function"
+                    ? _canonicalPagePlaneCandidateId(reusePageIndex)
+                    : ("cand.pass.page_textless_graphic_groups.page."
+                        + String(reusePageIndex)
+                        + ".single_textless_page_plane");
+            results.push({
+                id: reuseSyntheticSourceId,
+                type: "page_textless_plane",
+                candidateId: reuseCandidateId,
+                candidateMatchStrategy: "page_plane_direct",
+                file: reuseEntry.file,
+                bounds: reuseBounds,
+                pageIndex: reusePageIndex,
+                zOrder: -900000,
+                zOrderKnown: true,
+                visualLayer: "PAGE_BACKGROUND",
+                policyLayer: "BACKGROUND",
+                visualOwner: "indesign_png",
+                textOwner: "none",
+                placement: "FLOATING",
+                coordinateSpace: "PAGE",
+                materialization: "PAGE_PLANE_PNG",
+                slotRole: "page_textless_plane",
+                ownershipSlot: "CONTENT_VISUAL_SLOT",
+                reason: "canonical_single_textless_page_plane_reused",
+                sourceObjectIds: [reuseSyntheticSourceId],
+                visualSourceObjectIds: [reuseSyntheticSourceId],
+                exportSourceObjectIds: [reuseSyntheticSourceId],
+                hiddenTextFrameIds: [],
+                globalRenderedFrame: true,
+                exportSanity: {
+                    singleTextlessPagePlane: true,
+                    globalPreExportReused: true,
+                    fileBytes: reuseEntry.fileBytes || 0,
+                    pageRelativeBounds: reuseBounds
+                }
+            });
+        }
+        try {
+            writeJson(outputDir + "/single-textless-page-plane-export.json", {
+                schemaVersion: 1,
+                mode: "single-textless-plane-reuse",
+                elapsedMs: nowMs() - _reuseStartedAt,
+                pageCount: results.length,
+                hiddenInlineItemCount: 0,
+                perfBreakdown: {
+                    collectInlineMs: 0,
+                    hideInlineMs: 0,
+                    collectTextMs: 0,
+                    hideTextMs: 0,
+                    prepTotalMs: 0,
+                    exportLoopMs: 0,
+                    restoreMs: 0,
+                    hiddenTextItemCount: 0,
+                    hiddenInlineItemCount: 0,
+                    reusedPagePlaneCount: results.length
+                },
+                diagnostics: diagnostics
+            });
+        } catch (eWriteSinglePlaneReuseDiag) {}
+        return {
+            frames: results,
+            textlessShellDiagnostics: diagnostics,
+            childIds: {}
+        };
+    }
     try {
         try { savedRes = app.pngExportPreferences.exportResolution; } catch (eRes) {}
         try { savedTransparent = app.pngExportPreferences.transparentBackground; } catch (eTrans) {}
@@ -282,12 +400,14 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 visualSourceObjectIds: [syntheticSourceId],
                 exportSourceObjectIds: [syntheticSourceId],
                 hiddenTextFrameIds: [],
+                globalRenderedFrame: opts.globalPreExport === true,
                 exportSanity: {
                     singleTextlessPagePlane: true,
                     fileBytes: outFile.exists ? outFile.length : 0,
                     pageRelativeBounds: bounds,
                     hiddenInlineItemCount: savedInlineItems.length,
-                    hiddenTextFrameCount: savedDocumentTextFrames.length
+                    hiddenTextFrameCount: savedDocumentTextFrames.length,
+                    globalPreExport: opts.globalPreExport === true
                 }
             });
         }
