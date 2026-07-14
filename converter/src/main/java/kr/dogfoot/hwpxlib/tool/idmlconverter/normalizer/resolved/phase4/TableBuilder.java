@@ -1205,6 +1205,7 @@ public final class TableBuilder {
                 ASTParagraph paragraph = new ASTParagraph();
                 normalizeNestedInlineTable(child);
                 paragraph.inlineTable(child);
+                removeEmptyPlaceholderParagraphs(target.cell);
                 target.cell.addParagraph(paragraph);
                 it.remove();
                 absorbed++;
@@ -1216,6 +1217,29 @@ public final class TableBuilder {
             }
         }
         return absorbed;
+    }
+
+    private static void removeEmptyPlaceholderParagraphs(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null || cell.paragraphs().isEmpty()) return;
+        cell.paragraphs().removeIf(TableBuilder::isEmptyPlaceholderParagraph);
+    }
+
+    private static boolean isEmptyPlaceholderParagraph(ASTParagraph paragraph) {
+        if (paragraph == null) return true;
+        if (paragraph.inlineTable() != null) return false;
+        if (paragraph.items() == null || paragraph.items().isEmpty()) return true;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item == null) continue;
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.replace("\r", "").replace("\n", "").trim().isEmpty()) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isNestedTableBlockCandidate(ResolvedBuildContext ctx, ASTTable table) {
