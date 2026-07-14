@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ConverterConstants;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
@@ -3480,11 +3481,20 @@ public class InlineFrameHandler {
                         double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor; // right - left
                         double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor; // bottom - top
                         if (bw <= 0 || bh <= 0) return null;
-                        obj.width(CoordinateConverter.pointsToHwpunits(bw));
-                        obj.height(CoordinateConverter.pointsToHwpunits(bh));
+                        long wHu = CoordinateConverter.pointsToHwpunits(bw);
+                        long hHu = CoordinateConverter.pointsToHwpunits(bh);
+                        obj.width(wHu);
+                        obj.height(hHu);
+                        obj.resolvedWidth(wHu);
+                        obj.resolvedHeight(hHu);
                     }
 
                     obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+                    ResolvedPageItem anchorItem = findInlineAnchorSourceItem(ctx, plan, rg, anchoredObjectId);
+                    if (isLargeFloatingAnchoredInlineVisual(anchorItem, obj.width(), obj.height())) {
+                        obj.anchoredPosition("Anchored");
+                        obj.affectsLineSpacing(false);
+                    }
                     if (rg.inlineSourceTreeClosed()) {
                         obj.affectsLineSpacing(false);
                     }
@@ -3503,6 +3513,49 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static ResolvedPageItem findInlineAnchorSourceItem(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        ResolvedPageItem direct = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
+        if (direct != null) return direct;
+        ResolvedPageItem planned = firstFloatingAnchoredInlineItem(ctx, plan != null ? plan.sourceObjectIds : null);
+        if (planned != null) return planned;
+        planned = firstFloatingAnchoredInlineItem(ctx, plan != null ? plan.visualSourceObjectIds : null);
+        if (planned != null) return planned;
+        planned = firstFloatingAnchoredInlineItem(ctx, plan != null ? plan.exportSourceObjectIds : null);
+        if (planned != null) return planned;
+        planned = firstFloatingAnchoredInlineItem(ctx, rg != null ? rg.sourceObjectIds() : null);
+        if (planned != null) return planned;
+        return firstFloatingAnchoredInlineItem(ctx, rg != null ? rg.exportSourceObjectIds() : null);
+    }
+
+    private static ResolvedPageItem firstFloatingAnchoredInlineItem(ResolvedBuildContext ctx, int[] sourceIds) {
+        if (ctx == null || ctx.resolvedData == null || sourceIds == null) return null;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (isFloatingAnchoredInlineSource(item)) return item;
+        }
+        return null;
+    }
+
+    private static boolean isLargeFloatingAnchoredInlineVisual(ResolvedPageItem item, long width, long height) {
+        if (!isFloatingAnchoredInlineSource(item)) return false;
+        return height >= ConverterConstants.INLINE_IMAGE_HEIGHT_THRESHOLD
+                || width >= ConverterConstants.INLINE_IMAGE_HEIGHT_THRESHOLD * 2L;
+    }
+
+    private static boolean isFloatingAnchoredInlineSource(ResolvedPageItem item) {
+        if (item == null) return false;
+        if (!item.storyTextInlineSlot() && !item.isInline()) return false;
+        String storyAnchorPlacement = upper(item.storyAnchorPlacement());
+        String anchoredPosition = upper(item.anchoredPosition());
+        return "FLOATING_ANCHORED".equals(storyAnchorPlacement)
+                || "ANCHORED".equals(anchoredPosition);
     }
 
     private static boolean hasExplicitInlineSourceEvidence(
