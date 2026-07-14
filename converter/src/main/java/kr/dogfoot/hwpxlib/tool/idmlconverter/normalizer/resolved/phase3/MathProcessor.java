@@ -384,6 +384,7 @@ class MathProcessor {
         if (!hasLetter) return null;
         if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
         if (!hasEquation && !hasBox) return null;
+        if (hasBox && !hasEquation && !hasDigit && !hasOperator && !hasArrow && !hasPositioned) return null;
         if (!hasDigit && !hasOperator && !hasBox && !hasArrow && !hasPositioned) return null;
 
         ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
@@ -751,6 +752,7 @@ class MathProcessor {
         if (hwpScript.isEmpty() || hwpScript.length() > 128) return null;
         if (!hasLetter) return null;
         if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
+        if (hasBox && !hasDigit && !hasOperator && !hasArrow && !hasPositioned) return null;
         if (!hasDigit && !hasOperator && !hasBox && !hasArrow && !hasPositioned) return null;
 
         ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");

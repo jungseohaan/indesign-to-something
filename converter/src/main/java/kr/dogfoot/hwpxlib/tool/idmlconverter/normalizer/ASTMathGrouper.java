@@ -767,7 +767,7 @@ public class ASTMathGrouper {
                 || containsFormulaOperator(normalized)) {
             return true;
         }
-        return containsAsciiLetter(normalized);
+        return false;
     }
 
     private static boolean emitSimplePositionedFormulaTextRuns(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {

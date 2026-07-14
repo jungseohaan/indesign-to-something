@@ -2321,7 +2321,39 @@ public class InlineFrameHandler {
 
         String storyText = normalizeInlineShellStoryText(ctx.resolvedData.getStory(textFrame.storyId()));
         if (storyText.isEmpty()) return false;
-        return frameText.equals(storyText);
+        if (frameText.equals(storyText)) return true;
+        return canMaterializeOwnedOverflowShellText(ctx, textFrame, frameText, storyText);
+    }
+
+    private static boolean canMaterializeOwnedOverflowShellText(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame textFrame,
+            String frameText,
+            String storyText) {
+        if (ctx == null || textFrame == null || frameText == null || storyText == null) return false;
+        if (!textFrame.overflows() || !textFrame.isInline()) return false;
+        int textFrameDomId = parseDecimalId(textFrame.id());
+        if (textFrameDomId < 0) return false;
+        if (!ctx.isTextFrameOwnedByTextShellPlan(textFrameDomId)
+                || !ctx.ownershipPlanPlacesInlineHwpxText(textFrameDomId)) {
+            return false;
+        }
+        if (!isSingleOwnerTextFlow(ctx, textFrame)) return false;
+        return storyText.startsWith(frameText);
+    }
+
+    private static boolean isSingleOwnerTextFlow(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame textFrame) {
+        if (ctx == null || ctx.textFlowDocument == null || textFrame == null || textFrame.storyId() == null) {
+            return false;
+        }
+        TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(textFrame.storyId());
+        if (unit == null || unit.ownerTextFrameIds == null || unit.ownerTextFrameIds.size() != 1) {
+            return false;
+        }
+        if (!"HWPX_TEXT".equals(unit.textOwner)) return false;
+        return textFrame.id() != null && textFrame.id().equals(unit.ownerTextFrameIds.get(0));
     }
 
     private static String normalizeInlineShellStoryText(ResolvedStory story) {
