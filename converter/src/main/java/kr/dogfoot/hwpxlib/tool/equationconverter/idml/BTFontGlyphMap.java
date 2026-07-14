@@ -59,6 +59,31 @@ public class BTFontGlyphMap {
     }
 
     /**
+     * CharacterStyle 이 "수식" 그룹에 속하지만 실제로는 본문 영문/숫자를 조판하는가.
+     *
+     * <p>과학 교과서는 "00_수식모음" 그룹 아래에 본문 조판용 스타일을 둔다:
+     * <pre>
+     *   00_수식모음:00_영문bold   →  'H', 'O'   (원소기호)
+     *   00_영문                   →  '1', '2'   (숫자)
+     * </pre>
+     * 이걸 수식으로 취급하면 한글 문장 속 원소기호가 이탤릭 HWP 수식이 된다
+     * — "수소 원자(H)" 의 H, "산소 원자(O)" 의 O (표 셀에서 관측).
+     *
+     * <p>수학 교과서는 이런 이름을 쓰지 않는다(실측: "상부자(정체)", "태광10:상부자 10",
+     * "EH분수소문자"). 따라서 이 판정은 수학 교과서의 진짜 수식에 영향을 주지 않는다.
+     *
+     * <p>IDML 의 CharacterStyle 참조는 URL-encoded 로 올 수 있어 함께 처리한다.
+     */
+    public static boolean isBodyTextGlyphStyle(String styleRef) {
+        if (styleRef == null) return false;
+        String s = styleRef.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%ec%98%81%eb%ac%b8", "영문")
+                .replace("%ec%88%ab%ec%9e%90", "숫자");
+        return s.contains("영문") || s.contains("숫자");
+    }
+
+    /**
      * BT 화살표 전용 폰트인지 확인.
      *
      * 과학 교과서는 화학 반응식의 화살표(→)를 "BT화살표" 라는 별도 폰트로 조판한다.
