@@ -66,9 +66,11 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             if (c.materialization === "HWPX_TEXT" || c.materialization === "HWPX_TABLE_STYLE") continue;
             var item = inlineItemForCandidate(c);
             if (!item) continue;
-            try {
-                if (item.constructor && item.constructor.name === "TextFrame") continue;
-            } catch (eCtor) {}
+            // Planned inline visuals must be removed from the page plane even
+            // when the export target itself is a TextFrame shape.  The later
+            // text-hiding pass preserves TextFrame fill/stroke by design, so
+            // excluding TextFrames here bakes inline checkbox/marker shells
+            // into page_textless_plane_p*.png.
             var id = null;
             try { id = item.id; } catch (eId) {}
             var key = id !== null && id !== undefined ? String(id) : String(items.length);
