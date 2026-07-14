@@ -49,6 +49,12 @@ public final class TextFlowDiagnosticsBuilder {
 
             List<ResolvedTextFrame> owners = data.getTextFramesForStory(story.id());
             owners.sort(Comparator.comparing(tf -> safe(tf.id()), TextFlowDiagnosticsBuilder::compareStoryIds));
+            if (shouldSkipPlanlessSyntheticTextFlow(ctx, owners)) {
+                diagnostics.warnings.add(warning("PLANLESS_SYNTHETIC_MASTER_TEXT_FLOW_SKIPPED",
+                        story.id(), firstOwnerId(owners),
+                        "Synthetic master/off-canvas TextFrame story has no Stage 1 ObjectPlan"));
+                continue;
+            }
             boolean hasHwpxTextOwner = false;
             boolean hasPngTextOwner = false;
             for (ResolvedTextFrame tf : owners) {
@@ -99,6 +105,29 @@ public final class TextFlowDiagnosticsBuilder {
             diagnostics.flows.add(flow);
         }
         return diagnostics;
+    }
+
+    private static boolean shouldSkipPlanlessSyntheticTextFlow(
+            ResolvedBuildContext ctx,
+            List<ResolvedTextFrame> owners) {
+        if (ctx == null || owners == null || owners.isEmpty()) return false;
+        boolean sawSyntheticOwner = false;
+        for (ResolvedTextFrame tf : owners) {
+            if (tf == null) continue;
+            if (!ctx.shouldSkipPlanlessSyntheticCloneTextFrame(tf)) {
+                return false;
+            }
+            sawSyntheticOwner = true;
+        }
+        return sawSyntheticOwner;
+    }
+
+    private static String firstOwnerId(List<ResolvedTextFrame> owners) {
+        if (owners == null) return null;
+        for (ResolvedTextFrame tf : owners) {
+            if (tf != null && tf.id() != null) return tf.id();
+        }
+        return null;
     }
 
     private static TextFlowDiagnostics.TextFlowRun buildRun(

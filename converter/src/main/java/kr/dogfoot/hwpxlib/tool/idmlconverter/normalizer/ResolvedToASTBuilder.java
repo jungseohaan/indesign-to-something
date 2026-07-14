@@ -291,6 +291,10 @@ public class ResolvedToASTBuilder {
                     plan = nativeVectorShapePlanFromJson(planJson);
                 }
                 if (plan == null) continue;
+                if (isSupersededMasterInstanceTextPlan(plan)) {
+                    warnSupersededMasterInstanceTextPlanSkipped(plan);
+                    continue;
+                }
                 ctx.addOwnershipPlan(plan);
                 imported++;
             }
@@ -302,6 +306,114 @@ public class ResolvedToASTBuilder {
             System.err.println("[ResolvedToASTBuilder] object-plans import skipped: "
                     + e.getMessage());
         }
+    }
+
+    private boolean isSupersededMasterInstanceTextPlan(ObjectPlan plan) {
+        if (plan == null || resolvedData == null) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                || plan.visualAction != VisualAction.DROP_VISUAL
+                || plan.materialization != Materialization.HWPX_TEXT) {
+            return false;
+        }
+        String[] keys = plan.ownedTextFrameIdKeys;
+        if (keys == null || keys.length == 0) return false;
+        for (String key : keys) {
+            ResolvedTextFrame masterTf = resolvedData.getTextFrame(key);
+            if (!isSuppressibleMasterInstanceTextFrame(masterTf)) continue;
+            if (hasPageLocalTextFrameReplacingMasterSlot(masterTf)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isSuppressibleMasterInstanceTextFrame(ResolvedTextFrame tf) {
+        if (tf == null || !tf.isMasterInstance()) return false;
+        if ("pagenum".equals(tf.masterSpecialType())) return false;
+        return tf.pageIndex() >= 0 && tf.id() != null && !tf.id().isEmpty();
+    }
+
+    private boolean hasPageLocalTextFrameReplacingMasterSlot(ResolvedTextFrame masterTf) {
+        if (masterTf == null || resolvedData == null) return false;
+        ResolvedPageItem masterItem = resolvedData.getPageItem(masterTf.id());
+        double[] masterBounds = bestSourceBounds(masterTf, masterItem);
+        if (masterBounds == null) return false;
+        String masterLayer = sourceLayerName(masterTf, masterItem);
+        for (ResolvedTextFrame candidate : resolvedData.textFrames()) {
+            if (candidate == null || candidate == masterTf) continue;
+            if (candidate.isMasterInstance()) continue;
+            if (candidate.sourceHidden()) continue;
+            if (candidate.pageIndex() != masterTf.pageIndex()) continue;
+            ResolvedPageItem candidateItem = resolvedData.getPageItem(candidate.id());
+            if (!sameSourceLayer(masterLayer, sourceLayerName(candidate, candidateItem))) continue;
+            if (sameSourceSlotBounds(masterBounds, bestSourceBounds(candidate, candidateItem))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double[] bestSourceBounds(ResolvedTextFrame tf, ResolvedPageItem item) {
+        if (item != null && validBounds(item.geometricBounds())) return item.geometricBounds();
+        if (tf != null && validBounds(tf.pageRelativeBounds())) return tf.pageRelativeBounds();
+        if (tf != null && validBounds(tf.geometricBounds())) return tf.geometricBounds();
+        return null;
+    }
+
+    private static boolean validBounds(double[] bounds) {
+        return bounds != null && bounds.length >= 4
+                && bounds[2] > bounds[0] && bounds[3] > bounds[1];
+    }
+
+    private static String sourceLayerName(ResolvedTextFrame tf, ResolvedPageItem item) {
+        if (item != null && item.layerName() != null && !item.layerName().isEmpty()) {
+            return item.layerName();
+        }
+        return tf != null ? tf.layerName() : null;
+    }
+
+    private static boolean sameSourceLayer(String a, String b) {
+        if (a == null || a.isEmpty() || b == null || b.isEmpty()) return false;
+        return a.equals(b);
+    }
+
+    private static boolean sameSourceSlotBounds(double[] a, double[] b) {
+        if (!validBounds(a) || !validBounds(b)) return false;
+        double maxDelta = 0.75;
+        if (Math.abs(a[0] - b[0]) <= maxDelta
+                && Math.abs(a[1] - b[1]) <= maxDelta
+                && Math.abs(a[2] - b[2]) <= maxDelta
+                && Math.abs(a[3] - b[3]) <= maxDelta) {
+            return true;
+        }
+        double overlap = objectPlanOverlapArea(a, b);
+        double minArea = Math.min(objectPlanArea(a), objectPlanArea(b));
+        return minArea > 0 && overlap / minArea >= 0.95;
+    }
+
+    private static double objectPlanArea(double[] bounds) {
+        if (!validBounds(bounds)) return 0;
+        return Math.abs(bounds[2] - bounds[0]) * Math.abs(bounds[3] - bounds[1]);
+    }
+
+    private static double objectPlanOverlapArea(double[] a, double[] b) {
+        if (!validBounds(a) || !validBounds(b)) return 0;
+        double top = Math.max(a[0], b[0]);
+        double left = Math.max(a[1], b[1]);
+        double bottom = Math.min(a[2], b[2]);
+        double right = Math.min(a[3], b[3]);
+        if (bottom <= top || right <= left) return 0;
+        return (bottom - top) * (right - left);
+    }
+
+    private void warnSupersededMasterInstanceTextPlanSkipped(ObjectPlan plan) {
+        if (ctx == null || ctx.ownershipWarningLines == null || plan == null) return;
+        ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_SUPERSEDED_MASTER_INSTANCE_TEXT_PLAN_SKIPPED\""
+                + ",\"stage\":\"stage1\",\"detail\":\"plan="
+                + ObjectPlan.escape(plan.kind + ":" + plan.domId)
+                + " ownedTextFrameIdKeys="
+                + ObjectPlan.escape(Arrays.toString(plan.ownedTextFrameIdKeys))
+                + "\"}");
     }
 
     private void warnPlannerDeclaredImportSkipped(JsonObject planJson, String issue) {

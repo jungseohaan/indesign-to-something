@@ -509,6 +509,8 @@ function _objectPlanPolicyLayerForVisualLayer(visualLayer) {
 
 function _appendEditableTextFrameObjectPlans(objectPlans, sourceItems) {
     if (!objectPlans || !sourceItems) return;
+    var supersededMasterTextFrameKeys =
+            _objectPlanSupersededMasterTextFrameKeys(sourceItems);
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || String(src.kind || "") !== "TextFrame") continue;
@@ -516,11 +518,65 @@ function _appendEditableTextFrameObjectPlans(objectPlans, sourceItems) {
         if (src.hasText !== true) continue;
         var id = _objectPlanTextFrameIdValue(src);
         if (id === null || id === undefined) continue;
+        if (supersededMasterTextFrameKeys[String(id)] === true) continue;
         var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
         var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
         objectPlans.push(_textFrameObjectPlan(src, id, pageIndex, zOrder,
                 "pass.editable_text_frames", "editable_text_frame"));
     }
+}
+
+function _objectPlanSupersededMasterTextFrameKeys(sourceItems) {
+    var out = {};
+    if (!sourceItems) return out;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!_objectPlanIsSuppressibleMasterTextFrame(src)) continue;
+        if (_objectPlanHasPageLocalTextFrameReplacingMasterSlot(sourceItems, src)) {
+            out[String(src.id)] = true;
+        }
+    }
+    return out;
+}
+
+function _objectPlanIsSuppressibleMasterTextFrame(src) {
+    if (!src || String(src.kind || "") !== "TextFrame") return false;
+    if (src.isMasterInstance !== true) return false;
+    if (String(src.masterSpecialType || "") === "pagenum") return false;
+    if (src.pageIndex === undefined || src.pageIndex === null || src.pageIndex < 0) return false;
+    return src.id !== undefined && src.id !== null && String(src.id) !== "";
+}
+
+function _objectPlanHasPageLocalTextFrameReplacingMasterSlot(sourceItems, masterSrc) {
+    var masterBounds = masterSrc ? masterSrc.bounds : null;
+    if (!masterBounds || masterBounds.length < 4) return false;
+    var masterLayer = String(masterSrc.layerName || "");
+    if (!masterLayer) return false;
+    for (var i = 0; i < sourceItems.length; i++) {
+        var candidate = sourceItems[i];
+        if (!candidate || candidate === masterSrc) continue;
+        if (String(candidate.kind || "") !== "TextFrame") continue;
+        if (candidate.isMasterInstance === true) continue;
+        if (candidate.hiddenLayer === true || candidate.nonprinting === true) continue;
+        if (candidate.pageIndex !== masterSrc.pageIndex) continue;
+        if (String(candidate.layerName || "") !== masterLayer) continue;
+        if (_objectPlanSameSourceSlotBounds(masterBounds, candidate.bounds)) return true;
+    }
+    return false;
+}
+
+function _objectPlanSameSourceSlotBounds(a, b) {
+    if (!a || !b || a.length < 4 || b.length < 4) return false;
+    var maxDelta = 0.75;
+    if (Math.abs(a[0] - b[0]) <= maxDelta
+            && Math.abs(a[1] - b[1]) <= maxDelta
+            && Math.abs(a[2] - b[2]) <= maxDelta
+            && Math.abs(a[3] - b[3]) <= maxDelta) {
+        return true;
+    }
+    var overlap = _objectPlanOverlapArea(a, b);
+    var minArea = Math.min(_objectPlanArea(a), _objectPlanArea(b));
+    return minArea > 0 && overlap / minArea >= 0.95;
 }
 
 function _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems) {
