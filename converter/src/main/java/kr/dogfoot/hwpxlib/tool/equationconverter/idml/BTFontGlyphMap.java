@@ -96,11 +96,50 @@ public class BTFontGlyphMap {
         return fontFamily.contains("BT화살표");
     }
 
+    /**
+     * CharacterStyle 이 화살표 글리프 스타일인가.
+     *
+     * <p>실제 문서의 스타일명은 "CharacterStyle/00_수식모음%3a00_수식(화살표)" 처럼
+     * "BT" 접두사가 없다. "화살표" 라는 단어로 판정한다.
+     */
     public static boolean isBTArrowFontStyle(String styleRef) {
         if (styleRef == null) return false;
         // "화살표" URL-encoded = %ed%99%94%ec%82%b4%ed%91%9c
-        return styleRef.contains("BT화살표")
-                || styleRef.contains("BT%ed%99%94%ec%82%b4%ed%91%9c");
+        return styleRef.contains("화살표")
+                || styleRef.contains("%ed%99%94%ec%82%b4%ed%91%9c");
+    }
+
+    /** 정규화된 화살표 문자 (U+2192). */
+    public static final String ARROW = "→";
+
+    /**
+     * 화살표 글리프 런의 텍스트를 실제 화살표(→)로 정규화한다.
+     *
+     * <p><b>왜 파싱 직후에 하는가</b><br>
+     * InDesign 은 화학 반응식의 화살표를 "BT화살표" 라는 전용 폰트로 조판한다.
+     * 그 폰트는 특정 글자 자리에 화살표 모양을 그려둔 것이라, 파일에 저장된 실제
+     * 글자는 문서마다 — 심지어 같은 문서 안에서도 — 제각각이다. 실측(과학 1단원):
+     * <pre>
+     *   "C"   5회      ← 접두문자 없음
+     *   "@"   4회
+     *   "@C"  3회
+     *   "?C"  2회
+     * </pre>
+     * 전부 화면에는 똑같이 화살표로 보인다.
+     *
+     * <p>이걸 하류에서 각자 치환하면 문제가 생긴다. 실제로 네 곳(ChemicalFormulaPolicy,
+     * StoryLoader 두 곳, TextFlowAstMaterializer)에서 제각각 치환하다가
+     * 중복 삽입("→→")과 런 매칭 어긋남(Ca(OH)₂ 의 C 소실)이 발생했다.
+     *
+     * <p>→ 파싱 직후 IDML/resolved 양쪽에서 한 번만 정규화하면, 하류는 그냥
+     * 평범한 텍스트로 다루면 된다.
+     *
+     * @return 화살표 런이면 "→", 아니면 원본 텍스트 그대로
+     */
+    public static String normalizeArrowGlyphText(String fontFamily, String styleRef, String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (!isBTArrowFont(fontFamily) && !isBTArrowFontStyle(styleRef)) return text;
+        return ARROW;
     }
 
     /**

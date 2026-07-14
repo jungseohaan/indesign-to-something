@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ConverterConstants;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -2531,6 +2532,17 @@ public class InlineFrameHandler {
                                                       String text) {
         if (paragraph == null || text == null || text.isEmpty()) return;
         ResolvedRun sourceRun = firstResolvedRun(ctx, textFrame);
+
+        // 화살표 글리프 정규화.
+        //
+        // 이 text 는 텍스트프레임의 원문(contents)이라 ResolvedDataReader.parseRun 의
+        // 정규화를 거치지 않는다. 그래서 화살표 프레임의 "@C" 가 그대로 남았다.
+        // sourceRun 의 폰트로 화살표 프레임인지 판정해 텍스트를 "→" 로 바꾼다.
+        if (sourceRun != null) {
+            text = BTFontGlyphMap.normalizeArrowGlyphText(
+                    sourceRun.fontFamily(), sourceRun.charStyle(), text);
+        }
+
         List<ASTTextRun> runs;
         if (sourceRun != null) {
             runs = ResolvedTextFlowAstConverter.convertRunText(

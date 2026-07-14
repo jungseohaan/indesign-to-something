@@ -363,15 +363,18 @@ public class StoryLoader {
                 }
 
                 if (isStandaloneBtArrowGlyphRun(run) && !formulaClusterRun) {
+                    // 화살표에서 수식 그룹을 끊는다(화살표는 수식의 일부가 아니다).
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
-                    // 화살표 글리프가 여러 IDML 런으로 쪼개져 들어오기도 한다
-                    // (실측: BT화살표 런이 "@C" 하나가 아니라 "@" + "C" 로 분리).
-                    // 각각에 화살표를 넣으면 "→→" 가 된다. 직전 항목이 이미 화살표면
-                    // 이 런은 같은 글리프의 나머지 조각이므로 버린다.
-                    if (!lastItemIsArrow(para)) {
-                        para.addItem(createStandaloneArrowRun(ctx, run, defaultRR, sc));
+                    // 화살표 런을 새로 만들지 않는다 — IDMLStoryParser 가 파싱 직후 이미
+                    // "→" 로 정규화해 두었다. 여기서 또 추가하면 중복("→→")된다.
+                    //
+                    // 화살표 글리프가 "@" + "C" 처럼 여러 IDML 런으로 쪼개져 들어오는
+                    // 경우가 있어, 조각마다 화살표가 붙던 것이 중복의 원인이었다.
+                    // 정규화된 화살표 런은 그대로 일반 텍스트 경로로 흘려보낸다.
+                    if (lastItemIsArrow(para)) {
+                        // 같은 화살표 글리프의 나머지 조각 — 버린다.
+                        continue;
                     }
-                    continue;
                 }
 
                 // EH 수식 그룹 진입
@@ -1016,10 +1019,12 @@ public class StoryLoader {
             while (start <= text.length()) {
                 int breakAt = text.indexOf('\r', start);
                 String segment = breakAt >= 0 ? text.substring(start, breakAt) : text.substring(start);
+                // 화살표 런: 텍스트는 ResolvedDataReader 가 파싱 직후 이미 "→" 로
+                // 정규화했다. 여기서는 폰트만 벗긴다 — BT화살표 폰트를 그대로 두면
+                // 한글이 글리프를 렌더링하지 못한다.
                 boolean arrowRun = BTFontGlyphMap.isBTArrowFont(run.fontFamily());
                 for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(segment, run, current, options)) {
                     if (arrowRun) {
-                        textRun.text("→");
                         textRun.fontFamily(null);
                         textRun.fontStyle(null);
                         textRun.grepMathFont(false);
@@ -1269,23 +1274,12 @@ public class StoryLoader {
             String text = run.text();
             if (text == null) continue;
 
-            // 화살표 글리프(@C/?C/C)를 실제 화살표로 치환한다.
-            //
-            // 이 경로(resolved 셀 런 → AST)는 IDML 런을 거치지 않아
-            // buildParagraphContent 의 isStandaloneBtArrowGlyphRun 분기를 타지 못한다.
-            // 여기가 화살표 폰트 정보(BT화살표)가 살아있는 마지막 지점이다. 놓치면
-            // 하류에서는 폰트가 이미 벗겨져 있어(함초롬돋움) 화살표인지 알 수 없고,
-            // "@C" 가 표 셀에 그대로 노출된다(반응식을 표로 조판한 레이아웃).
+            // 화살표 런: 텍스트는 ResolvedDataReader 가 파싱 직후 이미 "→" 로
+            // 정규화했다. 여기서는 폰트만 벗긴다 — BT화살표 폰트를 그대로 두면
+            // 한글이 글리프를 렌더링하지 못한다.
             boolean arrowRun = BTFontGlyphMap.isBTArrowFont(run.fontFamily());
-            boolean arrowEmitted = false;
             for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(text, run, para, options)) {
                 if (arrowRun) {
-                    // convertRunText 는 런 하나를 여러 ASTTextRun 으로 쪼갤 수 있다.
-                    // 각각에 화살표를 넣으면 "→→" 가 된다(실측: 화살표 단독 셀 8곳).
-                    // → 화살표는 딱 한 번만 내보내고, 나머지 조각은 버린다.
-                    if (arrowEmitted) continue;
-                    arrowEmitted = true;
-                    textRun.text("→");
                     textRun.fontFamily(null);
                     textRun.fontStyle(null);
                     textRun.grepMathFont(false);

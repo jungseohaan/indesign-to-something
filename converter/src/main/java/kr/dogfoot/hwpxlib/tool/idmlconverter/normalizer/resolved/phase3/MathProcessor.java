@@ -56,14 +56,11 @@ class MathProcessor {
         // (collectFormulaEquationCluster / collapseMixedFormulaEquationClusters)
         // ASTEquation("CHEM_FORMULA")으로 되돌려버리기 때문에, 차단은 여기서 해야 한다.
         //
-        // 차단만으로는 부족하다. 상류 경로에 따라 화살표 글리프(@C/?C)가 치환되지
-        // 않았거나 아래첨자가 유실된 채 도착하기도 하므로, 여기서 함께 정리한다.
-        // 화살표 글리프(@C/?C)는 화학식 여부와 무관하게 항상 실제 화살표로 바꾼다.
-        // 반응식을 표로 조판하면 화살표만 홀로 든 셀/문단이 생기는데, 그 문단에는
-        // 원소기호가 없어 화학식 판정을 통과하지 못한다. 그대로 두면 화면에 "@C" 가
-        // 그대로 노출된다(실측: ParagraphStyle=00_컷사식(중앙), 내용이 "@C" 뿐인 문단).
-        replaceArrowGlyphsInTextRuns(items);
-
+        // 화살표 글리프(@C/?C/C)는 IDMLStoryParser / ResolvedDataReader 가 파싱 직후
+        // "→" 로 정규화하므로, 여기까지 원시 글리프 코드가 도달하지 않는다.
+        //
+        // 차단만으로는 부족하다. 상류 경로에 따라 아래첨자가 유실된 채 도착하기도
+        // 하므로, 화학식 문단은 아래에서 아래첨자를 재계산한다.
         if (isChemicalFormulaAstParagraph(items)) {
             normalizeChemicalFormulaRuns(items);
             return;
@@ -1161,45 +1158,6 @@ class MathProcessor {
      *   ↑계수      ↑아래첨자  ↑계수
      * </pre>
      */
-    /**
-     * AST 텍스트 런의 화살표 글리프 코드(@C / ?C)를 실제 화살표(→)로 치환한다.
-     *
-     * <p>화학식 여부와 무관하게 적용한다. 반응식을 표로 조판하면 화살표만 홀로 든
-     * 문단이 생기는데(실측: 내용이 "@C" 뿐인 문단), 원소기호가 없어 화학식 판정을
-     * 통과하지 못하고 "@C" 가 그대로 화면에 노출됐다.
-     *
-     * <p>일반 영문 텍스트에 우연히 "@C" 가 있을 수 있으므로, 수식 폰트가 적용된
-     * 런에서만 치환한다. 치환 후에는 폰트를 벗겨 본문 폰트로 렌더되게 한다
-     * (수식 폰트를 그대로 두면 한글이 글리프를 렌더링하지 못한다).
-     */
-    private static void replaceArrowGlyphsInTextRuns(List<ASTInlineItem> items) {
-        if (items == null) return;
-        for (ASTInlineItem item : items) {
-            if (!(item instanceof ASTTextRun)) continue;
-            ASTTextRun tr = (ASTTextRun) item;
-            String text = tr.text();
-            if (text == null || text.isEmpty()) continue;
-            if (text.indexOf("@C") < 0 && text.indexOf("?C") < 0
-                    && text.indexOf("@c") < 0 && text.indexOf("?c") < 0) {
-                continue;
-            }
-            String ff = tr.fontFamily();
-            boolean mathFont = ff != null
-                    && (BTFontGlyphMap.isBTFontFamily(ff)
-                        || BTFontGlyphMap.isBTArrowFont(ff)
-                        || EHFontGlyphMap.isEHFontFamily(ff)
-                        || NPFontGlyphMap.isNPFont(ff));
-            if (!mathFont && !tr.grepMathFont()) continue;
-
-            tr.text(text.replace("@C", "\u2192").replace("@c", "\u2192")
-                        .replace("?C", "\u2192").replace("?c", "\u2192"));
-            tr.fontFamily(null);
-            tr.fontStyle(null);
-            tr.grepMathFont(false);
-            tr.subscript(false);
-            tr.superscript(false);
-        }
-    }
 
     static void normalizeChemicalFormulaRuns(List<ASTInlineItem> items) {
         if (items == null || items.isEmpty()) return;

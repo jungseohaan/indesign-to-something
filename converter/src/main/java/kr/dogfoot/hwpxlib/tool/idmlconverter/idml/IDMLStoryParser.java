@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.idml;
 
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 
 import org.w3c.dom.*;
@@ -433,8 +434,10 @@ public class IDMLStoryParser {
                     if (!text.isEmpty()) {
                         currentRun.content(text);
                     }
-                    if (currentRun.content() != null || !currentRun.inlineFrames().isEmpty()
-                            || !currentRun.inlineGraphics().isEmpty()) {
+                    normalizeArrowGlyphRun(currentRun);
+                    if (!isDuplicateArrowRun(currentPara, currentRun)
+                            && (currentRun.content() != null || !currentRun.inlineFrames().isEmpty()
+                                || !currentRun.inlineGraphics().isEmpty())) {
                         currentPara.addCharacterRun(currentRun);
                     }
                     result.add(currentPara);
@@ -516,8 +519,10 @@ public class IDMLStoryParser {
             if (!text.isEmpty()) {
                 currentRun.content(text);
             }
-            if (currentRun.content() != null || !currentRun.inlineFrames().isEmpty()
-                    || !currentRun.inlineGraphics().isEmpty()) {
+            normalizeArrowGlyphRun(currentRun);
+            if (!isDuplicateArrowRun(currentPara, currentRun)
+                    && (currentRun.content() != null || !currentRun.inlineFrames().isEmpty()
+                        || !currentRun.inlineGraphics().isEmpty())) {
                 currentPara.addCharacterRun(currentRun);
             }
         }
@@ -2287,4 +2292,44 @@ public class IDMLStoryParser {
         }
         return sb.toString();
     }
+
+    /**
+     * 화살표 글리프 런의 텍스트를 실제 화살표(→)로 정규화한다 — 파싱 직후 한 번만.
+     *
+     * <p>InDesign 은 화학 반응식의 화살표를 "BT화살표" 전용 폰트로 조판한다. 그 폰트는
+     * 특정 글자 자리에 화살표 모양을 그려둔 것이라, 파일에 저장된 실제 글자가 제각각이다
+     * (실측 — 과학 1단원 한 문서 안에서: "C" 5회, "@" 4회, "@C" 3회, "?C" 2회).
+     * 전부 화면에는 똑같이 화살표로 보인다.
+     *
+     * <p>이걸 하류에서 각자 치환하면 문제가 생긴다. 실제로 네 곳에서 제각각 치환하다가
+     * 중복 삽입("→→")과 런 매칭 어긋남(Ca(OH)₂ 의 C 소실)이 발생했다.
+     * → 여기서 통일해두면 하류는 평범한 텍스트로 다루면 된다.
+     *
+     * <p>폰트/스타일은 지우지 않는다. 하류가 그 정보를 쓸 수 있어 텍스트만 바꾼다.
+     */
+    private static void normalizeArrowGlyphRun(IDMLCharacterRun run) {
+        if (run == null) return;
+        String normalized = BTFontGlyphMap.normalizeArrowGlyphText(
+                run.fontFamily(), run.appliedCharacterStyle(), run.content());
+        if (normalized != null && !normalized.equals(run.content())) {
+            run.content(normalized);
+        }
+    }
+
+    /**
+     * 이 런이 앞 런과 같은 화살표 글리프의 나머지 조각인가.
+     *
+     * <p>하나의 화살표 글리프가 여러 런으로 쪼개져 들어오기도 한다(실측: "@C" 가
+     * 런 '@' + 런 'C' 로 분리). 각각 "→" 로 정규화하면 "→→" 가 되므로,
+     * 앞 런이 이미 화살표면 이 조각은 버린다.
+     */
+    private static boolean isDuplicateArrowRun(IDMLParagraph para, IDMLCharacterRun run) {
+        if (para == null || run == null) return false;
+        if (!BTFontGlyphMap.ARROW.equals(run.content())) return false;
+        List<IDMLCharacterRun> runs = para.characterRuns();
+        if (runs == null || runs.isEmpty()) return false;
+        IDMLCharacterRun last = runs.get(runs.size() - 1);
+        return last != null && BTFontGlyphMap.ARROW.equals(last.content());
+    }
+
 }
