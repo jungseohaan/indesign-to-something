@@ -712,6 +712,7 @@ class MathProcessor {
         boolean hasArrow = false;
         boolean hasPositioned = false;
         boolean hasChemicalSymbol = false;
+        boolean hasFormulaFontEvidence = false;
         String color = null;
         Integer preferredBaseUnit = null;
         String preferredFontFamily = null;
@@ -744,12 +745,30 @@ class MathProcessor {
             hasArrow |= result.hasArrow;
             hasPositioned |= tr.subscript() || tr.superscript();
             hasChemicalSymbol |= result.hasChemicalSymbol;
+            hasFormulaFontEvidence |= isFormulaFontEvidence(tr);
             end = i + 1;
         }
 
         if (end == start) return null;
         String hwpScript = normalizeFormulaScript(script.toString());
         if (hwpScript.isEmpty() || hwpScript.length() > 128) return null;
+        if (!hasFormulaFontEvidence
+                && !hasDigit
+                && !hasBox
+                && !hasArrow
+                && !hasPositioned
+                && !containsMathStructureText(hwpScript)) {
+            return null;
+        }
+        if (!hasFormulaFontEvidence
+                && hasLongLatinWord(hwpScript, 3)
+                && !hasDigit
+                && !hasBox
+                && !hasArrow
+                && !hasPositioned
+                && !containsMathStructureText(hwpScript)) {
+            return null;
+        }
         if (!hasLetter) return null;
         if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
         if (hasBox && !hasDigit && !hasOperator && !hasArrow && !hasPositioned) return null;
@@ -759,6 +778,15 @@ class MathProcessor {
         if (color != null) eq.textColor(color);
         applyBodyTextEquationHints(eq, preferredBaseUnit, preferredFontFamily);
         return new FormulaCluster(eq, end);
+    }
+
+    private static boolean isFormulaFontEvidence(ASTTextRun tr) {
+        if (tr == null) return false;
+        String ff = tr.fontFamily();
+        return tr.grepMathFont()
+                || (ff != null && (EHFontGlyphMap.isEHFontFamily(ff)
+                || BTFontGlyphMap.isBTFontFamily(ff)
+                || NPFontGlyphMap.isNPFont(ff)));
     }
 
     static void applyBodyTextEquationHints(ASTEquation equation, Integer preferredBaseUnit, String preferredFontFamily) {
@@ -856,6 +884,21 @@ class MathProcessor {
             return false;
         }
         return true;
+    }
+
+    private static boolean hasLongLatinWord(String text, int minLen) {
+        if (text == null) return false;
+        int streak = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isAsciiLetter(c)) {
+                streak++;
+                if (streak >= minLen) return true;
+            } else {
+                streak = 0;
+            }
+        }
+        return false;
     }
 
     private static String normalizeFormulaScript(String script) {

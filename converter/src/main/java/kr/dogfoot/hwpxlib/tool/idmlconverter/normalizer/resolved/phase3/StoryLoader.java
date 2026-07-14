@@ -416,7 +416,16 @@ public class StoryLoader {
 
                     // 일반 런 변환 (U+FFFC 인라인 객체 포함)
                     String text = run.content();
-                    if (text == null || text.isEmpty()) continue;
+                    if (text == null || text.isEmpty()) {
+                        if (appendAnchorOnlyRunItems(ctx, runs, idx, run, resolvedParagraph,
+                                ip, storyId, para)) {
+                            hasIdmlInlineAnchors = true;
+                            if (!hasVisibleText(para)) {
+                                firstTextRunAfterLeadingAnchor = true;
+                            }
+                        }
+                        continue;
+                    }
 
                     if (text.contains("\uFFFC")) {
                         hasIdmlInlineAnchors = true;
@@ -599,6 +608,118 @@ public class StoryLoader {
             if (chemicalFormulaPara) {
                 MathProcessor.normalizeChemicalFormulaRuns(para.items());
             }
+    }
+
+    private static boolean appendAnchorOnlyRunItems(
+            ResolvedBuildContext ctx,
+            List<IDMLCharacterRun> runs,
+            int runIndex,
+            IDMLCharacterRun run,
+            ResolvedParagraph resolvedParagraph,
+            IDMLParagraph idmlParagraph,
+            String storyId,
+            ASTParagraph para) {
+        List<String> inlineIds = inlineIdsInRunOrder(run);
+        if (inlineIds.isEmpty()) return false;
+        boolean handled = false;
+        String previousText = nearestIdmlText(runs, runIndex - 1, -1);
+        String nextText = nearestIdmlText(runs, runIndex + 1, 1);
+        for (String inlineId : inlineIds) {
+            int domId = parseInlineDomId(inlineId);
+            if (domId < 0) continue;
+            if (isDoviraSubunitMarker(resolvedParagraph, idmlParagraph, domId)
+                    && DoviraSubunitMarkerPolicy.isDuplicateMarkerStory(
+                    ctx != null ? ctx.resolvedData : null, storyId)) {
+                handled = true;
+                continue;
+            }
+            List<ASTInlineItem> plannedItems =
+                    InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, previousText, nextText);
+            if (plannedItems != null) {
+                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, para);
+                for (ASTInlineItem item : plannedItems) {
+                    if (item instanceof ASTInlineObject) {
+                        ((ASTInlineObject) item).keepInline(true);
+                    }
+                    para.addItem(item);
+                }
+                handled = true;
+                continue;
+            }
+            if (InlineFrameHandler.hasOwnershipPlanForAnchorBundle(ctx, domId)) {
+                handled = true;
+                continue;
+            }
+            warnUnplannedInlineAnchorSkipped(ctx, storyId, domId);
+        }
+        return handled;
+    }
+
+    private static List<String> inlineIdsInRunOrder(IDMLCharacterRun run) {
+        List<String> ids = new ArrayList<>();
+        if (run == null) return ids;
+        if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) {
+            for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                if (anchor == null) continue;
+                if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                        && run.inlineFrames() != null
+                        && anchor.index() >= 0
+                        && anchor.index() < run.inlineFrames().size()) {
+                    ids.add(run.inlineFrames().get(anchor.index()).selfId());
+                } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                        && run.inlineGraphics() != null
+                        && anchor.index() >= 0
+                        && anchor.index() < run.inlineGraphics().size()) {
+                    ids.add(run.inlineGraphics().get(anchor.index()).selfId());
+                }
+            }
+            return ids;
+        }
+        if (run.inlineFrames() != null) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame : run.inlineFrames()) {
+                if (frame != null && frame.selfId() != null) ids.add(frame.selfId());
+            }
+        }
+        if (run.inlineGraphics() != null) {
+            for (IDMLCharacterRun.InlineGraphic graphic : run.inlineGraphics()) {
+                if (graphic != null && graphic.selfId() != null) ids.add(graphic.selfId());
+            }
+        }
+        return ids;
+    }
+
+    private static int parseInlineDomId(String inlineId) {
+        if (inlineId == null || inlineId.isEmpty()) return -1;
+        String s = inlineId;
+        if (s.startsWith("child_")) s = s.substring("child_".length());
+        if (s.startsWith("u") || s.startsWith("U")) s = s.substring(1);
+        int end = 0;
+        while (end < s.length()) {
+            char c = s.charAt(end);
+            boolean hex = (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F');
+            if (!hex) break;
+            end++;
+        }
+        if (end == 0) return -1;
+        try {
+            return Integer.parseInt(s.substring(0, end), 16);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static String nearestIdmlText(List<IDMLCharacterRun> runs, int start, int step) {
+        if (runs == null || step == 0) return null;
+        for (int i = start; i >= 0 && i < runs.size(); i += step) {
+            IDMLCharacterRun run = runs.get(i);
+            String text = run != null ? run.content() : null;
+            if (text == null) continue;
+            String normalized = text.replace("\uFFFC", "").trim();
+            if (!normalized.isEmpty()) return normalized;
+        }
+        return null;
     }
 
     private static boolean hasStage1ObjectPlans(ResolvedBuildContext ctx) {
@@ -849,6 +970,7 @@ public class StoryLoader {
         if (ctx == null || resolvedParagraph == null) return paragraphs;
 
         ASTParagraph current = createResolvedCellParagraph(ctx, idmlParagraph, resolvedParagraph);
+        appendLeadingAnchorOnlyRuns(ctx, idmlParagraph, resolvedParagraph, current);
         if (includeTextRuns) {
             appendGeneratedParagraphPrefix(ctx, resolvedParagraph, current);
         }
@@ -866,7 +988,7 @@ public class StoryLoader {
             ResolvedRun run = runs.get(i);
             if (run == null) continue;
             if (run.isInlineAnchor()) {
-                appendResolvedInlineAnchorInOrder(ctx, runs, i, current);
+                appendResolvedInlineAnchorInOrder(ctx, idmlParagraph, runs, i, current);
                 continue;
             }
             if (!includeTextRuns || run.text() == null) continue;
@@ -915,6 +1037,37 @@ public class StoryLoader {
         return para;
     }
 
+    private static void appendLeadingAnchorOnlyRuns(
+            ResolvedBuildContext ctx,
+            IDMLParagraph idmlParagraph,
+            ResolvedParagraph resolvedParagraph,
+            ASTParagraph para) {
+        if (idmlParagraph == null || idmlParagraph.characterRuns() == null || para == null) return;
+        List<IDMLCharacterRun> runs = idmlParagraph.characterRuns();
+        for (int i = 0; i < runs.size(); i++) {
+            IDMLCharacterRun run = runs.get(i);
+            if (hasMeaningfulRunText(run)) return;
+            appendAnchorOnlyRunItems(ctx, runs, i, run, resolvedParagraph, idmlParagraph, null, para);
+        }
+    }
+
+    private static boolean hasMeaningfulRunText(IDMLCharacterRun run) {
+        String text = run != null ? run.content() : null;
+        if (text == null || text.isEmpty()) return false;
+        return !text.replace("\uFFFC", "").trim().isEmpty();
+    }
+
+    private static boolean paragraphContainsInlineAnchor(IDMLParagraph paragraph, int anchorId) {
+        if (paragraph == null || paragraph.characterRuns() == null || anchorId <= 0) return false;
+        for (IDMLCharacterRun run : paragraph.characterRuns()) {
+            if (run == null) continue;
+            if (containsInlineAnchorDomId(run, anchorId)) return true;
+            if (containsInlineGraphicDomId(run.inlineGraphics(), anchorId)) return true;
+            if (containsInlineFrameDomId(run.inlineFrames(), anchorId)) return true;
+        }
+        return false;
+    }
+
     private static void addNonEmptyParagraph(List<ASTParagraph> paragraphs, ASTParagraph para) {
         if (paragraphs == null || para == null || para.items() == null || para.items().isEmpty()) return;
         paragraphs.add(para);
@@ -922,6 +1075,7 @@ public class StoryLoader {
 
     private static void appendResolvedInlineAnchorInOrder(
             ResolvedBuildContext ctx,
+            IDMLParagraph idmlParagraph,
             List<ResolvedRun> runs,
             int runIndex,
             ASTParagraph para) {
@@ -932,6 +1086,9 @@ public class StoryLoader {
         if (run == null || !run.isInlineAnchor()) return;
         Integer anchoredId = run.anchoredObjectId();
         if (anchoredId == null || anchoredId <= 0) return;
+        if (idmlParagraph != null && !paragraphContainsInlineAnchor(idmlParagraph, anchoredId)) {
+            return;
+        }
         if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
             return;
         }
