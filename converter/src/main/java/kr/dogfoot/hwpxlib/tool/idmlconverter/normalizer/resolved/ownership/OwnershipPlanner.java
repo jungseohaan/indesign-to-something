@@ -1272,6 +1272,7 @@ public final class OwnershipPlanner {
         timed("normalizeInlineTextStyleMarkerVisuals.final", this::normalizeInlineTextStyleMarkerVisuals);
         timed("normalizeRawClippedImageVisualSources.final", this::normalizeRawClippedImageVisualSources);
         timed("normalizeVisibleVisualSourcesToPlanPage.final", this::normalizeVisibleVisualSourcesToPlanPage);
+        timed("normalizeVisualSlotsExcludeTableStyleSources.final", this::normalizeVisualSlotsExcludeTableStyleSources);
         timed("normalizeDuplicateVisibleSourceSlots.final", this::normalizeDuplicateVisibleSourceSlots);
     }
 
@@ -11821,9 +11822,30 @@ public final class OwnershipPlanner {
     }
 
     private void normalizeVisualSlotsExcludeTableStyleSources() {
-        // V2 keeps table geometry editable, but table/cell decoration remains
-        // source-owned textless visual material.  Do not absorb sibling visual
-        // sources into TABLE_STYLE_SLOT and do not demote their PNG owners.
+        if (data == null || plans.isEmpty()) return;
+        LinkedHashMap<Integer, List<ObjectPlan>> tableStylePlansByPage = new LinkedHashMap<>();
+        for (ObjectPlan plan : plans) {
+            if (!planCarriesTableStyleSourceChannel(plan)) continue;
+            tableStylePlansByPage
+                    .computeIfAbsent(plan.pageIndex, k -> new ArrayList<>())
+                    .add(plan);
+        }
+        if (tableStylePlansByPage.isEmpty()) return;
+
+        int suppressed = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan visualPlan = plans.get(i);
+            if (!isTableStyleCarrierVisualDuplicate(visualPlan,
+                    tableStylePlansByPage.get(visualPlan != null ? visualPlan.pageIndex : -1))) {
+                continue;
+            }
+            plans.set(i, visualPlan.withVisualAction(
+                    VisualAction.DROP_VISUAL,
+                    "table_style_slot_owned_by_hwpx_table"));
+            suppressed++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.normalizeVisualSlotsExcludeTableStyleSources.suppressed",
+                suppressed);
     }
 
     private void ensureTableStyleSourceObjectIds() {
@@ -11848,7 +11870,63 @@ public final class OwnershipPlanner {
 
     private static boolean planCarriesTableStyleSourceChannel(ObjectPlan plan) {
         if (plan == null) return false;
-        return plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
+        return plan.materialization == Materialization.HWPX_TABLE_STYLE
+                || plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
+    }
+
+    private boolean isTableStyleCarrierVisualDuplicate(ObjectPlan visualPlan, List<ObjectPlan> tableStylePlans) {
+        if (visualPlan == null || tableStylePlans == null || tableStylePlans.isEmpty()) return false;
+        if (!visualPlan.hasVisibleVisual()) return false;
+        if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
+        if (visualPlan.materialization == Materialization.HWPX_TABLE_STYLE) return false;
+        if (visualPlan.domId < 0) return false;
+
+        for (ObjectPlan tableStylePlan : tableStylePlans) {
+            if (tableStylePlan == null || tableStylePlan == visualPlan) continue;
+            if (sameTableStyleCarrierSource(visualPlan, tableStylePlan)) return true;
+        }
+        return false;
+    }
+
+    private boolean sameTableStyleCarrierSource(ObjectPlan visualPlan, ObjectPlan tableStylePlan) {
+        int[] tableStyleSources = mergeIds(tableStylePlan.sourceObjectIds, tableStylePlan.styleSourceObjectIds);
+        int[] visualSources = visualSourceIds(visualPlan);
+        if (containsAny(tableStyleSources, visualSources)
+                && visualSourceOwnsAnyTableStyleTextFrame(visualSources, tableStylePlan)) {
+            return true;
+        }
+        if (contains(tableStyleSources, visualPlan.domId)
+                && visualSourceOwnsAnyTableStyleTextFrame(new int[] { visualPlan.domId }, tableStylePlan)) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean visualSourceOwnsAnyTableStyleTextFrame(int[] visualSources, ObjectPlan tableStylePlan) {
+        if (visualSources == null || visualSources.length == 0 || tableStylePlan == null) return false;
+        int[] textFrameIds = textFrameIdsForPlan(tableStylePlan);
+        if (textFrameIds.length == 0) textFrameIds = tableStylePlan.ownedTextFrameIds;
+        for (int visualSourceId : visualSources) {
+            for (int textFrameId : textFrameIds) {
+                if (sourceTreeOwnsTextFrame(visualSourceId, textFrameId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean sourceTreeOwnsTextFrame(int sourceId, int textFrameId) {
+        if (sourceId < 0 || textFrameId < 0 || data == null) return false;
+        if (sourceId == textFrameId) return true;
+        ResolvedPageItem textItem = data.getPageItem(String.valueOf(textFrameId));
+        if (textItem == null) return false;
+        String current = textItem.parentId();
+        HashSet<String> visited = new HashSet<>();
+        while (current != null && !current.isBlank() && visited.add(current)) {
+            if (current.equals(String.valueOf(sourceId))) return true;
+            ResolvedPageItem parent = data.getPageItem(current);
+            current = parent != null ? parent.parentId() : null;
+        }
+        return false;
     }
 
     private int tableStyleOwnerTextFrameId(ObjectPlan plan) {
