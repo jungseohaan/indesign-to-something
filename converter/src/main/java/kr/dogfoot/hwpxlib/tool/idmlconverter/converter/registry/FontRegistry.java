@@ -159,13 +159,6 @@ public class FontRegistry {
     }
 
     /**
-     * 마지막 resolveFontIdPair() 호출 결과의 장평(horizontalScale) 보정값을 반환한다.
-     */
-    public int lastScaleAdjust() {
-        return lastMappingResult != null ? lastMappingResult.scaleAdjust : 0;
-    }
-
-    /**
      * 마지막 resolveFontIdPair() 호출 결과의 장평 비율을 반환한다.
      * 1.0 미만이면 HWPX 폰트가 원본보다 넓어서 장평 축소 필요.
      */

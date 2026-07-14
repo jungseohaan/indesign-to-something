@@ -127,7 +127,6 @@ public class ConversionConfig {
                     me.ko = val.has("ko") ? val.get("ko").getAsString() : defaultSansKo;
                     me.en = val.has("en") ? val.get("en").getAsString() : me.ko;
                     me.spacing = val.has("spacing") ? val.get("spacing").getAsInt() : 0;
-                    me.scaleAdjust = val.has("scaleAdjust") ? val.get("scaleAdjust").getAsInt() : 0;
                     me.ratio = val.has("ratio") ? val.get("ratio").getAsDouble() : 1.0;
                     fontMappings.put(entry.getKey(), me);
                 }
@@ -255,7 +254,6 @@ public class ConversionConfig {
         public String ko;
         public String en;
         public int spacing;
-        public int scaleAdjust;
         public double ratio = 1.0;
     }
 
