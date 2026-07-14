@@ -7,6 +7,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
@@ -3523,8 +3525,9 @@ public class InlineFrameHandler {
 
                     obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
                     ResolvedPageItem anchorItem = findInlineAnchorSourceItem(ctx, plan, rg, anchoredObjectId);
+                    applyInlineGraphicAnchorAndWrapMetadata(ctx, obj, rg, plan, anchoredObjectId);
                     if (isLargeFloatingAnchoredInlineVisual(anchorItem, obj.width(), obj.height())) {
-                        obj.anchoredPosition("Anchored");
+                        if (obj.anchoredPosition() == null) obj.anchoredPosition("Anchored");
                         obj.affectsLineSpacing(false);
                     }
                     if (rg.inlineSourceTreeClosed()) {
@@ -3545,6 +3548,142 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static void applyInlineGraphicAnchorAndWrapMetadata(
+            ResolvedBuildContext ctx,
+            ASTInlineObject obj,
+            RenderedGroup rg,
+            ObjectPlan plan,
+            int anchoredObjectId) {
+        if (ctx == null || obj == null) return;
+        IDMLCharacterRun.InlineGraphic graphic =
+                findIDMLInlineGraphicForRenderedAnchor(ctx, rg, plan, anchoredObjectId);
+        if (graphic == null) return;
+        String anchoredPosition = normalizeInlineAnchorValue(graphic.anchoredPosition());
+        if (anchoredPosition != null) obj.anchoredPosition(anchoredPosition);
+        String wrapMode = normalizeInlineAnchorValue(graphic.textWrapMode());
+        if (wrapMode != null && !wrapMode.isEmpty()) obj.textWrapMode(wrapMode);
+        String wrapSide = normalizeInlineAnchorValue(graphic.textWrapSide());
+        if (wrapSide != null && !wrapSide.isEmpty()) obj.textWrapSide(wrapSide);
+        obj.textWrapTop(CoordinateConverter.pointsToHwpunits(graphic.textWrapTop()));
+        obj.textWrapLeft(CoordinateConverter.pointsToHwpunits(graphic.textWrapLeft()));
+        obj.textWrapBottom(CoordinateConverter.pointsToHwpunits(graphic.textWrapBottom()));
+        obj.textWrapRight(CoordinateConverter.pointsToHwpunits(graphic.textWrapRight()));
+    }
+
+    private static IDMLCharacterRun.InlineGraphic findIDMLInlineGraphicForRenderedAnchor(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            ObjectPlan plan,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.loadIDMLStory == null) return null;
+        String parentStoryId = rg != null ? rg.parentStoryId() : null;
+        if (parentStoryId == null || parentStoryId.isEmpty()) return null;
+        IDMLStory story = ctx.loadIDMLStory.apply(parentStoryId);
+        if (story == null) return null;
+        IDMLCharacterRun.InlineGraphic graphic =
+                findIDMLInlineGraphicForRenderedAnchorInParagraphs(
+                        story.paragraphs(), plan, rg, anchoredObjectId);
+        if (graphic != null) return graphic;
+        return findIDMLInlineGraphicForRenderedAnchorInTables(
+                story.tables(), plan, rg, anchoredObjectId);
+    }
+
+    private static IDMLCharacterRun.InlineGraphic findIDMLInlineGraphicForRenderedAnchorInTables(
+            List<IDMLTable> tables,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (tables == null) return null;
+        for (IDMLTable table : tables) {
+            if (table == null || table.rows() == null) continue;
+            for (IDMLTableRow row : table.rows()) {
+                if (row == null || row.cells() == null) continue;
+                for (IDMLTableCell cell : row.cells()) {
+                    if (cell == null) continue;
+                    IDMLCharacterRun.InlineGraphic graphic =
+                            findIDMLInlineGraphicForRenderedAnchorInParagraphs(
+                                    cell.paragraphs(), plan, rg, anchoredObjectId);
+                    if (graphic != null) return graphic;
+                    graphic = findIDMLInlineGraphicForRenderedAnchorInTables(
+                            cell.directNestedTables(), plan, rg, anchoredObjectId);
+                    if (graphic != null) return graphic;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static IDMLCharacterRun.InlineGraphic findIDMLInlineGraphicForRenderedAnchorInParagraphs(
+            List<IDMLParagraph> paragraphs,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (paragraphs == null) return null;
+        for (IDMLParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                IDMLCharacterRun.InlineGraphic graphic =
+                        findIDMLInlineGraphicForRenderedAnchor(run.inlineGraphics(), plan, rg, anchoredObjectId);
+                if (graphic != null) return graphic;
+            }
+        }
+        return null;
+    }
+
+    private static IDMLCharacterRun.InlineGraphic findIDMLInlineGraphicForRenderedAnchor(
+            List<IDMLCharacterRun.InlineGraphic> graphics,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (graphics == null) return null;
+        for (IDMLCharacterRun.InlineGraphic graphic : graphics) {
+            if (graphic == null) continue;
+            int id = parseInlineSourceDomId(graphic.selfId());
+            if (id == anchoredObjectId
+                    || containsInt(plan != null ? plan.sourceObjectIds : null, id)
+                    || containsInt(plan != null ? plan.visualSourceObjectIds : null, id)
+                    || containsInt(plan != null ? plan.exportSourceObjectIds : null, id)
+                    || containsInt(rg != null ? rg.sourceObjectIds() : null, id)
+                    || containsInt(rg != null ? rg.exportSourceObjectIds() : null, id)) {
+                return graphic;
+            }
+            IDMLCharacterRun.InlineGraphic child =
+                    findIDMLInlineGraphicForRenderedAnchor(graphic.childGraphics(), plan, rg, anchoredObjectId);
+            if (child != null) return child;
+        }
+        return null;
+    }
+
+    private static int parseInlineSourceDomId(String value) {
+        if (value == null || value.isEmpty()) return -1;
+        String s = value;
+        boolean hexId = s.startsWith("u") || s.startsWith("U");
+        if (hexId) s = s.substring(1);
+        int end = 0;
+        while (end < s.length()) {
+            char c = s.charAt(end);
+            boolean hex = (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F');
+            if (!hex) break;
+            end++;
+        }
+        if (end <= 0) return -1;
+        String token = s.substring(0, end);
+        try {
+            return Integer.parseInt(token, hexId ? 16 : 10);
+        } catch (NumberFormatException ignored) {
+            return parseDecimalId(value);
+        }
+    }
+
+    private static String normalizeInlineAnchorValue(String value) {
+        if (value == null) return null;
+        String normalized = value.trim();
+        if (normalized.startsWith("$ID/")) normalized = normalized.substring("$ID/".length());
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private static ResolvedPageItem findInlineAnchorSourceItem(
