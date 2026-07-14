@@ -982,7 +982,6 @@ public final class ResolvedBuildContext {
             plan = renderedOnly(ownershipPlanByObjectPlanId.get(sourceBundleKeyFromObjectPlanId(objectPlanId)));
         }
         if (isPlannerDeclaredOwnershipPlan(plan)
-                && plan.placement == placement
                 && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
             return plan;
         }
@@ -999,7 +998,6 @@ public final class ResolvedBuildContext {
         }
         plan = renderedOnly(ownershipPlanByCandidateId.get(candidateIdKey(rg.candidateId())));
         if (isPlannerDeclaredOwnershipPlan(plan)
-                && plan.placement == placement
                 && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
             return plan;
         }
@@ -1641,7 +1639,11 @@ public final class ResolvedBuildContext {
     }
 
     private static boolean isPlannerDeclaredOwnershipPlan(ObjectPlan plan) {
-        return plan != null && "planner_declared_object_plan".equals(plan.reason);
+        if (plan == null) return false;
+        if ("planner_declared_object_plan".equals(plan.reason)) return true;
+        return "direct_story_flow_inline_graphic_owner".equals(plan.reason)
+                && plan.kind != null
+                && plan.kind.startsWith("planner_declared_rendered:");
     }
 
     private static String renderedPlanCacheKey(RenderedGroup rg) {

@@ -4368,6 +4368,9 @@ public class InlineFrameHandler {
         double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
         double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
         if (w <= 0 && h <= 0) return null;
+        if (isVerticalFlowSpacerStyle(ctx, anchoredObjectId)) {
+            w = 0.1;
+        }
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
@@ -4377,6 +4380,54 @@ public class InlineFrameHandler {
         obj.keepInline(true);
         obj.layoutOnlyInlineSlot(true);
         return obj;
+    }
+
+    private static boolean isVerticalFlowSpacerStyle(ResolvedBuildContext ctx, int anchoredObjectId) {
+        String style = inlineGraphicObjectStyle(ctx, anchoredObjectId);
+        if (style == null || style.isBlank()) return false;
+        String normalized = style.toLowerCase(Locale.ROOT);
+        // Source metadata, not page/text/coordinate exception: these layout-only
+        // inline slots reserve vertical paragraph breathing room, not horizontal advance.
+        return normalized.contains("하단간격")
+                || normalized.contains("bottom-spacing")
+                || normalized.contains("bottom_spacing")
+                || normalized.contains("bottom space");
+    }
+
+    private static String inlineGraphicObjectStyle(ResolvedBuildContext ctx, int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.loadIDMLStory == null) return null;
+        String sourceId = ParagraphTextHelpers.domIdToSourceId(String.valueOf(anchoredObjectId));
+        if (sourceId == null) return null;
+        for (ResolvedStory resolvedStory : ctx.resolvedData.stories()) {
+            if (resolvedStory == null || resolvedStory.id() == null) continue;
+            IDMLStory idmlStory = ctx.loadIDMLStory.apply(resolvedStory.id());
+            String style = inlineGraphicObjectStyle(idmlStory, sourceId);
+            if (style != null && !style.isBlank()) return style;
+        }
+        return null;
+    }
+
+    private static String inlineGraphicObjectStyle(IDMLStory story, String sourceId) {
+        if (story == null || sourceId == null) return null;
+        for (IDMLCharacterRun.InlineGraphic graphic : story.getAllInlineGraphics()) {
+            String style = inlineGraphicObjectStyle(graphic, sourceId);
+            if (style != null && !style.isBlank()) return style;
+        }
+        return null;
+    }
+
+    private static String inlineGraphicObjectStyle(
+            IDMLCharacterRun.InlineGraphic graphic,
+            String sourceId) {
+        if (graphic == null) return null;
+        if (sourceId.equals(graphic.selfId())) return graphic.appliedObjectStyle();
+        if (graphic.childGraphics() != null) {
+            for (IDMLCharacterRun.InlineGraphic child : graphic.childGraphics()) {
+                String style = inlineGraphicObjectStyle(child, sourceId);
+                if (style != null && !style.isBlank()) return style;
+            }
+        }
+        return null;
     }
 
     public static ASTInlineObject loadPlannedInlineTextShellForTextFrame(

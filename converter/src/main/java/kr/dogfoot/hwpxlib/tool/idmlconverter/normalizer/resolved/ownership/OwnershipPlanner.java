@@ -442,6 +442,13 @@ public final class OwnershipPlanner {
                             + ObjectPlan.intArrayJson(visualSourceIds(plan)));
             return plan;
         }
+        if (isImportedFloatingDirectStoryFlowInlineVisual(plan)) {
+            return plan
+                    .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
+                    .withVisualAction(VisualAction.PLACE_INLINE_PNG,
+                            "direct_story_flow_inline_graphic_owner")
+                    .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
+        }
         if (isImportedStoryFlowInlineVisualWithPagePosition(plan)) {
             warnImportedPlanRepairSuppressed(plan,
                     "IMPORTED_STORY_FLOW_INLINE_PAGE_POSITION_REPAIR_SUPPRESSED",
@@ -472,6 +479,41 @@ public final class OwnershipPlanner {
                     "expected repair was PLACE_INLINE_PNG");
         }
         return plan;
+    }
+
+    private boolean isImportedFloatingDirectStoryFlowInlineVisual(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!hasInlineObjectPlanSignal(plan)) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.PAGE) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return false;
+        if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        return directStoryFlowInlineGraphicAnchorId(plan) > 0;
+    }
+
+    private int directStoryFlowInlineGraphicAnchorId(ObjectPlan plan) {
+        if (plan == null || data == null) return -1;
+        if (isDirectStoryFlowInlineGraphicAnchor(plan.domId, plan.sourceObjectIds)) {
+            return plan.domId;
+        }
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds != null) {
+            for (int visualId : visualIds) {
+                if (isDirectStoryFlowInlineGraphicAnchor(visualId, plan.sourceObjectIds)) {
+                    return visualId;
+                }
+            }
+        }
+        if (plan.sourceObjectIds != null) {
+            for (int sourceId : plan.sourceObjectIds) {
+                if (isDirectStoryFlowInlineGraphicAnchor(sourceId, plan.sourceObjectIds)) {
+                    return sourceId;
+                }
+            }
+        }
+        return -1;
     }
 
     private void warnImportedPlanRepairSuppressed(ObjectPlan plan, String code, String detail) {
@@ -7072,6 +7114,9 @@ public final class OwnershipPlanner {
             return Placement.INLINE;
         }
         if ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType())) {
+            if (isDirectStoryFlowInlineGraphicOwner(rg)) {
+                return Placement.INLINE;
+            }
             if (hasAnchoredPagePositionSource(rg)) {
                 return Placement.FLOATING;
             }
@@ -7105,6 +7150,43 @@ public final class OwnershipPlanner {
             return Placement.FLOATING;
         }
         return Placement.FLOATING;
+    }
+
+    private boolean isDirectStoryFlowInlineGraphicOwner(RenderedGroup rg) {
+        if (!isStandaloneGraphicOnlyInlineObject(rg)) return false;
+        int anchorId = directStoryFlowInlineGraphicAnchorId(rg);
+        return anchorId > 0;
+    }
+
+    private int directStoryFlowInlineGraphicAnchorId(RenderedGroup rg) {
+        if (rg == null || data == null) return -1;
+        int declaredAnchorSourceId = rg.inlineAnchorSourceObjectId();
+        if (isDirectStoryFlowInlineGraphicAnchor(declaredAnchorSourceId, sourceIdsOrSelf(rg))) {
+            return declaredAnchorSourceId;
+        }
+        if (isDirectStoryFlowInlineGraphicAnchor(rg.id(), sourceIdsOrSelf(rg))) {
+            return rg.id();
+        }
+        int[] sourceIds = sourceIdsOrSelf(rg);
+        if (sourceIds == null) return -1;
+        for (int sourceId : sourceIds) {
+            if (isDirectStoryFlowInlineGraphicAnchor(sourceId, sourceIds)) {
+                return sourceId;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isDirectStoryFlowInlineGraphicAnchor(int anchorSourceId, int[] sourceIds) {
+        if (anchorSourceId <= 0) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(anchorSourceId));
+        if (item == null || item.sourceHidden()) return false;
+        if (!item.storyTextInlineSlot() && !hasIdmlStoryInlineAnchor(anchorSourceId)) return false;
+        if (!idmlInlineAnchorParagraphHasVisibleText(anchorSourceId)
+                && !hasResolvedInlineAnchorForSourceId(anchorSourceId)) {
+            return false;
+        }
+        return allSourcesBelongToInlineAnchorTree(anchorSourceId, sourceIds);
     }
 
     private boolean hasStoryFlowPlacementContext(RenderedGroup rg) {
