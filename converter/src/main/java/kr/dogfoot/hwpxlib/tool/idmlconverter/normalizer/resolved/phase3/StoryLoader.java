@@ -379,7 +379,19 @@ public class StoryLoader {
                 // copyMathRunTextStyle 이 IDML 런의 isSubscript()(= CharacterStyle 이름에
                 // "하부자" 포함 여부)를 그대로 복사해, 계수 2 까지 아래첨자가 된다.
                 // (2Mg + O₂ → 2MgO 에서 "2MgO"의 계수 2 가 작아지던 원인)
-                boolean enterEH = !chemicalFormulaPara && !_orcOnly && (run.isEHFont()
+                //
+                // "수식" 그룹에 속하지만 실제로는 본문 영문/숫자를 조판하는 스타일은
+                // 수식 그룹을 새로 열지 않는다. 과학 교과서의 "00_수식모음:00_영문bold"
+                // 가 그것으로, 한글 문장 속 원소기호가 이탤릭 수식이 되던 원인이다
+                // — "수소 원자(H)" 의 H, "산소 원자(O)" 의 O (표 셀에서 관측).
+                //
+                // 이미 열린 그룹은 건드리지 않는다(ehMathGroup.isEmpty() 조건).
+                // 진행 중인 수식 흐름을 끊으면 ":3:" 같은 비율 표기가 ":" 로 분해된다.
+                boolean bodyTextGlyphRun = ehMathGroup.isEmpty()
+                        && BTFontGlyphMap.isBodyTextGlyphStyle(run.appliedCharacterStyle());
+
+                boolean enterEH = !chemicalFormulaPara && !_orcOnly && !bodyTextGlyphRun
+                        && (run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
