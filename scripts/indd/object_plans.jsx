@@ -3894,6 +3894,7 @@ function _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourc
     if (!objectPlans || !sourceItems || sourceItems.length === 0) return { summary: summary };
     sourceById = sourceById || _objectPlanSourceInfoById(sourceItems);
     var visibleOwned = {};
+    var tableStyleOwned = {};
 
     function markOwned(ids) {
         for (var i = 0; ids && i < ids.length; i++) {
@@ -3902,9 +3903,28 @@ function _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourc
         }
     }
 
+    function markTableStyleOwned(ids) {
+        for (var i = 0; ids && i < ids.length; i++) {
+            if (ids[i] === null || ids[i] === undefined) continue;
+            tableStyleOwned[String(ids[i])] = true;
+        }
+    }
+
     for (var pi = 0; pi < objectPlans.length; pi++) {
         var plan = objectPlans[pi];
-        if (!plan || !_objectPlanHasVisibleVisual(plan)) continue;
+        if (!plan) continue;
+        if (plan.materialization === "HWPX_TABLE_STYLE"
+                || plan.visualAction === "PLACE_TABLE_STYLE"
+                || plan.ownershipSlot === "TABLE_STYLE_SLOT"
+                || plan.slotRole === "table_textless_shell_slot"
+                || plan.compositeRole === "table_carrier_textless_shell") {
+            markTableStyleOwned(plan.sourceObjectIds || []);
+            markTableStyleOwned(plan.styleSourceObjectIds || []);
+            markTableStyleOwned(plan.visualSourceObjectIds || []);
+            markTableStyleOwned(plan.exportSourceObjectIds || []);
+            markTableStyleOwned(plan.hiddenVisualSourceObjectIds || []);
+        }
+        if (!_objectPlanHasVisibleVisual(plan)) continue;
         if (plan.visualAction === "DROP_VISUAL") continue;
         markOwned(plan.visualSourceObjectIds || []);
         markOwned(plan.exportSourceObjectIds || []);
@@ -3947,6 +3967,10 @@ function _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourc
         var id = Number(src.id);
         if (isNaN(id)) continue;
         if (visibleOwned[String(id)] === true) {
+            summary.skippedAlreadyOwnedCount++;
+            continue;
+        }
+        if (tableStyleOwned[String(id)] === true) {
             summary.skippedAlreadyOwnedCount++;
             continue;
         }
