@@ -272,7 +272,7 @@ public class IDMLStoryParser {
         for (Element range : cellRanges) {
             List<Element> paraRanges = getChildElements(range, "ParagraphStyleRange");
             for (Element paraRange : paraRanges) {
-                for (IDMLParagraph para : parseParagraphs(paraRange)) {
+                for (IDMLParagraph para : parseParagraphs(paraRange, doc)) {
                     cell.addParagraph(para);
                 }
             }
@@ -281,7 +281,7 @@ public class IDMLStoryParser {
         // Also check for direct ParagraphStyleRange children (alternative structure)
         List<Element> directParas = getChildElements(cellElem, "ParagraphStyleRange");
         for (Element paraRange : directParas) {
-            for (IDMLParagraph para : parseParagraphs(paraRange)) {
+            for (IDMLParagraph para : parseParagraphs(paraRange, doc)) {
                 cell.addParagraph(para);
             }
         }
@@ -444,6 +444,7 @@ public class IDMLStoryParser {
                     if ("NextColumn".equals(pBreakType)) {
                         currentPara.columnBreakAfter(true);
                     }
+                    applyNestedStyles(currentPara, doc);
 
                     // 새 단락 + 새 런 시작
                     currentPara = createParagraphFromRange(paraRange);
@@ -523,9 +524,149 @@ public class IDMLStoryParser {
 
         // Br가 마지막이면 빈 단락이 생성됨 — 내용이 있을 때만 추가
         if (!currentPara.characterRuns().isEmpty()) {
+            applyNestedStyles(currentPara, doc);
             result.add(currentPara);
         }
         return result;
+    }
+
+    private static void applyNestedStyles(IDMLParagraph para, IDMLDocument doc) {
+        if (para == null || doc == null || para.characterRuns() == null || para.characterRuns().isEmpty()) {
+            return;
+        }
+        IDMLStyleDef paraStyle = findStyle(para.appliedParagraphStyle(), doc.paraStyles());
+        if (paraStyle == null || paraStyle.nestedStyles() == null || paraStyle.nestedStyles().isEmpty()) {
+            return;
+        }
+        String text = para.getPlainText();
+        if (text == null || text.isEmpty()) return;
+
+        String[] styleByChar = new String[text.length()];
+        int cursor = 0;
+        for (IDMLStyleDef.NestedStyleRule rule : paraStyle.nestedStyles()) {
+            if (rule == null || rule.appliedCharacterStyle() == null
+                    || rule.delimiter() == null || rule.delimiter().isEmpty()) {
+                continue;
+            }
+            if (cursor >= text.length()) break;
+            int delimiterStart = findRepeatedDelimiter(
+                    text, rule.delimiter(), cursor, Math.max(1, rule.repetition()));
+            int styledEnd;
+            int nextCursor;
+            if (delimiterStart >= 0) {
+                styledEnd = rule.inclusive()
+                        ? delimiterStart + rule.delimiter().length()
+                        : delimiterStart;
+                nextCursor = delimiterStart + rule.delimiter().length();
+            } else {
+                styledEnd = text.length();
+                nextCursor = text.length();
+            }
+            for (int i = cursor; i < styledEnd && i < styleByChar.length; i++) {
+                styleByChar[i] = rule.appliedCharacterStyle();
+            }
+            cursor = Math.max(nextCursor, cursor);
+        }
+
+        List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
+        List<IDMLCharacterRun> newRuns = new ArrayList<>();
+        boolean modified = false;
+        int globalOffset = 0;
+        for (IDMLCharacterRun run : originalRuns) {
+            String runText = run.content();
+            int len = runText != null ? runText.length() : 0;
+            if (len == 0 || hasInlinePayload(run)) {
+                newRuns.add(run);
+                globalOffset += len;
+                continue;
+            }
+            int start = 0;
+            while (start < len) {
+                String style = styleAt(styleByChar, globalOffset + start);
+                int end = start + 1;
+                while (end < len && sameStyle(style, styleAt(styleByChar, globalOffset + end))) {
+                    end++;
+                }
+                IDMLCharacterRun subRun = cloneRunWithText(run, runText.substring(start, end));
+                if (style != null) {
+                    subRun.appliedCharacterStyle(style);
+                    applyCharacterStyleToRun(subRun, findStyle(style, doc.charStyles()));
+                    modified = true;
+                }
+                newRuns.add(subRun);
+                start = end;
+            }
+            globalOffset += len;
+        }
+        if (modified) {
+            para.characterRuns().clear();
+            para.characterRuns().addAll(newRuns);
+        }
+    }
+
+    private static void applyCharacterStyleToRun(IDMLCharacterRun run, IDMLStyleDef style) {
+        if (run == null || style == null) return;
+        if (style.fontFamily() != null) run.fontFamily(style.fontFamily());
+        if (style.fontSize() != null) run.fontSize(style.fontSize());
+        if (style.fillColor() != null) run.fillColor(style.fillColor());
+        if (style.fontStyle() != null) run.fontStyle(style.fontStyle());
+        if (style.tracking() != null) run.tracking(style.tracking());
+        if (style.underline() != null) run.underline(style.underline());
+        if (style.underlineType() != null) run.underlineType(style.underlineType());
+        if (style.shadeColor() != null) run.shadeColor(style.shadeColor());
+        if (style.shadeTint() != null) run.shadeTint(style.shadeTint());
+        if (style.strikeThrough() != null) run.strikeThrough(style.strikeThrough());
+        if (style.baselineShift() != null) run.baselineShift(style.baselineShift());
+        if (style.horizontalScale() != null) run.horizontalScale(style.horizontalScale());
+        if (style.capitalization() != null) run.capitalization(style.capitalization());
+    }
+
+    private static int findRepeatedDelimiter(String text, String delimiter, int start, int repetition) {
+        int from = Math.max(0, start);
+        int found = -1;
+        for (int i = 0; i < repetition; i++) {
+            found = text.indexOf(delimiter, from);
+            if (found < 0) return -1;
+            from = found + delimiter.length();
+        }
+        return found;
+    }
+
+    private static boolean hasInlinePayload(IDMLCharacterRun run) {
+        return run != null
+                && ((run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                || (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty())
+                || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()));
+    }
+
+    private static String styleAt(String[] styles, int index) {
+        return styles != null && index >= 0 && index < styles.length ? styles[index] : null;
+    }
+
+    private static boolean sameStyle(String a, String b) {
+        return a == null ? b == null : a.equals(b);
+    }
+
+    private static IDMLStyleDef findStyle(String styleRef, Map<String, IDMLStyleDef> styles) {
+        if (styleRef == null || styles == null || styles.isEmpty()) return null;
+        IDMLStyleDef direct = styles.get(styleRef);
+        if (direct != null) return direct;
+        String decoded = styleRef.replace("%3a", ":").replace("%25", "%");
+        direct = styles.get(decoded);
+        if (direct != null) return direct;
+        String shortRef = styleRef;
+        if (shortRef.startsWith("ParagraphStyle/")) {
+            shortRef = shortRef.substring("ParagraphStyle/".length());
+        } else if (shortRef.startsWith("CharacterStyle/")) {
+            shortRef = shortRef.substring("CharacterStyle/".length());
+        }
+        for (Map.Entry<String, IDMLStyleDef> entry : styles.entrySet()) {
+            IDMLStyleDef style = entry.getValue();
+            if (style == null) continue;
+            if (shortRef.equals(style.name()) || shortRef.equals(style.simpleName())) return style;
+            if (decoded.equals(entry.getKey())) return style;
+        }
+        return null;
     }
 
     private static String replaceUnmatchedObjectAnchors(String text, int count) {
@@ -2069,6 +2210,11 @@ public class IDMLStoryParser {
         clone.shadeColor(source.shadeColor());
         clone.shadeTint(source.shadeTint());
         clone.strikeThrough(source.strikeThrough());
+        clone.baselineShift(source.baselineShift());
+        clone.horizontalScale(source.horizontalScale());
+        clone.capitalization(source.capitalization());
+        clone.grepMathFont(source.grepMathFont());
+        clone.grepFillColor(source.grepFillColor());
         clone.grepAppliedCharStyle(source.grepAppliedCharStyle());
         clone.content(newText);
         return clone;

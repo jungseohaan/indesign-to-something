@@ -61,6 +61,9 @@ public class IDMLStyleDef {
     // GREP 스타일 규칙 (단락 스타일에서만 사용)
     private java.util.List<GrepStyleRule> grepStyles;
 
+    // Nested 스타일 규칙 (단락 스타일에서만 사용)
+    private java.util.List<NestedStyleRule> nestedStyles;
+
     /**
      * GREP 스타일 규칙 — 단락 스타일의 AllGREPStyles에서 파싱.
      * InDesign이 렌더링 시 GREP 패턴에 매칭되는 문자에 문자 스타일을 동적 적용.
@@ -80,6 +83,38 @@ public class IDMLStyleDef {
 
         public String appliedCharacterStyle() { return appliedCharacterStyle; }
         public void appliedCharacterStyle(String v) { this.appliedCharacterStyle = v; }
+    }
+
+    /**
+     * Nested 스타일 규칙 — 단락 스타일의 AllNestedStyles에서 파싱.
+     * InDesign은 delimiter 전/후의 텍스트 범위에 문자 스타일을 동적 적용한다.
+     */
+    public static class NestedStyleRule {
+        private String delimiter;
+        private String appliedCharacterStyle;
+        private int repetition;
+        private boolean inclusive;
+
+        public NestedStyleRule() {}
+        public NestedStyleRule(String delimiter, String appliedCharacterStyle,
+                               int repetition, boolean inclusive) {
+            this.delimiter = delimiter;
+            this.appliedCharacterStyle = appliedCharacterStyle;
+            this.repetition = repetition;
+            this.inclusive = inclusive;
+        }
+
+        public String delimiter() { return delimiter; }
+        public void delimiter(String v) { this.delimiter = v; }
+
+        public String appliedCharacterStyle() { return appliedCharacterStyle; }
+        public void appliedCharacterStyle(String v) { this.appliedCharacterStyle = v; }
+
+        public int repetition() { return repetition; }
+        public void repetition(int v) { this.repetition = v; }
+
+        public boolean inclusive() { return inclusive; }
+        public void inclusive(boolean v) { this.inclusive = v; }
     }
 
     /**
@@ -257,6 +292,16 @@ public class IDMLStyleDef {
             this.grepStyles = new java.util.ArrayList<>();
         }
         this.grepStyles.add(rule);
+    }
+
+    public java.util.List<NestedStyleRule> nestedStyles() { return nestedStyles; }
+    public void nestedStyles(java.util.List<NestedStyleRule> v) { this.nestedStyles = v; }
+
+    public void addNestedStyle(NestedStyleRule rule) {
+        if (this.nestedStyles == null) {
+            this.nestedStyles = new java.util.ArrayList<>();
+        }
+        this.nestedStyles.add(rule);
     }
 
     /**

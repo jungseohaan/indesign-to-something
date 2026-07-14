@@ -293,6 +293,23 @@ public class IDMLResourceParser {
                 }
             }
 
+            // AllNestedStyles (delimiter 기반 문자 스타일 규칙 — 단락 스타일에서만 존재)
+            Element allNestedStyles = getFirstChildElement(props2, "AllNestedStyles");
+            if (allNestedStyles != null) {
+                List<Element> nestedItems = getChildElements(allNestedStyles, "ListItem");
+                for (Element item : nestedItems) {
+                    String charStyle = getChildElementText(item, "AppliedCharacterStyle");
+                    String delimiter = getChildElementText(item, "Delimiter");
+                    int repetition = parseChildElementInt(item, "Repetition", 1);
+                    boolean inclusive = Boolean.parseBoolean(
+                            String.valueOf(getChildElementText(item, "Inclusive")));
+                    if (charStyle != null && delimiter != null && !delimiter.isEmpty()) {
+                        def.addNestedStyle(new IDMLStyleDef.NestedStyleRule(
+                                delimiter, charStyle, Math.max(1, repetition), inclusive));
+                    }
+                }
+            }
+
             Element tabList = getFirstChildElement(props2, "TabList");
             if (tabList != null) {
                 List<Element> listItems = getChildElements(tabList, "ListItem");
@@ -456,6 +473,16 @@ public class IDMLResourceParser {
         }
 
         return null;
+    }
+
+    private static int parseChildElementInt(Element parent, String childName, int fallback) {
+        String text = getChildElementText(parent, childName);
+        if (text == null || text.isEmpty()) return fallback;
+        try {
+            return Integer.parseInt(text.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
 }
