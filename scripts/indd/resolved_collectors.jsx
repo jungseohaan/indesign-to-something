@@ -1401,6 +1401,7 @@ function _collectPageItemsFromSourceItems(startPage, endPage, skipRenderPagesMap
                 anchoredPosition: src.anchoredPosition || null,
                 storyAnchorPlacement: src.storyAnchorPlacement || null,
                 storyTextInlineSlot: src.storyTextInlineSlot === true,
+                tableCellStoryTextInlineSlot: src.tableCellStoryTextInlineSlot === true,
                 isInline: _resolvedSourceIsInline(src)
             };
             if (src.bounds) data.geometricBounds = arrCopy(src.bounds);

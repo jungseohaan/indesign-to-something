@@ -1403,6 +1403,7 @@ function _slimObjectPlanForWrite(plan) {
         "slotRole",
         "layoutOnlyInlineSlot",
         "sourceInlineFlow",
+        "tableCellInlineAnchorSource",
         "pagePositionedAnchoredSource",
         "inlineCompositeLayoutDescendant",
         "inlineAnchorSourceObjectId",
@@ -1489,6 +1490,7 @@ function _objectPlanSlimFieldIsWriteOnlyDiagnostic(key, plan) {
             || key === "omittedClusterSourceSetId")
             && !_objectPlanSlimPlanNeedsDiagnosticSourceSets(plan)) return true;
     if (key === "sourceInlineFlow") return true;
+    if (key === "tableCellInlineAnchorSource") return true;
     if (key === "pagePositionedAnchoredSource") return true;
     if (key === "inlineCompositeLayoutDescendant") return true;
     if (key === "connectorDecorationVisual") return true;
@@ -4516,6 +4518,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         slotRole: bundle.slotRole || null,
         layoutOnlyInlineSlot: bundle.layoutOnlyInlineSlot === true,
         sourceInlineFlow: bundle.sourceInlineFlow === true,
+        tableCellInlineAnchorSource: bundle.tableCellInlineAnchorSource === true,
         pagePositionedAnchoredSource: bundle.pagePositionedAnchoredSource === true,
         inlineCompositeLayoutDescendant: bundle.inlineCompositeLayoutDescendant === true,
         inlineAnchorSourceObjectId: placement === "INLINE"
@@ -5145,6 +5148,9 @@ function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
 }
 
 function _objectPlanPlacement(bundle) {
+    if (bundle && bundle.tableCellInlineAnchorSource === true
+            && bundle.sourceInlineFlow === true
+            && bundle.inlineAnchorSourceObjectId) return "INLINE";
     if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
     if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";

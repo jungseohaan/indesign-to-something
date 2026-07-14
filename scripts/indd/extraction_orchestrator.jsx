@@ -708,14 +708,16 @@ function _globalSingleTextlessInlineHideCandidates(sourceItems) {
     for (var i = 0; sourceItems && i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || src.id === null || src.id === undefined) continue;
-        if (String(src.kind || "") !== "TextFrame") continue;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        var kind = String(src.kind || "");
         var inline =
                 src.storyTextInlineSlot === true
+                || src.tableCellStoryTextInlineSlot === true
                 || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
                 || String(src.parentKind || "") === "Character"
                 || String(src.parentKind || "") === "InsertionPoint";
         if (!inline) continue;
+        if (kind !== "TextFrame" && src.tableCellStoryTextInlineSlot !== true) continue;
         var id = Number(src.id);
         if (isNaN(id)) continue;
         candidates.push({
