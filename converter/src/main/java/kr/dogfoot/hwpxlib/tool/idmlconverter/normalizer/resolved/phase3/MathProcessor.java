@@ -941,18 +941,65 @@ class MathProcessor {
         }
         String text = joined.toString();
 
-        // 원소기호가 없으면 화학식이 아니다.
-        if (!containsKnownChemicalElementText(text)) return false;
+        // 원소기호처럼 보이는 대문자만으로는 부족하다. 일반 영문 문장
+        // "Skills", "Australia"도 S/Au 같은 원소기호 접두어를 포함하기 때문이다.
+        // 화학식 정리는 source font를 벗기는 단계이므로, 문단 전체가 화학식 토큰으로
+        // 파싱될 때만 적용한다.
+        if (!isChemicalFormulaLikeText(text)) return false;
         // 수학 구조가 있으면 HWP 수식이 필요하다 → 수식 경로 유지.
         return !containsMathStructureText(text);
     }
 
-    private static boolean containsKnownChemicalElementText(String text) {
+    private static boolean isChemicalFormulaLikeText(String text) {
         if (text == null) return false;
-        for (int i = 0; i < text.length(); i++) {
-            if (isLikelyChemicalElementAt(text, i)) return true;
+        String compact = text.replace("\u2005", "")
+                .replace("\u2007", "")
+                .replace("\u2009", "")
+                .replace("\u200A", "")
+                .replaceAll("\\s+", "");
+        if (compact.isEmpty() || compact.length() > 80) return false;
+
+        boolean hasElement = false;
+        boolean hasFormulaEvidence = false;
+        int i = 0;
+        while (i < compact.length()) {
+            char c = compact.charAt(i);
+            if (Character.isDigit(c)) {
+                hasFormulaEvidence = true;
+                i++;
+                continue;
+            }
+            if (c == '+' || c == '-' || c == '\u2192' || c == '='
+                    || c == '(' || c == ')' || c == '[' || c == ']') {
+                hasFormulaEvidence = true;
+                i++;
+                continue;
+            }
+            if (c < 'A' || c > 'Z') {
+                return false;
+            }
+
+            String one = String.valueOf(c);
+            String two = null;
+            if (i + 1 < compact.length()) {
+                char next = compact.charAt(i + 1);
+                if (next >= 'a' && next <= 'z') {
+                    two = "" + c + next;
+                }
+            }
+            if (two != null && isChemicalElement(two)) {
+                hasElement = true;
+                i += 2;
+                continue;
+            }
+            if (isChemicalElement(one)) {
+                hasElement = true;
+                i++;
+                continue;
+            }
+            return false;
         }
-        return false;
+        return hasElement && hasFormulaEvidence;
     }
 
     /** 수학 구조 문자가 있으면 화학식이 아니라 수학 수식이다. */

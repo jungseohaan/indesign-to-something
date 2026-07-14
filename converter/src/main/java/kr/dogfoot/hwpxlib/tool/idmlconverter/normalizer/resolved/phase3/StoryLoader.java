@@ -815,7 +815,7 @@ public class StoryLoader {
                 || resolvedCell.paragraphs().isEmpty()) {
             return result;
         }
-        boolean includeResolvedText = hasDirectVisibleCellText(idmlCell);
+        boolean includeResolvedText = resolvedCell.hasTextRuns();
 
         int paraIndex = 0;
         for (ResolvedParagraph resolvedParagraph : resolvedCell.paragraphs()) {
@@ -824,27 +824,124 @@ public class StoryLoader {
                     && paraIndex < idmlCell.paragraphs().size())
                     ? idmlCell.paragraphs().get(paraIndex)
                     : null;
-            ASTParagraph para = new ASTParagraph();
-            if (idmlParagraph != null) {
-                if (idmlParagraph.appliedParagraphStyle() != null) {
-                    para.paragraphStyleRef(idmlParagraph.appliedParagraphStyle());
+            for (ASTParagraph para : buildResolvedCellParagraphs(
+                    ctx, idmlParagraph, resolvedParagraph, includeResolvedText)) {
+                MathProcessor.convertMathRunsInParagraph(ctx, para);
+                RunPostProcessor.splitOverlineRuns(para);
+                RunPostProcessor.convertItalicRunsToEquations(para);
+                RunBuilder.resetBulletParagraphColors(ctx, para);
+                recordCellInlineEmbeddedIds(ctx, para);
+                if (para.items() != null && !para.items().isEmpty()) {
+                    result.add(para);
                 }
-                ParagraphPropertyResolver.apply(para, idmlParagraph, resolvedParagraph, ctx, null);
-            } else {
-                applyResolvedParagraphPropertiesOnly(para, resolvedParagraph);
-            }
-            appendResolvedRunsInOrder(ctx, resolvedParagraph, para, includeResolvedText);
-            MathProcessor.convertMathRunsInParagraph(ctx, para);
-            RunPostProcessor.splitOverlineRuns(para);
-            RunPostProcessor.convertItalicRunsToEquations(para);
-            RunBuilder.resetBulletParagraphColors(ctx, para);
-            recordCellInlineEmbeddedIds(ctx, para);
-            if (para.items() != null && !para.items().isEmpty()) {
-                result.add(para);
             }
             paraIndex++;
         }
         return result;
+    }
+
+    private static List<ASTParagraph> buildResolvedCellParagraphs(
+            ResolvedBuildContext ctx,
+            IDMLParagraph idmlParagraph,
+            ResolvedParagraph resolvedParagraph,
+            boolean includeTextRuns) {
+        List<ASTParagraph> paragraphs = new ArrayList<>();
+        if (ctx == null || resolvedParagraph == null) return paragraphs;
+
+        ASTParagraph current = createResolvedCellParagraph(ctx, idmlParagraph, resolvedParagraph);
+        if (includeTextRuns) {
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, current);
+        }
+
+        ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
+                .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
+                .truncateAtParagraphBreak(false);
+        List<ResolvedRun> runs = resolvedParagraph.runs();
+        if (runs == null || runs.isEmpty()) {
+            addNonEmptyParagraph(paragraphs, current);
+            return paragraphs;
+        }
+
+        for (int i = 0; i < runs.size(); i++) {
+            ResolvedRun run = runs.get(i);
+            if (run == null) continue;
+            if (run.isInlineAnchor()) {
+                appendResolvedInlineAnchorInOrder(ctx, runs, i, current);
+                continue;
+            }
+            if (!includeTextRuns || run.text() == null) continue;
+
+            String text = run.text();
+            int start = 0;
+            while (start <= text.length()) {
+                int breakAt = text.indexOf('\r', start);
+                String segment = breakAt >= 0 ? text.substring(start, breakAt) : text.substring(start);
+                boolean arrowRun = BTFontGlyphMap.isBTArrowFont(run.fontFamily());
+                for (ASTTextRun textRun : ResolvedTextFlowAstConverter.convertRunText(segment, run, current, options)) {
+                    if (arrowRun) {
+                        textRun.text("→");
+                        textRun.fontFamily(null);
+                        textRun.fontStyle(null);
+                        textRun.grepMathFont(false);
+                        textRun.subscript(false);
+                        textRun.superscript(false);
+                    }
+                    current.addItem(textRun);
+                }
+                if (breakAt < 0) break;
+                addNonEmptyParagraph(paragraphs, current);
+                current = createResolvedCellParagraph(ctx, idmlParagraph, resolvedParagraph);
+                start = breakAt + 1;
+            }
+        }
+
+        addNonEmptyParagraph(paragraphs, current);
+        return paragraphs;
+    }
+
+    private static ASTParagraph createResolvedCellParagraph(
+            ResolvedBuildContext ctx,
+            IDMLParagraph idmlParagraph,
+            ResolvedParagraph resolvedParagraph) {
+        ASTParagraph para = new ASTParagraph();
+        if (idmlParagraph != null) {
+            if (idmlParagraph.appliedParagraphStyle() != null) {
+                para.paragraphStyleRef(idmlParagraph.appliedParagraphStyle());
+            }
+            ParagraphPropertyResolver.apply(para, idmlParagraph, resolvedParagraph, ctx, null);
+        } else {
+            applyResolvedParagraphPropertiesOnly(para, resolvedParagraph);
+        }
+        return para;
+    }
+
+    private static void addNonEmptyParagraph(List<ASTParagraph> paragraphs, ASTParagraph para) {
+        if (paragraphs == null || para == null || para.items() == null || para.items().isEmpty()) return;
+        paragraphs.add(para);
+    }
+
+    private static void appendResolvedInlineAnchorInOrder(
+            ResolvedBuildContext ctx,
+            List<ResolvedRun> runs,
+            int runIndex,
+            ASTParagraph para) {
+        if (ctx == null || runs == null || runIndex < 0 || runIndex >= runs.size() || para == null) {
+            return;
+        }
+        ResolvedRun run = runs.get(runIndex);
+        if (run == null || !run.isInlineAnchor()) return;
+        Integer anchoredId = run.anchoredObjectId();
+        if (anchoredId == null || anchoredId <= 0) return;
+        if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
+            return;
+        }
+        String previousText = nearestResolvedText(runs, runIndex - 1, -1);
+        String nextText = nearestResolvedText(runs, runIndex + 1, 1);
+        List<ASTInlineItem> plannedItems =
+                InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
+        if (plannedItems == null) return;
+        InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, para);
+        appendInlineItemsKeepingObjectsInline(para, plannedItems);
     }
 
     static void applyComposedLinePitchFallback(ASTParagraph para,
