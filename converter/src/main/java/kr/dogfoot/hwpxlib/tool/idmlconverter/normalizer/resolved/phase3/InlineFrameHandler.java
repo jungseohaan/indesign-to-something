@@ -1435,12 +1435,12 @@ public class InlineFrameHandler {
             boolean preserveTransparentShell = shouldPreserveTransparentInlineShell(shellImage);
             if (preserveTransparentShell && extractedShellImageOwnsGeometry(shellPlan)) {
                 ASTInlineObject transparentShell = buildTransparentInlineShellImageObject(
-                        ctx, anchoredObjectId, shellPlan, shellBounds, childTfs, shellImage);
+                        ctx, anchoredObjectId, anchorItem, shellPlan, shellBounds, childTfs, shellImage);
                 if (transparentShell != null) {
                     if (shell != null) {
                         ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
                                 "PLACE_INLINE_TEXT_SHELL",
-                                "placed planned transparent inline textless shell as IMAGE with HWPX text overlays");
+                                "placed planned transparent inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
                     }
                     return transparentShell;
                 }
@@ -1505,6 +1505,7 @@ public class InlineFrameHandler {
     private static ASTInlineObject buildTransparentInlineShellImageObject(
             ResolvedBuildContext ctx,
             int anchoredObjectId,
+            ResolvedPageItem anchorItem,
             ObjectPlan shellPlan,
             double[] shellBounds,
             java.util.List<ResolvedTextFrame> childTfs,
@@ -1519,10 +1520,10 @@ public class InlineFrameHandler {
             if (w <= 0 || h <= 0) return null;
 
             ASTInlineObject obj = new ASTInlineObject();
-            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
             obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
-            obj.imageData(VisualCropper.encodePng(shellImage));
-            obj.imageFormat("png");
+            obj.imageFillData(flattenOntoWhite(shellImage));
+            obj.forceImageFill(true);
             obj.pixelWidth(shellImage.getWidth());
             obj.pixelHeight(shellImage.getHeight());
             obj.width(CoordinateConverter.pointsToHwpunits(w));
@@ -1542,8 +1543,16 @@ public class InlineFrameHandler {
                 obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pageLocal[0] * scale));
             }
 
-            attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
-            if (obj.overlayFrames() == null || obj.overlayFrames().isEmpty()) return null;
+            if (childTfs != null && childTfs.size() == 1) {
+                applyInlineShellTextMargins(ctx, obj, shellPlan, anchorItem, childTfs);
+            }
+            if (childTfs != null) {
+                for (ResolvedTextFrame childTf : childTfs) {
+                    if (isOrcCarrierTextFrame(childTf)) continue;
+                    buildBadgeParagraph(ctx, childTf, obj);
+                }
+            }
+            if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return null;
             for (ResolvedTextFrame childTf : childTfs) {
                 markInlineShellChildTextPlaced(ctx, childTf);
             }
