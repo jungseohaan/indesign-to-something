@@ -173,9 +173,12 @@ public class HwpxParagraphBuilder {
             paraPrId = lineSpacingResolver.applyBetweenLinesSpacing(paraPrId, astPara);
         }
 
-        // 분수 수식이 줄 간격보다 크면 줄 간격 확장 (명시적 lineSpacing 없을 때만)
+        // 분수 수식이 줄 간격보다 크면 줄 간격 확장.
+        // 원본이 고정 줄간격(FIXED)을 지정했더라도, 분수는 세로 2줄 높이라 그 값보다
+        // 크면 윗줄에 겹쳐 붙는다(실측: 3단원 (3)y=5/x 가 (1)(2)줄에 붙음). 확장 여부는
+        // ensureLineSpacingForInline 내부가 "FIXED 값 < 분수 높이"일 때만 늘리도록 판단한다.
         long maxEqH = lineSpacingResolver.maxFractionEquationHeight(astPara);
-        if (maxEqH > maxInlineH && maxEqH > ConverterConstants.INLINE_LINE_SPACING_THRESHOLD && astPara.lineSpacing() == null) {
+        if (maxEqH > maxInlineH && maxEqH > ConverterConstants.INLINE_LINE_SPACING_THRESHOLD) {
             paraPrId = lineSpacingResolver.ensureLineSpacingForInline(paraPrId, maxEqH);
         }
 

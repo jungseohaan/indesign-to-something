@@ -378,12 +378,37 @@ public class EHFontGlyphMap {
                 continue;
             }
 
-            // 구조 문자 (괄호): 스킵 (분수 시각 장식)
-            // [, ], {, }, | → 분수 괄호 요소
+            // EH분수소문자 폰트에서 [ \ ] ^ (0x5B-0x5E) 자리는 분수선을 포함한
+            // 특수 분모 글리프다(TTF 렌더 확인): [→x, \→g, ]→y, ^→6.
+            // 이전엔 "괄호 장식"으로 스킵돼 분모가 통째로 사라졌다(실측: 3단원 y=5/x → 5/□).
+            char fracDenomGlyph = decodeFractionDenominatorGlyph(c);
+            if (fracDenomGlyph != 0) {
+                denom.append(fracDenomGlyph);
+                continue;
+            }
+
+            // 그 외 구조 문자 ({ } |): 스킵 (분수 시각 장식)
         }
 
         if (numer.length() == 0 && denom.length() == 0) return null;
         return new String[]{numer.toString(), denom.toString()};
+    }
+
+    /**
+     * EH분수소문자 폰트의 특수 분모 글리프 디코딩.
+     * <p>0x5B-0x5E([ \ ] ^) 자리에 분수선을 포함한 분모 문자가 그려져 있다
+     * (TTF 렌더 확인): [→x, \→g, ]→y, ^→6. shift-digit(분자)·대문자(분자 소문자)
+     * 뒤 default 분기에서만 도달하므로 shift-digit 우선순위와 충돌하지 않는다.
+     *
+     * @return 디코딩된 분모 문자, 또는 매핑 없으면 0
+     */
+    private static char decodeFractionDenominatorGlyph(char c) {
+        switch (c) {
+            case '[': return 'x';
+            case '\\': return 'g';
+            case ']': return 'y';
+            default: return 0;
+        }
     }
 
     /**
