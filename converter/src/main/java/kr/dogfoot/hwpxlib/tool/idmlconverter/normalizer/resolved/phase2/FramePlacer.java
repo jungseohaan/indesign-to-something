@@ -769,6 +769,7 @@ public final class FramePlacer {
         if (!isSourceSingleLineTextFrame(tf)) return false;
         if (hasRenderedVisualShell || plannedVisualTextOverlay) return true;
         if (hasTextShellPlan(ctx, tf)) return true;
+        if (isSourceSingleLineFixedCarrier(tf)) return true;
         return startsWithInlineAnchor(ctx, tf);
     }
 
@@ -1304,5 +1305,20 @@ public final class FramePlacer {
         if (tf.paragraphStart() != tf.paragraphEnd()) return false;
         if (tf.frameParaTexts() != null && tf.frameParaTexts().size() != 1) return false;
         return hasVisibleTextExcludingObjectControls(visibleText);
+    }
+
+    private static boolean isSourceSingleLineFixedCarrier(ResolvedTextFrame tf) {
+        if (!isSourceSingleLineTextFrame(tf)) return false;
+        if (tf.overflows()) return false;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() != 1) return false;
+        ResolvedTextFrame.ComposedLine line = lines.get(0);
+        if (line == null || line.bounds() == null || line.bounds().length < 4) return false;
+        double[] frame = boundsOf(tf);
+        if (frame == null || frame.length < 4) return false;
+        double frameH = Math.abs(frame[2] - frame[0]);
+        double lineH = Math.abs(line.bounds()[2] - line.bounds()[0]);
+        if (frameH <= 0 || lineH <= 0) return false;
+        return frameH <= lineH * 1.8;
     }
 }

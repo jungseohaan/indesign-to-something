@@ -1491,13 +1491,12 @@ public final class StoryConverter {
                 if (insertComposedLineBreaks(para, lines)) {
                     processed.add(para);
                     para.alignment("left");
+                    para.squeezeLineWrap(true);
                     changedBlock = true;
                 }
             }
-            // Explicit break edits preserve the source line structure.
-            // Do not turn the whole text frame into HWPX SQUEEZE: that flag is
-            // reserved for source single-line labels and would force body text
-            // into one visual line.
+            // Keep the TextFrame editable/ordinary while applying the
+            // SOURCE_TEXT_WRAP contract at paragraph scope only.
         }
     }
 
@@ -1539,6 +1538,7 @@ public final class StoryConverter {
                     continue;
                 }
                 if (insertComposedLineBreaks(para, lines)) {
+                    para.squeezeLineWrap(true);
                     processed.add(para);
                     changedBlock = true;
                     insertedBreaks += Math.max(0, lines.size() - 1);
@@ -1553,10 +1553,12 @@ public final class StoryConverter {
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.lineCarriers", 0);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.hardLineBreaks", insertedBreaks);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsApplied", applied);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.squeezeParagraphs", applied);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsSkipped", skipped);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsObserved", observed);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalHardLineBreaks", insertedBreaks);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsApplied", applied);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalSqueezeParagraphs", applied);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsSkipped", skipped);
             if (ctx.ownershipWarningLines != null) {
                 ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_HARD_LINE_BREAKS\""
@@ -1564,8 +1566,9 @@ public final class StoryConverter {
                         + ",\"applied\":" + applied
                         + ",\"lineCarriers\":0"
                         + ",\"hardLineBreaks\":" + insertedBreaks
+                        + ",\"squeezeParagraphs\":" + applied
                         + ",\"skipped\":" + skipped
-                        + ",\"detail\":\"SOURCE_TEXT_WRAP is executed inside the original editable TextFrame by inserting source composed-line hard line breaks; per-line floating carriers and paragraph SQUEEZE remain disabled\"}");
+                        + ",\"detail\":\"SOURCE_TEXT_WRAP: source composed-line hard line breaks plus paragraph-local SQUEEZE inside the original editable TextFrame; per-line floating carriers remain disabled\"}");
             }
         }
     }

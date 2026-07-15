@@ -84,6 +84,9 @@ final class DrawTextBoxComposer {
         spec.lineWrap = HwpxTextBoxBuilder.textFrameLineWrap(block);
         spec.verticalAlign = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
         spec.paragraphs = block.paragraphs();
+        if (block.noAutoLineWrap()) {
+            markParagraphLocalSqueeze(spec.paragraphs);
+        }
         return spec;
     }
 
@@ -109,7 +112,19 @@ final class DrawTextBoxComposer {
         spec.verticalAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
         spec.paragraphs = obj.paragraphs();
         spec.inlineTables = obj.inlineTables();
+        if (obj.noAutoLineWrap()) {
+            markParagraphLocalSqueeze(spec.paragraphs);
+        }
         return spec;
+    }
+
+    private static void markParagraphLocalSqueeze(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph != null) {
+                paragraph.squeezeLineWrap(true);
+            }
+        }
     }
 
     SubList apply(Rectangle rect, Spec spec) {

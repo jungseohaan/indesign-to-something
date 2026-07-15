@@ -21,6 +21,9 @@ public class ASTParagraph {
     private String lineSpacingType; // "fixed" or "percent"
     private Integer autoLeadingPercent;
     private Short letterSpacing;
+    // Stage 1/2 execution hint: apply HWPX paragraph lineWrap=SQUEEZE to this
+    // paragraph only, without changing the owning TextFrame/drawText box.
+    private boolean squeezeLineWrap;
 
     // 단락 배경
     private boolean shadingOn;
@@ -106,6 +109,9 @@ public class ASTParagraph {
 
     public Short letterSpacing() { return letterSpacing; }
     public void letterSpacing(Short v) { this.letterSpacing = v; }
+
+    public boolean squeezeLineWrap() { return squeezeLineWrap; }
+    public void squeezeLineWrap(boolean v) { this.squeezeLineWrap = v; }
 
     public boolean shadingOn() { return shadingOn; }
     public void shadingOn(boolean v) { this.shadingOn = v; }

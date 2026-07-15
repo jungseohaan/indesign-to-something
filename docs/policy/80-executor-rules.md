@@ -187,9 +187,15 @@ Text Builder:
   elements at source composed-line boundaries, but only inside the original
   source TextFrame declared by Stage 1. This keeps the text searchable/editable
   while preventing HWPX from flowing through the planned obstacle.
-- Text Builder must not set paragraph `lineWrap=SQUEEZE` for
-  `SOURCE_TEXT_WRAP` body text. HWP may collapse narrow or wrapped body columns
-  into one-character lines when SQUEEZE is applied to ordinary paragraphs.
+- Text Builder should pair `SOURCE_TEXT_WRAP` source-composed hard line breaks
+  with paragraph-local `lineWrap=SQUEEZE` on the affected paragraphs. This is a
+  Stage 1 contract execution detail, not a visual recovery heuristic.
+- Text Builder must not set `lineWrap=SQUEEZE` on a whole TextFrame/drawText
+  carrier or on unrelated paragraphs merely because a column is narrow,
+  rendered text overlaps, or a screenshot looks wrapped.
+- Source single-line fixed carriers may also use no-wrap/SQUEEZE when resolved
+  metadata proves one composed line, no overflow, and fixed source carrier
+  height. This is a source-layout fact, not a phrase/page exception.
 - Text Builder must not execute `SOURCE_TEXT_WRAP` as per-composed-line
   floating text carriers. The original source TextFrame remains a coherent
   editable HWPX text flow; any remaining wrap mismatch is reported as a layout
