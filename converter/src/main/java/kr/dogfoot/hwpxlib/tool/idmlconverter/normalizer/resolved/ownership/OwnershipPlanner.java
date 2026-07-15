@@ -447,11 +447,16 @@ public final class OwnershipPlanner {
                 return dropStoryFlowInlineShellDecoration(plan,
                         "story_flow_inline_shell_decoration_covered_by_text_shell_or_page_plane");
             }
-            return plan
-                    .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
-                    .withVisualAction(VisualAction.PLACE_INLINE_PNG,
-                            "direct_story_flow_inline_graphic_owner")
+            ObjectPlan repaired = plan
+                    .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
+                    .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
+                            "direct_page_positioned_story_anchor_visual")
                     .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
+            if (isThinInlineTextStyleMarkerPlanBounds(repaired, repaired.sourceObjectIds)
+                    || isThinPagePositionedTextStyleMarkerPlanBounds(repaired)) {
+                repaired = repaired.withVisualLayer(VisualLayer.LABEL_BACKDROP);
+            }
+            return repaired;
         }
         if (isImportedStoryFlowInlineVisualWithPagePosition(plan)) {
             warnImportedPlanRepairSuppressed(plan,
@@ -654,6 +659,27 @@ public final class OwnershipPlanner {
         if (longAxis / Math.max(0.1, shortAxis) < 3.0) return false;
         for (int visualId : visualIds) {
             if (hasDescendantTextFrameExcluding(String.valueOf(visualId),
+                    new HashSet<>(), new HashSet<>())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isThinPagePositionedTextStyleMarkerPlanBounds(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) return false;
+        if (plan.sourceObjectIds.length > 4) return false;
+        double[] b = plan.bounds;
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        double longAxis = Math.max(w, h);
+        double shortAxis = Math.min(w, h);
+        if (longAxis < 6.0 || shortAxis > 4.0) return false;
+        if (longAxis / Math.max(0.1, shortAxis) < 3.0) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (hasDescendantTextFrameExcluding(String.valueOf(sourceId),
                     new HashSet<>(), new HashSet<>())) {
                 return false;
             }

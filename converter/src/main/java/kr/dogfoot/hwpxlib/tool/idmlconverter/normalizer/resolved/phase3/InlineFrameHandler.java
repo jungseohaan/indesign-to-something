@@ -3608,6 +3608,11 @@ public class InlineFrameHandler {
         // 배치 여부는 Stage 1 ObjectPlan의 PLACE_INLINE_PNG만 따른다.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            ObjectPlan pagePositionedOwner =
+                    findPagePositionedStoryAnchorOwnerPlan(ctx, rg, anchoredObjectId);
+            if (pagePositionedOwner != null) {
+                return null;
+            }
             boolean plannedAnchorMaterial = plan != null
                     && plan.placement == Placement.INLINE
                     && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
@@ -3978,6 +3983,12 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return null;
         List<ASTInlineItem> closedCarrierItems =
                 loadClosedInlineCarrierFlowItems(ctx, anchoredObjectId);
+        if (findPagePositionedStoryAnchorOwnerPlan(
+                ctx,
+                findRenderedGroupByInlineAnchorId(ctx, anchoredObjectId),
+                anchoredObjectId) != null) {
+            return new ArrayList<>();
+        }
         boolean hasDirectPlan = hasDirectExecutableInlinePlan(ctx, anchoredObjectId);
         if (!hasDirectPlan && (closedCarrierItems == null || closedCarrierItems.isEmpty())) return null;
         if (closedCarrierItems != null && !closedCarrierItems.isEmpty()) {
@@ -4062,6 +4073,132 @@ public class InlineFrameHandler {
             items.add(image);
         }
         return items;
+    }
+
+    private static ObjectPlan findPagePositionedStoryAnchorOwnerPlan(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null
+                || anchoredObjectId < 0) {
+            return null;
+        }
+        ObjectPlan best = null;
+        int bestScore = Integer.MIN_VALUE;
+        java.util.LinkedHashSet<ObjectPlan> candidates = new java.util.LinkedHashSet<>();
+        candidates.addAll(ctx.ownershipPlansForObjectTree(anchoredObjectId, 8));
+        if (rg != null) {
+            for (ObjectPlan plan : ctx.ownershipPlans) {
+                if (plan == null) continue;
+                if (planSharesRenderedSource(plan, rg)) {
+                    candidates.add(plan);
+                }
+            }
+        }
+        for (ObjectPlan plan : candidates) {
+            if (!isPagePositionedStoryAnchorOwnerPlan(ctx, plan)) continue;
+            if (rg != null && !isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)
+                    && !planSharesRenderedSource(plan, rg)) {
+                continue;
+            }
+            int score = pagePositionedStoryAnchorOwnerScore(ctx, plan, rg, anchoredObjectId);
+            if (best == null || score > bestScore) {
+                best = plan;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    private static boolean isPagePositionedStoryAnchorOwnerPlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan) {
+        if (ctx == null || ctx.resolvedData == null || plan == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.coordinateSpace != CoordinateSpace.PAGE) return false;
+        if (!plan.hasVisibleVisual()) return false;
+        return hasFloatingAnchoredInlineSource(ctx, plan.domId)
+                || hasFloatingAnchoredInlineSource(ctx, plan.renderId)
+                || hasFloatingAnchoredInlineSource(ctx, plan.sourceObjectIds)
+                || hasFloatingAnchoredInlineSource(ctx, plan.visualSourceObjectIds)
+                || hasFloatingAnchoredInlineSource(ctx, plan.exportSourceObjectIds);
+    }
+
+    private static int pagePositionedStoryAnchorOwnerScore(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        int score = 0;
+        if (isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) score += 100;
+        if (hasFloatingAnchoredInlineSource(ctx, anchoredObjectId)) score += 40;
+        if (rg != null && plan.file != null && plan.file.equals(rg.file())) score += 20;
+        if (containsInt(plan.sourceObjectIds, anchoredObjectId)
+                || containsInt(plan.visualSourceObjectIds, anchoredObjectId)
+                || containsInt(plan.exportSourceObjectIds, anchoredObjectId)) {
+            score += 10;
+        }
+        return score;
+    }
+
+    private static boolean hasFloatingAnchoredInlineSource(ResolvedBuildContext ctx, Integer sourceId) {
+        return sourceId != null && hasFloatingAnchoredInlineSource(ctx, sourceId.intValue());
+    }
+
+    private static boolean hasFloatingAnchoredInlineSource(ResolvedBuildContext ctx, int sourceId) {
+        if (ctx == null || ctx.resolvedData == null || sourceId < 0) return false;
+        return isFloatingAnchoredInlineSource(
+                ctx.resolvedData.getPageItem(String.valueOf(sourceId)));
+    }
+
+    private static boolean hasFloatingAnchoredInlineSource(ResolvedBuildContext ctx, int[] sourceIds) {
+        if (sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            if (hasFloatingAnchoredInlineSource(ctx, sourceId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean planSharesRenderedSource(ObjectPlan plan, RenderedGroup rg) {
+        if (plan == null || rg == null) return false;
+        if (plan.file != null && !plan.file.isEmpty() && plan.file.equals(rg.file())) return true;
+        if (plan.domId == rg.id()) return true;
+        if (plan.renderId != null && plan.renderId == rg.id()) return true;
+        return overlaps(plan.sourceObjectIds, rg.sourceObjectIds())
+                || overlaps(plan.sourceObjectIds, rg.exportSourceObjectIds())
+                || overlaps(plan.visualSourceObjectIds, rg.sourceObjectIds())
+                || overlaps(plan.visualSourceObjectIds, rg.exportSourceObjectIds())
+                || overlaps(plan.exportSourceObjectIds, rg.sourceObjectIds())
+                || overlaps(plan.exportSourceObjectIds, rg.exportSourceObjectIds());
+    }
+
+    private static boolean overlaps(int[] a, int[] b) {
+        if (a == null || b == null || a.length == 0 || b.length == 0) return false;
+        for (int value : a) {
+            if (containsInt(b, value)) return true;
+        }
+        return false;
+    }
+
+    private static RenderedGroup findRenderedGroupByInlineAnchorId(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null
+                || anchoredObjectId < 0) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null) continue;
+            if (rg.id() == anchoredObjectId) return rg;
+            if (rg.inlineAnchorSourceObjectId() == anchoredObjectId) return rg;
+            if (containsInt(rg.sourceObjectIds(), anchoredObjectId)
+                    || containsInt(rg.exportSourceObjectIds(), anchoredObjectId)) {
+                return rg;
+            }
+        }
+        return null;
     }
 
     private static List<ASTInlineItem> loadClosedInlineCarrierFlowItems(

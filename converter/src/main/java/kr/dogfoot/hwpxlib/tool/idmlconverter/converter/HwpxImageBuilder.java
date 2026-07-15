@@ -268,11 +268,17 @@ public class HwpxImageBuilder {
         run.charPrIDRef("0");
         Picture pic = run.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
+        int zOrder = obj.plannedZOrder() != Integer.MIN_VALUE
+                ? obj.plannedZOrder()
+                : ctx.foregroundOutputZOrder();
+        TextWrapMethod wrapMethod = isBehindTextVisualLayer(obj.plannedVisualLayer())
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT;
 
         pic.idAnd(picId)
-                .zOrderAnd(ctx.foregroundOutputZOrder())
+                .zOrderAnd(zOrder)
                 .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textWrapAnd(wrapMethod)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None)
@@ -774,7 +780,9 @@ public class HwpxImageBuilder {
     }
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
-        return "PAGE_BACKGROUND".equals(visualLayer);
+        return "PAGE_BACKGROUND".equals(visualLayer)
+                || "CONTAINER_BACKDROP".equals(visualLayer)
+                || "LABEL_BACKDROP".equals(visualLayer);
     }
 
     // ── 배경 PNG ──
