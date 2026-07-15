@@ -1323,6 +1323,7 @@ public class ASTStoryConverter {
             p.lineSpacing(source.lineSpacing());
         }
         p.letterSpacing(source.letterSpacing());
+        p.squeezeLineWrap(source.squeezeLineWrap());
         if (source.tabStops() != null) {
             for (ASTTabStop ts : source.tabStops()) {
                 p.addTabStop(ts);

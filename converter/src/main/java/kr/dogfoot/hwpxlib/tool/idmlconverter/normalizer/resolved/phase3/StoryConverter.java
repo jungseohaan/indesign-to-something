@@ -1505,9 +1505,9 @@ public final class StoryConverter {
             ResolvedBuildContext ctx, List<ASTSection> sections, List<ASTTextFrameBlock> blocks) {
         if (ctx == null || ctx.resolvedData == null || blocks == null || blocks.isEmpty()) return;
         int observed = 0;
-        int materialized = 0;
+        int applied = 0;
+        int insertedBreaks = 0;
         int skipped = 0;
-        Map<ASTTextFrameBlock, List<ASTTextFrameBlock>> replacements = new IdentityHashMap<>();
         for (ASTTextFrameBlock block : new ArrayList<>(blocks)) {
             if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
             int textFrameId = parseTextFrameBlockSourceId(block.sourceId());
@@ -1516,316 +1516,61 @@ public final class StoryConverter {
             if (contract == null || !contract.isSourceTextWrap()) continue;
             observed++;
             ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(Integer.toString(textFrameId));
-            List<ASTTextFrameBlock> carriers = materializeSourceTextWrapLineCarriers(ctx, block, tf);
-            if (carriers == null || carriers.isEmpty()) {
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) {
                 skipped++;
                 continue;
             }
-            replacements.put(block, carriers);
-            materialized += sourceTextWrapCarrierCount(carriers);
-        }
-        if (!replacements.isEmpty()) {
-            replaceTextFrameBlocks(sections, blocks, replacements);
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara = composedLinesByParagraph(tf);
+            if (linesByPara.isEmpty()) {
+                skipped++;
+                continue;
+            }
+            boolean changedBlock = false;
+            Set<ASTParagraph> processed = new HashSet<>();
+            for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : linesByPara.entrySet()) {
+                List<ResolvedTextFrame.ComposedLine> lines = entry.getValue();
+                if (lines == null || lines.size() < 2) continue;
+                ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
+                if (para == null) {
+                    para = paragraphAtComposedParaIndex(block.paragraphs(), entry.getKey(), processed);
+                }
+                if (para == null) {
+                    skipped++;
+                    continue;
+                }
+                if (insertComposedLineBreaks(para, lines)) {
+                    para.squeezeLineWrap(true);
+                    processed.add(para);
+                    changedBlock = true;
+                    insertedBreaks += Math.max(0, lines.size() - 1);
+                } else {
+                    skipped++;
+                }
+            }
+            if (changedBlock) applied++;
         }
         if (observed > 0) {
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsObserved", observed);
-            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.lineCarriers", materialized);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.lineCarriers", 0);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.hardLineBreaks", insertedBreaks);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsApplied", applied);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.squeezeParagraphs", applied);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsSkipped", skipped);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsObserved", observed);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalHardLineBreaks", insertedBreaks);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsApplied", applied);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalSqueezeParagraphs", applied);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsSkipped", skipped);
             if (ctx.ownershipWarningLines != null) {
-                ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_LINE_CARRIERS\""
+                ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_HARD_LINE_BREAKS\""
                         + ",\"count\":" + observed
-                        + ",\"lineCarriers\":" + materialized
+                        + ",\"applied\":" + applied
+                        + ",\"lineCarriers\":0"
+                        + ",\"hardLineBreaks\":" + insertedBreaks
+                        + ",\"squeezeParagraphs\":" + applied
                         + ",\"skipped\":" + skipped
-                        + ",\"detail\":\"SOURCE_TEXT_WRAP is executed as composed-line fixed HWPX text carriers with no hard lineBreak materialization\"}");
+                        + ",\"detail\":\"SOURCE_TEXT_WRAP is executed inside the original editable TextFrame by inserting source composed-line hard line breaks and paragraph SQUEEZE; per-line floating carriers remain disabled\"}");
             }
-        }
-    }
-
-    private static List<ASTTextFrameBlock> materializeSourceTextWrapLineCarriers(
-            ResolvedBuildContext ctx,
-            ASTTextFrameBlock block,
-            ResolvedTextFrame tf) {
-        if (ctx == null || block == null || tf == null
-                || tf.composedLines() == null || tf.composedLines().size() < 2
-                || block.paragraphs() == null || block.paragraphs().isEmpty()) {
-            return Collections.emptyList();
-        }
-        Map<Integer, List<ResolvedTextFrame.ComposedLine>> byParagraph = composedLinesByParagraph(tf);
-        if (byParagraph.isEmpty()) return Collections.emptyList();
-
-        List<ASTTextFrameBlock> carriers = new ArrayList<>();
-        Set<ASTParagraph> processed = new HashSet<>();
-        Set<ASTParagraph> converted = Collections.newSetFromMap(new IdentityHashMap<>());
-        int lineIndex = 0;
-        for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : byParagraph.entrySet()) {
-            List<ResolvedTextFrame.ComposedLine> lines = entry.getValue();
-            if (lines == null || lines.isEmpty()) continue;
-            ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
-            if (para == null) {
-                para = paragraphAtComposedParaIndex(block.paragraphs(), entry.getKey(), processed);
-            }
-            if (para == null) {
-                warnSourceTextWrapSkipped(ctx, tf.id(), "paragraph_match_failed");
-                continue;
-            }
-            if (containsNonTextInlineMaterial(para)) {
-                warnSourceTextWrapSkipped(ctx, tf.id(), "paragraph_non_text_inline_material");
-                processed.add(para);
-                continue;
-            }
-            List<TextRange> ranges = composedLineTextRanges(para, lines);
-            if (ranges.size() != lines.size()) {
-                warnSourceTextWrapSkipped(ctx, tf.id(), "line_range_mapping_failed");
-                processed.add(para);
-                continue;
-            }
-            int before = carriers.size();
-            for (int i = 0; i < lines.size(); i++) {
-                ResolvedTextFrame.ComposedLine line = lines.get(i);
-                long[] bounds = pageRelativeLineBounds(tf, Collections.singletonList(line), ctx.resolvedData.scaleFactor());
-                if (bounds == null) {
-                    warnSourceTextWrapSkipped(ctx, tf.id(), "line_bounds_missing");
-                    continue;
-                }
-                ASTParagraph linePara = extractParagraphTextRange(para, ranges.get(i));
-                if (linePara == null || paragraphVisibleText(linePara).isEmpty()) continue;
-                ASTTextFrameBlock carrier = sourceTextWrapCarrierFrom(block, linePara, bounds, lineIndex++);
-                carriers.add(carrier);
-            }
-            if (carriers.size() > before) {
-                converted.add(para);
-            }
-            processed.add(para);
-        }
-        if (!converted.isEmpty()) {
-            block.paragraphs().removeIf(converted::contains);
-        }
-        if (carriers.isEmpty()) {
-            return Collections.emptyList();
-        }
-        if (!hasVisibleParagraphMaterial(block.paragraphs())) {
-            return carriers;
-        }
-        List<ASTTextFrameBlock> withRemainder = new ArrayList<>();
-        withRemainder.add(block);
-        withRemainder.addAll(carriers);
-        return withRemainder;
-    }
-
-    private static int sourceTextWrapCarrierCount(List<ASTTextFrameBlock> blocks) {
-        if (blocks == null || blocks.isEmpty()) return 0;
-        int count = 0;
-        for (ASTTextFrameBlock block : blocks) {
-            if (block != null && block.sourceComposedFixedText()) count++;
-        }
-        return count;
-    }
-
-    private static boolean hasVisibleParagraphMaterial(List<ASTParagraph> paragraphs) {
-        if (paragraphs == null || paragraphs.isEmpty()) return false;
-        for (ASTParagraph paragraph : paragraphs) {
-            if (paragraph == null) continue;
-            if (paragraph.inlineTable() != null) return true;
-            if (paragraph.items() == null) continue;
-            for (ASTInlineItem item : paragraph.items()) {
-                if (item instanceof ASTTextRun) {
-                    String text = ((ASTTextRun) item).text();
-                    if (text != null && !text.trim().isEmpty()) return true;
-                } else if (item != null) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static boolean containsNonTextInlineMaterial(ASTParagraph paragraph) {
-        if (paragraph == null || paragraph.items() == null) return false;
-        if (paragraph.inlineTable() != null) return true;
-        for (ASTInlineItem item : paragraph.items()) {
-            if (item == null || item instanceof ASTTextRun) continue;
-            if (item instanceof ASTBreak) continue;
-            return true;
-        }
-        return false;
-    }
-
-    private static boolean containsNonTextInlineMaterial(List<ASTParagraph> paragraphs) {
-        if (paragraphs == null) return false;
-        for (ASTParagraph paragraph : paragraphs) {
-            if (containsNonTextInlineMaterial(paragraph)) return true;
-        }
-        return false;
-    }
-
-    private static ASTTextFrameBlock sourceTextWrapCarrierFrom(
-            ASTTextFrameBlock source,
-            ASTParagraph paragraph,
-            long[] bounds,
-            int lineIndex) {
-        ASTTextFrameBlock carrier = new ASTTextFrameBlock();
-        carrier.sourceId((source.sourceId() != null ? source.sourceId() : "tf") + "#twline" + lineIndex);
-        carrier.storyId(source.storyId());
-        carrier.x(bounds[0]);
-        carrier.y(bounds[1]);
-        carrier.width(Math.max(1, bounds[2] - bounds[0]));
-        carrier.height(Math.max(1, bounds[3] - bounds[1]));
-        carrier.zOrder(source.zOrder());
-        carrier.verticalText(source.verticalText());
-        carrier.verticalJustification(source.verticalJustification());
-        carrier.rotationAngle(source.rotationAngle());
-        carrier.plannedVisualTextOverlay(source.plannedVisualTextOverlay());
-        carrier.plannedShellVisualLayer(source.plannedShellVisualLayer());
-        carrier.anchoredFlowWithText(source.anchoredFlowWithText());
-        carrier.distributed(true);
-        carrier.sourceComposedFixedText(true);
-        carrier.noAutoLineWrap(true);
-        carrier.frameVisibleText(paragraphVisibleText(paragraph));
-        carrier.frameVisibleTextLength(carrier.frameVisibleText() != null ? carrier.frameVisibleText().length() : 0);
-        carrier.storyTotalTextLength(source.storyTotalTextLength());
-        carrier.addParagraph(paragraph);
-        return carrier;
-    }
-
-    private static void replaceTextFrameBlocks(
-            List<ASTSection> sections,
-            List<ASTTextFrameBlock> storyBlocks,
-            Map<ASTTextFrameBlock, List<ASTTextFrameBlock>> replacements) {
-        if (replacements == null || replacements.isEmpty()) return;
-        if (sections != null) {
-            for (ASTSection section : sections) {
-                if (section == null || section.blocks() == null) continue;
-                List<ASTBlock> sectionBlocks = section.blocks();
-                for (ListIterator<ASTBlock> it = sectionBlocks.listIterator(); it.hasNext();) {
-                    ASTBlock block = it.next();
-                    List<ASTTextFrameBlock> carriers = replacements.get(block);
-                    if (carriers == null || carriers.isEmpty()) continue;
-                    it.remove();
-                    for (ASTTextFrameBlock carrier : carriers) {
-                        it.add(carrier);
-                    }
-                }
-            }
-        }
-        storyBlocks.clear();
-        if (sections != null) {
-            storyBlocks.addAll(textFrameBlocks(sections));
-        }
-    }
-
-    private static List<TextRange> composedLineTextRanges(
-            ASTParagraph para,
-            List<ResolvedTextFrame.ComposedLine> lines) {
-        if (para == null || lines == null || lines.isEmpty()) return Collections.emptyList();
-        NormalizedTextMap paraMap = normalizedTextMap(para);
-        if (paraMap == null || paraMap.normalized.isEmpty()) return Collections.emptyList();
-        String fullText = paragraphTextRunText(para);
-        List<TextRange> ranges = new ArrayList<>();
-        int normCursor = 0;
-        int textCursor = 0;
-        for (int i = 0; i < lines.size(); i++) {
-            String lineNorm = normalizeForParagraphMatch(lines.get(i) != null ? lines.get(i).text() : null);
-            if (lineNorm.isEmpty()) return Collections.emptyList();
-            int endNorm = Math.min(paraMap.textOffsetsAfterNormalizedChars.length - 1,
-                    normCursor + lineNorm.length());
-            if (endNorm <= normCursor && i < lines.size() - 1) return Collections.emptyList();
-            int endText = i == lines.size() - 1
-                    ? paraMap.textLength
-                    : paraMap.textOffsetsAfterNormalizedChars[endNorm];
-            endText = Math.max(textCursor, Math.min(endText, paraMap.textLength));
-            if (i < lines.size() - 1) {
-                while (endText < paraMap.textLength
-                        && fullText != null
-                        && endText < fullText.length()
-                        && isSoftWhitespace(fullText.charAt(endText))) {
-                    endText++;
-                }
-            }
-            ranges.add(new TextRange(textCursor, endText));
-            textCursor = endText;
-            normCursor = endNorm;
-        }
-        return ranges;
-    }
-
-    private static ASTParagraph extractParagraphTextRange(ASTParagraph source, TextRange range) {
-        if (source == null || range == null || source.items() == null || range.end <= range.start) return null;
-        ASTParagraph paragraph = copyParagraphLayoutForFixedCarrier(source);
-        int pos = 0;
-        for (ASTInlineItem item : source.items()) {
-            if (!(item instanceof ASTTextRun)) continue;
-            ASTTextRun run = (ASTTextRun) item;
-            String text = run.text();
-            int len = text != null ? text.length() : 0;
-            int runStart = pos;
-            int runEnd = pos + len;
-            pos = runEnd;
-            int from = Math.max(range.start, runStart);
-            int to = Math.min(range.end, runEnd);
-            if (to <= from) continue;
-            String slice = text.substring(from - runStart, to - runStart);
-            if (slice.isEmpty()) continue;
-            paragraph.addItem(copyTextRun(run, slice));
-        }
-        return paragraph.items().isEmpty() ? null : paragraph;
-    }
-
-    private static ASTParagraph copyParagraphLayoutForFixedCarrier(ASTParagraph source) {
-        ASTParagraph copy = new ASTParagraph();
-        copy.paragraphStyleRef(source.paragraphStyleRef());
-        copy.alignment(source.alignment());
-        copy.firstLineIndent(0L);
-        copy.leftMargin(0L);
-        copy.rightMargin(0L);
-        copy.spaceBefore(0L);
-        copy.spaceAfter(0L);
-        copy.lineSpacing(source.lineSpacing());
-        copy.lineSpacingType(source.lineSpacingType());
-        copy.autoLeadingPercent(source.autoLeadingPercent());
-        copy.letterSpacing(source.letterSpacing());
-        copy.keepLinesTogether(true);
-        return copy;
-    }
-
-    private static String paragraphTextRunText(ASTParagraph para) {
-        if (para == null || para.items() == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (ASTInlineItem item : para.items()) {
-            if (item instanceof ASTTextRun) {
-                String text = ((ASTTextRun) item).text();
-                if (text != null) sb.append(text);
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String paragraphVisibleText(ASTParagraph para) {
-        String text = paragraphTextRunText(para);
-        if (text == null) return "";
-        return text.replace("\r", "").replace("\n", "").trim();
-    }
-
-    private static boolean isSoftWhitespace(char ch) {
-        return ch != '\r' && ch != '\n' && Character.isWhitespace(ch);
-    }
-
-    private static void warnSourceTextWrapSkipped(
-            ResolvedBuildContext ctx,
-            String textFrameId,
-            String reason) {
-        if (ctx == null || ctx.ownershipWarningLines == null) return;
-        ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_LINE_CARRIERS_SKIPPED\""
-                + ",\"textFrameId\":\"" + ObjectPlan.escape(textFrameId) + "\""
-                + ",\"reason\":\"" + ObjectPlan.escape(reason) + "\"}");
-    }
-
-    private static final class TextRange {
-        final int start;
-        final int end;
-
-        TextRange(int start, int end) {
-            this.start = start;
-            this.end = end;
         }
     }
 

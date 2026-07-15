@@ -183,13 +183,16 @@ Text Builder:
   Stage 1 contract or by validation, not by ad hoc `narrowedWidth`,
   `narrowedXOffset`, spacer insertion, or legacy `FloatingImageMerger`
   recovery.
-- Text Builder must not execute `SOURCE_TEXT_WRAP` by inserting hard
-  `lineBreak` elements at source composed-line boundaries. Those boundaries are
-  automatic layout evidence; they are not authored content breaks.
-- When HWP lacks stable floating-object TextWrap, Text Builder may execute
-  `SOURCE_TEXT_WRAP` as source-composed line carriers with line-local
-  no-auto-line-wrap/SQUEEZE. It must not apply SQUEEZE to the whole source
-  TextFrame.
+- Text Builder may execute `SOURCE_TEXT_WRAP` by inserting hard `lineBreak`
+  elements at source composed-line boundaries, but only inside the original
+  source TextFrame declared by Stage 1. This keeps the text searchable/editable
+  while preventing HWPX from flowing through the planned obstacle.
+- Text Builder may set paragraph `lineWrap=SQUEEZE` only on paragraphs where it
+  inserted those source-composed hard line breaks for `SOURCE_TEXT_WRAP`.
+- Text Builder must not execute `SOURCE_TEXT_WRAP` as per-composed-line
+  floating text carriers. The original source TextFrame remains a coherent
+  editable HWPX text flow; any remaining wrap mismatch is reported as a layout
+  approximation gap rather than repaired by fragmenting text.
 - HWPX drawText carriers use the same positive source-derived height for
   `orgSz`, `curSz`, corner points, and `sz`. `curSz height=0` is not an
   auto-height policy; some renderers treat it as an invisible zero-height

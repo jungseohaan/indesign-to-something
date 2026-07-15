@@ -53,6 +53,7 @@ public class ASTParagraph {
     private boolean keepWithNext;
     private boolean keepLinesTogether;
     private boolean pageBreakBefore;
+    private boolean squeezeLineWrap;
 
     // "Indent to Here" (ACE 7) 위치 (HWPUNIT). 0이면 미설정.
     // U+2028 강제 줄바꿈 후 이 위치에 탭 삽입하여 들여쓰기 재현.
@@ -173,6 +174,9 @@ public class ASTParagraph {
 
     public boolean pageBreakBefore() { return pageBreakBefore; }
     public void pageBreakBefore(boolean v) { this.pageBreakBefore = v; }
+
+    public boolean squeezeLineWrap() { return squeezeLineWrap; }
+    public void squeezeLineWrap(boolean v) { this.squeezeLineWrap = v; }
 
     public String pendingUnderlineColor() { return pendingUnderlineColor; }
     public void pendingUnderlineColor(String v) { this.pendingUnderlineColor = v; }

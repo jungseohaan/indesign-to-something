@@ -105,6 +105,7 @@ public final class ParagraphTextHelpers {
         if (original.spaceAfter() != null) split.spaceAfter(original.spaceAfter());
         if (original.leftMargin() != null) split.leftMargin(original.leftMargin());
         if (original.firstLineIndent() != null) split.firstLineIndent(original.firstLineIndent());
+        split.squeezeLineWrap(original.squeezeLineWrap());
 
         // 텍스트 런을 frameText 길이에 맞게 복제
         int remaining = frameText.length();
@@ -146,6 +147,7 @@ public final class ParagraphTextHelpers {
         if (original.spaceBefore() != null) cont.spaceBefore(original.spaceBefore());
         if (original.spaceAfter() != null) cont.spaceAfter(original.spaceAfter());
         if (original.leftMargin() != null) cont.leftMargin(original.leftMargin());
+        cont.squeezeLineWrap(original.squeezeLineWrap());
 
         int skipped = 0;
         for (ASTInlineItem item : original.items()) {
