@@ -495,6 +495,7 @@ public class StoryLoader {
                                 if (resolvedStyleVaries) {
                                     partSplit = RunBuilder.splitIdmlRunByResolvedRuns(ctx, run, partText, resolvedRuns, resolvedRunIdx,
                                             para, sc);
+                                    if (partSplit) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
                                 }
                                 if (!partSplit) {
                                     ResolvedRun matchedRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
@@ -560,6 +561,7 @@ public class StoryLoader {
                         if (resolvedStyleVaries) {
                             splitByResolved = RunBuilder.splitIdmlRunByResolvedRuns(ctx, run, text, resolvedRuns, resolvedRunIdx,
                                     para, sc);
+                            if (splitByResolved) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
                         }
                         if (!splitByResolved) {
                             ResolvedRun matchedRR2 = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, text);

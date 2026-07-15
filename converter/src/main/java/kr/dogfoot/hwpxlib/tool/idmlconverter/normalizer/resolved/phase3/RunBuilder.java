@@ -938,17 +938,19 @@ class RunBuilder {
             String rrText = rr.text();
             if (rrText == null || rrText.isEmpty()) { rIdx++; continue; }
 
-            // resolved 런 텍스트가 remaining의 접두사인지 확인
-            // 특수 공백(Figure Space \u2007 등)을 일반 공백으로 정규화하여 비교
+            // resolved 런 텍스트가 remaining의 접두사인지 확인.
+            // IDML inline anchor 뒤의 layout tab/특수 공백은 StoryLoader에서 제거될 수 있으므로
+            // 비교 시에만 앞쪽 layout whitespace 누락을 허용한다. 실제 출력 텍스트는 remaining에서 보존한다.
             String normRemaining = normalizeSpaces(remaining);
             String normRRText = normalizeSpaces(rrText);
-            if (normRemaining.startsWith(normRRText)) {
+            int matchedPrefixLen = matchedResolvedPrefixLength(normRemaining, normRRText);
+            if (matchedPrefixLen > 0) {
                 // 정규화 후 정확 접두사 매칭 → HIGH (특수 공백 포함 원문 raw 매칭도 이 경로로 처리됨)
-                int cutLen = findOriginalLength(remaining, normRRText.length());
+                int cutLen = findOriginalLength(remaining, matchedPrefixLen);
                 segments.add(new Segment(remaining.substring(0, cutLen), rIdx, MatchConfidence.HIGH));
                 remaining = remaining.substring(cutLen);
                 rIdx++;
-            } else if (rrText.length() > 0 && remaining.startsWith(rrText.substring(0, Math.min(3, rrText.length())))) {
+            } else if (startsWithResolvedRunKey(remaining, rrText)) {
                 // 부분 매칭: 앞 3자만 일치 → 다음 런 키워드로 분할
                 // 성공하면 MEDIUM, 분할 실패 시 LOW
                 if (rIdx + 1 < resolvedRuns.size()) {
@@ -982,10 +984,12 @@ class RunBuilder {
         // 분할이 없으면(세그먼트 1개) 기존 로직 사용
         if (segments.size() <= 1 && !foundSplit) return false;
 
+        int lastResolvedRunIdx = -1;
         // 각 세그먼트별로 ASTTextRun 생성 (confidence 전달)
         for (Segment seg : segments) {
             ResolvedRun rr = (seg.rrIdx >= 0 && seg.rrIdx < resolvedRuns.size())
                     ? resolvedRuns.get(seg.rrIdx) : null;
+            if (rr != null) lastResolvedRunIdx = Math.max(lastResolvedRunIdx, seg.rrIdx);
             ResolvedRun effectiveRr = rr != null ? rr : findDefaultResolvedRun(ctx, resolvedRuns);
             // findDefaultResolvedRun 폴백은 신뢰도 강등
             MatchConfidence effConf = (rr != null) ? seg.confidence : MatchConfidence.LOW;
@@ -1011,6 +1015,9 @@ class RunBuilder {
             if (!splitBulletRun(ctx, tr, para)) {
                 splitChemicalFormulasAndLatinVarsInMixedText(ctx, tr, para);
             }
+        }
+        if (lastResolvedRunIdx >= 0) {
+            ctx.lastMatchResult[0] = lastResolvedRunIdx;
         }
         return true;
     }
@@ -1045,7 +1052,51 @@ class RunBuilder {
     static String normalizeSpaces(String s) {
         if (s == null) return "";
         return s.replace('\u2007', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+                .replace('\u2005', ' ').replace('\u2006', ' ')
                 .replace('\u2009', ' ').replace('\u200A', ' ').replace('\u00A0', ' ');
+    }
+
+    private static int matchedResolvedPrefixLength(String normalizedRemaining, String normalizedResolvedRunText) {
+        if (normalizedRemaining == null || normalizedResolvedRunText == null
+                || normalizedRemaining.isEmpty() || normalizedResolvedRunText.isEmpty()) {
+            return -1;
+        }
+        if (normalizedRemaining.startsWith(normalizedResolvedRunText)) {
+            return normalizedResolvedRunText.length();
+        }
+        String trimmedResolved = trimLeadingLayoutSpaces(normalizedResolvedRunText);
+        if (!trimmedResolved.isEmpty() && normalizedRemaining.startsWith(trimmedResolved)) {
+            return trimmedResolved.length();
+        }
+        return -1;
+    }
+
+    private static boolean startsWithResolvedRunKey(String remaining, String resolvedRunText) {
+        if (remaining == null || resolvedRunText == null || resolvedRunText.isEmpty()) return false;
+        String normRemaining = normalizeSpaces(remaining);
+        String normResolved = normalizeSpaces(resolvedRunText);
+        if (normResolved.length() > 0
+                && normRemaining.startsWith(normResolved.substring(0, Math.min(3, normResolved.length())))) {
+            return true;
+        }
+        String trimmedResolved = trimLeadingLayoutSpaces(normResolved);
+        return trimmedResolved.length() > 0
+                && normRemaining.startsWith(trimmedResolved.substring(0, Math.min(3, trimmedResolved.length())));
+    }
+
+    private static String trimLeadingLayoutSpaces(String s) {
+        if (s == null || s.isEmpty()) return "";
+        int i = 0;
+        while (i < s.length() && isLeadingLayoutSpace(s.charAt(i))) {
+            i++;
+        }
+        return s.substring(i);
+    }
+
+    private static boolean isLeadingLayoutSpace(char ch) {
+        return ch == '\t' || ch == ' ' || ch == '\u2002' || ch == '\u2003'
+                || ch == '\u2005' || ch == '\u2006' || ch == '\u2007'
+                || ch == '\u2009' || ch == '\u200A' || ch == '\u00A0';
     }
 
     /** 정규화된 길이에 대응하는 원본 문자열의 실제 길이 (1:1 매핑이므로 동일) */
