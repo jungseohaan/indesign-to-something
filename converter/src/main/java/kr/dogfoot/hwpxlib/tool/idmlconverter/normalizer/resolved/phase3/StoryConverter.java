@@ -1538,6 +1538,7 @@ public final class StoryConverter {
                     continue;
                 }
                 if (insertComposedLineBreaks(para, lines)) {
+                    applySourceTextWrapAlignment(para, contract);
                     para.squeezeLineWrap(true);
                     processed.add(para);
                     changedBlock = true;
@@ -1568,8 +1569,16 @@ public final class StoryConverter {
                         + ",\"hardLineBreaks\":" + insertedBreaks
                         + ",\"squeezeParagraphs\":" + applied
                         + ",\"skipped\":" + skipped
-                        + ",\"detail\":\"SOURCE_TEXT_WRAP: source composed-line hard line breaks plus paragraph-local SQUEEZE inside the original editable TextFrame; per-line floating carriers remain disabled\"}");
+                        + ",\"detail\":\"SOURCE_TEXT_WRAP: source composed-line hard line breaks plus paragraph-local alignment/SQUEEZE inside the original editable TextFrame; per-line floating carriers remain disabled\"}");
             }
+        }
+    }
+
+    private static void applySourceTextWrapAlignment(ASTParagraph para, TextLayoutContract contract) {
+        if (para == null || contract == null || contract.wrapSide == null) return;
+        String wrapSide = contract.wrapSide.trim().toUpperCase(Locale.ROOT);
+        if ("LEFT".equals(wrapSide)) {
+            para.alignment("right");
         }
     }
 

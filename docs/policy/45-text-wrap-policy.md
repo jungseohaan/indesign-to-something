@@ -24,18 +24,25 @@ Stage 1 may declare `TextWrap` only from source layout metadata:
 - one or more composed lines have non-neutral `wrapIndentLeft` or
   `wrapIndentRight`, or their line bounds are narrower than the source
   TextFrame bounds;
-- the narrowed side corresponds to a source page-level obstacle such as a
-  floating group, anchored object, or placed visual whose source bounds overlap
-  the TextFrame's source bounds in the affected vertical band;
-- the obstacle relationship is proven from IDML/resolved source ids, bounds,
-  z-order, page index, and placement metadata, not from rendered pixels or a
-  page-specific phrase.
+- when the obstacle source can be identified, the narrowed side corresponds to
+  a source page-level obstacle such as a floating group, anchored object, or
+  placed visual whose source bounds overlap the TextFrame's source bounds in
+  the affected vertical band;
+- the obstacle relationship, when recorded, is proven from IDML/resolved source
+  ids, bounds, z-order, page index, and placement metadata, not from rendered
+  pixels or a page-specific phrase.
 
 When those facts exist, the source `composedLines` are authoritative evidence
 that InDesign already composed the text around the obstacle. The HWPX converter
 does not need to rediscover the wrap. It needs to approximate the source
 composed line geometry without turning automatic composition boundaries into
 authored paragraph structure.
+
+`resolved.composedLines` may be enough to declare the text layout contract even
+when the obstacle source id cannot yet be named. In that case Stage 1 writes an
+empty obstacle list on the `SOURCE_TEXT_WRAP` contract and keeps the obstacle's
+visual ownership unchanged. Missing obstacle ids are diagnostics/proof gaps, not
+permission for Stage 2 or Stage 3 to rediscover TextWrap from pixels or overlap.
 
 ### Ownership
 
@@ -57,11 +64,12 @@ does not make the obstacle part of the text bundle.
 Stage 1:
 
 - detects source-composed wrap from `composedLines` and overlapping source
-  obstacles;
+  obstacles when they can be proven;
 - records the wrap contract on the `HWPX_TEXT` ObjectPlan or an equivalent
   Stage 1 text layout plan;
-- records source proof: wrapped TextFrame id, obstacle source ids, affected
-  composed line indices, original frame bounds, line bounds, and wrap indents;
+- records source proof: wrapped TextFrame id, affected composed line indices,
+  original frame bounds, line bounds, wrap indents, and obstacle source ids when
+  available;
 - chooses no new visual ownership while doing this.
 
 Stage 2:
@@ -72,6 +80,11 @@ Stage 2:
   elements at source composed-line boundaries inside that same source TextFrame.
   This is a source-layout execution strategy, not a page/text/coordinate
   exception;
+- executes the recorded wrap side without rediscovery. When the source contract
+  says `wrapSide=LEFT`, affected paragraphs may use right alignment so the
+  hard-broken source lines occupy the right side of the original editable
+  TextFrame. `wrapSide=RIGHT` keeps the normal left-flow approximation unless
+  Stage 1 records a stronger source alignment contract;
 - must not split the source TextFrame into per-composed-line floating text
   boxes. That preserves visual line geometry at the cost of editability and is
   therefore not an allowed main-path implementation;
@@ -113,9 +126,11 @@ Stage 4:
   declared a source layout contract that needs it.
 - For `SOURCE_TEXT_WRAP`, Stage 2 executes the contract by inserting
   source-composed hard line breaks inside the original editable TextFrame and
-  applying paragraph-local `lineWrap=SQUEEZE` to those affected paragraphs.
-  This is the canonical HWPX approximation for source wrap because HWPX has no
-  equivalent floating-object text wrap.
+  applying paragraph-local alignment and `lineWrap=SQUEEZE` to those affected
+  paragraphs. Alignment may only come from the Stage 1 `wrapSide` contract, not
+  from screenshots or page-specific symptoms. This is the canonical HWPX
+  approximation for source wrap because HWPX has no equivalent floating-object
+  text wrap.
 - `SOURCE_TEXT_WRAP` SQUEEZE must remain paragraph-local. It must not turn the
   whole TextFrame, drawText carrier, or unrelated paragraphs into a single-line
   pressure box.
