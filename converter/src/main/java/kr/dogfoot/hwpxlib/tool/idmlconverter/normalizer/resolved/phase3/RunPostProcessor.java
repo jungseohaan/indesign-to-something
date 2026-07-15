@@ -276,8 +276,11 @@ class RunPostProcessor {
             script = null;
         }
         if (script == null || script.isEmpty()) {
-            // EH 변환 실패 → raw 텍스트에서 backtick 제거
-            script = mathBuf.toString().replace("`", "");
+            // EH 변환 실패(예: 본문 폰트에 섞인 EH 인코딩 글리프) → 그래도 EH 글리프를
+            // 디코딩한다. 그냥 raw 로 두면 Û(²)·Ü(³) 같은 위첨자 글리프가 깨진다
+            // (실측: 3단원 p104 y=xÛ 이 y=x² 로 안 바뀜). convertToHwpScript 가 Û→^{2}
+            // 등을 처리한다.
+            script = EHFontEquationConverter.convertToHwpScript(mathBuf.toString());
         }
         if (!script.isEmpty()) {
             // 수식 스크립트의 선행 공백은 sanitizeHwpScript 의 trim 에 제거돼 앞 항과

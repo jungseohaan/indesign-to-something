@@ -103,6 +103,19 @@ public class EHFontEquationConverter {
                 i++;
                 continue;
             }
+            // EH상부자 raw 위첨자 글리프(decodeSubSupGlyph 미적용 경로): Û→², Ü→³.
+            // 본문 폰트에 섞인 EH 인코딩이 EH 변환 경로를 못 타면 여기로 온다
+            // (실측: 3단원 p104 y=xÛ 이 y=x² 로 안 바뀜).
+            if (c == 0x00DB) { // Û → ²
+                sb.append("^{2}");
+                i++;
+                continue;
+            }
+            if (c == 0x00DC) { // Ü → ³
+                sb.append("^{3}");
+                i++;
+                continue;
+            }
             if (c == 0x00B9) { // ¹
                 sb.append("^{1}");
                 i++;
