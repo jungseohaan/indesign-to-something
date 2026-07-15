@@ -108,6 +108,90 @@ public class EHFontGlyphMap {
                 || fontFamily.startsWith("EH고딕상부자");
     }
 
+    /**
+     * EH 폰트 해킹 글리프가 EH 수식 그룹에 못 들어간 채 일반 텍스트로 흘러온
+     * 경우, 폰트 종류에 맞춰 raw 라틴 글리프를 실제 수학 기호로 디코딩한다.
+     *
+     * <p><b>공통 진입점</b>: 신 파이프라인의 여러 텍스트 경로(RunBuilder 직접 변환,
+     * 테이블 셀의 convertStoryParagraphs 등)가 모두 이 메서드 하나를 호출한다.
+     * 경로마다 디코딩을 흩뿌리면 누락이 생겨(실측: 5단원 테이블 셀 180ù) 여기로 모은다.
+     *
+     * <p>{@code fontFamily} 는 해당 텍스트 run 의 EH 폰트 이름. EH 폰트가 아니면
+     * 원문을 그대로 돌려준다.
+     *
+     * @param text        run 텍스트
+     * @param fontFamily  run 의 fontFamily (EH… 계열이어야 디코딩)
+     * @return 디코딩된 텍스트 (EH 폰트가 아니면 원문)
+     */
+    public static String decodeStrayGlyphText(String text, String fontFamily) {
+        if (text == null || fontFamily == null) return text;
+        if (isChemicalFont(fontFamily)) {
+            // EH약물: µ→⌒(호), ª→≡(합동)
+            text = decodeChemicalGlyphText(text);
+        } else if (isSuperscriptFont(fontFamily)) {
+            // EH상부자: 선분 표기 marker Ó(0xD3)를 overline 마커로 감싸고
+            // (이후 RunPostProcessor.splitOverlineRuns 가 ASTEquation 변환),
+            // 도(°) 등 상부자 기호도 디코딩.
+            text = applyOverlineMarkers(text);
+            text = decodeSuperscriptSymbols(text);
+        }
+        // 위 분기에 안 걸린 EH 폰트(분수소문자 등)에도 호(µ)·합동(ª)처럼
+        // 폰트 무관하게 의미가 고정된 공통 기호는 디코딩한다(실측: 2단원 ';;ª').
+        if (isEHFontFamily(fontFamily)) {
+            text = decodeCommonSymbols(text);
+        } else {
+            // 본문 폰트에 섞여 들어온 EH 해킹 글리프(실측: 5단원 테이블 셀의 180ù,
+            // 2단원 Õ). EH 폰트가 아니므로 위 분기를 못 타지만, 문맥상 깨진 EH
+            // 글리프임이 확실한 경우만 좁게 치환한다(본문의 진짜 기호 오변환 방지).
+            text = decodeStrayGlyphInBodyFont(text);
+        }
+        return text;
+    }
+
+    /**
+     * 본문 폰트 run 에 섞여 들어온 EH 해킹 글리프를 <b>문맥이 확실할 때만</b> 치환한다.
+     *
+     * <p>EH 폰트가 아닌 run 은 원칙적으로 건드리지 않는다. 다만 조판자가 EH 폰트 대신
+     * 본문 폰트로 기호를 입력했거나 폰트 상속이 꼬여, 한글 수학 본문에 정상적으로는
+     * 나올 수 없는 글리프가 깨진 채 남는 경우가 있다. 아래 세 글리프만, 각각 오변환
+     * 위험이 없는 좁은 문맥에서 치환한다:
+     * <ul>
+     *   <li>{@code ù}(0xF9): 바로 앞이 숫자면 도(°). 예 {@code 180ù}→{@code 180°}</li>
+     *   <li>{@code ª}(0xAA): 서수 표시자, 한글 수학 본문 정상 등장 없음 → 합동(≡)</li>
+     *   <li>{@code Õ}(0xD5): 상부자 수평선 장식 → 제거</li>
+     *   <li>{@code µ}(0xB5): 뒤가 소문자 단위(µm·µs·µg…)가 아니면 호(⌒).
+     *       예 {@code 2 µ BC}(호 BC)→{@code 2 ⌒ BC}</li>
+     * </ul>
+     */
+    private static String decodeStrayGlyphInBodyFont(String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (text.indexOf('ù') < 0 && text.indexOf('ª') < 0
+                && text.indexOf('Õ') < 0 && text.indexOf('µ') < 0) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == 'ù') {
+                // 바로 앞이 숫자일 때만 도(°) — "180ù" 같은 각도 표기
+                char prev = sb.length() > 0 ? sb.charAt(sb.length() - 1) : '\0';
+                if (prev >= '0' && prev <= '9') { sb.append('°'); continue; }
+                sb.append(c);
+            } else if (c == 'ª') {
+                sb.append('≡');
+            } else if (c == 'Õ') {
+                // 수평선 장식 글리프 → 제거
+            } else if (c == 'µ') {
+                // 마이크로 단위(µm·µs·µg·µA…)면 그대로, 아니면 호(⌒).
+                char next = i + 1 < text.length() ? text.charAt(i + 1) : '\0';
+                boolean microUnit = next == 'm' || next == 's' || next == 'g'
+                        || next == 'A' || next == 'l' || next == 'L' || next == 'F';
+                sb.append(microUnit ? c : '⌒');
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     /** 아래첨자 폰트인지 확인 (EH하부자, EH고딕하부자) */
     public static boolean isSubscriptFont(String fontFamily) {
         if (fontFamily == null) return false;
@@ -148,6 +232,60 @@ public class EHFontGlyphMap {
     public static boolean isChemicalFont(String fontFamily) {
         if (fontFamily == null) return false;
         return fontFamily.startsWith("EH약물");
+    }
+
+    /**
+     * 어느 EH 폰트에서든 의미가 고정된 공통 기호를 디코딩한다.
+     *
+     * <p>{@code µ}(0xB5)=호(⌒), {@code ª}(0xAA)=합동(≡) 두 글리프는 폰트 해킹 계열이
+     * 무엇이든(약물·분수·상부자 …) 항상 같은 수학 기호를 가리킨다. 폰트별 디코더
+     * (약물/상부자)에 못 걸린 케이스가 있어(실측: 수학 2단원 {@code EH분수소문자}의
+     * {@code ;;ª}), EH 폰트 전체에 공통으로 이 치환을 한 번 더 적용한다.
+     *
+     * <p>영문·숫자·한글·기타 글리프는 건드리지 않는다 — 매핑된 두 문자만 치환.
+     */
+    public static String decodeCommonSymbols(String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (text.indexOf('µ') < 0 && text.indexOf('ª') < 0) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == 'µ') sb.append('⌒');
+            else if (c == 'ª') sb.append('≡');
+            else sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * EH약물 폰트의 글리프를 실제 수학 기호로 디코딩한다.
+     *
+     * <p>EH약물은 "약물"(掠物, 문장부호·기호)을 담는 폰트 해킹이다. 특정 라틴 문자
+     * 자리에 수학 기호를 그려두어, EH 처리 경로를 못 타면 raw 라틴 문자로 샌다.
+     * 실측(수학 5단원):
+     * <pre>
+     *   µ (0xB5, 39회)  →  ⌒ (호)      문맥: µAB = 호 AB
+     *   ª (0xAA,  3회)  →  ≡ (합동)     문맥: △OAM ª △OBM = △OAM ≡ △OBM
+     * </pre>
+     * 매핑 없는 확장 문자(공백/장식/마커)는 제거한다.
+     */
+    public static String decodeChemicalGlyphText(String text) {
+        if (text == null || text.isEmpty()) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case 'µ': sb.append('⌒'); break;   // ⌒ 호(arc)
+                case 'ª': sb.append('≡'); break;   // ≡ 합동(equiv)
+                case '`': break;                        // 위첨자 마커 → 제거
+                default:
+                    // 매핑 없는 확장 문자(0x80+ 장식/미지 글리프)는 제거,
+                    // 그 외(영문·숫자·한글·공백)는 그대로.
+                    if (c < 0x20 || (c >= 0x80 && c <= 0xFF)) break;
+                    sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /** 선모음 폰트인지 확인 */
@@ -354,6 +492,7 @@ public class EHFontGlyphMap {
             case 0xD0: return '-';    // Ð → - (마이너스)
             case 0xD1: return 'e';    // Ñ → e
             // 0xD2: 긴 수평선 (분수선/장식선) → 무시
+            case 0xD3: return '\u0305'; // Ó → overline marker (선분 AB̅ → overline{AB}, EHTokenizer 가 앞 토큰 래핑)
             case 0xD4: return 'i';    // Ô → i
             // 0xD5: 중간 수평선 → 무시
             case 0xD6: return '\u00F7'; // Ö → ÷ (나눗셈)
@@ -399,6 +538,98 @@ public class EHFontGlyphMap {
 
             default: return c;
         }
+    }
+
+    /** 텍스트에 EH overline marker(0xD3, "Ó")가 있는지. */
+    public static boolean containsOverlineMarker(String text) {
+        return text != null && text.indexOf('Ó') >= 0;
+    }
+
+    /**
+     * EH overline marker(Ó=0xD3)를 담은 텍스트를 HWP 수식 문법으로 변환한다.
+     *
+     * <p>EH상부자 폰트에서 Ó 는 앞 문자에 윗줄을 씌우는 선분 기호다(AB̅).
+     * 정상 경로(EH 그룹 → EHTokenizer)는 이걸 overline{...} 으로 감싸지만,
+     * 이 런들은 IDML 파싱 시점에 폰트가 상속으로만 지정되어(fontFamily=null)
+     * EH 그룹에 들어가지 못한 채 일반 텍스트로 흘러 "Ó" 가 raw 로 새어나온다.
+     * 실측(수학 5단원)에서 이런 런이 33개.
+     *
+     * <p>런 안의 "문자열 + Ó" 를 문자열 마커로 감싼다. 이후
+     * RunPostProcessor.splitOverlineRuns 가 이 마커를 ASTEquation("overline{문자열}")
+     * 으로 변환한다(정상 overline 이 처리되는 기존 경로와 동일). 형태(실측):
+     * <pre>
+     *   "ABÓ"        → "AB"
+     *   "ABÓ=CDÓ"    → "AB=CD"
+     *   "=OBÓ"       → "=OB"
+     * </pre>
+     *
+     * <p>Ó 앞에 감쌀 문자가 없으면(런이 "Ó" 로 시작 = 앞 런에서 이어지는 경우)
+     * 그 marker 는 텍스트 레벨에서 대상을 알 수 없으므로 제거만 한다.
+     *
+     * @return overline 마커가 삽입된 텍스트 (Ó 없으면 원본 그대로)
+     */
+    public static String applyOverlineMarkers(String text) {
+        if (text == null || text.indexOf('Ó') < 0) return text;
+        StringBuilder out = new StringBuilder(text.length() + 16);
+        int segStart = 0;   // 현재 overline 대상 후보의 시작
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c != 'Ó') continue;
+
+            // segStart..i 사이에서 Ó 바로 앞에 붙은 "감쌀 문자열"을 찾는다.
+            // 원소기호/변수(영문)만 대상으로 하고, 그 앞의 구분자(=,공백,쉼표,숫자)는
+            // overline 밖에 그대로 둔다.
+            int wrapStart = i;
+            while (wrapStart > segStart) {
+                char pc = text.charAt(wrapStart - 1);
+                if (isOverlineWrappable(pc)) {
+                    wrapStart--;
+                } else {
+                    break;
+                }
+            }
+            // wrapStart..i = 감쌀 문자열, 그 앞(segStart..wrapStart)은 그대로 출력
+            out.append(text, segStart, wrapStart);
+            if (wrapStart < i) {
+                out.append('\uE000').append(text, wrapStart, i).append('\uE001');
+            }
+            // 감쌀 문자가 없으면(Ó 단독) marker 를 그냥 버린다.
+            segStart = i + 1;
+        }
+        out.append(text, segStart, text.length());
+        return out.toString();
+    }
+
+    /**
+     * overline 으로 감쌀 수 있는 문자인가.
+     *
+     * <p>선분/점 이름은 영문자다(AB̅, PA̅). 숫자는 계수이므로(예: 2AM̅ = 2×AM̅)
+     * overline 밖에 둔다 — 숫자를 포함하면 "2AM̅" 이 overline{2AM} 으로 잘못 감싸진다.
+     */
+    private static boolean isOverlineWrappable(char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    }
+
+    /**
+     * EH상부자 폰트의 비숫자 기호를 실제 유니코드 기호로 디코딩한다.
+     *
+     * <p>overline marker(Ó=0xD3)와 위첨자 숫자(0xDA~0xE2)는 각각 applyOverlineMarkers /
+     * 수식 그룹 경로가 처리하므로 여기서 건드리지 않는다. 그 외 기호 글리프만 치환한다.
+     * 실측(수학 5단원): ù(0xF9) → °(도), 문맥 "90ù" = 90°.
+     */
+    public static String decodeSuperscriptSymbols(String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (text.indexOf('ù') < 0 && text.indexOf('Õ') < 0) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case 'ù': sb.append('°'); break;  // ù → ° (도)
+                case 'Õ': break;                       // 0xD5 = 수평선 장식 → 제거
+                default: sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**

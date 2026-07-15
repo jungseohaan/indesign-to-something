@@ -138,6 +138,10 @@ public class EHFontEquationConverter {
             case '\u00D6': return "div";         // Ö (EH상부자 raw, decodeSubSupGlyph 미적용 시)
             case '\u2103': return "DEG C";       // ℃
             case '\u00B0': return "DEG";         // °
+            case '\u00F9': return "DEG";         // ù raw 도, decodeSubSupGlyph 미적용 시
+            case '\u00B5': return "\u2312";      // µ raw 호(⌒)
+            case '\u00AA': return "equiv";       // ª raw 합동
+            case '\u2312': return "\u2312";      // ⌒ 호(그대로)
             case '\u2260': return "!=";          // ≠
             case '\u2264': return "LEQ";         // ≤
             case '\u2265': return "GEQ";         // ≥

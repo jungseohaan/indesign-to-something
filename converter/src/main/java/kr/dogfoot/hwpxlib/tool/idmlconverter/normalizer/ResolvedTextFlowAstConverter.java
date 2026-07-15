@@ -100,6 +100,11 @@ public final class ResolvedTextFlowAstConverter {
         if (run == null || text == null) return new ArrayList<>();
         Options opts = options != null ? options : options();
         String runText = text;
+        // EH 폰트 해킹 글리프가 EH 수식 그룹에 못 들어간 채 일반 텍스트로 남으면
+        // raw 라틴 문자(µ ª ù)로 새어 한글에서 깨진다. 모든 resolved 텍스트 경로
+        // (본문·테이블 셀·인라인 프레임)가 이 메서드를 거치므로 여기서 공통 디코딩한다.
+        runText = kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap
+                .decodeStrayGlyphText(runText, run.fontFamily());
         if (opts.truncateAtParagraphBreak) {
             int crIdx = runText.indexOf('\r');
             if (crIdx >= 0) {

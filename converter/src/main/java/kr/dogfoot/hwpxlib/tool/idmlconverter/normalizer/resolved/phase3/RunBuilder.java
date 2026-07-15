@@ -100,6 +100,11 @@ class RunBuilder {
                 && EHFontGlyphMap.isEHFontFamily(grepCharStyle.fontFamily())) {
             text = EHFontGlyphMap.applyEHGrepAsciiGlyphMap(text);
         }
+        // EH 폰트 해킹 글리프가 EH 수식 그룹에 못 들어간 채 일반 텍스트로 흘러오면
+        // raw 라틴 문자로 남는다(실측: 수학 5단원). 공통 진입점에서 디코딩한다.
+        String ehFont = rr != null ? rr.fontFamily() : null;
+        if (ehFont == null && cr != null) ehFont = cr.fontFamily();
+        text = EHFontGlyphMap.decodeStrayGlyphText(text, ehFont);
         tr.text(text);
         String characterStyleRef = resolvedCharacterStyleRef(rr, cr);
         if (characterStyleRef != null) {
