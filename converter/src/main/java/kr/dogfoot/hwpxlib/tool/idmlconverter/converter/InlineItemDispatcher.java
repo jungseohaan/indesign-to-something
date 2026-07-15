@@ -336,7 +336,7 @@ final class InlineItemDispatcher {
             // ShapeSize — 한글이 열 때 자동 계산하지만 초기값 필요
             int baseUnit = resolvedBaseUnit;
             String script = hwpScript;
-            long estW = (long) (script.length() * baseUnit * 0.7);
+            long estW = (long) (estimateRenderedWidthChars(script) * baseUnit * 0.7);
             // 분수(over) 수식은 분자+분수선+분모로 높이가 크므로 별도 추정
             boolean hasFraction = script.contains(" over ");
             long estH = hasFraction ? (long) (baseUnit * HwpxParagraphBuilder.FRACTION_HEIGHT_MULTIPLIER)
@@ -377,6 +377,36 @@ final class InlineItemDispatcher {
             ctx.addWarning("Equation", "수식 변환 실패: " + hwpScript);
             run.addNewT().addText("[수식: " + hwpScript + "]");
         }
+    }
+
+    /**
+     * HWP 수식 스크립트의 실제 렌더 가로 폭을 문자 수로 추정한다.
+     *
+     * <p>{@code script.length()} 를 그대로 쓰면 {@code over}·{@code sqrt}·중괄호 등
+     * 폭을 차지하지 않는 마크업까지 세어 폭이 과대해진다(실측: 3단원 y={5} over {x}
+     * 가 12자로 계산돼 탭 간격이 사라짐). 마크업을 제거하고, 분수는 세로로 쌓이므로
+     * 분자/분모 중 넓은 쪽만 폭에 반영한다.
+     */
+    private static int estimateRenderedWidthChars(String script) {
+        if (script == null || script.isEmpty()) return 0;
+        // 분수 {A} over {B} → 넓은 쪽 길이로 축약 (반복 적용)
+        java.util.regex.Matcher m;
+        java.util.regex.Pattern frac = java.util.regex.Pattern.compile(
+                "\\{([^{}]*)\\} over \\{([^{}]*)\\}");
+        String s = script;
+        while ((m = frac.matcher(s)).find()) {
+            String rep = m.group(1).length() >= m.group(2).length() ? m.group(1) : m.group(2);
+            s = s.substring(0, m.start()) + rep + s.substring(m.end());
+        }
+        // 폭을 차지하지 않는 마크업 토큰 제거
+        s = s.replace("sqrt", "√").replace(" over ", "")
+                .replace("{", "").replace("}", "")
+                .replace("^", "").replace("_", "");
+        int count = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) != ' ') count++;
+        }
+        return Math.max(1, count);
     }
 
     private int resolveEquationBaseUnit(ASTEquation eq, Equation template) {

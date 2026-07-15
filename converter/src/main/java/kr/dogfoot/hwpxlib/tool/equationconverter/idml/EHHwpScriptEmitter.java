@@ -79,8 +79,27 @@ public class EHHwpScriptEmitter {
     /**
      * 후처리: 빈 sqrt 제거, 중괄호 보정, 유효성 검증.
      */
+    /** 앞뒤 공백(스페이스·개행)만 제거하고 탭(\t)은 보존한다. 탭은 선택지 구분자다. */
+    private static String trimSpacesKeepTabs(String s) {
+        if (s == null || s.isEmpty()) return s;
+        int start = 0, end = s.length();
+        while (start < end) {
+            char c = s.charAt(start);
+            if (c == '\t' || c > ' ') break;
+            start++;
+        }
+        while (end > start) {
+            char c = s.charAt(end - 1);
+            if (c == '\t' || c > ' ') break;
+            end--;
+        }
+        return s.substring(start, end);
+    }
+
     private static String postProcess(String raw) {
-        String result = raw.trim();
+        // 탭은 선택지 구분자(⑶…\t⑷…)이므로 보존한다. trim()은 후행 탭까지
+        // 제거해 splitByCircledNumbers 가 항을 못 나눈다(실측: 3단원 y=5/x 뒤 탭 유실).
+        String result = trimSpacesKeepTabs(raw);
         if (result.isEmpty()) return null;
 
         // HWP 수식 키워드 앞뒤 공백 보장 (인접 토큰에 붙는 것 방지)
@@ -109,7 +128,7 @@ public class EHHwpScriptEmitter {
         while (result.contains("sqrt{}")) {
             result = result.replace("sqrt{}", "");
         }
-        result = result.trim();
+        result = trimSpacesKeepTabs(result);
         if (result.isEmpty()) return null;
 
         // 짝 안 맞는 중괄호 보정

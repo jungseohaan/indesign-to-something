@@ -400,6 +400,22 @@ public class StoryLoader {
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
                         || (!ehMathGroup.isEmpty() && MathProcessor.isEHSqrtContent(run, ehMathGroup)));
 
+                // EH 폰트 공백-only run이 그룹을 "시작"하면 그 선행 공백이 수식에
+                // 흡수돼 유실된다(실측: 3단원 ⑶ 뒤 EH상부자 공백 → (3)과 수식이 붙음).
+                // 그룹이 비어있을 때의 공백 run은 일반 텍스트로 내보낸다.
+                if (enterEH && ehMathGroup.isEmpty()
+                        && run.content() != null && run.content().trim().isEmpty()) {
+                    enterEH = false;
+                }
+                // 실제 인라인 프레임/그래픽 앵커를 가진 run은 EH 그룹에 넣지 않는다.
+                // 넣으면 앵커(U+FFFC)가 수식 스크립트/□ 로 뭉개져 프레임이 유실된다
+                // (실측: 3단원 y=-x²/5 의 x²/5 분수 앵커 프레임). 정상 인라인 배치로 보낸다.
+                if (enterEH
+                        && ((run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                            || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()))) {
+                    enterEH = false;
+                }
+
                 // NP 수식 그룹 진입
                 boolean enterNP = false;
                 if (!chemicalFormulaPara && !enterEH && !_orcOnly) {

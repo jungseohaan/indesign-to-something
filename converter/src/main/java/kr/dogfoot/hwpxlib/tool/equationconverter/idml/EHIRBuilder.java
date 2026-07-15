@@ -52,6 +52,10 @@ public class EHIRBuilder {
                         fi++;
                     } else if (ft.type() == EHToken.Type.SUP_BASE_TEXT
                             || ft.type() == EHToken.Type.BASE_TEXT) {
+                        // 탭은 선택지 구분자이지 분수 내용이 아니다. 여기서 수집을
+                        // 멈춰야 뒤 항(⑷ …)이 분수에 흡수되지 않는다(실측: 3단원
+                        // y=;[%;\t⑷ 에서 탭이 분수에 먹혀 (3)(4) 항이 붙던 문제).
+                        if (ft.text() != null && ft.text().indexOf('\t') >= 0) break;
                         fracRaw.append(ft.text());
                         fi++;
                     } else if (ft.type() == EHToken.Type.SKIP) {
@@ -235,6 +239,10 @@ public class EHIRBuilder {
                         fi++;
                     } else if (ft.type() == EHToken.Type.SUP_BASE_TEXT
                             || ft.type() == EHToken.Type.BASE_TEXT) {
+                        // 탭은 선택지 구분자이지 분수 내용이 아니다. 여기서 수집을
+                        // 멈춰야 뒤 항(⑷ …)이 분수에 흡수되지 않는다(실측: 3단원
+                        // y=;[%;\t⑷ 에서 탭이 분수에 먹혀 (3)(4) 항이 붙던 문제).
+                        if (ft.text() != null && ft.text().indexOf('\t') >= 0) break;
                         fracRaw.append(ft.text());
                         fi++;
                     } else if (ft.type() == EHToken.Type.SKIP) {
