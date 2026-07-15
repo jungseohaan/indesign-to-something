@@ -100,28 +100,11 @@ class RunBuilder {
                 && EHFontGlyphMap.isEHFontFamily(grepCharStyle.fontFamily())) {
             text = EHFontGlyphMap.applyEHGrepAsciiGlyphMap(text);
         }
-        // EH 폰트 글리프가 EH 수식 그룹에 못 들어간 채 일반 텍스트로 흘러오면,
-        // 폰트 해킹 글리프가 raw 라틴 문자로 남는다(실측: 수학 5단원). 폰트별로 디코딩한다.
+        // EH 폰트 해킹 글리프가 EH 수식 그룹에 못 들어간 채 일반 텍스트로 흘러오면
+        // raw 라틴 문자로 남는다(실측: 수학 5단원). 공통 진입점에서 디코딩한다.
         String ehFont = rr != null ? rr.fontFamily() : null;
         if (ehFont == null && cr != null) ehFont = cr.fontFamily();
-        if (text != null && ehFont != null) {
-            // EH약물: µ→⌒(호), ª→≡(합동)
-            if (EHFontGlyphMap.isChemicalFont(ehFont)) {
-                text = EHFontGlyphMap.decodeChemicalGlyphText(text);
-            }
-            // EH상부자: 선분 표기 marker "Ó"(0xD3) → overline 마커로 감싸 이후
-            // RunPostProcessor.splitOverlineRuns 가 ASTEquation 으로 변환.
-            // 도(°) 등 다른 상부자 기호도 함께 디코딩.
-            else if (EHFontGlyphMap.isSuperscriptFont(ehFont)) {
-                text = EHFontGlyphMap.applyOverlineMarkers(text);
-                text = EHFontGlyphMap.decodeSuperscriptSymbols(text);
-            }
-            // 위 분기에 안 걸린 EH 폰트(분수소문자 등)에도 호(µ)·합동(ª)처럼
-            // 폰트 무관하게 의미가 고정된 공통 기호는 디코딩한다(실측: 2단원 ';;ª').
-            if (EHFontGlyphMap.isEHFontFamily(ehFont)) {
-                text = EHFontGlyphMap.decodeCommonSymbols(text);
-            }
-        }
+        text = EHFontGlyphMap.decodeStrayGlyphText(text, ehFont);
         tr.text(text);
         String characterStyleRef = resolvedCharacterStyleRef(rr, cr);
         if (characterStyleRef != null) {
