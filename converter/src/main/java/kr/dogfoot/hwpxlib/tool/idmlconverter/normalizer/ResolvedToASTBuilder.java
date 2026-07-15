@@ -415,8 +415,27 @@ public class ResolvedToASTBuilder {
         if (anchored != null && anchored.toUpperCase(Locale.ROOT).contains("INLINE")) return false;
         String storyPlacement = item.storyAnchorPlacement();
         if (storyPlacement != null && storyPlacement.toUpperCase(Locale.ROOT).contains("INLINE")) return false;
-        if (item.parentId() != null && !item.parentId().isEmpty()) return false;
+        // TextWrap can be caused by the actual visual child inside a clipping
+        // rectangle/group. Requiring a spread/page root item drops those source
+        // facts because the root carrier may have a lower zOrder while the
+        // child visual is the object InDesign composed text around.
+        if (item.parentId() != null && !item.parentId().isEmpty()) {
+            return isNestedSourceTextWrapObstacleCandidate(tf, item);
+        }
         return item.zOrder() > tf.zOrder();
+    }
+
+    private boolean isNestedSourceTextWrapObstacleCandidate(ResolvedTextFrame tf, ResolvedPageItem item) {
+        if (tf == null || item == null) return false;
+        if (item.zOrder() <= tf.zOrder()) return false;
+        String type = item.type();
+        if (type == null) return false;
+        return "Image".equals(type)
+                || "Rectangle".equals(type)
+                || "Oval".equals(type)
+                || "Polygon".equals(type)
+                || "GraphicLine".equals(type)
+                || "Group".equals(type);
     }
 
     private String[] objectPlanIdsForSources(int[] sourceIds) {

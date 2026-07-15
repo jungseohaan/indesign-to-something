@@ -1583,7 +1583,129 @@ public final class StoryConverter {
             if (!containsInt(plan.ownedTextFrameIds, textFrameId) && plan.domId != textFrameId) continue;
             return plan.textLayoutContract;
         }
-        return null;
+        return sourceTextWrapContractFromResolved(ctx, textFrameId);
+    }
+
+    private static TextLayoutContract sourceTextWrapContractFromResolved(
+            ResolvedBuildContext ctx,
+            int textFrameId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameId < 0) return null;
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(Integer.toString(textFrameId));
+        if (tf == null || tf.sourceHidden() || tf.composedLines() == null || tf.composedLines().size() < 2) {
+            return null;
+        }
+        double scale = ctx.resolvedData.scaleFactor() > 0.0 ? ctx.resolvedData.scaleFactor() : 1.0;
+        int rightWrapped = 0;
+        int leftWrapped = 0;
+        final double threshold = 6.0;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null) continue;
+            if (line.wrapIndentRight() / scale >= threshold) rightWrapped++;
+            if (line.wrapIndentLeft() / scale >= threshold) leftWrapped++;
+        }
+        if (rightWrapped == 0 && leftWrapped == 0) return null;
+        String wrapSide = rightWrapped >= leftWrapped ? "RIGHT_OBSTACLE" : "LEFT_OBSTACLE";
+        int[] obstacleIds = overlappingSourceTextWrapObstacleIds(ctx, tf, wrapSide);
+        if (obstacleIds.length == 0) return null;
+        return new TextLayoutContract(
+                TextLayoutContract.SOURCE_TEXT_WRAP,
+                "resolved.composedLines",
+                textFrameId,
+                wrapSide,
+                obstacleIds,
+                new String[0],
+                tf.composedLines().size(),
+                "resolved_composed_lines_wrap_indent_with_overlapping_source_visual");
+    }
+
+    private static int[] overlappingSourceTextWrapObstacleIds(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            String wrapSide) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || ctx.resolvedData.pageItems() == null) {
+            return new int[0];
+        }
+        double[] tfBounds = tf.geometricBounds();
+        if (!validBounds(tfBounds)) tfBounds = tf.pageRelativeBounds();
+        if (!validBounds(tfBounds)) return new int[0];
+        double tfCenter = (tfBounds[1] + tfBounds[3]) / 2.0;
+        List<ObstacleCandidate> candidates = new ArrayList<>();
+        for (ResolvedPageItem item : ctx.resolvedData.pageItems()) {
+            if (!isSourceTextWrapObstacleCandidate(tf, item)) continue;
+            double[] itemBounds = item.geometricBounds();
+            if (!validBounds(itemBounds)) itemBounds = item.pageRelativeBounds();
+            if (!validBounds(itemBounds)) continue;
+            double overlap = overlapArea(tfBounds, itemBounds);
+            if (overlap <= 0.0) continue;
+            double itemCenter = (itemBounds[1] + itemBounds[3]) / 2.0;
+            if ("RIGHT_OBSTACLE".equals(wrapSide) && itemCenter <= tfCenter) continue;
+            if ("LEFT_OBSTACLE".equals(wrapSide) && itemCenter >= tfCenter) continue;
+            int id = parseInt(item.id(), -1);
+            if (id < 0) continue;
+            candidates.add(new ObstacleCandidate(id, overlap));
+        }
+        if (candidates.isEmpty()) return new int[0];
+        candidates.sort((a, b) -> Double.compare(b.overlapArea, a.overlapArea));
+        int limit = Math.min(8, candidates.size());
+        int[] out = new int[limit];
+        for (int i = 0; i < limit; i++) out[i] = candidates.get(i).sourceId;
+        return out;
+    }
+
+    private static boolean isSourceTextWrapObstacleCandidate(ResolvedTextFrame tf, ResolvedPageItem item) {
+        if (tf == null || item == null) return false;
+        if (item.sourceHidden()) return false;
+        if (item.pageIndex() != tf.pageIndex()) return false;
+        if ("TextFrame".equals(item.type())) return false;
+        if (item.isInline() || item.storyTextInlineSlot()) return false;
+        String anchored = item.anchoredPosition();
+        if (anchored != null && anchored.toUpperCase(Locale.ROOT).contains("INLINE")) return false;
+        String storyPlacement = item.storyAnchorPlacement();
+        if (storyPlacement != null && storyPlacement.toUpperCase(Locale.ROOT).contains("INLINE")) return false;
+        if (item.parentId() != null && !item.parentId().isEmpty()) {
+            return isNestedSourceTextWrapObstacleCandidate(tf, item);
+        }
+        return item.zOrder() > tf.zOrder();
+    }
+
+    private static boolean isNestedSourceTextWrapObstacleCandidate(ResolvedTextFrame tf, ResolvedPageItem item) {
+        if (tf == null || item == null) return false;
+        if (item.zOrder() <= tf.zOrder()) return false;
+        String type = item.type();
+        if (type == null) return false;
+        return "Image".equals(type)
+                || "Rectangle".equals(type)
+                || "Oval".equals(type)
+                || "Polygon".equals(type)
+                || "GraphicLine".equals(type)
+                || "Group".equals(type);
+    }
+
+    private static boolean validBounds(double[] b) {
+        return b != null && b.length >= 4
+                && Double.isFinite(b[0]) && Double.isFinite(b[1])
+                && Double.isFinite(b[2]) && Double.isFinite(b[3])
+                && b[2] > b[0] && b[3] > b[1];
+    }
+
+    private static double overlapArea(double[] a, double[] b) {
+        if (!validBounds(a) || !validBounds(b)) return 0.0;
+        double top = Math.max(a[0], b[0]);
+        double left = Math.max(a[1], b[1]);
+        double bottom = Math.min(a[2], b[2]);
+        double right = Math.min(a[3], b[3]);
+        if (bottom <= top || right <= left) return 0.0;
+        return (bottom - top) * (right - left);
+    }
+
+    private static final class ObstacleCandidate {
+        final int sourceId;
+        final double overlapArea;
+
+        ObstacleCandidate(int sourceId, double overlapArea) {
+            this.sourceId = sourceId;
+            this.overlapArea = overlapArea;
+        }
     }
 
     private static int parseTextFrameBlockSourceId(String sourceId) {
