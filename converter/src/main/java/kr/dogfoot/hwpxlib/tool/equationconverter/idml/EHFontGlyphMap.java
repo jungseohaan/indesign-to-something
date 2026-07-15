@@ -354,6 +354,7 @@ public class EHFontGlyphMap {
             case 0xD0: return '-';    // Ð → - (마이너스)
             case 0xD1: return 'e';    // Ñ → e
             // 0xD2: 긴 수평선 (분수선/장식선) → 무시
+            case 0xD3: return '\u0305'; // Ó → overline marker (선분 AB̅ → overline{AB}, EHTokenizer 가 앞 토큰 래핑)
             case 0xD4: return 'i';    // Ô → i
             // 0xD5: 중간 수평선 → 무시
             case 0xD6: return '\u00F7'; // Ö → ÷ (나눗셈)
