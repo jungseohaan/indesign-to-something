@@ -71,13 +71,40 @@ public class EquationBuilder {
                 out.appendCodePoint(cp);
             }
         }
-        return out.toString()
+        String result = out.toString()
                 .replace('\t', ' ')
                 .replace('\r', ' ')
                 .replace('\f', ' ')
                 .replace('\u000B', ' ')
                 .replaceAll(" +", " ")
                 .trim();
+        return ensureSqrtBoundary(result);
+    }
+
+    /**
+     * HWP 수식 예약어 sqrt 앞에 경계 공백을 보장한다.
+     *
+     * <p>sqrt 가 앞 토큰에 붙으면(예: asqrt{4b}, 2sqrt{5}, TIMESsqrt{2}) 한글 수식
+     * 파서가 sqrt 를 예약어로 인식하지 못해 근호 대신 리터럴 "sqrt" 로 렌더링된다
+     * (실측: 수학 1단원 asqrt/bsqrt). EH/BT/NP 세 폰트 경로가 모두 이 sanitize
+     * 관문을 거치므로 여기서 공통 보정한다.
+     *
+     * <p>앞 문자가 단어문자/닫는 괄호(}, ), ])일 때만 공백을 넣는다. 이미 공백이거나
+     * 문자열 시작이면 건드리지 않는다.
+     */
+    private static String ensureSqrtBoundary(String script) {
+        if (script == null || script.indexOf("sqrt") < 0) return script;
+        // 앞이 단어문자/닫는 괄호면 공백 삽입.
+        script = script.replaceAll("(?<=[\\p{Alnum}}\\])])sqrt", " sqrt");
+        // 첨자 연산자(_ ^) 바로 뒤의 sqrt 는 중괄호 없는 첨자 대상이 될 수 없다.
+        // "2_sqrt{3}" 같은 잘못된 결합은 곱셈(2√3)이 의도이므로 공백으로 분리한다.
+        script = script.replaceAll("(?<=[_^])sqrt", " sqrt");
+        // 빈 근호 뒤로 밀린 분수 피근호를 근호 안으로 흡수한다.
+        // "sqrt{ }{A} over {B}" → "sqrt{{A} over {B}}" (실측: 수학 1단원 a√(4b/a)).
+        script = script.replaceAll(
+                "sqrt\\{ \\}(\\{[^{}]*\\}) over (\\{[^{}]*\\})",
+                "sqrt{$1 over $2}");
+        return script.replaceAll(" +", " ");
     }
 
     private static boolean isXml10Character(int cp) {
