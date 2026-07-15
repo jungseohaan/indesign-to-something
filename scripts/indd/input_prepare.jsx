@@ -253,6 +253,7 @@ function _parseArgs(args) {
         perfMode:           (args[7] || "standard").toLowerCase(),
         skipRenderPagesMap: {},
         extractScriptPath:   args[16] || null,
+        pagePlaneCacheDir:   args[17] || null,
         graphicsMode:        graphicsMode,
         // SPEC-030 B.2: "pre_scan" 모드 — 해시만 계산하고 렌더링 없이 종료
         extractMode:        (args[10] || "full").toLowerCase(),
@@ -303,6 +304,7 @@ function _parseArgs(args) {
         cfgLog.writeln("writePlannerDiagnostics=" + ctx.writePlannerDiagnostics);
         cfgLog.writeln("skipValidation=" + ctx.skipValidation);
         cfgLog.writeln("reuseExistingIdml=" + ctx.reuseExistingIdml);
+        cfgLog.writeln("pagePlaneCacheDir=" + ctx.pagePlaneCacheDir);
         cfgLog.writeln("graphicsMode=" + ctx.graphicsMode);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
         try { cfgLog.writeln("moduleLoadDebug=" + _EXTRACT_MODULE_LOAD_DEBUG); } catch (eModuleDebugLog) {}

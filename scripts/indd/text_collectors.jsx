@@ -78,7 +78,7 @@ function characterStyleChangesExportedRunProps(cs) {
 }
 
 function buildParagraphCharacterCorrectionDescriptor(para) {
-    var descriptor = { needs: false, grepExpressions: [], hasNonGrepRule: false };
+    var descriptor = { needs: false, grepExpressions: [], hasNonGrepRule: false, hasContextualGrep: false };
     try {
         var ps = para.appliedParagraphStyle;
         if (!ps) return descriptor;
@@ -87,7 +87,13 @@ function buildParagraphCharacterCorrectionDescriptor(para) {
             for (var gi = 0; gi < ngs.length; gi++) {
                 if (characterStyleChangesExportedRunProps(ngs[gi].appliedCharacterStyle)) {
                     descriptor.needs = true;
-                    try { descriptor.grepExpressions.push(String(ngs[gi].grepExpression || "")); } catch (eExpr) { descriptor.grepExpressions.push(""); }
+                    try {
+                        var grepExpr = String(ngs[gi].grepExpression || "");
+                        descriptor.grepExpressions.push(grepExpr);
+                        if (grepExpr.indexOf("(?=") >= 0 || grepExpr.indexOf("(?<=") >= 0) {
+                            descriptor.hasContextualGrep = true;
+                        }
+                    } catch (eExpr) { descriptor.grepExpressions.push(""); }
                 }
             }
         } catch (eGrep) {}
@@ -132,7 +138,213 @@ function _grepTokenPresentInText(token, text) {
     if (token === "\\d" || token === "\\p{Nd}") return /[0-9]/.test(text);
     if (token === "\\w") return /[0-9A-Za-z_]/.test(text);
     if (token === "\\s") return /\s/.test(text);
+    if (token === "\\t") return text.indexOf("\t") >= 0;
+    if (token === "\\r") return text.indexOf("\r") >= 0;
+    if (token === "\\n") return text.indexOf("\n") >= 0;
     return null; // 모르는 토큰
+}
+
+function _grepLiteralTextPresentInText(literal, text) {
+    if (!literal) return true;
+    var s = String(literal)
+            .replace(/\\t/g, "\t")
+            .replace(/\\r/g, "\r")
+            .replace(/\\n/g, "\n")
+            .replace(/\\(.)/g, "$1");
+    if (s.length === 0) return true;
+    return text.indexOf(s) >= 0;
+}
+
+function _grepSimpleRequiredTermPresent(term, text) {
+    if (!term) return true;
+    if (/[|*+?{}()]/.test(term)) return null;
+    var tokenMatch = term.match(/^\\p\{[^}]*\}$|^\\[a-zA-Z]$/);
+    if (tokenMatch) return _grepTokenPresentInText(term, text);
+    var classMatch = term.match(/^\[([^\]]+)\]$/);
+    if (classMatch) {
+        var body = classMatch[1];
+        if (body.indexOf("^") === 0) return null;
+        if (body.indexOf("|") >= 0) return null;
+        var anyClassSatisfied = false;
+        var sawClassRequirement = false;
+        var tokenRe = /\\p\{[^}]*\}|\\[a-zA-Z]/g;
+        var tm;
+        while ((tm = tokenRe.exec(body)) !== null) {
+            var tokenPresent = _grepTokenPresentInText(tm[0], text);
+            if (tokenPresent === null) return null;
+            sawClassRequirement = true;
+            if (tokenPresent) anyClassSatisfied = true;
+        }
+        var cleaned = body.replace(/\\p\{[^}]*\}/g, "")
+                          .replace(/\\[a-zA-Z]/g, "")
+                          .replace(/\\([^a-zA-Z])/g, "$1");
+        for (var ci = 0; ci < cleaned.length; ci++) {
+            var ch = cleaned.charAt(ci);
+            if (ci + 2 < cleaned.length && cleaned.charAt(ci + 1) === "-") {
+                var lo = cleaned.charCodeAt(ci);
+                var hi = cleaned.charCodeAt(ci + 2);
+                if (hi >= lo) {
+                    sawClassRequirement = true;
+                    for (var ti = 0; ti < text.length; ti++) {
+                        var code = text.charCodeAt(ti);
+                        if (code >= lo && code <= hi) { anyClassSatisfied = true; break; }
+                    }
+                }
+                ci += 2;
+                continue;
+            }
+            if (ch === "") continue;
+            sawClassRequirement = true;
+            if (text.indexOf(ch) >= 0) anyClassSatisfied = true;
+        }
+        return sawClassRequirement ? anyClassSatisfied : null;
+    }
+    if (/^[^\[\]\\.^$]+$/.test(term)) {
+        // InDesign GREP uses ~-prefixed metacharacters (for example ~m) whose
+        // rendered story character is not the literal two-character string.
+        // Treat them as unknown so correctness stays fail-open.
+        if (term.indexOf("~") >= 0) return null;
+        return _grepLiteralTextPresentInText(term, text);
+    }
+    return null;
+}
+
+function _grepRequiredLookaroundAbsent(expr, text) {
+    var e = String(expr || "");
+    var lookRe = /\(\?<=[^)]*\)|\(\?=[^)]*\)/g;
+    var m;
+    while ((m = lookRe.exec(e)) !== null) {
+        var raw = m[0];
+        var inner = raw.substring(raw.indexOf("=") + 1, raw.length - 1);
+        var present = _grepSimpleRequiredTermPresent(inner, text);
+        if (present === false) return true;
+    }
+    return false;
+}
+
+function _grepHasTopLevelAlternation(expr) {
+    var e = String(expr || "");
+    var classDepth = 0;
+    var groupDepth = 0;
+    var escaped = false;
+    for (var i = 0; i < e.length; i++) {
+        var ch = e.charAt(i);
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (ch === "\\") {
+            escaped = true;
+            continue;
+        }
+        if (ch === "[") {
+            classDepth++;
+            continue;
+        }
+        if (ch === "]" && classDepth > 0) {
+            classDepth--;
+            continue;
+        }
+        if (classDepth > 0) continue;
+        if (ch === "(") {
+            groupDepth++;
+            continue;
+        }
+        if (ch === ")" && groupDepth > 0) {
+            groupDepth--;
+            continue;
+        }
+        if (ch === "|" && groupDepth === 0) return true;
+    }
+    return false;
+}
+
+function _grepQuantifierMakesPreviousOptional(expr, indexAfterAtom) {
+    try {
+        var q = String(expr || "").charAt(indexAfterAtom);
+        return q === "*" || q === "?";
+    } catch (e) {}
+    return false;
+}
+
+function _grepRequiredLiteralAbsent(expr, text) {
+    var e = String(expr || "");
+    // InDesign GREP uses ~-prefixed metacharacters (for example ~/).
+    // They are not literal story text, so literal-prerequisite pruning would
+    // incorrectly skip contextual rules such as `(?=\t).+?(?<=~/)`.
+    if (e.indexOf("~") >= 0) return false;
+    if (_grepHasTopLevelAlternation(e)) return false;
+    var classDepth = 0;
+    var escaped = false;
+    for (var i = 0; i < e.length; i++) {
+        var ch = e.charAt(i);
+        if (escaped) {
+            escaped = false;
+            if (ch === "p" && e.charAt(i + 1) === "{") {
+                var pClose = e.indexOf("}", i + 2);
+                if (pClose > i) i = pClose;
+                continue;
+            }
+            if (/[a-zA-Z]/.test(ch)) continue;
+            if (_grepQuantifierMakesPreviousOptional(e, i + 1)) continue;
+            if (text.indexOf(ch) < 0) return true;
+            continue;
+        }
+        if (ch === "\\") {
+            escaped = true;
+            continue;
+        }
+        if (ch === "[") {
+            classDepth++;
+            continue;
+        }
+        if (ch === "]" && classDepth > 0) {
+            classDepth--;
+            continue;
+        }
+        if (classDepth > 0) continue;
+        if ("(){}?*+^$|".indexOf(ch) >= 0) continue;
+        if (ch === ".") continue;
+        if (ch === "") continue;
+        if (_grepQuantifierMakesPreviousOptional(e, i + 1)) continue;
+        if (text.indexOf(ch) < 0) return true;
+    }
+    return false;
+}
+
+function _grepKnownRequiredTokenAbsent(expr, text) {
+    var e = String(expr || "");
+    if (_grepHasTopLevelAlternation(e)) return false;
+    var classDepth = 0;
+    for (var i = 0; i < e.length; i++) {
+        var ch = e.charAt(i);
+        if (ch === "[") {
+            classDepth++;
+            continue;
+        }
+        if (ch === "]" && classDepth > 0) {
+            classDepth--;
+            continue;
+        }
+        if (classDepth > 0) continue;
+        if (ch !== "\\") continue;
+        var token = null;
+        var end = i + 2;
+        if (e.substr(i, 3) === "\\p{") {
+            var close = e.indexOf("}", i + 3);
+            if (close > i) {
+                token = e.substring(i, close + 1);
+                end = close + 1;
+            }
+        } else if (i + 1 < e.length && /[a-zA-Z]/.test(e.charAt(i + 1))) {
+            token = e.substr(i, 2);
+        }
+        if (!token) continue;
+        if (_grepQuantifierMakesPreviousOptional(e, end)) continue;
+        var present = _grepTokenPresentInText(token, text);
+        if (present === false) return true;
+    }
+    return false;
 }
 
 function grepExpressionCouldAffectText(expr, text) {
@@ -141,6 +353,14 @@ function grepExpressionCouldAffectText(expr, text) {
     if (text.length === 0) return false;
 
     var e = String(expr);
+
+    // Positive lookaround with a simple required token is a hard prerequisite.
+    // Example: `(?=\t).+?(?<=~m)` cannot affect text that has no tab. The old
+    // wildcard guard below forced a DOM scan for those runs even though the
+    // GREP could never match.
+    if (_grepRequiredLookaroundAbsent(e, text)) return false;
+    if (_grepRequiredLiteralAbsent(e, text)) return false;
+    if (_grepKnownRequiredTokenAbsent(e, text)) return false;
 
     // 안전장치: 아래 구조가 보이면 정적 분석을 신뢰하지 않고 스캔한다.
     //  - 부정 문자 클래스 [^...] : 거의 모든 문자에 매칭될 수 있음
@@ -219,6 +439,13 @@ function correctionDescriptorNeedsRunScan(descriptor, text) {
         if (grepExpressionCouldAffectText(exprs[i], text)) return true;
     }
     return false;
+}
+
+function correctionProbeTextForDescriptor(descriptor, para, runText) {
+    if (descriptor && descriptor.hasContextualGrep) {
+        try { return para.contents || ""; } catch (eParaContents) {}
+    }
+    return runText || "";
 }
 
 function cellMayHaveAnchoredPageItems(cell) {
@@ -438,7 +665,8 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
         // ParagraphStyle에 GREP/중첩 스타일이 있으면 빠른 체크 건너뛰고 바로 스캔.
         var hasGrepStyles = !!needsCharacterCorrection;
         var firstProps = getCharProps(rngStart);
-        if (hasGrepStyles && !correctionDescriptorNeedsRunScan(correctionDescriptor, runData.text || "")) {
+        var correctionProbeText = correctionProbeTextForDescriptor(correctionDescriptor, para, runData.text || "");
+        if (hasGrepStyles && !correctionDescriptorNeedsRunScan(correctionDescriptor, correctionProbeText)) {
             runData.fillColor = firstProps.color;
             if (firstProps.size) runData.fontSize = firstProps.size;
             if (firstProps.font) runData.fontFamily = firstProps.font;
@@ -925,7 +1153,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
                     var shouldRunCorrection = needsCharacterCorrection
-                            && correctionDescriptorNeedsRunScan(correctionDescriptor, runData.text || "");
+                            && correctionDescriptorNeedsRunScan(correctionDescriptor,
+                                    correctionProbeTextForDescriptor(correctionDescriptor, para, runData.text || ""));
                     if (shouldRunCorrection) {
                         // GREP/Nested 스타일 색상 감지: 첫 번째 비제어 문자의 fillColor 확인
                         // textStyleRanges는 GREP 색상을 반영하지 않으므로 characters로 보정

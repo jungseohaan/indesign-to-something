@@ -775,22 +775,38 @@ function _appendLayoutOnlyInlineSlotObjectPlans(objectPlans, sourceItems) {
         skippedPlannedCount: 0,
         skippedTextFrameCount: 0,
         skippedInvalidBoundsCount: 0,
+        decisionIndexMs: 0,
+        loopMs: 0,
+        decisionCheckMs: 0,
+        footprintMs: 0,
+        addDecisionMs: 0,
+        scannedSourceCount: 0,
+        directInlineSourceCount: 0,
         createdObjectPlanIds: []
     };
     if (!objectPlans || !sourceItems) return { summary: summary };
+    var startedAt = _objectPlanTimingNow();
     var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
+    summary.decisionIndexMs = _objectPlanTimingNow() - startedAt;
     var sourceById = _objectPlanSourceInfoById(sourceItems);
     var childrenByParentId = _objectPlanSourceChildrenByParentId(sourceItems);
+    var footprintCandidateIndex = _objectPlanLayoutFootprintCandidatesByPage(sourceItems);
+    var loopStartedAt = _objectPlanTimingNow();
     for (var i = 0; i < sourceItems.length; i++) {
+        summary.scannedSourceCount++;
         var src = sourceItems[i];
         if (!_objectPlanIsDirectInlineLayoutSource(src)) continue;
+        summary.directInlineSourceCount++;
         var id = Number(src.id);
         if (isNaN(id)) continue;
+        var decisionStartedAt = _objectPlanTimingNow();
         if (_objectPlanDecisionIndexHasVisualDecision(decisionIndex, id)
                 || _objectPlanDecisionIndexHasTextDecision(decisionIndex, id)) {
+            summary.decisionCheckMs += _objectPlanTimingNow() - decisionStartedAt;
             summary.skippedPlannedCount++;
             continue;
         }
+        summary.decisionCheckMs += _objectPlanTimingNow() - decisionStartedAt;
         if (String(src.kind || "") === "TextFrame") {
             summary.skippedTextFrameCount++;
             continue;
@@ -802,16 +818,26 @@ function _appendLayoutOnlyInlineSlotObjectPlans(objectPlans, sourceItems) {
         var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? Number(src.pageIndex) : -1;
         if (isNaN(pageIndex) || pageIndex < 0) continue;
         var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        var footprintStartedAt = _objectPlanTimingNow();
         var footprint = _objectPlanLayoutOnlyInlineFootprint(
-                src, sourceItems, sourceById, childrenByParentId);
+                src, footprintCandidateIndex, sourceById, childrenByParentId);
+        summary.footprintMs += _objectPlanTimingNow() - footprintStartedAt;
         if (footprint && footprint.expanded === true) summary.expandedFootprintCount++;
         var plan = _layoutOnlyInlineSlotObjectPlan(src, id, pageIndex, zOrder, footprint);
         objectPlans.push(plan);
+        var addStartedAt = _objectPlanTimingNow();
         _addObjectPlanToDecisionIndex(decisionIndex, plan);
+        summary.addDecisionMs += _objectPlanTimingNow() - addStartedAt;
         summary.createdPlanCount++;
         summary.createdObjectPlanIds.push(plan.objectPlanId);
     }
+    summary.loopMs = _objectPlanTimingNow() - loopStartedAt;
     return { summary: summary };
+}
+
+function _objectPlanTimingNow() {
+    try { return (new Date()).getTime(); } catch (e) {}
+    return 0;
 }
 
 function _objectPlanIsDirectInlineLayoutSource(src) {
@@ -831,7 +857,48 @@ function _objectPlanHasUsableInlineLayoutBounds(src) {
     return !isNaN(h) && !isNaN(w) && h > 0 && w > 0;
 }
 
-function _objectPlanLayoutOnlyInlineFootprint(src, sourceItems, sourceById, childrenByParentId) {
+function _objectPlanLayoutFootprintCandidatesByPage(sourceItems) {
+    var byPage = {};
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var candidate = sourceItems[i];
+        if (!_objectPlanIsLayoutFootprintClusterCandidateStatic(candidate)) continue;
+        var pageIndex = candidate.pageIndex !== undefined && candidate.pageIndex !== null
+                ? Number(candidate.pageIndex) : -1;
+        if (isNaN(pageIndex) || pageIndex < 0) continue;
+        var pageKey = String(pageIndex);
+        if (!byPage[pageKey]) byPage[pageKey] = [];
+        byPage[pageKey].push(candidate);
+    }
+    return byPage;
+}
+
+function _objectPlanIsLayoutFootprintClusterCandidateStatic(candidate) {
+    if (!candidate || candidate.id === null || candidate.id === undefined) return false;
+    if (candidate.visible === false || candidate.hiddenLayer === true || candidate.nonprinting === true) return false;
+    if (candidate.hiddenByParent === true) return false;
+    if (_objectPlanIsDirectInlineLayoutSource(candidate)) return false;
+    if (String(candidate.storyAnchorPlacement || "").toUpperCase() === "INLINE") return false;
+    if (candidate.isInline === true) return false;
+    if (!_objectPlanHasUsableInlineLayoutBounds(candidate)) return false;
+    var kind = String(candidate.kind || candidate.type || "");
+    if (kind === "TextFrame") return false;
+    var parentKind = String(candidate.parentKind || "").toLowerCase();
+    if (candidate.parentId !== null
+            && candidate.parentId !== undefined
+            && String(candidate.parentId) !== ""
+            && parentKind !== "spread"
+            && parentKind !== "page") {
+        return false;
+    }
+    if (kind === "Group") return true;
+    if (candidate.hasPlacedVisual === true || candidate.hasVisibleFill === true || candidate.hasVisibleStroke === true) {
+        return true;
+    }
+    if (candidate.childIds && candidate.childIds.length > 0) return true;
+    return false;
+}
+
+function _objectPlanLayoutOnlyInlineFootprint(src, footprintCandidateIndex, sourceById, childrenByParentId) {
     var anchorBounds = src && src.bounds ? _objectPlanNormalizeBounds(src.bounds) : null;
     if (!anchorBounds) {
         return {
@@ -851,10 +918,13 @@ function _objectPlanLayoutOnlyInlineFootprint(src, sourceItems, sourceById, chil
         };
     }
     var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? Number(src.pageIndex) : -1;
+    var pageCandidates = footprintCandidateIndex && footprintCandidateIndex[String(pageIndex)]
+            ? footprintCandidateIndex[String(pageIndex)]
+            : [];
     var best = null;
     var bestScore = 0;
-    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
-        var candidate = sourceItems[i];
+    for (var i = 0; i < pageCandidates.length; i++) {
+        var candidate = pageCandidates[i];
         if (!_objectPlanIsLayoutFootprintClusterCandidate(src, candidate, sourceById)) continue;
         var cb = _objectPlanNormalizeBounds(candidate.bounds);
         if (!cb) continue;
@@ -866,9 +936,6 @@ function _objectPlanLayoutOnlyInlineFootprint(src, sourceItems, sourceById, chil
         if (overlapRatio < 0.55) continue;
         var areaRatio = candidateArea / anchorArea;
         if (areaRatio > 8.0) continue;
-        var pageIndex2 = candidate.pageIndex !== undefined && candidate.pageIndex !== null
-                ? Number(candidate.pageIndex) : -1;
-        if (pageIndex2 !== pageIndex) continue;
         var kindScore = String(candidate.kind || candidate.type || "") === "Group" ? 1000 : 0;
         var score = kindScore + (overlapRatio * 100) - Math.abs(areaRatio - 1.5);
         if (!best || score > bestScore) {
@@ -1322,19 +1389,24 @@ function _shouldKeepObjectPlanAfterExecutionCandidateSync(plan, activeObjectPlan
     return false;
 }
 
-function _slimObjectPlanDiagnosticsForWrite(diagnostics) {
+function _slimObjectPlanDiagnosticsForWrite(diagnostics, options) {
     if (!diagnostics) return diagnostics;
+    if (!options) options = {};
     var validation = diagnostics.validation || {};
     var slimPlans = [];
     var plans = diagnostics.objectPlans || [];
     for (var i = 0; i < plans.length; i++) {
+        if (options.importReadyOnly === true && !_objectPlanShouldWriteForStage1Import(plans[i])) {
+            continue;
+        }
         slimPlans.push(_slimObjectPlanForWrite(plans[i]));
     }
     return {
         schemaVersion: diagnostics.schemaVersion || 1,
         policy: diagnostics.policy || "POLICY-source-ownership",
         mode: "object-plan-diagnostics-slim",
-        summary: diagnostics.summary || {},
+        summary: _objectPlanWriteSummary(diagnostics.summary || {}, plans.length, slimPlans.length,
+                options.importReadyOnly === true),
         validation: {
             issueCount: validation.issueCount || 0,
             importReadyPlanCount: validation.importReadyPlanCount || 0,
@@ -1347,6 +1419,26 @@ function _slimObjectPlanDiagnosticsForWrite(diagnostics) {
         fullDiagnosticsSkipped: true,
         objectPlans: slimPlans
     };
+}
+
+function _objectPlanWriteSummary(summary, fullPlanCount, writtenPlanCount, importReadyOnly) {
+    var out = {};
+    for (var key in summary) {
+        if (summary.hasOwnProperty(key)) out[key] = summary[key];
+    }
+    out.fullObjectPlanCount = fullPlanCount || 0;
+    out.writtenObjectPlanCount = writtenPlanCount || 0;
+    out.importReadyOnlyWrite = importReadyOnly === true;
+    return out;
+}
+
+function _objectPlanShouldWriteForStage1Import(plan) {
+    if (!plan) return false;
+    if (plan.compositeRole === "inline_visual_inventory") return false;
+    if (plan.contractStatus === "READY_FOR_STAGE1_IMPORT") return true;
+    if (plan.layoutOnlyInlineSlot === true) return true;
+    if (plan.compositeRole === "clip_parent_source_set") return true;
+    return false;
 }
 
 function _slimObjectPlanSourceSetRefsForWrite(sourceSetRefs, slimPlans) {

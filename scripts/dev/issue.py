@@ -33,6 +33,7 @@ TRACE_SOURCE_PATH = REPO_ROOT / "scripts" / "dev" / "trace_source.py"
 PAGE_INVENTORY_PATH = REPO_ROOT / "scripts" / "dev" / "page_inventory.py"
 IDML_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "idml"
 PREVIEW_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "preview"
+PAGE_PLANE_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "page_textless_plane"
 
 CASE_ALIASES = {
     "park31-u1": ("중3-1국어교과서(박영민)", "u1"),
@@ -228,6 +229,7 @@ def write_applescript(
     extract_config: str,
     extract_mode: str,
     reuse_existing_idml: bool,
+    page_plane_cache_dir_path: Path,
 ) -> None:
     args = [
         str(indd_path),
@@ -247,6 +249,7 @@ def write_applescript(
         "",
         "1" if reuse_existing_idml else "0",
         str(EXTRACT_JSX),
+        str(page_plane_cache_dir_path),
     ]
     quoted_args = ", ".join(json.dumps(a, ensure_ascii=False) for a in args)
     script = f'''using terms from application "{app_name}"
@@ -393,8 +396,30 @@ def idml_cache_key(indd_path: Path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def extract_script_version() -> str:
+    try:
+        text = EXTRACT_JSX.read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
+    marker = 'EXTRACT_SCRIPT_VERSION = "'
+    start = text.find(marker)
+    if start < 0:
+        return "unknown"
+    start += len(marker)
+    end = text.find('"', start)
+    if end < 0:
+        return "unknown"
+    return text[start:end]
+
+
 def idml_cache_dir(indd_path: Path) -> Path:
     return IDML_CACHE_ROOT / idml_cache_key(indd_path)
+
+
+def page_plane_cache_dir(indd_path: Path, perf_mode: str) -> Path:
+    version = extract_script_version()
+    mode = (perf_mode or "standard").lower()
+    return PAGE_PLANE_CACHE_ROOT / idml_cache_key(indd_path) / f"extract-v{version}" / f"single-textless-plane-{mode}"
 
 
 def restore_cached_idml(indd_path: Path, extract_dir: Path, enabled: bool) -> Dict[str, Any]:
@@ -839,6 +864,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     issue_dir = output_root / args.case / f"{page_label(args.page, args.end_page)}-{stamp}"
     extract_dir = issue_dir / "extract"
     converted_dir = issue_dir / "converted"
+    page_plane_cache = page_plane_cache_dir(indd_path, args.perf_mode)
 
     script_path = issue_dir / "run_extract.scpt"
     if not args.dry_run:
@@ -857,6 +883,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             args.extract_config,
             args.extract_mode,
             bool(idml_cache_restore.get("hit")),
+            page_plane_cache,
         )
     else:
         idml_cache_restore = {
@@ -871,6 +898,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"[issue] extract-local-page={extract_range['extractStartPage']}..{extract_range['extractEndPage']} mode={extract_range['pageRangeMode']}")
     print(f"[issue] extract-mode={args.extract_mode} graphics-mode=single-textless-plane")
     print(f"[issue] idml-cache={idml_cache_restore.get('reason')} hit={idml_cache_restore.get('hit')} dir={idml_cache_restore.get('cacheDir')}")
+    print(f"[issue] page-plane-cache=enabled dir={page_plane_cache}")
     print(f"[issue] preview-cache={'disabled' if args.skip_pdf else 'enabled'}")
     print(f"[issue] output={issue_dir}")
     ensure_indesign_running(args.app, issue_dir, args.dry_run)
@@ -885,6 +913,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "extractMode": args.extract_mode,
             "graphicsMode": "single-textless-plane",
             "idmlCache": idml_cache_restore,
+            "pagePlaneCache": {
+                "enabled": True,
+                "cacheDir": str(page_plane_cache),
+                "key": page_plane_cache.name,
+            },
             **extract_range,
         }
         (extract_dir / "issue-run.json").write_text(json.dumps(issue_meta, ensure_ascii=False, indent=2), encoding="utf-8")
