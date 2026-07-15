@@ -97,6 +97,7 @@ public final class OwnershipPlanner {
         recordLegacyBridgeMetrics(legacyBridgePlanStart, legacyBridgeWarningStart, legacyBridgeSkipped);
         recordLegacyBridgeDiagnostics(legacyBridgePlanStart, preBridgePlanJsons, legacyBridgeSkipped);
         timed("ensureOwnedTextFramePlansForVisibleTextShells", this::ensureOwnedTextFramePlansForVisibleTextShells);
+        timed("ensureSourceTextWrapContracts", this::ensureSourceTextWrapContracts);
         timed("finalizeOwnedTextFrameDepthContracts.afterShellOwnedTextPlans", this::finalizeOwnedTextFrameDepthContracts);
         timed("normalizeStage1ContractsBeforeValidation", this::normalizeStage1ContractsBeforeValidation);
         timed("dropNativeSourceShapePlans", this::dropNativeSourceShapePlans);
@@ -524,6 +525,223 @@ public final class OwnershipPlanner {
             if (!normalized.isEmpty()) return true;
         }
         return false;
+    }
+
+    private void ensureSourceTextWrapContracts() {
+        if (data == null || data.textFrames() == null) return;
+        int observed = 0;
+        int attached = 0;
+        int addedPlans = 0;
+        int skipped = 0;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            int textFrameId = parseFlexibleId(tf != null ? tf.id() : null);
+            if (textFrameId < 0) continue;
+            TextLayoutContract contract = sourceTextWrapContractForTextFrame(tf, textFrameId);
+            if (contract == null) continue;
+            observed++;
+            int planIndex = findHwpxTextSlotPlanIndexForTextFrame(textFrameId);
+            if (planIndex >= 0) {
+                ObjectPlan plan = plans.get(planIndex);
+                if (plan != null) {
+                    plan.withTextLayoutContract(contract);
+                    attached++;
+                } else {
+                    skipped++;
+                }
+                continue;
+            }
+            if (addSourceTextWrapTextFramePlan(tf, textFrameId, contract)) {
+                addedPlans++;
+                attached++;
+            } else {
+                skipped++;
+            }
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceTextWrap.contractsObserved", observed);
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceTextWrap.contractsAttached", attached);
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceTextWrap.plansAdded", addedPlans);
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceTextWrap.contractsSkipped", skipped);
+        if (observed > 0 && ctx.ownershipWarningLines != null) {
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_SOURCE_TEXT_WRAP_CONTRACTS_DECLARED\""
+                    + ",\"observed\":" + observed
+                    + ",\"attached\":" + attached
+                    + ",\"plansAdded\":" + addedPlans
+                    + ",\"skipped\":" + skipped
+                    + ",\"detail\":\"SOURCE_TEXT_WRAP contracts are declared from resolved.composedLines wrap indents and executed by Stage 2\"}");
+        }
+    }
+
+    private TextLayoutContract sourceTextWrapContractForTextFrame(
+            ResolvedTextFrame tf,
+            int textFrameId) {
+        if (tf == null || textFrameId < 0) return null;
+        if (tf.sourceHidden()) return null;
+        if (data != null && data.isTextOwnedByIndesignPng(tf.id())) return null;
+        if (!textFrameHasVisibleSemanticText(tf)) return null;
+        if (tf.composedLines() == null || tf.composedLines().size() < 2) return null;
+        if (isVerticalComposedTextFrameSource(tf)) return null;
+        SourceWrapEvidence evidence = sourceWrapEvidence(tf);
+        if (evidence == null) return null;
+        return new TextLayoutContract(
+                TextLayoutContract.SOURCE_TEXT_WRAP,
+                "resolved.composedLines",
+                textFrameId,
+                evidence.wrapSide,
+                new int[0],
+                new String[0],
+                evidence.lineCount,
+                "source_composed_wrap_indent");
+    }
+
+    private SourceWrapEvidence sourceWrapEvidence(ResolvedTextFrame tf) {
+        if (tf == null || tf.composedLines() == null || tf.composedLines().isEmpty()) return null;
+        double[] bounds = tf.pageRelativeBounds();
+        if (bounds == null || bounds.length < 4) bounds = tf.geometricBounds();
+        if (bounds == null || bounds.length < 4) return null;
+        double frameWidth = Math.abs(bounds[3] - bounds[1]);
+        if (frameWidth <= 0.0) return null;
+        double threshold = Math.max(24.0, frameWidth * 0.18);
+
+        int leftCount = 0;
+        int rightCount = 0;
+        int visibleCount = 0;
+        Map<Integer, int[]> countsByPara = new HashMap<>();
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || !hasVisibleTextExcludingObjectControls(line.text())) continue;
+            visibleCount++;
+            int[] counts = countsByPara.computeIfAbsent(line.paraIndex(), k -> new int[2]);
+            if (line.wrapIndentLeft() >= threshold) {
+                leftCount++;
+                counts[0]++;
+            }
+            if (line.wrapIndentRight() >= threshold) {
+                rightCount++;
+                counts[1]++;
+            }
+        }
+        if (visibleCount < 2) return null;
+
+        boolean paraHasRepeatedLeft = false;
+        boolean paraHasRepeatedRight = false;
+        for (int[] counts : countsByPara.values()) {
+            if (counts == null) continue;
+            if (counts[0] >= 2) paraHasRepeatedLeft = true;
+            if (counts[1] >= 2) paraHasRepeatedRight = true;
+        }
+        if (!paraHasRepeatedLeft && !paraHasRepeatedRight) return null;
+
+        String side;
+        if (paraHasRepeatedLeft && paraHasRepeatedRight) {
+            side = "BOTH";
+        } else if (paraHasRepeatedLeft) {
+            side = "LEFT";
+        } else {
+            side = "RIGHT";
+        }
+        int lineCount = Math.max(leftCount, rightCount);
+        return new SourceWrapEvidence(side, lineCount);
+    }
+
+    private int findHwpxTextSlotPlanIndexForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return -1;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (!contains(plan.ownedTextFrameIds, textFrameId) && plan.domId != textFrameId) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.materialization == Materialization.HWPX_TEXT) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean addSourceTextWrapTextFramePlan(
+            ResolvedTextFrame tf,
+            int textFrameId,
+            TextLayoutContract contract) {
+        if (tf == null || textFrameId < 0 || contract == null) return false;
+        TextAction textAction = TextAction.OWNED_BY_HWPX_TEXT;
+        VisualAction visualAction = VisualAction.DROP_VISUAL;
+        Placement placement = placementOfTextFrame(tf, textFrameId, textAction, visualAction);
+        CoordinateSpace coordinateSpace = placement == Placement.INLINE
+                ? CoordinateSpace.STORY_FLOW
+                : CoordinateSpace.PAGE;
+        ObjectPlan plan = new ObjectPlan(
+                textFrameId,
+                "text_frame:source_text_wrap",
+                tf.pageIndex(),
+                textAction,
+                visualAction,
+                VisualLayer.CONTENT_VISUAL,
+                placement,
+                null,
+                new int[] { textFrameId },
+                new int[] { textFrameId },
+                new int[0],
+                new int[] { textFrameId },
+                new int[0],
+                "p" + tf.pageIndex() + ":tf:" + textFrameId,
+                Materialization.HWPX_TEXT,
+                coordinateSpace,
+                null,
+                textFrameSourceZOrder(tf),
+                "source_text_wrap_text_frame",
+                null,
+                textFramePlanBounds(tf, textFrameId, false),
+                tf.layerId(),
+                tf.layerName(),
+                tf.layerIndex());
+        plan.withTextLayoutContract(contract);
+        plans.add(plan);
+        return true;
+    }
+
+    private static boolean isVerticalComposedTextFrameSource(ResolvedTextFrame tf) {
+        if (tf == null || tf.composedLines() == null || tf.composedLines().isEmpty()) return false;
+        double[] frameBounds = tf.pageRelativeBounds();
+        if (frameBounds == null || frameBounds.length < 4) frameBounds = tf.geometricBounds();
+        if (frameBounds == null || frameBounds.length < 4) return false;
+        double frameW = Math.abs(frameBounds[3] - frameBounds[1]);
+        double frameH = Math.abs(frameBounds[2] - frameBounds[0]);
+        if (frameW <= 0.0 || frameH <= 0.0 || frameH <= frameW * 1.2) return false;
+
+        int checked = 0;
+        int verticalLike = 0;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+            if (!hasVisibleTextExcludingObjectControls(line.text())) continue;
+            double[] b = line.bounds();
+            double lineW = Math.abs(b[3] - b[1]);
+            double lineH = Math.abs(b[2] - b[0]);
+            if (lineW <= 0.0 || lineH <= 0.0) continue;
+            checked++;
+            if (lineH > lineW * 1.8) {
+                verticalLike++;
+            }
+        }
+        return checked > 0 && verticalLike == checked;
+    }
+
+    private static boolean hasVisibleTextExcludingObjectControls(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0003' || ch == '\u0007' || ch == '\b') continue;
+            if (Character.isWhitespace(ch)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static final class SourceWrapEvidence {
+        final String wrapSide;
+        final int lineCount;
+
+        SourceWrapEvidence(String wrapSide, int lineCount) {
+            this.wrapSide = wrapSide;
+            this.lineCount = lineCount;
+        }
     }
 
     private ObjectPlan canonicalizeImportedPreplannedObjectPlan(ObjectPlan plan) {
