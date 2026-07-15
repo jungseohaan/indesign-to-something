@@ -1590,6 +1590,7 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
             materialization: plan.materialization || null
         };
         addClaims(plan.sourceObjectIds, "PROVENANCE", owner);
+        addClaims(plan.sourceObjectIdKeys, "PROVENANCE", owner);
         if (_sourceCoveragePlanHasVisibleVisual(plan)) {
             var coverageIds = plan.coverageSourceObjectIds && plan.coverageSourceObjectIds.length > 0
                     ? plan.coverageSourceObjectIds
@@ -1600,12 +1601,16 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
         if (plan.visualAction === "PLACE_TABLE_STYLE") {
             addClaims(plan.styleSourceObjectIds, "STYLE_OWNER", owner);
             addClaims(plan.ownedTextFrameIds, "TEXT_OWNER", owner);
+            addClaims(plan.ownedTextFrameIdKeys, "TEXT_OWNER", owner);
         } else {
             addClaims(plan.styleSourceObjectIds, "STYLE_OWNER", owner);
             if (plan.textAction === "OWNED_BY_HWPX_TEXT") {
                 addClaims(plan.ownedTextFrameIds, "TEXT_OWNER", owner);
+                addClaims(plan.ownedTextFrameIdKeys, "TEXT_OWNER", owner);
             } else if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) {
                 addClaims(plan.ownedTextFrameIds, "TEXT_RELATION", owner);
+            } else if (plan.ownedTextFrameIdKeys && plan.ownedTextFrameIdKeys.length > 0) {
+                addClaims(plan.ownedTextFrameIdKeys, "TEXT_RELATION", owner);
             }
         }
         addClaims(plan.hiddenVisualSourceObjectIds, "HIDDEN_BY_OWNER", owner);
