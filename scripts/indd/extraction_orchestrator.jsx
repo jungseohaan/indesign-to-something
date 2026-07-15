@@ -643,6 +643,216 @@ function _indexSingleTextlessPagePlaneFrames(result) {
     return byPageIndex;
 }
 
+function _pagePlaneCacheFileName(pageIndex, pageHash) {
+    // The cache directory is already keyed by immutable INDD path/size/mtime,
+    // extractor version, graphics mode, and perf mode. The legacy page_hashes
+    // include session-local DOM ids for some generated instances, so using them
+    // in the file name makes deterministic source pages miss the cache.
+    return "page_textless_plane_p" + String(pageIndex + 1) + ".png";
+}
+
+function _copyFileReplacingGeneric(src, dest, label) {
+    if (!src || !src.exists) {
+        throw new Error((label || "file") + " source file missing: " + (src ? src.fsName : "<null>"));
+    }
+    if (dest.exists) {
+        try { dest.remove(); } catch (eRemove) {}
+    }
+    if (!src.copy(dest.fsName)) {
+        throw new Error((label || "file") + " copy failed: " + src.fsName + " -> " + dest.fsName);
+    }
+}
+
+function _pageLocalBoundsForCache(page) {
+    try {
+        var pb = page.bounds;
+        return [0, 0, Number(pb[2]) - Number(pb[0]), Number(pb[3]) - Number(pb[1])];
+    } catch (eBounds) {}
+    return null;
+}
+
+function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
+    var startedAt = (new Date()).getTime();
+    var summary = {
+        schemaVersion: 1,
+        mode: "single-textless-page-plane-cache-restore",
+        status: "skipped",
+        reason: null,
+        cacheDir: ctx ? ctx.pagePlaneCacheDir || null : null,
+        pageCount: ctx ? ctx.rangePageCount || 0 : 0,
+        hitCount: 0,
+        missCount: 0,
+        allHit: false,
+        elapsedMs: null,
+        entries: []
+    };
+    try {
+        if (!ctx || !ctx.pagePlaneCacheDir || ctx.graphicsMode !== "single-textless-plane") {
+            summary.reason = "cache_not_configured";
+            return summary;
+        }
+        var cacheDir = Folder(ctx.pagePlaneCacheDir);
+        if (!cacheDir.exists) {
+            summary.reason = "cache_dir_missing";
+            return summary;
+        }
+        var pageHashes = readJson(ctx.outputDir + "/page_hashes.json") || {};
+        var renderDir = _ensureFolder(ctx.outputDir + "/rendered_frames");
+        var restored = {};
+        var allHit = true;
+        for (var pageNumber = ctx.startPage; pageNumber <= ctx.endPage; pageNumber++) {
+            var pageIndex = pageNumber - 1;
+            var hash = pageHashes[String(pageIndex + 1)];
+            var page = null;
+            try { page = doc.pages[pageIndex]; } catch (ePage) {}
+            var entry = {
+                pageIndex: pageIndex,
+                pageHash: hash || null,
+                hit: false,
+                cacheFile: null,
+                file: null,
+                bounds: page ? _pageLocalBoundsForCache(page) : null,
+                fileBytes: 0
+            };
+            if (!hash) {
+                summary.missCount++;
+                allHit = false;
+                entry.reason = "missing_page_hash";
+                summary.entries.push(entry);
+                continue;
+            }
+            var cacheFile = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash));
+            entry.cacheFile = cacheFile.fsName;
+            if (!cacheFile.exists) {
+                summary.missCount++;
+                allHit = false;
+                entry.reason = "cache_file_missing";
+                summary.entries.push(entry);
+                continue;
+            }
+            var outName = "page_textless_plane_p" + String(pageIndex + 1) + ".png";
+            var outFile = File(renderDir.fsName + "/" + outName);
+            _copyFileReplacingGeneric(cacheFile, outFile, "page plane cache");
+            entry.hit = true;
+            entry.file = "rendered_frames/" + outName;
+            try { entry.fileBytes = outFile.length || 0; } catch (eLen) {}
+            summary.hitCount++;
+            summary.entries.push(entry);
+            restored[String(pageIndex)] = {
+                file: entry.file,
+                bounds: entry.bounds,
+                fileBytes: entry.fileBytes
+            };
+        }
+        summary.allHit = allHit && summary.hitCount === summary.pageCount;
+        if (!summary.allHit) {
+            ctx.globalSingleTextlessPagePlanesByPageIndex = null;
+            summary.status = "miss";
+            summary.reason = "not_all_pages_cached";
+            return summary;
+        }
+        ctx.globalSingleTextlessPagePlanesByPageIndex = restored;
+        summary.status = "hit";
+        summary.reason = "all_pages_restored";
+        return summary;
+    } catch (eCacheRestore) {
+        ctx.globalSingleTextlessPagePlanesByPageIndex = null;
+        summary.status = "error";
+        summary.reason = String(eCacheRestore);
+        return summary;
+    } finally {
+        summary.elapsedMs = (new Date()).getTime() - startedAt;
+        try { writeJson(ctx.outputDir + "/single-textless-page-plane-cache-restore.json", summary); } catch (eWriteRestoreSummary) {}
+    }
+}
+
+function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
+    var startedAt = (new Date()).getTime();
+    var summary = {
+        schemaVersion: 1,
+        mode: "single-textless-page-plane-cache-store",
+        status: "skipped",
+        reason: null,
+        cacheDir: ctx ? ctx.pagePlaneCacheDir || null : null,
+        storedCount: 0,
+        skippedCount: 0,
+        elapsedMs: null,
+        entries: []
+    };
+    try {
+        if (!ctx || !ctx.pagePlaneCacheDir || ctx.graphicsMode !== "single-textless-plane") {
+            summary.reason = "cache_not_configured";
+            return summary;
+        }
+        var cacheDir = _ensureFolder(ctx.pagePlaneCacheDir);
+        var pageHashes = readJson(ctx.outputDir + "/page_hashes.json") || {};
+        var frames = pageTextlessGroupResult && pageTextlessGroupResult.frames
+                ? pageTextlessGroupResult.frames
+                : [];
+        for (var i = 0; i < frames.length; i++) {
+            var frame = frames[i];
+            if (!frame || frame.pageIndex === null || frame.pageIndex === undefined || !frame.file) {
+                summary.skippedCount++;
+                continue;
+            }
+            var pageIndex = parseInt(frame.pageIndex, 10);
+            var hash = pageHashes[String(pageIndex + 1)];
+            var entry = {
+                pageIndex: pageIndex,
+                pageHash: hash || null,
+                sourceFile: frame.file,
+                cacheFile: null,
+                stored: false
+            };
+            if (!hash) {
+                summary.skippedCount++;
+                entry.reason = "missing_page_hash";
+                summary.entries.push(entry);
+                continue;
+            }
+            var src = File(ctx.outputDir + "/" + frame.file);
+            var dest = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash));
+            entry.cacheFile = dest.fsName;
+            if (!src.exists) {
+                summary.skippedCount++;
+                entry.reason = "source_missing";
+                summary.entries.push(entry);
+                continue;
+            }
+            if (!dest.exists) {
+                _copyFileReplacingGeneric(src, dest, "page plane cache store");
+                entry.stored = true;
+                summary.storedCount++;
+            } else {
+                entry.stored = false;
+                entry.reason = "already_cached";
+                summary.skippedCount++;
+            }
+            summary.entries.push(entry);
+        }
+        summary.status = "ok";
+        summary.reason = "stored_available_planes";
+        try {
+            writeJson(cacheDir.fsName + "/metadata.json", {
+                schemaVersion: 1,
+                mode: "single-textless-page-plane-cache",
+                graphicsMode: ctx.graphicsMode,
+                perfMode: ctx.perfMode,
+                pageCount: ctx.rangePageCount,
+                updatedAt: (new Date()).toString()
+            });
+        } catch (eWriteCacheMetadata) {}
+        return summary;
+    } catch (eCacheStore) {
+        summary.status = "error";
+        summary.reason = String(eCacheStore);
+        return summary;
+    } finally {
+        summary.elapsedMs = (new Date()).getTime() - startedAt;
+        try { writeJson(ctx.outputDir + "/single-textless-page-plane-cache-store.json", summary); } catch (eWriteStoreSummary) {}
+    }
+}
+
 function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
     if (!ctx || ctx.globalSingleTextlessPagePlanesByPageIndex) return;
     if (ctx.graphicsMode && ctx.graphicsMode !== "single-textless-plane") return;
@@ -824,7 +1034,9 @@ function _runRenderPhases(doc, ctx, allItems) {
     writeJson(ctx.outputDir + "/object-plans.json",
             ctx.writePlannerDiagnostics === true
                     ? objectPlanDiagnostics
-                    : _slimObjectPlanDiagnosticsForWrite(objectPlanDiagnostics));
+                    : _slimObjectPlanDiagnosticsForWrite(objectPlanDiagnostics, {
+                        importReadyOnly: ctx.perfMode === "fast"
+                    }));
     _marker(ctx.outputDir, "03l_writeObjectPlans_done");
     var objectPlanValidationGate = _assertObjectPlanGate(ctx, objectPlanDiagnostics);
     ctx.extractionPlan.objectPlanValidationGateSummary = {
@@ -995,6 +1207,8 @@ function _runRenderPhases(doc, ctx, allItems) {
             inlinePngCandidates,
             pagePlaneExportOptions);
     _marker(ctx.outputDir, "06b1_pageTextlessGroups_exportDone");
+    _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult);
+    _marker(ctx.outputDir, "06b1a_pageTextlessGroups_cacheStoreDone");
     _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
     _marker(ctx.outputDir, "06b2_pageTextlessGroups_metaDone");
     for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
@@ -1329,6 +1543,9 @@ function main(args) {
                 _pm.encoding = "UTF-8"; _pm.open("w"); _pm.write(JSON.stringify(_pd.itemMap)); _pm.close();
             } catch (eHash) { $.writeln("[pageHash] error: " + eHash); }
             _marker(ctx.outputDir, "03b_pageHashes_done");
+            _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_start");
+            _restoreCachedSingleTextlessPagePlanes(doc, ctx);
+            _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_done");
 
             _runRenderPhases(doc, ctx, allItems);
             allItems = null; try { $.gc(); } catch (e) {}
