@@ -72,10 +72,6 @@ Stage 2:
   elements at source composed-line boundaries inside that same source TextFrame.
   This is a source-layout execution strategy, not a page/text/coordinate
   exception;
-- may mark those affected paragraphs with HWP/HWPX `SQUEEZE` line wrap so HWP
-  preserves the source-composed line width after the hard breaks. This is
-  allowed only for the paragraphs actually executing the Stage 1 TextWrap
-  contract;
 - must not split the source TextFrame into per-composed-line floating text
   boxes. That preserves visual line geometry at the cost of editability and is
   therefore not an allowed main-path implementation;
@@ -112,9 +108,10 @@ Stage 4:
 - Do not materialize `resolved.composedLines` as individual floating TextFrames
   or drawText carriers. TextWrap approximation must not destroy ordinary text
   editing.
-- Do not apply SQUEEZE to the whole source TextFrame as a shortcut for
-  TextWrap. SQUEEZE is valid only on paragraphs that Stage 2 changed because of
-  the Stage 1 `SOURCE_TEXT_WRAP` contract.
+- Do not apply paragraph SQUEEZE to `SOURCE_TEXT_WRAP` body text. HWP can treat
+  it as a single-line pressure mode and collapse narrow/wrapped columns into
+  one-character lines. SQUEEZE remains valid only for bounded single-line
+  labels/carriers selected by their own source ownership facts.
 - Do not rely on HWPX floating image wrap to reproduce InDesign wrap unless
   Stage 1 explicitly selects that as the TextWrap implementation strategy and
   validation proves it is stable for the source layout.

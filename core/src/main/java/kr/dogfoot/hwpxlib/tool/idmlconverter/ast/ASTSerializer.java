@@ -534,10 +534,6 @@ public class ASTSerializer {
         if (para.letterSpacing() != null) {
             first = writeBoxedShortField(sb, "letterSpacing", para.letterSpacing(), first);
         }
-        if (para.squeezeLineWrap()) {
-            first = writeBooleanField(sb, "squeezeLineWrap", true, first);
-        }
-
         // shading
         if (para.shadingOn()) {
             first = writeBooleanField(sb, "shadingOn", true, first);

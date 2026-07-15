@@ -823,7 +823,6 @@ public class ResolvedFrameDistributor {
         dst.lineSpacing(src.lineSpacing());
         dst.lineSpacingType(src.lineSpacingType());
         dst.letterSpacing(src.letterSpacing());
-        dst.squeezeLineWrap(src.squeezeLineWrap());
         dst.shadingOn(src.shadingOn());
         dst.shadingColor(src.shadingColor());
         dst.shadingTint(src.shadingTint());

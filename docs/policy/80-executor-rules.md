@@ -187,8 +187,9 @@ Text Builder:
   elements at source composed-line boundaries, but only inside the original
   source TextFrame declared by Stage 1. This keeps the text searchable/editable
   while preventing HWPX from flowing through the planned obstacle.
-- Text Builder may set paragraph `lineWrap=SQUEEZE` only on paragraphs where it
-  inserted those source-composed hard line breaks for `SOURCE_TEXT_WRAP`.
+- Text Builder must not set paragraph `lineWrap=SQUEEZE` for
+  `SOURCE_TEXT_WRAP` body text. HWP may collapse narrow or wrapped body columns
+  into one-character lines when SQUEEZE is applied to ordinary paragraphs.
 - Text Builder must not execute `SOURCE_TEXT_WRAP` as per-composed-line
   floating text carriers. The original source TextFrame remains a coherent
   editable HWPX text flow; any remaining wrap mismatch is reported as a layout

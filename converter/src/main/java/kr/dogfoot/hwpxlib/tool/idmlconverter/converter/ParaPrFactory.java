@@ -42,7 +42,6 @@ final class ParaPrFactory {
                 || para.spaceBefore() != null
                 || para.spaceAfter() != null
                 || para.lineSpacing() != null
-                || para.squeezeLineWrap()
                 || para.hasTabStops()
                 || para.shadingOn();
     }
@@ -154,7 +153,7 @@ final class ParaPrFactory {
                 .keepWithNextAnd(astPara.keepWithNext())
                 .keepLinesAnd(astPara.keepLinesTogether())
                 .pageBreakBeforeAnd(astPara.pageBreakBefore())
-                .lineWrap(astPara.squeezeLineWrap() ? LineWrap.SQUEEZE : LineWrap.BREAK);
+                .lineWrap(LineWrap.BREAK);
 
         paraPr.createAutoSpacing();
         paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);

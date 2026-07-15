@@ -1539,7 +1539,6 @@ public final class StoryConverter {
                     continue;
                 }
                 if (insertComposedLineBreaks(para, lines)) {
-                    para.squeezeLineWrap(true);
                     processed.add(para);
                     changedBlock = true;
                     insertedBreaks += Math.max(0, lines.size() - 1);
@@ -1554,12 +1553,10 @@ public final class StoryConverter {
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.lineCarriers", 0);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.hardLineBreaks", insertedBreaks);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsApplied", applied);
-            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.squeezeParagraphs", applied);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsSkipped", skipped);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsObserved", observed);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalHardLineBreaks", insertedBreaks);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsApplied", applied);
-            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalSqueezeParagraphs", applied);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsSkipped", skipped);
             if (ctx.ownershipWarningLines != null) {
                 ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_HARD_LINE_BREAKS\""
@@ -1567,9 +1564,8 @@ public final class StoryConverter {
                         + ",\"applied\":" + applied
                         + ",\"lineCarriers\":0"
                         + ",\"hardLineBreaks\":" + insertedBreaks
-                        + ",\"squeezeParagraphs\":" + applied
                         + ",\"skipped\":" + skipped
-                        + ",\"detail\":\"SOURCE_TEXT_WRAP is executed inside the original editable TextFrame by inserting source composed-line hard line breaks and paragraph SQUEEZE; per-line floating carriers remain disabled\"}");
+                        + ",\"detail\":\"SOURCE_TEXT_WRAP is executed inside the original editable TextFrame by inserting source composed-line hard line breaks; per-line floating carriers and paragraph SQUEEZE remain disabled\"}");
             }
         }
     }
