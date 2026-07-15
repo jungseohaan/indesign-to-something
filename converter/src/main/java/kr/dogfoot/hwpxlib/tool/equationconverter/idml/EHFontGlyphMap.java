@@ -150,6 +150,60 @@ public class EHFontGlyphMap {
         return fontFamily.startsWith("EH약물");
     }
 
+    /**
+     * 어느 EH 폰트에서든 의미가 고정된 공통 기호를 디코딩한다.
+     *
+     * <p>{@code µ}(0xB5)=호(⌒), {@code ª}(0xAA)=합동(≡) 두 글리프는 폰트 해킹 계열이
+     * 무엇이든(약물·분수·상부자 …) 항상 같은 수학 기호를 가리킨다. 폰트별 디코더
+     * (약물/상부자)에 못 걸린 케이스가 있어(실측: 수학 2단원 {@code EH분수소문자}의
+     * {@code ;;ª}), EH 폰트 전체에 공통으로 이 치환을 한 번 더 적용한다.
+     *
+     * <p>영문·숫자·한글·기타 글리프는 건드리지 않는다 — 매핑된 두 문자만 치환.
+     */
+    public static String decodeCommonSymbols(String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (text.indexOf('µ') < 0 && text.indexOf('ª') < 0) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == 'µ') sb.append('⌒');
+            else if (c == 'ª') sb.append('≡');
+            else sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * EH약물 폰트의 글리프를 실제 수학 기호로 디코딩한다.
+     *
+     * <p>EH약물은 "약물"(掠物, 문장부호·기호)을 담는 폰트 해킹이다. 특정 라틴 문자
+     * 자리에 수학 기호를 그려두어, EH 처리 경로를 못 타면 raw 라틴 문자로 샌다.
+     * 실측(수학 5단원):
+     * <pre>
+     *   µ (0xB5, 39회)  →  ⌒ (호)      문맥: µAB = 호 AB
+     *   ª (0xAA,  3회)  →  ≡ (합동)     문맥: △OAM ª △OBM = △OAM ≡ △OBM
+     * </pre>
+     * 매핑 없는 확장 문자(공백/장식/마커)는 제거한다.
+     */
+    public static String decodeChemicalGlyphText(String text) {
+        if (text == null || text.isEmpty()) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case 'µ': sb.append('⌒'); break;   // ⌒ 호(arc)
+                case 'ª': sb.append('≡'); break;   // ≡ 합동(equiv)
+                case '`': break;                        // 위첨자 마커 → 제거
+                default:
+                    // 매핑 없는 확장 문자(0x80+ 장식/미지 글리프)는 제거,
+                    // 그 외(영문·숫자·한글·공백)는 그대로.
+                    if (c < 0x20 || (c >= 0x80 && c <= 0xFF)) break;
+                    sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     /** 선모음 폰트인지 확인 */
     public static boolean isLineFont(String fontFamily) {
         if (fontFamily == null) return false;
@@ -400,6 +454,98 @@ public class EHFontGlyphMap {
 
             default: return c;
         }
+    }
+
+    /** 텍스트에 EH overline marker(0xD3, "Ó")가 있는지. */
+    public static boolean containsOverlineMarker(String text) {
+        return text != null && text.indexOf('Ó') >= 0;
+    }
+
+    /**
+     * EH overline marker(Ó=0xD3)를 담은 텍스트를 HWP 수식 문법으로 변환한다.
+     *
+     * <p>EH상부자 폰트에서 Ó 는 앞 문자에 윗줄을 씌우는 선분 기호다(AB̅).
+     * 정상 경로(EH 그룹 → EHTokenizer)는 이걸 overline{...} 으로 감싸지만,
+     * 이 런들은 IDML 파싱 시점에 폰트가 상속으로만 지정되어(fontFamily=null)
+     * EH 그룹에 들어가지 못한 채 일반 텍스트로 흘러 "Ó" 가 raw 로 새어나온다.
+     * 실측(수학 5단원)에서 이런 런이 33개.
+     *
+     * <p>런 안의 "문자열 + Ó" 를 문자열 마커로 감싼다. 이후
+     * RunPostProcessor.splitOverlineRuns 가 이 마커를 ASTEquation("overline{문자열}")
+     * 으로 변환한다(정상 overline 이 처리되는 기존 경로와 동일). 형태(실측):
+     * <pre>
+     *   "ABÓ"        → "AB"
+     *   "ABÓ=CDÓ"    → "AB=CD"
+     *   "=OBÓ"       → "=OB"
+     * </pre>
+     *
+     * <p>Ó 앞에 감쌀 문자가 없으면(런이 "Ó" 로 시작 = 앞 런에서 이어지는 경우)
+     * 그 marker 는 텍스트 레벨에서 대상을 알 수 없으므로 제거만 한다.
+     *
+     * @return overline 마커가 삽입된 텍스트 (Ó 없으면 원본 그대로)
+     */
+    public static String applyOverlineMarkers(String text) {
+        if (text == null || text.indexOf('Ó') < 0) return text;
+        StringBuilder out = new StringBuilder(text.length() + 16);
+        int segStart = 0;   // 현재 overline 대상 후보의 시작
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c != 'Ó') continue;
+
+            // segStart..i 사이에서 Ó 바로 앞에 붙은 "감쌀 문자열"을 찾는다.
+            // 원소기호/변수(영문)만 대상으로 하고, 그 앞의 구분자(=,공백,쉼표,숫자)는
+            // overline 밖에 그대로 둔다.
+            int wrapStart = i;
+            while (wrapStart > segStart) {
+                char pc = text.charAt(wrapStart - 1);
+                if (isOverlineWrappable(pc)) {
+                    wrapStart--;
+                } else {
+                    break;
+                }
+            }
+            // wrapStart..i = 감쌀 문자열, 그 앞(segStart..wrapStart)은 그대로 출력
+            out.append(text, segStart, wrapStart);
+            if (wrapStart < i) {
+                out.append('\uE000').append(text, wrapStart, i).append('\uE001');
+            }
+            // 감쌀 문자가 없으면(Ó 단독) marker 를 그냥 버린다.
+            segStart = i + 1;
+        }
+        out.append(text, segStart, text.length());
+        return out.toString();
+    }
+
+    /**
+     * overline 으로 감쌀 수 있는 문자인가.
+     *
+     * <p>선분/점 이름은 영문자다(AB̅, PA̅). 숫자는 계수이므로(예: 2AM̅ = 2×AM̅)
+     * overline 밖에 둔다 — 숫자를 포함하면 "2AM̅" 이 overline{2AM} 으로 잘못 감싸진다.
+     */
+    private static boolean isOverlineWrappable(char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    }
+
+    /**
+     * EH상부자 폰트의 비숫자 기호를 실제 유니코드 기호로 디코딩한다.
+     *
+     * <p>overline marker(Ó=0xD3)와 위첨자 숫자(0xDA~0xE2)는 각각 applyOverlineMarkers /
+     * 수식 그룹 경로가 처리하므로 여기서 건드리지 않는다. 그 외 기호 글리프만 치환한다.
+     * 실측(수학 5단원): ù(0xF9) → °(도), 문맥 "90ù" = 90°.
+     */
+    public static String decodeSuperscriptSymbols(String text) {
+        if (text == null || text.isEmpty()) return text;
+        if (text.indexOf('ù') < 0 && text.indexOf('Õ') < 0) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case 'ù': sb.append('°'); break;  // ù → ° (도)
+                case 'Õ': break;                       // 0xD5 = 수평선 장식 → 제거
+                default: sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
