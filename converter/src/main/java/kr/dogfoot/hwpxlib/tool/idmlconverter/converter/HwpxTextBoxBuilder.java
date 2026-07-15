@@ -279,7 +279,10 @@ public class HwpxTextBoxBuilder {
         if (!nativeTextBoxGraphicsEnabled() && !forceNativeGraphics) return false;
         if (pngData == null || pngData.length == 0) return false;
         try {
-            String itemId = ImageInserter.registerImage(ctx.hwpxFile, pngData, "png");
+            String itemId = ImageInserter.registerImage(
+                    ctx.hwpxFile,
+                    AlphaSafePng.flattenOntoWhiteIfNeeded(pngData),
+                    "png");
             if (itemId == null) return false;
             rect.createFillBrush();
             rect.fillBrush().createImgBrush();
@@ -956,7 +959,10 @@ public class HwpxTextBoxBuilder {
 
         if (block.imageFillData() != null && block.imageFillData().length > 0) {
             try {
-                String itemId = ImageInserter.registerImage(ctx.hwpxFile, block.imageFillData(), "png");
+                String itemId = ImageInserter.registerImage(
+                        ctx.hwpxFile,
+                        AlphaSafePng.flattenOntoWhiteIfNeeded(block.imageFillData()),
+                        "png");
                 if (itemId != null) {
                     bf.createFillBrush();
                     bf.fillBrush().createImgBrush();
