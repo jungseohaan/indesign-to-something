@@ -1909,8 +1909,8 @@ function _promoteObjectPlanInlineVisibleTextFrameShell(plan, src, sourceId) {
     plan.visualSourceSetId = sourceSetId;
     plan.exportSourceSetId = sourceSetId;
     plan.hiddenSourceSetId = _sourceSetId([]);
-    plan.materialization = "NATIVE_SOURCE_SHAPE";
-    plan.textAction = "OWNED_BY_HWPX_TEXT";
+    plan.materialization = "EXTRACTED_PNG_VECTOR";
+    plan.textAction = "DROP_TEXT";
     plan.ownedTextFrameIds = [sourceId];
     plan.visualAction = "PLACE_TEXT_SHELL";
     plan.ownershipSlot = "SHELL_SLOT";
@@ -6216,7 +6216,8 @@ function _objectPlanAllowsTextFrameShellSourceOverlap(plan, overlap) {
     if (plan.ownershipSlot !== "SHELL_SLOT") return false;
     if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
     if (plan.materialization !== "EXTRACTED_PNG_VECTOR") return false;
-    if (plan.passId !== "pass.editable_textframe_visual_shells") return false;
+    if (plan.passId !== "pass.editable_textframe_visual_shells"
+            && plan.passId !== "pass.inline_objects") return false;
     if (!plan.styleSourceObjectIds || plan.styleSourceObjectIds.length === 0) return false;
     var styleIds = _sourceIdSet(plan.styleSourceObjectIds);
     for (var i = 0; i < overlap.length; i++) {
