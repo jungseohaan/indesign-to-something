@@ -271,6 +271,10 @@ class RunPostProcessor {
     private static boolean isItalicMathRun(ASTTextRun tr) {
         String text = tr.text();
         if (text == null || text.isEmpty()) return false;
+        // 공백만인 run은 EH 폰트여도 수식 내용이 아니다(구분자). 수식 버퍼에 넣으면
+        // 앞 항과 합쳐질 때 선행 공백이 trim 돼 사라진다(실측: 3단원 ⑵ 뒤 EH상부자
+        // 공백이 y=- 수식에 흡수돼 ⑵와 y= 가 붙음).
+        if (text.trim().isEmpty()) return false;
         // 한국어가 포함되면 수식이 아님
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
