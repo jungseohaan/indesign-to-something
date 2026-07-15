@@ -34,7 +34,8 @@ Stage 1 may declare `TextWrap` only from source layout metadata:
 When those facts exist, the source `composedLines` are authoritative evidence
 that InDesign already composed the text around the obstacle. The HWPX converter
 does not need to rediscover the wrap. It needs to approximate the source
-composed line geometry.
+composed line geometry without turning automatic composition boundaries into
+authored paragraph structure.
 
 ### Ownership
 
@@ -66,10 +67,17 @@ Stage 1:
 Stage 2:
 
 - emits the original text as HWPX text;
-- may split the HWPX paragraph into source-composed line segments only when
-  Stage 1 declares TextWrap for that TextFrame;
-- may use HWPX paragraph/table/text-box primitives to approximate the source
-  line widths and left/right wrap indents;
+- keeps the source paragraph as editable HWPX text. A `SOURCE_TEXT_WRAP`
+  contract is not permission to insert hard HWPX `lineBreak` elements at every
+  source composed-line boundary;
+- may split the visible execution into source-composed line carriers when HWP
+  cannot reproduce the InDesign floating-object wrap directly. These carriers
+  remain the single `HWPX_TEXT` owner, use the source `composedLines` bounds,
+  and may use line-local no-auto-line-wrap/SQUEEZE so HWP does not reflow text
+  through the obstacle;
+- may use other HWPX paragraph/table/text-box/layout primitives to approximate
+  the source line widths and left/right wrap indents while preserving source
+  reading order;
 - must preserve source reading order and searchable text;
 - must not create page/text/coordinate/literal-string exceptions.
 
@@ -96,6 +104,12 @@ Stage 4:
 - Do not narrow or shift a TextFrame in Stage 2/3 unless Stage 1 has declared
   TextWrap.
 - Do not insert spacer images/tables as an unplanned workaround.
+- Do not materialize `resolved.composedLines` as hard line breaks. Composed
+  lines are source layout evidence for a TextWrap contract, not authored
+  content breaks.
+- Do not apply SQUEEZE to the whole source TextFrame as a shortcut for
+  TextWrap. SQUEEZE is allowed only on line-local carriers whose bounds come
+  from the Stage 1 `SOURCE_TEXT_WRAP` contract.
 - Do not rely on HWPX floating image wrap to reproduce InDesign wrap unless
   Stage 1 explicitly selects that as the TextWrap implementation strategy and
   validation proves it is stable for the source layout.
@@ -108,5 +122,5 @@ If a page-level floating group overlaps the right side of a body TextFrame and
 the TextFrame's `composedLines` show the first seven lines ending at the
 floating group's left edge, Stage 1 declares TextWrap on the body TextFrame.
 The floating group remains page-level visual material. Stage 2 approximates the
-seven narrowed text lines from the source composed-line data, then resumes full
-TextFrame width for the later lines.
+seven narrowed visual lines from the source composed-line data without inserting
+hard line breaks, then resumes full TextFrame width for the later lines.
