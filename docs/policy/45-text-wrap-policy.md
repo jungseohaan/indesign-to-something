@@ -34,7 +34,8 @@ Stage 1 may declare `TextWrap` only from source layout metadata:
 When those facts exist, the source `composedLines` are authoritative evidence
 that InDesign already composed the text around the obstacle. The HWPX converter
 does not need to rediscover the wrap. It needs to approximate the source
-composed line geometry.
+composed line geometry without turning automatic composition boundaries into
+authored paragraph structure.
 
 ### Ownership
 
@@ -66,10 +67,16 @@ Stage 1:
 Stage 2:
 
 - emits the original text as HWPX text;
-- may split the HWPX paragraph into source-composed line segments only when
-  Stage 1 declares TextWrap for that TextFrame;
-- may use HWPX paragraph/table/text-box primitives to approximate the source
-  line widths and left/right wrap indents;
+- keeps the source paragraph as editable HWPX text. When Stage 1 declares a
+  `SOURCE_TEXT_WRAP` contract, Stage 2 may insert hard HWPX `lineBreak`
+  elements at source composed-line boundaries inside that same source TextFrame.
+  This is a source-layout execution strategy, not a page/text/coordinate
+  exception;
+- must not split the source TextFrame into per-composed-line floating text
+  boxes. That preserves visual line geometry at the cost of editability and is
+  therefore not an allowed main-path implementation;
+- may use HWPX paragraph/table/layout primitives only when they preserve the
+  original source TextFrame as a coherent editable text flow;
 - must preserve source reading order and searchable text;
 - must not create page/text/coordinate/literal-string exceptions.
 
@@ -96,6 +103,25 @@ Stage 4:
 - Do not narrow or shift a TextFrame in Stage 2/3 unless Stage 1 has declared
   TextWrap.
 - Do not insert spacer images/tables as an unplanned workaround.
+- Do not materialize `resolved.composedLines` as hard line breaks unless Stage 1
+  has declared a `SOURCE_TEXT_WRAP` contract for that source TextFrame.
+- Do not materialize `resolved.composedLines` as individual floating TextFrames
+  or drawText carriers. TextWrap approximation must not destroy ordinary text
+  editing.
+- Do not apply `lineWrap=SQUEEZE` from screenshots, visible overflow, narrow
+  columns, or literal text symptoms. SQUEEZE is allowed only when Stage 1 has
+  declared a source layout contract that needs it.
+- For `SOURCE_TEXT_WRAP`, Stage 2 executes the contract by inserting
+  source-composed hard line breaks inside the original editable TextFrame and
+  applying paragraph-local `lineWrap=SQUEEZE` to those affected paragraphs.
+  This is the canonical HWPX approximation for source wrap because HWPX has no
+  equivalent floating-object text wrap.
+- `SOURCE_TEXT_WRAP` SQUEEZE must remain paragraph-local. It must not turn the
+  whole TextFrame, drawText carrier, or unrelated paragraphs into a single-line
+  pressure box.
+- Bounded single-line labels/carriers may also use no-wrap/SQUEEZE only when
+  resolved metadata proves source single-line intent, no overflow, and source
+  ownership keeps the carrier as one editable object.
 - Do not rely on HWPX floating image wrap to reproduce InDesign wrap unless
   Stage 1 explicitly selects that as the TextWrap implementation strategy and
   validation proves it is stable for the source layout.
@@ -108,5 +134,7 @@ If a page-level floating group overlaps the right side of a body TextFrame and
 the TextFrame's `composedLines` show the first seven lines ending at the
 floating group's left edge, Stage 1 declares TextWrap on the body TextFrame.
 The floating group remains page-level visual material. Stage 2 approximates the
-seven narrowed text lines from the source composed-line data, then resumes full
-TextFrame width for the later lines.
+wrapped layout by inserting source-composed hard line breaks inside the original
+editable TextFrame. If HWPX cannot represent the wrap stably, validation reports
+the layout approximation gap rather than splitting the paragraph into separate
+floating text boxes.

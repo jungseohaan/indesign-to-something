@@ -51,13 +51,20 @@ Placement and coordinate space are a single source decision.
   owner for that slot. A paired `page_object` render is only a duplicate channel
   and must not convert the object to floating placement by itself.
 - A `Character` or `InsertionPoint` source parent is an anchor relation, not an
-  inline-placement contract. Stage 0 must classify each story-anchored visual as
-  `storyAnchorPlacement=INLINE` only when its resolved source bounds belong to
-  the carrier TextFrame/table-cell content flow. If those source bounds live in
-  page space outside the carrier content box, Stage 0 writes
+  inline-placement contract by itself. Stage 0 must classify each
+  story-anchored visual from the actual story token stream and source object
+  metadata. A direct IDML story inline slot whose paragraph also contains
+  visible story text is story-flow material when that slot owns the visual
+  source tree; Stage 1 writes `placement=INLINE` and
+  `coordinateSpace=STORY_FLOW` even if resolved DOM diagnostics also report
+  `storyAnchorPlacement=FLOATING_ANCHORED` for the same root. A descendant
+  object's page-positioned anchored setting does not move the root inline slot
+  out of story flow.
+- If the source bounds live in page space outside the carrier content box and
+  the source is not the direct story-flow slot owner, Stage 0 writes
   `storyAnchorPlacement=FLOATING_ANCHORED`; Stage 1 then plans the object as
   `placement=FLOATING` and `coordinateSpace=PAGE`. Story/Text Builder must not
-  emit an inline slot for `FLOATING_ANCHORED` sources.
+  emit an inline slot for those page-positioned anchored sources.
   Missing `storyAnchorPlacement` is not treated as `INLINE`; it is a metadata
   defect to fix in Stage 0.
 - `PLACE_INLINE_PNG` requires explicit inline source evidence:
@@ -69,12 +76,14 @@ Placement and coordinate space are a single source decision.
   page-positioned source metadata normally wins over a generic marker: if the
   same source bundle contains `storyAnchorPlacement=FLOATING_ANCHORED` or
   `AnchoredPosition="Anchored"`, Stage 1 uses `placement=FLOATING` and
-  `coordinateSpace=PAGE` unless Stage 0 also records a more specific
-  `tableCellStoryTextInlineSlot=true` fact. That fact is only valid when the
-  direct story anchor is in a table cell and the source bounds overlap the cell
-  carrier bounds. In that case the table cell flow owns the slot, Stage 1 writes
-  `placement=INLINE` / `coordinateSpace=STORY_FLOW`, and Story/Text Builder may
-  insert the PNG at that table-cell paragraph position.
+  `coordinateSpace=PAGE` unless Stage 0 also records a more specific direct
+  story-flow ownership fact. Valid direct story-flow ownership facts include
+  `storyTextInlineSlot=true` from the actual IDML story token stream and
+  `tableCellStoryTextInlineSlot=true` when the direct story anchor is in a table
+  cell and the source bounds overlap the cell carrier bounds. In that case the
+  story/table-cell flow owns the slot, Stage 1 writes `placement=INLINE` /
+  `coordinateSpace=STORY_FLOW`, and Story/Text Builder may insert the PNG at
+  that paragraph position.
 - An empty inline TextFrame with only frame paint is not automatically
   `CONTENT_VISUAL_SLOT`. When the same source pattern appears as a repeated
   baseline run of small empty inline frames, the run represents a text-flow

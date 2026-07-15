@@ -350,7 +350,7 @@ public final class StoryConverter {
             restoreTfInlineVisuals(ctx, blocks);
             restoreInlineNanos += System.nanoTime() - stepStart;
             stepStart = System.nanoTime();
-            applySourceTextWrapContracts(ctx, blocks);
+            applySourceTextWrapContracts(ctx, sections, blocks);
             preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
             replaceDottedInlineImagesWithTabLeaders(ctx, blocks);
             coalesceDotLeaderAnswerVisualBreaks(blocks);
@@ -1491,77 +1491,85 @@ public final class StoryConverter {
                 if (insertComposedLineBreaks(para, lines)) {
                     processed.add(para);
                     para.alignment("left");
+                    para.squeezeLineWrap(true);
                     changedBlock = true;
                 }
             }
-            // Explicit break edits preserve the source line structure.
-            // Do not turn the whole text frame into HWPX SQUEEZE: that flag is
-            // reserved for source single-line labels and would force body text
-            // into one visual line.
+            // Keep the TextFrame editable/ordinary while applying the
+            // SOURCE_TEXT_WRAP contract at paragraph scope only.
         }
     }
 
     private static void applySourceTextWrapContracts(
-            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+            ResolvedBuildContext ctx, List<ASTSection> sections, List<ASTTextFrameBlock> blocks) {
         if (ctx == null || ctx.resolvedData == null || blocks == null || blocks.isEmpty()) return;
+        int observed = 0;
         int applied = 0;
-        int unmatched = 0;
-        int failed = 0;
-        Set<Integer> failedTextFrameIds = new LinkedHashSet<>();
-        for (ASTTextFrameBlock block : blocks) {
+        int insertedBreaks = 0;
+        int skipped = 0;
+        for (ASTTextFrameBlock block : new ArrayList<>(blocks)) {
             if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
             int textFrameId = parseTextFrameBlockSourceId(block.sourceId());
             if (textFrameId < 0) continue;
             TextLayoutContract contract = sourceTextWrapContractForTextFrame(ctx, textFrameId);
             if (contract == null || !contract.isSourceTextWrap()) continue;
-            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
-            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) continue;
-            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara =
-                    composedLinesByParagraph(tf);
-            if (linesByPara.isEmpty()) continue;
+            observed++;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(Integer.toString(textFrameId));
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) {
+                skipped++;
+                continue;
+            }
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara = composedLinesByParagraph(tf);
+            if (linesByPara.isEmpty()) {
+                skipped++;
+                continue;
+            }
+            boolean changedBlock = false;
             Set<ASTParagraph> processed = new HashSet<>();
             for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : linesByPara.entrySet()) {
-                int paraIndex = entry.getKey();
                 List<ResolvedTextFrame.ComposedLine> lines = entry.getValue();
                 if (lines == null || lines.size() < 2) continue;
-                if (!hasComposedWrapIndent(lines)) continue;
                 ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
                 if (para == null) {
-                    para = paragraphAtComposedParaIndex(block.paragraphs(), paraIndex, processed);
+                    para = paragraphAtComposedParaIndex(block.paragraphs(), entry.getKey(), processed);
                 }
                 if (para == null) {
-                    para = soleUnprocessedParagraph(block.paragraphs(), processed);
-                }
-                if (para == null) {
-                    unmatched++;
+                    skipped++;
                     continue;
                 }
                 if (insertComposedLineBreaks(para, lines)) {
-                    para.alignment("left");
+                    para.squeezeLineWrap(true);
                     processed.add(para);
-                    applied++;
+                    changedBlock = true;
+                    insertedBreaks += Math.max(0, lines.size() - 1);
                 } else {
-                    failed++;
-                    failedTextFrameIds.add(textFrameId);
+                    skipped++;
                 }
             }
+            if (changedBlock) applied++;
         }
-        if (applied > 0) {
-            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.appliedParagraphs", applied);
-        }
-        if (failed > 0) {
-            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.failedParagraphs", failed);
-        }
-        if (unmatched > 0 && ctx.ownershipWarningLines != null) {
-            ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_PARAGRAPH_MATCH_MISSING\""
-                    + ",\"count\":" + unmatched
-                    + ",\"detail\":\"Stage 1 TextWrap contracts existed, but some composed-line paragraphs did not match AST paragraphs\"}");
-        }
-        if (failed > 0 && ctx.ownershipWarningLines != null) {
-            ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_LINE_BREAK_INSERT_FAILED\""
-                    + ",\"count\":" + failed
-                    + ",\"textFrameIds\":\"" + failedTextFrameIds
-                    + "\",\"detail\":\"Stage 1 TextWrap contracts matched AST paragraphs, but source composed-line breaks could not be inserted\"}");
+        if (observed > 0) {
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsObserved", observed);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.lineCarriers", 0);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.hardLineBreaks", insertedBreaks);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsApplied", applied);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.squeezeParagraphs", applied);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsSkipped", skipped);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsObserved", observed);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalHardLineBreaks", insertedBreaks);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsApplied", applied);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalSqueezeParagraphs", applied);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsSkipped", skipped);
+            if (ctx.ownershipWarningLines != null) {
+                ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_SOURCE_TEXT_WRAP_HARD_LINE_BREAKS\""
+                        + ",\"count\":" + observed
+                        + ",\"applied\":" + applied
+                        + ",\"lineCarriers\":0"
+                        + ",\"hardLineBreaks\":" + insertedBreaks
+                        + ",\"squeezeParagraphs\":" + applied
+                        + ",\"skipped\":" + skipped
+                        + ",\"detail\":\"SOURCE_TEXT_WRAP: source composed-line hard line breaks plus paragraph-local SQUEEZE inside the original editable TextFrame; per-line floating carriers remain disabled\"}");
+            }
         }
     }
 
@@ -2307,21 +2315,51 @@ public final class StoryConverter {
                 continue;
             }
             if (remaining == 0) {
+                consumeLeadingSourceLineBreak(items, i);
                 items.add(advancePastTrailingInlineObjects(items, i, trailingInlineObjects), lineBreak);
                 return;
             }
             if (remaining == len) {
+                consumeLeadingSourceLineBreak(items, i + 1);
                 items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
                 return;
             }
             ASTTextRun before = copyTextRun(run, text.substring(0, remaining));
-            ASTTextRun after = copyTextRun(run, text.substring(remaining));
+            ASTTextRun after = copyTextRun(run, stripOneLeadingSourceLineBreak(text.substring(remaining)));
             items.set(i, before);
-            items.add(i + 1, after);
+            if (after.text() != null && !after.text().isEmpty()) {
+                items.add(i + 1, after);
+            }
             items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
             return;
         }
         items.add(advancePastTrailingInlineObjects(items, items.size(), trailingInlineObjects), lineBreak);
+    }
+
+    private static void consumeLeadingSourceLineBreak(List<ASTInlineItem> items, int index) {
+        if (items == null || index < 0 || index >= items.size()) return;
+        ASTInlineItem item = items.get(index);
+        if (!(item instanceof ASTTextRun)) return;
+        ASTTextRun run = (ASTTextRun) item;
+        String stripped = stripOneLeadingSourceLineBreak(run.text());
+        if (stripped == null || stripped.isEmpty()) {
+            items.remove(index);
+        } else if (!stripped.equals(run.text())) {
+            run.text(stripped);
+        }
+    }
+
+    private static String stripOneLeadingSourceLineBreak(String text) {
+        if (text == null || text.isEmpty()) return text;
+        char ch = text.charAt(0);
+        if (ch == '\r') {
+            int next = text.length() > 1 && text.charAt(1) == '\n' ? 2 : 1;
+            return text.substring(next);
+        }
+        if (ch == '\n' || ch == '\u2028') {
+            return text.substring(1);
+        }
+        return text;
     }
 
     private static int advancePastTrailingInlineObjects(

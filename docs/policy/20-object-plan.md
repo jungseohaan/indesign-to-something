@@ -310,8 +310,10 @@ No Stage 2.5 or post-text ownership refinement exists. Later stages may collect
 diagnostics, but diagnostics must not change `ObjectPlan` or create/drop visible
 material.
 
-`SQUEEZE`/no-auto-line-wrap is only valid for source single-line labels. A
-TextFrame whose resolved source text contains explicit line breaks, table
-markers, or multiple composed lines must keep HWPX line wrapping enabled. Line
-structure preservation should be represented by explicit break items or source
-bounds, not by changing the whole container to single-line squeeze.
+`SQUEEZE`/no-auto-line-wrap is valid only for bounded source text carriers:
+source single-line labels, or composed-line carriers created by a Stage 1
+`SOURCE_TEXT_WRAP` contract. A TextFrame whose resolved source text contains
+explicit line breaks, table markers, or multiple composed lines must not be
+changed wholesale to single-line squeeze. TextWrap preservation is represented
+by source-composed line bounds and line-local carriers, not by changing the
+whole container to single-line squeeze.

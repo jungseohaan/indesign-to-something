@@ -179,11 +179,14 @@ public class HwpxImageBuilder {
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
         } else {
-            // 인라인 (글자처럼 취급, 줄간격 확장 허용)
-            boolean smallMarker = isSmallMarkerImage(displayW, displayH);
+            // 인라인 (글자처럼 취급). 작은 marker/deco는 줄 위치만 차지하고
+            // 문단 leading 자체는 키우지 않는다.
+            boolean participatesInLineSpacing = InlineFlowPolicy.participatesInLineSpacing(obj);
+            boolean smallMarker = InlineFlowPolicy.isLineNeutralInlineMarker(obj)
+                    || isSmallMarkerImage(displayW, displayH);
             long inlineVertOffset = smallMarker ? -Math.max(120L, Math.round(displayH * 0.45)) : 0L;
             pic.pos().treatAsCharAnd(true)
-                    .affectLSpacingAnd(true)
+                    .affectLSpacingAnd(participatesInLineSpacing)
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(false)
                     .holdAnchorAndSOAnd(false)
@@ -265,11 +268,17 @@ public class HwpxImageBuilder {
         run.charPrIDRef("0");
         Picture pic = run.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
+        int zOrder = obj.plannedZOrder() != Integer.MIN_VALUE
+                ? obj.plannedZOrder()
+                : ctx.foregroundOutputZOrder();
+        TextWrapMethod wrapMethod = isBehindTextVisualLayer(obj.plannedVisualLayer())
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT;
 
         pic.idAnd(picId)
-                .zOrderAnd(ctx.foregroundOutputZOrder())
+                .zOrderAnd(zOrder)
                 .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textWrapAnd(wrapMethod)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None)
@@ -771,7 +780,9 @@ public class HwpxImageBuilder {
     }
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
-        return "PAGE_BACKGROUND".equals(visualLayer);
+        return "PAGE_BACKGROUND".equals(visualLayer)
+                || "CONTAINER_BACKDROP".equals(visualLayer)
+                || "LABEL_BACKDROP".equals(visualLayer);
     }
 
     // ── 배경 PNG ──
