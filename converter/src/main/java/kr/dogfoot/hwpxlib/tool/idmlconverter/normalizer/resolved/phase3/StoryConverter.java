@@ -1291,6 +1291,13 @@ public final class StoryConverter {
 
     private static boolean hasWrapperFlowContent(IDMLTable wrapper, AnchoredTablePlan plan) {
         if (wrapper == null || wrapper.rows() == null) return false;
+        // nestedTableId가 wrapper 자기 자신이면 셀에 별도 story의 nested table이 없는 데이터/레이아웃
+        // 표다. 평탄화하면 셀이 흩어지므로 통짜 인라인 표로 처리해야 한다 → wrapper flow 아님
+        // (실측: 3단원 p106 인라인 앵커된 3x10 값표).
+        if (plan != null && plan.nestedTableId != null
+                && plan.nestedTableId.equals(plan.wrapperTableId)) {
+            return false;
+        }
         // 실제 nested table(별도 story)을 감싼 wrapper만 평탄화 대상. nestedStoryId가 없으면
         // (nestedTableId가 wrapper 자기 자신으로 채워진 경우) 셀에 직접 텍스트를 담은 데이터/레이아웃
         // 표이므로 평탄화하면 셀이 흩어진다 → wrapper flow 아님.
