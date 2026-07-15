@@ -77,6 +77,7 @@ public final class OwnershipPlanner {
 
     private void run() {
         timed("importPreplannedObjectPlans", this::importPreplannedObjectPlans);
+        timed("ensureImportedInlineTextFramePlans", this::ensureImportedInlineTextFramePlans);
         timed("planRenderedItems", this::planRenderedItems);
         timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
         timed("planNativeParentTextShells", this::planNativeParentTextShells);
@@ -432,6 +433,97 @@ public final class OwnershipPlanner {
             recordPlannerDeclaredInlineTextShellContract(plan);
         }
         ctx.clearOwnershipPlansForRewrite();
+    }
+
+    private void ensureImportedInlineTextFramePlans() {
+        if (data == null || data.stories() == null) return;
+        int added = 0;
+        LinkedHashSet<Integer> seen = new LinkedHashSet<>();
+        for (ResolvedStory story : data.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
+                    int anchoredId = run.anchoredObjectId();
+                    if (!seen.add(anchoredId)) continue;
+                    if (ensureImportedInlineTextFramePlan(anchoredId)) {
+                        added++;
+                    }
+                }
+            }
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.ensureImportedInlineTextFramePlans.added", added);
+    }
+
+    private boolean ensureImportedInlineTextFramePlan(int anchoredId) {
+        if (anchoredId < 0 || data == null) return false;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(anchoredId));
+        if (tf == null || !tf.isInline() || tf.sourceHidden()) return false;
+        if (data.isTextOwnedByIndesignPng(tf.id())) return false;
+        if (!textFrameHasVisibleSemanticText(tf)) return false;
+        if (hasTextSlotDecisionForTextFrame(anchoredId)) return false;
+
+        plans.add(new ObjectPlan(
+                anchoredId,
+                "text_frame:imported_inline_anchor",
+                tf.pageIndex(),
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.DROP_VISUAL,
+                VisualLayer.CONTENT_VISUAL,
+                Placement.INLINE,
+                null,
+                new int[] { anchoredId },
+                new int[] { anchoredId },
+                new int[0],
+                new int[] { anchoredId },
+                new int[0],
+                "p" + tf.pageIndex() + ":tf:" + anchoredId,
+                Materialization.HWPX_TEXT,
+                CoordinateSpace.STORY_FLOW,
+                null,
+                textFrameSourceZOrder(tf),
+                "imported_preplanned_missing_inline_text_frame",
+                null,
+                textFramePlanBounds(tf, anchoredId, false),
+                tf.layerId(),
+                tf.layerName(),
+                tf.layerIndex()));
+        return true;
+    }
+
+    private boolean hasTextSlotDecisionForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (!contains(plan.ownedTextFrameIds, textFrameId) && plan.domId != textFrameId) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    || plan.textAction == TextAction.OWNED_BY_PNG
+                    || plan.textAction == TextAction.DROP_TEXT) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean textFrameHasVisibleSemanticText(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String text = safe(tf.frameVisibleText())
+                .replace('\uFFFC', ' ')
+                .replace('\r', ' ')
+                .replace('\n', ' ')
+                .trim();
+        if (!text.isEmpty()) return true;
+        if (tf.frameParaTexts() == null) return false;
+        for (String paragraphText : tf.frameParaTexts()) {
+            String normalized = safe(paragraphText)
+                    .replace('\uFFFC', ' ')
+                    .replace('\r', ' ')
+                    .replace('\n', ' ')
+                    .trim();
+            if (!normalized.isEmpty()) return true;
+        }
+        return false;
     }
 
     private ObjectPlan canonicalizeImportedPreplannedObjectPlan(ObjectPlan plan) {
