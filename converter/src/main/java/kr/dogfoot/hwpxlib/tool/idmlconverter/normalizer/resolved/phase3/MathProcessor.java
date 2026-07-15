@@ -339,6 +339,7 @@ class MathProcessor {
 
             if (item instanceof ASTEquation) {
                 ASTEquation eq = (ASTEquation) item;
+                if (isProtectedInlineFormulaEquation(eq)) break;
                 String eqScript = normalizeExistingFormulaEquationScript(eq.hwpScript());
                 if (eqScript.isEmpty() || !isFormulaEquationScript(eqScript)) break;
                 ScriptAppendResult result =
@@ -388,6 +389,19 @@ class MathProcessor {
         if (color != null) eq.textColor(color);
         applyBodyTextEquationHints(eq, preferredBaseUnit, preferredFontFamily);
         return new FormulaCluster(eq, end);
+    }
+
+    private static boolean isProtectedInlineFormulaEquation(ASTEquation eq) {
+        if (eq == null) return false;
+        String sourceType = eq.sourceType();
+        if ("INLINE_FRACTION".equals(sourceType)) return true;
+
+        String script = eq.hwpScript();
+        if (script == null) return false;
+        String normalized = script.toLowerCase(Locale.ROOT);
+        return normalized.contains(" over ")
+                || normalized.contains("sqrt")
+                || normalized.contains("root");
     }
 
     private static String normalizeExistingFormulaEquationScript(String script) {

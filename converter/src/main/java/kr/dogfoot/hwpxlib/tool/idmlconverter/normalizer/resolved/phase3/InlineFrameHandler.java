@@ -139,8 +139,8 @@ public class InlineFrameHandler {
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
         if (tf == null || !tf.isInline()) return null;
-        if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) return null;
-        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
+        // Stage 1 is authoritative for the TEXT_SLOT. Legacy rendered-channel flags
+        // may describe the visual shell, but must not suppress an inline HWPX text plan.
 
         // 2개 단락 = 분수 구조 (frameParaTexts[0]=분자, [1]=분모)
         ResolvedStory rs = (tf.storyId() != null) ? ctx.resolvedData.getStory(tf.storyId()) : null;
@@ -161,7 +161,7 @@ public class InlineFrameHandler {
         if (denomScript == null) denomScript = denominator;
 
         String hwpScript = "{" + numScript + "} over {" + denomScript + "}";
-        return new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(hwpScript, "EH_FONT");
+        return new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(hwpScript, "INLINE_FRACTION");
     }
 
     private static String collectParagraphEquationText(ResolvedParagraph rp) {
