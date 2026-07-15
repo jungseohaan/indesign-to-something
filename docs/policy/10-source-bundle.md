@@ -118,11 +118,14 @@ Required materialization values:
 - `EXTRACTED_PNG_VECTOR`
 - `TEXTLESS_VISUAL_FRAGMENT`
 - `COMPLETE_PNG`
+- `NATIVE_SOURCE_SHAPE`
 
-`NATIVE_SOURCE_SHAPE` is legacy diagnostic vocabulary and is not an executable
-visible graphic materialization. Rectangles, fills, strokes, rounded corners,
-background-only TextFrames, and vector shells must be supplied by
-InDesign-extracted image material when they are visible graphics.
+`NATIVE_SOURCE_SHAPE` is executable only for source-style slots that Stage 1 can
+prove from original metadata and that HWPX can represent natively. It is allowed
+for source-declared line/vector slots and for story-flow inline TextFrames whose
+own fill/stroke/text must enter the paragraph as one inline drawText carrier.
+It is not a late fallback for recreating arbitrary missing graphics from bounds,
+color, pixels, or occlusion symptoms.
 
 Slot ownership rules:
 
@@ -372,6 +375,13 @@ Slot ownership rules:
 - A source tree that contains editable TextFrame descendants is not a complete
   visual owner unless Stage 1 explicitly assigns those descendants to
   `OWNED_BY_PNG`.
+- For a story-flow inline `COMPLETE_PNG` text owner, all visible and owned text
+  sources must close under one source-declared atom root. The accepted proof is
+  source parentage: for example, a marker Oval that directly owns its child
+  TextFrame, or a single source inline/group atom whose descendants include the
+  visual shell and the text. Stage 1 must not combine a nearby page/background
+  shell with an inline marker merely because their rendered bounds appear to
+  form one visual component.
 - The extractor must not shrink a text-owning inline source tree to only the
   inline root id when emitting an `inline_object` candidate. It must carry the
   closed source ids and descendant TextFrame ids, or not emit the inline

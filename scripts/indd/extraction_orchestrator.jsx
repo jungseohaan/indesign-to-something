@@ -924,6 +924,9 @@ function _globalSingleTextlessInlineHideCandidates(sourceItems) {
                 src.storyTextInlineSlot === true
                 || src.tableCellStoryTextInlineSlot === true
                 || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
+                || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+                || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION"
+                || src.isInline === true
                 || String(src.parentKind || "") === "Character"
                 || String(src.parentKind || "") === "InsertionPoint";
         if (!inline) continue;

@@ -15,7 +15,7 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "58";
+var EXTRACT_SCRIPT_VERSION = "61";
 var _EXTRACT_MODULE_LOAD_DEBUG = "";
 var _EXTRACT_MODULE_ALIAS_SOURCE = "";
 var _EXACT_SHELL_SLOT_DUPLICATE_DIAGNOSTICS = null;

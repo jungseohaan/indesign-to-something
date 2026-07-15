@@ -452,7 +452,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     function shouldEmitDecorationSourceCandidate(itemInfo) {
         if (!itemInfo) return false;
-        var kind = itemInfo.kind;
+        var kind = itemInfo.kind || itemInfo.type || itemInfo.itemType;
         if (kind === "Group") return itemInfo.hasChildren === true;
         if (kind === "Rectangle" || kind === "Oval"
                 || kind === "Polygon" || kind === "GraphicLine") {
@@ -463,11 +463,22 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
     }
 
     function textFrameMayHaveStyleShellForBase(itemInfo) {
-        if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") return false;
+        var kindName = String(itemInfo && (itemInfo.kind || itemInfo.type || itemInfo.itemType) || "");
+        if (!itemInfo || kindName !== "TextFrame") return false;
         return itemInfo.hasVisibleFill === true
                 || itemInfo.hasVisibleStroke === true
                 || _sourceHasTextFrameShellStyleMetadataInIndex(
                         itemInfo.id, sourceIndex.sourceInfoById);
+    }
+
+    function sourceInfoIsInlineFlowForBase(itemInfo) {
+        if (!itemInfo) return false;
+        if (itemInfo.storyTextInlineSlot === true || itemInfo.isInline === true) return true;
+        var placement = String(itemInfo.storyAnchorPlacement || "").toUpperCase();
+        var anchoredPosition = String(itemInfo.anchoredPosition || "").toUpperCase();
+        return placement === "INLINE"
+                || anchoredPosition === "INLINE_POSITION"
+                || anchoredPosition === "INLINEPOSITION";
     }
 
     function sourceMayBeBackgroundVectorCandidateFast(itemInfo, pageIndex) {
@@ -1800,8 +1811,13 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 var tfShellSourceIds = [id];
                 item = item || domItemForBase(id);
                 if (!item) continue;
-                pushBaseExtractionCandidate("pass.editable_textframe_visual_shells", item, candidateAttrsForInfo(itemInfo, {
+                var textFrameInlineFlow = sourceInfoIsInlineFlowForBase(itemInfo);
+                var textFrameShellPassId = textFrameInlineFlow
+                        ? "pass.inline_objects"
+                        : "pass.editable_textframe_visual_shells";
+                pushBaseExtractionCandidate(textFrameShellPassId, item, candidateAttrsForInfo(itemInfo, {
                     sourceObjectIds: tfShellSourceIds,
+                    executionSourceObjectIds: tfShellSourceIds,
                     exportSourceObjectIds: tfShellSourceIds,
                     visualSourceObjectIds: tfShellSourceIds,
                     styleSourceObjectIds: tfShellSourceIds,
@@ -1810,12 +1826,28 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                     requiresTextHidden: true,
                     textOwner: "hwpx_tf",
                     pageIndex: extractionPageIndex,
-                    unit: "TEXT_FRAME",
+                    unit: textFrameInlineFlow ? "INLINE_OBJECT" : "TEXT_FRAME",
                     mode: "TEXTLESS_CANDIDATE",
-                    candidatePurpose: "SHELL_CANDIDATE",
-                    compositeRole: "textframe_style_shell_slot",
-                    slotRole: "direct_child_shell_slot"
-                }), "textframe_style_shell_slot");
+                    candidatePurpose: textFrameInlineFlow ? "INLINE_CANDIDATE" : "SHELL_CANDIDATE",
+                    compositeRole: textFrameInlineFlow
+                            ? "inline_visible_text_frame_shell"
+                            : "textframe_style_shell_slot",
+                    slotRole: textFrameInlineFlow
+                            ? "inline_text_frame_shell_slot"
+                            : "direct_child_shell_slot",
+                    inlineAnchorSourceObjectId: textFrameInlineFlow ? id : null,
+                    inlineSourceTreeClosed: textFrameInlineFlow,
+                    inlineFlowSourceObjectIds: textFrameInlineFlow ? tfShellSourceIds : [],
+                    ownershipSlot: "SHELL_SLOT",
+                    materialization: "EXTRACTED_PNG_VECTOR",
+                    textAction: "DROP_TEXT",
+                    visualAction: "PLACE_TEXT_SHELL",
+                    visualLayer: "LABEL_BACKDROP",
+                    placement: textFrameInlineFlow ? "INLINE" : "FLOATING",
+                    coordinateSpace: textFrameInlineFlow ? "STORY_FLOW" : "PAGE"
+                }), textFrameInlineFlow
+                        ? "inline_visible_text_frame_shell"
+                        : "textframe_style_shell_slot");
                 basePerfBranchEnd("textframe_style_shell", textFrameBranchStartedAt);
             }
         }
@@ -1839,9 +1871,26 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 }
 
 function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems, candidates, candidateSeen) {
+    function itemInfoKind(itemInfo) {
+        return String(itemInfo && (itemInfo.kind || itemInfo.type || itemInfo.itemType) || "");
+    }
     function itemInfoHasTextFrameShellStyle(itemInfo) {
-        if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") return false;
-        return itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true;
+        if (!itemInfo || itemInfoKind(itemInfo) !== "TextFrame") return false;
+        if (itemInfo.hasVisibleFill === true || itemInfo.hasVisibleStroke === true) return true;
+        var fillName = String(itemInfo.fillColorName || itemInfo.fillColor || "");
+        if (fillName && fillName !== "None" && fillName !== "[None]") return true;
+        var strokeName = String(itemInfo.strokeColorName || itemInfo.strokeColor || "");
+        var strokeWeight = Number(itemInfo.strokeWeight || 0);
+        return strokeName && strokeName !== "None" && strokeName !== "[None]" && strokeWeight > 0;
+    }
+    function itemInfoIsInlineFlow(itemInfo) {
+        if (!itemInfo) return false;
+        if (itemInfo.storyTextInlineSlot === true || itemInfo.isInline === true) return true;
+        var placement = String(itemInfo.storyAnchorPlacement || "").toUpperCase();
+        var anchoredPosition = String(itemInfo.anchoredPosition || "").toUpperCase();
+        return placement === "INLINE"
+                || anchoredPosition === "INLINE_POSITION"
+                || anchoredPosition === "INLINEPOSITION";
     }
     function hasCandidate(passId, pageIndex, sourceIds) {
         var sourceKey = _sourceSetKey(sourceIds || []);
@@ -1880,35 +1929,46 @@ function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems
     }
     for (var i = 0; sourceItems && i < sourceItems.length; i++) {
         var itemInfo = sourceItems[i];
-        if (!itemInfo || String(itemInfo.kind || "") !== "TextFrame") continue;
+        if (!itemInfo || itemInfoKind(itemInfo) !== "TextFrame") continue;
         if (itemInfo.textFrameClass !== "editable") continue;
         if (itemInfo.id === null || itemInfo.id === undefined) continue;
         var id = itemInfo.id;
         if (!itemInfoHasTextFrameShellStyle(itemInfo)) continue;
         var sourceIds = [id];
-        if (hasCandidate("pass.editable_textframe_visual_shells", itemInfo.pageIndex, sourceIds)) continue;
+        var inlineFlow = itemInfoIsInlineFlow(itemInfo);
+        var passId = inlineFlow ? "pass.inline_objects" : "pass.editable_textframe_visual_shells";
+        if (hasCandidate(passId, itemInfo.pageIndex, sourceIds)) continue;
         if (hasInlineDirectChildShellOwner(itemInfo.pageIndex, itemInfo)) continue;
-        var candidateId = _candidateId("pass.editable_textframe_visual_shells", id, itemInfo.pageIndex);
+        var candidateId = _candidateId(passId, id, itemInfo.pageIndex)
+                + (inlineFlow ? ".inline_textframe_shell" : "");
         candidates.push({
             candidateId: candidateId,
-            passId: "pass.editable_textframe_visual_shells",
+            passId: passId,
             sourceObjectIds: sourceIds,
+            executionSourceObjectIds: sourceIds,
             primarySourceObjectId: id,
             pageIndex: itemInfo.pageIndex,
             kind: "TextFrame",
-            unit: "TEXT_FRAME",
+            unit: inlineFlow ? "INLINE_OBJECT" : "TEXT_FRAME",
             mode: "TEXTLESS_CANDIDATE",
-            candidatePurpose: "SHELL_CANDIDATE",
+            candidatePurpose: inlineFlow ? "INLINE_CANDIDATE" : "SHELL_CANDIDATE",
             bounds: itemInfo.bounds || null,
             parentId: itemInfo.parentId,
             parentKind: itemInfo.parentKind,
             anchoredPosition: itemInfo.anchoredPosition,
             storyAnchorPlacement: itemInfo.storyAnchorPlacement,
             composite: false,
-            compositeRole: "textframe_style_shell_slot",
-            slotRole: "direct_child_shell_slot",
+            compositeRole: inlineFlow
+                    ? "inline_visible_text_frame_shell"
+                    : "textframe_style_shell_slot",
+            slotRole: inlineFlow
+                    ? "inline_text_frame_shell_slot"
+                    : "direct_child_shell_slot",
             exportSourceObjectIds: sourceIds,
             exportTargetObjectId: id,
+            inlineAnchorSourceObjectId: inlineFlow ? id : null,
+            inlineSourceTreeClosed: inlineFlow,
+            inlineFlowSourceObjectIds: inlineFlow ? sourceIds : [],
             hiddenVisualSourceObjectIds: [],
             visualSourceObjectIds: sourceIds,
             styleSourceObjectIds: sourceIds,
@@ -1918,11 +1978,21 @@ function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems
             textOwner: "hwpx_tf",
             containsEditableText: false,
             completePngTextAllowed: false,
+            ownershipSlot: "SHELL_SLOT",
+            materialization: "EXTRACTED_PNG_VECTOR",
+            textAction: "DROP_TEXT",
+            visualAction: "PLACE_TEXT_SHELL",
+            visualLayer: "LABEL_BACKDROP",
+            placement: inlineFlow ? "INLINE" : "FLOATING",
+            coordinateSpace: inlineFlow ? "STORY_FLOW" : "PAGE",
             zOrder: itemInfo.zOrder,
-            required: false
+            required: false,
+            reason: inlineFlow
+                    ? "inline_visible_text_frame_shell_from_source_style"
+                    : "textframe_style_shell_from_source_style"
         });
         if (candidateSeen) {
-            candidateSeen["pass.editable_textframe_visual_shells|page:" + itemInfo.pageIndex
+            candidateSeen[passId + "|page:" + itemInfo.pageIndex
                     + "|src:" + _sourceSetKey(sourceIds)] = true;
         }
     }

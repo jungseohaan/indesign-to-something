@@ -78,11 +78,15 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             seen[key] = true;
             items.push(item);
         }
-        if ((!inlineCandidates || inlineCandidates.length === 0)
-                && opts.inlineFallbackAllItems === true) {
+        if (opts.inlineFallbackAllItems === true) {
+            var includeAllFallbackInlineItems = !inlineCandidates || inlineCandidates.length === 0;
             function addFallbackInlineItem(fallbackItem) {
                 try {
-                    if (!isPagePlaneInlineVisualItem(fallbackItem)) return;
+                    if (includeAllFallbackInlineItems) {
+                        if (!isPagePlaneInlineVisualItem(fallbackItem)) return;
+                    } else if (!isPagePlaneInlineTextFrameItem(fallbackItem)) {
+                        return;
+                    }
                 } catch (eInlineFallback) {
                     return;
                 }
@@ -118,6 +122,19 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             } catch (eFallbackDocPageItems) {}
         }
         return items;
+    }
+
+    function isPagePlaneInlineTextFrameItem(item) {
+        if (!item) return false;
+        try {
+            if (!item.constructor || item.constructor.name !== "TextFrame") return false;
+            if (isInlineItem(item) || isStoryAnchoredInlineItem(item)) return true;
+            try {
+                var anchored = String(item.anchoredObjectSettings.anchoredPosition || "").toUpperCase();
+                if (anchored === "INLINE_POSITION" || anchored === "INLINEPOSITION") return true;
+            } catch (eAnchoredPosition) {}
+        } catch (eTextFrameInlineItem) {}
+        return false;
     }
 
     function isPagePlaneInlineVisualItem(item) {
