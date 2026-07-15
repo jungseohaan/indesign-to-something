@@ -81,6 +81,8 @@ public final class OwnershipPlanner {
         timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
         timed("planNativeParentTextShells", this::planNativeParentTextShells);
         timed("planNativeSiblingTextShells", this::planNativeSiblingTextShells);
+        timed("ensureLayoutOnlyInlineSlotChildTextPlans",
+                this::ensureLayoutOnlyInlineSlotChildTextPlans);
         int legacyBridgePlanStart = plans.size();
         int legacyBridgeWarningStart = ctx.ownershipWarningLines.size();
         List<String> preBridgePlanJsons = snapshotPlanJsons();
@@ -504,6 +506,113 @@ public final class OwnershipPlanner {
                     "expected repair was PLACE_INLINE_PNG");
         }
         return plan;
+    }
+
+    private void ensureLayoutOnlyInlineSlotChildTextPlans() {
+        if (data == null || plans.isEmpty()) return;
+        int added = 0;
+        List<ObjectPlan> additions = new ArrayList<>();
+        for (ObjectPlan plan : plans) {
+            if (!isLayoutOnlyInlineEditableTextShellComposite(plan)) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            for (int textFrameId : plan.ownedTextFrameIds) {
+                if (textFrameId < 0) continue;
+                if (hasDirectHwpxTextFrameOwner(textFrameId)
+                        || hasPendingHwpxTextFrameOwner(additions, textFrameId)) {
+                    continue;
+                }
+                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+                if (!isExecutableLayoutOnlyInlineChildTextFrame(tf)) continue;
+                additions.add(layoutOnlyInlineSlotChildTextPlan(tf, textFrameId, plan));
+                added++;
+            }
+        }
+        if (!additions.isEmpty()) {
+            plans.addAll(additions);
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.layoutOnlyInlineSlotChildTextPlans.added",
+                added);
+    }
+
+    private boolean isLayoutOnlyInlineEditableTextShellComposite(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (effectiveCoordinateSpace(plan) != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (!"inline_editable_text_shell_composite".equals(safe(plan.slotRole))) return false;
+        return plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0;
+    }
+
+    private boolean isExecutableLayoutOnlyInlineChildTextFrame(ResolvedTextFrame tf) {
+        if (tf == null || tf.id() == null) return false;
+        if (!tf.isInline()) return false;
+        if (tf.sourceHidden()) return false;
+        if (data.isTextOwnedByIndesignPng(tf.id())) return false;
+        return hasSemanticText(tf);
+    }
+
+    private boolean hasPendingHwpxTextFrameOwner(List<ObjectPlan> pending, int textFrameId) {
+        if (pending == null || pending.isEmpty()) return false;
+        for (ObjectPlan plan : pending) {
+            if (plan == null) continue;
+            if (!isTextFramePlanKind(plan)) continue;
+            if (plan.domId != textFrameId) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
+        }
+        return false;
+    }
+
+    private ObjectPlan layoutOnlyInlineSlotChildTextPlan(
+            ResolvedTextFrame tf,
+            int textFrameId,
+            ObjectPlan slotPlan) {
+        double[] bounds = textFramePlanBounds(tf, textFrameId, false);
+        Placement placement = layoutOnlyInlineSlotChildTextPlacement(slotPlan);
+        CoordinateSpace coordinateSpace = placement == Placement.INLINE
+                ? CoordinateSpace.STORY_FLOW
+                : CoordinateSpace.PAGE;
+        if (coordinateSpace == CoordinateSpace.STORY_FLOW
+                && slotPlan != null
+                && slotPlan.pageIndex >= 0) {
+            bounds = normalizeSpreadBoundsToPage(slotPlan.pageIndex, bounds);
+        }
+        int pageIndex = tf.pageIndex() >= 0
+                ? tf.pageIndex()
+                : (slotPlan != null ? slotPlan.pageIndex : -1);
+        return new ObjectPlan(
+                textFrameId,
+                "planner_declared_text_frame:layout_only_inline_slot_child",
+                pageIndex,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.DROP_VISUAL,
+                VisualLayer.CONTENT_VISUAL,
+                placement,
+                null,
+                new int[] { textFrameId },
+                new int[0],
+                new int[0],
+                new int[] { textFrameId },
+                new int[0],
+                "p" + pageIndex + ":tf:" + textFrameId,
+                Materialization.HWPX_TEXT,
+                coordinateSpace,
+                slotPlan != null ? slotPlan.anchorOwner : null,
+                textFrameSourceZOrder(tf),
+                "layout_only_inline_slot_child_text",
+                null,
+                bounds,
+                tf.layerId(),
+                tf.layerName(),
+                tf.layerIndex());
+    }
+
+    private Placement layoutOnlyInlineSlotChildTextPlacement(ObjectPlan slotPlan) {
+        if (slotPlan == null) return Placement.FLOATING;
+        if (slotPlan.inlineSourceTreeClosed || !safe(slotPlan.anchorOwner).isEmpty()) {
+            return Placement.INLINE;
+        }
+        return Placement.FLOATING;
     }
 
     private boolean isImportedFloatingDirectStoryFlowInlineVisual(ObjectPlan plan) {
