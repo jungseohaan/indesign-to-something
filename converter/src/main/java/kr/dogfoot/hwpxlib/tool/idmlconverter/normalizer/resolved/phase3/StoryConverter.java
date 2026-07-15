@@ -2805,10 +2805,11 @@ public final class StoryConverter {
             for (ASTParagraph para : block.paragraphs()) {
                 if (para == null || !para.hasTabStops()) continue;
                 if (!hasTabRun(para) || !endsWithPageNumber(para)) continue;
-                ASTTabStop rightmost = rightmostPositiveTabStop(para);
-                if (rightmost != null) {
-                    rightmost.leader(".");
-                }
+                // 원본에 없는 점선을 강제로 만들지 않는다. endsWithPageNumber 판정이
+                // 느슨해("\d{1,4}") "문제 N" 같은 일반 문단까지 페이지번호로 오판했고,
+                // 여기서 DOT 리더를 강제해 없던 점선(------)이 생겼다(실측: 수학교과서).
+                // 원본 tabStop 의 leader 는 이미 ASTTabStop 생성 시 보존되므로 여기서
+                // 추가 조작하지 않는다.
             }
         }
     }
@@ -3640,7 +3641,11 @@ public final class StoryConverter {
             }
         }
         if (rightmost == null) return false;
-        rightmost.leader(".");
+        // 원본 leader 존중: 원본에 리더 없으면 점선을 강제로 만들지 않는다("문제 N"
+        // 처럼 숫자로 끝나는 일반 문단이 페이지번호로 오판돼 없던 점선이 생기던 문제).
+        if (rightmost.leader() == null || rightmost.leader().isEmpty()) {
+            return false;
+        }
         return true;
     }
 
