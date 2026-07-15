@@ -2312,21 +2312,51 @@ public final class StoryConverter {
                 continue;
             }
             if (remaining == 0) {
+                consumeLeadingSourceLineBreak(items, i);
                 items.add(advancePastTrailingInlineObjects(items, i, trailingInlineObjects), lineBreak);
                 return;
             }
             if (remaining == len) {
+                consumeLeadingSourceLineBreak(items, i + 1);
                 items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
                 return;
             }
             ASTTextRun before = copyTextRun(run, text.substring(0, remaining));
-            ASTTextRun after = copyTextRun(run, text.substring(remaining));
+            ASTTextRun after = copyTextRun(run, stripOneLeadingSourceLineBreak(text.substring(remaining)));
             items.set(i, before);
-            items.add(i + 1, after);
+            if (after.text() != null && !after.text().isEmpty()) {
+                items.add(i + 1, after);
+            }
             items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
             return;
         }
         items.add(advancePastTrailingInlineObjects(items, items.size(), trailingInlineObjects), lineBreak);
+    }
+
+    private static void consumeLeadingSourceLineBreak(List<ASTInlineItem> items, int index) {
+        if (items == null || index < 0 || index >= items.size()) return;
+        ASTInlineItem item = items.get(index);
+        if (!(item instanceof ASTTextRun)) return;
+        ASTTextRun run = (ASTTextRun) item;
+        String stripped = stripOneLeadingSourceLineBreak(run.text());
+        if (stripped == null || stripped.isEmpty()) {
+            items.remove(index);
+        } else if (!stripped.equals(run.text())) {
+            run.text(stripped);
+        }
+    }
+
+    private static String stripOneLeadingSourceLineBreak(String text) {
+        if (text == null || text.isEmpty()) return text;
+        char ch = text.charAt(0);
+        if (ch == '\r') {
+            int next = text.length() > 1 && text.charAt(1) == '\n' ? 2 : 1;
+            return text.substring(next);
+        }
+        if (ch == '\n' || ch == '\u2028') {
+            return text.substring(1);
+        }
+        return text;
     }
 
     private static int advancePastTrailingInlineObjects(
