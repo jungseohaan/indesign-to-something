@@ -130,6 +130,12 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         if (candidate.slotRole === "page_textless_graphic_group") score += 25;
         if (candidate.slotRole === "textless_group_visual_slot") score += 20;
         if (candidate.slotRole === "shell_slot_only") score += 10;
+        if (candidate.passId === "pass.inline_objects"
+                && candidate.placement === "INLINE"
+                && (candidate.slotRole === "inline_text_frame_shell_slot"
+                    || candidate.compositeRole === "inline_visible_text_frame_shell")) {
+            score += 120;
+        }
         if (candidate.visualAction === "PLACE_FLOATING_PNG") score += 4;
         if (candidate.visualAction === "PLACE_PAGE_BACKGROUND_PNG") score += 5;
         if (candidate.visualAction === "PLACE_TEXT_SHELL") score += 3;

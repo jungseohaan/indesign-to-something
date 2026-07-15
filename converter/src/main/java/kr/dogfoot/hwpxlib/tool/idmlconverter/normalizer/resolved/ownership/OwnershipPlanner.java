@@ -1445,6 +1445,11 @@ public final class OwnershipPlanner {
                     existingTextPlanById.putIfAbsent(plan.domId, plan);
                 }
             }
+            if (isDirectInlineTextFrameDrawTextPlan(plan)) {
+                for (int textFrameId : plan.ownedTextFrameIds) {
+                    existingTextPlanById.putIfAbsent(textFrameId, plan);
+                }
+            }
             if (isTextFramePlanKind(plan.kind)
                     && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                     && plan.domId >= 0) {
@@ -4308,14 +4313,42 @@ public final class OwnershipPlanner {
     private void dropNativeSourceShapePlans() {
         if (plans == null || plans.isEmpty()) return;
         int before = plans.size();
-        plans.removeIf(plan -> plan != null && plan.materialization == Materialization.NATIVE_SOURCE_SHAPE);
+        plans.removeIf(plan -> plan != null
+                && plan.materialization == Materialization.NATIVE_SOURCE_SHAPE
+                && !isAllowedNativeSourceShapePlan(plan));
         int dropped = before - plans.size();
         if (dropped > 0) {
             ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_NATIVE_SOURCE_SHAPE_PLANS_DROPPED\""
                     + ",\"detail\":\"dropped=" + dropped
-                    + "; HWP native shape materialization is disabled; graphics must come from InDesign-extracted images\"}");
+                    + "; unsupported HWP native shape materialization; graphics must be declared as an allowed source-native slot\"}");
             ConversionTiming.metric("stage1.ownershipPlanner.dropNativeSourceShapePlans.dropped", dropped);
         }
+    }
+
+    private boolean isAllowedNativeSourceShapePlan(ObjectPlan plan) {
+        return isDirectInlineTextFrameDrawTextPlan(plan);
+    }
+
+    private boolean isDirectInlineTextFrameDrawTextPlan(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length != 1) return false;
+        int textFrameId = plan.ownedTextFrameIds[0];
+        if (textFrameId < 0) return false;
+        if (plan.domId != textFrameId && !contains(plan.sourceObjectIds, textFrameId)) return false;
+
+        ResolvedPageItem item = data.getPageItem(String.valueOf(textFrameId));
+        if (item == null || !"TextFrame".equals(safe(item.type()))) return false;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+        if (tf == null || !tf.isInline()) return false;
+        return item.storyTextInlineSlot()
+                || "INLINE".equals(safe(item.storyAnchorPlacement()))
+                || "INLINE_POSITION".equals(safe(item.anchoredPosition()))
+                || item.isInline();
     }
 
     private void normalizePageSpanningBackdropTextShellPlans() {
@@ -13819,6 +13852,7 @@ public final class OwnershipPlanner {
         for (ObjectPlan plan : plans) {
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (isBackPlaneTextShell(plan)) continue;
+            if (isDirectInlineTextFrameDrawTextPlan(plan)) continue;
             for (int id : ownedTextFrameIdsForPlan(plan)) {
                 Integer textZ = hwpxTextZByTextFrame.get(id);
                 if (textZ == null) continue;

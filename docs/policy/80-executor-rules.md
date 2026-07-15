@@ -130,6 +130,12 @@ Text Builder:
   may be an HWPX `drawText` object when its fill comes from the planned source
   shell image/vector. Later stages must not invent the shell by Java style,
   bounds, stroke, fill, or corner fallback when source shell material is absent.
+- A direct story-flow inline TextFrame is different from a child shell fallback:
+  when Stage 1 declares the TextFrame itself as
+  `PLACE_TEXT_SHELL` / `NATIVE_SOURCE_SHAPE` / `OWNED_BY_HWPX_TEXT`, the executor
+  emits one inline HWPX `drawText` carrier from that same source TextFrame's
+  fill/stroke/text metadata. This is execution of the direct source slot, not
+  synthetic recovery of a missing shell.
 - If one source inline anchor contains multiple Stage 1 inline text-shell child
   plans, the executor materializes every planned child atom in source reading
   order. It must not stop after the first descendant shell, and it must not fall

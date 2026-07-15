@@ -279,6 +279,9 @@ public class ResolvedToASTBuilder {
                     plan = tableTextObjectPlanFromJson(planJson);
                 }
                 if (plan == null) {
+                    plan = nativeInlineTextFrameShellPlanFromJson(planJson);
+                }
+                if (plan == null) {
                     String materialIssue = plannerDeclaredRenderedMaterialIssue(
                             planJson, renderedByObjectPlanId, renderedByCandidateId, renderedByPageAndId,
                             dropClipParentSourceSetCandidateIds);
@@ -654,6 +657,7 @@ public class ResolvedToASTBuilder {
                 && "NATIVE_SOURCE_SHAPE".equals(jsonString(o, "materialization"))) {
             return false;
         }
+        if (isPlannerDeclaredNativeInlineTextShellImport(o)) return false;
         String visualAction = jsonString(o, "visualAction");
         if ("ABSORB_TEXT_STYLE".equals(visualAction) || "PLACE_TABLE_STYLE".equals(visualAction)) return false;
         if ("DROP_VISUAL".equals(visualAction)
@@ -1192,6 +1196,17 @@ public class ResolvedToASTBuilder {
                 || jsonIntArray(o, "exportSourceObjectIds").length > 0;
     }
 
+    private static boolean isPlannerDeclaredNativeInlineTextShellImport(JsonObject o) {
+        if (o == null) return false;
+        if (!"NATIVE_SOURCE_SHAPE".equals(jsonString(o, "materialization"))) return false;
+        if (!"PLACE_TEXT_SHELL".equals(jsonString(o, "visualAction"))) return false;
+        if (!"INLINE".equals(jsonString(o, "placement"))) return false;
+        if (!"STORY_FLOW".equals(jsonString(o, "coordinateSpace"))) return false;
+        if (jsonIntArray(o, "ownedTextFrameIds").length == 0) return false;
+        return jsonIntArray(o, "sourceObjectIds").length > 0
+                || jsonIntArray(o, "visualSourceObjectIds").length > 0;
+    }
+
     private static boolean isPlannerDeclaredStyleOnlyImport(JsonObject o) {
         if (o == null) return false;
         String visualAction = jsonString(o, "visualAction");
@@ -1375,6 +1390,62 @@ public class ResolvedToASTBuilder {
                 jsonString(o, "sourceLayerId"),
                 jsonString(o, "sourceLayerName"),
                 jsonInt(o, "sourceLayerIndex", -1));
+    }
+
+    private static ObjectPlan nativeInlineTextFrameShellPlanFromJson(JsonObject o) {
+        if (!isPlannerDeclaredNativeInlineTextShellImport(o)) return null;
+        int[] sourceIds = jsonIntArray(o, "sourceObjectIds");
+        if (sourceIds.length == 0) sourceIds = jsonIntArray(o, "visualSourceObjectIds");
+        if (sourceIds.length == 0) return null;
+        int domId = jsonInt(o, "domId", -1);
+        if (domId < 0) {
+            domId = jsonInt(o, "primarySourceObjectId", sourceIds[0]);
+        }
+        int pageIndex = jsonInt(o, "pageIndex", -1);
+        if (domId < 0 || pageIndex < 0) return null;
+        int[] visualSourceIds = jsonIntArray(o, "visualSourceObjectIds");
+        if (visualSourceIds.length == 0) visualSourceIds = sourceIds;
+        TextAction textAction = strictEnumValue(TextAction.class, jsonString(o, "textAction"));
+        VisualAction visualAction = strictEnumValue(VisualAction.class, jsonString(o, "visualAction"));
+        VisualLayer visualLayer = strictEnumValue(VisualLayer.class, jsonString(o, "visualLayer"));
+        CoordinateSpace coordinateSpace = strictEnumValue(CoordinateSpace.class, jsonString(o, "coordinateSpace"));
+        if (textAction == null || visualAction == null || visualLayer == null
+                || coordinateSpace != CoordinateSpace.STORY_FLOW) {
+            return null;
+        }
+        return new ObjectPlan(
+                domId,
+                "native_inline_text_frame_shell:" + jsonString(o, "kind"),
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                Placement.INLINE,
+                null,
+                sourceIds,
+                visualSourceIds,
+                jsonIntArray(o, "styleSourceObjectIds"),
+                jsonIntArray(o, "ownedTextFrameIds"),
+                jsonIntArray(o, "descendantVisualObjectIds"),
+                jsonString(o, "bundleId"),
+                Materialization.NATIVE_SOURCE_SHAPE,
+                CoordinateSpace.STORY_FLOW,
+                jsonString(o, "anchorOwner"),
+                jsonInt(o, "zOrder", 0),
+                "planner_native_inline_text_frame_shell",
+                null,
+                jsonDoubleArray(o, "bounds"),
+                null,
+                jsonString(o, "sourceLayerId"),
+                jsonString(o, "sourceLayerName"),
+                jsonInt(o, "sourceLayerIndex", -1))
+                .withExtractionCandidate(
+                        jsonString(o, "candidateId"),
+                        jsonString(o, "passId"),
+                        jsonString(o, "slotRole"))
+                .withExtractionSourceObjectIds(
+                        jsonIntArray(o, "exportSourceObjectIds"),
+                        jsonIntArray(o, "hiddenVisualSourceObjectIds"));
     }
 
     private static String jsonString(JsonObject o, String key) {

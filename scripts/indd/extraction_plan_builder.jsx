@@ -7082,15 +7082,36 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     }
     var objectPlans = objectPlanDiagnostics.objectPlans;
     var claimedVisibleSourceIds = {};
+    var completePngTextOwnerSourceIds = {};
     function markIds(ids) {
         for (var i = 0; ids && i < ids.length; i++) {
             if (ids[i] === null || ids[i] === undefined) continue;
             claimedVisibleSourceIds[String(ids[i])] = true;
         }
     }
+    function markCompletePngTextOwnerIds(plan) {
+        if (!plan) return;
+        if (plan.textAction !== "OWNED_BY_PNG") return;
+        if (plan.materialization !== "COMPLETE_PNG") return;
+        if (plan.visualAction !== "PLACE_INLINE_PNG"
+                && plan.visualAction !== "PLACE_FLOATING_PNG") return;
+        if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return;
+        var ids = [];
+        ids = ids.concat(plan.sourceObjectIds || []);
+        ids = ids.concat(plan.visualSourceObjectIds || []);
+        ids = ids.concat(plan.exportSourceObjectIds || []);
+        ids = ids.concat(plan.hiddenVisualSourceObjectIds || []);
+        ids = ids.concat(plan.ownedTextFrameIds || []);
+        for (var ci = 0; ci < ids.length; ci++) {
+            if (ids[ci] === null || ids[ci] === undefined) continue;
+            completePngTextOwnerSourceIds[String(ids[ci])] = true;
+        }
+        markIds(ids);
+    }
     for (var pi = 0; pi < objectPlans.length; pi++) {
         var existing = objectPlans[pi];
         if (!existing || existing.materialization === "PAGE_PLANE_PNG") continue;
+        markCompletePngTextOwnerIds(existing);
         if (!_sourceCoveragePlanHasVisibleVisual(existing)) continue;
         markIds(existing.sourceObjectIds || []);
         markIds(existing.visualSourceObjectIds || []);
@@ -7099,12 +7120,45 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     }
 
     var coverageByPage = {};
+    var excludedInlineByPage = {};
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+    function hasVisibleFramePaint(src) {
+        if (!src) return false;
+        if (src.hasVisibleFill === true || src.hasVisibleStroke === true) return true;
+        var fill = String(src.fillColorName || src.fillColor || "");
+        if (fill && fill !== "None" && fill !== "[None]") return true;
+        var stroke = String(src.strokeColorName || src.strokeColor || "");
+        var strokeWeight = Number(src.strokeWeight || 0);
+        return stroke && stroke !== "None" && stroke !== "[None]" && strokeWeight > 0;
+    }
+    function isStoryFlowInlineTextFramePaintSource(src) {
+        if (!src || sourceKind(src) !== "TextFrame") return false;
+        if (!hasVisibleFramePaint(src)) return false;
+        if (src.storyTextInlineSlot === true) return true;
+        if (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE") return true;
+        if (String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION") return true;
+        return src.isInline === true;
+    }
+    function rememberExcludedInlineSource(src) {
+        if (!isStoryFlowInlineTextFramePaintSource(src)) return;
+        var pageIndex = src.pageIndex === null || src.pageIndex === undefined
+                ? -1
+                : Number(src.pageIndex);
+        if (isNaN(pageIndex) || pageIndex < 0) return;
+        var pageKey = String(pageIndex);
+        if (!excludedInlineByPage[pageKey]) excludedInlineByPage[pageKey] = [];
+        excludedInlineByPage[pageKey].push(src.id);
+    }
     for (var si = 0; sourceItems && si < sourceItems.length; si++) {
         var src = sourceItems[si];
         if (!src || src.id === null || src.id === undefined) continue;
+        rememberExcludedInlineSource(src);
         if (claimedVisibleSourceIds[String(src.id)]) continue;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
         if (src.pageIndex === null || src.pageIndex === undefined || Number(src.pageIndex) < 0) continue;
+        if (isStoryFlowInlineTextFramePaintSource(src)) continue;
         if (src.storyTextInlineSlot === true) continue;
         if (src.storyAnchorPlacement && String(src.storyAnchorPlacement) !== "PAGE") continue;
         if (!_sourceCoverageHasPotentialVisibleMaterial(src)) continue;
@@ -7119,6 +7173,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         var pageIndex = Number(pageKey);
         var coverageIds = _sortedNumericIds(coverageByPage[pageKey]);
         if (coverageIds.length === 0) continue;
+        var excludedInlineSourceObjectIds = _sortedNumericIds(excludedInlineByPage[pageKey] || []);
         var syntheticSourceId = _canonicalPagePlaneSyntheticSourceId(pageIndex);
         var plan = {
             objectPlanId: _canonicalPagePlaneObjectPlanId(pageIndex),
@@ -7139,6 +7194,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             visualSourceObjectIds: [syntheticSourceId],
             exportSourceObjectIds: [syntheticSourceId],
             coverageSourceObjectIds: coverageIds,
+            excludedInlineSourceObjectIds: excludedInlineSourceObjectIds,
             materialization: "PAGE_PLANE_PNG",
             textAction: "DROP_TEXT",
             visualAction: "PLACE_FLOATING_PNG",
@@ -7156,7 +7212,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             executable: true,
             required: true,
             requiredSlot: "CONTENT_VISUAL_SLOT",
-            requiredSlotReason: "page_plane_canonical_visual_owner"
+            requiredSlotReason: "page_plane_canonical_visual_owner",
+            excludedInlineSourceCount: excludedInlineSourceObjectIds.length
         };
         objectPlans.push(plan);
         appended.push({
@@ -7165,6 +7222,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             candidateId: plan.candidateId,
             syntheticSourceObjectId: syntheticSourceId,
             coverageSourceCount: coverageIds.length
+            ,
+            excludedInlineSourceCount: excludedInlineSourceObjectIds.length
         });
     }
 
@@ -7183,12 +7242,16 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
                 + appended.length;
         objectPlanDiagnostics.summary.pagePlaneMaterialization = {
             appendedCount: appended.length,
-            appended: appended
+            appended: appended,
+            completePngTextOwnerExcludedSourceCount:
+                    _objectPlanMapKeyCount(completePngTextOwnerSourceIds)
         };
     }
     return {
         appendedCount: appended.length,
-        appended: appended
+        appended: appended,
+        completePngTextOwnerExcludedSourceCount:
+                _objectPlanMapKeyCount(completePngTextOwnerSourceIds)
     };
 }
 
