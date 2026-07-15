@@ -156,9 +156,11 @@ class RunBuilder {
         String resolvedFontStyle = RunPropertyResolver.resolveFontStyleWithConfidence(
                 rr, cr, sc.fontStyle, confidence);
         if (resolvedFontStyle != null) {
-            String styleFontFamily = resolvedFontFamily != null ? resolvedFontFamily
-                    : (cr.fontFamily() != null ? cr.fontFamily() : (rr != null ? rr.fontFamily() : null));
-            if (shouldApplyFontStyle(styleFontFamily, resolvedFontStyle, text)) {
+            // 이탤릭 적용 여부는 "원본" 폰트(EH/BT 여부)로 판단해야 한다. resolvedFontFamily
+            // 는 위에서 이미 본문 폰트로 교체됐을 수 있어 EH 판정이 사라진다. rr/cr 우선.
+            String originFontFamily = (rr != null && rr.fontFamily() != null) ? rr.fontFamily()
+                    : (cr.fontFamily() != null ? cr.fontFamily() : resolvedFontFamily);
+            if (shouldApplyFontStyle(originFontFamily, resolvedFontStyle, text)) {
                 tr.fontStyle(resolvedFontStyle);
             }
         }
@@ -513,7 +515,25 @@ class RunBuilder {
         if (!isEHorBT) return true;
         String lower = fontStyle.toLowerCase(Locale.ROOT);
         boolean isItalic = lower.contains("italic") || lower.contains("oblique");
+        // EH/BT 이탤릭은 "수식 변수(x, y)" 로 보고 이탤릭을 적용하지만, 순수 숫자·부호
+        // (예: 제곱근 값 5, -5, 25)는 변수가 아니라 본문 숫자다. 이탤릭을 적용하지 않는다.
+        // (실측: 수학 1단원 p14 "제곱근은 5와 -5이다" 의 5/-5 가 이탤릭으로 나옴)
+        if (isItalic && isNumericOrSignOnly(text)) return false;
         return isItalic || text == null || !EHTextClassifier.isKoreanOnly(text);
+    }
+
+    /** 텍스트가 숫자·부호(+ - . , 공백)만으로 이루어졌는지 — 수식 변수가 아닌 본문 숫자 판별용. */
+    private static boolean isNumericOrSignOnly(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean hasDigit = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= '0' && c <= '9') { hasDigit = true; continue; }
+            if (c == '+' || c == '-' || c == '.' || c == ',' || c == ' '
+                    || c == '−' /* − 마이너스 */) continue;
+            return false;
+        }
+        return hasDigit;
     }
 
     private static String resolveCharacterShadeColor(ResolvedBuildContext ctx, IDMLCharacterRun cr,
