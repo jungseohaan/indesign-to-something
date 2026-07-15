@@ -410,12 +410,6 @@ public class StoryLoader {
                 // 실제 인라인 프레임/그래픽 앵커를 가진 run은 EH 그룹에 넣지 않는다.
                 // 넣으면 앵커(U+FFFC)가 수식 스크립트/□ 로 뭉개져 프레임이 유실된다
                 // (실측: 3단원 y=-x²/5 의 x²/5 분수 앵커 프레임). 정상 인라인 배치로 보낸다.
-                if (enterEH
-                        && ((run.inlineFrames() != null && !run.inlineFrames().isEmpty())
-                            || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()))) {
-                    enterEH = false;
-                }
-
                 // NP 수식 그룹 진입
                 boolean enterNP = false;
                 if (!chemicalFormulaPara && !enterEH && !_orcOnly) {
@@ -436,6 +430,16 @@ public class StoryLoader {
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
                             || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()))
                             || formulaClusterRun;
+                }
+
+                // 실제 인라인 프레임/그래픽 앵커를 가진 run은 어떤 수식 그룹(EH/NP/BT)에도
+                // 넣지 않는다. 넣으면 앵커(U+FFFC)가 수식 스크립트/□ 로 뭉개져 프레임이
+                // 유실된다(실측: 3단원 y=-x²/5 의 x²/5 분수 앵커). 정상 인라인 배치로 보낸다.
+                if ((run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                        || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty())) {
+                    enterEH = false;
+                    enterNP = false;
+                    enterBT = false;
                 }
 
                 if (enterEH) {

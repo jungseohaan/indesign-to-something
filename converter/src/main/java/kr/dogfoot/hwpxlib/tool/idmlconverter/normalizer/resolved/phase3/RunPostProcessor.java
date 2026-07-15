@@ -172,8 +172,17 @@ class RunPostProcessor {
                 flushItalicMathBuf(mathBuf, mathRuns, newItems);
                 newItems.add(item);
             } else if (item instanceof ASTEquation) {
-                // 기존 수식도 연속 이탤릭 버퍼에 합침
-                mathBuf.append(((ASTEquation) item).hwpScript());
+                // 이미 완성된 ASTEquation. mathBuf(텍스트 이탤릭 버퍼)만 EH 변환하는
+                // flushItalicMathBuf 는 이 스크립트를 반영하지 못한다(실측: 3단원
+                // y=-x²/5 에서 x²/5 앵커 수식이 y=- 이탤릭 버퍼에 흡수돼 유실). 앞
+                // 버퍼를 먼저 flush 하고, 이 수식은 스크립트를 이어붙여 그대로 유지한다.
+                ASTEquation existingEq = (ASTEquation) item;
+                if (mathBuf.length() > 0) {
+                    // 앞 이탤릭 버퍼 + 이 수식 스크립트를 하나로 이어붙인다.
+                    flushItalicMathBufWithSuffix(mathBuf, mathRuns, newItems, existingEq.hwpScript());
+                } else {
+                    newItems.add(existingEq);
+                }
             } else {
                 // 수학 버퍼 flush
                 flushItalicMathBuf(mathBuf, mathRuns, newItems);
@@ -206,6 +215,29 @@ class RunPostProcessor {
      * EH 폰트 런이 있으면 EHFontEquationConverter로 파이프라인 처리,
      * 없으면 raw 텍스트에서 backtick 제거 후 수식으로 사용.
      */
+    /**
+     * 이탤릭 버퍼를 수식으로 변환한 스크립트에 이미 완성된 수식 스크립트(suffix)를
+     * 이어붙여 하나의 ASTEquation 으로 만든다. 앵커로 배치된 분수 수식(x²/5)이 앞
+     * 이탤릭(y=-)에 이어져야 y=-x²/5 로 온전히 렌더된다.
+     */
+    private static void flushItalicMathBufWithSuffix(StringBuilder mathBuf, List<IDMLCharacterRun> mathRuns,
+                                                     List<ASTInlineItem> out, String suffixScript) {
+        List<ASTInlineItem> tmp = new ArrayList<>();
+        flushItalicMathBuf(mathBuf, mathRuns, tmp);
+        String prefix = "";
+        for (ASTInlineItem it : tmp) {
+            if (it instanceof ASTEquation) {
+                prefix += ((ASTEquation) it).hwpScript();
+            } else {
+                out.add(it); // 수식이 아닌 잔여물은 그대로
+            }
+        }
+        String merged = prefix + (suffixScript != null ? suffixScript : "");
+        if (!merged.isEmpty()) {
+            out.add(new ASTEquation(merged, "EH_FONT"));
+        }
+    }
+
     private static void flushItalicMathBuf(StringBuilder mathBuf, List<IDMLCharacterRun> mathRuns,
                                             List<ASTInlineItem> out) {
         if (mathBuf.length() == 0) return;
