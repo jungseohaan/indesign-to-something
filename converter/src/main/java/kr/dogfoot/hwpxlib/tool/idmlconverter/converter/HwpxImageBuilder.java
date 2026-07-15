@@ -179,11 +179,14 @@ public class HwpxImageBuilder {
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
         } else {
-            // 인라인 (글자처럼 취급, 줄간격 확장 허용)
-            boolean smallMarker = isSmallMarkerImage(displayW, displayH);
+            // 인라인 (글자처럼 취급). 작은 marker/deco는 줄 위치만 차지하고
+            // 문단 leading 자체는 키우지 않는다.
+            boolean participatesInLineSpacing = InlineFlowPolicy.participatesInLineSpacing(obj);
+            boolean smallMarker = InlineFlowPolicy.isLineNeutralInlineMarker(obj)
+                    || isSmallMarkerImage(displayW, displayH);
             long inlineVertOffset = smallMarker ? -Math.max(120L, Math.round(displayH * 0.45)) : 0L;
             pic.pos().treatAsCharAnd(true)
-                    .affectLSpacingAnd(true)
+                    .affectLSpacingAnd(participatesInLineSpacing)
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(false)
                     .holdAnchorAndSOAnd(false)

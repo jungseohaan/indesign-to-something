@@ -208,9 +208,14 @@ final class ParaPrFactory {
             lsValue = astPara.autoLeadingPercent();
             lsType = "percent";
         }
+        if ("fixed".equals(lsType)
+                && shouldPreferBetweenLinesForSourceComposedMultiline(astPara, lsValue)) {
+            int dominantFont = dominantTextFontSize(astPara);
+            lsValue = Math.max(lsValue - dominantFont, dominantFont / 3);
+            lsType = "betweenLines";
+        }
         if (lsValue != null) {
-            LineSpacingType hwpxType = "fixed".equals(lsType)
-                    ? LineSpacingType.FIXED : LineSpacingType.PERCENT;
+            LineSpacingType hwpxType = mapLineSpacingType(lsType);
             paraPr.lineSpacing()
                     .typeAnd(hwpxType)
                     .valueAnd(lsValue)
@@ -223,6 +228,40 @@ final class ParaPrFactory {
         }
 
         return newId;
+    }
+
+    private static LineSpacingType mapLineSpacingType(String lsType) {
+        if ("fixed".equals(lsType)) return LineSpacingType.FIXED;
+        if ("betweenLines".equals(lsType)) return LineSpacingType.BETWEEN_LINES;
+        return LineSpacingType.PERCENT;
+    }
+
+    private static boolean shouldPreferBetweenLinesForSourceComposedMultiline(
+            ASTParagraph para,
+            Integer fixedLeading) {
+        if (para == null || fixedLeading == null || fixedLeading <= 0) return false;
+        if (!hasSourceManualLineBreak(para)) return false;
+        int dominantFont = dominantTextFontSize(para);
+        if (dominantFont <= 0 || fixedLeading <= dominantFont) return false;
+        if (meaningfulTextLength(para) < 20) return false;
+        return fixedLeading < Math.round(dominantFont * 2.5f);
+    }
+
+    private static boolean hasSourceManualLineBreak(ASTParagraph para) {
+        if (para == null || para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTBreak
+                    && ((ASTBreak) item).breakType() == ASTBreak.BreakType.LINE) {
+                return true;
+            }
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && (text.indexOf('\n') >= 0 || text.indexOf('\u2028') >= 0)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean shouldPreferAutoLeadingPercent(ASTParagraph para, Integer fixedLeading) {
