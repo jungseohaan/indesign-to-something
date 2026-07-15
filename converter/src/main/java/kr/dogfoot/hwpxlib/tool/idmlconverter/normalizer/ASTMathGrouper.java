@@ -9,6 +9,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.PatternEquationConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -464,10 +465,20 @@ public class ASTMathGrouper {
         }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (hwpScript != null) {
+            int beforeCount = para.items().size();
             // 선행 번호 "(숫자) " 분리
             hwpScript = splitLeadingNumber(hwpScript, para);
             // 원문자 번호(⑴⑵⑶... ①②③...)로 수식 분할
             splitByCircledNumbers(hwpScript, para);
+            // 이 flush 로 새로 추가된 EH 수식들에 원본 폰트 크기(preferredBaseUnit)를
+            // 붙인다. 없으면 baseUnit 이 기본값(11pt)으로 떨어져 큰 제목 속 수식이
+            // 본문보다 작게 나온다(실측: 3단원 "이차함수 y=ax² 의 그래프" 24pt).
+            for (int i = beforeCount; i < para.items().size(); i++) {
+                ASTInlineItem it = para.items().get(i);
+                if (it instanceof ASTEquation) {
+                    applyTextDerivedEquationHints((ASTEquation) it, ehRuns);
+                }
+            }
         } else {
             // 수식이 아닌 EH 폰트 텍스트 → 일반 텍스트 런으로 폴백
             for (IDMLCharacterRun run : ehRuns) {

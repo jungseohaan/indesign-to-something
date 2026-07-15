@@ -452,6 +452,15 @@ public class StoryLoader {
 
                 if (enterEH) {
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
+                    // IDML run 은 명시적 fontSize 가 없어(스타일 상속만) EH 수식의
+                    // 원본 크기 힌트가 유실된다(실측: "이차함수 y=ax² 의 그래프" 24pt 가
+                    // 기본 11pt 로). 매칭 resolved run 의 크기를 IDML run 에 채워둔다.
+                    if (run.fontSize() == null && resolvedRuns != null) {
+                        ResolvedRun rrSize = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, run.content());
+                        if (rrSize != null && rrSize.fontSize() != null && rrSize.fontSize() > 0) {
+                            run.fontSize(rrSize.fontSize());
+                        }
+                    }
                     ehMathGroup.add(run);
                 } else if (enterNP) {
                     MathProcessor.flushMathGroups(ctx, mathGroup, null, ehMathGroup, para);
