@@ -1432,8 +1432,26 @@ public class InlineFrameHandler {
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             BufferedImage shellImage = VisualCropper.knockOutPaperLikeFill(img);
-            if (shouldPreserveTransparentInlineShell(shellImage)) {
-                ResolvedPageItem nativeStyleSource = findInlineTextShellNativeStyleSource(ctx, shellPlan, anchorItem);
+            boolean preserveTransparentShell = shouldPreserveTransparentInlineShell(shellImage);
+            if (preserveTransparentShell && extractedShellImageOwnsGeometry(shellPlan)) {
+                ASTInlineObject transparentShell = buildTransparentInlineShellImageObject(
+                        ctx, anchoredObjectId, shellPlan, shellBounds, childTfs, shellImage);
+                if (transparentShell != null) {
+                    if (shell != null) {
+                        ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
+                                "PLACE_INLINE_TEXT_SHELL",
+                                "placed planned transparent inline textless shell as IMAGE with HWPX text overlays");
+                    }
+                    return transparentShell;
+                }
+            }
+            if (preserveTransparentShell) {
+                // Stage 1이 extracted PNG materialization으로 확정한 shell은 PNG 자체가
+                // geometry/paint의 실행 계약이다.  여기서 native source style로 재해석하면
+                // 복합 선/아이콘 shell이 단일 HWPX 도형 fill로 변형될 수 있다.
+                ResolvedPageItem nativeStyleSource = extractedShellImageOwnsGeometry(shellPlan)
+                        ? null
+                        : findInlineTextShellNativeStyleSource(ctx, shellPlan, anchorItem);
                 if (nativeStyleSource != null) {
                     applyInlineShellShapeStyle(ctx, nativeStyleSource, obj);
                     applyOwnedTextFrameShellShapeStyle(ctx, childTfs, obj);
