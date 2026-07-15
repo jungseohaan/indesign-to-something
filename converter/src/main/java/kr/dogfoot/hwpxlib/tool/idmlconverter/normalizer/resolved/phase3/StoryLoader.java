@@ -407,6 +407,14 @@ public class StoryLoader {
                         && run.content() != null && run.content().trim().isEmpty()) {
                     enterEH = false;
                 }
+                // "변수`단위"(예: y`cmÛ`) 구조 run은 EH 그룹에 넣지 않는다. 넣으면
+                // 변수+단위가 통째로 수식이 된다(ycm²). 일반 텍스트로 남겨 convertItalic
+                // 경로의 splitVariableBacktickLatin 이 변수(수식)/단위(텍스트)로 나누게
+                // 한다. x`km(제곱 없음)과 동일 경로로 통일(실측: 3단원 x km, y cm²).
+                if (enterEH && ehMathGroup.isEmpty()
+                        && RunPostProcessor.isVariableBacktickLatinRun(run.content())) {
+                    enterEH = false;
+                }
                 // 실제 인라인 프레임/그래픽 앵커를 가진 run은 EH 그룹에 넣지 않는다.
                 // 넣으면 앵커(U+FFFC)가 수식 스크립트/□ 로 뭉개져 프레임이 유실된다
                 // (실측: 3단원 y=-x²/5 의 x²/5 분수 앵커 프레임). 정상 인라인 배치로 보낸다.

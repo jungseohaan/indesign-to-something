@@ -132,7 +132,8 @@ class RunPostProcessor {
         for (ASTInlineItem it : items) {
             if (it instanceof ASTTextRun
                     && !isSimplePositionedTextRun((ASTTextRun) it)
-                    && isItalicMathRun((ASTTextRun) it)) {
+                    && (isItalicMathRun((ASTTextRun) it)
+                        || isVariableBacktickLatinRun(((ASTTextRun) it).text()))) {
                 hasTarget = true;
                 break;
             }
@@ -148,13 +149,31 @@ class RunPostProcessor {
             if (item instanceof ASTTextRun && isSimplePositionedTextRun((ASTTextRun) item)) {
                 flushItalicMathBuf(mathBuf, mathRuns, newItems);
                 newItems.add(item);
-            } else if (item instanceof ASTTextRun && isItalicMathRun((ASTTextRun) item)) {
+            } else if (item instanceof ASTTextRun
+                    && (isItalicMathRun((ASTTextRun) item)
+                        || isVariableBacktickLatinRun(((ASTTextRun) item).text()))) {
                 ASTTextRun tr = (ASTTextRun) item;
-                mathBuf.append(tr.text());
-                IDMLCharacterRun cr = new IDMLCharacterRun();
-                cr.content(tr.text());
-                cr.fontFamily(tr.fontFamily());
-                mathRuns.add(cr);
+                // "라틴1글자`라틴…"(예: x`km) 구조는 변수(수식)+백틱(thin space)+
+                // 단위 텍스트다. 백틱은 원본이 명시한 경계 마커. 변수만 수식화하고
+                // 백틱 뒤는 공백+정체 텍스트로 분리한다(실측: 3단원 x km, y cm²).
+                String[] varUnit = splitVariableBacktickLatin(tr.text());
+                if (varUnit != null) {
+                    mathBuf.append(varUnit[0]);
+                    IDMLCharacterRun crv = new IDMLCharacterRun();
+                    crv.content(varUnit[0]);
+                    crv.fontFamily(tr.fontFamily());
+                    mathRuns.add(crv);
+                    flushItalicMathBuf(mathBuf, mathRuns, newItems);
+                    ASTTextRun unitRun = new ASTTextRun();
+                    unitRun.text(" " + varUnit[1]);
+                    newItems.add(unitRun);
+                } else {
+                    mathBuf.append(tr.text());
+                    IDMLCharacterRun cr = new IDMLCharacterRun();
+                    cr.content(tr.text());
+                    cr.fontFamily(tr.fontFamily());
+                    mathRuns.add(cr);
+                }
             } else if (item instanceof ASTTextRun && mathBuf.length() > 0) {
                 // 수식 버퍼가 열려있을 때 backtick/thin space 등 짧은 비수식 런은 흡수
                 String t = ((ASTTextRun) item).text();
@@ -268,6 +287,46 @@ class RunPostProcessor {
     }
 
     /** 이탤릭 수학 런 판별: 수식 전용 폰트/기호/짧은 변수 런만 수식으로 승격한다. */
+    /**
+     * run 텍스트가 "라틴1글자`라틴…" (변수+백틱+단위) 구조인지 판정한다.
+     * {@link #splitVariableBacktickLatin} 과 동일 규칙 — EH 그룹 진입 제외 판정용.
+     */
+    static boolean isVariableBacktickLatinRun(String text) {
+        return splitVariableBacktickLatin(text) != null;
+    }
+
+    /**
+     * "라틴1글자`라틴…" 구조를 변수와 단위 텍스트로 분리한다.
+     *
+     * <p>순수 구조 규칙(단위 목록 없음): 백틱(thin space) 앞이 라틴 <b>1글자</b>이고,
+     * 백틱 <b>뒤 첫 글자가 라틴</b>일 때만 분리한다. 백틱은 원본이 명시한 경계 마커다.
+     * 제곱(x²의 xÛ`)처럼 백틱 뒤가 부호·공백인 경우는 첫 글자가 라틴이 아니므로 걸리지
+     * 않는다. 단위의 EH 지수 마커(Û→², Ü→³)는 유니코드 위첨자로 디코딩한다.
+     *
+     * @return {@code [변수, 단위텍스트]} 또는 대상이 아니면 null
+     */
+    private static String[] splitVariableBacktickLatin(String text) {
+        if (text == null) return null;
+        int bt = text.indexOf('`');
+        if (bt != 1) return null; // 백틱 앞이 정확히 1글자
+        char v = text.charAt(0);
+        if (!((v >= 'a' && v <= 'z') || (v >= 'A' && v <= 'Z'))) return null;
+        String rest = text.substring(bt + 1);
+        if (rest.isEmpty()) return null;
+        char u0 = rest.charAt(0);
+        if (!((u0 >= 'a' && u0 <= 'z') || (u0 >= 'A' && u0 <= 'Z'))) return null;
+        // 단위의 EH 지수/마커 디코딩: Û→², Ü→³, 백틱 제거
+        StringBuilder unit = new StringBuilder();
+        for (int i = 0; i < rest.length(); i++) {
+            char c = rest.charAt(i);
+            if (c == 'Û') unit.append('²');      // Û → ²
+            else if (c == 'Ü') unit.append('³'); // Ü → ³
+            else if (c == '`') continue;                    // 백틱(thin space) 제거
+            else unit.append(c);
+        }
+        return new String[]{String.valueOf(v), unit.toString()};
+    }
+
     private static boolean isItalicMathRun(ASTTextRun tr) {
         String text = tr.text();
         if (text == null || text.isEmpty()) return false;
