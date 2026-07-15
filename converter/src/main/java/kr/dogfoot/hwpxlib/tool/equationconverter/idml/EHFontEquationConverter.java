@@ -122,8 +122,12 @@ public class EHFontEquationConverter {
             i++;
         }
 
-        // 정리: 연속 공백
-        return sb.toString().replaceAll("\\s+", " ").trim();
+        // 정리: 연속 공백은 단일 공백으로. 단, 탭(\t)은 선택지 구분자이므로 보존한다
+        // (실측: 3단원 ⑶ f(1/2) \t\t ⑷ f(2) 의 항 사이 탭이 공백으로 뭉개짐).
+        // 탭 아닌 공백류만 합치고, 탭 주변의 잉여 공백은 제거한다.
+        String s = sb.toString().replaceAll("[^\\S\\t]+", " ");
+        s = s.replaceAll(" *\\t *", "\t"); // 탭 주변 공백 정리
+        return s.trim();
     }
 
     /**

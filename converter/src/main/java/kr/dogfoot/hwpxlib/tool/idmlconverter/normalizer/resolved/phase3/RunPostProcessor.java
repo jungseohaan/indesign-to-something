@@ -280,7 +280,20 @@ class RunPostProcessor {
             script = mathBuf.toString().replace("`", "");
         }
         if (!script.isEmpty()) {
-            out.add(new ASTEquation(script, "EH_FONT"));
+            // 수식 스크립트의 선행 공백은 sanitizeHwpScript 의 trim 에 제거돼 앞 항과
+            // 붙는다. 원문자와 수식 사이 구분 공백이므로(⑴ f(-1)) 공백을 앞 텍스트로
+            // 분리해 보존한다(실측: 3단원 ⑴f(-1) 처럼 공백 흡수).
+            int lead = 0;
+            while (lead < script.length() && script.charAt(lead) == ' ') lead++;
+            if (lead > 0) {
+                ASTTextRun sp = new ASTTextRun();
+                sp.text(script.substring(0, lead));
+                out.add(sp);
+                script = script.substring(lead);
+            }
+            if (!script.isEmpty()) {
+                out.add(new ASTEquation(script, "EH_FONT"));
+            }
         }
         mathBuf.setLength(0);
         mathRuns.clear();
