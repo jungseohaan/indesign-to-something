@@ -48,6 +48,85 @@ public final class AnchoredTablePlanner {
                 ctx.ownershipPlanLines.add(plan.toJson());
             }
         }
+        planInlineAnchoredTableOnlyFrames(ctx, plannedTables);
+    }
+
+    /**
+     * Host 본문 스토리에 인라인 앵커(FFFC)된 table-only 프레임을 인라인 표로 흐르게 한다.
+     *
+     * <p>표만 담은 프레임이 다른 본문 스토리의 문단 흐름에 앵커되면, InDesign은 그 표를
+     * 앵커 문단 뒤에 배치하고 이후 본문이 표를 세로로 피해 흐른다. 이 표는 자기 프레임의
+     * 내용이 아니라 <b>host 문단의 인라인 객체</b>이므로, Phase 4가 프레임 bounds에 floating
+     * 배치하면 host 본문과 겹친다(실측: 3단원 p106/107 "위의 표에서..." 겹침). host 프레임을
+     * owner로 하는 AnchoredTablePlan을 만들어 표를 앵커 문단 뒤 인라인 표로 삽입하면
+     * 다음 문단이 표 아래에서 시작한다.</p>
+     *
+     * <p>기존 storyAnchoredTables 경로(표가 owner 스토리 안에 있는 경우)와 달리, 여기선 표가
+     * <b>다른 스토리</b>(table-only frame의 ParentStory)에 있고 host 스토리 문단의 inlineFrames로
+     * 참조된다. buildPlan line113의 "다행 레이아웃 표=프레임 내용" 스킵은 자기 프레임 내용일
+     * 때만 옳으므로 여기엔 적용하지 않는다.</p>
+     */
+    private static void planInlineAnchoredTableOnlyFrames(ResolvedBuildContext ctx, Set<String> plannedTables) {
+        Set<String> plannedHostStories = new HashSet<>();
+        for (ResolvedTextFrame hostTf : ctx.resolvedData.textFrames()) {
+            if (hostTf == null || hostTf.storyId() == null) continue;
+            if (hostTf.isInline() || hostTf.sourceHidden()) continue;
+            if (!plannedHostStories.add(hostTf.storyId())) continue;
+
+            IDMLStory hostStory = ctx.loadIDMLStory.apply(hostTf.storyId());
+            if (hostStory == null || hostStory.paragraphs() == null) continue;
+            if (!hasStandaloneStoryText(hostStory)) continue;
+
+            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph> paragraphs = hostStory.paragraphs();
+            for (int paraIdx = 0; paraIdx < paragraphs.size(); paraIdx++) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph paragraph = paragraphs.get(paraIdx);
+                if (paragraph == null || paragraph.characterRuns() == null) continue;
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : paragraph.characterRuns()) {
+                    if (run == null || run.inlineFrames() == null) continue;
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame inlineFrame : run.inlineFrames()) {
+                        AnchoredTablePlan plan = inlineAnchoredTableOnlyPlan(
+                                ctx, hostTf, inlineFrame, paraIdx, plannedTables);
+                        if (plan == null) continue;
+                        ctx.addAnchoredTablePlan(plan);
+                        ctx.ownershipPlanLines.add(plan.toJson());
+                    }
+                }
+            }
+        }
+    }
+
+    private static AnchoredTablePlan inlineAnchoredTableOnlyPlan(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame hostTf,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame inlineFrame,
+            int afterParagraphIndex,
+            Set<String> plannedTables) {
+        if (inlineFrame == null || inlineFrame.parentStoryId() == null) return null;
+        IDMLStory tableStory = ctx.loadIDMLStory.apply(inlineFrame.parentStoryId());
+        if (tableStory == null || !tableStory.hasTables()) return null;
+        // table-only: 표를 담은 프레임에 독립 본문 텍스트가 없어야 한다(사이드바/캡션 프레임 제외).
+        if (hasStandaloneStoryText(tableStory)) return null;
+        IDMLTable table = firstTable(tableStory);
+        if (table == null || table.selfId() == null) return null;
+        if (!plannedTables.add(table.selfId())) return null;
+
+        int ownerTfDomId = parseDecimal(hostTf.id(), -1);
+        if (ownerTfDomId < 0) return null;
+        // nestedStoryId는 표 로딩용으로 유지(loadPlannedTable이 이 스토리에서 표를 찾는다). 단
+        // nestedTableId를 표 자기 자신으로 두므로 wrapper flow 평탄화 대상이 아니다(셀에 별도 story의
+        // nested table이 없음). hasWrapperFlowContent가 wrapperTableId==nestedTableId를 보고 통짜
+        // 인라인 표로 처리하도록 해 셀 구조를 보존한다.
+        String tableStoryId = toDecimalStoryId(inlineFrame.parentStoryId());
+        return new AnchoredTablePlan(
+                ownerTfDomId,
+                hostTf.storyId(),
+                afterParagraphIndex,
+                table.selfId(),
+                -1,
+                tableStoryId,
+                table.selfId(),
+                hostTf.pageIndex(),
+                "inline_anchored_table_only_frame");
     }
 
     private static List<ResolvedTextFrame> visibleNonInlineFramesForStory(
