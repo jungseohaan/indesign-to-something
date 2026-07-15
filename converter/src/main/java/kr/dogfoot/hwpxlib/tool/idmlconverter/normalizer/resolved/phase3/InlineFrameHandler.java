@@ -1427,35 +1427,41 @@ public class InlineFrameHandler {
             File pngFile = new File(ctx.basePath, shellFile);
             if (!pngFile.exists() || !pngFile.isFile()) return null;
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            boolean useImageFill = true;
+            boolean usedNativeShellStyle = false;
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             BufferedImage shellImage = VisualCropper.knockOutPaperLikeFill(img);
             if (shouldPreserveTransparentInlineShell(shellImage)) {
-                ASTInlineObject transparentShell = buildTransparentInlineShellImageObject(
-                        ctx, anchoredObjectId, shellPlan, shellBounds, childTfs, shellImage);
-                if (transparentShell != null) {
-                    if (shell != null) {
-                        ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
-                                "PLACE_INLINE_TEXT_SHELL_AS_IMAGE",
-                                "placed transparent inline textless shell as alpha PNG with HWPX text overlays");
-                    }
-                    return transparentShell;
+                ResolvedPageItem nativeStyleSource = findInlineTextShellNativeStyleSource(ctx, shellPlan, anchorItem);
+                if (nativeStyleSource != null) {
+                    applyInlineShellShapeStyle(ctx, nativeStyleSource, obj);
+                    applyOwnedTextFrameShellShapeStyle(ctx, childTfs, obj);
+                    useImageFill = false;
+                    usedNativeShellStyle = true;
+                } else {
+                    imageData = VisualCropper.encodePng(shellImage);
                 }
+            } else {
+                boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
+                imageData = prepareInlineTextShellImageData(shellImage, preserveSourceCanvas);
             }
-            boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
-            imageData = prepareInlineTextShellImageData(shellImage, preserveSourceCanvas);
             int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
             boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
             if (visibleShellTextFrameCount > 1 || separatedHwpxTextChannel) {
-                obj.imageFillData(imageData);
-                obj.forceImageFill(true);
+                if (useImageFill) {
+                    obj.imageFillData(imageData);
+                    obj.forceImageFill(true);
+                }
                 attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
                 for (ResolvedTextFrame childTf : childTfs) {
                     markInlineShellChildTextPlaced(ctx, childTf);
                 }
             } else {
-                obj.imageFillData(imageData);
-                obj.forceImageFill(true);
+                if (useImageFill) {
+                    obj.imageFillData(imageData);
+                    obj.forceImageFill(true);
+                }
                 applyInlineShellTextMargins(ctx, obj, shellPlan, anchorItem, childTfs);
                 for (ResolvedTextFrame childTf : childTfs) {
                     if (isOrcCarrierTextFrame(childTf)) {
@@ -1468,7 +1474,9 @@ public class InlineFrameHandler {
             if (shell != null) {
                 ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
                         "PLACE_INLINE_TEXT_SHELL",
-                        "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
+                        usedNativeShellStyle
+                                ? "placed planned inline textless shell as INLINE_TEXT_FRAME native source shape; editable text is owned by HWPX"
+                                : "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
             }
             return obj;
         } catch (Exception e) {
@@ -2239,6 +2247,103 @@ public class InlineFrameHandler {
             if (!containsInt(owner, value)) return false;
         }
         return true;
+    }
+
+    private static ResolvedPageItem findInlineTextShellNativeStyleSource(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            ResolvedPageItem anchorItem) {
+        if (ctx == null || ctx.resolvedData == null || shellPlan == null) return null;
+        if (shellPlan.placement != Placement.INLINE
+                || shellPlan.coordinateSpace != CoordinateSpace.STORY_FLOW
+                || shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                || (shellPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                    && !(shellPlan.textAction == TextAction.DROP_TEXT
+                        && shellPlan.ownedTextFrameIds != null
+                        && shellPlan.ownedTextFrameIds.length > 0))
+                || !ShellRole.isTextShell(shellPlan)) {
+            return null;
+        }
+
+        ResolvedPageItem item = findInlineTextShellNativeStyleSource(ctx, shellPlan, anchorItem, new HashSet<Integer>());
+        if (item != null) return item;
+
+        int[][] idGroups = new int[][] {
+                shellPlan.styleSourceObjectIds,
+                shellPlan.visualSourceObjectIds,
+                shellPlan.exportSourceObjectIds,
+                shellPlan.sourceObjectIds,
+                shellPlan.sourceRootObjectIds
+        };
+        HashSet<Integer> visited = new HashSet<>();
+        for (int[] ids : idGroups) {
+            if (ids == null) continue;
+            for (int id : ids) {
+                item = findInlineTextShellNativeStyleSource(
+                        ctx,
+                        shellPlan,
+                        ctx.resolvedData.getPageItem(String.valueOf(id)),
+                        visited);
+                if (item != null) return item;
+            }
+        }
+        return null;
+    }
+
+    private static ResolvedPageItem findInlineTextShellNativeStyleSource(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            ResolvedPageItem item,
+            Set<Integer> visited) {
+        if (ctx == null || ctx.resolvedData == null || item == null || shellPlan == null) return null;
+        int itemId = parseIntOrDefault(item.id(), -1);
+        if (itemId > 0 && !visited.add(itemId)) return null;
+        if (isInlineTextShellNativeStyleSource(shellPlan, item)) return item;
+        int[] childIds = item.childIds();
+        if (childIds == null || childIds.length == 0) return null;
+        for (int childId : childIds) {
+            ResolvedPageItem child = ctx.resolvedData.getPageItem(String.valueOf(childId));
+            ResolvedPageItem found = findInlineTextShellNativeStyleSource(ctx, shellPlan, child, visited);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static boolean isInlineTextShellNativeStyleSource(ObjectPlan shellPlan, ResolvedPageItem item) {
+        if (shellPlan == null || item == null) return false;
+        int itemId = parseIntOrDefault(item.id(), -1);
+        if (itemId <= 0) return false;
+        if (!containsInt(shellPlan.sourceObjectIds, itemId)
+                && !containsInt(shellPlan.visualSourceObjectIds, itemId)
+                && !containsInt(shellPlan.styleSourceObjectIds, itemId)
+                && !containsInt(shellPlan.exportSourceObjectIds, itemId)
+                && !containsInt(shellPlan.sourceRootObjectIds, itemId)
+                && shellPlan.domId != itemId) {
+            return false;
+        }
+        if (!isSimpleNativeShellShape(item)) return false;
+        return hasSourceShapeStyle(item);
+    }
+
+    private static boolean isSimpleNativeShellShape(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = item.type();
+        if (!"Rectangle".equals(type) && !"Oval".equals(type) && !"Polygon".equals(type)) {
+            return false;
+        }
+        if (!item.visible() || item.hiddenByParent()) return false;
+        if (item.hasDropShadow() || item.gradientFeatherApplied()) return false;
+        if (Math.abs(item.absoluteRotationAngle()) > 0.01 || Math.abs(item.absoluteShearAngle()) > 0.01) {
+            return false;
+        }
+        if (item.childIds() != null && item.childIds().length > 0) return false;
+        return true;
+    }
+
+    private static boolean hasSourceShapeStyle(ResolvedPageItem item) {
+        if (item == null) return false;
+        if (!isNoneColor(item.fillColorName())) return true;
+        return !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.0;
     }
 
     private static void applyInlineShellShapeStyle(
