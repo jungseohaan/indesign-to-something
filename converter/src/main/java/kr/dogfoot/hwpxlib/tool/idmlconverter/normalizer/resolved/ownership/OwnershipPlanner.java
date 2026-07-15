@@ -443,6 +443,10 @@ public final class OwnershipPlanner {
             return plan;
         }
         if (isImportedFloatingDirectStoryFlowInlineVisual(plan)) {
+            if (isStoryFlowInlineShellDecorationSource(plan)) {
+                return dropStoryFlowInlineShellDecoration(plan,
+                        "story_flow_inline_shell_decoration_covered_by_text_shell_or_page_plane");
+            }
             return plan
                     .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
                     .withVisualAction(VisualAction.PLACE_INLINE_PNG,
@@ -11524,6 +11528,12 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isStoryFlowInlineVisualMaterialSlot(plan)) continue;
+            if (isStoryFlowInlineShellDecorationSource(plan)) {
+                plans.set(i, dropStoryFlowInlineShellDecoration(plan,
+                        "story_flow_inline_shell_decoration_covered_by_text_shell_or_page_plane"));
+                normalized++;
+                continue;
+            }
             ObjectPlan replacement = plan
                     .withVisualAction(VisualAction.PLACE_INLINE_PNG,
                             "story_flow_inline_anchor_material_slot")
@@ -11533,6 +11543,50 @@ public final class OwnershipPlanner {
         }
         ConversionTiming.metric("stage1.ownershipPlanner.storyFlowInlineVisualMaterial.normalized",
                 normalized);
+    }
+
+    private ObjectPlan dropStoryFlowInlineShellDecoration(ObjectPlan plan, String reason) {
+        return plan
+                .withTextAction(TextAction.DROP_TEXT)
+                .withVisualAction(VisualAction.DROP_VISUAL, reason)
+                .withVisualSourceObjectIds(new int[0])
+                .withDescendantVisualObjectIds(new int[0])
+                .withOwnedTextFrameIds(new int[0]);
+    }
+
+    private boolean isStoryFlowInlineShellDecorationSource(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (!hasInlineObjectPlanSignal(plan) && !hasStoryFlowInlineAnchorMaterialSignal(plan)) return false;
+        if (hasPlacedContentSourceTree(plan)) return false;
+        if (hasTextFrameSourceTree(plan)) return false;
+        String slotRole = safe(plan.slotRole);
+        String candidateId = safe(plan.candidateId);
+        if (!"inline_flow_visual_root".equals(slotRole)
+                && !candidateId.contains("inline_flow_visual_root")) {
+            return false;
+        }
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length == 0) visualIds = plan.sourceObjectIds != null ? plan.sourceObjectIds : new int[0];
+        if (visualIds.length != 1) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(visualIds[0]));
+        if (!isInlineTextShellDecorationItem(item)) return false;
+        return hasResolvedInlineAnchor(visualIds[0]) || item.isInline() || item.storyTextInlineSlot();
+    }
+
+    private static boolean isInlineTextShellDecorationItem(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if (!"Polygon".equals(type)
+                && !"Rectangle".equals(type)
+                && !"Oval".equals(type)
+                && !"GraphicLine".equals(type)) {
+            return false;
+        }
+        if ("GraphicLine".equals(type)) return false;
+        if (!isPaperColor(item.fillColorName())) return false;
+        return item.strokeWeight() > 0.01
+                && !isNoneColor(item.strokeColorName())
+                && !isPaperColor(item.strokeColorName());
     }
 
     private boolean isStoryFlowInlineVisualMaterialSlot(ObjectPlan plan) {
