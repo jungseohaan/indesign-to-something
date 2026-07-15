@@ -101,7 +101,7 @@ final class DrawTextBoxComposer {
         spec.fillColor = obj.fillColor();
         spec.fillTint = obj.fillTint();
         spec.imageFillData = obj.imageFillData();
-        spec.nativeGraphicsAllowed = false;
+        spec.nativeGraphicsAllowed = obj.nativeGraphicsAllowed();
         spec.forceImageFill = obj.forceImageFill();
         spec.marginLeft = obj.textMarginLeft();
         spec.marginRight = obj.textMarginRight();

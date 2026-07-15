@@ -60,6 +60,18 @@ Placement and coordinate space are a single source decision.
   `storyAnchorPlacement=FLOATING_ANCHORED` for the same root. A descendant
   object's page-positioned anchored setting does not move the root inline slot
   out of story flow.
+- Compact direct story inline visuals such as marker/deco curves that are
+  emitted from `pass.inline_objects` remain `INLINE/STORY_FLOW` when Stage 0
+  records `storyTextInlineSlot=true` and the source tree is owned by that inline
+  anchor. Page-positioned repair must not promote these small direct story
+  markers to floating merely because InDesign also reports `Anchored`.
+- Direct story inline visuals whose source paint/style name declares a text
+  emphasis role, such as highlighter, underline, or equivalent editorial marker
+  names, are not inline content visuals. Stage 1 plans them as
+  `ABSORB_TEXT_STYLE` on `TEXT_SLOT`/style sources, or as non-advancing text
+  decoration if native HWPX style cannot express the appearance. They must not
+  be emitted as `PLACE_INLINE_PNG`, because an inline PNG consumes text advance
+  and changes the paragraph flow.
 - If the source bounds live in page space outside the carrier content box and
   the source is not the direct story-flow slot owner, Stage 0 writes
   `storyAnchorPlacement=FLOATING_ANCHORED`; Stage 1 then plans the object as

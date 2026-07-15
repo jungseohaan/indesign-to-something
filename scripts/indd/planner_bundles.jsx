@@ -370,6 +370,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         inlineAnchorSourceObjectId: inlineAnchorSourceObjectId || null,
         inlineSourceTreeClosed: candidate.inlineSourceTreeClosed === true,
         inlineFlowSourceObjectIds: inlineFlowSourceObjectIds,
+        inlineTextStyleMarkerSource: _plannerBundleHasInlineTextStyleMarkerSource(
+                candidate, sourceIds, clusterIndex),
         connectorDecorationVisual: connectorDecorationVisual,
         zOrder: zOrder,
         bounds: candidate.bounds || null,
@@ -2254,6 +2256,32 @@ function _plannerBundleSourceHasPaint(source) {
     var hasStroke = strokeWeight > 0 && strokeName && strokeName !== "none"
             && strokeName !== "[none]" && strokeName !== "n/a";
     return hasFill || hasStroke;
+}
+
+function _plannerBundleHasInlineTextStyleMarkerSource(candidate, sourceIds, clusterIndex) {
+    if (!candidate || candidate.passId !== "pass.inline_objects") return false;
+    if (candidate.storyTextInlineSlot !== true && candidate.sourceInlineFlow !== true) return false;
+    if (!sourceIds || sourceIds.length === 0 || !clusterIndex || !clusterIndex.sourceInfo) return false;
+    for (var i = 0; i < sourceIds.length; i++) {
+        var source = clusterIndex.sourceInfo(sourceIds[i]);
+        if (!source) continue;
+        if (_plannerBundleSourceDeclaresTextStyleMarker(source)) return true;
+    }
+    return false;
+}
+
+function _plannerBundleSourceDeclaresTextStyleMarker(source) {
+    if (!source) return false;
+    var fillName = String(source.fillColorName || source.fillColor || "").toLowerCase();
+    var strokeName = String(source.strokeColorName || source.strokeColor || "").toLowerCase();
+    var names = fillName + " " + strokeName;
+    return names.indexOf("형광펜") >= 0
+            || names.indexOf("highlight") >= 0
+            || names.indexOf("highlighter") >= 0
+            || names.indexOf("underline") >= 0
+            || names.indexOf("밑줄") >= 0
+            || names.indexOf("강조") >= 0
+            || names.indexOf("emphasis") >= 0;
 }
 
 function _plannerBundleNonTextOnlySourceIds(ids, clusterIndex) {

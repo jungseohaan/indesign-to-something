@@ -3713,11 +3713,6 @@ public class InlineFrameHandler {
         // 배치 여부는 Stage 1 ObjectPlan의 PLACE_INLINE_PNG만 따른다.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
-            ObjectPlan pagePositionedOwner =
-                    findPagePositionedStoryAnchorOwnerPlan(ctx, rg, anchoredObjectId);
-            if (pagePositionedOwner != null) {
-                return null;
-            }
             boolean plannedAnchorMaterial = plan != null
                     && plan.placement == Placement.INLINE
                     && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
@@ -3726,6 +3721,12 @@ public class InlineFrameHandler {
                     && (isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)
                     || isClosedRenderedMaterialForInlineAnchor(rg, anchoredObjectId));
             if (rg.id() != anchoredObjectId && !plannedAnchorMaterial) continue;
+
+            ObjectPlan pagePositionedOwner =
+                    findPagePositionedStoryAnchorOwnerPlan(ctx, rg, anchoredObjectId);
+            if (pagePositionedOwner != null) {
+                return null;
+            }
             boolean proceed = plannedAnchorMaterial || isInlineRenderedGroupType(rg);
             if (!proceed && rg.itemType() == null) {
                 ResolvedTextFrame ancTf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
@@ -4142,6 +4143,12 @@ public class InlineFrameHandler {
             return items;
         }
         if (dropOnlyInlinePlan != null) {
+            List<ASTInlineItem> childTextItems =
+                    loadLayoutOnlyInlineSlotChildTextItems(ctx, anchoredObjectId);
+            if (childTextItems != null && !childTextItems.isEmpty()) {
+                items.addAll(childTextItems);
+                return items;
+            }
             ASTInlineObject spacer = createLayoutOnlyInlineSpacer(ctx, anchoredObjectId);
             if (spacer != null) {
                 items.add(spacer);
@@ -4178,6 +4185,177 @@ public class InlineFrameHandler {
             items.add(image);
         }
         return items;
+    }
+
+    private static List<ASTInlineItem> loadLayoutOnlyInlineSlotChildTextItems(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        ObjectPlan layoutPlan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
+        if (!isLayoutOnlyInlineSlotPlan(layoutPlan)) return null;
+        if (ctx == null || ctx.resolvedData == null) return null;
+        String anchorId = String.valueOf(anchoredObjectId);
+        Set<String> descendants = ctx.descendantSet(anchorId, 8);
+        if (descendants == null || descendants.isEmpty()) return null;
+
+        List<InlineLayoutChildText> candidates = new ArrayList<>();
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (!isExecutableInlineLayoutChildText(ctx, tf, descendants)) continue;
+            List<ASTInlineItem> items = materializeInlineLayoutChildText(ctx, anchoredObjectId, tf);
+            if (items == null || items.isEmpty()) continue;
+            double[] bounds = bestTextFrameBounds(tf);
+            double sortY = validBounds(bounds) ? (bounds[0] + bounds[2]) / 2.0 : 0.0;
+            double sortX = validBounds(bounds) ? bounds[1] : 0.0;
+            candidates.add(new InlineLayoutChildText(sortY, sortX, items));
+        }
+        if (candidates.isEmpty()) return null;
+        java.util.Collections.sort(candidates, new java.util.Comparator<InlineLayoutChildText>() {
+            public int compare(InlineLayoutChildText a, InlineLayoutChildText b) {
+                if (Math.abs(a.sortY - b.sortY) > 1.0) {
+                    return Double.compare(a.sortY, b.sortY);
+                }
+                return Double.compare(a.sortX, b.sortX);
+            }
+        });
+
+        List<ASTInlineItem> out = new ArrayList<>();
+        for (InlineLayoutChildText candidate : candidates) {
+            out.addAll(candidate.items);
+        }
+        return out;
+    }
+
+    private static boolean isLayoutOnlyInlineSlotPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && plan.visualAction == VisualAction.DROP_VISUAL
+                && plan.textAction == TextAction.DROP_TEXT
+                && ("layout_only_inline_slot".equals(plan.slotRole)
+                || "page_plane_absorbed_inline_anchor_layout_slot".equals(plan.reason));
+    }
+
+    private static boolean isExecutableInlineLayoutChildText(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            Set<String> descendants) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return false;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(tf.id());
+        if (item == null || item.parentId() == null) return false;
+        if (!descendants.contains(tf.id()) && !descendants.contains(item.parentId())) return false;
+        if (!tf.isInline()) return false;
+        int tfDomId = parseDecimalId(tf.id());
+        if (tfDomId < 0) return false;
+        if (!ctx.ownershipPlanPlacesInlineHwpxText(tfDomId)) return false;
+        if (ctx.isTextDisposed(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED)) return false;
+        if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return false;
+        String visible = normalizeInlineShellText(tf.frameVisibleText());
+        return !visible.isEmpty();
+    }
+
+    private static List<ASTInlineItem> materializeInlineLayoutChildText(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedTextFrame tf) {
+        int tfDomId = parseDecimalId(tf.id());
+        if (tfDomId < 0) return null;
+
+        ASTInlineObject plannedShell = loadPlannedInlineTextShellForOwnedTextFrame(ctx, tfDomId);
+        if (plannedShell != null) {
+            List<ASTInlineItem> out = new ArrayList<>();
+            out.add(plannedShell);
+            return out;
+        }
+
+        ResolvedPageItem styleItem = inlineLayoutChildTextStyleItem(ctx, anchoredObjectId, tf);
+        ASTInlineObject nativeShell = buildNativeInlineShellObjectFromSourceItem(ctx, styleItem, tf);
+        if (nativeShell != null) {
+            List<ASTInlineItem> out = new ArrayList<>();
+            out.add(nativeShell);
+            return out;
+        }
+
+        List<ASTInlineItem> textItems = inlineFlowItemsForTextFrame(ctx, tf);
+        if (textItems == null || textItems.isEmpty()) return null;
+        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+        return textItems;
+    }
+
+    private static ResolvedPageItem inlineLayoutChildTextStyleItem(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return null;
+        ResolvedPageItem textItem = ctx.resolvedData.getPageItem(tf.id());
+        if (textItem == null || textItem.parentId() == null) return null;
+        if (String.valueOf(anchoredObjectId).equals(textItem.parentId())) return null;
+        ResolvedPageItem parent = ctx.resolvedData.getPageItem(textItem.parentId());
+        if (!isNativeInlineTextShellStyleItem(parent)) return null;
+        Set<String> descendants = ctx.descendantSet(String.valueOf(anchoredObjectId), 8);
+        if (descendants == null || !descendants.contains(parent.id())) return null;
+        return parent;
+    }
+
+    private static boolean isNativeInlineTextShellStyleItem(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = item.type();
+        if (!"Rectangle".equals(type) && !"Oval".equals(type) && !"Polygon".equals(type)
+                && !"TextFrame".equals(type)) {
+            return false;
+        }
+        String strokeName = item.strokeColorName();
+        if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)
+                && item.strokeWeight() > 0) {
+            return true;
+        }
+        String fillName = item.fillColorName();
+        return fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName);
+    }
+
+    private static ASTInlineObject buildNativeInlineShellObjectFromSourceItem(
+            ResolvedBuildContext ctx,
+            ResolvedPageItem styleItem,
+            ResolvedTextFrame childTf) {
+        if (ctx == null || styleItem == null || childTf == null) return null;
+        double[] bounds = styleItem.geometricBounds();
+        if (!validBounds(bounds)) return null;
+        double w = Math.abs(bounds[3] - bounds[1]);
+        double h = Math.abs(bounds[2] - bounds[0]);
+        if (w <= 0 || h <= 0) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.sourceId(ParagraphTextHelpers.domIdToSourceId(childTf.id()));
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.keepInline(true);
+        obj.nativeGraphicsAllowed(true);
+        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
+        obj.verticalJustification("CenterAlign");
+        applyInlineShellShapeStyle(ctx, styleItem, obj);
+        buildBadgeParagraph(ctx, childTf, obj);
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return null;
+        markInlineShellChildTextPlaced(ctx, childTf);
+        return obj;
+    }
+
+    private static double[] bestTextFrameBounds(ResolvedTextFrame tf) {
+        if (tf == null) return null;
+        double[] bounds = tf.geometricBounds();
+        if (validBounds(bounds)) return bounds;
+        bounds = tf.pageRelativeBounds();
+        return validBounds(bounds) ? bounds : null;
+    }
+
+    private static final class InlineLayoutChildText {
+        final double sortY;
+        final double sortX;
+        final List<ASTInlineItem> items;
+
+        InlineLayoutChildText(double sortY, double sortX, List<ASTInlineItem> items) {
+            this.sortY = sortY;
+            this.sortX = sortX;
+            this.items = items;
+        }
     }
 
     private static ObjectPlan findPagePositionedStoryAnchorOwnerPlan(

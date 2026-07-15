@@ -4526,6 +4526,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
                 : null,
         inlineSourceTreeClosed: inlineSourceTreeClosed,
         inlineFlowSourceObjectIds: inlineFlowSourceObjectIds,
+        inlineTextStyleMarkerSource: bundle.inlineTextStyleMarkerSource === true,
         connectorDecorationVisual: bundle.connectorDecorationVisual === true,
         primarySourceObjectId: bundle.primarySourceObjectId !== undefined
                 ? bundle.primarySourceObjectId
@@ -5094,6 +5095,7 @@ function _objectPlanVisualAction(bundle, sourceById) {
 
 function _objectPlanBundleIsInlineVectorTextStyleMarker(bundle) {
     if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.inlineTextStyleMarkerSource === true) return true;
     if (_objectPlanPlacement(bundle) !== "INLINE") return false;
     if (bundle.clusterHasTextFrame === true || bundle.clusterHasEditableText === true) return false;
     if (bundle.clusterHasPlacedContent === true) return false;
@@ -5105,7 +5107,11 @@ function _objectPlanBundleIsInlineVectorTextStyleMarker(bundle) {
             if (Number(counts[lineKind] || 0) <= 0) continue;
             if (lineKind !== "GraphicLine") return false;
         }
-        return true;
+        // A GraphicLine can be either a text-style strip (underline/highlight
+        // surrogate) or a compact inline marker such as a bullet. Only the
+        // elongated source strip belongs to ABSORB_TEXT_STYLE; compact markers
+        // remain ordinary inline visual owners.
+        return _objectPlanBundleHasTextStyleMarkerBounds(bundle);
     }
     if (!_objectPlanBundleHasOnlyInlineVectorMarkerKinds(counts)) return false;
     if (!_objectPlanBundleHasTextStyleMarkerBounds(bundle)) return false;
@@ -5151,6 +5157,8 @@ function _objectPlanPlacement(bundle) {
     if (bundle && bundle.tableCellInlineAnchorSource === true
             && bundle.sourceInlineFlow === true
             && bundle.inlineAnchorSourceObjectId) return "INLINE";
+    if (bundle && bundle.inlineTextStyleMarkerSource === true) return "INLINE";
+    if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
     if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
     if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
@@ -5158,6 +5166,7 @@ function _objectPlanPlacement(bundle) {
     if (bundle && bundle.passId === "pass.inline_objects") {
         var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
         if (bundle.pagePositionedAnchoredSource === true) return "FLOATING";
+        if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
         if (bundle.sourceInlineFlow === true && bundle.inlineAnchorSourceObjectId) return "INLINE";
         if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
             return "FLOATING";
@@ -5165,6 +5174,24 @@ function _objectPlanPlacement(bundle) {
         return "INLINE";
     }
     return "FLOATING";
+}
+
+function _objectPlanBundleIsDirectCompactStoryInlineVisual(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.inlineTextStyleMarkerSource === true) return false;
+    if (bundle.storyTextInlineSlot !== true && bundle.sourceInlineFlow !== true) return false;
+    if (!bundle.inlineAnchorSourceObjectId) return false;
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return false;
+    if (bundle.clusterHasPlacedContent === true) return false;
+    if (bundle.tableCellInlineAnchorSource === true) return false;
+    var bounds = bundle.bounds;
+    if (!bounds || bounds.length < 4) return false;
+    var h = Math.abs(Number(bounds[2]) - Number(bounds[0]));
+    var w = Math.abs(Number(bounds[3]) - Number(bounds[1]));
+    if (isNaN(h) || isNaN(w) || h <= 0 || w <= 0) return false;
+    var longAxis = Math.max(w, h);
+    var shortAxis = Math.min(w, h);
+    return longAxis <= 18.0 && shortAxis <= 6.5;
 }
 
 function _objectPlanBundleIsInlineFlowShell(bundle) {

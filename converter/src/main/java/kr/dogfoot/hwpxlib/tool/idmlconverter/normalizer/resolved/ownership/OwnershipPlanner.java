@@ -442,10 +442,26 @@ public final class OwnershipPlanner {
                             + ObjectPlan.intArrayJson(visualSourceIds(plan)));
             return plan;
         }
+        if (isInlineTextStyleMarkerSourcePlan(plan)
+                && plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) {
+            return absorbTextStyleMarkerSource(plan,
+                    "direct_story_inline_text_style_marker");
+        }
         if (isImportedFloatingDirectStoryFlowInlineVisual(plan)) {
             if (isStoryFlowInlineShellDecorationSource(plan)) {
                 return dropStoryFlowInlineShellDecoration(plan,
                         "story_flow_inline_shell_decoration_covered_by_text_shell_or_page_plane");
+            }
+            if (hasTextStyleMarkerSource(plan)) {
+                return absorbTextStyleMarkerSource(plan,
+                        "direct_story_inline_text_style_marker");
+            }
+            if (isCompactDirectStoryFlowInlineVisual(plan)) {
+                return plan
+                        .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
+                        .withVisualAction(VisualAction.PLACE_INLINE_PNG,
+                                "direct_compact_story_inline_visual")
+                        .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR);
             }
             ObjectPlan repaired = plan
                     .withPlacementAndCoordinateSpace(Placement.FLOATING, CoordinateSpace.PAGE)
@@ -502,6 +518,14 @@ public final class OwnershipPlanner {
         return directStoryFlowInlineGraphicAnchorId(plan) > 0;
     }
 
+    private boolean isInlineTextStyleMarkerSourcePlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!hasInlineObjectPlanSignal(plan)) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        return hasTextStyleMarkerSource(plan);
+    }
+
     private int directStoryFlowInlineGraphicAnchorId(ObjectPlan plan) {
         if (plan == null || data == null) return -1;
         if (isDirectStoryFlowInlineGraphicAnchor(plan.domId, plan.sourceObjectIds)) {
@@ -523,6 +547,80 @@ public final class OwnershipPlanner {
             }
         }
         return -1;
+    }
+
+    private ObjectPlan absorbTextStyleMarkerSource(ObjectPlan plan, String reason) {
+        int[] styleIds = textStyleMarkerSourceIds(plan);
+        if (styleIds.length == 0) styleIds = visualSourceIds(plan);
+        if (styleIds.length == 0) styleIds = plan.sourceObjectIds;
+        int[] ownedTextFrameIds = storyTextFrameIdsForInlineAnchor(plan);
+        if (ownedTextFrameIds.length == 0) ownedTextFrameIds = plan.ownedTextFrameIds;
+        return plan
+                .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
+                .withVisualAction(VisualAction.ABSORB_TEXT_STYLE, reason)
+                .withMaterialization(Materialization.HWPX_TEXT)
+                .withVisualSourceObjectIds(new int[0])
+                .withStyleSourceObjectIds(styleIds)
+                .withOwnedTextFrameIds(ownedTextFrameIds);
+    }
+
+    private int[] storyTextFrameIdsForInlineAnchor(ObjectPlan plan) {
+        if (plan == null || data == null) return new int[0];
+        LinkedHashSet<Integer> anchorIds = new LinkedHashSet<>();
+        int direct = directStoryFlowInlineGraphicAnchorId(plan);
+        if (direct > 0) anchorIds.add(direct);
+        if (plan.sourceObjectIds != null) {
+            for (int id : plan.sourceObjectIds) anchorIds.add(id);
+        }
+        LinkedHashSet<Integer> out = new LinkedHashSet<>();
+        for (ResolvedStory story : data.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (int paraIndex = 0; paraIndex < story.paragraphs().size(); paraIndex++) {
+                ResolvedParagraph paragraph = story.paragraphs().get(paraIndex);
+                if (!paragraphHasInlineAnchor(paragraph, anchorIds)) continue;
+                for (ResolvedTextFrame tf : data.getTextFramesForStory(story.id())) {
+                    if (tf == null || tf.id() == null) continue;
+                    if (paraIndex < tf.paragraphStart() || paraIndex > tf.paragraphEnd()) continue;
+                    try {
+                        out.add(Integer.parseInt(tf.id()));
+                    } catch (NumberFormatException ignored) {
+                        // Non-numeric synthetic ids cannot be encoded in ObjectPlan ownedTextFrameIds.
+                    }
+                }
+            }
+        }
+        int[] ids = new int[out.size()];
+        int index = 0;
+        for (Integer id : out) ids[index++] = id;
+        return ids;
+    }
+
+    private boolean paragraphHasInlineAnchor(ResolvedParagraph paragraph, Set<Integer> anchorIds) {
+        if (paragraph == null || paragraph.runs() == null || anchorIds == null || anchorIds.isEmpty()) {
+            return false;
+        }
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
+            if (anchorIds.contains(run.anchoredObjectId())) return true;
+        }
+        return false;
+    }
+
+    private boolean isCompactDirectStoryFlowInlineVisual(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (hasTextStyleMarkerSource(plan)) return false;
+        if (directStoryFlowInlineGraphicAnchorId(plan) <= 0) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) return false;
+        if (plan.sourceObjectIds.length > 6) return false;
+        double[] b = plan.bounds;
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        if (w <= 0.0 || h <= 0.0) return false;
+        double longAxis = Math.max(w, h);
+        double shortAxis = Math.min(w, h);
+        return longAxis <= 18.0 && shortAxis <= 6.5;
     }
 
     private void warnImportedPlanRepairSuppressed(ObjectPlan plan, String code, String detail) {
@@ -611,7 +709,8 @@ public final class OwnershipPlanner {
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         int[] visualIds = visualSourceIds(plan);
         if (visualIds.length == 0) return false;
-        if (!hasVisibleFillStyleMarkerSource(visualIds)) return false;
+        if (!hasVisibleTextStyleMarkerPaintSource(visualIds)
+                && !hasTextStyleMarkerSource(plan)) return false;
         if (isThinInlineTextStyleMarkerPlanBounds(plan, visualIds)) return true;
         for (int visualId : visualIds) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(visualId));
@@ -633,16 +732,58 @@ public final class OwnershipPlanner {
         return true;
     }
 
-    private boolean hasVisibleFillStyleMarkerSource(int[] sourceIds) {
+    private boolean hasVisibleTextStyleMarkerPaintSource(int[] sourceIds) {
         if (sourceIds == null || data == null) return false;
         for (int sourceId : sourceIds) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
             if (item == null) continue;
+            if (isTextStyleMarkerPaintName(item.fillColorName())
+                    || isTextStyleMarkerPaintName(item.strokeColorName())) {
+                return true;
+            }
             if (!isNoneColor(item.fillColorName()) && !isPaperColor(item.fillColorName())) {
                 return true;
             }
         }
         return false;
+    }
+
+    private boolean hasTextStyleMarkerSource(ObjectPlan plan) {
+        return textStyleMarkerSourceIds(plan).length > 0;
+    }
+
+    private int[] textStyleMarkerSourceIds(ObjectPlan plan) {
+        if (plan == null || data == null) return new int[0];
+        LinkedHashSet<Integer> out = new LinkedHashSet<>();
+        collectTextStyleMarkerSourceIds(plan.sourceObjectIds, out);
+        collectTextStyleMarkerSourceIds(visualSourceIds(plan), out);
+        int[] ids = new int[out.size()];
+        int index = 0;
+        for (Integer id : out) ids[index++] = id;
+        return ids;
+    }
+
+    private void collectTextStyleMarkerSourceIds(int[] ids, LinkedHashSet<Integer> out) {
+        if (ids == null || out == null || data == null) return;
+        for (int id : ids) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            if (isTextStyleMarkerPaintName(item.fillColorName())
+                    || isTextStyleMarkerPaintName(item.strokeColorName())) {
+                out.add(id);
+            }
+        }
+    }
+
+    private boolean isTextStyleMarkerPaintName(String name) {
+        String value = safe(name).toLowerCase(Locale.ROOT);
+        return value.contains("형광펜")
+                || value.contains("highlight")
+                || value.contains("highlighter")
+                || value.contains("underline")
+                || value.contains("밑줄")
+                || value.contains("강조")
+                || value.contains("emphasis");
     }
 
     private boolean isThinInlineTextStyleMarkerPlanBounds(ObjectPlan plan, int[] visualIds) {

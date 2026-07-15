@@ -253,6 +253,12 @@ final class InlineFrameBuilder {
         if (obj != null && obj.imageFillData() != null && obj.imageFillData().length > 0) {
             return true;
         }
+        if (obj != null && obj.nativeGraphicsAllowed()) {
+            return obj.fillColor() != null
+                    || obj.strokeColor() != null
+                    || obj.cornerRadius() > 0
+                    || obj.shellShapeType() != null;
+        }
         return false;
     }
 
@@ -301,7 +307,7 @@ final class InlineFrameBuilder {
                 obj.cornerRadius(),
                 h,
                 obj.shellShapeType(),
-                false);
+                obj.nativeGraphicsAllowed());
 
         rect.createPos();
         if (useWrapping) {

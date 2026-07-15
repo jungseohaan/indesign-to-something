@@ -143,17 +143,21 @@ Text Builder:
   inline-object carrier. When such a frame is owned by a text shell, its source
   anchors remain source anchors; its visible text is not flattened into the
   shell body as a late duplicate-removal workaround.
-- A graphic-only `inline_object` in story flow whose bounds are a degenerate or
-  very thin line is a text-style decoration such as an underline. It must not
-  own or displace the surrounding `TEXT_SLOT`. If HWPX cannot materialize that
-  decoration faithfully, Stage 1 may drop the visual, but the carrier TextFrame
-  text remains `OWNED_BY_HWPX_TEXT`.
+- A graphic-only `inline_object` in story flow whose source geometry is an
+  elongated strip may be a text-style decoration such as an underline. It must
+  not own or displace the surrounding `TEXT_SLOT`. If HWPX cannot materialize
+  that decoration faithfully, Stage 1 may drop the visual, but the carrier
+  TextFrame text remains `OWNED_BY_HWPX_TEXT`.
+- A compact source inline marker, such as a bullet/label dot before editable
+  label text, is not a text-style strip merely because its source kind is
+  `GraphicLine`. Compact markers remain ordinary `CONTENT_VISUAL_SLOT` inline
+  visual owners unless Stage 1 has an explicit text-style absorption target.
 - A source inline thin vector strip used as a text-style marker is never a
-  standalone inline PNG owner. This includes `GraphicLine`, `Polygon`, or
-  `Rectangle` material wrapped in an inline `Group`. Stage 1 must either absorb
-  it into an explicit HWPX text style/underline-tab representation or assign
-  `DROP_VISUAL`; the executor must not preserve it as `PLACE_INLINE_PNG` merely
-  because it is anchored in story flow.
+  standalone inline PNG owner. This includes elongated `GraphicLine`, `Polygon`,
+  or `Rectangle` material wrapped in an inline `Group`. Stage 1 must either
+  absorb it into an explicit HWPX text style/underline-tab representation or
+  assign `DROP_VISUAL`; the executor must not preserve it as `PLACE_INLINE_PNG`
+  merely because it is anchored in story flow.
 - Text Builder must not split, shrink, or horizontally shift a TextFrame from
   `composedLines`, `wrapIndentLeft`, `wrapIndentRight`, paragraph Y offsets, or
   line-gap measurements unless Stage 1 has declared a TextWrap contract under
