@@ -581,6 +581,17 @@ public class ASTMathGrouper {
     private static boolean canEmitPositionedFormulaEquation(List<IDMLCharacterRun> mathRuns) {
         if (mathRuns == null || mathRuns.size() < 2) return false;
 
+        // 실제 인라인 프레임/그래픽 앵커(U+FFFC)를 가진 run이 있으면 이 경로를 포기한다.
+        // 여기서 앵커를 □(답안 상자)로 뭉개면 프레임이 유실된다(실측: 3단원 y=-x²/5 에서
+        // x²/5 분수가 앵커 프레임인데 y=-□ 로 깨짐). 정상 인라인 앵커 배치 경로로 보낸다.
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) continue;
+            if ((run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                    || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty())) {
+                return false;
+            }
+        }
+
         boolean hasFormulaLetter = false;
         boolean hasPositionedRun = false;
         boolean hasFormulaOperator = false;
