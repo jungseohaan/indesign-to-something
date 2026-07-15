@@ -495,6 +495,24 @@ pub struct InddFolderScanResult {
     pub subfolder_files: Vec<InddSubfolderEntry>,
 }
 
+fn is_apple_double_metadata_path(path: &std::path::Path) -> bool {
+    path.components().any(|component| {
+        let name = component.as_os_str().to_string_lossy();
+        name == "__MACOSX" || name.starts_with("._")
+    })
+}
+
+fn is_indd_source_file(path: &std::path::Path) -> bool {
+    if is_apple_double_metadata_path(path) {
+        return false;
+    }
+    path.is_file()
+        && path
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("indd"))
+            .unwrap_or(false)
+}
+
 /// 폴더를 스캔하여 .indd 파일을 찾는다 (1 depth).
 /// - direct_files: 폴더 직접 하위 .indd 경로
 /// - subfolder_files: 서브폴더별 .indd 파일
@@ -515,12 +533,11 @@ pub fn scan_indd_folder(path: String) -> Result<InddFolderScanResult, String> {
 
     for entry in &sorted_entries {
         let entry_path = entry.path();
-        if entry_path.is_file() {
-            if let Some(ext) = entry_path.extension() {
-                if ext.eq_ignore_ascii_case("indd") {
-                    direct_files.push(entry_path.to_string_lossy().to_string());
-                }
-            }
+        if is_apple_double_metadata_path(&entry_path) {
+            continue;
+        }
+        if is_indd_source_file(&entry_path) {
+            direct_files.push(entry_path.to_string_lossy().to_string());
         } else if entry_path.is_dir() {
             // 1 depth: 서브폴더 내 .indd 파일 수집
             let mut indd_files: Vec<InddFileEntry> = Vec::new();
@@ -530,19 +547,15 @@ pub fn scan_indd_folder(path: String) -> Result<InddFolderScanResult, String> {
 
                 for sub_entry in &sorted_sub {
                     let sub_path = sub_entry.path();
-                    if sub_path.is_file() {
-                        if let Some(ext) = sub_path.extension() {
-                            if ext.eq_ignore_ascii_case("indd") {
-                                indd_files.push(InddFileEntry {
-                                    path: sub_path.to_string_lossy().to_string(),
-                                    filename: sub_path
-                                        .file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .to_string(),
-                                });
-                            }
-                        }
+                    if is_indd_source_file(&sub_path) {
+                        indd_files.push(InddFileEntry {
+                            path: sub_path.to_string_lossy().to_string(),
+                            filename: sub_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string(),
+                        });
                     }
                 }
             }
