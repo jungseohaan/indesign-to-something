@@ -103,6 +103,19 @@ public class EHFontEquationConverter {
                 i++;
                 continue;
             }
+            // EH상부자 raw 위첨자 글리프(decodeSubSupGlyph 미적용 경로): Û→², Ü→³.
+            // 본문 폰트에 섞인 EH 인코딩이 EH 변환 경로를 못 타면 여기로 온다
+            // (실측: 3단원 p104 y=xÛ 이 y=x² 로 안 바뀜).
+            if (c == 0x00DB) { // Û → ²
+                sb.append("^{2}");
+                i++;
+                continue;
+            }
+            if (c == 0x00DC) { // Ü → ³
+                sb.append("^{3}");
+                i++;
+                continue;
+            }
             if (c == 0x00B9) { // ¹
                 sb.append("^{1}");
                 i++;
@@ -122,8 +135,12 @@ public class EHFontEquationConverter {
             i++;
         }
 
-        // 정리: 연속 공백
-        return sb.toString().replaceAll("\\s+", " ").trim();
+        // 정리: 연속 공백은 단일 공백으로. 단, 탭(\t)은 선택지 구분자이므로 보존한다
+        // (실측: 3단원 ⑶ f(1/2) \t\t ⑷ f(2) 의 항 사이 탭이 공백으로 뭉개짐).
+        // 탭 아닌 공백류만 합치고, 탭 주변의 잉여 공백은 제거한다.
+        String s = sb.toString().replaceAll("[^\\S\\t]+", " ");
+        s = s.replaceAll(" *\\t *", "\t"); // 탭 주변 공백 정리
+        return s.trim();
     }
 
     /**

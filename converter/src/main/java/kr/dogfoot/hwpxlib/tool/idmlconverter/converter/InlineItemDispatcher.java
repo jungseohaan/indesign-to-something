@@ -410,10 +410,10 @@ final class InlineItemDispatcher {
     }
 
     private int resolveEquationBaseUnit(ASTEquation eq, Equation template) {
-        if (usesBodyTextEquationStyle(eq)
-                && eq != null
-                && eq.preferredBaseUnit() != null
-                && eq.preferredBaseUnit() > 0) {
+        // 원본 폰트 크기(preferredBaseUnit)가 있으면 sourceType 과 무관하게 사용한다.
+        // 이전엔 CHEM_FORMULA 만 반영해, 일반 EH 수식은 기본값(11pt)으로 떨어져 큰
+        // 제목 속 수식이 본문보다 작게 나왔다(실측: "이차함수 y=ax² 의 그래프" 24pt).
+        if (eq != null && eq.preferredBaseUnit() != null && eq.preferredBaseUnit() > 0) {
             return eq.preferredBaseUnit();
         }
         return template.baseUnit() != null ? template.baseUnit() : 1100;

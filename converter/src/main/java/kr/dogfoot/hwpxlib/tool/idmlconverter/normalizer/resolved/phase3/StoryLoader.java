@@ -452,6 +452,15 @@ public class StoryLoader {
 
                 if (enterEH) {
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
+                    // IDML run 은 명시적 fontSize 가 없어(스타일 상속만) EH 수식의
+                    // 원본 크기 힌트가 유실된다(실측: "이차함수 y=ax² 의 그래프" 24pt 가
+                    // 기본 11pt 로). 매칭 resolved run 의 크기를 IDML run 에 채워둔다.
+                    if (run.fontSize() == null && resolvedRuns != null) {
+                        ResolvedRun rrSize = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, run.content());
+                        if (rrSize != null && rrSize.fontSize() != null && rrSize.fontSize() > 0) {
+                            run.fontSize(rrSize.fontSize());
+                        }
+                    }
                     ehMathGroup.add(run);
                 } else if (enterNP) {
                     MathProcessor.flushMathGroups(ctx, mathGroup, null, ehMathGroup, para);
@@ -1875,9 +1884,11 @@ public class StoryLoader {
             }
         }
         if (rightmost == null) return false;
-        // 이미 leader가 지정된 탭(예: 밑줄 빈칸의 "_" SOLID)은 점선으로 덮어쓰지 않는다.
+        // 원본 leader 존중: 원본에 리더가 있으면 유지, 없으면 점선을 강제로 만들지
+        // 않는다. endsWithPageNumber 오판("\d{1,4}")으로 "문제 N" 같은 일반 문단에
+        // 없던 점선(------)이 생기던 문제(실측: 수학교과서 "문제 N" 전부).
         if (rightmost.leader() == null || rightmost.leader().isEmpty()) {
-            rightmost.leader(".");
+            return false;
         }
         return true;
     }

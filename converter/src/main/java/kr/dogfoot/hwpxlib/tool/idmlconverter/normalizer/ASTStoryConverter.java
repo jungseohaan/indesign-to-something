@@ -515,7 +515,12 @@ public class ASTStoryConverter {
             }
         }
         if (rightmost == null) return false;
-        rightmost.leader(".");
+        // 원본 tabStop 의 leader 를 존중한다. 원본에 리더가 없으면(대부분) 점선을
+        // 강제로 만들지 않는다 — "문제 3" 처럼 숫자로 끝나는 일반 문단이 페이지번호로
+        // 오판돼 없던 점선(------)이 생기던 문제(실측: 수학교과서 "문제 N" 전부).
+        if (rightmost.leader() == null || rightmost.leader().isEmpty()) {
+            return false;
+        }
         return true;
     }
 

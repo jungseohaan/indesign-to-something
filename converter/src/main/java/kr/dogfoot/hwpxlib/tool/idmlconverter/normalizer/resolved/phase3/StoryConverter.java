@@ -1719,14 +1719,16 @@ public final class StoryConverter {
 
     private static String normalizeForParagraphMatch(String text) {
         if (text == null) return "";
-        return text.replace("\uFFFC", "")
-                .replace("\u0003", "")
-                .replace("\u0007", "")
-                .replace("\u0008", "")
-                .replace("\r", "")
-                .replace("\n", "")
-                .replaceAll("\\s+", "")
-                .trim();
+        // AST 문단 텍스트(normalizedTextMap)와 동일 기준: 한글 골격만 남긴다.
+        // 수식/영문/숫자/기호는 수식 변환으로 AST 에서 빠지므로 composedLine 쪽도
+        // 함께 무시해야 줄 경계가 일치한다.
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (isIgnoredForComposedLineMatch(ch)) continue;
+            sb.append(ch);
+        }
+        return sb.toString();
     }
 
     private static boolean shouldPreserveAnswerVisualLines(
@@ -1936,7 +1938,24 @@ public final class StoryConverter {
                 || ch == '\u0008'
                 || ch == '\r'
                 || ch == '\n'
-                || Character.isWhitespace(ch);
+                || Character.isWhitespace(ch)
+                || isNonKoreanBodyChar(ch);
+    }
+
+    /**
+     * 수식/라틴/숫자/기호 등 수식 변환으로 AST 텍스트와 composedLine 원본이 달라지는
+     * 문자인지 판별한다. composedLine 줄바꿈 매칭을 한글 골격만으로 하기 위해 이런
+     * 문자를 양쪽에서 모두 무시한다(실측: 수식 y=xU 가 AST 에선 빠져 불일치).
+     * 한글 음절/자모, 원문자(선택지 번호)만 매칭에 남긴다.
+     */
+    private static boolean isNonKoreanBodyChar(char ch) {
+        // 한글 골격만 매칭에 남긴다. 수식이 된 영문(y=x)과 텍스트 영문(좌표 A)을
+        // 문자만으로 구분할 수 없어, 영문/숫자/수식기호는 양쪽에서 모두 무시한다.
+        if (ch >= 0xAC00 && ch <= 0xD7A3) return false; // 한글 음절
+        if (ch >= 0x3131 && ch <= 0x318E) return false; // 한글 자모
+        if (ch >= 0x2460 && ch <= 0x2473) return false; // circled 1-20
+        if (ch >= 0x2474 && ch <= 0x2487) return false; // parenthesized 1-20
+        return true; // 그 외(영문/숫자/수식기호/EH글리프)는 매칭에서 무시
     }
 
     private static String normalizeComposedLineText(String text) {
@@ -2805,10 +2824,11 @@ public final class StoryConverter {
             for (ASTParagraph para : block.paragraphs()) {
                 if (para == null || !para.hasTabStops()) continue;
                 if (!hasTabRun(para) || !endsWithPageNumber(para)) continue;
-                ASTTabStop rightmost = rightmostPositiveTabStop(para);
-                if (rightmost != null) {
-                    rightmost.leader(".");
-                }
+                // 원본에 없는 점선을 강제로 만들지 않는다. endsWithPageNumber 판정이
+                // 느슨해("\d{1,4}") "문제 N" 같은 일반 문단까지 페이지번호로 오판했고,
+                // 여기서 DOT 리더를 강제해 없던 점선(------)이 생겼다(실측: 수학교과서).
+                // 원본 tabStop 의 leader 는 이미 ASTTabStop 생성 시 보존되므로 여기서
+                // 추가 조작하지 않는다.
             }
         }
     }
@@ -3640,7 +3660,11 @@ public final class StoryConverter {
             }
         }
         if (rightmost == null) return false;
-        rightmost.leader(".");
+        // 원본 leader 존중: 원본에 리더 없으면 점선을 강제로 만들지 않는다("문제 N"
+        // 처럼 숫자로 끝나는 일반 문단이 페이지번호로 오판돼 없던 점선이 생기던 문제).
+        if (rightmost.leader() == null || rightmost.leader().isEmpty()) {
+            return false;
+        }
         return true;
     }
 
