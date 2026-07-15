@@ -45,7 +45,10 @@ public final class TextControlNormalizer {
         out = out.replace("\u202C", "");
         out = out.replace("\u202D", "");
         out = out.replace("\u202E", "");
-        out = out.replace("\uFFE3", "~");
+        // U+FFE3 is used in source text as a degree range separator (0°￣30°).
+        // Do not normalize it to "~": BT math fallback treats leading "~" as
+        // an internal marker and strips it. Keep a visible text-range glyph.
+        out = out.replace("\uFFE3", "∼");
 
         out = out.replace('\uE285', '\u25A1')
                 .replace('\uE287', '\u25A1')

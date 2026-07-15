@@ -417,6 +417,7 @@ public class StoryLoader {
                 if (!chemicalFormulaPara && !enterEH && !enterNP && !_orcOnly) {
                     enterBT = (run.isBTFont()
                                 && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
+                            && !ASTMathGrouper.isPlainAlphanumericRun(run)
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
                             || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()))
                             || formulaClusterRun;

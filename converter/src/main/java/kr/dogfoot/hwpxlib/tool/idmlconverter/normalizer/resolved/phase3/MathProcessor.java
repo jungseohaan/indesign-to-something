@@ -111,6 +111,14 @@ class MathProcessor {
                 else if (NPFontGlyphMap.isNPFont(ff)) currentType = "NP";
             }
 
+            if ("BT".equals(currentType) && isBtRangeSeparatorRun(tr)) {
+                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                mathGroup.clear();
+                mathType = null;
+                newItems.add(copyTextRun(tr, "∼", false));
+                continue;
+            }
+
             FormulaCluster formulaCluster = collectFormulaEquationCluster(items, i);
             if (formulaCluster != null) {
                 flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
@@ -137,10 +145,15 @@ class MathProcessor {
             //
             // 이런 런을 무조건 수식 그룹에 넣으면 한글 문장 속 원소기호나 번호까지
             // HWP 수식(이탤릭)이 된다 — "수소 원자(H)" 의 H, "1." 같은 항목 번호.
-            // → 수식 구조 문자가 없는 평범한 텍스트면 수식 그룹에 넣지 않는다.
-            if (currentType != null && mathGroup.isEmpty()
+            // 이미 열린 BT 그룹 뒤에 붙은 경우도 끊어야 한다. 예를 들어 범위 기호
+            // "￣" 뒤의 "30° 사이의 순환은..." 같은 한국어 설명문은 수식 스크립트가
+            // 아니라 편집 가능한 본문 텍스트다.
+            if ("BT".equals(currentType)
                     && BTFontGlyphMap.isBTBodyTextFont(ff)
                     && !looksLikeMathContent(tr.text())) {
+                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                mathGroup.clear();
+                mathType = null;
                 newItems.add(item);
                 continue;
             }
@@ -1250,6 +1263,14 @@ class MathProcessor {
             }
         }
         return BTFontEquationConverter.containsGreekKeyword(text);
+    }
+
+    private static boolean isBtRangeSeparatorRun(ASTTextRun tr) {
+        if (tr == null) return false;
+        String text = tr.text();
+        if (text == null) return false;
+        String trimmed = text.trim();
+        return "￣".equals(trimmed) || "~".equals(trimmed) || "∼".equals(trimmed);
     }
 
     /** 화학식 조판에 쓰이는 공백류(일반/얇은/헤어 스페이스 등). */
