@@ -462,6 +462,42 @@ def main() -> int:
                 failures.append(
                     "InlineFrameHandler.java: inline text-shell source-bundle coverage must use ObjectPlans before rendered textOwner fallback"
                 )
+        transparent_marker = "private static ASTInlineObject buildTransparentInlineShellImageObject"
+        if transparent_marker in text:
+            helper_start = text.index(transparent_marker)
+            next_marker = text.find("private static boolean shouldAttachSeparatedHwpxTextAsOverlay", helper_start)
+            helper = text[helper_start:next_marker if next_marker >= 0 else len(text)]
+            required_inline_shell_execution = [
+                "obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);",
+                "obj.imageFillData(flattenOntoWhite(shellImage));",
+                "obj.forceImageFill(true);",
+                "buildBadgeParagraph(ctx, childTf, obj);",
+            ]
+            for needle in required_inline_shell_execution:
+                if needle not in helper:
+                    failures.append(
+                        f"InlineFrameHandler.java: transparent inline text shell must execute as alpha-safe INLINE_TEXT_FRAME, missing: {needle}"
+                    )
+                    break
+            forbidden_inline_shell_execution = [
+                "obj.kind(ASTInlineObject.ObjectKind.IMAGE);",
+                "obj.imageData(VisualCropper.encodePng(shellImage));",
+                "attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);",
+            ]
+            for needle in forbidden_inline_shell_execution:
+                if needle in helper:
+                    failures.append(
+                        f"InlineFrameHandler.java: transparent inline text shell must not execute through IMAGE/deferred overlay path: {needle}"
+                    )
+                    break
+        else:
+            failures.append(
+                "InlineFrameHandler.java: transparent inline text-shell execution helper is missing"
+            )
+        if "placed planned transparent inline textless shell as IMAGE with HWPX text overlays" in text:
+            failures.append(
+                "InlineFrameHandler.java: inline text shell diagnostics must not describe IMAGE with HWPX text overlays"
+            )
 
     planner_bundles = ROOT / "scripts/indd/planner_bundles.jsx"
     object_plans = ROOT / "scripts/indd/object_plans.jsx"

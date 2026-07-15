@@ -86,6 +86,22 @@
   source/visual ids include an inline source object must remain
   `INLINE` / `STORY_FLOW` unless Stage 1 records explicit page-positioned source
   metadata such as anchored-position or table-cell external-label ownership.
+- The HWPX output for a visible `PLACE_TEXT_SHELL` with `placement=INLINE` and
+  `coordinateSpace=STORY_FLOW` must be an inline carrier. The emitted shell
+  object uses `treatAsChar=true` and paragraph/story-flow coordinates; its
+  owned child TextFrame text must not appear as a separate `PAPER`-relative
+  table, rectangle, or picture overlay. Any page-level child overlay for this
+  plan is an execution invariant failure.
+- A `STORY_FLOW` inline plan cannot be executed through a deferred page overlay.
+  Deferred overlays are allowed only for plans whose Stage 1 contract is
+  page-level placement or for a separately declared page-overlay execution
+  contract. The presence of source child TextFrames, resolved page bounds, or
+  image overlay metadata is not enough to promote inline text to page floating
+  output.
+- Inline text-shell image-fill material must be alpha-safe for the HWPX carrier.
+  Transparent PNG alpha that would render as black or opaque paper in HWPX
+  `imageFill`/`imgBrush` is an output-preparation defect, not a source ownership
+  decision.
 - When an IDML source group is a closed text-owning shell and its direct visual
   child branches overlap inside that same source group, Stage 1 must keep the
   group as one textless `SHELL_SLOT` owner. The child branches must not be split

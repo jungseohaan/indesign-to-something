@@ -99,6 +99,21 @@ Text Builder:
   reconstruction. The owned text uses the source TextFrame story paragraphs,
   paragraph alignment, and TextFrame inset/bounds relation; it is not centered
   or reflowed by a generic badge fallback.
+- A `PLACE_TEXT_SHELL` plan with `placement=INLINE` and
+  `coordinateSpace=STORY_FLOW` has one permitted HWPX execution shape: a
+  story-flow inline carrier (`treatAsChar=true`, paragraph-relative
+  coordinates) whose shell material and owned editable child text are emitted
+  in the same carrier. It must not be materialized as an `IMAGE` with
+  `overlayFrames`, and it must not queue its child TextFrames through
+  `deferredOverlay`, because that converts a story-flow ownership contract into
+  page-level floating objects.
+- When an inline text shell uses extracted PNG material as an HWPX `imageFill`
+  or `imgBrush`, image preparation must use an alpha-safe payload for that
+  carrier. HWPX renderers may treat transparent PNG alpha as black in image
+  brushes; therefore transparent shell material used as an inline text-shell
+  fill is flattened through the canonical shell image-preparation path before
+  emission. Alpha may be preserved only for a plan whose HWPX execution contract
+  explicitly requires transparent page-level material.
 - Inline text-shell vertical alignment is source geometry, not text content.
   When a textless inline shell atom owns one editable child TextFrame, the
   executor may center the HWPX text only when the child TextFrame bounds are
