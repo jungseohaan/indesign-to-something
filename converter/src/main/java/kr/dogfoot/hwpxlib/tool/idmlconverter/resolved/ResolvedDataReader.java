@@ -292,8 +292,7 @@ public class ResolvedDataReader {
                         ResolvedTextFrame.ComposedRun cr = new ResolvedTextFrame.ComposedRun();
                         cr.text(getString(rObj, "text"));
                         cr.fillColor(getString(rObj, "fillColor"));
-                        cr.fontSize(rObj.has("fontSize") && !rObj.get("fontSize").isJsonNull()
-                                ? rObj.get("fontSize").getAsDouble() : null);
+                        cr.fontSize(getResolvedFontSize(rObj));
                         cr.fontFamily(getString(rObj, "fontFamily"));
                         cr.fontStyle(getString(rObj, "fontStyle"));
                         runs.add(cr);
@@ -453,7 +452,7 @@ public class ResolvedDataReader {
         ResolvedRun run = new ResolvedRun();
         run.text(replaceInDesignSpecialCharCodes(getString(o, "text")));
         run.fontFamily(getString(o, "fontFamily"));
-        run.fontSize(getBoxedDouble(o, "fontSize"));
+        run.fontSize(getResolvedFontSize(o));
         run.fontStyle(getString(o, "fontStyle"));
         run.fillColor(getString(o, "fillColor"));
         run.charStyle(getString(o, "charStyle"));
@@ -481,6 +480,14 @@ public class ResolvedDataReader {
             run.anchoredObjectId(o.get("anchoredObjectId").getAsInt());
         }
         return run;
+    }
+
+    private static Double getResolvedFontSize(JsonObject o) {
+        Double fontSize = getBoxedDouble(o, "fontSize");
+        if (fontSize == null) {
+            fontSize = getBoxedDouble(o, "pointSize");
+        }
+        return fontSize;
     }
 
     private static ResolvedPage parsePage(JsonObject o) {

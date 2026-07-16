@@ -13,6 +13,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -939,6 +940,7 @@ public class ASTTableConverter {
                 if (cellPara.appliedParagraphStyle() != null) {
                     astPara.paragraphStyleRef(cellPara.appliedParagraphStyle());
                 }
+                applyTableCellParagraphAlignment(astPara, cellPara, resolvedData, styleResolver);
                 for (IDMLCharacterRun run : cellPara.characterRuns()) {
                     addSimpleTextRuns(astPara, run, cellPara.appliedParagraphStyle(),
                             resolvedData, styleResolver);
@@ -949,8 +951,47 @@ public class ASTTableConverter {
         if (!usedCellParagraphBuilder) {
             replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
         }
+        normalizeTextHiddenInlineShellCarriers(cell, resolvedData);
 
         return cell;
+    }
+
+    private static void applyTableCellParagraphAlignment(
+            ASTParagraph astPara,
+            IDMLParagraph cellPara,
+            ResolvedData resolvedData,
+            StylePropertyResolver styleResolver) {
+        if (astPara == null || cellPara == null) return;
+        if (cellPara.justification() != null && !cellPara.justification().isEmpty()) {
+            astPara.alignment(cellPara.justification());
+            return;
+        }
+        String styleRef = cellPara.appliedParagraphStyle();
+        if (styleRef == null || styleRef.isEmpty()) return;
+        IDMLStyleDef style = styleResolver != null
+                ? styleResolver.getResolvedParagraphStyle(styleRef)
+                : null;
+        if (style != null && style.textAlignment() != null && !style.textAlignment().isEmpty()) {
+            astPara.alignment(style.textAlignment());
+            return;
+        }
+        if (resolvedData != null) {
+            String cleanStyle = cleanParagraphStyleName(styleRef);
+            String resolvedJustification = resolvedData.getParagraphStyleJustification(cleanStyle);
+            if (resolvedJustification != null && !resolvedJustification.isEmpty()) {
+                astPara.alignment(resolvedJustification);
+            }
+        }
+    }
+
+    private static String cleanParagraphStyleName(String styleRef) {
+        if (styleRef == null) return null;
+        String clean = styleRef;
+        int slash = clean.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < clean.length()) {
+            clean = clean.substring(slash + 1);
+        }
+        return clean;
     }
 
     private static void normalizeTextHiddenInlineShellCarriers(ASTTableCell cell, ResolvedData resolvedData) {
@@ -963,65 +1004,130 @@ public class ASTTableConverter {
                 if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) continue;
                 String domId = domIdFromSourceId(obj.sourceId());
                 if (domId == null) continue;
-                RenderedGroup shell = findTextHiddenShellForEditableTextFrame(resolvedData, domId);
-                if (shell == null) continue;
-                applyExtractedShellAsInlineFrameFill(obj, shell, resolvedData, domId);
-                removeStandaloneShellImage(para, shell.id());
+                TextHiddenShellMatch shell = findTextHiddenShellForInlineObject(resolvedData, domId);
+                if (shell == null || shell.renderedGroup == null) continue;
+                applyExtractedShellAsInlineFrameFill(obj, shell.renderedGroup, resolvedData, domId);
+                populateInlineShellOwnedText(obj, shell.plan, resolvedData);
+                removeStandaloneShellImage(para, shell.renderedGroup.id());
             }
         }
     }
 
-    private static RenderedGroup findTextHiddenShellForEditableTextFrame(
-            ResolvedData resolvedData, String textFrameDomId) {
-        if (resolvedData == null || textFrameDomId == null) return null;
-        ResolvedTextFrame textFrame = resolvedData.getTextFrame(textFrameDomId);
-        if (textFrame == null || !textFrame.isInline()) return null;
+    private static TextHiddenShellMatch findTextHiddenShellForInlineObject(
+            ResolvedData resolvedData, String inlineObjectDomId) {
+        if (resolvedData == null || inlineObjectDomId == null) return null;
         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
                 tableBridgeContext(resolvedData);
         boolean hasStage1ObjectPlans = ctx.ownershipPlans != null && !ctx.ownershipPlans.isEmpty();
-        int tfDomId = parseDomIdOrNeg(textFrameDomId);
+        int domId = parseDomIdOrNeg(inlineObjectDomId);
         if (hasStage1ObjectPlans) {
-            return findPlannedTextHiddenShellForInlineTextFrame(ctx, resolvedData, tfDomId);
+            return findPlannedTextHiddenShellForInlineObject(ctx, resolvedData, domId);
         }
+        ResolvedTextFrame textFrame = resolvedData.getTextFrame(inlineObjectDomId);
+        if (textFrame == null || !textFrame.isInline()) return null;
         if (resolvedData.allRenderedFloatingItems() == null) return null;
         for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
             if (!isTextHiddenShellForInlineTextFrame(rg)) continue;
             String[] ids = rg.editableTextFrameIds();
             if (ids == null) continue;
             for (String id : ids) {
-                if (textFrameDomId.equals(id)) return rg;
+                if (inlineObjectDomId.equals(id)) return new TextHiddenShellMatch(rg, null);
             }
         }
         return null;
     }
 
-    private static RenderedGroup findPlannedTextHiddenShellForInlineTextFrame(
+    private static TextHiddenShellMatch findPlannedTextHiddenShellForInlineObject(
             kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx,
             ResolvedData resolvedData,
-            int textFrameDomId) {
-        if (ctx == null || resolvedData == null || textFrameDomId < 0) return null;
-        for (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan
-                : ctx.ownershipPlans) {
-            if (!isPlannedTextHiddenShellForInlineTextFrame(plan, textFrameDomId)) continue;
+            int inlineObjectDomId) {
+        if (ctx == null || resolvedData == null || inlineObjectDomId < 0) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (!isPlannedTextHiddenShellForInlineObject(plan, inlineObjectDomId)) continue;
             RenderedGroup rg = renderedGroupByPlannedFile(resolvedData, plan.file);
-            if (rg != null) return rg;
+            if (rg != null) return new TextHiddenShellMatch(rg, plan);
         }
         return null;
     }
 
-    private static boolean isPlannedTextHiddenShellForInlineTextFrame(
-            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan plan,
-            int textFrameDomId) {
-        if (plan == null || textFrameDomId < 0) return false;
-        if (plan.textAction
-                != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction.OWNED_BY_HWPX_TEXT) {
+    private static boolean isPlannedTextHiddenShellForInlineObject(
+            ObjectPlan plan,
+            int inlineObjectDomId) {
+        if (plan == null || inlineObjectDomId < 0) return false;
+        if (plan.visualAction
+                != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction.PLACE_TEXT_SHELL) {
             return false;
         }
         if (!kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole.isTextShell(plan)) {
             return false;
         }
-        if (!containsInt(plan.ownedTextFrameIds, textFrameDomId)) return false;
+        if (plan.domId != inlineObjectDomId
+                && !containsInt(plan.sourceObjectIds, inlineObjectDomId)
+                && !containsInt(plan.ownedTextFrameIds, inlineObjectDomId)) {
+            return false;
+        }
         return plan.file != null && !plan.file.isEmpty();
+    }
+
+    private static void populateInlineShellOwnedText(
+            ASTInlineObject obj,
+            ObjectPlan plan,
+            ResolvedData resolvedData) {
+        if (obj == null || plan == null || resolvedData == null) return;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return;
+        if (inlineObjectHasVisibleText(obj)) return;
+        List<ResolvedTextFrame> frames = new ArrayList<>();
+        for (int id : plan.ownedTextFrameIds) {
+            ResolvedTextFrame tf = resolvedData.getTextFrame(String.valueOf(id));
+            if (tf == null || tf.storyId() == null) continue;
+            if (tf.sourceHidden()) continue;
+            frames.add(tf);
+        }
+        if (frames.isEmpty()) return;
+        frames.sort((a, b) -> {
+            double[] ab = a.pageRelativeBounds();
+            double[] bb = b.pageRelativeBounds();
+            double ay = ab != null && ab.length >= 4 ? ab[0] : 0;
+            double by = bb != null && bb.length >= 4 ? bb[0] : 0;
+            if (Math.abs(ay - by) > 1.0) return Double.compare(ay, by);
+            double ax = ab != null && ab.length >= 4 ? ab[1] : 0;
+            double bx = bb != null && bb.length >= 4 ? bb[1] : 0;
+            return Double.compare(ax, bx);
+        });
+        List<ASTParagraph> paragraphs = new ArrayList<>();
+        for (ResolvedTextFrame tf : frames) {
+            ResolvedStory story = resolvedData.getStory(tf.storyId());
+            if (story == null) continue;
+            List<ASTParagraph> converted = convertResolvedStoryForCell(story, resolvedData);
+            if (converted == null || converted.isEmpty()) continue;
+            paragraphs.addAll(converted);
+        }
+        if (paragraphs.isEmpty()) return;
+        obj.paragraphs(new ArrayList<>());
+        obj.paragraphs().addAll(paragraphs);
+    }
+
+    private static boolean inlineObjectHasVisibleText(ASTInlineObject obj) {
+        if (obj == null || obj.paragraphs() == null || obj.paragraphs().isEmpty()) return false;
+        for (ASTParagraph paragraph : obj.paragraphs()) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (!(item instanceof ASTTextRun)) continue;
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.trim().isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    private static final class TextHiddenShellMatch {
+        final RenderedGroup renderedGroup;
+        final ObjectPlan plan;
+
+        TextHiddenShellMatch(RenderedGroup renderedGroup, ObjectPlan plan) {
+            this.renderedGroup = renderedGroup;
+            this.plan = plan;
+        }
     }
 
     private static RenderedGroup renderedGroupByPlannedFile(ResolvedData resolvedData, String plannedFile) {
@@ -1164,6 +1270,7 @@ public class ASTTableConverter {
 
         ResolvedStory best = null;
         for (String storyId : idmlCell.textFrameStoryRefs()) {
+            if (isStoryOwnedByInlineTextShellPlan(resolvedData, storyId)) continue;
             ResolvedStory story = resolvedData.getStory(storyId);
             if (!hasRicherResolvedStructure(story)) continue;
             if (hasInlineAnchors(story)) continue;
@@ -1179,6 +1286,48 @@ public class ASTTableConverter {
         if (paragraphs.isEmpty()) return;
         cell.paragraphs().clear();
         cell.paragraphs().addAll(paragraphs);
+    }
+
+    private static boolean isStoryOwnedByInlineTextShellPlan(ResolvedData resolvedData, String storyId) {
+        if (resolvedData == null || storyId == null || storyId.isEmpty()) return false;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                tableBridgeContext(resolvedData);
+        String decimalStoryId = toDecimalStoryId(storyId);
+        List<ResolvedTextFrame> frames = resolvedData.getTextFramesForStory(decimalStoryId);
+        if ((frames == null || frames.isEmpty()) && !decimalStoryId.equals(storyId)) {
+            frames = resolvedData.getTextFramesForStory(storyId);
+        }
+        if (frames == null || frames.isEmpty()) return false;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null || tf.id() == null) continue;
+            int domId = parseDomIdOrNeg(tf.id());
+            if (domId < 0) continue;
+            if (ctx.isTextFrameOwnedByTextShellPlan(domId)
+                    && ctx.ownershipPlanPlacesInlineHwpxText(domId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String toDecimalStoryId(String storyRef) {
+        if (storyRef == null) return "";
+        String value = storyRef.trim();
+        if (value.isEmpty()) return value;
+        if (value.startsWith("child_")) {
+            value = value.substring("child_".length());
+        }
+        if (value.startsWith("Story_")) {
+            value = value.substring("Story_".length());
+        }
+        if (value.startsWith("u") && value.length() > 1) {
+            try {
+                return String.valueOf(Long.parseLong(value.substring(1), 16));
+            } catch (NumberFormatException ignored) {
+                return value;
+            }
+        }
+        return value;
     }
 
     private static boolean looksLikeFlattenedLongCell(ASTTableCell cell) {

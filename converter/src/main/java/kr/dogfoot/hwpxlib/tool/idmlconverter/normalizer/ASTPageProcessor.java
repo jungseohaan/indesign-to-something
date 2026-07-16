@@ -1783,6 +1783,9 @@ public class ASTPageProcessor {
 
         int added = 0;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : items) {
+            if (isCanonicalSingleTextlessPagePlane(rg)) {
+                continue;
+            }
             String idmlHexId = "u" + Integer.toHexString(rg.id());
             boolean isPageBg = "page_background".equals(rg.itemType());
 
@@ -1866,5 +1869,20 @@ public class ASTPageProcessor {
             System.out.println("[Stage4] Page " + page.pageNumber()
                     + " floatingItems: " + added + " (ExtendScript)");
         }
+    }
+
+    /**
+     * Stage 1/3 canonical page textless plane is executed by the resolved
+     * Visual Builder.  The legacy floating rendered-item bridge must not add
+     * the same page-sized artifact again.
+     */
+    private static boolean isCanonicalSingleTextlessPagePlane(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!"PAGE_BACKGROUND".equals(rg.visualLayer())) return false;
+        String file = rg.file();
+        if (file != null && file.contains("page_textless_plane")) return true;
+        String reason = rg.reason();
+        return reason != null && reason.contains("single_textless_plane");
     }
 }

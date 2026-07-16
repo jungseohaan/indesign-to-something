@@ -310,6 +310,9 @@ public final class StoryFlowAssembler {
         List<ASTParagraph> merged = new ArrayList<>();
         for (String storyRef : orderedTextFrameStoryRefsForCellFlow(ctx, idmlCell)) {
             if (storyRef == null) continue;
+            if (isStoryOwnedByInlineTextShellPlan(ctx, storyRef)) {
+                continue;
+            }
             if (!shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef)
                     && isStoryOwnedByPlacedTextFrame(ctx, storyRef)) {
                 continue;
@@ -431,6 +434,27 @@ public final class StoryFlowAssembler {
             sawInlineFrame = true;
         }
         return sawInlineFrame;
+    }
+
+    private static boolean isStoryOwnedByInlineTextShellPlan(ResolvedBuildContext ctx, String storyRef) {
+        if (ctx == null || ctx.resolvedData == null || storyRef == null) return false;
+        String storyId = toDecimalStoryId(storyRef);
+        if (storyId == null) return false;
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
+        if (frames == null || frames.isEmpty()) return false;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null || tf.id() == null) continue;
+            try {
+                int domId = Integer.parseInt(tf.id());
+                if (ctx.isTextFrameOwnedByTextShellPlan(domId)
+                        && ctx.ownershipPlanPlacesInlineHwpxText(domId)) {
+                    return true;
+                }
+            } catch (NumberFormatException ignored) {
+                // Non-DOM ids cannot be checked against Stage 1 ownership plans.
+            }
+        }
+        return false;
     }
 
     public static boolean isStoryOwnedByPlacedTextFrame(ResolvedBuildContext ctx, String storyRef) {

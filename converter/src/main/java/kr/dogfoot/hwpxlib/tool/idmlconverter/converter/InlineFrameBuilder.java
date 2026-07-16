@@ -116,7 +116,9 @@ final class InlineFrameBuilder {
 
         if (shouldUseInlineDrawTextShell(obj)) {
             addInlineExtractedShellTextFrame(para, obj, w, h, twm, tfs, useWrapping);
-            queueInlineTextShellOverlays(obj);
+            if (!hasParagraphs) {
+                queueInlineTextShellOverlays(obj);
+            }
             ctx.currentContainerWidth = savedContainerWidth;
             return;
         }

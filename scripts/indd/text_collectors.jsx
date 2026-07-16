@@ -1370,9 +1370,10 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
 	                    for (var ci2 = 0; ci2 < cells.length; ci2++) {
 	                        var cell = cells[ci2];
 	                        collectStats.cells++;
+                        var cellPos = tableCellPositionFromSourceName(cell, ci2, tbl.columns.length);
                         var cellData = {
-                            row: cell.rowSpan > 0 ? Math.floor(ci2 / tbl.columns.length) : 0,
-                            col: ci2 % tbl.columns.length,
+                            row: cellPos.row,
+                            col: cellPos.col,
                             rowSpan: cell.rowSpan,
                             colSpan: cell.columnSpan,
                             paragraphs: []
@@ -1637,6 +1638,37 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
         statsFile.close();
     } catch (eStats) {}
     return stories;
+}
+
+function tableCellPositionFromSourceName(cell, fallbackIndex, columnCount) {
+    var fallbackCols = Number(columnCount || 0);
+    if (!(fallbackCols > 0)) fallbackCols = 1;
+    var fallback = {
+        row: Math.floor(Number(fallbackIndex || 0) / fallbackCols),
+        col: Number(fallbackIndex || 0) % fallbackCols
+    };
+    try {
+        var name = String(cell.name || "");
+        var m = name.match(/^\s*(\d+)\s*:\s*(\d+)\s*$/);
+        if (m) {
+            return {
+                // IDML Cell@Name is "column:row".  Do not infer from
+                // cells.everyItem() order; merged/anchored table cells can be
+                // returned in an order that does not match the physical grid.
+                col: parseInt(m[1], 10),
+                row: parseInt(m[2], 10)
+            };
+        }
+    } catch (eName) {}
+    try {
+        if (cell.parentColumn && cell.parentRow) {
+            return {
+                col: Number(cell.parentColumn.index),
+                row: Number(cell.parentRow.index)
+            };
+        }
+    } catch (eParentIndex) {}
+    return fallback;
 }
 
 // --- 텍스트 프레임 수집 (오버플로/줄 수) ---

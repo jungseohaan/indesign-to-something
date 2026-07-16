@@ -72,6 +72,9 @@ public final class FramePlacer {
 
         for (ResolvedTextFrame tf : frames) {
             int tfDomId = parseDomIdOrNeg(tf.id());
+            if (ctx.isTextFrameOwnedByTextShellPlan(tfDomId)) {
+                continue;
+            }
             ObjectPlan textPlan = ctx.findAnyTextFrameOwnershipPlan(tf.id());
             boolean planKnown = textPlan != null;
             boolean ownedByFloatingTextShell = ctx.isTextFrameOwnedByFloatingTextShellPlan(tfDomId);

@@ -355,6 +355,9 @@ public final class ResolvedBuildContext {
     /** Java legacy ownership bridge 추가/수정 plan 분류 요약 JSONL 라인. */
     public java.util.List<String> legacyBridgeSummaryLines = new java.util.ArrayList<>();
 
+    /** AST block producer trace. Stage 2/3 legacy producers must be observable before behavior changes. */
+    public java.util.List<String> astProductionLines = new java.util.ArrayList<>();
+
     /**
      * Stage 2 TextFlow snapshot.
      *
