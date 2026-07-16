@@ -141,6 +141,44 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         if (candidate.visualAction === "PLACE_TEXT_SHELL") score += 3;
         return score;
     }
+    function candidateOwnedTextFrameIds(candidate) {
+        return _internSourceSetIds(candidate && candidate.ownedTextFrameIds || []);
+    }
+    function candidateHiddenTextFrameIds(candidate) {
+        return _internSourceSetIds(candidate && candidate.hiddenTextFrameIds || []);
+    }
+    function candidateExportSourceIds(candidate) {
+        return _internSourceSetIds(candidate && candidate.exportSourceObjectIds || []);
+    }
+    function isVisibleTextShellCarrier(candidate) {
+        if (!candidate) return false;
+        if (candidateOwnershipSlot(candidate) !== "SHELL_SLOT") return false;
+        if (candidate.visualAction !== "PLACE_TEXT_SHELL") return false;
+        if (candidate.materialization === "HWPX_TEXT" || candidate.visualAction === "DROP_VISUAL") return false;
+        if (candidateOwnedTextFrameIds(candidate).length === 0) return false;
+        if (candidateExportSourceIds(candidate).length === 0) return false;
+        return true;
+    }
+    function textShellCarrierCanBeReplacedByOwner(candidate, owner) {
+        if (!isVisibleTextShellCarrier(candidate)) return true;
+        if (!owner || owner === candidate) return true;
+        if (!isVisibleTextShellCarrier(owner)) return false;
+        if (candidatePlacement(owner)
+                && candidatePlacement(candidate)
+                && candidatePlacement(owner) !== candidatePlacement(candidate)) {
+            return false;
+        }
+        if (!containsAllIds(candidateExportSourceIds(owner), candidateExportSourceIds(candidate))) {
+            return false;
+        }
+        if (!containsAllIds(candidateOwnedTextFrameIds(owner), candidateOwnedTextFrameIds(candidate))) {
+            return false;
+        }
+        if (!containsAllIds(candidateHiddenTextFrameIds(owner), candidateHiddenTextFrameIds(candidate))) {
+            return false;
+        }
+        return true;
+    }
     function incrementReason(reason) {
         reason = reason || "UNKNOWN";
         if (!diagnostics.reasonCounts[reason]) diagnostics.reasonCounts[reason] = 0;
@@ -355,6 +393,10 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         var candidateVisibleIds = visibleCandidateSourceIds(candidate);
         var exactVisibleOwner = exactVisibleOwnersBySlotKey[exactVisibleSlotKey(candidate)];
         if (exactVisibleOwner && exactVisibleOwner !== candidate) {
+            if (!textShellCarrierCanBeReplacedByOwner(candidate, exactVisibleOwner)) {
+                filtered.push(candidate);
+                continue;
+            }
             recordSuppressedCandidate(candidate, "SUBSUMED_BY_EXACT_VISIBLE_SLOT_OWNER", exactVisibleOwner);
             continue;
         }

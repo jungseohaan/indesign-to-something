@@ -711,6 +711,10 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 var plannedTextFrameShell = inlineCandidate.visualAction === "PLACE_TEXT_SHELL"
                         && (inlineCandidate.slotRole === "direct_child_shell_slot"
                             || inlineCandidate.compositeRole === "direct_child_shell_slot"
+                            || inlineCandidate.slotRole === "inline_text_frame_shell_slot"
+                            || inlineCandidate.compositeRole === "inline_visible_text_frame_shell"
+                            || inlineCandidate.slotRole === "inline_editable_text_shell_composite"
+                            || inlineCandidate.compositeRole === "inline_editable_text_shell_composite"
                             || inlineCandidate.slotRole === "table_textless_shell_slot"
                             || inlineCandidate.compositeRole === "table_carrier_textless_shell")
                         && (inlineCandidate.exportSourceObjectIds && inlineCandidate.exportSourceObjectIds.length > 0);
