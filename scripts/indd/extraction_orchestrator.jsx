@@ -111,11 +111,25 @@ function _copyFileReplacing(src, dest) {
     }
 }
 
+function _exportIdmlReplacing(doc, dest) {
+    if (!doc) {
+        throw new Error("IDML fallback export failed: document is not available");
+    }
+    if (dest.exists) {
+        try { dest.remove(); } catch (eRemove) {}
+    }
+    doc.exportFile(ExportFormat.INDESIGN_MARKUP, dest);
+    if (!dest.exists) {
+        throw new Error("IDML fallback export failed: output missing: " + dest.fsName);
+    }
+}
+
 function _prepareExtractionIdml(doc, ctx) {
     var outputIdml = File(ctx.outputDir + "/output.idml");
     var sibling = _findReusableSiblingIdml(ctx);
     var siblingIdml = sibling.file;
     var mode = "sibling_reuse";
+    var copyFallbackReason = null;
 
     if (!siblingIdml.exists) {
         mode = "sibling_export";
@@ -125,13 +139,21 @@ function _prepareExtractionIdml(doc, ctx) {
         writeProgress(ctx.outputDir, "idml_sibling_reuse", 0, ctx.pageCount);
     }
 
-    _copyFileReplacing(siblingIdml, outputIdml);
+    try {
+        _copyFileReplacing(siblingIdml, outputIdml);
+    } catch (eCopy) {
+        copyFallbackReason = String(eCopy && eCopy.message ? eCopy.message : eCopy);
+        mode = mode + "_copy_fallback_export";
+        writeProgress(ctx.outputDir, "idml_copy_fallback_export", 0, ctx.pageCount);
+        _exportIdmlReplacing(doc, outputIdml);
+    }
     writeJson(ctx.outputDir + "/idml-source.json", {
         mode: mode,
         match: sibling.match,
         sourceINDD: ctx.inddPath,
         sourceIDML: siblingIdml.fsName,
-        outputIDML: outputIdml.fsName
+        outputIDML: outputIdml.fsName,
+        copyFallbackReason: copyFallbackReason
     });
     return outputIdml;
 }

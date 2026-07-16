@@ -386,7 +386,7 @@ function _appendTableCarrierTextlessShellCandidates(sourceItems, candidates, can
         if (src.textFrameClass !== "editable") return false;
         if (src.hasTablesInStory !== true && Number(src.tableCountInStory || 0) <= 0) return false;
         if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
-        return src.markerOnlyContents === true;
+        return src.markerOnlyContents !== false;
     }
     function buildIndexes() {
         for (var si = 0; si < sourceItems.length; si++) {

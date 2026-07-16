@@ -138,7 +138,6 @@ public class IDMLToHwpxConverter {
                             .debugAst(options.debugAst())
                             .tableQualityGate(options.config().tableQualityGate())
                             .build();
-                    injectOrphanRenderedGraphics(astDoc, resolvedData, options);
                 } else {
                     // 레거시: IDML 기반 4단계 정규화 + Resolved 보강
                     astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
@@ -513,7 +512,6 @@ public class IDMLToHwpxConverter {
                         .debugAst(options.debugAst())
                         .tableQualityGate(options.config().tableQualityGate())
                         .build();
-                injectOrphanRenderedGraphics(astDoc, resolvedData, options);
             } else {
                 List<String> earlyWarnings = new ArrayList<>();
                 astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);

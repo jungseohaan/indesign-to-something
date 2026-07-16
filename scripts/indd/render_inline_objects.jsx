@@ -710,7 +710,9 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 }
                 var plannedTextFrameShell = inlineCandidate.visualAction === "PLACE_TEXT_SHELL"
                         && (inlineCandidate.slotRole === "direct_child_shell_slot"
-                            || inlineCandidate.compositeRole === "direct_child_shell_slot")
+                            || inlineCandidate.compositeRole === "direct_child_shell_slot"
+                            || inlineCandidate.slotRole === "table_textless_shell_slot"
+                            || inlineCandidate.compositeRole === "table_carrier_textless_shell")
                         && (inlineCandidate.exportSourceObjectIds && inlineCandidate.exportSourceObjectIds.length > 0);
                 var plannedInlineTextFrameVisual = inlineCandidate.visualAction === "PLACE_INLINE_PNG"
                         && inlineCandidate.placement === "INLINE"
@@ -723,7 +725,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 var plannedDirectChildShellSlot = inlineCandidate.slotRole === "direct_child_shell_slot";
                 var plannedPageVisual = inlineCandidate.placement === "FLOATING"
                         && inlineCandidate.visualAction === "PLACE_FLOATING_PNG";
-                if (!isInlineItem(inItem) && !plannedDirectChildShellSlot && !plannedPageVisual) {
+                if (!isInlineItem(inItem) && !plannedDirectChildShellSlot && !plannedPageVisual
+                        && !plannedTextFrameShell) {
                     inlineStats.notInlineSkipped++;
                     continue;
                 }

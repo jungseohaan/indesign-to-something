@@ -1800,7 +1800,7 @@ function _plannerBundleIsTableOnlyCarrierTextFrame(src) {
     if (src.textFrameClass !== "editable") return false;
     if (src.hasTablesInStory !== true && Number(src.tableCountInStory || 0) <= 0) return false;
     if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
-    return src.markerOnlyContents === true;
+    return src.markerOnlyContents !== false;
 }
 
 function _plannerBundleTextFrameShellSourceIds(sourceIds, clusterIndex) {

@@ -173,10 +173,23 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var pageBackgroundPlaneMaterialization =
-            _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceById);
+    var pageBackgroundPlaneMaterialization = {
+        summary: {
+            createdPlaneCount: 0,
+            absorbedPlanCount: 0,
+            createdObjectPlanIds: [],
+            absorbedObjectPlanIds: [],
+            normalizedExistingPlaneCount: 0,
+            normalizedExistingObjectPlanIds: [],
+            protectedTextlessGroupSlotCount: 0,
+            protectedTextlessGroupSlots: [],
+            disabled: true,
+            reason: "canonical_single_textless_page_plane_is_the_only_page_visual_owner"
+        }
+    };
     _recordObjectPlanTiming("applyPageBackgroundPlaneMaterialization", _timingStartedAt, {
-        objectPlanCount: objectPlans.length
+        objectPlanCount: objectPlans.length,
+        disabled: true
     });
     _timingStartedAt = _objectPlanNowMs();
     var depthFinalization = _finalizeObjectPlanVisualDepthContracts(objectPlans, sourceItems);
@@ -1967,7 +1980,7 @@ function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
         if (!src || String(src.kind || "") !== "TextFrame") continue;
         if (src.hasTablesInStory !== true) continue;
         if (src.storyHasVisibleTableCellText !== true) continue;
-        if (src.markerOnlyContents !== true) continue;
+        if (src.markerOnlyContents === false) continue;
         if (src.visible === false) continue;
         if (src.hiddenLayer === true || src.nonprinting === true) continue;
         var id = Number(src.id);
@@ -2012,7 +2025,7 @@ function _appendTableOnlyTextFrameShellObjectPlans(objectPlans, sourceItems) {
         if (!src || String(src.kind || "") !== "TextFrame") continue;
         if (src.hasTablesInStory !== true) continue;
         if (src.storyHasVisibleTableCellText !== true) continue;
-        if (src.markerOnlyContents !== true) continue;
+        if (src.markerOnlyContents === false) continue;
         if (src.visible === false) continue;
         if (src.hiddenLayer === true || src.nonprinting === true) continue;
         var id = Number(src.id);
@@ -2188,12 +2201,12 @@ function _tableOnlyTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
     var visualIds = [id];
     var sourceSetId = _sourceSetId(sourceIds);
     var visualSetId = _sourceSetId(visualIds);
-    var candidateId = _candidateId("pass.editable_textframe_visual_shells", id, pageIndex);
+    var candidateId = _candidateId("pass.inline_objects", id, pageIndex);
     return {
         objectPlanId: "objectPlan.table_only_text_frame_shell." + String(id),
         bundleId: "textFrame.tableOnlyShell." + String(id),
         candidateId: candidateId,
-        passId: "pass.editable_textframe_visual_shells",
+        passId: "pass.inline_objects",
         pageIndex: pageIndex,
         kind: "TextFrame",
         unit: "TEXT_FRAME",
@@ -2229,9 +2242,10 @@ function _tableOnlyTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
         exportSourceObjectIds: visualIds,
         exportTargetObjectId: id,
         hiddenVisualSourceObjectIds: [],
+        hiddenTextFrameIds: [id],
         excludedInlineSourceObjectIds: [],
-        materialization: "NATIVE_SOURCE_SHAPE",
-        textAction: "OWNED_BY_HWPX_TEXT",
+        materialization: "EXTRACTED_PNG_VECTOR",
+        textAction: "DROP_TEXT",
         visualAction: "PLACE_TEXT_SHELL",
         placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
         coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
@@ -6202,7 +6216,8 @@ function _objectPlanAllowsTextFrameShellSourceOverlap(plan, overlap) {
     if (!plan || !overlap || overlap.length === 0) return false;
     if (plan.compositeRole === "table_carrier_textless_shell"
             || plan.slotRole === "table_textless_shell_slot") {
-        if (plan.passId !== "pass.editable_textframe_visual_shells") return false;
+        if (plan.passId !== "pass.editable_textframe_visual_shells"
+                && plan.passId !== "pass.inline_objects") return false;
         if (plan.ownershipSlot !== "SHELL_SLOT") return false;
         if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
         if (plan.textAction !== "DROP_TEXT") return false;
