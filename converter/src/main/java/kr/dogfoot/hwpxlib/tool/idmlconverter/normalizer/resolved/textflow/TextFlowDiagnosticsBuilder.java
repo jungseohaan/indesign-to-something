@@ -69,7 +69,8 @@ public final class TextFlowDiagnosticsBuilder {
                 if (tf.pageIndex() >= 0 && !flow.ownerPageIndexes.contains(tf.pageIndex())) {
                     flow.ownerPageIndexes.add(tf.pageIndex());
                 }
-                if (data.isTextOwnedByIndesignPng(tf.id())) {
+                if (data.isTextOwnedByIndesignPng(tf.id())
+                        || ctx.isTextFrameOwnedByPngPlan(tf.id())) {
                     hasPngTextOwner = true;
                 } else {
                     hasHwpxTextOwner = true;
