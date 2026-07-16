@@ -176,7 +176,9 @@ public class ResolvedToASTBuilder {
             buildTextContent(sections);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.masterHashiraPlaceholderResolver")) {
+            Set<ASTBlock> before = snapshotBlocks(sections);
             MasterHashiraPlacer.resolveTextVariablePlaceholders(this.ctx, sections);
+            traceAstProduction("Stage2.TextBuilder.masterHashiraPlaceholderResolver", sections, before);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess")) {
             postprocessLayout(sections);
@@ -1604,19 +1606,26 @@ public class ResolvedToASTBuilder {
      * 로직은 이 메서드 안의 legacy Phase가 아니라 Planner로 이동해야 한다.</p>
      */
     private void buildTextContent(List<ASTSection> sections) {
+        Set<ASTBlock> before;
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.framePlacer")) {
+            before = snapshotBlocks(sections);
             FramePlacer.placeTextFrames(this.ctx, sections);
         }
+        traceAstProduction("Stage2.TextBuilder.legacyFramePlacer", sections, before);
         tagPhase(sections, "Stage2.TextBuilder.legacyFramePlacer");
 
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.storyConverter")) {
+            before = snapshotBlocks(sections);
             StoryConverter.convertStories(this.ctx, sections);
         }
+        traceAstProduction("Stage2.TextBuilder.legacyStoryConverter", sections, before);
         tagPhase(sections, "Stage2.TextBuilder.legacyStoryConverter");
 
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.tableBuilder")) {
+            before = snapshotBlocks(sections);
             TableBuilder.placeTablesFromIDML(this.ctx, sections);
         }
+        traceAstProduction("Stage2.TextBuilder.legacyTableBuilder", sections, before);
         tagPhase(sections, "Stage2.TextBuilder.legacyTableBuilder");
     }
 
@@ -1627,9 +1636,12 @@ public class ResolvedToASTBuilder {
      * 새 visible 객체를 만들거나 ownership을 뒤집는 로직을 추가하지 않는다.</p>
      */
     private void postprocessLayout(List<ASTSection> sections) {
+        Set<ASTBlock> before;
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.bulletInserter")) {
+            before = snapshotBlocks(sections);
             BulletInserter.run(this.ctx, sections);
         }
+        traceAstProduction("Stage4.LayoutPostprocess.insertBullets", sections, before);
         tagPhase(sections, "Stage4.LayoutPostprocess.insertBullets");
 
     }
@@ -1641,7 +1653,9 @@ public class ResolvedToASTBuilder {
      * 진입점으로 갖는다. 내부 legacy executor는 단계적으로 흡수 후 제거한다.</p>
      */
     private void placeVisuals(List<ASTSection> sections) {
+        Set<ASTBlock> before = snapshotBlocks(sections);
         VisualBuilder.place(this.ctx, sections);
+        traceAstProduction("Stage3.VisualBuilder", sections, before);
         tagPhase(sections, "Stage3.VisualBuilder");
     }
 
@@ -1676,7 +1690,176 @@ public class ResolvedToASTBuilder {
         writeJsonLines("ownership-legacy-bridge-summary.jsonl",
                 ctx.legacyBridgeSummaryLines,
                 "ownership legacy bridge summary");
+        writeJsonLines("ast-production.jsonl", ctx.astProductionLines, "ast production");
         writeOwnershipTraceLog();
+    }
+
+    private Set<ASTBlock> snapshotBlocks(List<ASTSection> sections) {
+        Set<ASTBlock> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        if (sections == null) return seen;
+        for (ASTSection section : sections) {
+            if (section == null || section.blocks() == null) continue;
+            seen.addAll(section.blocks());
+        }
+        return seen;
+    }
+
+    private void traceAstProduction(String producer, List<ASTSection> sections, Set<ASTBlock> before) {
+        if (ctx == null || ctx.astProductionLines == null || sections == null) return;
+        Set<ASTBlock> oldBlocks = before != null ? before : Collections.emptySet();
+        for (int sectionIndex = 0; sectionIndex < sections.size(); sectionIndex++) {
+            ASTSection section = sections.get(sectionIndex);
+            if (section == null || section.blocks() == null) continue;
+            for (int blockIndex = 0; blockIndex < section.blocks().size(); blockIndex++) {
+                ASTBlock block = section.blocks().get(blockIndex);
+                if (block == null || oldBlocks.contains(block)) continue;
+                ctx.astProductionLines.add(astProductionLine(producer, sectionIndex, blockIndex, block));
+            }
+        }
+    }
+
+    private String astProductionLine(String producer, int sectionIndex, int blockIndex, ASTBlock block) {
+        JsonObject row = new JsonObject();
+        row.addProperty("producer", producer);
+        row.addProperty("sectionIndex", sectionIndex);
+        row.addProperty("blockIndex", blockIndex);
+        row.addProperty("blockType", block.blockType() != null ? block.blockType().name() : null);
+        row.addProperty("sourceId", block.sourceId());
+        addBlockGeometry(row, block);
+        addBlockSpecifics(row, block);
+        row.addProperty("preview", previewBlock(block));
+        return row.toString();
+    }
+
+    private void addBlockGeometry(JsonObject row, ASTBlock block) {
+        if (block instanceof ASTTextFrameBlock) {
+            ASTTextFrameBlock tf = (ASTTextFrameBlock) block;
+            row.addProperty("x", tf.x());
+            row.addProperty("y", tf.y());
+            row.addProperty("width", tf.width());
+            row.addProperty("height", tf.height());
+            row.addProperty("zOrder", tf.zOrder());
+            row.addProperty("storyId", tf.storyId());
+            row.addProperty("plannedShellVisualLayer", tf.plannedShellVisualLayer());
+            row.addProperty("plannedVisualTextOverlay", tf.plannedVisualTextOverlay());
+            row.addProperty("inlineToFloating", tf.inlineToFloating());
+        } else if (block instanceof ASTTable) {
+            ASTTable table = (ASTTable) block;
+            row.addProperty("x", table.x());
+            row.addProperty("y", table.y());
+            row.addProperty("width", table.width());
+            row.addProperty("height", table.height());
+            row.addProperty("zOrder", table.zOrder());
+            row.addProperty("rowCount", table.rowCount());
+            row.addProperty("colCount", table.colCount());
+            row.addProperty("flowWithText", table.flowWithText());
+            row.addProperty("anchoredFlowWithText", table.anchoredFlowWithText());
+        } else if (block instanceof ASTFigure) {
+            ASTFigure figure = (ASTFigure) block;
+            row.addProperty("x", figure.x());
+            row.addProperty("y", figure.y());
+            row.addProperty("width", figure.width());
+            row.addProperty("height", figure.height());
+            row.addProperty("zOrder", figure.zOrder());
+            row.addProperty("kind", figure.kind() != null ? figure.kind().name() : null);
+            row.addProperty("visualLayer", figure.visualLayer());
+            row.addProperty("sourceLayerIndex", figure.sourceLayerIndex());
+        }
+    }
+
+    private void addBlockSpecifics(JsonObject row, ASTBlock block) {
+        if (block instanceof ASTFigure) {
+            ASTFigure figure = (ASTFigure) block;
+            row.addProperty("imagePath", figure.imagePath());
+            row.addProperty("bundlePath", figure.bundlePath());
+            row.addProperty("extractionCandidateId", figure.extractionCandidateId());
+            row.addProperty("extractionPlanPassId", figure.extractionPlanPassId());
+            row.addProperty("extractionSlotRole", figure.extractionSlotRole());
+            row.addProperty("parentGroupId", figure.parentGroupId());
+            row.addProperty("fromGroup", figure.fromGroup());
+        }
+    }
+
+    private String previewBlock(ASTBlock block) {
+        StringBuilder sb = new StringBuilder();
+        if (block instanceof ASTTextFrameBlock) {
+            ASTTextFrameBlock tf = (ASTTextFrameBlock) block;
+            appendParagraphsPreview(sb, tf.paragraphs());
+        } else if (block instanceof ASTTable) {
+            ASTTable table = (ASTTable) block;
+            appendTablePreview(sb, table);
+        } else if (block instanceof ASTFigure) {
+            ASTFigure figure = (ASTFigure) block;
+            appendPreviewToken(sb, figure.bundlePath());
+            appendPreviewToken(sb, figure.imagePath());
+        }
+        String preview = sb.toString().replace('\n', ' ').replace('\r', ' ').trim();
+        return preview.length() > 240 ? preview.substring(0, 240) : preview;
+    }
+
+    private void appendTablePreview(StringBuilder sb, ASTTable table) {
+        if (table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                appendParagraphsPreview(sb, cell.paragraphs());
+                if (sb.length() > 260) return;
+            }
+        }
+    }
+
+    private void appendParagraphsPreview(StringBuilder sb, List<ASTParagraph> paragraphs) {
+        if (paragraphs == null) return;
+        for (ASTParagraph paragraph : paragraphs) {
+            appendParagraphPreview(sb, paragraph);
+            appendPreviewToken(sb, " ");
+            if (sb.length() > 260) return;
+        }
+    }
+
+    private void appendParagraphPreview(StringBuilder sb, ASTParagraph paragraph) {
+        if (paragraph == null) return;
+        if (paragraph.items() != null) {
+            for (ASTInlineItem item : paragraph.items()) {
+                appendInlineItemPreview(sb, item);
+                if (sb.length() > 260) return;
+            }
+        }
+        if (paragraph.inlineTable() != null) {
+            appendPreviewToken(sb, "[inline-table]");
+            appendTablePreview(sb, paragraph.inlineTable());
+        }
+    }
+
+    private void appendInlineItemPreview(StringBuilder sb, ASTInlineItem item) {
+        if (item == null) return;
+        if (item instanceof ASTTextRun) {
+            ASTTextRun run = (ASTTextRun) item;
+            appendPreviewToken(sb, run.text());
+        } else if (item instanceof ASTEquation) {
+            ASTEquation equation = (ASTEquation) item;
+            appendPreviewToken(sb, "[eq:" + safePreview(equation.hwpScript()) + "]");
+        } else if (item instanceof ASTInlineObject) {
+            ASTInlineObject object = (ASTInlineObject) item;
+            appendPreviewToken(sb, "[inline:" + safePreview(object.sourceId()) + "]");
+            if (object.paragraphs() != null) {
+                appendParagraphsPreview(sb, object.paragraphs());
+            }
+        } else if (item instanceof ASTBreak) {
+            appendPreviewToken(sb, " ");
+        }
+    }
+
+    private void appendPreviewToken(StringBuilder sb, String text) {
+        if (text == null || text.isEmpty()) return;
+        sb.append(text);
+    }
+
+    private String safePreview(String text) {
+        if (text == null) return "";
+        String t = text.replace('\n', ' ').replace('\r', ' ').trim();
+        return t.length() > 48 ? t.substring(0, 48) : t;
     }
 
     private void writeOwnershipTraceLog() {

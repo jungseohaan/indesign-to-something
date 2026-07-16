@@ -3,6 +3,8 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBreak;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
@@ -38,6 +40,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -126,6 +130,11 @@ public final class TableBuilder {
             String storyId = tf.storyId();
             if (storyId == null) continue;
             if (tf.sourceHidden()) {
+                report.textFramesSkippedBeforeStoryLoad++;
+                continue;
+            }
+            int tfDomId = parseId(tf.id());
+            if (tfDomId >= 0 && ctx.isTextFrameOwnedByTextShellPlan(tfDomId)) {
                 report.textFramesSkippedBeforeStoryLoad++;
                 continue;
             }
@@ -622,8 +631,10 @@ public final class TableBuilder {
                 ctx != null ? ctx.resolvedData : null,
                 ctx != null ? ctx.styleResolver : null,
                 cellCtx == null ? null : ((table, idmlCell) -> StoryFlowAssembler.buildCellFlow(cellCtx, table, idmlCell)));
+        traceTableCells(ctx, "TableBuilder.afterConvertTableSimple", idmlTable, astTable);
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
         inlineNestedTextFrameParagraphsInCells(ctx, astTable);
+        traceTableCells(ctx, "TableBuilder.afterNestedContentRestore", idmlTable, astTable);
 
         ASTTable result = astTable;
         if (shouldPreserveTableStyleSlot(ctx, idmlTable, preserveNestedTableStyleSlot)) {
@@ -633,7 +644,120 @@ public final class TableBuilder {
         } else {
             stripTableCellDecoration(result);
         }
+        traceTableCells(ctx, "TableBuilder.afterStyleSlotPolicy", idmlTable, result);
         return result;
+    }
+
+    private static void traceTableCells(
+            ResolvedBuildContext ctx,
+            String producer,
+            IDMLTable idmlTable,
+            ASTTable table) {
+        if (ctx == null || ctx.astProductionLines == null || table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                JsonObject out = new JsonObject();
+                out.addProperty("producer", producer);
+                out.addProperty("blockType", "TABLE_CELL");
+                out.addProperty("tableSourceId", table.sourceId());
+                out.addProperty("idmlTableId", idmlTable != null ? idmlTable.selfId() : null);
+                out.addProperty("rowIndex", cell.rowIndex());
+                out.addProperty("columnIndex", cell.columnIndex());
+                out.addProperty("rowSpan", cell.rowSpan());
+                out.addProperty("columnSpan", cell.columnSpan());
+                out.addProperty("width", cell.width());
+                out.addProperty("height", cell.height());
+                out.addProperty("fillColor", cell.fillColor());
+                out.addProperty("hasTopBorder", cell.topBorder() != null);
+                out.addProperty("hasBottomBorder", cell.bottomBorder() != null);
+                out.addProperty("hasLeftBorder", cell.leftBorder() != null);
+                out.addProperty("hasRightBorder", cell.rightBorder() != null);
+                JsonArray inlineObjects = new JsonArray();
+                collectCellInlineObjects(cell, inlineObjects);
+                out.add("inlineObjects", inlineObjects);
+                out.addProperty("preview", previewCell(cell));
+                ctx.astProductionLines.add(out.toString());
+            }
+        }
+    }
+
+    private static void collectCellInlineObjects(ASTTableCell cell, JsonArray out) {
+        if (cell == null || cell.paragraphs() == null) return;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                JsonObject row = new JsonObject();
+                row.addProperty("sourceId", obj.sourceId());
+                row.addProperty("kind", obj.kind() != null ? obj.kind().name() : null);
+                row.addProperty("width", obj.width());
+                row.addProperty("height", obj.height());
+                row.addProperty("hasImageData", obj.imageData() != null);
+                row.addProperty("imagePath", obj.imagePath());
+                row.addProperty("bundlePath", obj.bundlePath());
+                row.addProperty("keepInline", obj.keepInline());
+                row.addProperty("layoutOnlyInlineSlot", obj.layoutOnlyInlineSlot());
+                row.addProperty("plannedVisualLayer", obj.plannedVisualLayer());
+                row.addProperty("plannedZOrder", obj.plannedZOrder());
+                row.addProperty("paragraphPreview", previewParagraphs(obj.paragraphs()));
+                out.add(row);
+            }
+        }
+    }
+
+    private static String previewCell(ASTTableCell cell) {
+        return cell == null ? "" : previewParagraphs(cell.paragraphs());
+    }
+
+    private static String previewParagraphs(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph paragraph : paragraphs) {
+            appendParagraphPreview(sb, paragraph);
+            sb.append(' ');
+            if (sb.length() > 260) break;
+        }
+        String preview = sb.toString().replace('\n', ' ').replace('\r', ' ').trim();
+        return preview.length() > 240 ? preview.substring(0, 240) : preview;
+    }
+
+    private static void appendParagraphPreview(StringBuilder sb, ASTParagraph paragraph) {
+        if (paragraph == null) return;
+        if (paragraph.items() != null) {
+            for (ASTInlineItem item : paragraph.items()) {
+                appendInlinePreview(sb, item);
+                if (sb.length() > 260) return;
+            }
+        }
+        if (paragraph.inlineTable() != null) {
+            sb.append("[inline-table]");
+        }
+    }
+
+    private static void appendInlinePreview(StringBuilder sb, ASTInlineItem item) {
+        if (item == null) return;
+        if (item instanceof ASTTextRun) {
+            String text = ((ASTTextRun) item).text();
+            if (text != null) sb.append(text);
+        } else if (item instanceof ASTEquation) {
+            sb.append("[eq:").append(safePreview(((ASTEquation) item).hwpScript())).append(']');
+        } else if (item instanceof ASTInlineObject) {
+            ASTInlineObject obj = (ASTInlineObject) item;
+            sb.append("[inline:").append(safePreview(obj.sourceId())).append(']');
+            String nested = previewParagraphs(obj.paragraphs());
+            if (!nested.isEmpty()) sb.append(nested);
+        } else if (item instanceof ASTBreak) {
+            sb.append(' ');
+        }
+    }
+
+    private static String safePreview(String text) {
+        if (text == null) return "";
+        String t = text.replace('\n', ' ').replace('\r', ' ').trim();
+        return t.length() > 48 ? t.substring(0, 48) : t;
     }
 
     private static boolean shouldPreserveTableStyleSlot(
