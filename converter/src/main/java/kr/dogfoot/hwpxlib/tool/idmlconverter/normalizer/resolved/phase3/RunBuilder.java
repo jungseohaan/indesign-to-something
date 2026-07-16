@@ -729,6 +729,7 @@ class RunBuilder {
 
         int i = start;
         boolean hasDigit = false;
+        int elementCount = 0;
         boolean parsedAnyElement = false;
         while (i < text.length()) {
             int elementEnd = i + 1;
@@ -738,6 +739,7 @@ class RunBuilder {
             String symbol = text.substring(i, elementEnd);
             if (!CHEMICAL_ELEMENT_SYMBOLS.contains(symbol)) break;
             parsedAnyElement = true;
+            elementCount++;
             i = elementEnd;
 
             int digitStart = i;
@@ -747,7 +749,7 @@ class RunBuilder {
             if (i > digitStart) hasDigit = true;
         }
 
-        if (!parsedAnyElement || !hasDigit) return null;
+        if (!parsedAnyElement || (!hasDigit && elementCount < 2)) return null;
         if (i < text.length() && Character.isLetterOrDigit(text.charAt(i))) return null;
         return new FormulaTokenMatch(start, i, text.substring(start, i));
     }

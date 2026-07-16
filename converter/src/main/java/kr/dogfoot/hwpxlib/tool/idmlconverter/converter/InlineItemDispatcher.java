@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.CharPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
@@ -294,6 +295,12 @@ final class InlineItemDispatcher {
      * ASTEquation → HWPX Equation (인라인 수식).
      */
     void addEquationRun(Para para, ASTEquation eq) {
+        if (addStandaloneRomanNumeralAsTextRun(para, eq)) {
+            return;
+        }
+        if (usesBodyTextEquationStyle(eq) && addChemicalFormulaAsTextRuns(para, eq)) {
+            return;
+        }
         // 다행 수식 (예: 분배법칙 전개)에 포함된 U+2028(LINE SEPARATOR) 또는 \n 을
         // HwpScript 의 줄바꿈 토큰 '#' 으로 변환. (탭은 공백으로 정규화)
         String rawScript = eq.hwpScript();
@@ -319,8 +326,8 @@ final class InlineItemDispatcher {
             Equation hwpxEq = run.addNewEquation();
             int resolvedBaseUnit = resolveEquationBaseUnit(eq, template);
             String resolvedFont = resolveEquationFont(eq, template);
-            // 수식 색상: AST에서 전달된 색상이 있으면 사용, 없으면 기본 검정
-            String eqColor = eq.textColor() != null ? eq.textColor() : template.textColor();
+            // 수식 색상: AST에서 전달된 색상이 있으면 사용하고, 없으면 현재 본문 색상을 상속한다.
+            String eqColor = equationTextColor(para, eq, template);
             hwpxEq.versionAnd(template.version())
                     .textColorAnd(eqColor)
                     .baseUnitAnd(resolvedBaseUnit)
@@ -433,5 +440,240 @@ final class InlineItemDispatcher {
     private boolean usesBodyTextEquationStyle(ASTEquation eq) {
         if (eq == null || eq.sourceType() == null) return false;
         return "CHEM_FORMULA".equals(eq.sourceType());
+    }
+
+    private boolean addChemicalFormulaAsTextRuns(Para para, ASTEquation eq) {
+        java.util.List<ASTTextRun> runs = chemicalFormulaTextRuns(eq);
+        if (runs == null || runs.isEmpty()) return false;
+        String inheritedColor = inheritedTextColor(para);
+        String formulaColor = bodyTextEquationColor(eq, inheritedColor);
+        String baseCharPrIDRef = lastCharPrIDRef(para);
+        for (ASTTextRun run : runs) {
+            if (run.textColor() == null || isDefaultBlack(run.textColor())) {
+                run.textColor(formulaColor);
+            }
+            paragraphBuilder.addTextRun(para, run, baseCharPrIDRef);
+            baseCharPrIDRef = lastCharPrIDRef(para);
+        }
+        return true;
+    }
+
+    private boolean addStandaloneRomanNumeralAsTextRun(Para para, ASTEquation eq) {
+        if (eq == null || eq.hwpScript() == null) return false;
+        String script = EquationBuilder.sanitizeHwpScript(eq.hwpScript()).trim();
+        if (!isStandaloneUnicodeRomanNumeral(script)) return false;
+        ASTTextRun run = new ASTTextRun();
+        run.text(script);
+        run.fontFamily(eq.preferredFontFamily());
+        run.fontSizeHwpunits(inheritedTextHeight(para, eq.preferredBaseUnit()));
+        run.textColor(bodyTextEquationColor(eq, inheritedTextColor(para)));
+        paragraphBuilder.addTextRun(para, run, lastCharPrIDRef(para));
+        return true;
+    }
+
+    private static String lastCharPrIDRef(Para para) {
+        if (para == null) return "0";
+        String last = "0";
+        for (Run run : para.runs()) {
+            if (run != null && run.charPrIDRef() != null && !run.charPrIDRef().isEmpty()) {
+                last = run.charPrIDRef();
+            }
+        }
+        return last;
+    }
+
+    private String equationTextColor(Para para, ASTEquation eq, Equation template) {
+        String inherited = inheritedTextColor(para);
+        String bodyColor = bodyTextEquationColor(eq, inherited);
+        if (bodyColor != null && !bodyColor.isEmpty()) {
+            return bodyColor;
+        }
+        if (eq != null && eq.textColor() != null && !eq.textColor().isEmpty()) {
+            return eq.textColor();
+        }
+        if (inherited != null && !inherited.isEmpty()) {
+            return inherited;
+        }
+        return template != null ? template.textColor() : "#000000";
+    }
+
+    private static String bodyTextEquationColor(ASTEquation eq, String inheritedColor) {
+        String sourceColor = eq != null ? eq.textColor() : null;
+        if (sourceColor != null && !sourceColor.isEmpty()) {
+            if (!isDefaultBlack(sourceColor)) {
+                return sourceColor;
+            }
+            if (inheritedColor != null && !inheritedColor.isEmpty()) {
+                return inheritedColor;
+            }
+            return sourceColor;
+        }
+        return inheritedColor;
+    }
+
+    private static boolean isDefaultBlack(String color) {
+        if (color == null) return false;
+        String normalized = color.trim();
+        return "#000000".equalsIgnoreCase(normalized)
+                || "000000".equalsIgnoreCase(normalized);
+    }
+
+    private String inheritedTextColor(Para para) {
+        CharPr charPr = findCharPr(lastCharPrIDRef(para));
+        if (charPr != null && charPr.textColor() != null && !charPr.textColor().isEmpty()) {
+            return charPr.textColor();
+        }
+        return null;
+    }
+
+    private Integer inheritedTextHeight(Para para, Integer fallback) {
+        CharPr charPr = findCharPr(lastCharPrIDRef(para));
+        if (charPr != null && charPr.height() > 0) {
+            return charPr.height();
+        }
+        return fallback;
+    }
+
+    private CharPr findCharPr(String id) {
+        if (id == null || id.isEmpty() || ctx == null || ctx.hwpxFile == null
+                || ctx.hwpxFile.headerXMLFile() == null
+                || ctx.hwpxFile.headerXMLFile().refList() == null
+                || ctx.hwpxFile.headerXMLFile().refList().charProperties() == null) {
+            return null;
+        }
+        for (CharPr charPr : ctx.hwpxFile.headerXMLFile().refList().charProperties().items()) {
+            if (charPr != null && id.equals(charPr.id())) {
+                return charPr;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isStandaloneUnicodeRomanNumeral(String script) {
+        if (script == null || script.isEmpty()) return false;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (!isUnicodeRomanNumeral(c)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isUnicodeRomanNumeral(char c) {
+        return (c >= '\u2160' && c <= '\u216F') || (c >= '\u2170' && c <= '\u217F');
+    }
+
+    private static java.util.List<ASTTextRun> chemicalFormulaTextRuns(ASTEquation eq) {
+        if (eq == null || eq.hwpScript() == null || eq.hwpScript().trim().isEmpty()) {
+            return null;
+        }
+        String script = EquationBuilder.sanitizeHwpScript(eq.hwpScript());
+        java.util.List<ASTTextRun> runs = new java.util.ArrayList<ASTTextRun>();
+        boolean emittedFormulaToken = false;
+        boolean lastElement = false;
+        for (int i = 0; i < script.length(); ) {
+            char c = script.charAt(i);
+            if (Character.isWhitespace(c)) {
+                addFormulaTextRun(runs, eq, String.valueOf(c), false, false);
+                lastElement = false;
+                i++;
+                continue;
+            }
+            if (script.regionMatches(true, i, "rarrow", 0, "rarrow".length())) {
+                addFormulaTextRun(runs, eq, "\u2192", false, false);
+                lastElement = false;
+                i += "rarrow".length();
+                continue;
+            }
+            if (isUpperAscii(c)) {
+                int start = i++;
+                if (i < script.length() && isLowerAscii(script.charAt(i))) {
+                    i++;
+                }
+                addFormulaTextRun(runs, eq, script.substring(start, i), false, false);
+                emittedFormulaToken = true;
+                lastElement = true;
+                continue;
+            }
+            if (Character.isDigit(c)) {
+                int start = i++;
+                while (i < script.length() && Character.isDigit(script.charAt(i))) {
+                    i++;
+                }
+                addFormulaTextRun(runs, eq, script.substring(start, i), lastElement, false);
+                emittedFormulaToken = true;
+                lastElement = false;
+                continue;
+            }
+            if (c == '_' || c == '^') {
+                boolean sub = c == '_';
+                ScriptToken token = readScriptToken(script, i + 1);
+                if (token != null && token.text.length() > 0) {
+                    addFormulaTextRun(runs, eq, token.text, sub, !sub);
+                    emittedFormulaToken = true;
+                    lastElement = false;
+                    i = token.nextIndex;
+                    continue;
+                }
+            }
+            if (c == '{' || c == '}') {
+                i++;
+                continue;
+            }
+            addFormulaTextRun(runs, eq, String.valueOf(c), false, false);
+            lastElement = false;
+            i++;
+        }
+        return emittedFormulaToken ? runs : null;
+    }
+
+    private static ScriptToken readScriptToken(String script, int index) {
+        if (script == null || index >= script.length()) return null;
+        if (script.charAt(index) == '{') {
+            int close = script.indexOf('}', index + 1);
+            if (close > index) {
+                return new ScriptToken(script.substring(index + 1, close), close + 1);
+            }
+            return null;
+        }
+        return new ScriptToken(String.valueOf(script.charAt(index)), index + 1);
+    }
+
+    private static void addFormulaTextRun(
+            java.util.List<ASTTextRun> runs,
+            ASTEquation source,
+            String text,
+            boolean subscript,
+            boolean superscript) {
+        if (text == null || text.isEmpty()) return;
+        ASTTextRun run = new ASTTextRun();
+        run.text(text);
+        run.fontFamily(source.preferredFontFamily());
+        run.fontSizeHwpunits(source.preferredBaseUnit());
+        run.textColor(source.textColor());
+        run.subscript(subscript);
+        run.superscript(superscript);
+        runs.add(run);
+    }
+
+    private static final class ScriptToken {
+        final String text;
+        final int nextIndex;
+
+        ScriptToken(String text, int nextIndex) {
+            this.text = text;
+            this.nextIndex = nextIndex;
+        }
+    }
+
+    private static boolean isAsciiLetter(char c) {
+        return isUpperAscii(c) || isLowerAscii(c);
+    }
+
+    private static boolean isUpperAscii(char c) {
+        return c >= 'A' && c <= 'Z';
+    }
+
+    private static boolean isLowerAscii(char c) {
+        return c >= 'a' && c <= 'z';
     }
 }
