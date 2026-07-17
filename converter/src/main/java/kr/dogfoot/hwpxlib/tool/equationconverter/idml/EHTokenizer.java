@@ -253,6 +253,35 @@ public class EHTokenizer {
             }
             return;
         }
+        // EH약물 H(0x48) = 순환소수 순환마디 점(overdot) 마커. 바로 뒤 숫자 위에 점을
+        // 찍는다(실측: 1단원 0.H4=0.4̇, 1.H3=1.3̇). decodeText(→decodeSubSupText)는
+        // 결합 점을 버리므로, H 를 분리해 결합 점(U+0307) 센티넬을 직접 emit 한다.
+        // convert()의 후처리가 다음 숫자와 결합해 dot{N} 스크립트로 만든다.
+        if (EHFontGlyphMap.isChemicalFont(fontFamily) && text.indexOf('H') >= 0) {
+            StringBuilder buf = new StringBuilder();
+            for (int ci = 0; ci < text.length(); ci++) {
+                char ch = text.charAt(ci);
+                if (ch == 'H') {
+                    if (buf.length() > 0) {
+                        String decoded = EHFontGlyphMap.decodeText(buf.toString(), fontFamily);
+                        if (decoded != null && !decoded.isEmpty()) {
+                            tokens.add(new EHToken(EHToken.Type.BASE_TEXT, decoded));
+                        }
+                        buf.setLength(0);
+                    }
+                    tokens.add(new EHToken(EHToken.Type.BASE_TEXT, "̇")); // 순환마디 점
+                } else {
+                    buf.append(ch);
+                }
+            }
+            if (buf.length() > 0) {
+                String decoded = EHFontGlyphMap.decodeText(buf.toString(), fontFamily);
+                if (decoded != null && !decoded.isEmpty()) {
+                    tokens.add(new EHToken(EHToken.Type.BASE_TEXT, decoded));
+                }
+            }
+            return;
+        }
         if (text.contains("`")) {
             StringBuilder buf = new StringBuilder();
             for (int i = 0; i < text.length(); i++) {
