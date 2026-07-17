@@ -152,6 +152,17 @@ public class ASTMathGrouper {
                 result.add(run);
                 continue;
             }
+            // "정체"(正體=정상 위치) 문자스타일은 본문 라틴(인명·연도)이지 화학식이 아니다.
+            // 원소기호로 분리하면 Pythagoras 의 P(인)·B(붕소)가 별도 수식 런으로 쪼개져
+            // 색상·이탤릭이 유실된다(실측: 1단원 "Pythagoras, B.C. 569?~475?").
+            String csRef = run.appliedCharacterStyle();
+            if (csRef != null) {
+                String cs = csRef.toLowerCase(java.util.Locale.ROOT);
+                if (cs.contains("정체") || cs.contains("정자")) {
+                    result.add(run);
+                    continue;
+                }
+            }
             List<String> parts = splitChemicalFormulaTextParts(text);
             if (parts.size() <= 1) {
                 result.add(run);
