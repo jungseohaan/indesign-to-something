@@ -650,6 +650,8 @@ public class ASTMathGrouper {
                     // 글리프(Û→²/Ö→÷/µ→⌒…)가 그대로 노출되지 않게 디코딩한다(실측: 1·2단원
                     // (a+b)Û` = (a+b)², EH상부자 런이 수식 그룹에서 탈락한 케이스).
                     text = EHFontGlyphMap.decodeStrayGlyphText(text, run.fontFamily());
+                    // EH thin space 마커 백틱(`)을 가는 공백으로(실측: 5단원 AB`:` = AB :).
+                    text = ASTRunConverter.replaceEHThinSpaceBacktick(text);
                     textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
                     // 한국어만 텍스트에 EH 폰트/스타일 적용 방지
                     String ff = run.fontFamily();
