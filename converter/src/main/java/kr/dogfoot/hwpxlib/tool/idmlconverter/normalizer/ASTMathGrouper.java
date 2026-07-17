@@ -12,6 +12,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
@@ -435,7 +436,7 @@ public class ASTMathGrouper {
             return;
         }
         String hwpScript = NPFontEquationConverter.convert(npRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, npRuns)) {
             para.addItem(new ASTEquation(hwpScript, "NP_FONT"));
         } else {
             // 수식이 아닌 NP 텍스트 → 유니코드 변환 후 텍스트 런으로 폴백
@@ -601,7 +602,7 @@ public class ASTMathGrouper {
             return;
         }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, ehRuns)) {
             int beforeCount = para.items().size();
             // 선행 번호 "(숫자) " 분리
             hwpScript = splitLeadingNumber(hwpScript, para);
@@ -656,7 +657,7 @@ public class ASTMathGrouper {
             return;
         }
         String hwpScript = BTFontEquationConverter.convert(mathRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, mathRuns)) {
             String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "GREP_FONT";
             para.addItem(new ASTEquation(hwpScript, sourceType));
         } else {
@@ -751,6 +752,11 @@ public class ASTMathGrouper {
     }
 
     private static boolean emitChemicalFormulaTextEquation(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        // A plain chemical formula authored with character attributes is still text:
+        // H2O, Cu2O, CaCO3 should keep editable runs with subscript/superscript
+        // instead of becoming an HWP equation. Equation materialization is reserved
+        // for clusters that need equation semantics: arrows, answer boxes, or
+        // reaction-like operators.
         if (!canEmitChemicalFormulaTextEquation(mathRuns)) return false;
         String script = buildPositionedFormulaScript(mathRuns);
         if (script == null || script.trim().isEmpty()) return false;
@@ -782,7 +788,8 @@ public class ASTMathGrouper {
                 script.append(text);
             }
         }
-        return hasFormulaEvidence && isChemicalFormulaElementSequence(script.toString());
+        if (!hasFormulaEvidence || !isChemicalFormulaElementSequence(script.toString())) return false;
+        return hasReactionEquationEvidence(mathRuns);
     }
 
     /**
@@ -849,6 +856,7 @@ public class ASTMathGrouper {
         boolean hasPositionedRun = false;
         boolean hasFormulaOperator = false;
         boolean hasAnswerBox = false;
+        boolean hasArrow = false;
         int visibleChars = 0;
         for (IDMLCharacterRun run : mathRuns) {
             if (run == null) return false;
@@ -859,10 +867,39 @@ public class ASTMathGrouper {
             if (containsAsciiLetter(normalized)) hasFormulaLetter = true;
             if (run.isSubscript() || run.isSuperscript()) hasPositionedRun = true;
             if (containsFormulaOperator(normalized)) hasFormulaOperator = true;
+            if (normalized.indexOf('\u2192') >= 0 || "rarrow".equalsIgnoreCase(normalized.trim())) hasArrow = true;
             if (normalized.indexOf('\u25A1') >= 0) hasAnswerBox = true;
         }
         if (!hasFormulaLetter || visibleChars == 0 || visibleChars > 96) return false;
-        return hasPositionedRun || hasFormulaOperator || hasAnswerBox;
+        if (hasAnswerBox || hasArrow) return true;
+        if (!hasFormulaOperator) return false;
+        // A positioned run plus a reaction/operator context is equation-worthy;
+        // positioned runs alone are text character attributes.
+        return hasPositionedRun || hasFormulaOperator;
+    }
+
+    private static boolean hasReactionEquationEvidence(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null || mathRuns.isEmpty()) return false;
+        boolean hasOperator = false;
+        boolean hasArrow = false;
+        boolean hasBox = false;
+        boolean hasPositioned = false;
+        boolean hasFormulaLetter = false;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) continue;
+            String normalized = normalizeFormulaRunText(run);
+            if (normalized == null || normalized.isEmpty()) continue;
+            if (containsAsciiLetter(normalized)) hasFormulaLetter = true;
+            if (run.isSubscript() || run.isSuperscript()) hasPositioned = true;
+            if (containsFormulaOperator(normalized)) hasOperator = true;
+            if (normalized.indexOf('\u2192') >= 0 || normalized.toLowerCase(java.util.Locale.ROOT).contains("rarrow")) {
+                hasArrow = true;
+            }
+            if (normalized.indexOf('\u25A1') >= 0) hasBox = true;
+        }
+        if (!hasFormulaLetter) return false;
+        if (hasArrow || hasBox) return true;
+        return hasOperator && hasPositioned;
     }
 
     private static String buildPositionedFormulaScript(List<IDMLCharacterRun> mathRuns) {
@@ -1262,7 +1299,7 @@ public class ASTMathGrouper {
             return;
         }
         String hwpScript = PatternEquationConverter.convert(patternRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, patternRuns)) {
             // 수식 폰트 등록 (동적 학습)
             for (IDMLCharacterRun run : patternRuns) {
                 if (run.fontFamily() != null) {
@@ -1350,7 +1387,7 @@ public class ASTMathGrouper {
                     if (!before.isEmpty()) {
                         before = splitLeadingNumber(before, para);
                         if (!before.isEmpty()) {
-                            para.addItem(new ASTEquation(before, "EH_FONT"));
+                            addEquationOrTextFallback(before, "EH_FONT", para);
                         }
                     }
                 }
@@ -1384,13 +1421,42 @@ public class ASTMathGrouper {
             if (!rest.isEmpty()) {
                 rest = splitLeadingNumber(rest, para);
                 if (!rest.isEmpty()) {
-                    para.addItem(new ASTEquation(rest, "EH_FONT"));
+                    addEquationOrTextFallback(rest, "EH_FONT", para);
                 }
             }
         } else if (lastSplit == 0) {
             // 원문자 없음 → 전체 수식
-            para.addItem(new ASTEquation(hwpScript, "EH_FONT"));
+            addEquationOrTextFallback(hwpScript, "EH_FONT", para);
         }
+    }
+
+    private static void addEquationOrTextFallback(String script, String sourceType, ASTParagraph para) {
+        if (shouldEmitConvertedEquation(script, null)) {
+            para.addItem(new ASTEquation(script, sourceType));
+            return;
+        }
+        ASTTextRun textRun = new ASTTextRun();
+        textRun.text(FormulaClassifier.hwpScriptFallbackText(script));
+        para.addItem(textRun);
+    }
+
+    private static boolean shouldEmitConvertedEquation(String script, List<IDMLCharacterRun> mathRuns) {
+        return FormulaClassifier.shouldEmitConvertedEquation(
+                script,
+                containsEncodedMathEvidence(mathRuns));
+    }
+
+    private static boolean containsEncodedMathEvidence(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null) return false;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null || run.content() == null) continue;
+            String text = run.content();
+            if (EHFontGlyphMap.containsEHEncodedChars(text)
+                    || EHFontGlyphMap.containsEHFractionPattern(text)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }

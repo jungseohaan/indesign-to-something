@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHGrepFractionConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
@@ -453,12 +454,32 @@ class MathProcessor {
         if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
         if (!hasEquation && !hasBox && !chemicalElementSequence) return null;
         if (hasBox && !hasEquation && !hasDigit && !hasOperator && !hasArrow && !hasPositioned) return null;
+        if (!hasEquation
+                && !hasBox
+                && !hasOperator
+                && !hasArrow
+                && hasPositioned
+                && chemicalElementSequence) {
+            return null;
+        }
         if (!chemicalElementSequence
                 && !hasDigit
                 && !hasOperator
                 && !hasBox
                 && !hasArrow
                 && !hasPositioned) {
+            return null;
+        }
+        if (!isFormulaEquationMaterializationCandidate(
+                hwpScript,
+                chemicalElementSequence,
+                hasFormulaFontEvidence,
+                hasEquation,
+                hasOperator,
+                hasBox,
+                hasArrow,
+                hasPositioned,
+                hasChemicalSymbol)) {
             return null;
         }
 
@@ -989,6 +1010,18 @@ class MathProcessor {
                 && !hasPositioned) {
             return null;
         }
+        if (!isFormulaEquationMaterializationCandidate(
+                hwpScript,
+                chemicalElementSequence,
+                hasFormulaFontEvidence,
+                false,
+                hasOperator,
+                hasBox,
+                hasArrow,
+                hasPositioned,
+                hasChemicalSymbol)) {
+            return null;
+        }
 
         ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
         color = resolvedFormulaTextColor(items, start, end, color);
@@ -1002,6 +1035,28 @@ class MathProcessor {
         Character before = previousVisibleChar(items, start - 1);
         Character after = nextVisibleChar(items, endExclusive);
         return isOpeningFormulaDelimiter(before) || isClosingFormulaDelimiter(after);
+    }
+
+    private static boolean isFormulaEquationMaterializationCandidate(
+            String hwpScript,
+            boolean chemicalElementSequence,
+            boolean hasFormulaFontEvidence,
+            boolean hasEquation,
+            boolean hasOperator,
+            boolean hasBox,
+            boolean hasArrow,
+            boolean hasPositioned,
+            boolean hasChemicalSymbol) {
+        return FormulaClassifier.shouldMaterializeChemicalEquation(
+                hwpScript,
+                chemicalElementSequence,
+                hasFormulaFontEvidence,
+                hasEquation,
+                hasOperator,
+                hasBox,
+                hasArrow,
+                hasPositioned,
+                hasChemicalSymbol);
     }
 
     private static Character previousVisibleChar(List<ASTInlineItem> items, int index) {

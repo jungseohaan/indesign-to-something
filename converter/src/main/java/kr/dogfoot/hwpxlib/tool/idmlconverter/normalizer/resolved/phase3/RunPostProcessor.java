@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 
 import java.util.ArrayList;
@@ -295,11 +296,76 @@ class RunPostProcessor {
                 script = script.substring(lead);
             }
             if (!script.isEmpty()) {
-                out.add(new ASTEquation(script, "EH_FONT"));
+                if (shouldEmitItalicEquation(script, mathRuns)) {
+                    out.add(new ASTEquation(script, "EH_FONT"));
+                } else {
+                    emitItalicMathRunsAsText(mathRuns, out);
+                }
             }
         }
         mathBuf.setLength(0);
         mathRuns.clear();
+    }
+
+    private static boolean shouldEmitItalicEquation(String script, List<IDMLCharacterRun> mathRuns) {
+        if (script == null) return false;
+        String trimmed = script.trim();
+        if (trimmed.isEmpty()) return false;
+
+        // Korean prose and bibliographic fragments can inherit italic/EH styling.
+        // They are text, never equation objects.
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return false;
+        }
+
+        if (FormulaClassifier.containsEquationSyntax(trimmed)) return true;
+        if (containsEHEncodedEvidence(mathRuns)) return true;
+
+        // Plain units/numbers/short latin tokens such as mL, 28, *C must remain text.
+        if (FormulaClassifier.isPlainUnitOrNumber(trimmed)) return false;
+        if (hasLongLatinWord(trimmed, 3)) return false;
+
+        // A single latin variable is a valid math equation; two or more latin letters
+        // without syntax are usually unit/body text in these books.
+        int letters = 0;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) letters++;
+        }
+        return letters == 1;
+    }
+
+    private static boolean containsEHEncodedEvidence(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null) return false;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null || run.content() == null) continue;
+            String text = run.content();
+            if (EHFontGlyphMap.containsEHEncodedChars(text)
+                    || EHFontGlyphMap.containsEHFractionPattern(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void emitItalicMathRunsAsText(List<IDMLCharacterRun> mathRuns, List<ASTInlineItem> out) {
+        if (mathRuns == null) return;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) continue;
+            String text = run.content();
+            if (text == null || text.isEmpty()) continue;
+            ASTTextRun tr = new ASTTextRun();
+            tr.text(text.replace("`", ""));
+            tr.fontFamily(run.fontFamily());
+            tr.characterStyleRef(run.appliedCharacterStyle());
+            if (run.fontStyle() != null) tr.fontStyle(run.fontStyle());
+            if (run.fontSize() != null) tr.fontSizeHwpunits((int) Math.round(run.fontSize() * 100.0));
+            if (run.fillColor() != null) tr.textColor(run.fillColor());
+            tr.subscript(run.isSubscript());
+            tr.superscript(run.isSuperscript());
+            out.add(tr);
+        }
     }
 
     /** 이탤릭 수학 런 판별: 수식 전용 폰트/기호/짧은 변수 런만 수식으로 승격한다. */
