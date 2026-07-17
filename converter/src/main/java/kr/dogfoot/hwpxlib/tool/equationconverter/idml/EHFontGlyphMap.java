@@ -124,7 +124,13 @@ public class EHFontGlyphMap {
      * @return 디코딩된 텍스트 (EH 폰트가 아니면 원문)
      */
     public static String decodeStrayGlyphText(String text, String fontFamily) {
-        if (text == null || fontFamily == null) return text;
+        if (text == null) return text;
+        // fontFamily가 null인 경우: EH상부자 등 수식 폰트가 그룹핑 단계에서 리셋(null)됐지만
+        // raw EH 글리프(Û/Ö/µ…)는 그대로 남는다(실측: 1단원 (a+b)Û`, 3단원 Ó=). 폰트 정보가
+        // 없으므로 본문 폰트 경로로 좁게 디코딩한다.
+        if (fontFamily == null) {
+            return decodeStrayGlyphInBodyFont(text);
+        }
         if (isChemicalFont(fontFamily)) {
             // EH약물: µ→⌒(호), ª→≡(합동)
             text = decodeChemicalGlyphText(text);
@@ -166,7 +172,9 @@ public class EHFontGlyphMap {
     private static String decodeStrayGlyphInBodyFont(String text) {
         if (text == null || text.isEmpty()) return text;
         if (text.indexOf('ù') < 0 && text.indexOf('ª') < 0
-                && text.indexOf('Õ') < 0 && text.indexOf('µ') < 0) return text;
+                && text.indexOf('Õ') < 0 && text.indexOf('µ') < 0
+                && text.indexOf('Û') < 0 && text.indexOf('Ü') < 0
+                && text.indexOf('Ö') < 0 && text.indexOf('Ó') < 0) return text;
         StringBuilder sb = new StringBuilder(text.length());
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
@@ -179,6 +187,18 @@ public class EHFontGlyphMap {
                 sb.append('≡');
             } else if (c == 'Õ') {
                 // 수평선 장식 글리프 → 제거
+            } else if (c == 'Û' || c == 'Ü') {
+                // 위첨자 제곱/세제곱. EH상부자 폰트가 그룹핑 단계에서 리셋돼 raw로 흘러온
+                // 경우(실측: 1·2단원 (a+b)Û` = (a+b)²). 앞에 base 문자(영숫자/닫는괄호)가
+                // 있을 때만 치환 — 홀로 선 Û는 오변환 위험이 있어 보존.
+                char prev = sb.length() > 0 ? sb.charAt(sb.length() - 1) : '\0';
+                boolean afterBase = Character.isLetterOrDigit(prev) || prev == ')' || prev == ']';
+                if (afterBase) sb.append(c == 'Û' ? '²' : '³');
+                else sb.append(c);
+            } else if (c == 'Ö') {
+                sb.append('÷');
+            } else if (c == 'Ó') {
+                // overline 마커 — stray 텍스트에선 선분 위 막대 표현 불가, 제거
             } else if (c == 'µ') {
                 // 마이크로 단위(µm·µs·µg·µA…)면 그대로, 아니면 호(⌒).
                 char next = i + 1 < text.length() ? text.charAt(i + 1) : '\0';
@@ -644,13 +664,23 @@ public class EHFontGlyphMap {
      */
     public static String decodeSuperscriptSymbols(String text) {
         if (text == null || text.isEmpty()) return text;
-        if (text.indexOf('ù') < 0 && text.indexOf('Õ') < 0) return text;
+        // Û/Ü(위첨자 제곱/세제곱), Ö(÷), Ó(overline), ù(°), Õ(장식) 중 하나라도 있어야 처리.
+        // 이전엔 ù/Õ만 봤으나, EH 그룹핑 변경(chemical PR)으로 EH상부자 수식 런이 수식
+        // 그룹에 못 들어가고 이 stray 경로로 흘러 raw Û/Ö/Ó가 그대로 노출됐다
+        // (실측: 2단원 (a+b)Û` = (a+b)², 1단원 0.36Ö, 3단원 Ó=).
+        if (text.indexOf('ù') < 0 && text.indexOf('Õ') < 0
+                && text.indexOf('Û') < 0 && text.indexOf('Ü') < 0
+                && text.indexOf('Ö') < 0 && text.indexOf('Ó') < 0) return text;
         StringBuilder sb = new StringBuilder(text.length());
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             switch (c) {
-                case 'ù': sb.append('°'); break;  // ù → ° (도)
-                case 'Õ': break;                       // 0xD5 = 수평선 장식 → 제거
+                case 'ù': sb.append('°'); break;   // ù → ° (도)
+                case 'Õ': break;                        // 0xD5 = 수평선 장식 → 제거
+                case 'Û': sb.append('²'); break;  // Û → ² (위첨자 제곱)
+                case 'Ü': sb.append('³'); break;  // Ü → ³ (위첨자 세제곱)
+                case 'Ö': sb.append('÷'); break;  // Ö → ÷ (나눗셈)
+                case 'Ó': break;                        // 0xD3 = overline 마커 — stray 텍스트에선 표현 불가, 제거
                 default: sb.append(c);
             }
         }

@@ -623,6 +623,10 @@ public class ASTMathGrouper {
                 String text = run.content();
                 if (text != null && !text.isEmpty()) {
                     ASTTextRun textRun = new ASTTextRun();
+                    // EH 그룹이 수식으로 변환되지 못하고 텍스트로 폴백될 때, raw EH 해킹
+                    // 글리프(Û→²/Ö→÷/µ→⌒…)가 그대로 노출되지 않게 디코딩한다(실측: 1·2단원
+                    // (a+b)Û` = (a+b)², EH상부자 런이 수식 그룹에서 탈락한 케이스).
+                    text = EHFontGlyphMap.decodeStrayGlyphText(text, run.fontFamily());
                     textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
                     // 한국어만 텍스트에 EH 폰트/스타일 적용 방지
                     String ff = run.fontFamily();
@@ -1216,6 +1220,10 @@ public class ASTMathGrouper {
     }
 
     private static void copyMathRunTextStyle(IDMLCharacterRun run, ASTTextRun textRun, String text) {
+        // EH 그룹이 수식으로 변환되지 못하고 텍스트 런으로 폴백되는 모든 경로
+        // (emitBoundaryAwareChemicalFormulaGroup 등)의 공통 sink. raw EH 해킹 글리프
+        // (Û→²/Ö→÷/µ→⌒…)를 여기서 디코딩한다(실측: 1단원 글상자의 (-5)Û`		⑷, 0.36Ö).
+        text = EHFontGlyphMap.decodeStrayGlyphText(text, run.fontFamily());
         textRun.text(text);
         textRun.fontFamily(run.fontFamily());
         textRun.grepMathFont(run.grepMathFont());

@@ -207,9 +207,16 @@ class RunBuilder {
                     : (cr.fontSize() != null && cr.fontSize() > 0) ? cr.fontSize() : 10.0;
             double baseFs = (sc.fontSize != null && sc.fontSize > 0) ? sc.fontSize : 10.0;
             boolean isSmallerFont = curFs < baseFs * 0.75; // 75% 이하면 첨자
-            if (isSmallerFont && bsPt > 0) {
+            // 첨자 후보는 숫자·라틴 1~2글자(화학식 H₂O의 2, 지수 x²)이지 한글 단어가
+            // 아니다. baselineShift 가 미세한(폰트의 ~12% 미만) 작은 한글 캡션이 첨자로
+            // 오판되던 문제 방지(실측: 과학 2단원 "지구의 기온"·"스스로 평가하기"가
+            // bs≈-0.2pt/7.7pt 로 아래첨자화). 명시적 position=SUBSCRIPT 화학식은 위쪽
+            // applyPositionStyle 에서 이미 처리되므로 이 가드의 영향을 받지 않는다.
+            boolean plausibleScriptToken = isPlausibleScriptToken(text)
+                    && Math.abs(bsPt) >= curFs * 0.12;
+            if (isSmallerFont && plausibleScriptToken && bsPt > 0) {
                 tr.superscript(true); // 위첨자
-            } else if (isSmallerFont && bsPt < 0) {
+            } else if (isSmallerFont && plausibleScriptToken && bsPt < 0) {
                 tr.subscript(true); // 아래첨자
             } else {
                 // 일반 기선 이동
@@ -278,6 +285,25 @@ class RunBuilder {
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
+    }
+
+    /**
+     * baselineShift 휴리스틱으로 첨자화해도 되는 토큰인지.
+     * 첨자(위/아래)는 화학식/이온의 숫자(H₂O의 2), 수학 지수(x²), 라틴 변수처럼
+     * 짧은 숫자·라틴이다. 한글이 섞였거나 길면(캡션·라벨) 첨자가 아니다.
+     */
+    private static boolean isPlausibleScriptToken(String text) {
+        if (text == null) return false;
+        String t = text.trim();
+        if (t.isEmpty() || t.length() > 3) return false;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            boolean ok = (c >= '0' && c <= '9')
+                    || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                    || c == '+' || c == '-' || c == '(' || c == ')';
+            if (!ok) return false;
+        }
+        return true;
     }
 
     private static void applyPositionStyle(ASTTextRun target, ResolvedRun rr, IDMLCharacterRun cr) {
