@@ -1,14 +1,23 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.CharPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.RunItem;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.TItem;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Equation;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.t.NormalText;
 import kr.dogfoot.hwpxlib.tool.equationconverter.EquationBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaRenderer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaStyle;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaStyleResolver;
 
 /**
  * 인라인 객체 dispatch + Break + Equation 변환 (W4-2 Step D).
@@ -294,6 +303,12 @@ final class InlineItemDispatcher {
      * ASTEquation → HWPX Equation (인라인 수식).
      */
     void addEquationRun(Para para, ASTEquation eq) {
+        if (addStandaloneRomanNumeralAsTextRun(para, eq)) {
+            return;
+        }
+        if (usesBodyTextEquationStyle(eq) && addChemicalFormulaAsTextRuns(para, eq)) {
+            return;
+        }
         // 다행 수식 (예: 분배법칙 전개)에 포함된 U+2028(LINE SEPARATOR) 또는 \n 을
         // HwpScript 의 줄바꿈 토큰 '#' 으로 변환. (탭은 공백으로 정규화)
         String rawScript = eq.hwpScript();
@@ -317,10 +332,10 @@ final class InlineItemDispatcher {
         try {
             Equation template = EquationBuilder.fromHwpScript(hwpScript);
             Equation hwpxEq = run.addNewEquation();
-            int resolvedBaseUnit = resolveEquationBaseUnit(eq, template);
-            String resolvedFont = resolveEquationFont(eq, template);
-            // 수식 색상: AST에서 전달된 색상이 있으면 사용, 없으면 기본 검정
-            String eqColor = eq.textColor() != null ? eq.textColor() : template.textColor();
+            FormulaStyle style = resolveFormulaStyle(para, eq, template);
+            int resolvedBaseUnit = style.baseUnit() != null ? style.baseUnit() : 1100;
+            String resolvedFont = style.fontFamily();
+            String eqColor = style.textColor();
             hwpxEq.versionAnd(template.version())
                     .textColorAnd(eqColor)
                     .baseUnitAnd(resolvedBaseUnit)
@@ -409,29 +424,140 @@ final class InlineItemDispatcher {
         return Math.max(1, count);
     }
 
-    private int resolveEquationBaseUnit(ASTEquation eq, Equation template) {
-        // 원본 폰트 크기(preferredBaseUnit)가 있으면 sourceType 과 무관하게 사용한다.
-        // 이전엔 CHEM_FORMULA 만 반영해, 일반 EH 수식은 기본값(11pt)으로 떨어져 큰
-        // 제목 속 수식이 본문보다 작게 나왔다(실측: "이차함수 y=ax² 의 그래프" 24pt).
-        if (eq != null && eq.preferredBaseUnit() != null && eq.preferredBaseUnit() > 0) {
-            return eq.preferredBaseUnit();
-        }
-        return template.baseUnit() != null ? template.baseUnit() : 1100;
-    }
-
-    private String resolveEquationFont(ASTEquation eq, Equation template) {
-        if (usesBodyTextEquationStyle(eq)) {
-            String sourceFont = eq != null ? eq.preferredFontFamily() : null;
-            if (sourceFont != null && !sourceFont.isEmpty()) {
-                return FontMapper.mapToHwpxFont(sourceFont);
-            }
-            return "함초롬바탕";
-        }
-        return template.font();
-    }
-
     private boolean usesBodyTextEquationStyle(ASTEquation eq) {
-        if (eq == null || eq.sourceType() == null) return false;
-        return "CHEM_FORMULA".equals(eq.sourceType());
+        return FormulaStyleResolver.usesBodyTextEquationStyle(eq);
+    }
+
+    private boolean addChemicalFormulaAsTextRuns(Para para, ASTEquation eq) {
+        FormulaStyle style = resolveFormulaStyle(para, eq, null);
+        java.util.List<ASTTextRun> runs = FormulaRenderer.toChemicalTextRuns(
+                eq,
+                style,
+                FormulaClassifier.previousTextEndsWithFormulaElement(lastVisibleParagraphText(para)));
+        if (runs == null || runs.isEmpty()) return false;
+        String baseCharPrIDRef = lastCharPrIDRef(para);
+        for (ASTTextRun run : runs) {
+            paragraphBuilder.addTextRun(para, run, baseCharPrIDRef);
+            baseCharPrIDRef = lastCharPrIDRef(para);
+        }
+        return true;
+    }
+
+    private static String lastVisibleParagraphText(Para para) {
+        if (para == null || para.runs() == null) return null;
+        String lastText = null;
+        for (Run run : para.runs()) {
+            String text = runText(run);
+            if (text != null && !text.trim().isEmpty()) {
+                lastText = text;
+            }
+        }
+        return lastText;
+    }
+
+    private boolean addStandaloneRomanNumeralAsTextRun(Para para, ASTEquation eq) {
+        if (eq == null || eq.hwpScript() == null) return false;
+        String script = EquationBuilder.sanitizeHwpScript(eq.hwpScript()).trim();
+        if (!isStandaloneUnicodeRomanNumeral(script)) return false;
+        FormulaStyle style = resolveFormulaStyle(para, eq, null);
+        ASTTextRun run = new ASTTextRun();
+        run.text(script);
+        run.fontFamily(style.fontFamily());
+        run.fontSizeHwpunits(style.baseUnit());
+        run.textColor(style.textColor());
+        paragraphBuilder.addTextRun(para, run, lastCharPrIDRef(para));
+        return true;
+    }
+
+    private FormulaStyle resolveFormulaStyle(Para para, ASTEquation eq, Equation template) {
+        return FormulaStyleResolver.resolve(
+                eq,
+                inheritedTextHeight(para, null),
+                inheritedTextColor(para),
+                template != null ? template.baseUnit() : null,
+                template != null ? template.font() : null,
+                template != null ? template.textColor() : null,
+                new FormulaStyleResolver.FontMapper() {
+                    @Override
+                    public String map(String sourceFont) {
+                        return FontMapper.mapToHwpxFont(sourceFont);
+                    }
+                });
+    }
+
+    private static String lastCharPrIDRef(Para para) {
+        if (para == null) return "0";
+        String last = "0";
+        for (Run run : para.runs()) {
+            if (run != null && run.charPrIDRef() != null && !run.charPrIDRef().isEmpty()) {
+                last = run.charPrIDRef();
+            }
+        }
+        return last;
+    }
+
+    private String inheritedTextColor(Para para) {
+        CharPr charPr = findCharPr(lastCharPrIDRef(para));
+        if (charPr != null && charPr.textColor() != null && !charPr.textColor().isEmpty()) {
+            return charPr.textColor();
+        }
+        return null;
+    }
+
+    private Integer inheritedTextHeight(Para para, Integer fallback) {
+        CharPr charPr = findCharPr(lastCharPrIDRef(para));
+        if (charPr != null && charPr.height() > 0) {
+            return charPr.height();
+        }
+        return fallback;
+    }
+
+    private CharPr findCharPr(String id) {
+        if (id == null || id.isEmpty() || ctx == null || ctx.hwpxFile == null
+                || ctx.hwpxFile.headerXMLFile() == null
+                || ctx.hwpxFile.headerXMLFile().refList() == null
+                || ctx.hwpxFile.headerXMLFile().refList().charProperties() == null) {
+            return null;
+        }
+        for (CharPr charPr : ctx.hwpxFile.headerXMLFile().refList().charProperties().items()) {
+            if (charPr != null && id.equals(charPr.id())) {
+                return charPr;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isStandaloneUnicodeRomanNumeral(String script) {
+        if (script == null || script.isEmpty()) return false;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (!isUnicodeRomanNumeral(c)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isUnicodeRomanNumeral(char c) {
+        return (c >= '\u2160' && c <= '\u216F') || (c >= '\u2170' && c <= '\u217F');
+    }
+
+    private static String runText(Run run) {
+        if (run == null) return null;
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < run.countOfRunItem(); i++) {
+            RunItem item = run.getRunItem(i);
+            if (!(item instanceof T)) continue;
+            T t = (T) item;
+            if (t.onlyText() != null) {
+                out.append(t.onlyText());
+                continue;
+            }
+            for (int j = 0; j < t.countOfItems(); j++) {
+                TItem tItem = t.getItem(j);
+                if (tItem instanceof NormalText && ((NormalText) tItem).text() != null) {
+                    out.append(((NormalText) tItem).text());
+                }
+            }
+        }
+        return out.length() > 0 ? out.toString() : null;
     }
 }

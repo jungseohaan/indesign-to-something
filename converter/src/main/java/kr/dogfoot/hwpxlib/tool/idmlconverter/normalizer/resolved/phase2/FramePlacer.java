@@ -101,7 +101,9 @@ public final class FramePlacer {
                                 && textPlan.placement == Placement.FLOATING
                             : ctx.ownershipPlanPlacesFloatingHwpxText(tf.id()));
             boolean editableForHwpx = ctx.resolvedData.isEditableTextFrame(tf.id()) || hwpxOwnedTextFrame;
-            if (!plannedFloatingHwpxText && ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
+            if (!plannedFloatingHwpxText
+                    && (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())
+                    || ctx.isTextFrameOwnedByPngPlan(tf.id()))) {
                 continue;
             }
             if (tf.isInline()

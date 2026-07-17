@@ -12,6 +12,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
@@ -138,6 +139,111 @@ public class ASTMathGrouper {
     }
 
     /**
+     * IDML direct 경로에서는 GREP/font split 전의 run이 ")(Cu", "O)과", ")(CuO)"처럼
+     * 괄호/한글과 화학식 조각을 함께 담는 경우가 있다. 화학식 ownership은 문자 단위
+     * 스타일 증거를 유지해야 하므로, 화학식처럼 닫히는 ASCII 구간을 먼저 분리한다.
+     */
+    public static List<IDMLCharacterRun> splitChemicalFormulaMixedRuns(List<IDMLCharacterRun> runs) {
+        if (runs == null || runs.isEmpty()) return runs;
+        List<IDMLCharacterRun> result = new ArrayList<>();
+        for (IDMLCharacterRun run : runs) {
+            String text = run == null ? null : run.content();
+            if (text == null || text.isEmpty()) {
+                result.add(run);
+                continue;
+            }
+            List<String> parts = splitChemicalFormulaTextParts(text);
+            if (parts.size() <= 1) {
+                result.add(run);
+                continue;
+            }
+            for (String part : parts) {
+                if (part == null || part.isEmpty()) continue;
+                IDMLCharacterRun split = cloneRunForSplit(run, part);
+                if (isChemicalFormulaElementSequence(part)) {
+                    split.grepMathFont(true);
+                }
+                result.add(split);
+            }
+        }
+        return result;
+    }
+
+    private static List<String> splitChemicalFormulaTextParts(String text) {
+        List<String> parts = new ArrayList<>();
+        StringBuilder plain = new StringBuilder();
+        int i = 0;
+        while (i < text.length()) {
+            int len = chemicalFormulaSpanLength(text, i);
+            if (len > 0 && isFormulaDelimited(text, i, i + len)) {
+                if (plain.length() > 0) {
+                    parts.add(plain.toString());
+                    plain.setLength(0);
+                }
+                parts.add(text.substring(i, i + len));
+                i += len;
+                continue;
+            }
+            plain.append(text.charAt(i));
+            i++;
+        }
+        if (plain.length() > 0) parts.add(plain.toString());
+        return parts;
+    }
+
+    private static int chemicalFormulaSpanLength(String text, int start) {
+        if (text == null || start < 0 || start >= text.length()) return 0;
+        int i = start;
+        int elements = 0;
+        boolean hasDigit = false;
+        while (i < text.length() && Character.isDigit(text.charAt(i))) {
+            hasDigit = true;
+            i++;
+        }
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (c < 'A' || c > 'Z') break;
+            String one = String.valueOf(c);
+            String symbol = one;
+            int nextIndex = i + 1;
+            if (nextIndex < text.length()) {
+                char next = text.charAt(nextIndex);
+                if (next >= 'a' && next <= 'z') {
+                    String two = "" + c + next;
+                    if (isChemicalElement(two)) {
+                        symbol = two;
+                        nextIndex++;
+                    }
+                }
+            }
+            if (!isChemicalElement(symbol)) break;
+            elements++;
+            i = nextIndex;
+            while (i < text.length() && Character.isDigit(text.charAt(i))) {
+                hasDigit = true;
+                i++;
+            }
+        }
+        if (elements == 0) return 0;
+        return i - start;
+    }
+
+    private static boolean isFormulaDelimited(String text, int start, int end) {
+        char before = start > 0 ? text.charAt(start - 1) : 0;
+        char after = end < text.length() ? text.charAt(end) : 0;
+        return isChemicalFormulaDelimiter(before) || isChemicalFormulaDelimiter(after);
+    }
+
+    private static boolean isChemicalFormulaDelimiter(char c) {
+        return c == 0
+                || Character.isWhitespace(c)
+                || c == '(' || c == ')' || c == '[' || c == ']'
+                || c == '{' || c == '}'
+                || c == '+' || c == '-' || c == '=' || c == '\u2192'
+                || c == '\u2005' || c == '\u2007' || c == '\u2009' || c == '\u200A';
+    }
+
+    /**
      * 런의 스타일을 복사하고 텍스트만 변경한 새 런을 생성한다 (수식/한국어 분리용).
      */
     static IDMLCharacterRun cloneRunForSplit(IDMLCharacterRun source, String newText) {
@@ -239,12 +345,41 @@ public class ASTMathGrouper {
     }
 
     /**
+     * Chemical formulas are often adjacent to ordinary text delimiters such as
+     * ")(Cu2O)" or "(CuO)". When a delimiter-only run inherits a math font,
+     * it must remain text; otherwise it starts a math group and produces
+     * malformed equations such as ")(Cu2".
+     */
+    public static boolean isChemicalFormulaBoundaryRun(IDMLCharacterRun run) {
+        if (run == null) return false;
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+        boolean hasBoundary = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c)
+                    || c == '\u2005' || c == '\u2007'
+                    || c == '\u2009' || c == '\u200A') {
+                continue;
+            }
+            if (c == '(' || c == ')' || c == '[' || c == ']'
+                    || c == '{' || c == '}' || c == ',' || c == '.') {
+                hasBoundary = true;
+                continue;
+            }
+            return false;
+        }
+        return hasBoundary;
+    }
+
+    /**
      * BT 수식 런 사이 또는 뒤의 비수식 런이 수식 그룹에 포함될 수 있는지 확인.
      * 비한국어 텍스트이고, (1) 뒤에 BT 수식 런이 이어지거나 (2) BT 마커를 포함하면 수식 그룹에 포함.
      */
     public static boolean isMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
+        if (isChemicalFormulaBoundaryRun(run)) return false;
         // 수식 토큰 사이를 잇는 순수 공백 런은 브리지로 인정한다.
         // InDesign은 BT수식/BT화살표 글리프 앞뒤 공백을 일반 본문 폰트 런으로
         // 분리하는 경우가 있어, 이 공백을 끊어 버리면 화학식/수식이 둘로 분할된다.
@@ -301,7 +436,7 @@ public class ASTMathGrouper {
             return;
         }
         String hwpScript = NPFontEquationConverter.convert(npRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, npRuns)) {
             para.addItem(new ASTEquation(hwpScript, "NP_FONT"));
         } else {
             // 수식이 아닌 NP 텍스트 → 유니코드 변환 후 텍스트 런으로 폴백
@@ -463,8 +598,11 @@ public class ASTMathGrouper {
         if (emitSimplePositionedTextRun(ehRuns, para)) {
             return;
         }
+        if (emitBoundaryAwareChemicalFormulaGroup(ehRuns, para)) {
+            return;
+        }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, ehRuns)) {
             int beforeCount = para.items().size();
             // 선행 번호 "(숫자) " 분리
             hwpScript = splitLeadingNumber(hwpScript, para);
@@ -506,6 +644,12 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 (순수 텍스트 등) 일반 텍스트 런으로 폴백.
      */
     public static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        if (emitBoundaryAwareChemicalFormulaGroup(mathRuns, para)) {
+            return;
+        }
+        if (emitChemicalFormulaTextEquation(mathRuns, para)) {
+            return;
+        }
         if (emitPositionedFormulaEquation(mathRuns, para, "CHEM_FORMULA")) {
             return;
         }
@@ -513,7 +657,7 @@ public class ASTMathGrouper {
             return;
         }
         String hwpScript = BTFontEquationConverter.convert(mathRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, mathRuns)) {
             String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "GREP_FONT";
             para.addItem(new ASTEquation(hwpScript, sourceType));
         } else {
@@ -541,6 +685,111 @@ public class ASTMathGrouper {
                 }
             }
         }
+    }
+
+    private static boolean emitBoundaryAwareChemicalFormulaGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        if (mathRuns == null || mathRuns.isEmpty()) return false;
+        List<IDMLCharacterRun> splitRuns = splitChemicalFormulaMixedRuns(mathRuns);
+        boolean needsSegmentedFlush = splitRuns.size() != mathRuns.size();
+        if (!needsSegmentedFlush) {
+            for (IDMLCharacterRun run : splitRuns) {
+                if (isChemicalFormulaBoundaryRun(run)) {
+                    needsSegmentedFlush = true;
+                    break;
+                }
+            }
+        }
+        if (!needsSegmentedFlush) return false;
+
+        List<IDMLCharacterRun> formulaRuns = new ArrayList<>();
+        boolean emittedFormula = false;
+        boolean changed = false;
+        for (IDMLCharacterRun run : splitRuns) {
+            if (run == null) continue;
+            if (isChemicalFormulaBoundaryRun(run)) {
+                emittedFormula |= flushFormulaSegment(formulaRuns, para);
+                formulaRuns.clear();
+                emitTextRun(run, para);
+                changed = true;
+                continue;
+            }
+
+            String normalized = normalizeFormulaRunText(run);
+            boolean formulaRun = isChemicalFormulaTextRun(run)
+                    || run.isSubscript()
+                    || run.isSuperscript()
+                    || (!formulaRuns.isEmpty()
+                    && (normalized.trim().isEmpty() || isFormulaEquationText(normalized)));
+            if (formulaRun) {
+                formulaRuns.add(run);
+                continue;
+            }
+
+            emittedFormula |= flushFormulaSegment(formulaRuns, para);
+            formulaRuns.clear();
+            emitTextRun(run, para);
+            changed = true;
+        }
+        emittedFormula |= flushFormulaSegment(formulaRuns, para);
+        formulaRuns.clear();
+        return changed;
+    }
+
+    private static boolean flushFormulaSegment(List<IDMLCharacterRun> formulaRuns, ASTParagraph para) {
+        if (formulaRuns == null || formulaRuns.isEmpty()) return false;
+        if (emitChemicalFormulaTextEquation(formulaRuns, para)) return true;
+        if (emitPositionedFormulaEquation(formulaRuns, para, "CHEM_FORMULA")) return true;
+        for (IDMLCharacterRun run : formulaRuns) {
+            emitTextRun(run, para);
+        }
+        return false;
+    }
+
+    private static void emitTextRun(IDMLCharacterRun run, ASTParagraph para) {
+        String text = cleanFormulaText(run != null ? run.content() : null);
+        if (text.isEmpty()) return;
+        para.addItem(textRunFromMathRun(run, text));
+    }
+
+    private static boolean emitChemicalFormulaTextEquation(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        // A plain chemical formula authored with character attributes is still text:
+        // H2O, Cu2O, CaCO3 should keep editable runs with subscript/superscript
+        // instead of becoming an HWP equation. Equation materialization is reserved
+        // for clusters that need equation semantics: arrows, answer boxes, or
+        // reaction-like operators.
+        if (!canEmitChemicalFormulaTextEquation(mathRuns)) return false;
+        String script = buildPositionedFormulaScript(mathRuns);
+        if (script == null || script.trim().isEmpty()) return false;
+        ASTEquation eq = new ASTEquation(stripChemicalFormulaInnerSpaces(script), "CHEM_FORMULA");
+        applyTextDerivedEquationHints(eq, mathRuns);
+        para.addItem(eq);
+        return true;
+    }
+
+    private static boolean canEmitChemicalFormulaTextEquation(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null || mathRuns.isEmpty()) return false;
+        boolean hasFormulaEvidence = false;
+        StringBuilder script = new StringBuilder();
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) return false;
+            if (run.isBTFont() || run.grepMathFont() || run.isEHFont() || run.isNPFont()) {
+                hasFormulaEvidence = true;
+            }
+            String text = normalizeFormulaRunText(run);
+            if (text.isEmpty()) continue;
+            if (!isFormulaEquationText(text)) return false;
+            if (run.isSubscript()) {
+                String sub = stripFormulaScriptSpaces(text);
+                if (!sub.isEmpty()) script.append("_{").append(sub).append("}");
+            } else if (run.isSuperscript()) {
+                String sup = stripFormulaScriptSpaces(text);
+                if (!sup.isEmpty()) script.append("^{").append(sup).append("}");
+            } else {
+                script.append(text);
+            }
+        }
+        if (!hasFormulaEvidence || !isChemicalFormulaElementSequence(script.toString())) return false;
+        return hasReactionEquationEvidence(mathRuns);
     }
 
     /**
@@ -607,6 +856,7 @@ public class ASTMathGrouper {
         boolean hasPositionedRun = false;
         boolean hasFormulaOperator = false;
         boolean hasAnswerBox = false;
+        boolean hasArrow = false;
         int visibleChars = 0;
         for (IDMLCharacterRun run : mathRuns) {
             if (run == null) return false;
@@ -617,10 +867,39 @@ public class ASTMathGrouper {
             if (containsAsciiLetter(normalized)) hasFormulaLetter = true;
             if (run.isSubscript() || run.isSuperscript()) hasPositionedRun = true;
             if (containsFormulaOperator(normalized)) hasFormulaOperator = true;
+            if (normalized.indexOf('\u2192') >= 0 || "rarrow".equalsIgnoreCase(normalized.trim())) hasArrow = true;
             if (normalized.indexOf('\u25A1') >= 0) hasAnswerBox = true;
         }
         if (!hasFormulaLetter || visibleChars == 0 || visibleChars > 96) return false;
-        return hasPositionedRun || hasFormulaOperator || hasAnswerBox;
+        if (hasAnswerBox || hasArrow) return true;
+        if (!hasFormulaOperator) return false;
+        // A positioned run plus a reaction/operator context is equation-worthy;
+        // positioned runs alone are text character attributes.
+        return hasPositionedRun || hasFormulaOperator;
+    }
+
+    private static boolean hasReactionEquationEvidence(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null || mathRuns.isEmpty()) return false;
+        boolean hasOperator = false;
+        boolean hasArrow = false;
+        boolean hasBox = false;
+        boolean hasPositioned = false;
+        boolean hasFormulaLetter = false;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) continue;
+            String normalized = normalizeFormulaRunText(run);
+            if (normalized == null || normalized.isEmpty()) continue;
+            if (containsAsciiLetter(normalized)) hasFormulaLetter = true;
+            if (run.isSubscript() || run.isSuperscript()) hasPositioned = true;
+            if (containsFormulaOperator(normalized)) hasOperator = true;
+            if (normalized.indexOf('\u2192') >= 0 || normalized.toLowerCase(java.util.Locale.ROOT).contains("rarrow")) {
+                hasArrow = true;
+            }
+            if (normalized.indexOf('\u25A1') >= 0) hasBox = true;
+        }
+        if (!hasFormulaLetter) return false;
+        if (hasArrow || hasBox) return true;
+        return hasOperator && hasPositioned;
     }
 
     private static String buildPositionedFormulaScript(List<IDMLCharacterRun> mathRuns) {
@@ -644,7 +923,16 @@ public class ASTMathGrouper {
         script = script.replaceAll("\\s*\\+\\s*", "+");
         script = script.replaceAll("(?i)\\s*rarrow\\s*", " rarrow ");
         script = script.replaceAll("\\s*->\\s*", " rarrow ");
+        if (isChemicalFormulaElementSequence(script)) {
+            script = stripChemicalFormulaInnerSpaces(script);
+        }
         return script;
+    }
+
+    public static boolean isChemicalFormulaTextRun(IDMLCharacterRun run) {
+        if (run == null) return false;
+        if (!(run.isBTFont() || run.grepMathFont() || run.isEHFont() || run.isNPFont())) return false;
+        return isChemicalFormulaElementSequence(normalizeFormulaRunText(run));
     }
 
     private static String normalizeFormulaRunText(IDMLCharacterRun run) {
@@ -707,6 +995,80 @@ public class ASTMathGrouper {
 
     private static boolean isAsciiLetter(char c) {
         return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    }
+
+    private static boolean isChemicalFormulaElementSequence(String script) {
+        String token = chemicalFormulaToken(script);
+        if (token.isEmpty()) return false;
+        int i = 0;
+        int elements = 0;
+        boolean hasDigit = false;
+        while (i < token.length() && Character.isDigit(token.charAt(i))) {
+            hasDigit = true;
+            i++;
+        }
+        while (i < token.length()) {
+            char c = token.charAt(i);
+            if (c < 'A' || c > 'Z') return false;
+            String one = String.valueOf(c);
+            String symbol = one;
+            int nextIndex = i + 1;
+            if (nextIndex < token.length()) {
+                char next = token.charAt(nextIndex);
+                if (next >= 'a' && next <= 'z') {
+                    String two = "" + c + next;
+                    if (isChemicalElement(two)) {
+                        symbol = two;
+                        nextIndex++;
+                    }
+                }
+            }
+            if (!isChemicalElement(symbol)) return false;
+            elements++;
+            i = nextIndex;
+            while (i < token.length() && Character.isDigit(token.charAt(i))) {
+                hasDigit = true;
+                i++;
+            }
+        }
+        return elements > 0 && (hasDigit || elements >= 2);
+    }
+
+    private static String chemicalFormulaToken(String script) {
+        if (script == null || script.isEmpty()) return "";
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (Character.isWhitespace(c)
+                    || c == '\u2005' || c == '\u2007' || c == '\u2009' || c == '\u200A'
+                    || c == '_' || c == '^' || c == '{' || c == '}') {
+                continue;
+            }
+            if (Character.isDigit(c) || isAsciiLetter(c)) {
+                out.append(c);
+                continue;
+            }
+            return "";
+        }
+        return out.toString();
+    }
+
+    private static String stripChemicalFormulaInnerSpaces(String script) {
+        return script == null ? "" : script.replaceAll("\\s+", "");
+    }
+
+    private static boolean isChemicalElement(String symbol) {
+        if (symbol == null) return false;
+        switch (symbol) {
+            case "H": case "He": case "Li": case "Be": case "B": case "C":
+            case "N": case "O": case "F": case "Ne": case "Na": case "Mg":
+            case "Al": case "Si": case "P": case "S": case "Cl": case "Ar":
+            case "K": case "Ca": case "Fe": case "Cu": case "Zn": case "Ag":
+            case "I": case "Ba": case "Pt": case "Au": case "Hg": case "Pb":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static boolean isBtArrowGlyphRun(IDMLCharacterRun run) {
@@ -847,6 +1209,9 @@ public class ASTMathGrouper {
     private static ASTTextRun textRunFromMathRun(IDMLCharacterRun run, String text) {
         ASTTextRun textRun = new ASTTextRun();
         copyMathRunTextStyle(run, textRun, text);
+        if (isChemicalFormulaElementSequence(text)) {
+            textRun.grepMathFont(true);
+        }
         return textRun;
     }
 
@@ -934,7 +1299,7 @@ public class ASTMathGrouper {
             return;
         }
         String hwpScript = PatternEquationConverter.convert(patternRuns);
-        if (hwpScript != null) {
+        if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, patternRuns)) {
             // 수식 폰트 등록 (동적 학습)
             for (IDMLCharacterRun run : patternRuns) {
                 if (run.fontFamily() != null) {
@@ -1022,7 +1387,7 @@ public class ASTMathGrouper {
                     if (!before.isEmpty()) {
                         before = splitLeadingNumber(before, para);
                         if (!before.isEmpty()) {
-                            para.addItem(new ASTEquation(before, "EH_FONT"));
+                            addEquationOrTextFallback(before, "EH_FONT", para);
                         }
                     }
                 }
@@ -1056,13 +1421,42 @@ public class ASTMathGrouper {
             if (!rest.isEmpty()) {
                 rest = splitLeadingNumber(rest, para);
                 if (!rest.isEmpty()) {
-                    para.addItem(new ASTEquation(rest, "EH_FONT"));
+                    addEquationOrTextFallback(rest, "EH_FONT", para);
                 }
             }
         } else if (lastSplit == 0) {
             // 원문자 없음 → 전체 수식
-            para.addItem(new ASTEquation(hwpScript, "EH_FONT"));
+            addEquationOrTextFallback(hwpScript, "EH_FONT", para);
         }
+    }
+
+    private static void addEquationOrTextFallback(String script, String sourceType, ASTParagraph para) {
+        if (shouldEmitConvertedEquation(script, null)) {
+            para.addItem(new ASTEquation(script, sourceType));
+            return;
+        }
+        ASTTextRun textRun = new ASTTextRun();
+        textRun.text(FormulaClassifier.hwpScriptFallbackText(script));
+        para.addItem(textRun);
+    }
+
+    private static boolean shouldEmitConvertedEquation(String script, List<IDMLCharacterRun> mathRuns) {
+        return FormulaClassifier.shouldEmitConvertedEquation(
+                script,
+                containsEncodedMathEvidence(mathRuns));
+    }
+
+    private static boolean containsEncodedMathEvidence(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null) return false;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null || run.content() == null) continue;
+            String text = run.content();
+            if (EHFontGlyphMap.containsEHEncodedChars(text)
+                    || EHFontGlyphMap.containsEHFractionPattern(text)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }

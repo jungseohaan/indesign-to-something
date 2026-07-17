@@ -78,6 +78,7 @@ public final class OwnershipPlanner {
     private void run() {
         timed("importPreplannedObjectPlans", this::importPreplannedObjectPlans);
         timed("ensureImportedInlineTextFramePlans", this::ensureImportedInlineTextFramePlans);
+        timed("ensurePngOwnedChildMarkerTextFramePlans", this::ensurePngOwnedChildMarkerTextFramePlans);
         timed("planRenderedItems", this::planRenderedItems);
         timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
         timed("planNativeParentTextShells", this::planNativeParentTextShells);
@@ -491,6 +492,42 @@ public final class OwnershipPlanner {
                 tf.layerName(),
                 tf.layerIndex()));
         return true;
+    }
+
+    private void ensurePngOwnedChildMarkerTextFramePlans() {
+        if (data == null) return;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (tf == null || tf.id() == null) continue;
+            int domId = parseInt(tf.id(), -1);
+            if (domId < 0) continue;
+            if (!isPngOwnedChildMarkerTextFrame(tf, domId)) continue;
+            if (hasTextSlotDecisionForTextFrame(domId)) continue;
+            plans.add(new ObjectPlan(
+                    domId,
+                    "text_frame:png_owned_child_marker",
+                    tf.pageIndex(),
+                    TextAction.OWNED_BY_PNG,
+                    VisualAction.DROP_VISUAL,
+                    VisualLayer.CONTENT_VISUAL,
+                    Placement.FLOATING,
+                    null,
+                    new int[] { domId },
+                    new int[] { domId },
+                    new int[0],
+                    new int[] { domId },
+                    new int[0],
+                    "p" + tf.pageIndex() + ":tf:" + domId,
+                    Materialization.HWPX_TEXT,
+                    CoordinateSpace.PAGE,
+                    null,
+                    textFrameSourceZOrder(tf),
+                    "child_marker_text_owned_by_png_carrier",
+                    null,
+                    textFramePlanBounds(tf, domId, false),
+                    tf.layerId(),
+                    tf.layerName(),
+                    tf.layerIndex()));
+        }
     }
 
     private boolean hasTextSlotDecisionForTextFrame(int textFrameId) {
@@ -2695,6 +2732,8 @@ public final class OwnershipPlanner {
                 textAction = TextAction.DROP_TEXT;
             } else if (data.isTextOwnedByIndesignPng(tf.id())) {
                 textAction = TextAction.OWNED_BY_PNG;
+            } else if (isPngOwnedChildMarkerTextFrame(tf, domId)) {
+                textAction = TextAction.OWNED_BY_PNG;
             } else {
                 textAction = TextAction.OWNED_BY_HWPX_TEXT;
             }
@@ -2759,6 +2798,42 @@ public final class OwnershipPlanner {
                     tf.layerName(),
                     tf.layerIndex()));
         }
+    }
+
+    private boolean isPngOwnedChildMarkerTextFrame(ResolvedTextFrame tf, int domId) {
+        if (tf == null || data == null || domId < 0) return false;
+        if (tf.sourceHidden() || tf.isInline()) return false;
+        if (tf.previousFrameId() != null || tf.nextFrameId() != null) return false;
+        if (!isSimplePngOwnedMarkerText(normalizeResolvedVisibleText(visibleText(tf)))) return false;
+        ResolvedPageItem textItem = data.getPageItem(tf.id());
+        if (textItem == null || textItem.parentId() == null || textItem.parentId().isBlank()) return false;
+        ResolvedPageItem parent = data.getPageItem(textItem.parentId());
+        if (!isVisibleGraphicCarrierForChildMarker(parent, domId)) return false;
+        if (!boundsContainCenter(pageRelativeBoundsOf(parent), textFramePlanBounds(tf, domId, false))) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isSimplePngOwnedMarkerText(String text) {
+        if (text == null || text.isEmpty() || text.length() > 2) return false;
+        if (text.chars().allMatch(Character::isDigit)) return true;
+        return text.matches("[가-하ㄱ-ㅎ]");
+    }
+
+    private boolean isVisibleGraphicCarrierForChildMarker(ResolvedPageItem parent, int childTextFrameId) {
+        if (parent == null || parent.sourceHidden() || parent.hiddenByParent() || !parent.visible()) {
+            return false;
+        }
+        if (parent.isInline()) return false;
+        String type = safe(parent.type());
+        if (!("Oval".equals(type) || "Rectangle".equals(type) || "Polygon".equals(type))) {
+            return false;
+        }
+        if (parent.childIds() != null && contains(parent.childIds(), childTextFrameId)) {
+            return true;
+        }
+        return sourceItemHasVisibleShellMaterial(parent);
     }
 
     private boolean hasHwpxTextOwnerForTextFrame(int textFrameId) {

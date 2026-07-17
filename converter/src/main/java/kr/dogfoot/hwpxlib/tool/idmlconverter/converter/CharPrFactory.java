@@ -4,6 +4,10 @@ import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.CharPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.RunItem;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.TItem;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.t.NormalText;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
@@ -42,12 +46,27 @@ final class CharPrFactory {
         if (text == null || text.isEmpty()) return;
 
         String charPrId = defaultCharPrId;
+        String inheritedCharPrId = lastNonDefaultTextColorCharPrIDRef(para, defaultCharPrId);
 
         // CharacterStyle 이름에서 밑줄 추론 (AST에서 설정되지 않은 경우)
         if (!textRun.underline() && textRun.characterStyleRef() != null) {
             String csRef = textRun.characterStyleRef();
             if (csRef.contains("밑줄") || csRef.toLowerCase().contains("underline")) {
                 textRun.underline(true);
+            }
+        }
+
+        if (isFormulaBoundaryText(text)) {
+            String boundaryCharPrId = lastBodyTextCharPrIDRef(para, inheritedCharPrId);
+            String inheritedColor = charPrTextColor(boundaryCharPrId);
+            if (inheritedColor != null && !inheritedColor.isEmpty() && !isDefaultBlack(inheritedColor)
+                    && (textRun.textColor() == null
+                        || textRun.textColor().isEmpty()
+                        || isDefaultBlack(textRun.textColor()))) {
+                Run run = para.addNewRun();
+                run.charPrIDRef(boundaryCharPrId);
+                run.addNewT().addText(text);
+                return;
             }
         }
 
@@ -62,9 +81,13 @@ final class CharPrFactory {
             if (mapped != null) charPrId = mapped;
         }
 
-        // 수식 폰트(NP_, BT수식, GREP 해석) → 밑줄 + 초록색 스타일
-        if (isEquationFontCached(textRun.fontFamily()) || textRun.grepMathFont()) {
-            charPrId = createEquationFontCharPr(textRun, charPrId);
+        // 수식 폰트(NP_, BT수식, GREP 해석) → 수식 전용 CharPr.
+        // 단, BT수식H 계열이 일반 한국어 문장 run에 묻어 들어오는 경우가 있다.
+        // 이때까지 수식 CharPr로 덮어쓰면 8pt 본문이 10pt 수식 스타일로 커진다.
+        // 실제 수식 구조가 없는 prose run은 앞단에서 정한 본문 CharPr를 그대로 실행한다.
+        if ((isEquationFontCached(textRun.fontFamily()) || textRun.grepMathFont())
+                && shouldUseEquationFontCharPr(textRun)) {
+            charPrId = createEquationFontCharPr(textRun, inheritedCharPrId);
         }
 
         // 공백 문자를 별도 런으로 분리하여 장평(ratio) 축소 적용
@@ -245,6 +268,10 @@ final class CharPrFactory {
         String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
         String fontFamilyToUse = textRun.fontFamily();
         Short letterSpacingToUse = textRun.letterSpacing();
+        if (fontFamilyToUse != null && fontFamilyToUse.contains("BT수식H")
+                && isPlainKoreanProse(textRun.text())) {
+            fontFamilyToUse = null;
+        }
 
         // SPEC-031: DSL char rule 적용
         kr.dogfoot.hwpxlib.tool.idmlconverter.rule.RuleContext ruleCtx =
@@ -375,10 +402,61 @@ final class CharPrFactory {
                 || EHFontGlyphMap.isEHFontFamily(fontFamily);
     }
 
+    private static boolean shouldUseEquationFontCharPr(ASTTextRun textRun) {
+        if (textRun == null) return false;
+        String fontFamily = textRun.fontFamily();
+        String text = textRun.text();
+
+        if (fontFamily != null && fontFamily.contains("BT수식H") && isPlainKoreanProse(text)) {
+            return false;
+        }
+        if (fontFamily != null && fontFamily.contains("BT수식H") && text != null && containsHangul(text)
+                && !containsEquationSyntax(text)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isPlainKoreanProse(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        if (!containsHangul(text)) return false;
+        return !containsEquationSyntax(text);
+    }
+
+    private static boolean containsHangul(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= '\uAC00' && c <= '\uD7A3')
+                    || (c >= '\u1100' && c <= '\u11FF')
+                    || (c >= '\u3130' && c <= '\u318F')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsEquationSyntax(String text) {
+        if (text == null) return false;
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains(" over ") || lower.contains("sqrt") || lower.contains("root")
+                || lower.contains("rarrow") || lower.contains("overline")) {
+            return true;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ("=+*/<>≤≥±×÷√²³^_π∑∫∞{}[]".indexOf(c) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
+        String textColor = equationFontTextColor(textRun, baseCharPrId);
         String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
                 + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
-                + "|" + (textRun.textColor() != null ? textRun.textColor() : "")
+                + "|" + (textColor != null ? textColor : "")
                 + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "");
         String cached = ctx.eqFontCharPrCache.get(cacheKey);
         if (cached != null) return cached;
@@ -387,7 +465,6 @@ final class CharPrFactory {
         CharPr charPr = ctx.hwpxFile.headerXMLFile().refList().charProperties().addNew();
 
         int height = textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : 1000;
-        String textColor = textRun.textColor() != null ? textRun.textColor() : "#000000";
         String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
 
         CharPrBuilder.build(charPr, newId, height, textColor,
@@ -405,5 +482,155 @@ final class CharPrFactory {
 
         ctx.eqFontCharPrCache.put(cacheKey, newId);
         return newId;
+    }
+
+    private String equationFontTextColor(ASTTextRun textRun, String baseCharPrId) {
+        String sourceColor = textRun.textColor();
+        if (sourceColor != null && !sourceColor.isEmpty() && !isDefaultBlack(sourceColor)) {
+            return sourceColor;
+        }
+        String inherited = charPrTextColor(baseCharPrId);
+        if (inherited != null && !inherited.isEmpty()) {
+            return inherited;
+        }
+        return sourceColor != null && !sourceColor.isEmpty() ? sourceColor : "#000000";
+    }
+
+    private static String lastCharPrIDRef(Para para, String fallback) {
+        if (para == null || para.runs() == null) return fallback;
+        String last = fallback;
+        for (Run run : para.runs()) {
+            if (run != null && run.charPrIDRef() != null && !run.charPrIDRef().isEmpty()) {
+                last = run.charPrIDRef();
+            }
+        }
+        return last;
+    }
+
+    private String lastNonDefaultTextColorCharPrIDRef(Para para, String fallback) {
+        if (para == null || para.runs() == null) return fallback;
+        String last = null;
+        for (Run run : para.runs()) {
+            if (run == null || run.charPrIDRef() == null || run.charPrIDRef().isEmpty()) {
+                continue;
+            }
+            String color = charPrTextColor(run.charPrIDRef());
+            if (color != null && !color.isEmpty() && !isDefaultBlack(color)) {
+                last = run.charPrIDRef();
+            }
+        }
+        return last != null ? last : lastCharPrIDRef(para, fallback);
+    }
+
+    private String lastBodyTextCharPrIDRef(Para para, String fallback) {
+        if (para == null || para.runs() == null) return fallback;
+        String last = null;
+        for (Run run : para.runs()) {
+            if (run == null || run.charPrIDRef() == null || run.charPrIDRef().isEmpty()) {
+                continue;
+            }
+            String text = runText(run);
+            if (text == null || text.trim().isEmpty()) {
+                continue;
+            }
+            String trimmed = text.trim();
+            if (isStandaloneUnicodeRomanNumeral(trimmed) || containsAsciiLetterOrDigit(trimmed)) {
+                continue;
+            }
+            String color = charPrTextColor(run.charPrIDRef());
+            if (color != null && !color.isEmpty() && !isDefaultBlack(color)) {
+                last = run.charPrIDRef();
+            }
+        }
+        return last != null ? last : fallback;
+    }
+
+    private static String runText(Run run) {
+        if (run == null) return null;
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < run.countOfRunItem(); i++) {
+            RunItem item = run.getRunItem(i);
+            if (!(item instanceof T)) {
+                continue;
+            }
+            T t = (T) item;
+            if (t.onlyText() != null) {
+                out.append(t.onlyText());
+                continue;
+            }
+            for (int j = 0; j < t.countOfItems(); j++) {
+                TItem tItem = t.getItem(j);
+                if (tItem instanceof NormalText && ((NormalText) tItem).text() != null) {
+                    out.append(((NormalText) tItem).text());
+                }
+            }
+        }
+        return out.length() > 0 ? out.toString() : null;
+    }
+
+    private static boolean isStandaloneUnicodeRomanNumeral(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!((c >= '\u2160' && c <= '\u216F') || (c >= '\u2170' && c <= '\u217F'))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean containsAsciiLetterOrDigit(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String charPrTextColor(String id) {
+        if (id == null || id.isEmpty() || ctx == null || ctx.hwpxFile == null
+                || ctx.hwpxFile.headerXMLFile() == null
+                || ctx.hwpxFile.headerXMLFile().refList() == null
+                || ctx.hwpxFile.headerXMLFile().refList().charProperties() == null) {
+            return null;
+        }
+        for (CharPr charPr : ctx.hwpxFile.headerXMLFile().refList().charProperties().items()) {
+            if (charPr != null && id.equals(charPr.id())) {
+                return charPr.textColor();
+            }
+        }
+        return null;
+    }
+
+    private static boolean isFormulaBoundaryText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean hasBoundary = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c)
+                    || c == '\u2005'
+                    || c == '\u2007'
+                    || c == '\u2009'
+                    || c == '\u200A') {
+                continue;
+            }
+            if (c == '(' || c == ')' || c == '[' || c == ']'
+                    || c == '{' || c == '}' || c == ',' || c == '.') {
+                hasBoundary = true;
+                continue;
+            }
+            return false;
+        }
+        return hasBoundary;
+    }
+
+    private static boolean isDefaultBlack(String color) {
+        if (color == null) return false;
+        String normalized = color.trim();
+        return "#000000".equalsIgnoreCase(normalized)
+                || "000000".equalsIgnoreCase(normalized);
     }
 }

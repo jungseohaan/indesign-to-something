@@ -702,6 +702,12 @@ public final class ResolvedBuildContext {
         return null;
     }
 
+    public boolean isTextFrameOwnedByPngPlan(String textFrameId) {
+        if (textFrameId == null || textFrameId.isEmpty()) return false;
+        ObjectPlan plan = findAnyTextFrameOwnershipPlan(textFrameId);
+        return plan != null && plan.textAction == TextAction.OWNED_BY_PNG;
+    }
+
     private ObjectPlan findAnyTextFrameOwnershipPlanByKey(String textFrameId) {
         if (textFrameId == null || textFrameId.isEmpty()) return null;
         ObjectPlan fallback = null;

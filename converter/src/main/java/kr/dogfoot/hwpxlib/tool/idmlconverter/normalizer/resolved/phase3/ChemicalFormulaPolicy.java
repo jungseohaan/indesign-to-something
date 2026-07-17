@@ -7,32 +7,20 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import java.util.List;
 
 /**
- * 화학 반응식을 HWP 수식이 아닌 일반 텍스트로 처리하는 정책.
+ * 화학 반응식 판정과 화살표 글리프 정규화 정책.
  *
- * <p><b>왜 텍스트인가</b><br>
- * 화학식을 ASTEquation(HWP 수식)으로 내보내면, 한글 수식 편집기가 BT 계열
- * 수식 폰트(BT수식H-분수N 등)의 글리프를 렌더링하지 못해 깨진 글자가 표시된다.
- * 과학 교과서 p20의 "2Mg + O₂ → 2MgO" 가 "갤 → 갤" 로 보이는 현상이 그것이다.
- * 수식 스크립트 자체(<code>2 Mg+O_{2} rarrow 2 MgO</code>)는 문법적으로 옳았지만,
- * 한글이 그 안의 폰트를 처리하지 못했다.
- *
- * <p>화학식에는 분수/루트/시그마/적분 같은 수학적 구조가 없다. "원소기호 +
- * 아래첨자 숫자 + 연산자(+)/화살표(→)" 뿐이므로, 일반 텍스트 런과 아래첨자
- * 속성만으로 온전히 표현할 수 있다.
- *
- * <p><b>왜 문단 단위인가</b><br>
- * 개별 런이나 수식 그룹 단위로 텍스트화하면 한 화학식이 여러 조각으로 파편화된다
- * (실제 회귀: '(CH', '(O', '_{3}+2 HCl', 단위 'g'/'mL' 이 개별 수식으로 분리).
- * 런은 이미 아래첨자 경계로 잘게 쪼개져 들어오기 때문에, 반드시 문단 전체를 보고
- * 판정한 뒤 그 문단의 수식 런을 통째로 텍스트로 강등해야 한다.
+ * <p>화학식은 일반 텍스트 첨자 보정으로 강등하지 않고
+ * {@code ASTEquation("CHEM_FORMULA")}으로 닫는다. 이 클래스는 resolved/IDML 런에
+ * 남아 있는 화학식 증거를 판정하고, BT 화살표 글리프처럼 HWP 수식 스크립트로
+ * 직접 표현해야 하는 기호를 정규화한다.
  *
  * <p><b>보수적 판정</b><br>
- * 수학 수식을 화학식으로 오판하면 수학 교과서가 깨진다. 따라서 아래를 모두
- * 만족할 때만 화학식으로 본다:
+ * 수학 수식을 화학식으로 오판하면 다른 교과서가 깨진다. 따라서 아래를 모두
+ * 만족할 때만 화학식 후보로 본다:
  * <ol>
- *   <li>아래첨자로 조판된 런이 하나 이상 (H₂O 의 2) — 화학식의 결정적 특징</li>
- *   <li>알려진 원소기호(H, O, Mg, Ca, Cl …)가 하나 이상 등장</li>
- *   <li>수학 구조 문자(분수/루트/시그마/적분/등호 등)가 전혀 없음</li>
+ *   <li>수식 폰트/화살표 또는 아래첨자처럼 화학식 조판 증거가 있다.</li>
+ *   <li>알려진 원소기호(H, O, Mg, Ca, Cl …)가 하나 이상 등장한다.</li>
+ *   <li>분수/루트/시그마/적분 같은 수학 구조 문자가 없다.</li>
  * </ol>
  */
 public final class ChemicalFormulaPolicy {
@@ -141,64 +129,6 @@ public final class ChemicalFormulaPolicy {
         return !containsMathStructure(text);
     }
 
-    /**
-     * 화학식 문단의 IDML 런에서 수식 표시를 제거해, 수식 그룹에 모이지 않게 한다.
-     *
-     * <p>화살표 런(@C/?C/C)은 실제 화살표 문자로 바꾼다. 폰트가 BT화살표면 내용은
-     * 무엇이든 화살표이므로, 텍스트 패턴이 아니라 폰트/스타일로 판정한다.
-     * (텍스트 패턴으로 추측하면 접두문자 없는 "C" 를 놓쳐 화살표 자리에 글자 C 가
-     *  그대로 박힌다 — 실제로 'CaO+H₂O C Ca(OH)₂' 로 깨졌다.)
-     */
-    public static void demoteMathRunsToText(List<IDMLCharacterRun> runs) {
-        if (runs == null) return;
-
-        for (IDMLCharacterRun run : runs) {
-            if (run == null) continue;
-
-            // 화살표 런: 텍스트는 IDMLStoryParser 가 파싱 직후 이미 "→" 로 정규화했다.
-            // 여기서는 폰트/스타일만 벗긴다.
-            //
-            // 예전에는 여기서 텍스트도 치환했는데, IDML 런 ↔ resolved 런 매칭이 텍스트
-            // 기준이라 매칭이 어긋나 뒤따르는 글자를 먹었다(실측: "Ca(OH)₂" → "a(OH)₂").
-            // 파싱 단계에서 양쪽(IDML/resolved)을 동시에 정규화하므로 그 문제가 없다.
-            if (isArrowGlyphRun(run)) {
-                run.fontFamily(null);
-                run.fontStyle(null);
-                run.appliedCharacterStyle(null);
-                run.grepMathFont(false);
-                continue;
-            }
-
-            // 수식 폰트/GREP 표시를 벗겨 본문 폰트 매핑을 타게 한다.
-            run.grepMathFont(false);
-            String ff = run.fontFamily();
-            if (ff != null && BTFontGlyphMap.isBTFontFamily(ff)) {
-                run.fontFamily(null);
-                run.fontStyle(null);
-            }
-        }
-    }
-
-    /**
-     * IDML 런에 남아 있는 첨자 근거를 제거한다.
-     *
-     * <p>화학식 문단의 첨자는 resolved 런의 position(NORMAL/SUBSCRIPT)만 신뢰한다.
-     * InDesign DOM 이 실제 조판 상태를 알려준 값이라 정확하기 때문이다:
-     * <pre>
-     *   '2'   NORMAL      ← 계수 (2Mg)
-     *   'O'   NORMAL
-     *   '2'   SUBSCRIPT   ← 아래첨자 (O₂)
-     *   '2'   NORMAL      ← 계수 (2MgO)
-     * </pre>
-     *
-     * <p>반면 IDML 런은 "2Mg + O" / "2" / "@C" / "  2MgO" 처럼 뭉쳐 있고,
-     * 아래첨자 CharacterStyle("00_수식(첨자-하부자)")이 런 분할·상속 과정에서
-     * 이웃 런까지 번진다. 그 상태의 {@link IDMLCharacterRun#isSubscript()} 를 믿으면
-     * 계수 2(2MgO)까지 아래첨자로 작아진다.
-     *
-     * <p>position 과 첨자 CharacterStyle 을 지워, 첨자 판정이 오직 resolved 의
-     * position 에서만 오도록 만든다.
-     */
     /**
      * 화살표 글리프 런을 실제 화살표 문자로 치환한다 — 화학식 여부와 무관하게.
      *

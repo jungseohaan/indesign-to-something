@@ -187,6 +187,7 @@ public class StoryLoader {
 
             appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
             buildParagraphContent(ctx, ip, resolvedParagraph, resolvedRuns, storyId, i, sc, para);
+            MathProcessor.convertMathRunsInParagraph(ctx, para);
 
             paragraphs.add(para);
             ConversionTiming.addCounter("phase3.storyLoader.paragraphs", 1);
@@ -225,6 +226,7 @@ public class StoryLoader {
             // 전처리: 한국어+수식마커 혼합 런 분리 + 원문자 변환
             long runPrepStart = System.nanoTime();
             List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(ip.characterRuns());
+            runs = ASTMathGrouper.splitChemicalFormulaMixedRuns(runs);
             ASTRunConverter.convertCircledNumberRuns(runs);
             addUnderlineBlankTabStop(ctx, storyId, paraIndex, para, runs);
             sc.hasTabStops = para.hasTabStops();
@@ -261,29 +263,6 @@ public class StoryLoader {
                 }
                 if (paraHasMathSymbols) break;
             }
-            // 화학 반응식(2Mg + O2 -> 2MgO)은 HWP 수식으로 만들지 않는다.
-            //
-            // 수식(ASTEquation)으로 내보내면 한글 수식 편집기가 BT 계열 폰트 글리프를
-            // 렌더링하지 못해 깨진 글자("갤")가 표시된다(과학 교과서 p20에서 확인).
-            // 화학식은 분수/루트/시그마 같은 수학적 구조가 없고 "원소기호 + 아래첨자 +
-            // 연산자/화살표" 뿐이라 일반 텍스트 + 아래첨자로 충분히 표현된다.
-            //
-            // 반드시 "문단 단위"로 판정해 그 문단의 BT 런을 통째로 텍스트화한다.
-            // 개별 런/그룹 단위로 빼내면 한 화학식이 여러 조각으로 파편화된다
-            // (예: '(CH', '(O', '_{3}+2 HCl' — 실제로 겪은 회귀).
-            //
-            // 판정은 resolvedRuns 로 한다. 이 시점의 IDML 런에는 아직 폰트/위치가
-            // 붙지 않아(fontFamily=null, position=null) BT 폰트도 아래첨자도 안 보인다.
-            // resolvedRuns 가 null 인 문단(표 형태로 조판된 화학반응식 등)은
-            // IDML 런으로 폴백 판정한다. 실측: 탭 구분 화학식이 resolved 스토리와
-            // 매칭되지 않아 resolvedRuns=NULL 로 들어왔고, 그래서 수식으로 남아 깨졌다.
-            boolean chemicalFormulaPara = resolvedRuns != null
-                    ? ChemicalFormulaPolicy.isChemicalFormulaParagraph(resolvedRuns)
-                    : ChemicalFormulaPolicy.isChemicalFormulaParagraphFromIdml(runs);
-            if (chemicalFormulaPara) {
-                ChemicalFormulaPolicy.demoteMathRunsToText(runs);
-            }
-
             for (IDMLCharacterRun r : runs) {
                 if (r.isBTFont()) paraHasBTRuns = true;
                 if (r.isNPFont()) {
@@ -351,9 +330,7 @@ public class StoryLoader {
                 String _runTxt = run.content();
                 boolean _orcOnly = _runTxt != null && !_runTxt.isEmpty()
                         && _runTxt.replace("￼", "").isEmpty();
-                // 화학식 문단에서는 formula cluster(→ ASTEquation) 경로도 끈다.
-                boolean formulaClusterRun = !chemicalFormulaPara
-                        && ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+                boolean formulaClusterRun = ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
 
                 if (_orcOnly && formulaClusterRun
                         && MathProcessor.isFormulaAnswerPlaceholderRun(ctx, run)) {
@@ -378,11 +355,6 @@ public class StoryLoader {
                 }
 
                 // EH 수식 그룹 진입
-                // 화학식 문단은 어떤 수식 그룹에도 넣지 않는다. EH 그룹에 들어가면
-                // copyMathRunTextStyle 이 IDML 런의 isSubscript()(= CharacterStyle 이름에
-                // "하부자" 포함 여부)를 그대로 복사해, 계수 2 까지 아래첨자가 된다.
-                // (2Mg + O₂ → 2MgO 에서 "2MgO"의 계수 2 가 작아지던 원인)
-                //
                 // "수식" 그룹에 속하지만 실제로는 본문 영문/숫자를 조판하는 스타일은
                 // 수식 그룹을 새로 열지 않는다. 과학 교과서의 "00_수식모음:00_영문bold"
                 // 가 그것으로, 한글 문장 속 원소기호가 이탤릭 수식이 되던 원인이다
@@ -393,7 +365,7 @@ public class StoryLoader {
                 boolean bodyTextGlyphRun = ehMathGroup.isEmpty()
                         && BTFontGlyphMap.isBodyTextGlyphStyle(run.appliedCharacterStyle());
 
-                boolean enterEH = !chemicalFormulaPara && !_orcOnly && !bodyTextGlyphRun
+                boolean enterEH = !_orcOnly && !bodyTextGlyphRun
                         && (run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
@@ -420,7 +392,7 @@ public class StoryLoader {
                 // (실측: 3단원 y=-x²/5 의 x²/5 분수 앵커 프레임). 정상 인라인 배치로 보낸다.
                 // NP 수식 그룹 진입
                 boolean enterNP = false;
-                if (!chemicalFormulaPara && !enterEH && !_orcOnly) {
+                if (!enterEH && !_orcOnly) {
                     enterNP = run.isNPFont()
                             || (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx))
                             || (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx))
@@ -429,15 +401,22 @@ public class StoryLoader {
                                 && ASTMathGrouper.isStandaloneMathRun(run));
                 }
 
-                // BT 수식 그룹 진입
-                // 화학식 문단은 수식으로 만들지 않는다(한글이 BT 글리프를 렌더링 못 해 깨짐).
-                boolean enterBT = false;
-                if (!chemicalFormulaPara && !enterEH && !enterNP && !_orcOnly) {
-                    enterBT = (run.isBTFont()
-                                && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
+	                // BT 수식 그룹 진입
+	                boolean enterBT = false;
+                if (!enterEH && !enterNP && !_orcOnly) {
+                    boolean btBodyTextWithoutFormulaStructure = run.isBTFont()
+                            && BTFontGlyphMap.isBTBodyTextFont(run.fontFamily())
+                            && !formulaClusterRun
+                            && !ASTMathGrouper.isChemicalFormulaTextRun(run)
+                            && !ASTMathGrouper.looksLikeMathRun(run.content());
+                    boolean formulaBoundaryOnly = ASTMathGrouper.isChemicalFormulaBoundaryRun(run);
+                    enterBT = !formulaBoundaryOnly
+                            && ((run.isBTFont()
+                                    && !btBodyTextWithoutFormulaStructure
+                                    && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
                             || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()))
-                            || formulaClusterRun;
+                            || formulaClusterRun);
                 }
 
                 // 실제 인라인 프레임/그래픽 앵커를 가진 run은 어떤 수식 그룹(EH/NP/BT)에도
@@ -657,15 +636,7 @@ public class StoryLoader {
                 ASTTableConverter.reorderInlineObjectsByBoundsX(para);
             }
 
-            // 화학식 문단 마무리 — 화살표 글리프(@C/?C) 치환 + 아래첨자 재계산.
-            //
-            // 이 경로의 문단은 수식 그룹을 타지 않으므로
-            // MathProcessor.convertMathRunsInParagraph 의 화학식 정리를 거치지 않는다.
-            // 그래서 여기서 같은 정리를 직접 적용해야 한다. 빠뜨리면 "@C" 가 화면에
-            // 그대로 노출되고, 계수(2MgO 의 2)가 아래첨자로 작아진다.
-            if (chemicalFormulaPara) {
-                MathProcessor.normalizeChemicalFormulaRuns(para.items());
-            }
+            // 화학식은 MathProcessor.convertMathRunsInParagraph 에서 ASTEquation으로 닫는다.
     }
 
     private static boolean appendAnchorOnlyRunItems(

@@ -201,7 +201,8 @@ public final class StoryConverter {
                     String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
                     if (domId == null) continue;
                     if (isStandaloneBlockTextOwnedByInlineShell(ctx, domId)) continue;
-                    if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) continue;
+                    if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)
+                            || ctx.isTextFrameOwnedByPngPlan(domId)) continue;
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {
                         String storyId = rtf.storyId();
@@ -682,7 +683,8 @@ public final class StoryConverter {
         boolean hasOwnedFrame = false;
         for (ResolvedTextFrame tf : frames) {
             if (tf == null || tf.id() == null) continue;
-            if (!ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return false;
+            if (!ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())
+                    && !ctx.isTextFrameOwnedByPngPlan(tf.id())) return false;
             hasOwnedFrame = true;
         }
         return hasOwnedFrame;
