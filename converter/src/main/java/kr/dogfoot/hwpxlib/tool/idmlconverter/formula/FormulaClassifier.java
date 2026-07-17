@@ -41,7 +41,11 @@ public final class FormulaClassifier {
         if (trimmed.matches("\\d*[A-Za-z]+\\d*") && !containsEquationSyntax(trimmed)) {
             return false;
         }
-        if (trimmed.matches("^[=+*/<>].*") || trimmed.matches(".*[=+*/<>-]$")) {
+        // =/연산자로 시작·끝나는 조각은 보통 수식이 아니지만, 위첨자(^{)·분수(over)·
+        // 루트(sqrt) 같은 구조적 수식 마크업이 있으면 앞 항의 연속(예: (a+4)²=a²+8a+16)
+        // 이므로 수식으로 인정한다(실측: 2단원 =a^{2}+8a+16 이 평문 a² 로 폴백되던 문제).
+        if (!hasStructuralMathMarkup(trimmed)
+                && (trimmed.matches("^[=+*/<>].*") || trimmed.matches(".*[=+*/<>-]$"))) {
             return false;
         }
         if (containsEquationSyntax(trimmed)) return true;
@@ -76,6 +80,19 @@ public final class FormulaClassifier {
         if (chemicalElementSequence && !hasOperator) return false;
 
         return hasOperator && hasChemicalSymbol && (hasPositioned || hasFormulaFontEvidence);
+    }
+
+    /**
+     * 구조적 수식 마크업(위첨자·아래첨자·분수·루트·선분) 포함 여부.
+     * 단순 연산자(=,+,-)만으로는 true가 아니며, HWP 수식 스크립트의 구조 토큰이
+     * 있을 때만 true. =/연산자 시작·끝 조각을 수식으로 살릴지 판단하는 데 쓴다.
+     */
+    private static boolean hasStructuralMathMarkup(String script) {
+        if (script == null) return false;
+        if (script.indexOf("^{") >= 0 || script.indexOf("_{") >= 0) return true;
+        String lower = script.toLowerCase(Locale.ROOT);
+        return lower.contains(" over ") || lower.contains("sqrt")
+                || lower.contains("overline") || lower.contains("root");
     }
 
     public static boolean containsEquationSyntax(String script) {
