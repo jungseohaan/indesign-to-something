@@ -603,13 +603,17 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
     public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
-        // 근호(√) 구조가 포함된 EH 그룹은 화학식 경계 분할을 건너뛴다.
-        // radicand 안의 괄호(예: √(1/2)²)의 ")" 가 isChemicalFormulaBoundaryRun 으로
-        // 감지돼 그룹이 통째로 쪼개지면 sqrt 구조가 파괴된다(실측: 1단원 p18 (√10)²,
-        // (-√(3/4))²). 근호 마커가 있으면 EHFontEquationConverter 가 스택 기반으로
-        // 괄호/근호를 온전히 처리하도록 그대로 넘긴다.
-        boolean hasSqrtStructure = containsEHSqrtMarker(ehRuns);
-        if (!hasSqrtStructure) {
+        // 근호(√)·GREP 분수 구조가 포함된 EH 그룹은 화학식 경계 분할을 건너뛴다.
+        // - 근호: radicand 안의 괄호(예: √(1/2)²)의 ")" 가 isChemicalFormulaBoundaryRun
+        //   으로 감지돼 그룹이 통째로 쪼개지면 sqrt 구조가 파괴된다(실측: 1단원 p18
+        //   (√10)², (-√(3/4))²).
+        // - GREP 분수: ";2!;, -0.1, -;3%;" 처럼 분수(;...;)와 일반 텍스트가 섞인 런은
+        //   ","·"-"·약물 폰트 때문에 화학식으로 오인돼, GREP 분수를 디코딩 못 한 채
+        //   ";2!;" 원문이 그대로 노출된다(실측: 1단원 p23 "정수가 아닌 유리수").
+        // 두 경우 모두 EHFontEquationConverter 가 온전히 처리하므로 그대로 넘긴다.
+        boolean hasEHEquationStructure = containsEHSqrtMarker(ehRuns)
+                || containsEHGrepFraction(ehRuns);
+        if (!hasEHEquationStructure) {
             if (emitPositionedFormulaEquation(ehRuns, para, "CHEM_FORMULA")) {
                 return;
             }
@@ -678,6 +682,25 @@ public class ASTMathGrouper {
             if (EHFontGlyphMap.isRootFont(ff)) return true;
             if (EHFontGlyphMap.isFractionNumeratorFont(ff)
                     && EHFontGlyphMap.isFractionBarDecoration(run.content())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * EH 그룹에 GREP 분수 패턴(;...;)이 있는지 확인.
+     *
+     * <p>";2!;"(=1/2), "-;3%;"(=-3/5) 같은 GREP 분수는 EHFontEquationConverter 만
+     * 디코딩할 수 있다. 이런 패턴이 일반 텍스트("-0.1", ",")·약물 폰트와 섞인 런은
+     * ","·"-" 때문에 화학식으로 오인돼 GREP 분수가 원문 그대로 노출되므로, 화학식
+     * 경계 분할({@link #emitBoundaryAwareChemicalFormulaGroup})을 건너뛰어야 한다.
+     */
+    private static boolean containsEHGrepFraction(List<IDMLCharacterRun> ehRuns) {
+        if (ehRuns == null) return false;
+        for (IDMLCharacterRun run : ehRuns) {
+            if (run == null) continue;
+            if (EHFontGlyphMap.containsEHFractionPattern(run.content())) {
                 return true;
             }
         }
