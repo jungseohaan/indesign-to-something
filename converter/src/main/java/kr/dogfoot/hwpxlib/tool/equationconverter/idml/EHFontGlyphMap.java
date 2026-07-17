@@ -297,6 +297,7 @@ public class EHFontGlyphMap {
             switch (c) {
                 case 'µ': sb.append('⌒'); break;   // ⌒ 호(arc)
                 case 'ª': sb.append('≡'); break;   // ≡ 합동(equiv)
+                case 'p': sb.append('π'); break;   // π 원주율(실측: 1단원 -π, π+1, 2<π)
                 case '`': break;                        // 위첨자 마커 → 제거
                 default:
                     // 매핑 없는 확장 문자(0x80+ 장식/미지 글리프)는 제거,
@@ -826,8 +827,14 @@ public class EHFontGlyphMap {
      */
     public static String decodeText(String text, String fontFamily) {
         if (text == null || text.isEmpty()) return text;
-        if (isSuperscriptFont(fontFamily) || isSubscriptFont(fontFamily)
-                || isChemicalFont(fontFamily)) {
+        if (isChemicalFont(fontFamily)) {
+            // EH약물 전용 글리프: p(0x70) → π. 약물 폰트에서만 π 이며(실측: 1단원
+            // -π, π+1, 2<π 등 모두 원주율), 다른 EH 폰트의 p 는 변수이므로 여기서만
+            // 치환한다. decodeSubSupText 는 매핑 없는 0x80+ 문자를 버리므로, π(U+03C0)
+            // 는 디코딩 이후에 넣는다. 나머지 글리프는 공용 상부자/하부자 매핑을 따른다.
+            return decodeSubSupText(text).replace('p', 'π');
+        }
+        if (isSuperscriptFont(fontFamily) || isSubscriptFont(fontFamily)) {
             return decodeSubSupText(text);
         }
         if (isFractionFont(fontFamily)) {
