@@ -105,6 +105,9 @@ public final class ResolvedTextFlowAstConverter {
         // (본문·테이블 셀·인라인 프레임)가 이 메서드를 거치므로 여기서 공통 디코딩한다.
         runText = kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap
                 .decodeStrayGlyphText(runText, run.fontFamily());
+        // EH thin space 마커 백틱(`)이 일반 텍스트로 새면 콤마·따옴표처럼 노출된다.
+        // 숫자·연산자 사이 백틱만 가는 공백(U+2009)으로 치환(실측: 1단원 1`:`√2, 290`K).
+        runText = ASTRunConverter.replaceEHThinSpaceBacktick(runText);
         if (opts.truncateAtParagraphBreak) {
             int crIdx = runText.indexOf('\r');
             if (crIdx >= 0) {

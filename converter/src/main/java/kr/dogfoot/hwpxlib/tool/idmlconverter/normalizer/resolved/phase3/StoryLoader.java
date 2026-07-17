@@ -422,7 +422,29 @@ public class StoryLoader {
                 // 실제 인라인 프레임/그래픽 앵커를 가진 run은 어떤 수식 그룹(EH/NP/BT)에도
                 // 넣지 않는다. 넣으면 앵커(U+FFFC)가 수식 스크립트/□ 로 뭉개져 프레임이
                 // 유실된다(실측: 3단원 y=-x²/5 의 x²/5 분수 앵커). 정상 인라인 배치로 보낸다.
-                if ((run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                //
+                // 예외: EH 근호 그룹이 열려 있고 앵커가 색 없는 투명 스페이서
+                // Rectangle 뿐이면, radicand 를 근호에 넣어야 한다(실측: 1단원 p22
+                // √15, √0.81, √(9/144) — √ 갈고리는 EH분수대문자 텍스트, radicand 는
+                // 텍스트, 항 사이 간격은 baseline 근처의 색 없는 고정폭(28.3pt)
+                // Rectangle 로 조판). 이 Rectangle 은 이미지·텍스트가 없어 인라인
+                // 배치 대상이 아니다. FFFC 위치는 그 근호의 radicand 종료 경계이자 항
+                // 간격 자리이므로, 지우지 않고 센티넬(U+241C)로 바꿔 EH 수식 변환기가
+                // (1) 인접한 다음 근호와 radicand 를 섞지 않고 (2) 그 자리에 항 간격을
+                // 넣게 한다.
+                boolean anchorIsVinculumOnly = enterEH
+                        && !ehMathGroup.isEmpty()
+                        && EHFontGlyphMap.isFractionNumeratorFont(
+                                ehMathGroup.get(ehMathGroup.size() - 1).fontFamily())
+                        && (run.inlineFrames() == null || run.inlineFrames().isEmpty())
+                        && allInlineGraphicsAreVinculum(run);
+                if (anchorIsVinculumOnly) {
+                    if (run.content() != null) {
+                        run.content(run.content().replace('\uFFFC', '\u241C'));
+                    }
+                    run.inlineGraphics().clear();
+                    if (run.inlineAnchors() != null) run.inlineAnchors().clear();
+                } else if ((run.inlineFrames() != null && !run.inlineFrames().isEmpty())
                         || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty())) {
                     enterEH = false;
                     enterNP = false;
@@ -506,13 +528,28 @@ public class StoryLoader {
                             }
                             partText = normalizeLeadingTabAfterLeadingInlineObjects(para, partText);
                             if (!partText.isEmpty()) {
+                                // ;...; 분수 GREP 패턴이 있으면 분수 수식으로 먼저 분리한다
+                                // (실측: 1단원 p26 "⑶ ;2%; □ √8"의 5/2 분수). resolved 스타일
+                                // 분할(splitIdmlRunByResolvedRuns)이 세미콜론을 런 경계로 잘라
+                                // ";2%;"→"2%" 로 만들면 분수 패턴이 깨지므로, 그 전에 처리한다.
+                                // 텍스트 조각만 처리하고, 뒤따르는 인라인 앵커(빈 답란 □)는
+                                // 아래 공통 블록이 그대로 이어서 배치한다.
+                                boolean handledAsFraction = false;
+                                if (EHFontGlyphMap.containsEHFractionPattern(partText)) {
+                                    ResolvedRun fracRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
+                                    if (fracRR != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
+                                    ASTTextRun fracTemplate = RunBuilder.createRunFromIDML(ctx, run, partText,
+                                            fracRR != null ? fracRR : defaultRR, sc, MatchConfidence.LOW);
+                                    MathProcessor.splitFractionPatternInText(ctx, partText, fracTemplate, para);
+                                    handledAsFraction = true;
+                                }
                                 // resolved 런 스타일 차이가 있으면 분할 시도
                                 boolean partSplit = false;
-                                if (resolvedStyleVaries) {
+                                if (!handledAsFraction && resolvedStyleVaries) {
                                     partSplit = RunBuilder.splitIdmlRunByResolvedRuns(ctx, run, partText, resolvedRuns, resolvedRunIdx,
                                             para, sc);
                                 }
-                                if (!partSplit) {
+                                if (!handledAsFraction && !partSplit) {
                                     ResolvedRun matchedRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
                                     if (matchedRR != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
                                     long createStart = System.nanoTime();
@@ -1947,6 +1984,31 @@ public class StoryLoader {
             if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) return true;
         }
         return false;
+    }
+
+    /**
+     * run \uC758 \uC778\uB77C\uC778 \uADF8\uB798\uD53D\uC774 \uBAA8\uB450 \uADFC\uD638 \uC9C0\uBD95(vinculum) \uC7A5\uC2DD\uC6A9 Rectangle \uC778\uC9C0 \uD655\uC778.
+     *
+     * <p>vinculum \uC740 radicand \uC704\uC5D0 \uADF8\uC5B4\uC9C0\uB294 \uAC00\uB85C \uB9C9\uB300\uB85C, \uC774\uBBF8\uC9C0\u00B7\uD14D\uC2A4\uD2B8 \uC5C6\uB294 \uC587\uC740
+     * \uAC00\uB85C Rectangle \uC774\uB2E4(\uC2E4\uCE21: 1\uB2E8\uC6D0 p22 \u221A \uC9C0\uBD95, 28.3\u00D75.7pt). HWP sqrt \uAC00 \uC9C0\uBD95\uC744
+     * \uC790\uCCB4 \uB80C\uB354\uD558\uBBC0\uB85C \uC774 Rectangle \uC740 \uBC84\uB9AC\uACE0 radicand \uB97C \uADFC\uD638\uC5D0 \uB123\uC5B4\uC57C \uD55C\uB2E4. \uC2E4\uC81C
+     * \uC778\uB77C\uC778 \uD504\uB808\uC784/\uC774\uBBF8\uC9C0/\uD14D\uC2A4\uD2B8\uAC00 \uD558\uB098\uB77C\uB3C4 \uC788\uC73C\uBA74 false(\uC815\uC0C1 \uC778\uB77C\uC778 \uBC30\uCE58 \uB300\uC0C1).
+     */
+    private static boolean allInlineGraphicsAreVinculum(IDMLCharacterRun run) {
+        if (run == null) return false;
+        java.util.List<IDMLCharacterRun.InlineGraphic> gfx = run.inlineGraphics();
+        if (gfx == null || gfx.isEmpty()) return false;
+        for (IDMLCharacterRun.InlineGraphic g : gfx) {
+            if (g == null) return false;
+            if (!"rectangle".equalsIgnoreCase(g.type())) return false;
+            if (g.linkResourceURI() != null) return false;      // \uC774\uBBF8\uC9C0 \uB2F4\uC740 \uD504\uB808\uC784
+            if (g.embeddedText() != null && !g.embeddedText().isEmpty()) return false;
+            if (g.childGraphics() != null && !g.childGraphics().isEmpty()) return false;
+            if (g.childTextFrames() != null && !g.childTextFrames().isEmpty()) return false;
+            // \uAC00\uB85C \uB9C9\uB300: \uD3ED > \uB192\uC774 (\uC138\uB85C \uB9C9\uB300\u00B7\uC815\uC0AC\uAC01 \uB3C4\uD615 \uC81C\uC678)
+            if (!(g.widthPoints() > g.heightPoints())) return false;
+        }
+        return true;
     }
 
     private static boolean insertResolvedLeadingInlineAnchors(

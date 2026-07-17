@@ -56,6 +56,10 @@ public class EHIRBuilder {
                         // 멈춰야 뒤 항(⑷ …)이 분수에 흡수되지 않는다(실측: 3단원
                         // y=;[%;\t⑷ 에서 탭이 분수에 먹혀 (3)(4) 항이 붙던 문제).
                         if (ft.text() != null && ft.text().indexOf('\t') >= 0) break;
+                        // 닫는 괄호 )는 바깥 괄호의 닫기이지 분모 내용이 아니다. 여기서
+                        // 멈춰야 (-√(1/6))² 의 바깥 ) 가 분수에 흡수돼 유실되지 않는다
+                        // (실측: 1단원 √((-1/2)²)의 여는 ( 짝이 사라짐).
+                        if (ft.text() != null && ft.text().indexOf(')') >= 0) break;
                         fracRaw.append(ft.text());
                         fi++;
                     } else if (ft.type() == EHToken.Type.SKIP) {
@@ -125,6 +129,11 @@ public class EHIRBuilder {
             i++;
         }
 
+        // 괄호 스택 깊이. radicand 안에서 (…) 가 열려 있으면(depth>0) 종료 조건
+        // (제곱 trailing·닫는 괄호·구분자)을 억제해 (…)² 처럼 괄호 그룹 전체를 근호에
+        // 포함한다. ( 는 push(+1), ) 는 pop(-1). 토큰 경계를 넘어 깊이를 유지한다.
+        int[] parenDepth = {0};
+
         // radicand 수집: 다음 토큰들에서 한국어/줄바꿈 이전까지
         while (i < tokens.size()) {
             EHToken t = tokens.get(i);
@@ -162,9 +171,15 @@ public class EHIRBuilder {
 
             // SUPERSCRIPT/SUBSCRIPT 글리프
             if (t.type() == EHToken.Type.SUPERSCRIPT_GLYPH) {
-                // radicand 뒤에 오는 지수(예: √23² → sqrt{23}^{2})인지 확인
-                // 이후에 radicand에 기여할 토큰이 없으면 → sqrt 밖 지수로 처리
-                if (!sqrt.radicand().isEmpty() && isTrailingExponent(tokens, i)) {
+                // radicand 뒤에 오는 지수(예: √23² → sqrt{23}^{2})인지 확인.
+                // 단, 괄호가 열려 있거나(parenDepth>0) radicand가 닫는 괄호 )로 끝났으면
+                // 이 제곱은 괄호 그룹에 붙은 것이므로 radicand 안에 포함한다(실측:
+                // √((1/2)²) → 근호가 (1/2)² 전체를 덮어야 하고, 제곱이 밖으로 새면 sqrt
+                // 범위가 = 까지 잘못 확장됨).
+                boolean insideOrAfterParen = parenDepth[0] > 0
+                        || radicandEndsWithCloseParen(sqrt.radicand());
+                if (!sqrt.radicand().isEmpty() && !insideOrAfterParen
+                        && isTrailingExponent(tokens, i)) {
                     break; // sqrt 종료, 상위에서 superscript 처리
                 }
                 i = processSuperscriptGlyphs(tokens, i, sqrt.radicand());
@@ -177,7 +192,8 @@ public class EHIRBuilder {
 
             // BACKTICK_SUPER → 지수 여부 확인
             if (t.type() == EHToken.Type.BACKTICK_SUPER) {
-                if (!sqrt.radicand().isEmpty() && isTrailingExponent(tokens, i)) {
+                if (!sqrt.radicand().isEmpty() && !radicandEndsWithCloseParen(sqrt.radicand())
+                        && isTrailingExponent(tokens, i)) {
                     break; // sqrt 종료, 상위에서 superscript 처리
                 }
                 EHNode.Superscript sup = new EHNode.Superscript();
@@ -203,7 +219,10 @@ public class EHIRBuilder {
                     || t.type() == EHToken.Type.SUB_BASE_TEXT) {
                 String text = t.text();
 
-                int splitPos = findRadicandEnd(text);
+                // 괄호가 열려 있으면(depth>0) 종료 조건을 억제하고 이 토큰 전체를
+                // radicand 에 넣되, 괄호 깊이를 갱신한다. 여는 ( 를 만나도 마찬가지로
+                // 이 토큰부터 괄호 구간에 진입한다. 스택 방식이라 (…) 짝을 절대 놓치지 않는다.
+                int splitPos = parenDepth[0] > 0 ? -1 : findRadicandEnd(text);
 
                 if (splitPos == 0) {
                     // 전체가 radicand 밖 (한국어로 시작) → sqrt 종료
@@ -217,7 +236,9 @@ public class EHIRBuilder {
                     out.add(new EHNode.Text(text.substring(splitPos)));
                     return i + 1;
                 } else {
-                    // 전체가 radicand 안 → 계속 수집
+                    // 전체가 radicand 안 → 계속 수집. 괄호 깊이 갱신.
+                    parenDepth[0] += countParenDelta(text);
+                    if (parenDepth[0] < 0) parenDepth[0] = 0;
                     sqrt.radicand().add(new EHNode.Text(text));
                     i++;
                     continue;
@@ -243,6 +264,10 @@ public class EHIRBuilder {
                         // 멈춰야 뒤 항(⑷ …)이 분수에 흡수되지 않는다(실측: 3단원
                         // y=;[%;\t⑷ 에서 탭이 분수에 먹혀 (3)(4) 항이 붙던 문제).
                         if (ft.text() != null && ft.text().indexOf('\t') >= 0) break;
+                        // 닫는 괄호 )는 바깥 괄호의 닫기이지 분모 내용이 아니다. 여기서
+                        // 멈춰야 (-√(1/6))² 의 바깥 ) 가 분수에 흡수돼 유실되지 않는다
+                        // (실측: 1단원 √((-1/2)²)의 여는 ( 짝이 사라짐).
+                        if (ft.text() != null && ft.text().indexOf(')') >= 0) break;
                         fracRaw.append(ft.text());
                         fi++;
                     } else if (ft.type() == EHToken.Type.SKIP) {
@@ -361,6 +386,41 @@ public class EHIRBuilder {
      * 예: √23² → SQRT_MARKER, BASE_TEXT "23", SUPERSCRIPT_GLYPH "2"
      *     → "2"는 trailing → sqrt{23}^{2}
      */
+    /** 텍스트의 소괄호 균형 증감: ( 는 +1, ) 는 -1. 괄호 스택 깊이 갱신용. */
+    private static int countParenDelta(String text) {
+        if (text == null) return 0;
+        int delta = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '(') delta++;
+            else if (c == ')') delta--;
+        }
+        return delta;
+    }
+
+    /**
+     * radicand의 마지막 유효 문자가 닫는 괄호 ) 인지 확인.
+     * (…)² 처럼 괄호 그룹에 붙은 제곱은 근호 안에 포함해야 한다.
+     */
+    private static boolean radicandEndsWithCloseParen(List<EHNode> radicand) {
+        for (int k = radicand.size() - 1; k >= 0; k--) {
+            EHNode node = radicand.get(k);
+            if (node instanceof EHNode.Text) {
+                String t = ((EHNode.Text) node).text();
+                if (t == null) continue;
+                for (int c = t.length() - 1; c >= 0; c--) {
+                    char ch = t.charAt(c);
+                    if (ch == ' ' || ch == '`') continue;
+                    return ch == ')';
+                }
+                continue;
+            }
+            // 분수/루트 등 비Text 노드로 끝나면 괄호 종료 아님
+            return false;
+        }
+        return false;
+    }
+
     private static boolean isTrailingExponent(List<EHToken> tokens, int superPos) {
         boolean passedSeparator = false;
         for (int j = superPos + 1; j < tokens.size(); j++) {
@@ -398,6 +458,9 @@ public class EHIRBuilder {
         int parenDepth = 0;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
+            // 근호 종료 센티넬(U+241C) — 이 근호의 radicand 끝(실측: 1단원 p22
+            // √15·√0.81·√(9/144), 항 간격 스페이서 Rectangle 앵커 위치가 경계).
+            if (ch == '\u241C') return i;
             // 한국어
             if (ch >= 0xAC00 && ch <= 0xD7A3) return i;
             // thin space / four-per-em space / 줄바꿈 / 탭 (선택지 구분자)

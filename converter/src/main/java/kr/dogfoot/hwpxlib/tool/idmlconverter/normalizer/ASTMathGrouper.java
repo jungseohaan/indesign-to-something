@@ -152,6 +152,17 @@ public class ASTMathGrouper {
                 result.add(run);
                 continue;
             }
+            // "정체"(正體=정상 위치) 문자스타일은 본문 라틴(인명·연도)이지 화학식이 아니다.
+            // 원소기호로 분리하면 Pythagoras 의 P(인)·B(붕소)가 별도 수식 런으로 쪼개져
+            // 색상·이탤릭이 유실된다(실측: 1단원 "Pythagoras, B.C. 569?~475?").
+            String csRef = run.appliedCharacterStyle();
+            if (csRef != null) {
+                String cs = csRef.toLowerCase(java.util.Locale.ROOT);
+                if (cs.contains("정체") || cs.contains("정자")) {
+                    result.add(run);
+                    continue;
+                }
+            }
             List<String> parts = splitChemicalFormulaTextParts(text);
             if (parts.size() <= 1) {
                 result.add(run);
@@ -592,14 +603,26 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
     public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
-        if (emitPositionedFormulaEquation(ehRuns, para, "CHEM_FORMULA")) {
-            return;
-        }
-        if (emitSimplePositionedTextRun(ehRuns, para)) {
-            return;
-        }
-        if (emitBoundaryAwareChemicalFormulaGroup(ehRuns, para)) {
-            return;
+        // 근호(√)·GREP 분수 구조가 포함된 EH 그룹은 화학식 경계 분할을 건너뛴다.
+        // - 근호: radicand 안의 괄호(예: √(1/2)²)의 ")" 가 isChemicalFormulaBoundaryRun
+        //   으로 감지돼 그룹이 통째로 쪼개지면 sqrt 구조가 파괴된다(실측: 1단원 p18
+        //   (√10)², (-√(3/4))²).
+        // - GREP 분수: ";2!;, -0.1, -;3%;" 처럼 분수(;...;)와 일반 텍스트가 섞인 런은
+        //   ","·"-"·약물 폰트 때문에 화학식으로 오인돼, GREP 분수를 디코딩 못 한 채
+        //   ";2!;" 원문이 그대로 노출된다(실측: 1단원 p23 "정수가 아닌 유리수").
+        // 두 경우 모두 EHFontEquationConverter 가 온전히 처리하므로 그대로 넘긴다.
+        boolean hasEHEquationStructure = containsEHSqrtMarker(ehRuns)
+                || containsEHGrepFraction(ehRuns);
+        if (!hasEHEquationStructure) {
+            if (emitPositionedFormulaEquation(ehRuns, para, "CHEM_FORMULA")) {
+                return;
+            }
+            if (emitSimplePositionedTextRun(ehRuns, para)) {
+                return;
+            }
+            if (emitBoundaryAwareChemicalFormulaGroup(ehRuns, para)) {
+                return;
+            }
         }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, ehRuns)) {
@@ -627,6 +650,8 @@ public class ASTMathGrouper {
                     // 글리프(Û→²/Ö→÷/µ→⌒…)가 그대로 노출되지 않게 디코딩한다(실측: 1·2단원
                     // (a+b)Û` = (a+b)², EH상부자 런이 수식 그룹에서 탈락한 케이스).
                     text = EHFontGlyphMap.decodeStrayGlyphText(text, run.fontFamily());
+                    // EH thin space 마커 백틱(`)을 가는 공백으로(실측: 5단원 AB`:` = AB :).
+                    text = ASTRunConverter.replaceEHThinSpaceBacktick(text);
                     textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
                     // 한국어만 텍스트에 EH 폰트/스타일 적용 방지
                     String ff = run.fontFamily();
@@ -641,6 +666,47 @@ public class ASTMathGrouper {
                 }
             }
         }
+    }
+
+    /**
+     * EH 그룹에 근호(√) 구조 마커가 있는지 확인.
+     *
+     * <p>근호는 EH분수대문자 폰트의 분수선 장식 글리프(®, Â, ', { 등, 실제 분자
+     * 값이 없는 비영숫자)로 인코딩된다. 이런 마커가 있으면 그룹은 화학식이 아니라
+     * 근호 수식이므로, 화학식 경계 분할({@link #emitBoundaryAwareChemicalFormulaGroup})
+     * 로 쪼개지 말고 EHFontEquationConverter 스택 파서에 통째로 넘겨야 한다.
+     */
+    private static boolean containsEHSqrtMarker(List<IDMLCharacterRun> ehRuns) {
+        if (ehRuns == null) return false;
+        for (IDMLCharacterRun run : ehRuns) {
+            if (run == null) continue;
+            String ff = run.fontFamily();
+            if (EHFontGlyphMap.isRootFont(ff)) return true;
+            if (EHFontGlyphMap.isFractionNumeratorFont(ff)
+                    && EHFontGlyphMap.isFractionBarDecoration(run.content())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * EH 그룹에 GREP 분수 패턴(;...;)이 있는지 확인.
+     *
+     * <p>";2!;"(=1/2), "-;3%;"(=-3/5) 같은 GREP 분수는 EHFontEquationConverter 만
+     * 디코딩할 수 있다. 이런 패턴이 일반 텍스트("-0.1", ",")·약물 폰트와 섞인 런은
+     * ","·"-" 때문에 화학식으로 오인돼 GREP 분수가 원문 그대로 노출되므로, 화학식
+     * 경계 분할({@link #emitBoundaryAwareChemicalFormulaGroup})을 건너뛰어야 한다.
+     */
+    private static boolean containsEHGrepFraction(List<IDMLCharacterRun> ehRuns) {
+        if (ehRuns == null) return false;
+        for (IDMLCharacterRun run : ehRuns) {
+            if (run == null) continue;
+            if (EHFontGlyphMap.containsEHFractionPattern(run.content())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -1030,6 +1030,47 @@ public class ASTRunConverter {
     }
 
     /**
+     * EH 폰트 thin space 마커 백틱(`)을 가는 공백(U+2009)으로 치환.
+     *
+     * <p>EH 조판에서 숫자·연산자 사이 얇은 간격은 백틱으로 표현된다(실측: 1단원
+     * "1`:`√2"(비율 1:√2), "290`K"(290 K), 5단원 "AB`:`"). 이 백틱이 EH 수식
+     * 그룹에 못 들어가고 일반 텍스트 런으로 새면, 리터럴 백틱이 콤마·따옴표처럼
+     * 노출된다. 양옆이 한글·제어문자만 아니면 thin space 로 치환하고, 한글 사이
+     * 백틱만 진짜 백틱으로 보고 보존한다({@link #isThinSpaceContext}).
+     */
+    public static String replaceEHThinSpaceBacktick(String text) {
+        if (text == null || text.indexOf('`') < 0) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '`') {
+                char prev = i > 0 ? text.charAt(i - 1) : '\0';
+                char next = i + 1 < text.length() ? text.charAt(i + 1) : '\0';
+                if (isThinSpaceContext(prev) && isThinSpaceContext(next)) {
+                    sb.append(' '); // THIN SPACE
+                    continue;
+                }
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * thin space 백틱을 인정할 인접 문자(블랙리스트 방식).
+     * EH 백틱은 수식 조판의 가는 공백 마커라, 양옆이 한글·제어문자만 아니면 항상
+     * 간격이다(숫자·라틴·연산자·괄호·위첨자 ² 등 모든 수식 문자를 자동 포함). 한글
+     * 음절/자모 사이나 제어문자 옆의 백틱만 진짜 백틱으로 보고 보존한다.
+     */
+    private static boolean isThinSpaceContext(char c) {
+        if (c == '\0') return true;                        // 런 경계
+        if (c >= 0xAC00 && c <= 0xD7A3) return false;      // 한글 음절
+        if (c >= 0x3131 && c <= 0x318E) return false;      // 한글 자모
+        if (c < 0x20) return false;                         // 제어문자
+        return true;
+    }
+
+    /**
      * ASTTextRun 생성.
      * IDML 스타일 상속을 해결하여 fontFamily/fontSize/fillColor 등을 설정.
      *

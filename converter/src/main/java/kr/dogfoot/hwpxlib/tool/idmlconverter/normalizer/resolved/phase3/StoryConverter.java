@@ -1843,6 +1843,19 @@ public final class StoryConverter {
     private static boolean insertComposedLineBreaks(
             ASTParagraph para, List<ResolvedTextFrame.ComposedLine> lines) {
         if (para == null || para.items() == null || lines == null || lines.size() < 2) return false;
+        // 1순위: composedLine 전체를 AST 텍스트에 순차 정렬해 줄 끝 위치를 잡는다.
+        // 한글 골격만으로 위치를 잡으면 줄 끝의 영문(인명 Pythagoras, 연도 B.C.569?)이
+        // 다음 줄로 통째로 밀린다(실측: 1단원). AST 에 실제 텍스트로 남은 문자(영문 포함)는
+        // 매칭에 포함하고, AST 에 없는(수식화된) 문자만 건너뛰어 줄 경계를 정확히 잡는다.
+        boolean[] alignOk = new boolean[1];
+        List<Integer> aligned = alignComposedLineBreakOffsets(para, lines, alignOk);
+        if (alignOk[0] && aligned != null && !aligned.isEmpty()) {
+            for (int i = aligned.size() - 1; i >= 0; i--) {
+                int packed = aligned.get(i);
+                insertBreakAtTextOffset(para, packed & 0x00ffffff, packed >>> 24);
+            }
+            return true;
+        }
         NormalizedTextMap paraMap = normalizedTextMap(para);
         if (paraMap.normalized.isEmpty()) return false;
         List<Integer> offsets = new ArrayList<>();
@@ -1872,6 +1885,58 @@ public final class StoryConverter {
             insertBreakAtTextOffset(para, textOffset, trailingObjects);
         }
         return !offsets.isEmpty();
+    }
+
+    /**
+     * composedLine 을 AST 문단 텍스트에 순차 정렬해 각 줄바꿈의 AST text offset 을 구한다.
+     *
+     * <p>composedLine 의 각 문자를 AST 텍스트 커서로 훑으며 매칭한다. AST 에 있는 문자
+     * (한글·영문·숫자 = 텍스트로 남은 것)는 커서를 전진시키고, AST 에 없는 문자
+     * (수식으로 변환돼 hp:script 로 빠진 y=x² 등)는 건너뛴다. 한 줄이 끝나면 그 시점의
+     * AST 커서 위치가 줄바꿈 지점이다. 공백/제어문자는 양쪽에서 유연하게 흡수한다.</p>
+     *
+     * @param ok 정렬 성공 여부(모든 줄 경계를 AST 안에서 찾으면 true)
+     * @return 각 줄바꿈의 (trailingObjects<<24 | textOffset) 목록, 실패 시 null
+     */
+    private static List<Integer> alignComposedLineBreakOffsets(
+            ASTParagraph para, List<ResolvedTextFrame.ComposedLine> lines, boolean[] ok) {
+        ok[0] = false;
+        String astText = ParagraphTextHelpers.getParaPlainText(para);
+        if (astText == null || astText.isEmpty()) return null;
+        List<Integer> result = new ArrayList<>();
+        int cursor = 0;
+        for (int li = 0; li < lines.size() - 1; li++) {
+            String lineText = lines.get(li) != null ? lines.get(li).text() : null;
+            if (lineText == null) return null;
+            for (int ci = 0; ci < lineText.length(); ci++) {
+                char lc = lineText.charAt(ci);
+                if (isAlignSkippable(lc)) continue;
+                // AST 커서에서 이 문자를 찾는다(중간의 AST-only 문자는 건너뜀 허용).
+                int scan = cursor;
+                int limit = Math.min(astText.length(), cursor + 40); // 폭주 방지
+                while (scan < astText.length()) {
+                    char ac = astText.charAt(scan);
+                    if (isAlignSkippable(ac)) { scan++; continue; }
+                    if (ac == lc) break;
+                    if (scan >= limit) { scan = -1; break; }
+                    scan++;
+                }
+                if (scan < 0 || scan >= astText.length()) return null; // 매칭 실패 → 폴백
+                cursor = scan + 1;
+            }
+            // 줄 끝: cursor 가 이 줄의 마지막 매칭 문자 다음. 후행 공백/제어는 다음 줄로 넘기지 않게 흡수.
+            int brk = cursor;
+            if (brk <= 0 || brk >= astText.length()) return null;
+            result.add((trailingObjectReplacementCount(lineText) << 24) | brk);
+        }
+        ok[0] = true;
+        return result;
+    }
+
+    /** 정렬 매칭에서 유연하게 건너뛸 문자(공백·제어·인라인 앵커). */
+    private static boolean isAlignSkippable(char ch) {
+        return ch == '￼' || ch == '' || ch == '' || ch == ''
+                || ch == '\r' || ch == '\n' || Character.isWhitespace(ch);
     }
 
     private static boolean insertComposedLineBreaksByCumulativeOffsets(

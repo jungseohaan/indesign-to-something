@@ -263,6 +263,13 @@ class MathProcessor {
                 out.add(item);
                 continue;
             }
+            // sqrt{...}·분수 {A} over {B} 의 구문 중괄호를 경계로 오인해 벗기면 짝이 깨져
+            // 닫는 }가 리터럴 텍스트로 새고 수식이 열린 채 렌더된다(실측: 수학 1단원 근호
+            // 선택지 -sqrt{121} → -sqrt{121 + "}"). core 의 { } 균형이 맞을 때만 벗긴다.
+            if (!isBraceBalanced(core)) {
+                out.add(item);
+                continue;
+            }
             if (start > 0) {
                 out.add(textRunFromEquationBoundary(eq, script.substring(0, start)));
             }
@@ -283,6 +290,17 @@ class MathProcessor {
     private static boolean isEquationBoundaryChar(char c) {
         return c == '(' || c == ')' || c == '[' || c == ']'
                 || c == '{' || c == '}' || c == ',' || c == '.';
+    }
+
+    /** HWP 수식 구문 중괄호 { } 짝이 맞는지. sqrt/분수 구문 보호용. */
+    private static boolean isBraceBalanced(String s) {
+        int depth = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '{') depth++;
+            else if (c == '}') { depth--; if (depth < 0) return false; }
+        }
+        return depth == 0;
     }
 
     private static ASTTextRun textRunFromEquationBoundary(ASTEquation source, String text) {
@@ -1407,6 +1425,11 @@ class MathProcessor {
         String style = tr.characterStyleRef().toLowerCase(Locale.ROOT)
                 .replace("%3a", ":")
                 .replace("%25", "%");
+        // "정체"(正體=똑바로 선 글자, 정상 위치)는 EH상부자/하부자 폰트를 쓰되 첨자
+        // 위치가 아니라는 조판 표기다. 스타일 이름의 "상부자/하부자"만 보고 첨자화하면
+        // 본문 라틴 주석이 첨자로 깨진다(실측: 1단원 "상부자(정체)" 스타일의
+        // Pythagoras·B.C.569?~475? 가 위첨자화). "정체"면 첨자로 만들지 않는다.
+        if (style.contains("정체") || style.contains("정자")) return;
         if (style.contains("superscript") || style.contains("상부자") || style.contains("위첨자")) {
             tr.superscript(true);
             tr.subscript(false);

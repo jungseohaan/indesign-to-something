@@ -412,6 +412,15 @@ class RunPostProcessor {
     private static boolean isItalicMathRun(ASTTextRun tr) {
         String text = tr.text();
         if (text == null || text.isEmpty()) return false;
+        // "정체"(正體=정상 위치) 문자스타일은 EH상부자 폰트를 쓰되 수식 변수가 아니라
+        // 본문 라틴(인명·연도)이다. 수식으로 처리하면 원소기호 분리·이탤릭·색상 유실이
+        // 연쇄로 일어난다(실측: 1단원 "Pythagoras, B.C. 569?~475?"의 P/B가 별도 수식
+        // 런으로 쪼개져 검정색으로). 정체 스타일은 수식 변수 판정에서 제외한다.
+        String csRef = tr.characterStyleRef();
+        if (csRef != null) {
+            String cs = csRef.toLowerCase(java.util.Locale.ROOT);
+            if (cs.contains("정체") || cs.contains("정자")) return false;
+        }
         // 공백만인 run은 EH 폰트여도 수식 내용이 아니다(구분자). 수식 버퍼에 넣으면
         // 앞 항과 합쳐질 때 선행 공백이 trim 돼 사라진다(실측: 3단원 ⑵ 뒤 EH상부자
         // 공백이 y=- 수식에 흡수돼 ⑵와 y= 가 붙음).

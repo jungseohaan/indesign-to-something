@@ -105,6 +105,10 @@ class RunBuilder {
         String ehFont = rr != null ? rr.fontFamily() : null;
         if (ehFont == null && cr != null) ehFont = cr.fontFamily();
         text = EHFontGlyphMap.decodeStrayGlyphText(text, ehFont);
+        // EH thin space 마커 백틱(`)이 일반 텍스트로 새면 콤마·따옴표처럼 노출된다.
+        // 숫자·연산자 사이 백틱만 가는 공백으로 치환(실측: 1단원 1`:`√2, 290`K).
+        text = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter
+                .replaceEHThinSpaceBacktick(text);
         tr.text(text);
         String characterStyleRef = resolvedCharacterStyleRef(rr, cr);
         if (characterStyleRef != null) {

@@ -129,11 +129,17 @@ public class EHTokenizer {
                 continue;
             }
 
-            // 순수 비EH 브릿지 런 — 탭으로 분리
-            if (text.contains("\t")) {
-                splitByTab(text, tokens);
+            // 순수 비EH 브릿지 런 — EH 그룹 안의 { } 는 EH 큰괄호이므로 ( ) 로 치환한다.
+            // (실측: 1단원 √((-1/2)²)에서 EH상부자가 리셋돼 null 폰트로 온 "{-" 의 { 가
+            // 치환 안 돼 HWP 중괄호 {} 로 깨지고 여는 괄호가 유실됨). hwpScript 구문 중괄호와
+            // 충돌하지 않도록 (·) 로 바꾼다.
+            String bridged = text.indexOf('{') >= 0 || text.indexOf('}') >= 0
+                    ? text.replace('{', '(').replace('}', ')')
+                    : text;
+            if (bridged.contains("\t")) {
+                splitByTab(bridged, tokens);
             } else {
-                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, text));
+                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, bridged));
             }
         }
 
@@ -235,6 +241,35 @@ public class EHTokenizer {
                         buf.setLength(0);
                     }
                     tokens.add(new EHToken(EHToken.Type.BASE_TEXT, "\u00B1")); // ±
+                } else {
+                    buf.append(ch);
+                }
+            }
+            if (buf.length() > 0) {
+                String decoded = EHFontGlyphMap.decodeText(buf.toString(), fontFamily);
+                if (decoded != null && !decoded.isEmpty()) {
+                    tokens.add(new EHToken(EHToken.Type.BASE_TEXT, decoded));
+                }
+            }
+            return;
+        }
+        // EH약물 H(0x48) = 순환소수 순환마디 점(overdot) 마커. 바로 뒤 숫자 위에 점을
+        // 찍는다(실측: 1단원 0.H4=0.4̇, 1.H3=1.3̇). decodeText(→decodeSubSupText)는
+        // 결합 점을 버리므로, H 를 분리해 결합 점(U+0307) 센티넬을 직접 emit 한다.
+        // convert()의 후처리가 다음 숫자와 결합해 dot{N} 스크립트로 만든다.
+        if (EHFontGlyphMap.isChemicalFont(fontFamily) && text.indexOf('H') >= 0) {
+            StringBuilder buf = new StringBuilder();
+            for (int ci = 0; ci < text.length(); ci++) {
+                char ch = text.charAt(ci);
+                if (ch == 'H') {
+                    if (buf.length() > 0) {
+                        String decoded = EHFontGlyphMap.decodeText(buf.toString(), fontFamily);
+                        if (decoded != null && !decoded.isEmpty()) {
+                            tokens.add(new EHToken(EHToken.Type.BASE_TEXT, decoded));
+                        }
+                        buf.setLength(0);
+                    }
+                    tokens.add(new EHToken(EHToken.Type.BASE_TEXT, "̇")); // 순환마디 점
                 } else {
                     buf.append(ch);
                 }
