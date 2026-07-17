@@ -423,13 +423,15 @@ public class StoryLoader {
                 // 넣지 않는다. 넣으면 앵커(U+FFFC)가 수식 스크립트/□ 로 뭉개져 프레임이
                 // 유실된다(실측: 3단원 y=-x²/5 의 x²/5 분수 앵커). 정상 인라인 배치로 보낸다.
                 //
-                // 예외: EH 근호 그룹이 열려 있고 앵커가 근호 지붕(vinculum) 장식용
+                // 예외: EH 근호 그룹이 열려 있고 앵커가 색 없는 투명 스페이서
                 // Rectangle 뿐이면, radicand 를 근호에 넣어야 한다(실측: 1단원 p22
-                // √15, √0.81, √(9/144) — √ 갈고리는 EH분수대문자 텍스트, 지붕 막대는
-                // 인라인 Rectangle 로 조판). HWP sqrt 가 지붕을 자체 렌더하므로 장식
-                // Rectangle 은 버린다. 단, FFFC 위치는 그 근호의 radicand 종료 경계이므로
-                // 지우지 않고 근호 종료 센티넬(U+241C)로 바꿔, EH 수식 변환기가 인접한
-                // 다음 근호와 radicand 를 섞지 않게 한다.
+                // √15, √0.81, √(9/144) — √ 갈고리는 EH분수대문자 텍스트, radicand 는
+                // 텍스트, 항 사이 간격은 baseline 근처의 색 없는 고정폭(28.3pt)
+                // Rectangle 로 조판). 이 Rectangle 은 이미지·텍스트가 없어 인라인
+                // 배치 대상이 아니다. FFFC 위치는 그 근호의 radicand 종료 경계이자 항
+                // 간격 자리이므로, 지우지 않고 센티넬(U+241C)로 바꿔 EH 수식 변환기가
+                // (1) 인접한 다음 근호와 radicand 를 섞지 않고 (2) 그 자리에 항 간격을
+                // 넣게 한다.
                 boolean anchorIsVinculumOnly = enterEH
                         && !ehMathGroup.isEmpty()
                         && EHFontGlyphMap.isFractionNumeratorFont(

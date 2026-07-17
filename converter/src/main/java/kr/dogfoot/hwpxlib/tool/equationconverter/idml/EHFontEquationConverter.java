@@ -82,8 +82,11 @@ public class EHFontEquationConverter {
             // 유효하지 않은 XML 문자 제거 (U+0008 Indent to Here, U+FFFC 인라인 앵커 등)
             if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') { i++; continue; }
             if (c == '\uFFFC') { i++; continue; }
-            // vinculum 종료 센티넬(U+241C) — radicand 경계 표시용, 스크립트에는 남기지 않음
-            if (c == '\u241C') { i++; continue; }
+            // 근호 종료+항 간격 센티넬(U+241C) — radicand 경계 표시이자, 원본에서 항
+            // 사이 간격을 만들던 투명 스페이서 Rectangle(28.3pt) 자리. 다른 근호 나열
+            // 문단과 동일하게 EM SPACE(U+2003)로 간격을 살린다(실측: 1단원 p22
+            // √15 √0.81 √(9/144) √7-2 3+√16 사이 간격).
+            if (c == '\u241C') { sb.append('\u2003'); i++; continue; }
             // backtick(0x60) = EH상부자 위첨자 마커 (thin space) → 수식에서 제거
             if (c == '`') { i++; continue; }
 

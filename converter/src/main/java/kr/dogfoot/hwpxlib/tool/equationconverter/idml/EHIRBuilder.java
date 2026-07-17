@@ -458,8 +458,8 @@ public class EHIRBuilder {
         int parenDepth = 0;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
-            // vinculum 종료 센티넬(U+241C) — 이 근호의 radicand 끝(실측: 1단원 p22
-            // √15·√0.81·√(9/144), 지붕 Rectangle 앵커 위치가 radicand 경계).
+            // 근호 종료 센티넬(U+241C) — 이 근호의 radicand 끝(실측: 1단원 p22
+            // √15·√0.81·√(9/144), 항 간격 스페이서 Rectangle 앵커 위치가 경계).
             if (ch == '\u241C') return i;
             // 한국어
             if (ch >= 0xAC00 && ch <= 0xD7A3) return i;
