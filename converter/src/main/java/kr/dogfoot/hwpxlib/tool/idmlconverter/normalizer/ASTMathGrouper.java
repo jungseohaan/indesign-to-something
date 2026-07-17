@@ -603,14 +603,22 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
     public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
-        if (emitPositionedFormulaEquation(ehRuns, para, "CHEM_FORMULA")) {
-            return;
-        }
-        if (emitSimplePositionedTextRun(ehRuns, para)) {
-            return;
-        }
-        if (emitBoundaryAwareChemicalFormulaGroup(ehRuns, para)) {
-            return;
+        // 근호(√) 구조가 포함된 EH 그룹은 화학식 경계 분할을 건너뛴다.
+        // radicand 안의 괄호(예: √(1/2)²)의 ")" 가 isChemicalFormulaBoundaryRun 으로
+        // 감지돼 그룹이 통째로 쪼개지면 sqrt 구조가 파괴된다(실측: 1단원 p18 (√10)²,
+        // (-√(3/4))²). 근호 마커가 있으면 EHFontEquationConverter 가 스택 기반으로
+        // 괄호/근호를 온전히 처리하도록 그대로 넘긴다.
+        boolean hasSqrtStructure = containsEHSqrtMarker(ehRuns);
+        if (!hasSqrtStructure) {
+            if (emitPositionedFormulaEquation(ehRuns, para, "CHEM_FORMULA")) {
+                return;
+            }
+            if (emitSimplePositionedTextRun(ehRuns, para)) {
+                return;
+            }
+            if (emitBoundaryAwareChemicalFormulaGroup(ehRuns, para)) {
+                return;
+            }
         }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, ehRuns)) {
@@ -652,6 +660,28 @@ public class ASTMathGrouper {
                 }
             }
         }
+    }
+
+    /**
+     * EH 그룹에 근호(√) 구조 마커가 있는지 확인.
+     *
+     * <p>근호는 EH분수대문자 폰트의 분수선 장식 글리프(®, Â, ', { 등, 실제 분자
+     * 값이 없는 비영숫자)로 인코딩된다. 이런 마커가 있으면 그룹은 화학식이 아니라
+     * 근호 수식이므로, 화학식 경계 분할({@link #emitBoundaryAwareChemicalFormulaGroup})
+     * 로 쪼개지 말고 EHFontEquationConverter 스택 파서에 통째로 넘겨야 한다.
+     */
+    private static boolean containsEHSqrtMarker(List<IDMLCharacterRun> ehRuns) {
+        if (ehRuns == null) return false;
+        for (IDMLCharacterRun run : ehRuns) {
+            if (run == null) continue;
+            String ff = run.fontFamily();
+            if (EHFontGlyphMap.isRootFont(ff)) return true;
+            if (EHFontGlyphMap.isFractionNumeratorFont(ff)
+                    && EHFontGlyphMap.isFractionBarDecoration(run.content())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
