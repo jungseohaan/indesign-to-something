@@ -528,13 +528,28 @@ public class StoryLoader {
                             }
                             partText = normalizeLeadingTabAfterLeadingInlineObjects(para, partText);
                             if (!partText.isEmpty()) {
+                                // ;...; 분수 GREP 패턴이 있으면 분수 수식으로 먼저 분리한다
+                                // (실측: 1단원 p26 "⑶ ;2%; □ √8"의 5/2 분수). resolved 스타일
+                                // 분할(splitIdmlRunByResolvedRuns)이 세미콜론을 런 경계로 잘라
+                                // ";2%;"→"2%" 로 만들면 분수 패턴이 깨지므로, 그 전에 처리한다.
+                                // 텍스트 조각만 처리하고, 뒤따르는 인라인 앵커(빈 답란 □)는
+                                // 아래 공통 블록이 그대로 이어서 배치한다.
+                                boolean handledAsFraction = false;
+                                if (EHFontGlyphMap.containsEHFractionPattern(partText)) {
+                                    ResolvedRun fracRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
+                                    if (fracRR != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
+                                    ASTTextRun fracTemplate = RunBuilder.createRunFromIDML(ctx, run, partText,
+                                            fracRR != null ? fracRR : defaultRR, sc, MatchConfidence.LOW);
+                                    MathProcessor.splitFractionPatternInText(ctx, partText, fracTemplate, para);
+                                    handledAsFraction = true;
+                                }
                                 // resolved 런 스타일 차이가 있으면 분할 시도
                                 boolean partSplit = false;
-                                if (resolvedStyleVaries) {
+                                if (!handledAsFraction && resolvedStyleVaries) {
                                     partSplit = RunBuilder.splitIdmlRunByResolvedRuns(ctx, run, partText, resolvedRuns, resolvedRunIdx,
                                             para, sc);
                                 }
-                                if (!partSplit) {
+                                if (!handledAsFraction && !partSplit) {
                                     ResolvedRun matchedRR = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, partText);
                                     if (matchedRR != null) resolvedRunIdx = ctx.lastMatchResult[0] + 1;
                                     long createStart = System.nanoTime();
