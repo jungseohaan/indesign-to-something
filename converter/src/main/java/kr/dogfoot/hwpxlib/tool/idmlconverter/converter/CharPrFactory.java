@@ -81,8 +81,12 @@ final class CharPrFactory {
             if (mapped != null) charPrId = mapped;
         }
 
-        // 수식 폰트(NP_, BT수식, GREP 해석) → 밑줄 + 초록색 스타일
-        if (isEquationFontCached(textRun.fontFamily()) || textRun.grepMathFont()) {
+        // 수식 폰트(NP_, BT수식, GREP 해석) → 수식 전용 CharPr.
+        // 단, BT수식H 계열이 일반 한국어 문장 run에 묻어 들어오는 경우가 있다.
+        // 이때까지 수식 CharPr로 덮어쓰면 8pt 본문이 10pt 수식 스타일로 커진다.
+        // 실제 수식 구조가 없는 prose run은 앞단에서 정한 본문 CharPr를 그대로 실행한다.
+        if ((isEquationFontCached(textRun.fontFamily()) || textRun.grepMathFont())
+                && shouldUseEquationFontCharPr(textRun)) {
             charPrId = createEquationFontCharPr(textRun, inheritedCharPrId);
         }
 
@@ -264,6 +268,10 @@ final class CharPrFactory {
         String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
         String fontFamilyToUse = textRun.fontFamily();
         Short letterSpacingToUse = textRun.letterSpacing();
+        if (fontFamilyToUse != null && fontFamilyToUse.contains("BT수식H")
+                && isPlainKoreanProse(textRun.text())) {
+            fontFamilyToUse = null;
+        }
 
         // SPEC-031: DSL char rule 적용
         kr.dogfoot.hwpxlib.tool.idmlconverter.rule.RuleContext ruleCtx =
@@ -392,6 +400,56 @@ final class CharPrFactory {
         return fontFamily.startsWith("NP_")
                 || BTFontGlyphMap.isBTFontFamily(fontFamily)
                 || EHFontGlyphMap.isEHFontFamily(fontFamily);
+    }
+
+    private static boolean shouldUseEquationFontCharPr(ASTTextRun textRun) {
+        if (textRun == null) return false;
+        String fontFamily = textRun.fontFamily();
+        String text = textRun.text();
+
+        if (fontFamily != null && fontFamily.contains("BT수식H") && isPlainKoreanProse(text)) {
+            return false;
+        }
+        if (fontFamily != null && fontFamily.contains("BT수식H") && text != null && containsHangul(text)
+                && !containsEquationSyntax(text)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isPlainKoreanProse(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        if (!containsHangul(text)) return false;
+        return !containsEquationSyntax(text);
+    }
+
+    private static boolean containsHangul(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= '\uAC00' && c <= '\uD7A3')
+                    || (c >= '\u1100' && c <= '\u11FF')
+                    || (c >= '\u3130' && c <= '\u318F')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsEquationSyntax(String text) {
+        if (text == null) return false;
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains(" over ") || lower.contains("sqrt") || lower.contains("root")
+                || lower.contains("rarrow") || lower.contains("overline")) {
+            return true;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ("=+*/<>≤≥±×÷√²³^_π∑∫∞{}[]".indexOf(c) >= 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
