@@ -2005,8 +2005,11 @@ public class StoryLoader {
             if (g.embeddedText() != null && !g.embeddedText().isEmpty()) return false;
             if (g.childGraphics() != null && !g.childGraphics().isEmpty()) return false;
             if (g.childTextFrames() != null && !g.childTextFrames().isEmpty()) return false;
-            // \uAC00\uB85C \uB9C9\uB300: \uD3ED > \uB192\uC774 (\uC138\uB85C \uB9C9\uB300\u00B7\uC815\uC0AC\uAC01 \uB3C4\uD615 \uC81C\uC678)
-            if (!(g.widthPoints() > g.heightPoints())) return false;
+            // \uAC00\uB85C \uB9C9\uB300(vinculum): \uD3ED\uC774 \uB192\uC774\uBCF4\uB2E4 \uB69C\uB837\uD558\uAC8C \uCEE4\uC57C \uD55C\uB2E4(\uC885\uD6A1\uBE44 \u2265 2).
+            // \uADFC\uD638 \uC9C0\uBD95 \uC2A4\uD398\uC774\uC11C\uB294 28.3\u00D75.7(\u22485:1). \uC815\uC0AC\uAC01\uD615\uC5D0 \uAC00\uAE4C\uC6B4 \uB3C4\uD615\uC740 \uC81C\uC678 \u2014
+            // \uBD80\uB4F1\uD638 \uBE48 \uB2F5\uB780 \uBC15\uC2A4(14.17\u00D714.17, \uBD80\uB3D9\uC18C\uC218 \uC624\uCC28\uB85C \uD3ED>\uB192\uC774\uAC00 \uB418\uB358 \uCF00\uC774\uC2A4)\uAC00
+            // vinculum \uC73C\uB85C \uC624\uD310\uB3FC \uC0AD\uC81C\uB418\uB358 \uBB38\uC81C \uBC29\uC9C0(\uC2E4\uCE21: 1\uB2E8\uC6D0 p26 \uBB38\uC81C6 \uBE48\uCE78).
+            if (!(g.widthPoints() >= g.heightPoints() * 2.0)) return false;
         }
         return true;
     }
