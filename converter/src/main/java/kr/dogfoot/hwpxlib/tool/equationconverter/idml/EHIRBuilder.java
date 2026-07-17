@@ -56,6 +56,10 @@ public class EHIRBuilder {
                         // 멈춰야 뒤 항(⑷ …)이 분수에 흡수되지 않는다(실측: 3단원
                         // y=;[%;\t⑷ 에서 탭이 분수에 먹혀 (3)(4) 항이 붙던 문제).
                         if (ft.text() != null && ft.text().indexOf('\t') >= 0) break;
+                        // 닫는 괄호 )는 바깥 괄호의 닫기이지 분모 내용이 아니다. 여기서
+                        // 멈춰야 (-√(1/6))² 의 바깥 ) 가 분수에 흡수돼 유실되지 않는다
+                        // (실측: 1단원 √((-1/2)²)의 여는 ( 짝이 사라짐).
+                        if (ft.text() != null && ft.text().indexOf(')') >= 0) break;
                         fracRaw.append(ft.text());
                         fi++;
                     } else if (ft.type() == EHToken.Type.SKIP) {
@@ -260,6 +264,10 @@ public class EHIRBuilder {
                         // 멈춰야 뒤 항(⑷ …)이 분수에 흡수되지 않는다(실측: 3단원
                         // y=;[%;\t⑷ 에서 탭이 분수에 먹혀 (3)(4) 항이 붙던 문제).
                         if (ft.text() != null && ft.text().indexOf('\t') >= 0) break;
+                        // 닫는 괄호 )는 바깥 괄호의 닫기이지 분모 내용이 아니다. 여기서
+                        // 멈춰야 (-√(1/6))² 의 바깥 ) 가 분수에 흡수돼 유실되지 않는다
+                        // (실측: 1단원 √((-1/2)²)의 여는 ( 짝이 사라짐).
+                        if (ft.text() != null && ft.text().indexOf(')') >= 0) break;
                         fracRaw.append(ft.text());
                         fi++;
                     } else if (ft.type() == EHToken.Type.SKIP) {

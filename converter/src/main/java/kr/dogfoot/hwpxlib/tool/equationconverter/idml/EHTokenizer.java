@@ -129,11 +129,17 @@ public class EHTokenizer {
                 continue;
             }
 
-            // 순수 비EH 브릿지 런 — 탭으로 분리
-            if (text.contains("\t")) {
-                splitByTab(text, tokens);
+            // 순수 비EH 브릿지 런 — EH 그룹 안의 { } 는 EH 큰괄호이므로 ( ) 로 치환한다.
+            // (실측: 1단원 √((-1/2)²)에서 EH상부자가 리셋돼 null 폰트로 온 "{-" 의 { 가
+            // 치환 안 돼 HWP 중괄호 {} 로 깨지고 여는 괄호가 유실됨). hwpScript 구문 중괄호와
+            // 충돌하지 않도록 (·) 로 바꾼다.
+            String bridged = text.indexOf('{') >= 0 || text.indexOf('}') >= 0
+                    ? text.replace('{', '(').replace('}', ')')
+                    : text;
+            if (bridged.contains("\t")) {
+                splitByTab(bridged, tokens);
             } else {
-                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, text));
+                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, bridged));
             }
         }
 
