@@ -263,6 +263,13 @@ class MathProcessor {
                 out.add(item);
                 continue;
             }
+            // sqrt{...}·분수 {A} over {B} 의 구문 중괄호를 경계로 오인해 벗기면 짝이 깨져
+            // 닫는 }가 리터럴 텍스트로 새고 수식이 열린 채 렌더된다(실측: 수학 1단원 근호
+            // 선택지 -sqrt{121} → -sqrt{121 + "}"). core 의 { } 균형이 맞을 때만 벗긴다.
+            if (!isBraceBalanced(core)) {
+                out.add(item);
+                continue;
+            }
             if (start > 0) {
                 out.add(textRunFromEquationBoundary(eq, script.substring(0, start)));
             }
@@ -283,6 +290,17 @@ class MathProcessor {
     private static boolean isEquationBoundaryChar(char c) {
         return c == '(' || c == ')' || c == '[' || c == ']'
                 || c == '{' || c == '}' || c == ',' || c == '.';
+    }
+
+    /** HWP 수식 구문 중괄호 { } 짝이 맞는지. sqrt/분수 구문 보호용. */
+    private static boolean isBraceBalanced(String s) {
+        int depth = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '{') depth++;
+            else if (c == '}') { depth--; if (depth < 0) return false; }
+        }
+        return depth == 0;
     }
 
     private static ASTTextRun textRunFromEquationBoundary(ASTEquation source, String text) {
