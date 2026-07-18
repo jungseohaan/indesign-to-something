@@ -157,6 +157,9 @@ public class EHHwpScriptEmitter {
         while (result.contains("sqrt{}")) {
             result = result.replace("sqrt{}", "");
         }
+        // 끝에 매달린 곱셈·나눗셈 키워드(TIMES/div)는 피연산자가 없으므로 제거한다.
+        // 원문이 깨진 근호 나열(sqrt{p2} TIMES 처럼 곱셈 뒤 항 없음)에서 발생.
+        result = result.replaceAll("(?:\\s*(?:TIMES|div))+\\s*$", "");
         result = trimSpacesKeepTabs(result);
         if (result.isEmpty()) return null;
 

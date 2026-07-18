@@ -710,7 +710,6 @@ public class StoryLoader {
                     System.nanoTime() - runLoopStart);
             // 단락 끝 잔여 수식 그룹 flush
             MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
-            absorbAnswerBoxIntoOpenSqrt(ctx, para);
             applyTrailingPageNumberLeader(ctx, ip, para);
 
             // 패턴 감지: 행잉 인덴트 + 인라인 아이콘 + 탭
@@ -2103,76 +2102,6 @@ public class StoryLoader {
             if (g.widthPoints() >= g.heightPoints() * 2.0) return false;
         }
         return true;
-    }
-
-    /**
-     * 근호가 열린 채(sqrt{X} 뒤 곱셈 TIMES) 끝난 수식 바로 뒤에 빈 답란 박스가 오면,
-     * 박스를 HWP 수식 box{~} 로 근호 안에 흡수한다(실측: 1단원 p32 "√(2×□)").
-     *
-     * <p>radicand 텍스트(2×)와 박스가 여러 런에 흩어져 EH 그룹핑 단계에서 묶기 어려운
-     * 복합 케이스를, AST 완성 후 스크립트 레벨에서 재조립한다: "…sqrt{2} TIMES" +
-     * 답란박스 → "…sqrt{2 TIMES box{~}}". 박스는 제거한다(근호가 답란을 덮으므로).
-     */
-    private static void absorbAnswerBoxIntoOpenSqrt(ResolvedBuildContext ctx, ASTParagraph para) {
-        if (para == null || para.items() == null) return;
-        List<ASTInlineItem> items = para.items();
-        for (int i = 0; i < items.size(); i++) {
-            if (!(items.get(i) instanceof ASTEquation)) continue;
-            ASTEquation eq = (ASTEquation) items.get(i);
-            String script = eq.hwpScript();
-            if (script == null) continue;
-
-            // (a) 근호 박스 뒤 곱셈 항 확장: sqrt{box{~}} TIMES {A} over {B}
-            //     → sqrt{box{~} TIMES {A} over {B}} (근호가 뒤 분수·항까지 덮음).
-            //     실측: 1단원 p32 √(□×9/2). = 나 문자열 끝에서 멈춘다.
-            script = SQRT_BOX_TRAILING_TIMES.matcher(script)
-                    .replaceAll("sqrt{box{~} TIMES $1}");
-            eq.hwpScript(script);
-
-            // (b) 근호가 열린 채 곱셈으로 끝남 + 다음이 답란 박스 객체:
-            //     "…sqrt{X} TIMES" + 박스 → "…sqrt{X TIMES box{~}}".
-            if (i + 1 >= items.size()) continue;
-            java.util.regex.Matcher m = OPEN_SQRT_TIMES.matcher(script);
-            if (!m.find()) continue;
-            if (!(items.get(i + 1) instanceof ASTInlineObject)) continue;
-            ASTInlineObject obj = (ASTInlineObject) items.get(i + 1);
-            if (!isEmptyAnswerBoxObject(ctx, obj)) continue;
-            String fixed = script.substring(0, m.start())
-                    + "sqrt{" + m.group(1) + " TIMES box{~}}";
-            eq.hwpScript(fixed);
-            items.remove(i + 1); // 답란 박스 제거(근호가 흡수)
-        }
-    }
-
-    /** "…sqrt{X} TIMES" 로 끝나는(근호 뒤 곱셈, 근호 미완결) 패턴. group(1)=radicand X. */
-    private static final java.util.regex.Pattern OPEN_SQRT_TIMES =
-            java.util.regex.Pattern.compile("sqrt\\{([^{}]*)\\}\\s*TIMES\\s*$");
-
-    /**
-     * "sqrt{box{~}} TIMES {A} over {B}" 패턴. 박스가 이미 근호에 흡수됐지만 근호가
-     * 조기에 닫혀 뒤 곱셈 분수가 밖으로 샌 경우. group(1)={A} over {B}.
-     */
-    private static final java.util.regex.Pattern SQRT_BOX_TRAILING_TIMES =
-            java.util.regex.Pattern.compile(
-                    "sqrt\\{box\\{~\\}\\}[\\s\\u2003\\u2009]*TIMES[\\s\\u2003\\u2009]*(\\{[^{}]*\\} over \\{[^{}]*\\})");
-
-    /** ASTInlineObject 가 빈 답란 박스(원본 Rectangle: Paper 채움+테두리, 정사각)인지 확인. */
-    private static boolean isEmptyAnswerBoxObject(ResolvedBuildContext ctx, ASTInlineObject obj) {
-        if (obj == null || ctx == null || ctx.resolvedData == null) return false;
-        String src = obj.sourceId();
-        if (src == null) return false;
-        String domId = src.startsWith("u")
-                ? String.valueOf(Integer.parseInt(src.substring(1), 16)) : src;
-        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem pi =
-                ctx.resolvedData.getPageItem(domId);
-        if (pi == null || !"Rectangle".equalsIgnoreCase(pi.type())) return false;
-        if (pi.strokeWeight() <= 0) return false; // 테두리 있어야 답란
-        double[] gb = pi.geometricBounds();
-        if (gb == null || gb.length < 4) return false;
-        double h = gb[2] - gb[0];
-        double w = gb[3] - gb[1];
-        if (w <= 0 || h <= 0) return false;
-        return w < h * 2.0; // 정사각에 가까움 (가로 막대 vinculum 제외)
     }
 
     private static boolean insertResolvedLeadingInlineAnchors(
