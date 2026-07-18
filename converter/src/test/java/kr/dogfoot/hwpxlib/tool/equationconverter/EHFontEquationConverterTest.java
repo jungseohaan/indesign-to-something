@@ -159,6 +159,23 @@ public class EHFontEquationConverterTest {
     }
 
     @Test
+    public void tall_hook_superscript_inside_radicand() {
+        // ("Å3Û`␣)=… — 키 큰 hook(")+폭선택자(Å) 뒤 radicand 3² (Û=² 가 본문 런 내장).
+        // 위첨자가 근호 가로줄 안에 들어간다 (실측: p17 탐구2 (√3²)=√9=).
+        Assert.assertEquals("left(sqrt{3^{2}} right)=sqrt{9}=",
+                convert(body("("), fracUpper("\""), fracUpper("Å"), body("3Û` )="),
+                        fracUpper("'"), body("9=")));
+    }
+
+    @Test
+    public void tall_hook_paren_squared_radicand() {
+        // "Ã(-3␣)Û`= — radicand (-3)². 닫는 ')' 뒤 내장 Û 는 괄호 밖·근호 안 지수
+        // (실측: p17 탐구2 √(-3)²=√□=□).
+        Assert.assertEquals("sqrt{(-3)^{2}}=",
+                convert(fracUpper("\""), fracUpper("Ã"), body("(-3 )Û`=")));
+    }
+
+    @Test
     public void no_space_before_closing_paren() {
         // ('5␣)Û` — 원문이 근호 가로줄과 ')' 겹침을 피하려고 넣은 U+2009 thin space 는
         // HWP 수식에서 쓸데없는 틈이 되므로 제거 (실측: p17 (√5 )²=5).

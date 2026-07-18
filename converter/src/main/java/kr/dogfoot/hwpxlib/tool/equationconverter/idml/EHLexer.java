@@ -19,19 +19,15 @@ import java.util.List;
  */
 public class EHLexer {
 
-    /** 근호 갈고리 글리프(분수대문자 폰트에서 radicand 를 여는 시각 마커). */
-    private static boolean isHookGlyph(char c) {
-        return c == '\'' || c == '®' /* ® */
-                || c == '¿' /* ¿ */ || c == '¾' /* ¾ */;
-    }
-
     /**
-     * 근호 폭 선택자 글리프(hook 직후 근호 너비를 고르는 마커). 원본 코드포인트로
-     * 판정한다 — decodeText 는 이들을 d/u/f/l/r/p 로 바꾸므로 디코딩 전에 걸러야 한다.
-     * 실측 집합: 0xB6 0xC4 0xC9 0xA8 0xB9 0xC2 (+ 0x8C 는 자리구분자로 별도).
+     * 근호 갈고리 글리프(분수대문자 폰트에서 radicand 를 여는 시각 마커).
+     * '"'(0x22) 는 키 큰 hook — radicand 에 위첨자가 포함될 때(√3², √(-3)²) 쓰인다
+     * (실측: 1단원 p17 탐구2). 놓치면 HWP 스크립트에 '"' 리터럴이 들어가 수식이
+     * 통째로 사라진다.
      */
-    private static boolean isWidthSelectorGlyph(char c) {
-        return c == 0xB6 || c == 0xC4 || c == 0xC9 || c == 0xA8 || c == 0xB9 || c == 0xC2;
+    private static boolean isHookGlyph(char c) {
+        return c == '\'' || c == '"' || c == '®' /* ® */
+                || c == '¿' /* ¿ */ || c == '¾' /* ¾ */;
     }
 
     /** 자리구분자: 분수대문자 폰트의 0x8C (여러자리 수의 숫자 사이 장식). */
@@ -118,16 +114,18 @@ public class EHLexer {
         // GREP 분수가 이 런에 섞여 있으면(드뭄) body 규칙과 공유.
         int i = 0;
         // 폭 선택자가 hook 과 별개 런으로 오는 경우(실측: 1단원 p16 √121 의 hook 런
-        // 다음 0xB6 단독 런): 직전 lexeme 이 HOOK 이고 이 런 첫 글자가 폭선택자 코드포인트면
-        // WIDTH_SELECTOR lexeme 으로(원본 코드포인트 보존). 단 같은 코드포인트가 √u·√l
-        // 처럼 진짜 변수 radicand 이기도 하므로, 폭선택자인지 변수인지는 "뒤에 radicand 가
-        // 더 오는가"로 Parser 가 판정한다(뒤 있으면 폭선택자 스킵, 없으면 이 코드포인트를
-        // 디코딩해 변수로). 여기서는 코드포인트만 보존한다.
+        // 다음 0xB6 단독 런, p17 "Å·"Ã): 직전 lexeme 이 HOOK 이고 이 런 첫 글자가
+        // 0x80+ 글리프면 WIDTH_SELECTOR lexeme 으로(원본 코드포인트 보존) — in-run
+        // 규칙(hook 직후 0x80+ 1개)과 동일 판정. 단 같은 코드포인트가 √u·√l 처럼 진짜
+        // 변수 radicand 이기도 하므로, 폭선택자인지 변수인지는 "뒤에 radicand 가 더
+        // 오는가"로 Parser 가 판정한다(뒤 있으면 폭선택자 스킵, 없으면 디코딩해 변수로).
         if (i < content.length() && !out.isEmpty()
-                && out.get(out.size() - 1).kind() == EHLexeme.Kind.HOOK
-                && isWidthSelectorGlyph(content.charAt(i))) {
-            out.add(EHLexeme.widthSelector(content.charAt(i)));
-            i++;
+                && out.get(out.size() - 1).kind() == EHLexeme.Kind.HOOK) {
+            char c0 = content.charAt(i);
+            if (c0 >= 0x80 && !isDigitSep(c0) && !isHookGlyph(c0) && !isSepChar(c0)) {
+                out.add(EHLexeme.widthSelector(c0));
+                i++;
+            }
         }
         while (i < content.length()) {
             char c = content.charAt(i);

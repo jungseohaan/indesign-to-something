@@ -123,9 +123,15 @@ public class EHParser {
         for (int k = pos; k < lx.size(); k++) {
             EHLexeme t = lx.get(k);
             switch (t.kind()) {
-                case ATOM_TEXT:
-                    // 순수 구분·연산 텍스트(공백만)면 radicand 아님. 그 외는 radicand.
-                    return t.value() != null && !t.value().trim().isEmpty();
+                case ATOM_TEXT: {
+                    // 공백뿐이거나 연산·관계·구분 문자로 시작하면 radicand 아님 —
+                    // 그 경우 폭선택자 자리 글리프가 진짜 변수다 (예: √x+1 의 "+1").
+                    String v = t.value() == null ? "" : t.value().trim();
+                    if (v.isEmpty()) return false;
+                    char c0 = v.charAt(0);
+                    return c0 != '+' && c0 != '=' && c0 != '<' && c0 != '>'
+                            && c0 != ',' && c0 != ')';
+                }
                 case FRACTION:
                 case BOX:
                     return true;
@@ -310,26 +316,39 @@ public class EHParser {
     /** '(' Item* ')' 를 out 에 Paren 노드로. */
     private void parseParenGroupInto(List<EHNode> out) {
         EHLexeme t = next(); // ATOM starting with '('
-        String v = t.value();
         EHNode.Paren paren = new EHNode.Paren();
-        // '(' 뒤 나머지 텍스트
-        String rest = v.substring(1);
+        String tail = null; // 닫는 ')' 뒤 같은 ATOM 의 잔여 텍스트 — 괄호 밖으로 되돌린다
+        String rest = t.value().substring(1);
         int depth = 1;
-        depth += count(rest, '(') - count(rest, ')');
-        if (!rest.isEmpty()) paren.content().add(new EHNode.Text(stripOuterClose(rest)));
+        int ci = closeIndex(rest, depth);
+        if (ci >= 0) {
+            if (ci > 0) paren.content().add(new EHNode.Text(rest.substring(0, ci)));
+            tail = rest.substring(ci + 1);
+            depth = 0;
+        } else {
+            depth += count(rest, '(') - count(rest, ')');
+            if (!rest.isEmpty()) paren.content().add(new EHNode.Text(rest));
+        }
         // 괄호 균형까지 Item 수집
         while (has() && depth > 0) {
             EHLexeme n = peek();
             if (n.kind() == EHLexeme.Kind.ATOM_TEXT) {
                 next();
                 String nv = n.value();
-                depth += count(nv, '(') - count(nv, ')');
-                if (depth <= 0) {
-                    // 닫는 괄호 위치까지만
-                    paren.content().add(new EHNode.Text(stripOuterClose(nv)));
+                int c2 = closeIndex(nv, depth);
+                if (c2 >= 0) {
+                    // 닫는 ')' 위치에서 절단 — 뒤 잔여(")Û`=" 의 Û=)는 괄호 안이 아니다
+                    // (실측: p17 √(-3)² 이 sqrt{(-3 ^{2}=)} 로 새던 문제).
+                    if (c2 > 0) paren.content().add(new EHNode.Text(nv.substring(0, c2)));
+                    tail = nv.substring(c2 + 1);
+                    depth = 0;
                     break;
                 }
+                depth += count(nv, '(') - count(nv, ')');
                 paren.content().add(new EHNode.Text(nv));
+            } else if (n.kind() == EHLexeme.Kind.SEP) {
+                next(); // 괄호 안 공백(원본 thin space 등)은 내용으로 보존
+                if (n.value() != null) paren.content().add(new EHNode.Text(n.value()));
             } else if (n.kind() == EHLexeme.Kind.HOOK) {
                 paren.content().add(parseSqrt());
             } else if (n.kind() == EHLexeme.Kind.FRACTION) {
@@ -346,23 +365,39 @@ public class EHParser {
             }
         }
         out.add(paren);
-        // Paren 직후 지수(제곱)는 radicand 의 Trailing 으로 흡수
+        if (tail != null && !tail.isEmpty()) {
+            lx.add(pos, EHLexeme.atomText(tail)); // 잔여 텍스트를 큐 맨 앞에 되돌림
+        }
+        // Paren 직후 지수(제곱)는 radicand 의 Trailing 으로 흡수. SUPERSCRIPT lexeme
+        // 외에, 본문 런에 내장된 원시 위첨자 글리프(Û=² Ü=³)도 같은 지수다
+        // (실측: p17 √(-3)² 의 ")Û`" — 괄호 밖·근호 안).
         if (has() && peek().kind() == EHLexeme.Kind.SUPERSCRIPT) {
             out.add(superNode(next().value()));
+        } else if (has() && peek().kind() == EHLexeme.Kind.ATOM_TEXT) {
+            String av = peek().value();
+            if (av != null && !av.isEmpty() && (av.charAt(0) == 'Û' || av.charAt(0) == 'Ü')) {
+                next();
+                out.add(superNode(av.charAt(0) == 'Û' ? "2" : "3"));
+                String rem = av.substring(1);
+                if (!rem.isEmpty()) lx.add(pos, EHLexeme.atomText(rem));
+            }
         }
+    }
+
+    /** s 안에서 depth 를 0 으로 만드는 ')' 의 인덱스. 없으면 -1. */
+    private static int closeIndex(String s, int depth) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '(') depth++;
+            else if (c == ')' && --depth == 0) return i;
+        }
+        return -1;
     }
 
     private static int count(String s, char c) {
         int n = 0;
         for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++;
         return n;
-    }
-
-    /** 닫는 괄호로 끝나는 문자열의 마지막 ')' 를 제거(Paren 노드가 괄호를 대신 그림). */
-    private static String stripOuterClose(String s) {
-        int idx = s.lastIndexOf(')');
-        if (idx >= 0) return s.substring(0, idx) + s.substring(idx + 1);
-        return s;
     }
 
     private EHNode fractionNode(EHLexeme t) {
