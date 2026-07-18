@@ -270,6 +270,13 @@ class MathProcessor {
                 out.add(item);
                 continue;
             }
+            // 소괄호도 마찬가지 — (-16)×…÷(-6/7) 의 바깥 ( ) 나 left( … right) 의 소괄호를
+            // 경계로 벗기면 짝이 깨져 닫는 )·right 가 리터럴로 새거나 left( 가 미완결된다
+            // (실측: 1단원 p30 "(-16)×3/4÷(-6/7)" → "-16)…right"). ( ) 균형이 맞을 때만 벗긴다.
+            if (!isParenBalanced(core)) {
+                out.add(item);
+                continue;
+            }
             if (start > 0) {
                 out.add(textRunFromEquationBoundary(eq, script.substring(0, start)));
             }
@@ -299,6 +306,20 @@ class MathProcessor {
             char c = s.charAt(i);
             if (c == '{') depth++;
             else if (c == '}') { depth--; if (depth < 0) return false; }
+        }
+        return depth == 0;
+    }
+
+    /**
+     * HWP 수식 소괄호 ( ) 짝이 맞는지. left( … right) 및 (-16)·(-6/7) 보호용.
+     * left(/right 키워드의 소괄호도 리터럴 ( )와 함께 depth 로 센다.
+     */
+    private static boolean isParenBalanced(String s) {
+        int depth = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '(') depth++;
+            else if (c == ')') { depth--; if (depth < 0) return false; }
         }
         return depth == 0;
     }
