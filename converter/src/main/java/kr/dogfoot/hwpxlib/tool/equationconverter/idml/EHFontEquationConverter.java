@@ -38,7 +38,20 @@ public class EHFontEquationConverter {
         EHNode.Group tree = EHIRBuilder.build(tokens);
         if (tree == null) return null;
 
-        return applyRecurringDecimalDots(EHHwpScriptEmitter.emit(tree));
+        return restoreBoxBraces(applyRecurringDecimalDots(EHHwpScriptEmitter.emit(tree)));
+    }
+
+    /**
+     * HWP 수식 박스 명령의 중괄호 복원: box(~) → box{~}.
+     *
+     * <p>빈 답란 박스를 근호 안 radicand 로 넣을 때 box{~} 를 쓰는데(실측: 1단원 p32
+     * √□), EH 토크나이저의 { → ( 치환이 box{~} 를 box(~) 로 바꿔 한글이 소괄호로
+     * 렌더한다. box·dashbox 명령의 소괄호를 중괄호로 되돌린다.
+     */
+    private static String restoreBoxBraces(String script) {
+        if (script == null || script.indexOf("box(") < 0) return script;
+        return script.replace("box(~)", "box{~}")
+                .replace("dashbox(~)", "dashbox{~}");
     }
 
     /**

@@ -284,6 +284,38 @@ public class StoryLoader {
                 IDMLCharacterRun run = runs.get(idx);
                 applyCharacterStylePosition(ctx, run);
 
+                // 근호 마커 직후(radicand 텍스트 없이) 순수 빈 답란 박스만 온 경우, 박스
+                // 1개를 HWP 수식 box{~} 로 근호 안 radicand 에 넣어 근호가 답란을 덮게 한다
+                // (실측: 1단원 p32 "√□"). 그룹 마지막이 sqrt 마커일 때만 — radicand 텍스트가
+                // 섞인 √(2×□) 복합 케이스는 별도 처리. 같은 런의 나머지 박스는 근호 밖으로
+                // 남겨(FFFC 하나 제거 후 재처리) 정상 배치한다.
+                if (run.content() != null
+                        && !ehMathGroup.isEmpty()
+                        && EHFontGlyphMap.isFractionNumeratorFont(
+                                ehMathGroup.get(ehMathGroup.size() - 1).fontFamily())
+                        && run.content().replace("￼", "").isEmpty()
+                        && (run.inlineFrames() == null || run.inlineFrames().isEmpty())
+                        && allInlineGraphicsAreEmptyAnswerBox(run)) {
+                    IDMLCharacterRun boxRun = run.shallowCopyWithoutInlines();
+                    boxRun.content("box{~}␜");
+                    MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
+                    ehMathGroup.add(boxRun);
+                    if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) {
+                        run.inlineGraphics().remove(0);
+                    }
+                    if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) {
+                        run.inlineAnchors().remove(0);
+                    }
+                    String rest = run.content().replaceFirst("￼", "");
+                    if ((run.inlineGraphics() == null || run.inlineGraphics().isEmpty())
+                            && rest.replace("￼", "").isEmpty()) {
+                        continue; // 남은 박스 없음 → 런 소진
+                    }
+                    run.content(rest);
+                    idx--; // 남은 박스 재처리
+                    continue;
+                }
+
                 // GREP 수식 리셋: 단일 라틴 문자(수식 변수 x, a, n)는 유지, 나머지 제거
                 if (run.grepMathFont()) {
                     String ct = run.content();
