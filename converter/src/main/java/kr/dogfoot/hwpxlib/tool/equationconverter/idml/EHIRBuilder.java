@@ -151,8 +151,24 @@ public class EHIRBuilder {
                 // 다음 토큰 확인: radicand 계속 수집 가능하면 √ 바 연장
                 if (i < tokens.size() && !sqrt.radicand().isEmpty()) {
                     EHToken next = tokens.get(i);
+                    // radicand 가 이미 완결된 분수로 끝났으면 바 연장하지 않는다 —
+                    // √(5/2)√10 처럼 분수 근호 뒤 SQRT_MARKER 는 새 근호다. 분수는 그
+                    // 자체로 완결된 radicand 라 뒤 숫자가 붙을 이유가 없다(실측: 1단원
+                    // p33 √(5/2)√10 이 √(5/2·10) 로 뭉치던 문제). 분수와 SQRT_MARKER
+                    // 사이의 백틱(thin space)·빈 Text 노드는 건너뛰고 실질 마지막을 본다.
+                    boolean radicandEndsWithFraction = false;
+                    for (int rj = sqrt.radicand().size() - 1; rj >= 0; rj--) {
+                        EHNode last = sqrt.radicand().get(rj);
+                        if (last instanceof EHNode.Text) {
+                            String lt = ((EHNode.Text) last).text();
+                            if (lt == null || lt.replace("`", "").trim().isEmpty()) continue;
+                        }
+                        radicandEndsWithFraction = last instanceof EHNode.Fraction;
+                        break;
+                    }
                     // 다음이 SKIP/BASE_TEXT/SUP_BASE_TEXT 등 radicand 후보이면 계속
-                    if (next.type() != EHToken.Type.SQRT_MARKER
+                    if (!radicandEndsWithFraction
+                            && next.type() != EHToken.Type.SQRT_MARKER
                             && next.type() != EHToken.Type.FRACTION_DENOMINATOR) {
                         continue; // √ 바 연장 → radicand 계속 수집
                     }
