@@ -147,6 +147,13 @@ public class EHParser {
                 next();
                 parseRadicand(out); // 폭 선택자 스킵 후 재시도
                 return;
+            case DIGIT_SEP:
+                // hook 직후 DIGIT_SEP 는 자리 이어붙이기가 아니라 폭 선택 마커다
+                // (앞 숫자가 없으므로). 스킵하고 radicand 재시도 → √a 가 sqrt{ }a 로
+                // 새는 것 방지.
+                next();
+                parseRadicand(out);
+                return;
             default:
                 return; // radicand 없음(빈 근호)
         }

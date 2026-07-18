@@ -112,6 +112,22 @@ public class EHFontEquationConverterTest {
     }
 
     @Test
+    public void sqrt_variable_after_leading_sep() {
+        // '[8C]a — hook 직후 자리구분자(폭 마커)가 오고 radicand 는 변수 a.
+        // DIGIT_SEP 을 폭 마커로 스킵해 √a 로 (sqrt{ }a 로 새면 안 됨).
+        Assert.assertEquals("sqrt{a}",
+                convert(fracUpper("'"), fracUpper(""), body("a")));
+    }
+
+    @Test
+    public void empty_sqrt_superscript_is_radicand() {
+        // '2` — hook 직후 radicand 가 상부자(작은크기)로 조판되어 SUPERSCRIPT 로 렉싱될 때,
+        // 빈 근호 + 위첨자면 그 위첨자는 지수가 아니라 radicand → sqrt{2}.
+        Assert.assertEquals("sqrt{2}",
+                convert(fracUpper("'"), sup("2`")));
+    }
+
+    @Test
     public void two_sqrts_product() {
         // '2_'3 → √2·√3 (hook 2개 → Sqrt 2개, _ = ×)
         Assert.assertEquals("sqrt{2} TIMES sqrt{3}",

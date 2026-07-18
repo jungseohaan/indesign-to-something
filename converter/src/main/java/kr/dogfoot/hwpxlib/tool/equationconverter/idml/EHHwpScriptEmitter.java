@@ -82,11 +82,24 @@ public class EHHwpScriptEmitter {
     private static void emitChildren(List<EHNode> children, StringBuilder sb) {
         for (int i = 0; i < children.size(); i++) {
             EHNode child = children.get(i);
+            boolean nextIsSuper = i + 1 < children.size()
+                    && children.get(i + 1) instanceof EHNode.Superscript;
+            // 빈 근호(√ 뒤 radicand 없음) + Superscript: 그 위첨자는 지수가 아니라
+            // 작은 크기로 조판된 radicand 다(√² 의 2). {sqrt{ }}^{n} 를 만들지 말고
+            // 위첨자 내용을 radicand 로 접어 sqrt{n} 으로 emit.
+            if (child instanceof EHNode.Sqrt
+                    && ((EHNode.Sqrt) child).radicand().isEmpty()
+                    && nextIsSuper) {
+                EHNode.Superscript sup = (EHNode.Superscript) children.get(i + 1);
+                sb.append("sqrt{");
+                emitChildren(sup.content(), sb);
+                sb.append("}");
+                i++; // Superscript 소비
+                continue;
+            }
             // Sqrt 뒤에 Superscript가 오면 → {sqrt{...}}^{n} 형태로 감싸야
             // HWP 수식 에디터에서 ^가 sqrt 내부로 흡수되지 않도록 함
-            boolean wrapSqrt = (child instanceof EHNode.Sqrt)
-                    && i + 1 < children.size()
-                    && children.get(i + 1) instanceof EHNode.Superscript;
+            boolean wrapSqrt = (child instanceof EHNode.Sqrt) && nextIsSuper;
             if (wrapSqrt) sb.append("{");
             emitNode(child, sb);
             if (wrapSqrt) sb.append("}");
