@@ -2116,18 +2116,27 @@ public class StoryLoader {
     private static void absorbAnswerBoxIntoOpenSqrt(ResolvedBuildContext ctx, ASTParagraph para) {
         if (para == null || para.items() == null) return;
         List<ASTInlineItem> items = para.items();
-        for (int i = 0; i + 1 < items.size(); i++) {
+        for (int i = 0; i < items.size(); i++) {
             if (!(items.get(i) instanceof ASTEquation)) continue;
             ASTEquation eq = (ASTEquation) items.get(i);
             String script = eq.hwpScript();
             if (script == null) continue;
-            // 근호가 열린 채 곱셈으로 끝남: 마지막 sqrt{X} 뒤에 곧바로 TIMES
+
+            // (a) 근호 박스 뒤 곱셈 항 확장: sqrt{box{~}} TIMES {A} over {B}
+            //     → sqrt{box{~} TIMES {A} over {B}} (근호가 뒤 분수·항까지 덮음).
+            //     실측: 1단원 p32 √(□×9/2). = 나 문자열 끝에서 멈춘다.
+            script = SQRT_BOX_TRAILING_TIMES.matcher(script)
+                    .replaceAll("sqrt{box{~} TIMES $1}");
+            eq.hwpScript(script);
+
+            // (b) 근호가 열린 채 곱셈으로 끝남 + 다음이 답란 박스 객체:
+            //     "…sqrt{X} TIMES" + 박스 → "…sqrt{X TIMES box{~}}".
+            if (i + 1 >= items.size()) continue;
             java.util.regex.Matcher m = OPEN_SQRT_TIMES.matcher(script);
             if (!m.find()) continue;
             if (!(items.get(i + 1) instanceof ASTInlineObject)) continue;
             ASTInlineObject obj = (ASTInlineObject) items.get(i + 1);
             if (!isEmptyAnswerBoxObject(ctx, obj)) continue;
-            // sqrt{X} TIMES(끝) → sqrt{X TIMES box{~}}
             String fixed = script.substring(0, m.start())
                     + "sqrt{" + m.group(1) + " TIMES box{~}}";
             eq.hwpScript(fixed);
@@ -2138,6 +2147,14 @@ public class StoryLoader {
     /** "…sqrt{X} TIMES" 로 끝나는(근호 뒤 곱셈, 근호 미완결) 패턴. group(1)=radicand X. */
     private static final java.util.regex.Pattern OPEN_SQRT_TIMES =
             java.util.regex.Pattern.compile("sqrt\\{([^{}]*)\\}\\s*TIMES\\s*$");
+
+    /**
+     * "sqrt{box{~}} TIMES {A} over {B}" 패턴. 박스가 이미 근호에 흡수됐지만 근호가
+     * 조기에 닫혀 뒤 곱셈 분수가 밖으로 샌 경우. group(1)={A} over {B}.
+     */
+    private static final java.util.regex.Pattern SQRT_BOX_TRAILING_TIMES =
+            java.util.regex.Pattern.compile(
+                    "sqrt\\{box\\{~\\}\\}[\\s\\u2003\\u2009]*TIMES[\\s\\u2003\\u2009]*(\\{[^{}]*\\} over \\{[^{}]*\\})");
 
     /** ASTInlineObject 가 빈 답란 박스(원본 Rectangle: Paper 채움+테두리, 정사각)인지 확인. */
     private static boolean isEmptyAnswerBoxObject(ResolvedBuildContext ctx, ASTInlineObject obj) {
