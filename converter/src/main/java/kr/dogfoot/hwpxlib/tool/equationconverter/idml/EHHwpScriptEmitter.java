@@ -174,6 +174,9 @@ public class EHHwpScriptEmitter {
         // 끝에 매달린 곱셈·나눗셈 키워드(TIMES/div)는 피연산자가 없으므로 제거한다.
         // 원문이 깨진 근호 나열(sqrt{p2} TIMES 처럼 곱셈 뒤 항 없음)에서 발생.
         result = result.replaceAll("(?:\\s*(?:TIMES|div))+\\s*$", "");
+        // 앞뒤 유니코드 공백(EM/thin — trimSpacesKeepTabs 는 0x20 이하만 자름) 제거:
+        // 항 간격 센티넬이 수식 끝에 남으면 뒤에 빈 간격이 붙는다.
+        result = result.replaceAll("^[\\u2000-\\u200B\\u202F]+|[\\u2000-\\u200B\\u202F]+$", "");
         result = trimSpacesKeepTabs(result);
         if (result.isEmpty()) return null;
 

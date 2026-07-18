@@ -159,6 +159,24 @@ public class EHFontEquationConverterTest {
     }
 
     @Test
+    public void sentinel_separates_adjacent_terms() {
+        // '1[8C]5␜- 'Ä0.81␜ — 항 사이 투명 스페이서(␜)가 radicand 를 끝내고
+        // EM 간격이 된다. √15 의 radicand 가 다음 항의 - 를 삼키면 안 됨 (실측: p22).
+        Assert.assertEquals("sqrt{15} -sqrt{0.81}",
+                convert(fracUpper("'"), body("1"), fracUpper(""), body("5␜-"),
+                        fracUpper("'"), fracUpper("Ä"), body("0.81␜")));
+    }
+
+    @Test
+    public void numeric_radicand_stops_at_sign() {
+        // '7-2␜3+ '1[8C]6 — 폭 선택자 없는 hook 근호는 숫자 하나만 덮는다:
+        // √7−2, 3+√16 (√(7−2)·√(2 3+…) 아님. 실측: p22).
+        Assert.assertEquals("sqrt{7}-2 3+sqrt{16}",
+                convert(fracUpper("'"), body("7-2␜3+"),
+                        fracUpper("'"), body("1"), fracUpper(""), body("6")));
+    }
+
+    @Test
     public void sentinel_terminated_radicand() {
         // '3␜ — StoryLoader 가 인라인 그래픽(정답 원 등) 앞 radicand 를 잘라 근호 종료
         // 센티넬(U+241C)을 붙여 넣는 형태 (실측: p19 √3 ●<). EM 잔여 없이 sqrt{3}.

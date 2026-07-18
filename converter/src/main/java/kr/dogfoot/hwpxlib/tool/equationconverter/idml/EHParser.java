@@ -302,8 +302,27 @@ public class EHParser {
                 if (i == 0 && c == '(') return -1; // 여는괄호 시작은 parseRadicand 가 ParenGroup 으로
                 return i;
             }
+            // 순수 숫자 radicand 뒤의 +·- 도 경계: 폭 선택자 없는 hook(') 근호의
+            // 가로줄은 숫자 하나만 덮으므로 "7-2" 는 √7 − 2 이지 √(7−2) 가 아니다
+            // (실측: p22 √7−2, 3+√16). 앞이 전부 숫자(.·선행 부호 허용)일 때만.
+            if ((c == '+' || c == '-') && i > 0 && allDigitsBefore(v, i)) {
+                return i;
+            }
         }
         return -1;
+    }
+
+    /** v[0,end) 가 숫자 radicand 인가 — 숫자·소수점(선행 - 허용)만이고 숫자 1개 이상. */
+    private static boolean allDigitsBefore(String v, int end) {
+        boolean hasDigit = false;
+        for (int i = 0; i < end; i++) {
+            char c = v.charAt(i);
+            if (Character.isDigit(c)) { hasDigit = true; continue; }
+            if (c == '.') continue;
+            if (c == '-' && i == 0) continue;
+            return false;
+        }
+        return hasDigit;
     }
 
     private void flushText(StringBuilder sb, List<EHNode> out) {

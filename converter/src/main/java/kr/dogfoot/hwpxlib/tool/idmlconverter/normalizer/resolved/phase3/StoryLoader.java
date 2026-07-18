@@ -298,7 +298,10 @@ public class StoryLoader {
                         && (run.inlineFrames() == null || run.inlineFrames().isEmpty())
                         && allInlineGraphicsAreEmptyAnswerBox(run)) {
                     IDMLCharacterRun boxRun = run.shallowCopyWithoutInlines();
-                    boxRun.content("box{~}␜");
+                    // ␜ 를 붙이지 않는다 — lexer 가 ␜ 를 radicand 종료 SEP 로 렉싱하게
+                    // 되면서, 여기 붙인 인위적 센티넬이 √(□²)·√(□×9/2) 의 뒤 지수·곱셈을
+                    // 근호 밖으로 밀어냈다. 여긴 실제 스페이서가 아니므로 간격도 불필요.
+                    boxRun.content("box{~}");
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
                     ehMathGroup.add(boxRun);
                     if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) {

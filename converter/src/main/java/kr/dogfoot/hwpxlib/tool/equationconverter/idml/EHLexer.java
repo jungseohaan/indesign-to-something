@@ -178,6 +178,14 @@ public class EHLexer {
                 i++;
                 continue;
             }
+            if (c == '␜') {
+                // 근호 종료 센티넬(투명 스페이서 Rectangle 자리). radicand 를 여기서
+                // 끝내고 항 간격(EM)으로 렌더한다. ATOM 에 흡수되면 radicand 가 다음
+                // 항을 삼킨다(실측: p22 sqrt{15 -}·sqrt{7-2 3+} 뭉침).
+                out.add(EHLexeme.sep(" "));
+                i++;
+                continue;
+            }
             if (isSepChar(c)) {
                 out.add(EHLexeme.sep(String.valueOf(c)));
                 i++;
@@ -193,7 +201,7 @@ public class EHLexer {
             while (j < content.length()) {
                 char d = content.charAt(j);
                 if (d == ';' && EHFontGlyphMap.containsEHFractionPattern(content.substring(j))) break;
-                if (isDigitSep(d) || isSepChar(d) || d == '`') break;
+                if (isDigitSep(d) || isSepChar(d) || d == '`' || d == '␜') break;
                 sb.append(d);
                 j++;
             }
