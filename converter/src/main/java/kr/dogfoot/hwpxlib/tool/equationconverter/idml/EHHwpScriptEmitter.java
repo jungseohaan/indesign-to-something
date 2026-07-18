@@ -137,6 +137,10 @@ public class EHHwpScriptEmitter {
         // 쓸데없는 틈이 된다(실측: p17 (√5 )²). left/right 확대 전에 지워야
         // " right)" 앞 이중 공백도 안 생긴다.
         result = result.replaceAll("[ \\u2000-\\u200B\\u202F]+\\)", ")");
+        // 닫는 중괄호 앞 유니코드 공백(EM/thin)도 제거: 근호 종료 센티넬(U+241C→EM)이
+        // radicand 끝에 남으면 sqrt{3 } 처럼 가로줄이 늘어진다. ASCII 공백은 보존
+        // (빈 근호 sqrt{ } 의 자리 공백).
+        result = result.replaceAll("[\\u2000-\\u200B\\u202F]+}", "}");
 
         // HWP 수식 키워드 앞뒤 공백 보장 (인접 토큰에 붙는 것 방지)
         for (String kw : new String[]{"TIMES", " div "}) {

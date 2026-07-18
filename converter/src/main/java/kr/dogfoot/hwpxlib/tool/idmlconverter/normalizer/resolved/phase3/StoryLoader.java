@@ -464,17 +464,21 @@ public class StoryLoader {
                 // 간격 자리이므로, 지우지 않고 센티넬(U+241C)로 바꿔 EH 수식 변환기가
                 // (1) 인접한 다음 근호와 radicand 를 섞지 않고 (2) 그 자리에 항 간격을
                 // 넣게 한다.
-                // 근호 그룹이 열려 있고, radicand 텍스트 뒤에 빈 답란 박스(FFFC)가
-                // 붙은 런은 FFFC 앞 radicand 만 근호에 넣고, 박스 앵커는 근호 뒤에 그대로
-                // 배치한다(실측: 1단원 p26 문제6 "√7 □ 0" — √ 갈고리 뒤 "7 <FFFC> 0" 런).
+                // 근호 그룹이 열려 있고, radicand 텍스트 뒤에 인라인 그래픽(FFFC)이
+                // 붙은 런은 FFFC 앞 radicand 만 근호에 넣고, 앵커는 근호 뒤에 그대로
+                // 배치한다(실측: 1단원 p26 문제6 "√7 □ 0" — √ 갈고리 뒤 "7 <FFFC> 0" 런,
+                // p19 "√3 ●<" — radicand 3 뒤 정답 원 그래픽. 답란 박스만 허용하면
+                // 원 그래픽 런이 그룹에서 통째로 밀려나 √ 와 3 이 분리된다).
                 // FFFC 앞 텍스트를 근호 종료 센티넬(U+241C)까지 EH 그룹에 넣고, 런 자신은
                 // FFFC 부터로 잘라 다시 처리(idx--) → 남은 부분이 일반 인라인 앵커 경로로
-                // 박스를 배치한다. 박스는 삭제하지 않는다(vinculum 스페이서와 다름).
+                // 그래픽을 배치한다. 단 vinculum 스페이서 전용 런은 제외 — 아래 센티넬
+                // 치환 경로가 런 전체를 그룹에 넣어야 한다.
                 if (enterEH && !ehMathGroup.isEmpty()
                         && EHFontGlyphMap.isFractionNumeratorFont(
                                 ehMathGroup.get(ehMathGroup.size() - 1).fontFamily())
                         && (run.inlineFrames() == null || run.inlineFrames().isEmpty())
-                        && allInlineGraphicsAreEmptyAnswerBox(run)
+                        && !allInlineGraphicsAreVinculum(run)
+                        && run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()
                         && run.content() != null) {
                     int fffcPos = run.content().indexOf('￼');
                     if (fffcPos > 0) {

@@ -159,6 +159,14 @@ public class EHFontEquationConverterTest {
     }
 
     @Test
+    public void sentinel_terminated_radicand() {
+        // '3␜ — StoryLoader 가 인라인 그래픽(정답 원 등) 앞 radicand 를 잘라 근호 종료
+        // 센티넬(U+241C)을 붙여 넣는 형태 (실측: p19 √3 ●<). EM 잔여 없이 sqrt{3}.
+        Assert.assertEquals("sqrt{3}",
+                convert(fracUpper("'"), body("3␜")));
+    }
+
+    @Test
     public void tall_hook_superscript_inside_radicand() {
         // ("Å3Û`␣)=… — 키 큰 hook(")+폭선택자(Å) 뒤 radicand 3² (Û=² 가 본문 런 내장).
         // 위첨자가 근호 가로줄 안에 들어간다 (실측: p17 탐구2 (√3²)=√9=).
