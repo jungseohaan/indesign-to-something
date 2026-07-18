@@ -70,8 +70,13 @@ public class EHLexer {
             lexChemical(content, out);
         } else if ("EH루트".equals(fontRole) || "EH선모음".equals(fontRole)) {
             out.add(EHLexeme.skip()); // 시각 장식
+        } else if ("EH수식".equals(fontRole) && content.indexOf('`') >= 0) {
+            // EH수식 폰트에서 백틱(`)은 "앞 문자를 위첨자로" 만드는 마커다(실측:
+            // 1단원 p14 (1/2)² 의 "2`" → ^{2}). lexBody 는 백틱을 그냥 제거해 지수를
+            // 잃으므로, EH수식 + 백틱 조합만 별도로 위첨자 렉싱한다.
+            lexMathExponent(content, out);
         } else {
-            // 비EH 본문 런 또는 EH수식: GREP 분수·자리구분·일반 텍스트.
+            // 비EH 본문 런 또는 백틱 없는 EH수식: GREP 분수·자리구분·일반 텍스트.
             lexBody(content, out);
         }
     }
@@ -235,6 +240,41 @@ public class EHLexer {
         }
     }
 
+    /**
+     * EH수식 폰트 + 백틱 런: 백틱 앞 문자를 위첨자로.
+     *
+     * <p>백틱(`)은 EH수식에서 "직전 글자를 위첨자로 올리는" 마커다. "2`" → ^{2},
+     * "x2`+1" → x^{2}+1 처럼, 백틱 바로 앞 1글자(연속 숫자면 그 숫자 묶음)를
+     * SUPERSCRIPT 로, 나머지는 ATOM 으로 낸다. GREP 분수·자리구분은 lexBody 와 동일.
+     */
+    private static void lexMathExponent(String content, List<EHLexeme> out) {
+        StringBuilder base = new StringBuilder();
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (c == '`') {
+                // base 끝의 지수 대상(연속 숫자/문자 1묶음)을 위첨자로 분리.
+                int k = base.length();
+                while (k > 0 && (Character.isLetterOrDigit(base.charAt(k - 1)))) k--;
+                // 지수는 백틱 직전 "마지막 토큰"이 아니라 통상 마지막 1~2 글자다.
+                // 실측상 지수는 숫자 묶음(2, 10)·단일 문자. base 전체가 지수가 되면
+                // 곤란하므로, 앞에 다른 내용이 있으면 그 경계까지만 남기고 뒤를 지수로.
+                String exp;
+                if (k < base.length()) {
+                    exp = base.substring(k);
+                    base.setLength(k);
+                } else {
+                    // 백틱 앞이 비영숫자거나 base 가 비면 지수 없음 — 백틱만 제거.
+                    continue;
+                }
+                if (base.length() > 0) { emitAtom(base.toString(), out); base.setLength(0); }
+                out.add(EHLexeme.superscript(exp));
+                continue;
+            }
+            base.append(c);
+        }
+        if (base.length() > 0) emitAtom(base.toString(), out);
+    }
+
     /** 약물 런: p→π, H→순환마디점(DOT), 그 외 공통기호 디코딩. */
     private static void lexChemical(String content, List<EHLexeme> out) {
         for (int i = 0; i < content.length(); i++) {
@@ -274,6 +314,13 @@ public class EHLexer {
     private static void emitAtom(String s, List<EHLexeme> out) {
         if (s == null) return;
         s = s.replace("￼", "").replace("`", "");
+        // EH분수대문자의 { } 는 큰 소괄호 글리프다(실측: 1단원 p14 (1/2)² 의 여는·닫는
+        // 소괄호). HWP 수식 스크립트의 그룹핑 중괄호와 충돌해 화면에서 유실되므로 소괄호
+        // 문자로 치환한다. 단, StoryLoader 가 주입하는 box{~} 명령 문자열은 예외 —
+        // 이건 괄호 글리프가 아니라 HWP 수식 명령이라 중괄호를 보존해야 한다.
+        if (!s.contains("box{~}")) {
+            s = s.replace('{', '(').replace('}', ')');
+        }
         if (s.isEmpty()) return;
         out.add(EHLexeme.atomText(s));
     }
