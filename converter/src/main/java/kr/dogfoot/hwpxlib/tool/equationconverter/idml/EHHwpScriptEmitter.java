@@ -132,6 +132,12 @@ public class EHHwpScriptEmitter {
         String result = trimSpacesKeepTabs(raw);
         if (result.isEmpty()) return null;
 
+        // 닫는 괄호 앞 공백 제거: InDesign 원문은 근호 가로줄이 ')' 와 겹치지 않게
+        // 얇은 공백(U+2009 등)을 넣지만, HWP 수식은 자체 여백을 그리므로 그대로 두면
+        // 쓸데없는 틈이 된다(실측: p17 (√5 )²). left/right 확대 전에 지워야
+        // " right)" 앞 이중 공백도 안 생긴다.
+        result = result.replaceAll("[ \\u2000-\\u200B\\u202F]+\\)", ")");
+
         // HWP 수식 키워드 앞뒤 공백 보장 (인접 토큰에 붙는 것 방지)
         for (String kw : new String[]{"TIMES", " div "}) {
             if (!result.contains(kw)) continue;

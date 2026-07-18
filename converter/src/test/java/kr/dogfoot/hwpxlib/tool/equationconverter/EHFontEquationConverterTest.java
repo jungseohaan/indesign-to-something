@@ -158,6 +158,14 @@ public class EHFontEquationConverterTest {
                 convert(fracUpper("'"), body("2_"), fracUpper("'"), body("3")));
     }
 
+    @Test
+    public void no_space_before_closing_paren() {
+        // ('5␣)Û` — 원문이 근호 가로줄과 ')' 겹침을 피하려고 넣은 U+2009 thin space 는
+        // HWP 수식에서 쓸데없는 틈이 되므로 제거 (실측: p17 (√5 )²=5).
+        Assert.assertEquals("left(sqrt{5} right)^{2}=5",
+                convert(body("("), fracUpper("'"), body("5 )Û`=5")));
+    }
+
     // ── GREP 분수 ──
 
     @Test
