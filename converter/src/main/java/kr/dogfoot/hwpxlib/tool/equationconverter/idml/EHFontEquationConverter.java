@@ -31,14 +31,16 @@ public class EHFontEquationConverter {
     public static String convert(List<IDMLCharacterRun> runs) {
         if (runs == null || runs.isEmpty()) return null;
 
-        // 3단계 파이프라인: Tokenize → Build IR → Emit hwpScript
-        List<EHToken> tokens = EHTokenizer.tokenize(runs);
-        if (tokens.isEmpty()) return null;
+        // 재작성 3단계: Lex(글리프 의미 보존) → Parse(재귀하강 문법) → Emit.
+        // 센티넬(box{~}·U+241C·U+0307)은 lexeme/노드로 내부화 → 후처리(restoreBoxBraces/
+        // applyRecurringDecimalDots) 불필요.
+        java.util.List<EHLexeme> lexemes = EHLexer.lex(runs);
+        if (lexemes.isEmpty()) return null;
 
-        EHNode.Group tree = EHIRBuilder.build(tokens);
+        EHNode.Group tree = EHParser.build(lexemes);
         if (tree == null) return null;
 
-        return restoreBoxBraces(applyRecurringDecimalDots(EHHwpScriptEmitter.emit(tree)));
+        return EHHwpScriptEmitter.emit(tree);
     }
 
     /**

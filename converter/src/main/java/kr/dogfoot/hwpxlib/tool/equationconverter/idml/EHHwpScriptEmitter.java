@@ -57,6 +57,23 @@ public class EHHwpScriptEmitter {
             }
             sb.append("}");
 
+        } else if (node instanceof EHNode.Box) {
+            // 빈 답란 박스 → HWP 수식 box{~} (ANSWER). VINCULUM 은 Parser 가 이미 제거.
+            sb.append("box{~}");
+
+        } else if (node instanceof EHNode.Overline) {
+            sb.append("overline{");
+            emitChildren(((EHNode.Overline) node).content(), sb);
+            sb.append("}");
+
+        } else if (node instanceof EHNode.RecurDot) {
+            sb.append("dot{").append(((EHNode.RecurDot) node).digit()).append("}");
+
+        } else if (node instanceof EHNode.Paren) {
+            sb.append("(");
+            emitChildren(((EHNode.Paren) node).content(), sb);
+            sb.append(")");
+
         } else if (node instanceof EHNode.Group) {
             emitChildren(((EHNode.Group) node).children(), sb);
         }
@@ -107,10 +124,9 @@ public class EHHwpScriptEmitter {
             if (!result.contains(kw)) continue;
             // 이미 공백이 있으면 skip
         }
-        // TIMES: 앞뒤 공백 보장
-        result = result.replaceAll("(?<=[^ ])TIMES(?=[^ ])", " TIMES ");
-        result = result.replaceAll("(?<=[^ ])TIMES$", " TIMES");
-        result = result.replaceAll("^TIMES(?=[^ ])", "TIMES ");
+        // TIMES: 앞뒤 공백 보장 (인접 토큰과 붙지 않게)
+        result = result.replaceAll("(?<=[^ ])TIMES", " TIMES");
+        result = result.replaceAll("TIMES(?=[^ ])", "TIMES ");
         // div: 단어 경계 기준 (숫자/문자에 붙은 경우만)
         result = result.replaceAll("(?<=[\\w}])div(?=[\\w{(])", " div ");
         result = result.replaceAll("(?<=[\\w}])div$", " div");
