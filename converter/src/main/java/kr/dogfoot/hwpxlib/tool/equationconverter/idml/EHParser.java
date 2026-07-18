@@ -150,12 +150,10 @@ public class EHParser {
             default:
                 return; // radicand 없음(빈 근호)
         }
-        // Trailing 지수: radicand 직후 SUPERSCRIPT 를 근호 안 마지막에 붙임(제곱근의 제곱).
-        // 단 (…)² 처럼 괄호 그룹 뒤 지수는 이미 ParenGroup 안에서 흡수됐을 수 있음.
-        if (has() && peek().kind() == EHLexeme.Kind.SUPERSCRIPT) {
-            EHLexeme sup = next();
-            out.add(superNode(sup.value()));
-        }
+        // radicand 직후 SUPERSCRIPT 는 근호 안에 넣지 않는다 — (√3)² 처럼 근호 밖 지수다.
+        // SUPERSCRIPT 를 소비하지 않고 남기면 parseItems 가 Sqrt 의 형제로 emit 하고,
+        // emitter 의 "Sqrt 뒤 Superscript → {sqrt{…}}^{n}" 래핑 규칙이 근호를 감싼다.
+        // 괄호그룹 뒤 지수(√((-1/2)²))는 이미 parseParenGroupInto 가 Paren 안에 흡수했다.
     }
 
     /**

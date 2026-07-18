@@ -43,6 +43,11 @@ public class EHFontEquationConverterTest {
         return r;
     }
 
+    /** EH상부자 폰트 런 (위첨자 또는 작은 크기 radicand). */
+    private static IDMLCharacterRun sup(String content) {
+        return run(content, "EH상부자", CS_SUP);
+    }
+
     /** 정사각형 빈 답란 박스 인라인 그래픽을 가진 런 (content = FFFC). */
     private static IDMLCharacterRun answerBox() {
         IDMLCharacterRun r = body("￼");
@@ -88,6 +93,22 @@ public class EHFontEquationConverterTest {
     public void sqrt_variable() {
         // 'b → √b
         Assert.assertEquals("sqrt{b}", convert(fracUpper("'"), body("b")));
+    }
+
+    @Test
+    public void sqrt_superscript_font_radicand() {
+        // '8[8C]0 — 8·0 이 EH상부자 폰트(작은 크기)로 조판된 radicand → √80
+        // 상부자 폰트라도 hook 직후 radicand 는 위첨자가 아니라 근호 안 숫자.
+        Assert.assertEquals("sqrt{80}",
+                convert(fracUpper("'"), sup("8"), fracUpper(""), sup("0")));
+    }
+
+    @Test
+    public void sqrt_radicand_then_exponent() {
+        // √3²  — hook + radicand 3 + 진짜 지수 2 → {sqrt{3}}^{2}
+        // radicand 를 다 모은 뒤의 SUPERSCRIPT 만 지수.
+        Assert.assertEquals("{sqrt{3}}^{2}",
+                convert(fracUpper("'"), body("3"), sup("2`")));
     }
 
     @Test

@@ -193,20 +193,40 @@ public class EHLexer {
         return second + 1;
     }
 
-    /** 상부자/하부자 런: decodeSubSupGlyph → SUPERSCRIPT/SUBSCRIPT/ATOM. 백틱은 닫기 마커. */
+    /**
+     * 상부자/하부자 런 → SUPERSCRIPT/SUBSCRIPT/ATOM.
+     *
+     * <p>중요: 상부자 폰트라도 <b>기본범위(0x20-0x7F, 일반 숫자·문자)</b> 글리프는
+     * 위첨자가 아니라 "작은 크기로 조판된 radicand/본문"이다(실측: √80 의 8·0 이
+     * EH상부자 폰트). 위첨자 위치가 아니므로 ATOM_TEXT 로 내보내 Parser 가 radicand
+     * 로 흡수하게 한다. 진짜 지수는 <b>확장범위(0x80+ → ²³ 등)</b> 또는 백틱(`)으로
+     * 닫히는 글리프다. 백틱 종료가 있으면 위첨자 위치가 확실.
+     */
     private static void lexSubSup(String content, boolean isSuper, List<EHLexeme> out) {
+        boolean hasBacktick = content.indexOf('`') >= 0;   // 위첨자 닫기 마커 존재
+        boolean hasExtended = false;                        // 0x80+ 위첨자 글리프 존재
         StringBuilder buf = new StringBuilder();
         for (int i = 0; i < content.length(); i++) {
             char c = content.charAt(i);
-            if (c == '`') continue; // 위첨자 닫기 마커(thin space)
+            if (c == '`') continue;
             char decoded = EHFontGlyphMap.decodeSubSupGlyph(c);
-            if (c >= 0x80 && decoded == c) continue; // 미매핑 확장문자 스킵
+            if (c >= 0x80) {
+                if (decoded == c) continue; // 미매핑 확장문자 스킵
+                hasExtended = true;
+            }
             buf.append(decoded);
         }
         String s = buf.toString();
         if (s.isEmpty()) return;
-        // 연산자(÷×±)는 ATOM, 나머지는 첨자.
+        // 연산자(÷×±°)는 항상 ATOM.
         if (s.length() == 1 && "÷×±°".indexOf(s.charAt(0)) >= 0) {
+            emitAtom(s, out);
+            return;
+        }
+        // 위첨자 위치 확실(확장범위 글리프 또는 백틱 종료) → 진짜 첨자.
+        // 그 외(기본범위 숫자·문자, 백틱 없음) → 작은 크기 radicand/본문 = ATOM.
+        boolean isTrueScript = hasExtended || hasBacktick;
+        if (!isTrueScript) {
             emitAtom(s, out);
         } else if (isSuper) {
             out.add(EHLexeme.superscript(s));
