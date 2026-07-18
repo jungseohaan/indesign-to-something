@@ -319,6 +319,10 @@ public class IDMLCharacterRun {
         String normalized = styleRef.toLowerCase(java.util.Locale.ROOT)
                 .replace("%3a", ":")
                 .replace("%25", "%");
+        // "정체"(正體)·"정자"는 상부자/하부자 폰트를 쓰되 위치는 정상인 조판 표기다.
+        // 스타일 이름에 "상부자/하부자"가 들어가도 첨자가 아니다(실측: 1단원 배지
+        // "점 B에 대응하는 수"의 B·C 가 "상부자(정체)"인데 위첨자화되던 문제).
+        if (normalized.contains("정체") || normalized.contains("정자")) return false;
         return normalized.contains(english)
                 || normalized.contains(koreanA)
                 || normalized.contains(koreanB);
