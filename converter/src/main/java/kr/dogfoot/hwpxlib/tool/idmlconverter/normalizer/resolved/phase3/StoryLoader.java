@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -343,7 +344,13 @@ public class StoryLoader {
                             if (idx + d < runs.size()) nearLongWord = nearLongWord || RunBuilder.containsLongLatinWord(runs.get(idx + d).content(), 3);
                         }
                     }
-                    if ((!paraHasMathSymbols && !isSingleLatinVar) || nearLongWord) {
+                    // 내용이 한국어뿐인 EH 폰트 런도 리셋 — InDesign DOM(resolved)이 √
+                    // 글리프 뒤 한국어 문장까지 EH상부자로 보고해 수식 그룹에 빨려들면
+                    // lexSubSup 이 미매핑 0x80+ 로 한국어를 통째로 버린다(실측: p20 표 셀
+                    // "a가 √a 보다 항상 더 큰지 말해 보자." → sqrt{a}. 로 잘림).
+                    boolean koreanOnly = EHTextClassifier.containsKorean(ct)
+                            && EHTextClassifier.isKoreanOnly(ct);
+                    if ((!paraHasMathSymbols && !isSingleLatinVar) || nearLongWord || koreanOnly) {
                         run.fontFamily(null);
                         run.fontStyle(null);
                         run.appliedCharacterStyle(null);

@@ -2,6 +2,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
@@ -203,6 +204,19 @@ public class ASTStoryConverter {
             }
 
             String runText = run.content();
+
+            // EH \uD3F0\uD2B8\uAC00 \uBD99\uC5C8\uC9C0\uB9CC \uB0B4\uC6A9\uC774 \uD55C\uAD6D\uC5B4\uBFD0\uC778 \uB7F0\uC740 \uC218\uC2DD\uC774 \uC544\uB2C8\uB2E4 \u2014 InDesign DOM
+            // (resolved)\uC774 \u221A \uAE00\uB9AC\uD504 \uB4A4 \uD55C\uAD6D\uC5B4 \uBB38\uC7A5\uAE4C\uC9C0 EH\uC0C1\uBD80\uC790 \uD3F0\uD2B8\uB85C \uBCF4\uACE0\uD558\uB294 \uACBD\uC6B0\uAC00
+            // \uC788\uB2E4(\uC2E4\uCE21: p20 \uD45C \uC140 "a\uAC00 \u221Aa \uBCF4\uB2E4 \uD56D\uC0C1 \uB354 \uD070\uC9C0 \uB9D0\uD574 \uBCF4\uC790." \uC758 \uD55C\uAD6D\uC5B4\uAC00
+            // EH \uADF8\uB8F9\uC5D0 \uB4E4\uC5B4\uAC00 lexSubSup \uBBF8\uB9E4\uD551 \uC2A4\uD0B5\uC73C\uB85C \uD1B5\uC9F8\uB85C \uC720\uC2E4). EH \uD3F0\uD2B8 \uC815\uBCF4\uB97C
+            // \uC9C0\uC6CC \uC77C\uBC18 \uD14D\uC2A4\uD2B8\uB85C \uD758\uB9B0\uB2E4(\uC774\uD0E4\uB9AD \uC624\uC5FC\uB3C4 \uD568\uAED8 \uBC29\uC9C0).
+            if (run.isEHFont() && EHTextClassifier.containsKorean(runText)
+                    && EHTextClassifier.isKoreanOnly(runText)) {
+                run.fontFamily(null);
+                run.fontStyle(null);
+                run.appliedCharacterStyle(null);
+            }
+
             boolean orcOnly = runText != null && !runText.isEmpty()
                     && runText.replace("\uFFFC", "").isEmpty();
             boolean formulaClusterRun = ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
