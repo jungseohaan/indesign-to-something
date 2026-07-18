@@ -216,6 +216,19 @@ public class EHParser {
                         break;
                     }
                 }
+                // radicand 는 숫자/변수 하나다. ATOM 안에 항 경계(쉼표·공백·관계연산자·
+                // 여는괄호)가 있으면 그 앞까지만 radicand 로 삼고, 나머지는 근호 밖 형제로
+                // 되돌린다(실측: 1단원 √2, π 가 sqrt{2, pi} 로 뭉치던 문제). 단 이미
+                // radicand 안 곱셈(sb 끝이 TIMES)이면 뒤 항을 계속 흡수한다.
+                int bd = radicandBoundary(v);
+                boolean insideMul = sb.toString().trim().endsWith("TIMES");
+                if (bd >= 0 && !insideMul) {
+                    next();
+                    if (bd > 0) sb.append(v.substring(0, bd));
+                    String rest = v.substring(bd);
+                    if (!rest.isEmpty()) lx.set(--pos, EHLexeme.atomText(rest)); // 나머지 되돌림
+                    break;
+                }
                 next();
                 sb.append(v);
             } else if (t.kind() == EHLexeme.Kind.DIGIT_SEP) {
@@ -239,6 +252,23 @@ public class EHParser {
             }
         }
         flushText(sb, out);
+    }
+
+    /**
+     * ATOM 문자열에서 radicand 를 끝내는 항 경계의 인덱스(없으면 -1).
+     * 쉼표·공백·관계연산자(=<>)는 근호 밖 텍스트다. 여는 괄호도 경계(별도 ParenGroup).
+     * 맨 앞 부호(-)는 radicand 의 일부이므로 0 은 반환하지 않는다.
+     */
+    private static int radicandBoundary(String v) {
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (c == ',' || c == ' ' || c == ' ' || c == ' '
+                    || c == '=' || c == '<' || c == '>' || c == '(') {
+                if (i == 0 && c == '(') return -1; // 여는괄호 시작은 parseRadicand 가 ParenGroup 으로
+                return i;
+            }
+        }
+        return -1;
     }
 
     private void flushText(StringBuilder sb, List<EHNode> out) {
