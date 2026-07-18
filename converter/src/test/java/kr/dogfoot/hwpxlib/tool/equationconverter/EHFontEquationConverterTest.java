@@ -120,6 +120,30 @@ public class EHFontEquationConverterTest {
     }
 
     @Test
+    public void sqrt_width_selector_run_then_number() {
+        // '[B6]1[8C]2[8C]1 — hook 다음 폭 선택자(0xB6)가 별도 런으로 오고 radicand 121.
+        // 폭 선택자는 버리고 √121 로 (실측: 1단원 p16). d 로 디코딩해 sqrt{d121} 로 새면 안 됨.
+        Assert.assertEquals("sqrt{121}",
+                convert(fracUpper("'"), fracUpper("¶"), body("1"),
+                        fracUpper(""), body("2"),
+                        fracUpper(""), body("1")));
+    }
+
+    @Test
+    public void sqrt_width_selector_glyph_as_variable_u() {
+        // '[C9] — 폭 선택자와 같은 코드포인트지만 뒤에 radicand 가 없음 → 진짜 변수 u.
+        Assert.assertEquals("sqrt{u}",
+                convert(fracUpper("'"), fracUpper("É")));
+    }
+
+    @Test
+    public void sqrt_width_selector_glyph_as_variable_l() {
+        // '[C2] — 마찬가지로 radicand 없음 → 변수 l (실측: 1단원 p16 √u·√l).
+        Assert.assertEquals("sqrt{l}",
+                convert(fracUpper("'"), fracUpper("Â")));
+    }
+
+    @Test
     public void empty_sqrt_superscript_is_radicand() {
         // '2` — hook 직후 radicand 가 상부자(작은크기)로 조판되어 SUPERSCRIPT 로 렉싱될 때,
         // 빈 근호 + 위첨자면 그 위첨자는 지수가 아니라 radicand → sqrt{2}.

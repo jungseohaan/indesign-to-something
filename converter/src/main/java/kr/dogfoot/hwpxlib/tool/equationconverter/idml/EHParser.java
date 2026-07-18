@@ -107,17 +107,36 @@ public class EHParser {
     /** Sqrt := HOOK WidthSel? Radicand */
     private EHNode parseSqrt() {
         next(); // consume HOOK
-        // 연속 HOOK/WIDTH_SELECTOR (같은 근호의 폭 마커 조각) 스킵
-        while (has() && (peek().kind() == EHLexeme.Kind.WIDTH_SELECTOR
-                || peek().kind() == EHLexeme.Kind.HOOK)) {
-            // 연속 HOOK 이 오면? — 별개 근호이므로 여기서 멈춰야 하지만, 실측상 hook 직후
-            // width-selector 만 스킵. 새 HOOK 은 radicand 파싱이 끝난 뒤 상위 루프가 잡는다.
-            if (peek().kind() == EHLexeme.Kind.HOOK) break;
-            next();
-        }
+        // hook 직후 WIDTH_SELECTOR 는 여기서 스킵하지 않는다 — parseRadicand 가
+        // "뒤에 radicand 가 더 오는가"로 폭 마커/진짜 변수(√121 vs √u)를 판정한다.
         EHNode.Sqrt sqrt = new EHNode.Sqrt();
         parseRadicand(sqrt.radicand());
         return sqrt;
+    }
+
+    /**
+     * 현재 위치(WIDTH_SELECTOR 소비 직후)에서 radicand 내용이 이어지는지.
+     * ATOM_TEXT/FRACTION/BOX 가 곧 오면 true(폭 선택자는 버림), 새 HOOK·SEP·끝이면
+     * false(폭 선택자 자리 글리프가 실은 변수). WIDTH_SELECTOR/DIGIT_SEP 는 건너뛰며 본다.
+     */
+    private boolean radicandFollows() {
+        for (int k = pos; k < lx.size(); k++) {
+            EHLexeme t = lx.get(k);
+            switch (t.kind()) {
+                case ATOM_TEXT:
+                    // 순수 구분·연산 텍스트(공백만)면 radicand 아님. 그 외는 radicand.
+                    return t.value() != null && !t.value().trim().isEmpty();
+                case FRACTION:
+                case BOX:
+                    return true;
+                case WIDTH_SELECTOR:
+                case DIGIT_SEP:
+                    continue; // 마커는 건너뛰고 다음을 본다
+                default:
+                    return false; // HOOK/SEP/SUPERSCRIPT 등 → radicand 없음
+            }
+        }
+        return false;
     }
 
     /** Radicand := RadAtom Trailing? — 하나의 원자 + 선택 지수. */
@@ -143,10 +162,20 @@ public class EHParser {
                 next();
                 if (t.boxKind() == EHNode.Box.Kind.ANSWER) out.add(new EHNode.Box(EHNode.Box.Kind.ANSWER));
                 break;
-            case WIDTH_SELECTOR:
+            case WIDTH_SELECTOR: {
                 next();
-                parseRadicand(out); // 폭 선택자 스킵 후 재시도
+                // 폭 선택자 뒤에 radicand 가 더 오면(√121 의 121) 폭 선택자를 버리고 재시도.
+                // 뒤에 radicand 가 없으면(√u, √l) 이 코드포인트는 폭 선택자가 아니라 진짜
+                // 변수다 — 디코딩해 radicand 로 넣는다(실측: 1단원 p16 √121 vs √u 구분).
+                if (radicandFollows()) {
+                    parseRadicand(out);
+                } else {
+                    String var = EHFontGlyphMap.decodeText(
+                            String.valueOf((char) t.rawCodepoint()), "EH분수대문자");
+                    if (var != null && !var.isEmpty()) out.add(new EHNode.Text(var));
+                }
                 return;
+            }
             case DIGIT_SEP:
                 // hook 직후 DIGIT_SEP 는 자리 이어붙이기가 아니라 폭 선택 마커다
                 // (앞 숫자가 없으므로). 스킵하고 radicand 재시도 → √a 가 sqrt{ }a 로
