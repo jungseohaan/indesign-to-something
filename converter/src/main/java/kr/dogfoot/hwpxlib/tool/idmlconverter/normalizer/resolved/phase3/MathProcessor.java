@@ -69,6 +69,8 @@ class MathProcessor {
             return;
         }
 
+        splitEHKoreanMixedTextRuns(items);
+
         List<ASTInlineItem> newItems = new ArrayList<>();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
         String mathType = null; // "EH", "BT", "NP"
@@ -203,6 +205,52 @@ class MathProcessor {
         collapseMixedFormulaEquationClusters(ctx, para);
     }
 
+    /**
+     * EH 폰트가 붙었지만 한국어가 섞인 TextRun 을 첫 한국어 문자에서 분리한다.
+     *
+     * <p>InDesign DOM(resolved)은 √ 글리프 뒤 한국어 문장까지 EH상부자 폰트로
+     * 보고하는 경우가 있다(실측: p20 표 셀 "a가 √a 보다 항상 더 큰지 말해 보자."의
+     * "a 보다…보자." 전체가 EH상부자). 그대로 수식 그룹에 넣으면 lexSubSup 이
+     * 미매핑 0x80+ 문자로 한국어를 통째로 버려 문장이 sqrt{a}. 로 잘린다.
+     * 라틴 머리(radicand)는 EH 수식으로 남기고, 첫 한국어부터는 EH 폰트를 지운
+     * 일반 텍스트 런으로 분리한다.
+     */
+    private static void splitEHKoreanMixedTextRuns(List<ASTInlineItem> items) {
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun tr = (ASTTextRun) item;
+            String ff = tr.fontFamily();
+            if (ff == null || !EHFontGlyphMap.isEHFontFamily(ff)) continue;
+            String text = tr.text();
+            if (text == null) continue;
+            int k = firstKoreanIndex(text);
+            if (k < 0) continue;
+            if (k == 0) {
+                tr.fontFamily(null);
+                tr.fontStyle(null);
+                continue;
+            }
+            ASTTextRun tail = new ASTTextRun();
+            tail.text(text.substring(k));
+            tail.fontSizeHwpunits(tr.fontSizeHwpunits());
+            tail.textColor(tr.textColor());
+            tail.shadeColor(tr.shadeColor());
+            tail.letterSpacing(tr.letterSpacing());
+            tr.text(text.substring(0, k));
+            items.add(i + 1, tail);
+            i++; // tail 은 EH 폰트가 없으므로 재검사 불필요
+        }
+    }
+
+    private static int firstKoreanIndex(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3131 && c <= 0x318E)) return i;
+        }
+        return -1;
+    }
+
     private static void collapseMixedFormulaEquationClusters(ResolvedBuildContext ctx, ASTParagraph para) {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
@@ -270,6 +318,13 @@ class MathProcessor {
                 out.add(item);
                 continue;
             }
+            // 소괄호도 마찬가지 — (-16)×…÷(-6/7) 의 바깥 ( ) 나 left( … right) 의 소괄호를
+            // 경계로 벗기면 짝이 깨져 닫는 )·right 가 리터럴로 새거나 left( 가 미완결된다
+            // (실측: 1단원 p30 "(-16)×3/4÷(-6/7)" → "-16)…right"). ( ) 균형이 맞을 때만 벗긴다.
+            if (!isParenBalanced(core)) {
+                out.add(item);
+                continue;
+            }
             if (start > 0) {
                 out.add(textRunFromEquationBoundary(eq, script.substring(0, start)));
             }
@@ -299,6 +354,20 @@ class MathProcessor {
             char c = s.charAt(i);
             if (c == '{') depth++;
             else if (c == '}') { depth--; if (depth < 0) return false; }
+        }
+        return depth == 0;
+    }
+
+    /**
+     * HWP 수식 소괄호 ( ) 짝이 맞는지. left( … right) 및 (-16)·(-6/7) 보호용.
+     * left(/right 키워드의 소괄호도 리터럴 ( )와 함께 depth 로 센다.
+     */
+    private static boolean isParenBalanced(String s) {
+        int depth = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '(') depth++;
+            else if (c == ')') { depth--; if (depth < 0) return false; }
         }
         return depth == 0;
     }

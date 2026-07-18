@@ -65,6 +65,29 @@ public class IDMLCharacterRun {
     }
 
     /**
+     * 문자 스타일 속성만 복사하고 인라인 앵커(프레임/그래픽/앵커)는 비운 새 런.
+     * content 는 복사하지 않는다(호출자가 세팅). 근호 radicand 를 빈 답란 박스 앵커와
+     * 분리해 EH 그룹에 넣을 때 사용(StoryLoader).
+     */
+    public IDMLCharacterRun shallowCopyWithoutInlines() {
+        IDMLCharacterRun c = new IDMLCharacterRun();
+        c.appliedCharacterStyle = this.appliedCharacterStyle;
+        c.fontFamily = this.fontFamily;
+        c.fontSize = this.fontSize;
+        c.fillColor = this.fillColor;
+        c.fillTint = this.fillTint;
+        c.fontStyle = this.fontStyle;
+        c.position = this.position;
+        c.tracking = this.tracking;
+        c.grepMathFont = this.grepMathFont;
+        c.grepFillColor = this.grepFillColor;
+        c.grepAppliedCharStyle = this.grepAppliedCharStyle;
+        c.baselineShift = this.baselineShift;
+        c.horizontalScale = this.horizontalScale;
+        return c;
+    }
+
+    /**
      * IDML 인라인 그래픽 (Rectangle, Polygon, Group 등 텍스트 내 인라인 객체).
      */
     public static class InlineGraphic {
@@ -296,6 +319,10 @@ public class IDMLCharacterRun {
         String normalized = styleRef.toLowerCase(java.util.Locale.ROOT)
                 .replace("%3a", ":")
                 .replace("%25", "%");
+        // "정체"(正體)·"정자"는 상부자/하부자 폰트를 쓰되 위치는 정상인 조판 표기다.
+        // 스타일 이름에 "상부자/하부자"가 들어가도 첨자가 아니다(실측: 1단원 배지
+        // "점 B에 대응하는 수"의 B·C 가 "상부자(정체)"인데 위첨자화되던 문제).
+        if (normalized.contains("정체") || normalized.contains("정자")) return false;
         return normalized.contains(english)
                 || normalized.contains(koreanA)
                 || normalized.contains(koreanB);

@@ -549,6 +549,10 @@ class RunBuilder {
         // (예: 제곱근 값 5, -5, 25)는 변수가 아니라 본문 숫자다. 이탤릭을 적용하지 않는다.
         // (실측: 수학 1단원 p14 "제곱근은 5와 -5이다" 의 5/-5 가 이탤릭으로 나옴)
         if (isItalic && isNumericOrSignOnly(text)) return false;
+        // 한글은 수식 변수가 아니다. EH/BT 수식 옆 한글 런("그런데")이 인접 수식의
+        // 이탤릭 resolved 스타일에 잘못 매칭돼 기울어지던 문제(실측: 1단원 5²=25 앞
+        // "그런데")를 막는다.
+        if (isItalic && text != null && EHTextClassifier.isKoreanOnly(text)) return false;
         return isItalic || text == null || !EHTextClassifier.isKoreanOnly(text);
     }
 

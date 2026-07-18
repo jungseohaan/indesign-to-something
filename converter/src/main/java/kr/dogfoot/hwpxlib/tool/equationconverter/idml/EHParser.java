@@ -1,0 +1,462 @@
+package kr.dogfoot.hwpxlib.tool.equationconverter.idml;
+
+import java.util.List;
+
+/**
+ * EH 수식 재작성 Phase 2: EHLexeme 리스트 → EHNode 트리 (재귀하강 문법).
+ *
+ * <p>기존 {@link EHIRBuilder}의 스트림 heuristic(findRadicandEnd / "바 연장 추측")을
+ * 명시적 문법으로 대체한다:
+ *
+ * <pre>
+ *   Group    := Item*
+ *   Item     := Sqrt | Fraction | Overline | Box | Sep | Text
+ *   Sqrt     := HOOK WidthSel? Radicand
+ *   Radicand := RadAtom Trailing?
+ *   RadAtom  := Number | Var | Fraction | ParenGroup | Box
+ *   Number   := ATOM_digits (DIGIT_SEP ATOM_digits)*   // 0x8C 로 조각난 √10 을 이어붙임
+ *   ParenGroup := '(' Item* ')'                        // 괄호 균형까지, 지수 흡수
+ *   Trailing := SUPERSCRIPT
+ * </pre>
+ *
+ * <p>핵심: HOOK 마다 새 Sqrt (√2·√3 자동 분리). radicand 는 정확히 하나의 RadAtom +
+ * 선택 지수. SEP·새 HOOK 을 만나면 radicand 종료. BOX(ANSWER)는 RadAtom 자리에 올 수 있고,
+ * BOX(VINCULUM)은 무시된다.
+ */
+public class EHParser {
+
+    private final List<EHLexeme> lx;
+    private int pos;
+
+    private EHParser(List<EHLexeme> lexemes) {
+        this.lx = lexemes;
+    }
+
+    public static EHNode.Group build(List<EHLexeme> lexemes) {
+        if (lexemes == null || lexemes.isEmpty()) return null;
+        EHParser p = new EHParser(lexemes);
+        EHNode.Group root = new EHNode.Group();
+        p.parseItems(root.children(), false);
+        return root;
+    }
+
+    private EHLexeme peek() { return pos < lx.size() ? lx.get(pos) : null; }
+    private EHLexeme next() { return lx.get(pos++); }
+    private boolean has() { return pos < lx.size(); }
+
+    /** Item* 를 out 에 파싱. inParen=true 면 ')'(ATOM ")") 에서 멈춘다. */
+    private void parseItems(List<EHNode> out, boolean inParen) {
+        while (has()) {
+            EHLexeme t = peek();
+            switch (t.kind()) {
+                case HOOK:
+                    out.add(parseSqrt());
+                    break;
+                case FRACTION:
+                    next();
+                    out.add(fractionNode(t));
+                    break;
+                case BOX:
+                    next();
+                    if (t.boxKind() == EHNode.Box.Kind.ANSWER) out.add(new EHNode.Box(EHNode.Box.Kind.ANSWER));
+                    // VINCULUM 은 무시
+                    break;
+                case DOT:
+                    next();
+                    // 뒤 숫자에 dot 적용
+                    applyRecurDot(out);
+                    break;
+                case SEP:
+                    next();
+                    if (t.value() != null && !t.value().trim().isEmpty()) {
+                        out.add(new EHNode.Text(t.value())); // EM/thin space·원문자 등 텍스트로
+                    } else if (t.value() != null) {
+                        out.add(new EHNode.Text(t.value()));
+                    }
+                    break;
+                case SUPERSCRIPT:
+                    next();
+                    out.add(superNode(t.value()));
+                    break;
+                case SUBSCRIPT:
+                    next();
+                    out.add(subNode(t.value()));
+                    break;
+                case OVERLINE:
+                    next();
+                    wrapLastInOverline(out);
+                    break;
+                case ATOM_TEXT: {
+                    String v = t.value();
+                    if (inParen && v != null && v.startsWith(")")) return; // 괄호 종료는 상위에서
+                    next();
+                    out.add(new EHNode.Text(v));
+                    break;
+                }
+                case WIDTH_SELECTOR:
+                case DIGIT_SEP:
+                case SKIP:
+                    next(); // 근호 밖에서는 무시
+                    break;
+                default:
+                    next();
+            }
+        }
+    }
+
+    /** Sqrt := HOOK WidthSel? Radicand */
+    private EHNode parseSqrt() {
+        next(); // consume HOOK
+        // hook 직후 WIDTH_SELECTOR 는 여기서 스킵하지 않는다 — parseRadicand 가
+        // "뒤에 radicand 가 더 오는가"로 폭 마커/진짜 변수(√121 vs √u)를 판정한다.
+        EHNode.Sqrt sqrt = new EHNode.Sqrt();
+        parseRadicand(sqrt.radicand());
+        return sqrt;
+    }
+
+    /**
+     * 현재 위치(WIDTH_SELECTOR 소비 직후)에서 radicand 내용이 이어지는지.
+     * ATOM_TEXT/FRACTION/BOX 가 곧 오면 true(폭 선택자는 버림), 새 HOOK·SEP·끝이면
+     * false(폭 선택자 자리 글리프가 실은 변수). WIDTH_SELECTOR/DIGIT_SEP 는 건너뛰며 본다.
+     */
+    private boolean radicandFollows() {
+        for (int k = pos; k < lx.size(); k++) {
+            EHLexeme t = lx.get(k);
+            switch (t.kind()) {
+                case ATOM_TEXT: {
+                    // 공백뿐이거나 연산·관계·구분 문자로 시작하면 radicand 아님 —
+                    // 그 경우 폭선택자 자리 글리프가 진짜 변수다 (예: √x+1 의 "+1").
+                    String v = t.value() == null ? "" : t.value().trim();
+                    if (v.isEmpty()) return false;
+                    char c0 = v.charAt(0);
+                    return c0 != '+' && c0 != '=' && c0 != '<' && c0 != '>'
+                            && c0 != ',' && c0 != ')';
+                }
+                case FRACTION:
+                case BOX:
+                    return true;
+                case WIDTH_SELECTOR:
+                case DIGIT_SEP:
+                    continue; // 마커는 건너뛰고 다음을 본다
+                default:
+                    return false; // HOOK/SEP/SUPERSCRIPT 등 → radicand 없음
+            }
+        }
+        return false;
+    }
+
+    /** Radicand := RadAtom Trailing? — 하나의 원자 + 선택 지수. */
+    private void parseRadicand(List<EHNode> out) {
+        if (!has()) return;
+        EHLexeme t = peek();
+        switch (t.kind()) {
+            case ATOM_TEXT: {
+                String v = t.value();
+                // 여는 괄호로 시작하면 ParenGroup
+                if (v != null && v.startsWith("(")) {
+                    parseParenGroupInto(out);
+                } else {
+                    parseNumberOrText(out);
+                }
+                break;
+            }
+            case FRACTION:
+                next();
+                out.add(fractionNode(t));
+                break;
+            case BOX:
+                next();
+                if (t.boxKind() == EHNode.Box.Kind.ANSWER) out.add(new EHNode.Box(EHNode.Box.Kind.ANSWER));
+                break;
+            case WIDTH_SELECTOR: {
+                next();
+                // 폭 선택자 뒤에 radicand 가 더 오면(√121 의 121) 폭 선택자를 버리고 재시도.
+                // 뒤에 radicand 가 없으면(√u, √l) 이 코드포인트는 폭 선택자가 아니라 진짜
+                // 변수다 — 디코딩해 radicand 로 넣는다(실측: 1단원 p16 √121 vs √u 구분).
+                if (radicandFollows()) {
+                    parseRadicand(out);
+                } else {
+                    String var = EHFontGlyphMap.decodeText(
+                            String.valueOf((char) t.rawCodepoint()), "EH분수대문자");
+                    if (var != null && !var.isEmpty()) out.add(new EHNode.Text(var));
+                }
+                return;
+            }
+            case DIGIT_SEP:
+                // hook 직후 DIGIT_SEP 는 자리 이어붙이기가 아니라 폭 선택 마커다
+                // (앞 숫자가 없으므로). 스킵하고 radicand 재시도 → √a 가 sqrt{ }a 로
+                // 새는 것 방지.
+                next();
+                parseRadicand(out);
+                return;
+            default:
+                return; // radicand 없음(빈 근호)
+        }
+        // radicand 직후 SUPERSCRIPT 는 근호 안에 넣지 않는다 — (√3)² 처럼 근호 밖 지수다.
+        // SUPERSCRIPT 를 소비하지 않고 남기면 parseItems 가 Sqrt 의 형제로 emit 하고,
+        // emitter 의 "Sqrt 뒤 Superscript → {sqrt{…}}^{n}" 래핑 규칙이 근호를 감싼다.
+        // 괄호그룹 뒤 지수(√((-1/2)²))는 이미 parseParenGroupInto 가 Paren 안에 흡수했다.
+    }
+
+    /**
+     * Number/Text radicand: ATOM 을 소비하되, DIGIT_SEP 로 이어지는 숫자는 이어붙인다.
+     *
+     * <p>"2_"(=2×) 의 곱셈 연산자 처리가 핵심:
+     * <ul>
+     *   <li>_ 뒤가 box/fraction/숫자 → radicand 안 곱셈 (√(2×□), √(2×9/2)).</li>
+     *   <li>_ 뒤가 새 HOOK → 곱셈은 근호 밖 (√2·√3). radicand 는 "2"까지, TIMES 는
+     *       상위 out 에 형제로 emit.</li>
+     * </ul>
+     * out 에는 radicand 만 넣고, 근호 밖으로 나갈 트레일링 TIMES 는 pendingTrailing 에 담아
+     * 호출자(parseSqrt→parseRadicand→parseItems)가 배치하게 한다. 여기서는 radicand 안
+     * 곱셈만 처리하고, 근호 밖 곱셈이면 TIMES 를 소비하지 않고 남긴다.
+     */
+    private void parseNumberOrText(List<EHNode> out) {
+        StringBuilder sb = new StringBuilder();
+        while (has()) {
+            EHLexeme t = peek();
+            if (t.kind() == EHLexeme.Kind.ATOM_TEXT) {
+                String v = t.value();
+                if (v.startsWith(")")) break; // 닫는 괄호는 상위 ParenGroup 처리
+                // ATOM 이 곱셈 _ 로 끝나는가?
+                int us = v.indexOf('_');
+                if (us >= 0) {
+                    String before = v.substring(0, us);
+                    String after = v.substring(us + 1);
+                    // _ 뒤에 같은 ATOM 안에 내용이 더 있으면(2_3) radicand 안 곱셈
+                    if (!after.isEmpty()) {
+                        next();
+                        sb.append(before).append(" TIMES ").append(after.replace("_", " TIMES "));
+                        continue;
+                    }
+                    // _ 로 끝남: 다음 lexeme 으로 안/밖 판정
+                    EHLexeme n = (pos + 1 < lx.size()) ? lx.get(pos + 1) : null;
+                    boolean insideTimes = n != null
+                            && (n.kind() == EHLexeme.Kind.BOX
+                                || n.kind() == EHLexeme.Kind.FRACTION
+                                || (n.kind() == EHLexeme.Kind.ATOM_TEXT
+                                    && n.value() != null && !n.value().isEmpty()
+                                    && Character.isLetterOrDigit(n.value().charAt(0))));
+                    if (insideTimes) {
+                        next();
+                        sb.append(before).append(" TIMES ");
+                        continue; // radicand 안에서 계속(box/fraction/숫자 흡수)
+                    } else {
+                        // 근호 밖 곱셈: radicand 는 before 까지. TIMES 는 소비 안 함(남김).
+                        // 현재 ATOM 을 before(radicand) + "_" 나머지로 분해: before 만 넣고,
+                        // _ 를 별도 TIMES ATOM 으로 남기기 위해 lexeme 을 교체.
+                        next();
+                        sb.append(before);
+                        lx.set(--pos, EHLexeme.atomText("_")); // "_" 를 다시 큐에(밖 곱셈)
+                        break;
+                    }
+                }
+                // radicand 는 숫자/변수 하나다. ATOM 안에 항 경계(쉼표·공백·관계연산자·
+                // 여는괄호)가 있으면 그 앞까지만 radicand 로 삼고, 나머지는 근호 밖 형제로
+                // 되돌린다(실측: 1단원 √2, π 가 sqrt{2, pi} 로 뭉치던 문제). 단 이미
+                // radicand 안 곱셈(sb 끝이 TIMES)이면 뒤 항을 계속 흡수한다.
+                int bd = radicandBoundary(v);
+                boolean insideMul = sb.toString().trim().endsWith("TIMES");
+                if (bd >= 0 && !insideMul) {
+                    next();
+                    if (bd > 0) sb.append(v.substring(0, bd));
+                    String rest = v.substring(bd);
+                    if (!rest.isEmpty()) lx.set(--pos, EHLexeme.atomText(rest)); // 나머지 되돌림
+                    break;
+                }
+                next();
+                sb.append(v);
+            } else if (t.kind() == EHLexeme.Kind.DIGIT_SEP) {
+                next(); // 자리구분 제거하고 숫자 이어붙임
+            } else if (t.kind() == EHLexeme.Kind.FRACTION) {
+                // radicand 안 곱셈 뒤 분수 (2×9/2)
+                if (sb.length() > 0 && sb.toString().trim().endsWith("TIMES")) {
+                    next();
+                    flushText(sb, out);
+                    out.add(fractionNode(t));
+                } else break;
+            } else if (t.kind() == EHLexeme.Kind.BOX && t.boxKind() == EHNode.Box.Kind.ANSWER) {
+                // radicand 안 곱셈 뒤 box (2×□)
+                if (sb.length() > 0 && sb.toString().trim().endsWith("TIMES")) {
+                    next();
+                    flushText(sb, out);
+                    out.add(new EHNode.Box(EHNode.Box.Kind.ANSWER));
+                } else break;
+            } else {
+                break;
+            }
+        }
+        flushText(sb, out);
+    }
+
+    /**
+     * ATOM 문자열에서 radicand 를 끝내는 항 경계의 인덱스(없으면 -1).
+     * 쉼표·공백·관계연산자(=<>)는 근호 밖 텍스트다. 여는 괄호도 경계(별도 ParenGroup).
+     * 맨 앞 부호(-)는 radicand 의 일부이므로 0 은 반환하지 않는다.
+     */
+    private static int radicandBoundary(String v) {
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (c == ',' || c == ' ' || c == ' ' || c == ' '
+                    || c == '=' || c == '<' || c == '>' || c == '(') {
+                if (i == 0 && c == '(') return -1; // 여는괄호 시작은 parseRadicand 가 ParenGroup 으로
+                return i;
+            }
+            // 순수 숫자 radicand 뒤의 +·- 도 경계: 폭 선택자 없는 hook(') 근호의
+            // 가로줄은 숫자 하나만 덮으므로 "7-2" 는 √7 − 2 이지 √(7−2) 가 아니다
+            // (실측: p22 √7−2, 3+√16). 앞이 전부 숫자(.·선행 부호 허용)일 때만.
+            if ((c == '+' || c == '-') && i > 0 && allDigitsBefore(v, i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** v[0,end) 가 숫자 radicand 인가 — 숫자·소수점(선행 - 허용)만이고 숫자 1개 이상. */
+    private static boolean allDigitsBefore(String v, int end) {
+        boolean hasDigit = false;
+        for (int i = 0; i < end; i++) {
+            char c = v.charAt(i);
+            if (Character.isDigit(c)) { hasDigit = true; continue; }
+            if (c == '.') continue;
+            if (c == '-' && i == 0) continue;
+            return false;
+        }
+        return hasDigit;
+    }
+
+    private void flushText(StringBuilder sb, List<EHNode> out) {
+        if (sb.length() > 0) {
+            out.add(new EHNode.Text(sb.toString()));
+            sb.setLength(0);
+        }
+    }
+
+    /** '(' Item* ')' 를 out 에 Paren 노드로. */
+    private void parseParenGroupInto(List<EHNode> out) {
+        EHLexeme t = next(); // ATOM starting with '('
+        EHNode.Paren paren = new EHNode.Paren();
+        String tail = null; // 닫는 ')' 뒤 같은 ATOM 의 잔여 텍스트 — 괄호 밖으로 되돌린다
+        String rest = t.value().substring(1);
+        int depth = 1;
+        int ci = closeIndex(rest, depth);
+        if (ci >= 0) {
+            if (ci > 0) paren.content().add(new EHNode.Text(rest.substring(0, ci)));
+            tail = rest.substring(ci + 1);
+            depth = 0;
+        } else {
+            depth += count(rest, '(') - count(rest, ')');
+            if (!rest.isEmpty()) paren.content().add(new EHNode.Text(rest));
+        }
+        // 괄호 균형까지 Item 수집
+        while (has() && depth > 0) {
+            EHLexeme n = peek();
+            if (n.kind() == EHLexeme.Kind.ATOM_TEXT) {
+                next();
+                String nv = n.value();
+                int c2 = closeIndex(nv, depth);
+                if (c2 >= 0) {
+                    // 닫는 ')' 위치에서 절단 — 뒤 잔여(")Û`=" 의 Û=)는 괄호 안이 아니다
+                    // (실측: p17 √(-3)² 이 sqrt{(-3 ^{2}=)} 로 새던 문제).
+                    if (c2 > 0) paren.content().add(new EHNode.Text(nv.substring(0, c2)));
+                    tail = nv.substring(c2 + 1);
+                    depth = 0;
+                    break;
+                }
+                depth += count(nv, '(') - count(nv, ')');
+                paren.content().add(new EHNode.Text(nv));
+            } else if (n.kind() == EHLexeme.Kind.SEP) {
+                next(); // 괄호 안 공백(원본 thin space 등)은 내용으로 보존
+                if (n.value() != null) paren.content().add(new EHNode.Text(n.value()));
+            } else if (n.kind() == EHLexeme.Kind.HOOK) {
+                paren.content().add(parseSqrt());
+            } else if (n.kind() == EHLexeme.Kind.FRACTION) {
+                next();
+                paren.content().add(fractionNode(n));
+            } else if (n.kind() == EHLexeme.Kind.SUPERSCRIPT) {
+                next();
+                paren.content().add(superNode(n.value()));
+            } else if (n.kind() == EHLexeme.Kind.BOX) {
+                next();
+                if (n.boxKind() == EHNode.Box.Kind.ANSWER) paren.content().add(new EHNode.Box(EHNode.Box.Kind.ANSWER));
+            } else {
+                break;
+            }
+        }
+        out.add(paren);
+        if (tail != null && !tail.isEmpty()) {
+            lx.add(pos, EHLexeme.atomText(tail)); // 잔여 텍스트를 큐 맨 앞에 되돌림
+        }
+        // Paren 직후 지수(제곱)는 radicand 의 Trailing 으로 흡수. SUPERSCRIPT lexeme
+        // 외에, 본문 런에 내장된 원시 위첨자 글리프(Û=² Ü=³)도 같은 지수다
+        // (실측: p17 √(-3)² 의 ")Û`" — 괄호 밖·근호 안).
+        if (has() && peek().kind() == EHLexeme.Kind.SUPERSCRIPT) {
+            out.add(superNode(next().value()));
+        } else if (has() && peek().kind() == EHLexeme.Kind.ATOM_TEXT) {
+            String av = peek().value();
+            if (av != null && !av.isEmpty() && (av.charAt(0) == 'Û' || av.charAt(0) == 'Ü')) {
+                next();
+                out.add(superNode(av.charAt(0) == 'Û' ? "2" : "3"));
+                String rem = av.substring(1);
+                if (!rem.isEmpty()) lx.add(pos, EHLexeme.atomText(rem));
+            }
+        }
+    }
+
+    /** s 안에서 depth 를 0 으로 만드는 ')' 의 인덱스. 없으면 -1. */
+    private static int closeIndex(String s, int depth) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '(') depth++;
+            else if (c == ')' && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private static int count(String s, char c) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++;
+        return n;
+    }
+
+    private EHNode fractionNode(EHLexeme t) {
+        EHNode.Fraction f = new EHNode.Fraction();
+        if (t.num() != null && !t.num().isEmpty()) f.numerator().add(new EHNode.Text(t.num()));
+        if (t.den() != null && !t.den().isEmpty()) f.denominator().add(new EHNode.Text(t.den()));
+        return f;
+    }
+
+    private EHNode superNode(String v) {
+        EHNode.Superscript s = new EHNode.Superscript();
+        if (v != null) s.content().add(new EHNode.Text(v));
+        return s;
+    }
+
+    private EHNode subNode(String v) {
+        EHNode.Subscript s = new EHNode.Subscript();
+        if (v != null) s.content().add(new EHNode.Text(v));
+        return s;
+    }
+
+    private void applyRecurDot(List<EHNode> out) {
+        // DOT 다음 ATOM 의 첫 숫자에 dot 적용
+        if (has() && peek().kind() == EHLexeme.Kind.ATOM_TEXT) {
+            String v = peek().value();
+            if (v != null && !v.isEmpty() && Character.isDigit(v.charAt(0))) {
+                next();
+                out.add(new EHNode.RecurDot(String.valueOf(v.charAt(0))));
+                if (v.length() > 1) out.add(new EHNode.Text(v.substring(1)));
+                return;
+            }
+        }
+        // 뒤 숫자 없으면 고아 DOT 버림
+    }
+
+    private void wrapLastInOverline(List<EHNode> out) {
+        if (out.isEmpty()) return;
+        EHNode last = out.remove(out.size() - 1);
+        EHNode.Overline ov = new EHNode.Overline();
+        ov.content().add(last);
+        out.add(ov);
+    }
+}

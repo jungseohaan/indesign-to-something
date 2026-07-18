@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -284,6 +285,41 @@ public class StoryLoader {
                 IDMLCharacterRun run = runs.get(idx);
                 applyCharacterStylePosition(ctx, run);
 
+                // 근호 마커 직후(radicand 텍스트 없이) 순수 빈 답란 박스만 온 경우, 박스
+                // 1개를 HWP 수식 box{~} 로 근호 안 radicand 에 넣어 근호가 답란을 덮게 한다
+                // (실측: 1단원 p32 "√□"). 그룹 마지막이 sqrt 마커일 때만 — radicand 텍스트가
+                // 섞인 √(2×□) 복합 케이스는 별도 처리. 같은 런의 나머지 박스는 근호 밖으로
+                // 남겨(FFFC 하나 제거 후 재처리) 정상 배치한다.
+                if (run.content() != null
+                        && !ehMathGroup.isEmpty()
+                        && EHFontGlyphMap.isFractionNumeratorFont(
+                                ehMathGroup.get(ehMathGroup.size() - 1).fontFamily())
+                        && run.content().replace("￼", "").isEmpty()
+                        && (run.inlineFrames() == null || run.inlineFrames().isEmpty())
+                        && allInlineGraphicsAreEmptyAnswerBox(run)) {
+                    IDMLCharacterRun boxRun = run.shallowCopyWithoutInlines();
+                    // ␜ 를 붙이지 않는다 — lexer 가 ␜ 를 radicand 종료 SEP 로 렉싱하게
+                    // 되면서, 여기 붙인 인위적 센티넬이 √(□²)·√(□×9/2) 의 뒤 지수·곱셈을
+                    // 근호 밖으로 밀어냈다. 여긴 실제 스페이서가 아니므로 간격도 불필요.
+                    boxRun.content("box{~}");
+                    MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
+                    ehMathGroup.add(boxRun);
+                    if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) {
+                        run.inlineGraphics().remove(0);
+                    }
+                    if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) {
+                        run.inlineAnchors().remove(0);
+                    }
+                    String rest = run.content().replaceFirst("￼", "");
+                    if ((run.inlineGraphics() == null || run.inlineGraphics().isEmpty())
+                            && rest.replace("￼", "").isEmpty()) {
+                        continue; // 남은 박스 없음 → 런 소진
+                    }
+                    run.content(rest);
+                    idx--; // 남은 박스 재처리
+                    continue;
+                }
+
                 // GREP 수식 리셋: 단일 라틴 문자(수식 변수 x, a, n)는 유지, 나머지 제거
                 if (run.grepMathFont()) {
                     String ct = run.content();
@@ -311,7 +347,13 @@ public class StoryLoader {
                             if (idx + d < runs.size()) nearLongWord = nearLongWord || RunBuilder.containsLongLatinWord(runs.get(idx + d).content(), 3);
                         }
                     }
-                    if ((!paraHasMathSymbols && !isSingleLatinVar) || nearLongWord) {
+                    // 내용이 한국어뿐인 EH 폰트 런도 리셋 — InDesign DOM(resolved)이 √
+                    // 글리프 뒤 한국어 문장까지 EH상부자로 보고해 수식 그룹에 빨려들면
+                    // lexSubSup 이 미매핑 0x80+ 로 한국어를 통째로 버린다(실측: p20 표 셀
+                    // "a가 √a 보다 항상 더 큰지 말해 보자." → sqrt{a}. 로 잘림).
+                    boolean koreanOnly = EHTextClassifier.containsKorean(ct)
+                            && EHTextClassifier.isKoreanOnly(ct);
+                    if ((!paraHasMathSymbols && !isSingleLatinVar) || nearLongWord || koreanOnly) {
                         run.fontFamily(null);
                         run.fontStyle(null);
                         run.appliedCharacterStyle(null);
@@ -432,6 +474,42 @@ public class StoryLoader {
                 // 간격 자리이므로, 지우지 않고 센티넬(U+241C)로 바꿔 EH 수식 변환기가
                 // (1) 인접한 다음 근호와 radicand 를 섞지 않고 (2) 그 자리에 항 간격을
                 // 넣게 한다.
+                // 근호 그룹이 열려 있고, radicand 텍스트 뒤에 인라인 그래픽(FFFC)이
+                // 붙은 런은 FFFC 앞 radicand 만 근호에 넣고, 앵커는 근호 뒤에 그대로
+                // 배치한다(실측: 1단원 p26 문제6 "√7 □ 0" — √ 갈고리 뒤 "7 <FFFC> 0" 런,
+                // p19 "√3 ●<" — radicand 3 뒤 정답 원 그래픽. 답란 박스만 허용하면
+                // 원 그래픽 런이 그룹에서 통째로 밀려나 √ 와 3 이 분리된다).
+                // FFFC 앞 텍스트를 근호 종료 센티넬(U+241C)까지 EH 그룹에 넣고, 런 자신은
+                // FFFC 부터로 잘라 다시 처리(idx--) → 남은 부분이 일반 인라인 앵커 경로로
+                // 그래픽을 배치한다. 단 vinculum 스페이서 전용 런은 제외 — 아래 센티넬
+                // 치환 경로가 런 전체를 그룹에 넣어야 한다.
+                if (enterEH && !ehMathGroup.isEmpty()
+                        && EHFontGlyphMap.isFractionNumeratorFont(
+                                ehMathGroup.get(ehMathGroup.size() - 1).fontFamily())
+                        && (run.inlineFrames() == null || run.inlineFrames().isEmpty())
+                        && !allInlineGraphicsAreVinculum(run)
+                        && run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()
+                        && run.content() != null) {
+                    int fffcPos = run.content().indexOf('￼');
+                    if (fffcPos > 0) {
+                        String radicandText = run.content().substring(0, fffcPos) + '␜';
+                        IDMLCharacterRun radicandRun = run.shallowCopyWithoutInlines();
+                        radicandRun.content(radicandText);
+                        if (radicandRun.fontSize() == null && resolvedRuns != null) {
+                            ResolvedRun rrSize = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, radicandText);
+                            if (rrSize != null && rrSize.fontSize() != null && rrSize.fontSize() > 0) {
+                                radicandRun.fontSize(rrSize.fontSize());
+                            }
+                        }
+                        MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
+                        ehMathGroup.add(radicandRun);
+                        // 현재 런은 FFFC 부터로 잘라 재처리 → 박스 앵커 정상 배치
+                        run.content(run.content().substring(fffcPos));
+                        idx--;
+                        continue;
+                    }
+                }
+
                 boolean anchorIsVinculumOnly = enterEH
                         && !ehMathGroup.isEmpty()
                         && EHFontGlyphMap.isFractionNumeratorFont(
@@ -2005,8 +2083,37 @@ public class StoryLoader {
             if (g.embeddedText() != null && !g.embeddedText().isEmpty()) return false;
             if (g.childGraphics() != null && !g.childGraphics().isEmpty()) return false;
             if (g.childTextFrames() != null && !g.childTextFrames().isEmpty()) return false;
-            // \uAC00\uB85C \uB9C9\uB300: \uD3ED > \uB192\uC774 (\uC138\uB85C \uB9C9\uB300\u00B7\uC815\uC0AC\uAC01 \uB3C4\uD615 \uC81C\uC678)
-            if (!(g.widthPoints() > g.heightPoints())) return false;
+            // \uAC00\uB85C \uB9C9\uB300(vinculum): \uD3ED\uC774 \uB192\uC774\uBCF4\uB2E4 \uB69C\uB837\uD558\uAC8C \uCEE4\uC57C \uD55C\uB2E4(\uC885\uD6A1\uBE44 \u2265 2).
+            // \uADFC\uD638 \uC9C0\uBD95 \uC2A4\uD398\uC774\uC11C\uB294 28.3\u00D75.7(\u22485:1). \uC815\uC0AC\uAC01\uD615\uC5D0 \uAC00\uAE4C\uC6B4 \uB3C4\uD615\uC740 \uC81C\uC678 \u2014
+            // \uBD80\uB4F1\uD638 \uBE48 \uB2F5\uB780 \uBC15\uC2A4(14.17\u00D714.17, \uBD80\uB3D9\uC18C\uC218 \uC624\uCC28\uB85C \uD3ED>\uB192\uC774\uAC00 \uB418\uB358 \uCF00\uC774\uC2A4)\uAC00
+            // vinculum \uC73C\uB85C \uC624\uD310\uB3FC \uC0AD\uC81C\uB418\uB358 \uBB38\uC81C \uBC29\uC9C0(\uC2E4\uCE21: 1\uB2E8\uC6D0 p26 \uBB38\uC81C6 \uBE48\uCE78).
+            if (!(g.widthPoints() >= g.heightPoints() * 2.0)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * run 의 인라인 그래픽이 모두 빈 답란 박스(정사각형에 가까운 Rectangle)인지 확인.
+     *
+     * <p>부등호·빈칸 채우기 문제의 답란 네모칸(실측: 1단원 p26 문제6, 14.17×14.17pt).
+     * 이미지·텍스트·자식 없는 Rectangle 이고 종횡비가 대략 정사각(폭 < 높이×2)이다.
+     * vinculum 스페이서(가로 막대, 폭 ≥ 높이×2)의 반대 케이스. 이 박스는 삭제하지
+     * 않고 근호 뒤에 인라인 배치해야 한다.
+     */
+    private static boolean allInlineGraphicsAreEmptyAnswerBox(IDMLCharacterRun run) {
+        if (run == null) return false;
+        java.util.List<IDMLCharacterRun.InlineGraphic> gfx = run.inlineGraphics();
+        if (gfx == null || gfx.isEmpty()) return false;
+        for (IDMLCharacterRun.InlineGraphic g : gfx) {
+            if (g == null) return false;
+            if (!"rectangle".equalsIgnoreCase(g.type())) return false;
+            if (g.linkResourceURI() != null) return false;
+            if (g.embeddedText() != null && !g.embeddedText().isEmpty()) return false;
+            if (g.childGraphics() != null && !g.childGraphics().isEmpty()) return false;
+            if (g.childTextFrames() != null && !g.childTextFrames().isEmpty()) return false;
+            if (g.widthPoints() <= 0 || g.heightPoints() <= 0) return false;
+            // 정사각형에 가까움: 폭 < 높이×2 (가로 막대 vinculum 제외)
+            if (g.widthPoints() >= g.heightPoints() * 2.0) return false;
         }
         return true;
     }

@@ -31,42 +31,15 @@ public class EHFontEquationConverter {
     public static String convert(List<IDMLCharacterRun> runs) {
         if (runs == null || runs.isEmpty()) return null;
 
-        // 3단계 파이프라인: Tokenize → Build IR → Emit hwpScript
-        List<EHToken> tokens = EHTokenizer.tokenize(runs);
-        if (tokens.isEmpty()) return null;
+        // 재작성 3단계: Lex(글리프 의미 보존) → Parse(재귀하강 문법) → Emit.
+        // 센티넬(box{~}·U+241C·U+0307)은 lexeme/노드로 내부화 → 문자열 후처리 불필요.
+        java.util.List<EHLexeme> lexemes = EHLexer.lex(runs);
+        if (lexemes.isEmpty()) return null;
 
-        EHNode.Group tree = EHIRBuilder.build(tokens);
+        EHNode.Group tree = EHParser.build(lexemes);
         if (tree == null) return null;
 
-        return applyRecurringDecimalDots(EHHwpScriptEmitter.emit(tree));
-    }
-
-    /**
-     * 순환소수 순환마디 점(overdot) 센티넬(U+0307)을 HWP 수식 dot 구문으로 변환.
-     *
-     * <p>EHTokenizer 가 EH약물 H 를 결합 점 U+0307 로 바꿔 두면, 최종 스크립트에서
-     * "0.̇4" 처럼 점 뒤에 숫자가 온다. 이를 "0.dot{4}" 로 만들어 4 위에 점이 찍히게
-     * 한다(실측: 1단원 0.H4=0.4̇, 1.H3=1.3̇).
-     */
-    private static String applyRecurringDecimalDots(String script) {
-        if (script == null || script.indexOf('̇') < 0) return script;
-        StringBuilder sb = new StringBuilder(script.length());
-        for (int i = 0; i < script.length(); i++) {
-            char c = script.charAt(i);
-            if (c == '̇') {
-                // 센티넬 뒤 첫 숫자를 dot{N} 으로. 사이 공백은 건너뛴다.
-                int j = i + 1;
-                while (j < script.length() && script.charAt(j) == ' ') j++;
-                if (j < script.length() && Character.isDigit(script.charAt(j))) {
-                    sb.append("dot{").append(script.charAt(j)).append('}');
-                    i = j;
-                }
-                // 뒤에 숫자가 없는 고아 마커는 버린다(런 경계에서 잘린 경우).
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
+        return EHHwpScriptEmitter.emit(tree);
     }
 
     /**

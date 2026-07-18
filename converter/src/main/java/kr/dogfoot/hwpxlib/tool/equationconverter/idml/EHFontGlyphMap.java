@@ -298,6 +298,7 @@ public class EHFontGlyphMap {
                 case 'µ': sb.append('⌒'); break;   // ⌒ 호(arc)
                 case 'ª': sb.append('≡'); break;   // ≡ 합동(equiv)
                 case 'p': sb.append('π'); break;   // π 원주율(실측: 1단원 -π, π+1, 2<π)
+                case 'y': sb.append('…'); break;   // … 말줄임(실측: 1단원 p21 √2=1.414…)
                 case '`': break;                        // 위첨자 마커 → 제거
                 default:
                     // 매핑 없는 확장 문자(0x80+ 장식/미지 글리프)는 제거,

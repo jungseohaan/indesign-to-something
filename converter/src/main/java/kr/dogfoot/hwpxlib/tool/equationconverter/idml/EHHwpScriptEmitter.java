@@ -57,6 +57,23 @@ public class EHHwpScriptEmitter {
             }
             sb.append("}");
 
+        } else if (node instanceof EHNode.Box) {
+            // 빈 답란 박스 → HWP 수식 box{~} (ANSWER). VINCULUM 은 Parser 가 이미 제거.
+            sb.append("box{~}");
+
+        } else if (node instanceof EHNode.Overline) {
+            sb.append("overline{");
+            emitChildren(((EHNode.Overline) node).content(), sb);
+            sb.append("}");
+
+        } else if (node instanceof EHNode.RecurDot) {
+            sb.append("dot{").append(((EHNode.RecurDot) node).digit()).append("}");
+
+        } else if (node instanceof EHNode.Paren) {
+            sb.append("(");
+            emitChildren(((EHNode.Paren) node).content(), sb);
+            sb.append(")");
+
         } else if (node instanceof EHNode.Group) {
             emitChildren(((EHNode.Group) node).children(), sb);
         }
@@ -65,11 +82,24 @@ public class EHHwpScriptEmitter {
     private static void emitChildren(List<EHNode> children, StringBuilder sb) {
         for (int i = 0; i < children.size(); i++) {
             EHNode child = children.get(i);
+            boolean nextIsSuper = i + 1 < children.size()
+                    && children.get(i + 1) instanceof EHNode.Superscript;
+            // 빈 근호(√ 뒤 radicand 없음) + Superscript: 그 위첨자는 지수가 아니라
+            // 작은 크기로 조판된 radicand 다(√² 의 2). {sqrt{ }}^{n} 를 만들지 말고
+            // 위첨자 내용을 radicand 로 접어 sqrt{n} 으로 emit.
+            if (child instanceof EHNode.Sqrt
+                    && ((EHNode.Sqrt) child).radicand().isEmpty()
+                    && nextIsSuper) {
+                EHNode.Superscript sup = (EHNode.Superscript) children.get(i + 1);
+                sb.append("sqrt{");
+                emitChildren(sup.content(), sb);
+                sb.append("}");
+                i++; // Superscript 소비
+                continue;
+            }
             // Sqrt 뒤에 Superscript가 오면 → {sqrt{...}}^{n} 형태로 감싸야
             // HWP 수식 에디터에서 ^가 sqrt 내부로 흡수되지 않도록 함
-            boolean wrapSqrt = (child instanceof EHNode.Sqrt)
-                    && i + 1 < children.size()
-                    && children.get(i + 1) instanceof EHNode.Superscript;
+            boolean wrapSqrt = (child instanceof EHNode.Sqrt) && nextIsSuper;
             if (wrapSqrt) sb.append("{");
             emitNode(child, sb);
             if (wrapSqrt) sb.append("}");
@@ -102,15 +132,28 @@ public class EHHwpScriptEmitter {
         String result = trimSpacesKeepTabs(raw);
         if (result.isEmpty()) return null;
 
+        // 닫는 괄호 앞 공백 제거: InDesign 원문은 근호 가로줄이 ')' 와 겹치지 않게
+        // 얇은 공백(U+2009 등)을 넣지만, HWP 수식은 자체 여백을 그리므로 그대로 두면
+        // 쓸데없는 틈이 된다(실측: p17 (√5 )²). left/right 확대 전에 지워야
+        // " right)" 앞 이중 공백도 안 생긴다.
+        result = result.replaceAll("[ \\u2000-\\u200B\\u202F]+\\)", ")");
+        // 닫는 중괄호 앞 유니코드 공백(EM/thin)도 제거: 근호 종료 센티넬(U+241C→EM)이
+        // radicand 끝에 남으면 sqrt{3 } 처럼 가로줄이 늘어진다. ASCII 공백은 보존
+        // (빈 근호 sqrt{ } 의 자리 공백).
+        result = result.replaceAll("[\\u2000-\\u200B\\u202F]+}", "}");
+
         // HWP 수식 키워드 앞뒤 공백 보장 (인접 토큰에 붙는 것 방지)
         for (String kw : new String[]{"TIMES", " div "}) {
             if (!result.contains(kw)) continue;
             // 이미 공백이 있으면 skip
         }
-        // TIMES: 앞뒤 공백 보장
-        result = result.replaceAll("(?<=[^ ])TIMES(?=[^ ])", " TIMES ");
-        result = result.replaceAll("(?<=[^ ])TIMES$", " TIMES");
-        result = result.replaceAll("^TIMES(?=[^ ])", "TIMES ");
+        // TIMES: 앞뒤 공백 보장 (인접 토큰과 붙지 않게)
+        result = result.replaceAll("(?<=[^ ])TIMES", " TIMES");
+        result = result.replaceAll("TIMES(?=[^ ])", "TIMES ");
+        // CDOTS: convertToHwpScript 가 Text 조각별로 trim 해 경계 공백이 사라진다
+        // (실측: p21 1.414213562373CDOTS). 앞뒤 공백 보장.
+        result = result.replaceAll("(?<=[^ ])CDOTS", " CDOTS");
+        result = result.replaceAll("CDOTS(?=[^ ])", "CDOTS ");
         // div: 단어 경계 기준 (숫자/문자에 붙은 경우만)
         result = result.replaceAll("(?<=[\\w}])div(?=[\\w{(])", " div ");
         result = result.replaceAll("(?<=[\\w}])div$", " div");
@@ -128,6 +171,12 @@ public class EHHwpScriptEmitter {
         while (result.contains("sqrt{}")) {
             result = result.replace("sqrt{}", "");
         }
+        // 끝에 매달린 곱셈·나눗셈 키워드(TIMES/div)는 피연산자가 없으므로 제거한다.
+        // 원문이 깨진 근호 나열(sqrt{p2} TIMES 처럼 곱셈 뒤 항 없음)에서 발생.
+        result = result.replaceAll("(?:\\s*(?:TIMES|div))+\\s*$", "");
+        // 앞뒤 유니코드 공백(EM/thin — trimSpacesKeepTabs 는 0x20 이하만 자름) 제거:
+        // 항 간격 센티넬이 수식 끝에 남으면 뒤에 빈 간격이 붙는다.
+        result = result.replaceAll("^[\\u2000-\\u200B\\u202F]+|[\\u2000-\\u200B\\u202F]+$", "");
         result = trimSpacesKeepTabs(result);
         if (result.isEmpty()) return null;
 

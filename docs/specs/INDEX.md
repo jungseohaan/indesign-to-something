@@ -57,6 +57,7 @@ ownership decisions.
 | [SPEC-031](SPEC-031-dsl-rule-engine.md) | DSL rules engine |
 | [SPEC-idml-free-pipeline](SPEC-idml-free-pipeline.md) | old hybrid pipeline entry |
 | [SPEC-pdf-export](SPEC-pdf-export.md) | PDF preview |
+| [SPEC-040](SPEC-040-eh-equation-converter-rewrite.md) | EH 수식 변환기 재작성 (Lexer/Parser/Emitter, 재귀하강 근호 문법) |
 
 ## Semantic / Adjacent Drafts
 
