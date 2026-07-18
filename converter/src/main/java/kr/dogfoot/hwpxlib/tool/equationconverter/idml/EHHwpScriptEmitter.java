@@ -150,6 +150,10 @@ public class EHHwpScriptEmitter {
         // TIMES: 앞뒤 공백 보장 (인접 토큰과 붙지 않게)
         result = result.replaceAll("(?<=[^ ])TIMES", " TIMES");
         result = result.replaceAll("TIMES(?=[^ ])", "TIMES ");
+        // CDOTS: convertToHwpScript 가 Text 조각별로 trim 해 경계 공백이 사라진다
+        // (실측: p21 1.414213562373CDOTS). 앞뒤 공백 보장.
+        result = result.replaceAll("(?<=[^ ])CDOTS", " CDOTS");
+        result = result.replaceAll("CDOTS(?=[^ ])", "CDOTS ");
         // div: 단어 경계 기준 (숫자/문자에 붙은 경우만)
         result = result.replaceAll("(?<=[\\w}])div(?=[\\w{(])", " div ");
         result = result.replaceAll("(?<=[\\w}])div$", " div");

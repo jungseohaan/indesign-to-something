@@ -249,4 +249,12 @@ public class EHFontEquationConverterTest {
         // 약물 p → pi
         Assert.assertEquals("pi", convert(run("p", "EH약물", CS_YAKMUL)));
     }
+
+    @Test
+    public void yakmul_ellipsis() {
+        // 약물 y = 말줄임(…) → CDOTS (실측: p21 √2=1.414213562373…)
+        Assert.assertEquals("sqrt{2}=1.414213562373 CDOTS",
+                convert(fracUpper("'"), body("2=1.414213562373"),
+                        run("y", "EH약물", CS_YAKMUL)));
+    }
 }
