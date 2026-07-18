@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.PatternEquationConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBreak;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
@@ -1454,7 +1455,10 @@ public class ASTMathGrouper {
             boolean isCircled = (c >= 0x2460 && c <= 0x2473)  // ①-⑳
                     || (c >= 0x2474 && c <= 0x2487); // ⑴-⒇
             boolean isTab = (c == '\t');
-            if (isCircled || isTab) {
+            // 강제 줄바꿈(U+2028): 다행 수식(=… 전개)의 행 경계 → ASTBreak 로 보존
+            // (실측: p32 (√2×√3)² 전개 4행이 한 줄로 붙던 문제)
+            boolean isLineSep = (c == ' ');
+            if (isCircled || isTab || isLineSep) {
                 // 원문자 앞 수식
                 if (i > lastSplit) {
                     String before = hwpScript.substring(lastSplit, i).trim();
@@ -1473,6 +1477,8 @@ public class ASTMathGrouper {
                     ASTTextRun tabRun = new ASTTextRun();
                     tabRun.text("\t");
                     para.addItem(tabRun);
+                } else if (isLineSep) {
+                    para.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
                 } else {
                     // 원문자 앞 여백 + 원문자 자체를 텍스트로
                     ASTTextRun numRun = new ASTTextRun();

@@ -92,7 +92,11 @@ public final class FormulaClassifier {
         if (script.indexOf("^{") >= 0 || script.indexOf("_{") >= 0) return true;
         String lower = script.toLowerCase(Locale.ROOT);
         return lower.contains(" over ") || lower.contains("sqrt")
-                || lower.contains("overline") || lower.contains("root");
+                || lower.contains("overline") || lower.contains("root")
+                // 곱셈·나눗셈 키워드도 수식 연속의 증거다 — 다행 수식의 마지막 행
+                // "=2 TIMES 3" 이 평문으로 폴백되면 키워드가 그대로 노출된다
+                // (실측: p32 =2×3 이 "2 TIMES 3" 텍스트로).
+                || script.contains(" TIMES ") || script.contains(" div ");
     }
 
     public static boolean containsEquationSyntax(String script) {
@@ -180,7 +184,10 @@ public final class FormulaClassifier {
     public static String hwpScriptFallbackText(String script) {
         if (script == null || script.isEmpty()) return "";
         String normalized = normalizeChemicalTextScript(script)
-                .replaceAll("(?i)\\brarrow\\b", "→");
+                .replaceAll("(?i)\\brarrow\\b", "→")
+                // 텍스트 폴백 시 수식 키워드가 그대로 노출되지 않게 기호로 치환
+                .replaceAll("\\s*TIMES\\s*", "×")
+                .replaceAll("(?<=[\\w})])\\s*div\\s*(?=[\\w{(])", "÷");
         StringBuilder out = new StringBuilder(normalized.length());
         for (int i = 0; i < normalized.length(); i++) {
             char c = normalized.charAt(i);

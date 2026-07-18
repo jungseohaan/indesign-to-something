@@ -331,6 +331,7 @@ public class EHLexer {
 
     private static boolean isSepChar(char c) {
         if (c == '\t' || c == '\n' || c == '\r') return true;
+        if (c == ' ') return true; // 강제 줄바꿈(LS) — 다행 수식의 행 경계로 보존
         if (c == ' ' || c == ' ' || c == ' ' || c == ' ') return true; // thin/em space
         if (c >= 0x2460 && c <= 0x2473) return true; // ①-⑳
         if (c >= 0x2474 && c <= 0x2487) return true; // ⑴-⒇
