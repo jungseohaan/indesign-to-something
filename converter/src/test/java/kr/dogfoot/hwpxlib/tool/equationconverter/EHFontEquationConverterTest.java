@@ -1,0 +1,158 @@
+package kr.dogfoot.hwpxlib.tool.equationconverter;
+
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * EH 수식 폰트 변환기 골든 단위테스트.
+ *
+ * <p>입력 = 폰트/스타일 지정된 IDMLCharacterRun 시퀀스, 기대 = hwpScript.
+ * 실측 데이터(비상 중3수학 971 Story 조사)의 대표 패턴을 케이스로 삼는다.
+ * 원본 EH 인코딩(hook 0x27/0xAE, 자리구분 0x8C, GREP 분수 ;..; 등)을
+ * content String 으로 직접 조립한다.
+ *
+ * <p>재작성 진행 단계에 따라 일부 케이스는 아직 실패(빨간 상태)할 수 있다.
+ * Lexer→Parser→Emitter 순으로 통과시킨다.
+ */
+public class EHFontEquationConverterTest {
+
+    private static final String CS_FRAC_UPPER = "CharacterStyle/분수대문자";
+    private static final String CS_SUP = "CharacterStyle/상부자";
+    private static final String CS_YAKMUL = "CharacterStyle/약물";
+
+    /** 분수대문자 폰트 EH 런 (근호 hook·radicand·GREP 분수). */
+    private static IDMLCharacterRun fracUpper(String content) {
+        return run(content, "EH분수대문자", CS_FRAC_UPPER);
+    }
+
+    /** 일반 본문 런(비EH). radicand 숫자·연산자 등. */
+    private static IDMLCharacterRun body(String content) {
+        return run(content, null, "CharacterStyle/$ID/[No character style]");
+    }
+
+    private static IDMLCharacterRun run(String content, String fontFamily, String charStyle) {
+        IDMLCharacterRun r = new IDMLCharacterRun();
+        r.content(content);
+        if (fontFamily != null) r.fontFamily(fontFamily);
+        r.appliedCharacterStyle(charStyle);
+        return r;
+    }
+
+    /** 정사각형 빈 답란 박스 인라인 그래픽을 가진 런 (content = FFFC). */
+    private static IDMLCharacterRun answerBox() {
+        IDMLCharacterRun r = body("￼");
+        IDMLCharacterRun.InlineGraphic g = new IDMLCharacterRun.InlineGraphic();
+        g.type("rectangle");
+        g.widthPoints(14.17);
+        g.heightPoints(14.17);
+        r.addInlineGraphic(g);
+        return r;
+    }
+
+    private static String convert(IDMLCharacterRun... runs) {
+        List<IDMLCharacterRun> list = new ArrayList<>();
+        for (IDMLCharacterRun r : runs) list.add(r);
+        return EHFontEquationConverter.convert(list);
+    }
+
+    // ── 근호 radicand 구조 ──
+
+    @Test
+    public void sqrt_single_digit() {
+        // '3 → √3
+        Assert.assertEquals("sqrt{3}", convert(fracUpper("'"), body("3")));
+    }
+
+    @Test
+    public void sqrt_split_number_10() {
+        // '1[8C]0 → √10 (0x8C 자리구분자 제거하고 이어붙임)
+        Assert.assertEquals("sqrt{10}",
+                convert(fracUpper("'"), body("1"), fracUpper(""), body("0")));
+    }
+
+    @Test
+    public void sqrt_split_number_144() {
+        // -'1[8C]4[8C]4 → -sqrt{144}
+        Assert.assertEquals("-sqrt{144}",
+                convert(body("-"), fracUpper("'"), body("1"),
+                        fracUpper(""), body("4"),
+                        fracUpper(""), body("4")));
+    }
+
+    @Test
+    public void sqrt_variable() {
+        // 'b → √b
+        Assert.assertEquals("sqrt{b}", convert(fracUpper("'"), body("b")));
+    }
+
+    @Test
+    public void two_sqrts_product() {
+        // '2_'3 → √2·√3 (hook 2개 → Sqrt 2개, _ = ×)
+        Assert.assertEquals("sqrt{2} TIMES sqrt{3}",
+                convert(fracUpper("'"), body("2_"), fracUpper("'"), body("3")));
+    }
+
+    // ── GREP 분수 ──
+
+    @Test
+    public void grep_fraction_half() {
+        // ;2!; → 1/2 (2=분모, !=shift-1=분자)
+        Assert.assertEquals("{1} over {2}", convert(body(";2!;")));
+    }
+
+    @Test
+    public void sqrt_fraction() {
+        // '[선택자];9!; → √(1/9) 형태 — 분수대문자 hook + GREP 분수
+        Assert.assertEquals("sqrt{{1} over {9}}",
+                convert(fracUpper("'"), body(";9!;")));
+    }
+
+    @Test
+    public void two_sqrts_fraction_then_number() {
+        // √(5/2)√10 — 분수 근호 뒤 새 근호 (뭉치면 안 됨)
+        Assert.assertEquals("sqrt{{5} over {2}}sqrt{10}",
+                convert(fracUpper("'"), body(";2%;"),
+                        fracUpper("'"), body("1"), fracUpper(""), body("0")));
+    }
+
+    // ── 빈 답란 박스 ──
+
+    @Test
+    public void sqrt_answer_box() {
+        // '□ → sqrt{box{~}}
+        Assert.assertEquals("sqrt{box{~}}", convert(fracUpper("'"), answerBox()));
+    }
+
+    @Test
+    public void sqrt_number_times_box() {
+        // '2_□ → sqrt{2 TIMES box{~}}
+        Assert.assertEquals("sqrt{2 TIMES box{~}}",
+                convert(fracUpper("'"), body("2_"), answerBox()));
+    }
+
+    // ── 첨자·특수기호 ──
+
+    @Test
+    public void superscript_square() {
+        // xÛ` → x^{2} (Û=위첨자², `=상부자 닫기)
+        Assert.assertEquals("x^{2}", convert(body("x"), run("Û`", "EH상부자", CS_SUP)));
+    }
+
+    @Test
+    public void recurring_decimal() {
+        // 0.H4 → 0.dot{4} (약물 H = 순환마디 점)
+        Assert.assertEquals("0.dot{4}",
+                convert(body("0."), run("H", "EH약물", CS_YAKMUL), body("4")));
+    }
+
+    @Test
+    public void pi() {
+        // 약물 p → pi
+        Assert.assertEquals("pi", convert(run("p", "EH약물", CS_YAKMUL)));
+    }
+}
