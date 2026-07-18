@@ -65,6 +65,29 @@ public class IDMLCharacterRun {
     }
 
     /**
+     * 문자 스타일 속성만 복사하고 인라인 앵커(프레임/그래픽/앵커)는 비운 새 런.
+     * content 는 복사하지 않는다(호출자가 세팅). 근호 radicand 를 빈 답란 박스 앵커와
+     * 분리해 EH 그룹에 넣을 때 사용(StoryLoader).
+     */
+    public IDMLCharacterRun shallowCopyWithoutInlines() {
+        IDMLCharacterRun c = new IDMLCharacterRun();
+        c.appliedCharacterStyle = this.appliedCharacterStyle;
+        c.fontFamily = this.fontFamily;
+        c.fontSize = this.fontSize;
+        c.fillColor = this.fillColor;
+        c.fillTint = this.fillTint;
+        c.fontStyle = this.fontStyle;
+        c.position = this.position;
+        c.tracking = this.tracking;
+        c.grepMathFont = this.grepMathFont;
+        c.grepFillColor = this.grepFillColor;
+        c.grepAppliedCharStyle = this.grepAppliedCharStyle;
+        c.baselineShift = this.baselineShift;
+        c.horizontalScale = this.horizontalScale;
+        return c;
+    }
+
+    /**
      * IDML 인라인 그래픽 (Rectangle, Polygon, Group 등 텍스트 내 인라인 객체).
      */
     public static class InlineGraphic {

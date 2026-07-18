@@ -432,6 +432,38 @@ public class StoryLoader {
                 // 간격 자리이므로, 지우지 않고 센티넬(U+241C)로 바꿔 EH 수식 변환기가
                 // (1) 인접한 다음 근호와 radicand 를 섞지 않고 (2) 그 자리에 항 간격을
                 // 넣게 한다.
+                // 근호 그룹이 열려 있고, radicand 텍스트 뒤에 빈 답란 박스(FFFC)가
+                // 붙은 런은 FFFC 앞 radicand 만 근호에 넣고, 박스 앵커는 근호 뒤에 그대로
+                // 배치한다(실측: 1단원 p26 문제6 "√7 □ 0" — √ 갈고리 뒤 "7 <FFFC> 0" 런).
+                // FFFC 앞 텍스트를 근호 종료 센티넬(U+241C)까지 EH 그룹에 넣고, 런 자신은
+                // FFFC 부터로 잘라 다시 처리(idx--) → 남은 부분이 일반 인라인 앵커 경로로
+                // 박스를 배치한다. 박스는 삭제하지 않는다(vinculum 스페이서와 다름).
+                if (enterEH && !ehMathGroup.isEmpty()
+                        && EHFontGlyphMap.isFractionNumeratorFont(
+                                ehMathGroup.get(ehMathGroup.size() - 1).fontFamily())
+                        && (run.inlineFrames() == null || run.inlineFrames().isEmpty())
+                        && allInlineGraphicsAreEmptyAnswerBox(run)
+                        && run.content() != null) {
+                    int fffcPos = run.content().indexOf('￼');
+                    if (fffcPos > 0) {
+                        String radicandText = run.content().substring(0, fffcPos) + '␜';
+                        IDMLCharacterRun radicandRun = run.shallowCopyWithoutInlines();
+                        radicandRun.content(radicandText);
+                        if (radicandRun.fontSize() == null && resolvedRuns != null) {
+                            ResolvedRun rrSize = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, radicandText);
+                            if (rrSize != null && rrSize.fontSize() != null && rrSize.fontSize() > 0) {
+                                radicandRun.fontSize(rrSize.fontSize());
+                            }
+                        }
+                        MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
+                        ehMathGroup.add(radicandRun);
+                        // 현재 런은 FFFC 부터로 잘라 재처리 → 박스 앵커 정상 배치
+                        run.content(run.content().substring(fffcPos));
+                        idx--;
+                        continue;
+                    }
+                }
+
                 boolean anchorIsVinculumOnly = enterEH
                         && !ehMathGroup.isEmpty()
                         && EHFontGlyphMap.isFractionNumeratorFont(
@@ -2010,6 +2042,32 @@ public class StoryLoader {
             // \uBD80\uB4F1\uD638 \uBE48 \uB2F5\uB780 \uBC15\uC2A4(14.17\u00D714.17, \uBD80\uB3D9\uC18C\uC218 \uC624\uCC28\uB85C \uD3ED>\uB192\uC774\uAC00 \uB418\uB358 \uCF00\uC774\uC2A4)\uAC00
             // vinculum \uC73C\uB85C \uC624\uD310\uB3FC \uC0AD\uC81C\uB418\uB358 \uBB38\uC81C \uBC29\uC9C0(\uC2E4\uCE21: 1\uB2E8\uC6D0 p26 \uBB38\uC81C6 \uBE48\uCE78).
             if (!(g.widthPoints() >= g.heightPoints() * 2.0)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * run 의 인라인 그래픽이 모두 빈 답란 박스(정사각형에 가까운 Rectangle)인지 확인.
+     *
+     * <p>부등호·빈칸 채우기 문제의 답란 네모칸(실측: 1단원 p26 문제6, 14.17×14.17pt).
+     * 이미지·텍스트·자식 없는 Rectangle 이고 종횡비가 대략 정사각(폭 < 높이×2)이다.
+     * vinculum 스페이서(가로 막대, 폭 ≥ 높이×2)의 반대 케이스. 이 박스는 삭제하지
+     * 않고 근호 뒤에 인라인 배치해야 한다.
+     */
+    private static boolean allInlineGraphicsAreEmptyAnswerBox(IDMLCharacterRun run) {
+        if (run == null) return false;
+        java.util.List<IDMLCharacterRun.InlineGraphic> gfx = run.inlineGraphics();
+        if (gfx == null || gfx.isEmpty()) return false;
+        for (IDMLCharacterRun.InlineGraphic g : gfx) {
+            if (g == null) return false;
+            if (!"rectangle".equalsIgnoreCase(g.type())) return false;
+            if (g.linkResourceURI() != null) return false;
+            if (g.embeddedText() != null && !g.embeddedText().isEmpty()) return false;
+            if (g.childGraphics() != null && !g.childGraphics().isEmpty()) return false;
+            if (g.childTextFrames() != null && !g.childTextFrames().isEmpty()) return false;
+            if (g.widthPoints() <= 0 || g.heightPoints() <= 0) return false;
+            // 정사각형에 가까움: 폭 < 높이×2 (가로 막대 vinculum 제외)
+            if (g.widthPoints() >= g.heightPoints() * 2.0) return false;
         }
         return true;
     }
