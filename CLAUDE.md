@@ -6,10 +6,11 @@
 
 IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) 데스크탑 앱 + React 프론트엔드.
 
-## 활성 작업 (2026-05-20 기준)
+## 활성 작업 (2026-07-19 기준)
 
-- **브랜치**: `open-indd` — main 머지 전
+- **브랜치**: `open-indd` — main 머지 전. EH 재작성(eh-rewrite, PR #35)·SPEC-041(fix-regression, PR #36) 머지됨
 - **진행 중 SPEC**:
+  - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) (앵커 가장자리 라벨 셀 흡수) — **구현 완료, 한글 육안 확인 대기** (p187 pill 위치)
   - source ownership policy — Tier A.5/A.6/B 구현 완료, **미테스트** (InDesign 재추출 필요). 잔여: A.1.5/A.4/A.8/Tier B 효과
   - [SPEC-027](docs/specs/SPEC-027-badge-scribble-outline-png.md) (배지 scribble 외곽선 PNG 폴백) — 신규(2026-05-20). 일러스트 톤 배지 외곽선만 PNG, 텍스트는 HWPX. **데이터 조사 단계**
 - **기타 Active SPEC**: SPEC-012 (속성 우선순위), SPEC-014 (폰트 자동 매핑), SPEC-015 (AST 디버깅), SPEC-018 (시멘틱 M3)
