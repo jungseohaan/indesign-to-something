@@ -2745,9 +2745,19 @@ public final class OwnershipPlanner {
             if (ownedByAnchoredTablePlan) {
                 textAction = TextAction.DROP_TEXT;
             }
-            VisualAction visualAction = VisualAction.DROP_VISUAL;
+            int[] sourceIds = tableOnlyTextFrame
+                    ? tableOnlySourceIds(domId, idmlStory)
+                    : new int[] { domId };
+            int[] styleSourceIds = tableOnlyTextFrame
+                    ? tableStyleSourceIdsForTextFrame(domId, idmlStory)
+                    : new int[0];
+            boolean ownsTableStyle = styleSourceIds.length > 0;
+            VisualAction visualAction = ownsTableStyle
+                    ? VisualAction.PLACE_TABLE_STYLE
+                    : VisualAction.DROP_VISUAL;
             if (tableOnlyTextFrame
                     && !ownedByAnchoredTablePlan
+                    && !ownsTableStyle
                     && hasHwpxTextOwnerForTextFrame(domId)) {
                 continue;
             }
@@ -2765,12 +2775,6 @@ public final class OwnershipPlanner {
                 continue;
             }
             Placement placement = placementOfTextFrame(tf, domId, textAction, visualAction);
-            int[] sourceIds = tableOnlyTextFrame
-                    ? tableOnlySourceIds(domId, idmlStory)
-                    : new int[] { domId };
-            int[] styleSourceIds = tableOnlyTextFrame
-                    ? tableOnlyStyleSourceIds(domId)
-                    : new int[0];
             plans.add(new ObjectPlan(
                     domId,
                     tableOnlyTextFrame ? "text_frame:table_only" : "text_frame",
@@ -5545,10 +5549,9 @@ public final class OwnershipPlanner {
         if (rg != null && rg.editableTextFrameIds() != null) {
             for (String id : rg.editableTextFrameIds()) {
                 int parsed = parseFlexibleId(id);
-                if (parsed >= 0 && data != null && data.isTextOwnedByIndesignPng(String.valueOf(parsed))) {
-                    continue;
-                }
-                if (parsed >= 0) ids.add(parsed);
+                if (parsed < 0) continue;
+                if (data != null && !isVisibleEditableTextFrameSourceId(parsed)) continue;
+                ids.add(parsed);
             }
         }
         if (ids.isEmpty() && rg != null
@@ -5602,6 +5605,7 @@ public final class OwnershipPlanner {
         if (tf == null || tf.id() == null) return false;
         if (tf.sourceHidden()) return false;
         if (data != null && data.isTextOwnedByIndesignPng(tf.id())) return false;
+        if (!hasSemanticText(tf)) return false;
         return true;
     }
 
@@ -5620,6 +5624,17 @@ public final class OwnershipPlanner {
         if (plan.sourceObjectIds != null) {
             for (int id : plan.sourceObjectIds) {
                 if (isVisibleEditableTextFrameSourceId(id)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasSemanticEditableTextOwnerSignal(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (editableTextFrameIdsOf(rg).length > 0) return true;
+        if (rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                if (isVisibleEditableTextFrameSourceId(sourceId)) return true;
             }
         }
         return false;
@@ -6171,12 +6186,29 @@ public final class OwnershipPlanner {
     }
 
     private int[] tableOnlyStyleSourceIds(int textFrameDomId) {
-        // Canonical table policy: a table-only carrier owns only editable table
-        // structure. Cell fills, row bands, outlines, and other decoration stay
-        // in separate textless visual slots and must not be claimed here as
-        // table-style provenance, because doing so blocks their Stage 1 native/
-        // extracted visual owners and later causes missing table chrome.
+        // Table style source ids must name concrete source-authored appearance
+        // objects. The table carrier/table id alone is structure provenance;
+        // direct wrapper and sibling grid sources are collected separately.
         return new int[0];
+    }
+
+    private int[] tableStyleSourceIdsForTextFrame(int textFrameDomId) {
+        return tableStyleSourceIdsForTextFrame(textFrameDomId, null);
+    }
+
+    private int[] tableStyleSourceIdsForTextFrame(int textFrameDomId, IDMLStory story) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        addAll(tableOnlyStyleSourceIds(textFrameDomId), ids);
+        if (story != null && story.tables() != null) {
+            for (IDMLTable table : story.tables()) {
+                int tableId = parseFlexibleId(table != null ? table.selfId() : null);
+                if (tableId >= 0) ids.add(tableId);
+            }
+        }
+        addParentTableCarrierStyleSourceId(textFrameDomId, ids);
+        addSiblingTableCarrierStyleSourceIds(textFrameDomId, ids);
+        addRenderedTableCarrierStyleSourceIds(textFrameDomId, ids);
+        return toIntArray(ids);
     }
 
     private void addRenderedTableCarrierStyleSourceIds(int textFrameDomId, LinkedHashSet<Integer> ids) {
@@ -6310,11 +6342,17 @@ public final class OwnershipPlanner {
         String type = safe(item.type());
         if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)) return false;
         if (item.cornerRadius() > 0.01) return false;
-        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
+        if (!isAxisAlignedRotation(item.absoluteRotationAngle(), 0.1)) return false;
         if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
         if (item.hasDropShadow()) return false;
         if (item.gradientFeatherApplied()) return false;
         return hasTableStyleMaterial(item);
+    }
+
+    private static boolean isAxisAlignedRotation(double angle, double tolerance) {
+        double normalized = Math.abs(angle) % 180.0;
+        normalized = Math.min(normalized, 180.0 - normalized);
+        return normalized <= tolerance;
     }
 
     private boolean hasSourceChildren(ResolvedPageItem item) {
@@ -6364,9 +6402,7 @@ public final class OwnershipPlanner {
         if (hasTextlessShellWithInferredEditableTextSource(rg)) {
             return TextAction.OWNED_BY_HWPX_TEXT;
         }
-        if ("hwpx_tf".equals(rg.textOwner())
-                || Boolean.TRUE.equals(rg.containsEditableText())
-                || hasEditableTextFrameIds(rg)) {
+        if (hasSemanticEditableTextOwnerSignal(rg)) {
             return TextAction.OWNED_BY_HWPX_TEXT;
         }
         return TextAction.DROP_TEXT;
@@ -6429,7 +6465,7 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (Boolean.FALSE.equals(rg.placementAllowed())
-                && (textAction != TextAction.OWNED_BY_HWPX_TEXT || !hasEditableTextOwnerSignal(rg))) {
+                && (textAction != TextAction.OWNED_BY_HWPX_TEXT || !hasSemanticEditableTextOwnerSignal(rg))) {
             return VisualAction.DROP_VISUAL;
         }
         if (isLabelBackdropGroupWithUnclaimedHwpxText(rg)) {
@@ -6453,9 +6489,7 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (textAction == TextAction.OWNED_BY_HWPX_TEXT
-                && ("hwpx_tf".equals(rg.textOwner())
-                || Boolean.TRUE.equals(rg.containsEditableText())
-                || hasEditableTextFrameIds(rg))) {
+                && hasSemanticEditableTextOwnerSignal(rg)) {
             if (isEditableVisualShellWithSeparateHwpxText(rg)) {
                 return VisualAction.PLACE_TEXT_SHELL;
             }
@@ -6551,7 +6585,8 @@ public final class OwnershipPlanner {
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
             return false;
         }
-        return rg.hasEditableTextHiddenFromPng() || hasEditableTextFrameIds(rg);
+        return (rg.hasEditableTextHiddenFromPng() || hasEditableTextFrameIds(rg))
+                && hasSemanticEditableTextOwnerSignal(rg);
     }
 
     private boolean hasTableOnlyCarrierSource(int[] sourceIds) {
@@ -6796,8 +6831,7 @@ public final class OwnershipPlanner {
     private boolean isEditableTextCarrierBackdrop(RenderedGroup rg, TextAction textAction) {
         if (rg == null) return false;
         if (textAction != TextAction.OWNED_BY_HWPX_TEXT
-                && !"hwpx_tf".equals(rg.textOwner())
-                && !hasEditableTextFrameIds(rg)) {
+                && !hasSemanticEditableTextOwnerSignal(rg)) {
             return false;
         }
         return isMultiTextCarrierShell(rg);
@@ -7181,9 +7215,8 @@ public final class OwnershipPlanner {
     private boolean isEditableLabelCardShell(RenderedGroup rg) {
         if (rg == null) return false;
         if (!"mixed_group_text_hidden".equals(rg.reason())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        String[] editableIds = rg.editableTextFrameIds();
-        if (editableIds == null || editableIds.length < 2) return false;
+        if (!hasSemanticEditableTextOwnerSignal(rg)) return false;
+        if (editableTextFrameIdsOf(rg).length < 2) return false;
         double[] b = rg.bounds();
         if (b == null || b.length < 4) return false;
         double h = Math.abs(b[2] - b[0]);
@@ -7205,7 +7238,7 @@ public final class OwnershipPlanner {
                 && !reason.contains("complex_graphic_text_hidden")) {
             return false;
         }
-        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) {
+        if (!hasSemanticEditableTextOwnerSignal(rg)) {
             return false;
         }
         List<double[]> textBounds = new ArrayList<>();
@@ -7442,18 +7475,7 @@ public final class OwnershipPlanner {
     }
 
     private boolean hasEditableTextOwnerSignal(RenderedGroup rg) {
-        if (rg == null || data == null) return false;
-        if ("hwpx_tf".equals(rg.textOwner())) return true;
-        if (hasEditableTextFrameIds(rg)) return true;
-        if (rg.sourceObjectIds() != null) {
-            for (int sourceId : rg.sourceObjectIds()) {
-                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
-                if (tf != null && !tf.sourceHidden()) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return hasSemanticEditableTextOwnerSignal(rg);
     }
 
     private boolean hasTextFrameSource(ObjectPlan plan) {
@@ -7527,8 +7549,7 @@ public final class OwnershipPlanner {
                 || reason.contains("textframe_visual_shell")
                 || reason.contains("text_composite_editable_text_hidden")
                 || reason.contains("visual_shell")
-                || "hwpx_tf".equals(rg.textOwner())
-                || hasEditableTextFrameIds(rg);
+                || hasSemanticEditableTextOwnerSignal(rg);
     }
 
     private boolean hasOnlyAbsorbableEditableLabelShellSources(RenderedGroup rg) {
@@ -7804,7 +7825,7 @@ public final class OwnershipPlanner {
     private boolean isInlineLeafTextShellAtom(RenderedGroup rg) {
         if (rg == null || data == null) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) return false;
+        if (!hasSemanticEditableTextOwnerSignal(rg)) return false;
         if (!hasExplicitTextlessShellSignal(rg)) return false;
         ResolvedPageItem root = data.getPageItem(String.valueOf(rg.id()));
         if (root == null || !root.isInline()) return false;
@@ -7844,7 +7865,7 @@ public final class OwnershipPlanner {
     private boolean isTextlessShellForInlineOwnedTextFrame(RenderedGroup rg) {
         if (rg == null || data == null) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) return false;
+        if (!hasSemanticEditableTextOwnerSignal(rg)) return false;
         if (!hasExplicitTextlessShellSignal(rg)) return false;
         int[] textFrameIds = editableTextFrameIdsOf(rg);
         if (textFrameIds.length == 0) return false;
@@ -8615,9 +8636,10 @@ public final class OwnershipPlanner {
         if (containsHwpxOwnedTextFrameSource(plan)) return true;
         RenderedGroup rg = renderedGroupForPlan(plan);
         if (rg == null) return false;
-        return rg.hasEditableTextHiddenFromPng()
+        return hasSemanticEditableTextOwnerSignal(rg)
+                && (rg.hasEditableTextHiddenFromPng()
                 || hasEditableTextFrameIds(rg)
-                || Boolean.TRUE.equals(rg.containsEditableText());
+                || Boolean.TRUE.equals(rg.containsEditableText()));
     }
 
     private void resolveTextShellSharedSources() {
@@ -12584,7 +12606,7 @@ public final class OwnershipPlanner {
     private int[] tableStyleSourceIdsForPlan(ObjectPlan plan) {
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
         if (plan == null) return new int[0];
-        addAll(tableOnlyStyleSourceIds(tableStyleOwnerTextFrameId(plan)), ids);
+        addAll(tableStyleSourceIdsForTextFrame(tableStyleOwnerTextFrameId(plan)), ids);
         addDirectTableStyleSiblingSourceIds(plan, ids);
         return toIntArray(ids);
     }
@@ -12598,7 +12620,11 @@ public final class OwnershipPlanner {
     private boolean isTableStyleCarrierVisualDuplicate(ObjectPlan visualPlan, List<ObjectPlan> tableStylePlans) {
         if (visualPlan == null || tableStylePlans == null || tableStylePlans.isEmpty()) return false;
         if (!visualPlan.hasVisibleVisual()) return false;
-        if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
+        if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && visualPlan.ownedTextFrameIds != null
+                && visualPlan.ownedTextFrameIds.length > 0) {
+            return false;
+        }
         if (visualPlan.materialization == Materialization.HWPX_TABLE_STYLE) return false;
         if (visualPlan.domId < 0) return false;
 
@@ -12669,14 +12695,25 @@ public final class OwnershipPlanner {
         int ownerTextFrameId = tableStyleOwnerTextFrameId(plan);
         if (ownerTextFrameId < 0) return;
         ResolvedPageItem ownerItem = data.getPageItem(String.valueOf(ownerTextFrameId));
-        if (ownerItem == null || ownerItem.parentId() == null) return;
-        ResolvedPageItem parent = data.getPageItem(ownerItem.parentId());
-        if (parent == null || parent.childIds() == null) return;
+        if (ownerItem == null) return;
         double[] ownerBounds = boundsOf(ownerItem);
         if (ownerBounds == null || ownerBounds.length < 4) ownerBounds = plan.bounds;
-        for (int childId : parent.childIds()) {
-            collectDirectTableStyleSiblingSourceId(childId, ownerTextFrameId, ownerBounds, ids);
+        String parentId = ownerItem.parentId();
+        for (ResolvedPageItem item : data.pageItems()) {
+            if (item == null || item.id() == null) continue;
+            if (!sameNullableId(parentId, item.parentId())) continue;
+            if (ownerItem.pageIndex() >= 0 && item.pageIndex() >= 0
+                    && ownerItem.pageIndex() != item.pageIndex()) continue;
+            int sourceId = parseFlexibleId(item.id());
+            collectDirectTableStyleSiblingSourceId(sourceId, ownerTextFrameId, ownerBounds, ids);
         }
+    }
+
+    private static boolean sameNullableId(String a, String b) {
+        boolean aBlank = a == null || a.isBlank();
+        boolean bBlank = b == null || b.isBlank();
+        if (aBlank || bBlank) return aBlank == bBlank;
+        return a.equals(b);
     }
 
     private void collectDirectTableStyleSiblingSourceId(

@@ -85,6 +85,26 @@ def resolve_case(case_name: str, cases_json: Path) -> Tuple[str, str, Dict[str, 
     return book_key, unit_key, unit
 
 
+def resolve_indd_path(path_value: str) -> Path:
+    path = Path(path_value)
+    if path.is_file():
+        return path
+    if not path.exists() or not path.is_dir():
+        return path
+    matches = sorted(
+        p for p in path.glob("*.indd")
+        if p.is_file() and not p.name.startswith("~")
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return path
+    names = ", ".join(str(p.name) for p in matches[:8])
+    if len(matches) > 8:
+        names += ", ..."
+    raise SystemExit(f"Multiple INDD files under case directory {path}: {names}")
+
+
 def page_label(page: int, end_page: Optional[int]) -> str:
     if end_page and end_page != page:
         return f"p{page:03d}-{end_page:03d}"
@@ -850,7 +870,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     if not cases_json.exists():
         raise SystemExit(f"cases.json not found: {cases_json}")
     book_key, unit_key, unit = resolve_case(args.case, cases_json)
-    indd_path = Path(unit["path"])
+    indd_path = resolve_indd_path(unit["path"])
     if not indd_path.exists():
         raise SystemExit(f"INDD path does not exist: {indd_path}")
     if not EXTRACT_JSX.exists():

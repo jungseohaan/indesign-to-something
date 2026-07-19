@@ -40,8 +40,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Phase 3 IDML Story 로딩 & 분기 (W3 Step C, 재시도).
@@ -939,6 +942,7 @@ public class StoryLoader {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
             if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
+                removeDuplicateInlineObjectsFromCellFlow(ctx, resolvedCellParagraphs);
                 return resolvedCellParagraphs;
             }
         }
@@ -947,6 +951,7 @@ public class StoryLoader {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
             if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
+                removeDuplicateInlineObjectsFromCellFlow(ctx, resolvedCellParagraphs);
                 return resolvedCellParagraphs;
             }
         }
@@ -983,6 +988,7 @@ public class StoryLoader {
             paraIndex++;
         }
         applyResolvedCellInlineGraphicRescueAnchors(ctx, idmlCell, resolvedCell, result);
+        removeDuplicateInlineObjectsFromCellFlow(ctx, result);
         for (ASTParagraph para : result) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
@@ -1112,6 +1118,40 @@ public class StoryLoader {
         copy.anchoredObjectId(source.anchoredObjectId());
         copy.storyAnchorPlacement(source.storyAnchorPlacement());
         return copy;
+    }
+
+    private static int removeDuplicateInlineObjectsFromCellFlow(
+            ResolvedBuildContext ctx,
+            List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return 0;
+        Set<String> seenSourceIds = new HashSet<>();
+        int removed = 0;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            Iterator<ASTInlineItem> it = paragraph.items().iterator();
+            while (it.hasNext()) {
+                ASTInlineItem item = it.next();
+                if (!(item instanceof ASTInlineObject)) continue;
+                String key = inlineObjectSourceKey((ASTInlineObject) item);
+                if (key == null) continue;
+                if (!seenSourceIds.add(key)) {
+                    it.remove();
+                    removed++;
+                }
+            }
+        }
+        if (removed > 0) {
+            ConversionTiming.addCounter("phase3.storyLoader.cell.duplicateInlineObjectsRemoved", removed);
+            if (ctx != null && ctx.debugAst) {
+                System.err.println("[StoryLoader] removed duplicate inline objects from cell flow: " + removed);
+            }
+        }
+        return removed;
+    }
+
+    private static String inlineObjectSourceKey(ASTInlineObject obj) {
+        if (obj == null || obj.sourceId() == null || obj.sourceId().isEmpty()) return null;
+        return obj.sourceId();
     }
 
     private static ResolvedStory findResolvedStoryForCell(
