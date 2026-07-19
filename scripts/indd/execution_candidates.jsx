@@ -491,9 +491,22 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     }
     if (objectPlan.textAction === "DROP_TEXT") {
         candidate.ownedTextFrameIds = [];
-        candidate.editableTextFrameIds = [];
-        candidate.hiddenTextFrameIds = [];
-        candidate.requiresTextHidden = false;
+        if (objectPlan.visualAction === "PLACE_TEXT_SHELL"
+                && objectPlan.textAction !== "OWNED_BY_PNG"
+                && objectPlan.ownedTextFrameIds
+                && objectPlan.ownedTextFrameIds.length > 0) {
+            candidate.hiddenTextFrameIds = _sortedNumericIds(
+                    _executionCandidateIdsUnion(
+                            objectPlan.hiddenTextFrameIds || [],
+                            objectPlan.ownedTextFrameIds || []));
+            candidate.editableTextFrameIds = candidate.hiddenTextFrameIds.slice(0);
+            candidate.requiresTextHidden = candidate.hiddenTextFrameIds.length > 0;
+            if (candidate.requiresTextHidden) candidate.textOwner = "hwpx_tf";
+        } else {
+            candidate.editableTextFrameIds = [];
+            candidate.hiddenTextFrameIds = [];
+            candidate.requiresTextHidden = false;
+        }
     } else if (objectPlan.textAction !== "OWNED_BY_HWPX_TEXT") {
         candidate.hiddenTextFrameIds = [];
         candidate.requiresTextHidden = false;
