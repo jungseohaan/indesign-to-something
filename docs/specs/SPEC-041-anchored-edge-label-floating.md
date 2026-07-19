@@ -119,9 +119,16 @@ p187 산출물의 실제 HWPX 구조: 셀 안 **단일 `<hp:rect>` + 단일 `<hp
 - 오버레이 소비자는 존재: `InlineFrameBuilder`/`HwpxImageBuilder` 가
   `overlayFrames`/`isOverlay()` 처리
 
-남은 미해결: 오버레이가 AST 에서 안 만들어졌는지(분기 미진입/overlay null),
-HWPX 빌더에서 유실됐는지, 아니면 rect 를 만든 게 제3의 빌더(TableBuilder
-중첩 복원, PageOverlayBuilder, SingleColumnTableConverter)인지.
+디버그 재변환(SPEC041_DEBUG, 2026-07-19)으로 추가 확정:
+- `buildInlineShellObject` 오버레이 분기 **실행됨** (shell=364019
+  visibleCount=2, separated=false → attachInlineShellChildTextOverlays 호출)
+- 그런데도 출력 셀엔 rect 1 + drawText 1 에 텍스트 연결뿐, 오버레이 없음
+- 오버레이 분기는 셸 obj 자체 문단에 텍스트를 넣지 않으므로, drawText 의
+  텍스트는 셸 객체가 아니라 **다른 경로**가 만든 것 → 셸 객체(오버레이 포함)
+  는 셀 흐름 어딘가에서 탈락하고, rect+텍스트는 TableBuilder 중첩 복원
+  (inlineNestedTextFrameParagraphsInCells 계열)이 pill TF + 인용 TF 를
+  문단으로 합쳐 만든 것으로 추정. 다음 단계: 셀 플로우에서 셸 obj 가
+  드롭되는 지점과 중첩 복원의 pill TF 포함 로직을 추적.
 
 ### 다음 단계 (재추출 불필요 — reconvert 로 반복)
 
