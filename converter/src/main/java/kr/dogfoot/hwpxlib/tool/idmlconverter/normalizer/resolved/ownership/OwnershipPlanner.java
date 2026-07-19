@@ -5545,10 +5545,9 @@ public final class OwnershipPlanner {
         if (rg != null && rg.editableTextFrameIds() != null) {
             for (String id : rg.editableTextFrameIds()) {
                 int parsed = parseFlexibleId(id);
-                if (parsed >= 0 && data != null && data.isTextOwnedByIndesignPng(String.valueOf(parsed))) {
-                    continue;
-                }
-                if (parsed >= 0) ids.add(parsed);
+                if (parsed < 0) continue;
+                if (data != null && !isVisibleEditableTextFrameSourceId(parsed)) continue;
+                ids.add(parsed);
             }
         }
         if (ids.isEmpty() && rg != null
@@ -5602,6 +5601,7 @@ public final class OwnershipPlanner {
         if (tf == null || tf.id() == null) return false;
         if (tf.sourceHidden()) return false;
         if (data != null && data.isTextOwnedByIndesignPng(tf.id())) return false;
+        if (!hasSemanticText(tf)) return false;
         return true;
     }
 
@@ -5620,6 +5620,17 @@ public final class OwnershipPlanner {
         if (plan.sourceObjectIds != null) {
             for (int id : plan.sourceObjectIds) {
                 if (isVisibleEditableTextFrameSourceId(id)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasSemanticEditableTextOwnerSignal(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (editableTextFrameIdsOf(rg).length > 0) return true;
+        if (rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                if (isVisibleEditableTextFrameSourceId(sourceId)) return true;
             }
         }
         return false;
@@ -6364,9 +6375,7 @@ public final class OwnershipPlanner {
         if (hasTextlessShellWithInferredEditableTextSource(rg)) {
             return TextAction.OWNED_BY_HWPX_TEXT;
         }
-        if ("hwpx_tf".equals(rg.textOwner())
-                || Boolean.TRUE.equals(rg.containsEditableText())
-                || hasEditableTextFrameIds(rg)) {
+        if (hasSemanticEditableTextOwnerSignal(rg)) {
             return TextAction.OWNED_BY_HWPX_TEXT;
         }
         return TextAction.DROP_TEXT;
@@ -6429,7 +6438,7 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (Boolean.FALSE.equals(rg.placementAllowed())
-                && (textAction != TextAction.OWNED_BY_HWPX_TEXT || !hasEditableTextOwnerSignal(rg))) {
+                && (textAction != TextAction.OWNED_BY_HWPX_TEXT || !hasSemanticEditableTextOwnerSignal(rg))) {
             return VisualAction.DROP_VISUAL;
         }
         if (isLabelBackdropGroupWithUnclaimedHwpxText(rg)) {
@@ -6453,9 +6462,7 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (textAction == TextAction.OWNED_BY_HWPX_TEXT
-                && ("hwpx_tf".equals(rg.textOwner())
-                || Boolean.TRUE.equals(rg.containsEditableText())
-                || hasEditableTextFrameIds(rg))) {
+                && hasSemanticEditableTextOwnerSignal(rg)) {
             if (isEditableVisualShellWithSeparateHwpxText(rg)) {
                 return VisualAction.PLACE_TEXT_SHELL;
             }
@@ -6551,7 +6558,8 @@ public final class OwnershipPlanner {
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
             return false;
         }
-        return rg.hasEditableTextHiddenFromPng() || hasEditableTextFrameIds(rg);
+        return (rg.hasEditableTextHiddenFromPng() || hasEditableTextFrameIds(rg))
+                && hasSemanticEditableTextOwnerSignal(rg);
     }
 
     private boolean hasTableOnlyCarrierSource(int[] sourceIds) {
@@ -6796,8 +6804,7 @@ public final class OwnershipPlanner {
     private boolean isEditableTextCarrierBackdrop(RenderedGroup rg, TextAction textAction) {
         if (rg == null) return false;
         if (textAction != TextAction.OWNED_BY_HWPX_TEXT
-                && !"hwpx_tf".equals(rg.textOwner())
-                && !hasEditableTextFrameIds(rg)) {
+                && !hasSemanticEditableTextOwnerSignal(rg)) {
             return false;
         }
         return isMultiTextCarrierShell(rg);
@@ -7181,9 +7188,8 @@ public final class OwnershipPlanner {
     private boolean isEditableLabelCardShell(RenderedGroup rg) {
         if (rg == null) return false;
         if (!"mixed_group_text_hidden".equals(rg.reason())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        String[] editableIds = rg.editableTextFrameIds();
-        if (editableIds == null || editableIds.length < 2) return false;
+        if (!hasSemanticEditableTextOwnerSignal(rg)) return false;
+        if (editableTextFrameIdsOf(rg).length < 2) return false;
         double[] b = rg.bounds();
         if (b == null || b.length < 4) return false;
         double h = Math.abs(b[2] - b[0]);
@@ -7205,7 +7211,7 @@ public final class OwnershipPlanner {
                 && !reason.contains("complex_graphic_text_hidden")) {
             return false;
         }
-        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) {
+        if (!hasSemanticEditableTextOwnerSignal(rg)) {
             return false;
         }
         List<double[]> textBounds = new ArrayList<>();
@@ -7442,18 +7448,7 @@ public final class OwnershipPlanner {
     }
 
     private boolean hasEditableTextOwnerSignal(RenderedGroup rg) {
-        if (rg == null || data == null) return false;
-        if ("hwpx_tf".equals(rg.textOwner())) return true;
-        if (hasEditableTextFrameIds(rg)) return true;
-        if (rg.sourceObjectIds() != null) {
-            for (int sourceId : rg.sourceObjectIds()) {
-                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
-                if (tf != null && !tf.sourceHidden()) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return hasSemanticEditableTextOwnerSignal(rg);
     }
 
     private boolean hasTextFrameSource(ObjectPlan plan) {
@@ -7527,8 +7522,7 @@ public final class OwnershipPlanner {
                 || reason.contains("textframe_visual_shell")
                 || reason.contains("text_composite_editable_text_hidden")
                 || reason.contains("visual_shell")
-                || "hwpx_tf".equals(rg.textOwner())
-                || hasEditableTextFrameIds(rg);
+                || hasSemanticEditableTextOwnerSignal(rg);
     }
 
     private boolean hasOnlyAbsorbableEditableLabelShellSources(RenderedGroup rg) {
@@ -7804,7 +7798,7 @@ public final class OwnershipPlanner {
     private boolean isInlineLeafTextShellAtom(RenderedGroup rg) {
         if (rg == null || data == null) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) return false;
+        if (!hasSemanticEditableTextOwnerSignal(rg)) return false;
         if (!hasExplicitTextlessShellSignal(rg)) return false;
         ResolvedPageItem root = data.getPageItem(String.valueOf(rg.id()));
         if (root == null || !root.isInline()) return false;
@@ -7844,7 +7838,7 @@ public final class OwnershipPlanner {
     private boolean isTextlessShellForInlineOwnedTextFrame(RenderedGroup rg) {
         if (rg == null || data == null) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) return false;
+        if (!hasSemanticEditableTextOwnerSignal(rg)) return false;
         if (!hasExplicitTextlessShellSignal(rg)) return false;
         int[] textFrameIds = editableTextFrameIdsOf(rg);
         if (textFrameIds.length == 0) return false;
@@ -8615,9 +8609,10 @@ public final class OwnershipPlanner {
         if (containsHwpxOwnedTextFrameSource(plan)) return true;
         RenderedGroup rg = renderedGroupForPlan(plan);
         if (rg == null) return false;
-        return rg.hasEditableTextHiddenFromPng()
+        return hasSemanticEditableTextOwnerSignal(rg)
+                && (rg.hasEditableTextHiddenFromPng()
                 || hasEditableTextFrameIds(rg)
-                || Boolean.TRUE.equals(rg.containsEditableText());
+                || Boolean.TRUE.equals(rg.containsEditableText()));
     }
 
     private void resolveTextShellSharedSources() {

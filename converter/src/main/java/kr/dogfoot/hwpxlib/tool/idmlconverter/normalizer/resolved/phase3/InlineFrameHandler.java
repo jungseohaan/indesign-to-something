@@ -45,6 +45,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
+import java.awt.AlphaComposite;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1086,6 +1087,14 @@ public class InlineFrameHandler {
             boolean hasOval) {
         RenderedGroup shell = findInlineEditableLabelShell(ctx, anchoredObjectId, childTf);
         if (shell == null) return null;
+        ObjectPlan shellPlan = findInlineTextShellOwnerPlan(
+                ctx, shell, java.util.Collections.singletonList(childTf));
+        if (shellPlan != null
+                && shellPlan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && extractedShellImageOwnsGeometry(shellPlan)) {
+            return buildInlineShellObject(ctx, anchoredObjectId, anchorItem,
+                    java.util.Collections.singletonList(childTf), shell, shellPlan);
+        }
         try {
             double w = widthPt;
             double h = heightPt;
@@ -1432,28 +1441,25 @@ public class InlineFrameHandler {
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             BufferedImage shellImage = VisualCropper.knockOutPaperLikeFill(img);
-            if (shouldPreserveTransparentInlineShell(shellImage)) {
-                ResolvedPageItem nativeStyleSource = findInlineTextShellNativeStyleSource(ctx, shellPlan, anchorItem);
-                if (nativeStyleSource != null) {
-                    applyInlineShellShapeStyle(ctx, nativeStyleSource, obj);
-                    applyOwnedTextFrameShellShapeStyle(ctx, childTfs, obj);
-                    useImageFill = false;
-                    usedNativeShellStyle = true;
-                } else {
-                    imageData = VisualCropper.encodePng(shellImage);
-                }
+            boolean transparentSparseShell = shouldPreserveTransparentInlineShell(shellImage);
+            if (transparentSparseShell) {
+                imageData = prepareTransparentInlineTextShellImageData(ctx, shellPlan, shellImage);
             } else {
                 boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
                 imageData = prepareInlineTextShellImageData(shellImage, preserveSourceCanvas);
             }
             int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
             boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
-            if (visibleShellTextFrameCount > 1 || separatedHwpxTextChannel) {
+            if (visibleShellTextFrameCount > 1 || separatedHwpxTextChannel || transparentSparseShell) {
                 if (useImageFill) {
                     obj.imageFillData(imageData);
                     obj.forceImageFill(true);
                 }
-                attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
+                boolean embeddedSingleChild = visibleShellTextFrameCount == 1
+                        && embedSingleInlineShellChildText(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
+                if (!embeddedSingleChild) {
+                    attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
+                }
                 for (ResolvedTextFrame childTf : childTfs) {
                     markInlineShellChildTextPlaced(ctx, childTf);
                 }
@@ -1540,11 +1546,111 @@ public class InlineFrameHandler {
             ObjectPlan shellPlan,
             java.util.List<ResolvedTextFrame> childTfs) {
         if (shellPlan == null || childTfs == null || childTfs.isEmpty()) return false;
-        if (visibleShellTextFrameCount(childTfs) <= 1) return false;
-        if (shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (!extractedShellImageOwnsGeometry(shellPlan)) return false;
-        return hasHwpxTextOwnershipForChildren(ctx, shellPlan, childTfs);
+        if (!hasHwpxTextOwnershipForChildren(ctx, shellPlan, childTfs)) return false;
+        if (visibleShellTextFrameCount(childTfs) > 1) return true;
+        return shouldAttachSingleShellTextAsOverlay(ctx, shellPlan, childTfs);
+    }
+
+    private static boolean shouldAttachSingleShellTextAsOverlay(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (ctx == null || shellPlan == null || childTfs == null) return false;
+        ResolvedTextFrame visibleChild = null;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
+            if (visibleChild != null) return false;
+            visibleChild = childTf;
+        }
+        if (visibleChild == null) return false;
+        double[] shellBounds = shellPlan.bounds;
+        if (!validBounds(shellBounds)) return false;
+        double[] shellPageBounds = normalizeShellBoundsToTextFramePageLocal(
+                ctx, shellPlan.pageIndex, shellBounds, visibleChild);
+        if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
+        double[] textBounds = normalizeTextFrameBoundsToShellPage(
+                ctx, shellPlan.pageIndex, visibleChild, shellPageBounds);
+        if (!validBounds(textBounds)) return false;
+
+        double shellW = Math.abs(shellPageBounds[3] - shellPageBounds[1]);
+        double shellH = Math.abs(shellPageBounds[2] - shellPageBounds[0]);
+        double textW = Math.abs(textBounds[3] - textBounds[1]);
+        double textH = Math.abs(textBounds[2] - textBounds[0]);
+        if (shellW <= 0.0 || shellH <= 0.0 || textW <= 0.0 || textH <= 0.0) return false;
+
+        double widthRatio = textW / shellW;
+        double heightRatio = textH / shellH;
+        double shellCenterX = (shellPageBounds[1] + shellPageBounds[3]) / 2.0;
+        double shellCenterY = (shellPageBounds[0] + shellPageBounds[2]) / 2.0;
+        double textCenterX = (textBounds[1] + textBounds[3]) / 2.0;
+        double textCenterY = (textBounds[0] + textBounds[2]) / 2.0;
+        double centerDx = Math.abs(textCenterX - shellCenterX) / shellW;
+        double centerDy = Math.abs(textCenterY - shellCenterY) / shellH;
+
+        return widthRatio < 0.80 || heightRatio < 0.80 || centerDx > 0.08 || centerDy > 0.08;
+    }
+
+    private static boolean embedSingleInlineShellChildText(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] shellBounds,
+            java.util.List<ResolvedTextFrame> childTfs,
+            ASTInlineObject shellObj) {
+        if (ctx == null || shellObj == null || childTfs == null || childTfs.size() != 1) return false;
+        ResolvedTextFrame childTf = childTfs.get(0);
+        if (childTf == null || isOrcCarrierTextFrame(childTf)) return false;
+        if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) return false;
+        if (!applySingleInlineShellChildTextMargins(ctx, pageIndex, shellBounds, childTf, shellObj)) return false;
+
+        shellObj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
+        shellObj.verticalJustification(childTf.verticalJustification() != null
+                ? childTf.verticalJustification()
+                : "CenterAlign");
+        buildBadgeParagraph(ctx, childTf, shellObj);
+        return shellObj.paragraphs() != null && !shellObj.paragraphs().isEmpty();
+    }
+
+    private static boolean applySingleInlineShellChildTextMargins(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] shellBounds,
+            ResolvedTextFrame childTf,
+            ASTInlineObject shellObj) {
+        if (ctx == null || childTf == null || shellObj == null || !validBounds(shellBounds)) return false;
+        double[] shellPageBounds = normalizeShellBoundsToTextFramePageLocal(ctx, pageIndex, shellBounds, childTf);
+        if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
+        double[] tb = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
+        if (!validBounds(tb) || !validBounds(shellPageBounds)) return false;
+
+        double shellW = Math.abs(shellPageBounds[3] - shellPageBounds[1]);
+        double shellH = Math.abs(shellPageBounds[2] - shellPageBounds[0]);
+        double textW = Math.abs(tb[3] - tb[1]);
+        double textH = Math.abs(tb[2] - tb[0]);
+        if (shellW <= 0.0 || shellH <= 0.0 || textW <= 0.0 || textH <= 0.0) return false;
+        if (textW > shellW * 1.25 || textH > shellH * 1.25) return false;
+
+        double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double left = Math.max(0.0, tb[1] - shellPageBounds[1]);
+        double top = Math.max(0.0, tb[0] - shellPageBounds[0]);
+        double right = Math.max(0.0, shellPageBounds[3] - tb[3]);
+        double bottom = Math.max(0.0, shellPageBounds[2] - tb[2]);
+
+        double[] inset = childTf.insetSpacing();
+        if (inset != null && inset.length >= 4) {
+            top += Math.max(0.0, inset[0]);
+            left += Math.max(0.0, inset[1]);
+            bottom += Math.max(0.0, inset[2]);
+            right += Math.max(0.0, inset[3]);
+        }
+
+        shellObj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left * scale));
+        shellObj.textMarginTop(CoordinateConverter.pointsToHwpunits(top * scale));
+        shellObj.textMarginRight(CoordinateConverter.pointsToHwpunits(right * scale));
+        shellObj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom * scale));
+        return true;
     }
 
     private static void attachInlineShellChildTextOverlays(
@@ -2171,6 +2277,73 @@ public class InlineFrameHandler {
     private static byte[] prepareInlineTextShellImageData(BufferedImage img, boolean preserveSourceCanvas) throws Exception {
         BufferedImage shell = VisualCropper.knockOutPaperLikeFill(img);
         return flattenOntoWhite(shell);
+    }
+
+    private static byte[] prepareTransparentInlineTextShellImageData(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            BufferedImage shellImage) throws Exception {
+        BufferedImage blended = blendTransparentShellOverPagePlane(ctx, shellPlan, shellImage);
+        if (blended != null) return encodeRgbPng(blended);
+        return flattenOntoWhite(shellImage);
+    }
+
+    private static BufferedImage blendTransparentShellOverPagePlane(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            BufferedImage shellImage) {
+        if (ctx == null || ctx.basePath == null || shellPlan == null || shellImage == null) return null;
+        if (!validBounds(shellPlan.bounds)) return null;
+        double pageW = localPageWidth(ctx, shellPlan.pageIndex);
+        double pageH = localPageHeight(ctx, shellPlan.pageIndex);
+        if (pageW <= 0.0 || pageH <= 0.0) return null;
+
+        File pagePlaneFile = new File(
+                ctx.basePath,
+                "rendered_frames/page_textless_plane_p" + (shellPlan.pageIndex + 1) + ".png");
+        if (!pagePlaneFile.exists() || !pagePlaneFile.isFile()) return null;
+        try {
+            BufferedImage pagePlane = ImageIO.read(pagePlaneFile);
+            if (pagePlane == null || pagePlane.getWidth() <= 0 || pagePlane.getHeight() <= 0) return null;
+
+            double[] b = normalizeInlineBoundsToPageLocal(ctx, shellPlan.pageIndex, shellPlan.bounds);
+            if (!validBounds(b)) return null;
+            int sx1 = (int) Math.round((b[1] / pageW) * pagePlane.getWidth());
+            int sy1 = (int) Math.round((b[0] / pageH) * pagePlane.getHeight());
+            int sx2 = (int) Math.round((b[3] / pageW) * pagePlane.getWidth());
+            int sy2 = (int) Math.round((b[2] / pageH) * pagePlane.getHeight());
+            sx1 = clamp(sx1, 0, pagePlane.getWidth());
+            sx2 = clamp(sx2, 0, pagePlane.getWidth());
+            sy1 = clamp(sy1, 0, pagePlane.getHeight());
+            sy2 = clamp(sy2, 0, pagePlane.getHeight());
+            if (sx2 <= sx1 || sy2 <= sy1) return null;
+
+            BufferedImage out = new BufferedImage(
+                    shellImage.getWidth(), shellImage.getHeight(), BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = out.createGraphics();
+            try {
+                g.drawImage(pagePlane, 0, 0, out.getWidth(), out.getHeight(), sx1, sy1, sx2, sy2, null);
+                g.setComposite(AlphaComposite.SrcOver);
+                g.drawImage(shellImage, 0, 0, out.getWidth(), out.getHeight(), null);
+            } finally {
+                g.dispose();
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static byte[] encodeRgbPng(BufferedImage image) throws java.io.IOException {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        ImageIO.write(image, "png", bos);
+        return bos.toByteArray();
+    }
+
+    private static int clamp(int value, int min, int max) {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
     }
 
     private static boolean shouldPreserveTransparentInlineShell(BufferedImage img) {
@@ -6202,8 +6375,21 @@ public class InlineFrameHandler {
 
     private static double[] pageBounds(ResolvedBuildContext ctx, int pageIndex) {
         if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null) return null;
-        if (pageIndex < 0 || pageIndex >= ctx.resolvedData.pages().size()) return null;
-        ResolvedPage page = ctx.resolvedData.pages().get(pageIndex);
+        ResolvedPage page = null;
+        if (pageIndex >= 0 && pageIndex < ctx.resolvedData.pages().size()) {
+            ResolvedPage byPosition = ctx.resolvedData.pages().get(pageIndex);
+            if (byPosition != null && byPosition.index() == pageIndex) {
+                page = byPosition;
+            }
+        }
+        if (page == null) {
+            for (ResolvedPage candidate : ctx.resolvedData.pages()) {
+                if (candidate != null && candidate.index() == pageIndex) {
+                    page = candidate;
+                    break;
+                }
+            }
+        }
         if (page == null || page.bounds() == null || page.bounds().length < 4) return null;
         return page.bounds();
     }
