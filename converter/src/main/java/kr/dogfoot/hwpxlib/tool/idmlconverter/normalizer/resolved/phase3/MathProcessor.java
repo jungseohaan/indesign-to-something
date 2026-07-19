@@ -73,13 +73,18 @@ class MathProcessor {
 
         List<ASTInlineItem> newItems = new ArrayList<>();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
+        // SPEC-042: 그룹에 들어간 원본 ASTTextRun — flush 결과 텍스트런에 크기·굵기·
+        // 첨자를 백필하기 위해 어댑터와 병렬로 유지 (어댑터 자체에 실으면 그룹핑
+        // 하류 경로가 바뀌어 첨자 회귀가 났다. SPEC-042 실패 기록 참조)
+        List<ASTTextRun> mathGroupSrc = new ArrayList<>();
         String mathType = null; // "EH", "BT", "NP"
 
         for (int i = 0; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 newItems.add(item);
                 continue;
@@ -97,8 +102,9 @@ class MathProcessor {
 
             FormulaCluster formulaCluster = collectFormulaEquationCluster(items, i);
             if (formulaCluster != null) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 newItems.add(formulaCluster.equation);
                 i = formulaCluster.endExclusive - 1;
@@ -106,8 +112,9 @@ class MathProcessor {
             }
 
             if (currentType != null && isSimplePositionedTextRun(tr)) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 newItems.add(item);
                 continue;
@@ -115,8 +122,9 @@ class MathProcessor {
 
             boolean formulaBoundaryOnly = isFormulaBoundaryText(tr.text());
             if (formulaBoundaryOnly) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 inheritFormulaBoundaryTextColor(items, i, tr);
                 newItems.add(item);
@@ -144,12 +152,15 @@ class MathProcessor {
                     mathType = currentType;
                     IDMLCharacterRun cr = mathRunFromTextRun(tr, ff);
                     mathGroup.add(cr);
+                    mathGroupSrc.add(tr);
                 } else {
-                    flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                    flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                     mathGroup.clear();
+                    mathGroupSrc.clear();
                     mathType = currentType;
                     IDMLCharacterRun cr = mathRunFromTextRun(tr, ff);
                     mathGroup.add(cr);
+                    mathGroupSrc.add(tr);
                 }
             } else {
                 // EH 그룹이 열려있으면 비EH 런의 bridge 가능성 확인
@@ -188,15 +199,17 @@ class MathProcessor {
                 if (bridge) {
                     IDMLCharacterRun cr = mathRunFromTextRun(tr, tr.fontFamily() != null ? tr.fontFamily() : "");
                     mathGroup.add(cr);
+                    mathGroupSrc.add(tr);
                 } else {
-                    flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                    flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                     mathGroup.clear();
+                    mathGroupSrc.clear();
                     mathType = null;
                     newItems.add(item);
                 }
             }
         }
-        flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+        flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
 
         if (newItems.size() != items.size() || !newItems.equals(items)) {
             items.clear();
@@ -1520,6 +1533,66 @@ class MathProcessor {
             return false;
         }
         return true;
+    }
+
+    /**
+     * SPEC-042: flush 후, 어댑터 변환으로 손실된 원본 런 스타일(크기·굵기·첨자)을
+     * 결과 텍스트런에 백필한다. 어댑터(IDMLCharacterRun)에 직접 실으면 그룹핑
+     * 하류 경로가 바뀌어 첨자 회귀가 나므로(SPEC-042 실패 기록), flush 산출물에만
+     * 비어 있는 속성을 채운다. 매칭은 순서 보존 텍스트 일치(1:1)로, 분절·병합된
+     * 산출물(수식 스크립트 등)은 건드리지 않는다.
+     */
+    private static void flushResolvedMathGroupWithBackfill(ResolvedBuildContext ctx, List<IDMLCharacterRun> group,
+                                         List<ASTTextRun> sources, String type,
+                                         List<ASTInlineItem> out, ASTParagraph ignoredPara) {
+        if (group == null || group.isEmpty()) return;
+        ASTParagraph tempPara = new ASTParagraph();
+        if ("EH".equals(type)) {
+            ASTMathGrouper.flushEHMathGroup(group, tempPara);
+        } else if ("BT".equals(type)) {
+            ASTMathGrouper.flushMathGroup(group, tempPara);
+        } else if ("NP".equals(type)) {
+            ASTMathGrouper.flushNPMathGroup(group, tempPara);
+        }
+        backfillFlushedTextRunStyles(tempPara.items(), sources);
+        out.addAll(tempPara.items());
+    }
+
+    private static void backfillFlushedTextRunStyles(List<ASTInlineItem> emitted, List<ASTTextRun> sources) {
+        if (emitted == null || sources == null || sources.isEmpty()) return;
+        int s = 0;
+        for (ASTInlineItem item : emitted) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun outRun = (ASTTextRun) item;
+            int k = s;
+            while (k < sources.size() && !flushedTextMatches(sources.get(k), outRun)) k++;
+            if (k >= sources.size()) continue;
+            ASTTextRun src = sources.get(k);
+            s = k + 1;
+            // 짧은 숫자 런(첨자 후보 — H₂의 2)은 백필하지 않는다. 하류의 첨자 보강이
+            // "크기 없는 폴백 런"을 조건으로 동작해, 여기서 크기를 선주입하면 첨자가
+            // 유실된다 (SPEC-042 실패 기록 3: 백필판에서도 동일 회귀 재현).
+            String outText = outRun.text() == null ? "" : outRun.text().trim();
+            if (outText.matches("\\d{1,2}")) continue;
+            if (outRun.fontSizeHwpunits() == null && src.fontSizeHwpunits() != null) {
+                outRun.fontSizeHwpunits(src.fontSizeHwpunits());
+            }
+            if (outRun.fontStyle() == null && src.fontStyle() != null) {
+                outRun.fontStyle(src.fontStyle());
+            }
+            if (!outRun.subscript() && !outRun.superscript()) {
+                if (src.subscript()) outRun.subscript(true);
+                else if (src.superscript()) outRun.superscript(true);
+            }
+        }
+    }
+
+    private static boolean flushedTextMatches(ASTTextRun src, ASTTextRun out) {
+        String a = src != null ? src.text() : null;
+        String b = out != null ? out.text() : null;
+        if (a == null || b == null) return false;
+        String at = a.trim();
+        return !at.isEmpty() && at.equals(b.trim());
     }
 
     private static void flushResolvedMathGroup(ResolvedBuildContext ctx, List<IDMLCharacterRun> group, String type,

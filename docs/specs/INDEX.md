@@ -17,7 +17,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-037](SPEC-037-issue-debug-cycle-acceleration.md) | Active support | Faster page issue loop, ObjectPlan tracing, regression audit workflow |
 | [SPEC-038](SPEC-038-extract-indd-modularization-map.md) | Active support | `extract_indd.jsx` modularization map and removal of legacy extraction paths |
 | [SPEC-041](SPEC-041-anchored-edge-label-floating.md) | Active | 앵커 가장자리 라벨(구절 풀이 배지) 테이블 셀 흡수 — 컨버터 오버레이 채널 보존으로 수정 (구현 완료, 육안 확인 대기) |
-| [SPEC-042](SPEC-042-chemical-formula-run-style.md) | Active | 화학식 H₂ 의 H 크기·굵기 손실 — mathRunFromTextRun 어댑터 손실. 조사 완료, naive 수정은 첨자 회귀 유발 (원인 미특정) |
+| [SPEC-042](SPEC-042-chemical-formula-run-style.md) | Active | 화학식 H₂ 의 H 크기·굵기 손실 — flush 백필로 수정 (구현 완료, 숫자 런 제외 제약은 SPEC 참조) |
 
 For V2 ownership changes, start from the canonical policies above. Historical
 ownership SPECs have been removed so they cannot be reused as implementation
