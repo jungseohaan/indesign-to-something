@@ -529,6 +529,27 @@ public class StoryLoader {
                     enterBT = false;
                 }
 
+                // SPEC-042: 수식 그룹 런은 RunBuilder(resolved 권위) 경로를 우회하므로,
+                // 매칭 resolved run 의 fillColor 를 여기서 주입한다. resolved 는 InDesign
+                // 이 실제 렌더한 계산값이라 IDML 로컬 속성보다 권위 있다 (실측: p17
+                // 2H₂ 의 H 가 IDML 로컬 파랑·resolved 빨강 — 인쇄는 빨강).
+                if ((enterEH || enterNP || enterBT) && resolvedRuns != null && run.content() != null) {
+                    // findResolvedRun 은 ctx.lastMatchResult 공유 커서를 갱신하므로,
+                    // 부수 조회가 본류 매칭을 밀지 않게 저장/복원한다.
+                    int savedMatchCursor = ctx.lastMatchResult[0];
+                    ResolvedRun rrColor = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, run.content());
+                    ctx.lastMatchResult[0] = savedMatchCursor;
+                    if (rrColor != null && rrColor.fillColor() != null) {
+                        // 무채색(검정·회색)은 주입하지 않는다 — 기본 텍스트의 기존
+                        // 상속 경로(CharPr 크기 계승 포함)를 바꾸지 않기 위함.
+                        // 목적은 화학식 강조색(유채색) 보존이다.
+                        String hex = RunBuilder.resolveColorToHex(ctx, rrColor.fillColor());
+                        if (hex != null && hex.length() == 7 && !isGrayscaleHex(hex)) {
+                            run.fillColor(rrColor.fillColor());
+                        }
+                    }
+                }
+
                 if (enterEH) {
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, null, para);
                     // IDML run 은 명시적 fontSize 가 없어(스타일 상속만) EH 수식의
@@ -2072,6 +2093,18 @@ public class StoryLoader {
      * \uC790\uCCB4 \uB80C\uB354\uD558\uBBC0\uB85C \uC774 Rectangle \uC740 \uBC84\uB9AC\uACE0 radicand \uB97C \uADFC\uD638\uC5D0 \uB123\uC5B4\uC57C \uD55C\uB2E4. \uC2E4\uC81C
      * \uC778\uB77C\uC778 \uD504\uB808\uC784/\uC774\uBBF8\uC9C0/\uD14D\uC2A4\uD2B8\uAC00 \uD558\uB098\uB77C\uB3C4 \uC788\uC73C\uBA74 false(\uC815\uC0C1 \uC778\uB77C\uC778 \uBC30\uCE58 \uB300\uC0C1).
      */
+    /** #RRGGBB 가 무채색(회색조)인지 — r=g=b 근사(±8). */
+    private static boolean isGrayscaleHex(String hex) {
+        try {
+            int r = Integer.parseInt(hex.substring(1, 3), 16);
+            int g = Integer.parseInt(hex.substring(3, 5), 16);
+            int b = Integer.parseInt(hex.substring(5, 7), 16);
+            return Math.abs(r - g) <= 8 && Math.abs(g - b) <= 8 && Math.abs(r - b) <= 8;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
     private static boolean allInlineGraphicsAreVinculum(IDMLCharacterRun run) {
         if (run == null) return false;
         java.util.List<IDMLCharacterRun.InlineGraphic> gfx = run.inlineGraphics();
