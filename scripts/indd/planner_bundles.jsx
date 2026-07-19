@@ -1571,6 +1571,7 @@ function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
                     : null;
             if (!pageGroupTextSource || pageGroupTextSource.kind !== "TextFrame") continue;
             if (pageGroupTextSource.textFrameClass !== "editable") continue;
+            if (pageGroupTextSource.hasText !== true) continue;
             if (pageGroupTextSource.simpleMarkerLabelContents !== true) continue;
             _pushUniqueId(ids, seen, pageGroupTextId);
         }
@@ -1609,6 +1610,7 @@ function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
             var src = clusterIndex && clusterIndex.sourceInfo ? clusterIndex.sourceInfo(id) : null;
             if (!src || src.kind !== "TextFrame") continue;
             if (src.textFrameClass !== "editable") continue;
+            if (src.hasText !== true) continue;
             if (candidate && candidate.compositeRole === "source_declared_closed_text_shell"
                     && _plannerBundleSourceIsInlineOwnedForParentShell(src)) {
                 continue;

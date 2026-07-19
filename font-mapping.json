@@ -280,7 +280,8 @@
     "강원교육새음 OTF": {
       "ko": "한컴돋움",
       "en": "한컴돋움",
-      "spacing": -5
+      "spacing": -5,
+      "ratio": 0.67
     },
     "Sandoll 고딕NeoRound": {
       "ko": "한컴돋움",
