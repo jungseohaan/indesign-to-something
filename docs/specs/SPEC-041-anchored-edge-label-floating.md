@@ -152,12 +152,24 @@ p187 산출물의 실제 HWPX 구조: 셀 안 **단일 `<hp:rect>` + 단일 `<hp
 2. (선택) `converter` OwnershipPlanner — 같은 위반을 경고하는 관찰 패스 추가
    (`ANCHOR_CARRIER_CIRCULAR_TEXT_SHELL_OWNERSHIP`)
 
+## 구현 (2026-07-19, B안 확정)
+
+최종 유실 지점: `ASTTableConverter.normalizeTextHiddenInlineShellCarriers` 의
+`populateInlineShellOwnedText` 가, phase3 가 오버레이 채널로 구성한 셸 객체에
+소유 텍스트(pill+인용문)를 평문 문단으로 재주입 → 문단이 생기면서
+`InlineFrameBuilder` 의 `!hasParagraphs` 게이트에서 오버레이가 통째로 폐기됨.
+
+수정: `populateInlineShellOwnedText` 에 오버레이 보유 셸 주입 금지 가드 1건.
+결과: 셸 rect 는 imageFill 만 남고, pill("구절풀이")·인용문 텍스트는
+page-level 오버레이 박스(IN_FRONT_OF_TEXT)로 원 좌표에 배치.
+
 ## 검증
 
-- [ ] u2 재추출 → p187 pill 이 FLOATING 배치, 셀 텍스트에서 "구절 풀이" 제거
-- [ ] "114쪽 9행" 인라인 셸은 현행 유지
-- [ ] u1·u2 전권 재변환 diff — 다른 페이지 회귀 없음
-- [ ] 중3수학 1단원 재변환 diff — 교과서 케이스 회귀 없음
+- [x] p187 재변환 — 셸 drawText 평문 합류 해소, "구절풀이" 오버레이 4건 생성,
+      텍스트 중복 없음(전후 카운트 동일), "114쪽 9행" pill 현행 유지
+- [x] u1·u2 전권 재변환 — 경고 0 (frames u2 861→963, u1 773→833: 오버레이 승격분)
+- [x] 중3수학 1단원 재변환 — 수식 diff 0건, 통계 동일 (회귀 없음)
+- [ ] 한글 육안 확인 (pill 위치·겹침)
 
 ## 조사 아티팩트
 

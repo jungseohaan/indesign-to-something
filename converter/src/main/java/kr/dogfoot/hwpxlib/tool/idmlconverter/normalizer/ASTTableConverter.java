@@ -1075,6 +1075,11 @@ public class ASTTableConverter {
             ResolvedData resolvedData) {
         if (obj == null || plan == null || resolvedData == null) return;
         if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return;
+        // phase3 가 이미 오버레이 채널(자식 텍스트를 셸 내 상대좌표에 배치)을 구성한
+        // 셸에는 소유 텍스트를 평문 문단으로 주입하지 않는다 — 주입하면
+        // InlineFrameBuilder 의 !hasParagraphs 게이트에서 오버레이가 통째로 버려지고,
+        // 가장자리 라벨(구절 풀이)이 본문과 한 문단 흐름으로 합쳐진다 (SPEC-041 p187).
+        if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) return;
         if (inlineObjectHasVisibleText(obj)) return;
         List<ResolvedTextFrame> frames = new ArrayList<>();
         for (int id : plan.ownedTextFrameIds) {
