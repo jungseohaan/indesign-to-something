@@ -422,7 +422,7 @@ final class InlineFrameBuilder {
             try {
                 String itemId = ImageInserter.registerImage(
                         ctx.hwpxFile,
-                        AlphaSafePng.flattenOntoWhiteIfNeeded(obj.imageFillData()),
+                        AlphaSafePng.prepareTextBoxImageFill(obj.imageFillData()),
                         "png");
                 if (itemId != null) {
                     bf.createFillBrush();

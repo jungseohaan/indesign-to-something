@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.PreparedVisualImage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualCropper;
@@ -49,6 +50,12 @@ public final class BackgroundInjector {
             if (ownershipPlan == null) {
                 ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
                         "SKIP_NO_OBJECT_PLAN", "visible candidate has no OwnershipPlanner ObjectPlan");
+                continue;
+            }
+            if (ctx.isRenderedDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
+                ctx.recordRenderedDecision(rg, ownershipPlan, "Stage3.VisualBuilder.Phase6",
+                        "SKIP_ALREADY_HANDLED_RENDERED_VISUAL",
+                        "rendered visual already materialized by an earlier ownership executor");
                 continue;
             }
             if (ownershipPlan.placement != Placement.FLOATING) {
