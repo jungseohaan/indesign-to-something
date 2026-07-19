@@ -8,7 +8,7 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
 
 ## 활성 작업 (2026-07-19 기준)
 
-- **브랜치**: `open-indd` — main 머지 전. EH 재작성(eh-rewrite, PR #35)·SPEC-041(fix-regression, PR #36) 머지됨
+- **브랜치**: `open-indd` — EH 재작성(PR #35)·SPEC-041(PR #36)·SPEC-042(chemical-eq, PR #41) 머지됨. main 은 PR #40 시점까지 반영
 - **진행 중 SPEC**:
   - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) (앵커 가장자리 라벨 셀 흡수) — **구현 완료, 한글 육안 확인 대기** (p187 pill 위치)
   - source ownership policy — Tier A.5/A.6/B 구현 완료, **미테스트** (InDesign 재추출 필요). 잔여: A.1.5/A.4/A.8/Tier B 효과
