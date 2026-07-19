@@ -1662,7 +1662,7 @@ public class OwnershipPlannerTest {
     }
 
     @Test
-    public void tableOnlyCarrierSiblingDecorationIsAbsorbedIntoTableStyleSlot() {
+    public void tableOnlyCarrierSiblingDecorationKeepsShellVisualBesideTableStructure() {
         ResolvedData data = new ResolvedData();
         ResolvedTextFrame tf = textFrame(501, "\u0016");
         tf.storyId("501");
@@ -1714,25 +1714,15 @@ public class OwnershipPlannerTest {
         shell.containsText(Boolean.FALSE);
         data.addRenderedFloatingItem(shell);
 
-        String previousRunLegacyBridge = System.getProperty("idml.ownership.runLegacyBridge");
-        System.setProperty("idml.ownership.runLegacyBridge", "true");
-        ResolvedBuildContext ctx;
-        try {
-            ctx = plan(data, storyWithSingleCellTable("u1f5i1", "cell text"));
-        } finally {
-            if (previousRunLegacyBridge != null) {
-                System.setProperty("idml.ownership.runLegacyBridge", previousRunLegacyBridge);
-            } else {
-                System.clearProperty("idml.ownership.runLegacyBridge");
-            }
-        }
+        ResolvedBuildContext ctx = plan(data, storyWithSingleCellTable("u1f5i1", "cell text"));
         ObjectPlan tablePlan = findPlanByKind(ctx, 501, "text_frame:table_only");
         ObjectPlan shellPlan = findRenderedPlan(ctx, 502, "slot_only_textless_shell");
 
         Assert.assertNotNull(tablePlan);
         Assert.assertEquals(VisualAction.PLACE_TABLE_STYLE, tablePlan.visualAction);
-        Assert.assertArrayEquals(new int[] { 1, 502 }, tablePlan.styleSourceObjectIds);
-        Assert.assertTrue(shellPlan == null || shellPlan.visualAction == VisualAction.DROP_VISUAL);
+        Assert.assertArrayEquals(new int[0], tablePlan.styleSourceObjectIds);
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
     }
 
     @Test

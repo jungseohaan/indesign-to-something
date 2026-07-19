@@ -713,11 +713,6 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
             summary.reason = "cache_not_configured";
             return summary;
         }
-        if (ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
-                && _objectPlanMapKeyCount(ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage) > 0) {
-            summary.reason = "table_style_source_hide_requires_fresh_page_plane";
-            return summary;
-        }
         var cacheDir = Folder(ctx.pagePlaneCacheDir);
         if (!cacheDir.exists) {
             summary.reason = "cache_dir_missing";
@@ -811,11 +806,6 @@ function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
             summary.reason = "cache_not_configured";
             return summary;
         }
-        if (ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
-                && _objectPlanMapKeyCount(ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage) > 0) {
-            summary.reason = "table_style_source_hide_not_cached";
-            return summary;
-        }
         var cacheDir = _ensureFolder(ctx.pagePlaneCacheDir);
         var pageHashes = readJson(ctx.outputDir + "/page_hashes.json") || {};
         var frames = pageTextlessGroupResult && pageTextlessGroupResult.frames
@@ -906,10 +896,6 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
         allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
         var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
         var itemById = sourceIndex && sourceIndex.domById ? sourceIndex.domById : _buildItemById(allItems);
-        ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
-                || _tableStyleSourceObjectIdsByPageForPagePlaneHide(
-                        sourceIndex && sourceIndex.sourceItems ? sourceIndex.sourceItems : []);
         var inlineCandidates = _globalSingleTextlessInlineHideCandidates(
                 sourceIndex && sourceIndex.sourceItems ? sourceIndex.sourceItems : []);
         var result = exportSingleTextlessPagePlanes(
@@ -922,9 +908,7 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
                 inlineCandidates,
                 {
                     globalPreExport: true,
-                    inlineFallbackAllItems: true,
-                    hiddenTableStyleSourceObjectIdsByPage:
-                            ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
+                    inlineFallbackAllItems: true
                 });
         ctx.globalSingleTextlessPagePlanesByPageIndex =
                 _indexSingleTextlessPagePlaneFrames(result);
@@ -949,49 +933,6 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
         allItems = null;
         try { $.gc(); } catch (eGc) {}
     }
-}
-
-function _tableStyleSourceObjectIdsByPageForPagePlaneHide(sourceItems) {
-    var byPage = {};
-    if (!sourceItems || sourceItems.length === 0) return byPage;
-    var sourceById = typeof _objectPlanSourceInfoById === "function"
-            ? _objectPlanSourceInfoById(sourceItems)
-            : {};
-    if (!sourceById || typeof _tableOnlyTextFrameStyleSourceObjectIds !== "function") return byPage;
-
-    function add(pageIndex, ids) {
-        if (pageIndex === null || pageIndex === undefined) return;
-        var pageNumber = Number(pageIndex);
-        if (isNaN(pageNumber) || pageNumber < 0) return;
-        var pageKey = String(pageNumber);
-        if (!byPage[pageKey]) byPage[pageKey] = [];
-        var seen = {};
-        for (var existingIndex = 0; existingIndex < byPage[pageKey].length; existingIndex++) {
-            seen[String(byPage[pageKey][existingIndex])] = true;
-        }
-        for (var i = 0; ids && i < ids.length; i++) {
-            var id = Number(ids[i]);
-            if (isNaN(id)) continue;
-            if (!sourceById[String(id)]) continue;
-            if (seen[String(id)]) continue;
-            seen[String(id)] = true;
-            byPage[pageKey].push(id);
-        }
-        byPage[pageKey] = _sortedNumericIds(byPage[pageKey]);
-    }
-
-    for (var i = 0; i < sourceItems.length; i++) {
-        var src = sourceItems[i];
-        if (!src || String(src.kind || "") !== "TextFrame") continue;
-        if (src.hasTablesInStory !== true) continue;
-        if (src.storyHasVisibleTableCellText !== true) continue;
-        if (src.markerOnlyContents === false) continue;
-        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
-        var id = Number(src.id);
-        if (isNaN(id)) continue;
-        add(src.pageIndex, [id].concat(_tableOnlyTextFrameStyleSourceObjectIds(src, id, sourceById)));
-    }
-    return byPage;
 }
 
 function _globalSingleTextlessInlineHideCandidates(sourceItems) {
@@ -1275,9 +1216,7 @@ function _runRenderPhases(doc, ctx, allItems) {
 
     _marker(ctx.outputDir, "06b_pageTextlessGroups");
     var pagePlaneExportOptions = {
-        inlineFallbackAllItems: true,
-        hiddenTableStyleSourceObjectIdsByPage:
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {}
+        inlineFallbackAllItems: true
     };
     if (ctx.globalSingleTextlessPagePlanesByPageIndex) {
         pagePlaneExportOptions.precomputedPagePlanesByPageIndex =
@@ -1618,16 +1557,6 @@ function main(args) {
             _marker(ctx.outputDir, "03_allPageItems");
             var allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
             ctx.rangeTargetPageIndexesBySourceId = collectRangePageItems.lastTargetPageIndexesByItemId || {};
-            try {
-                var _pagePlaneHideSourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
-                        _tableStyleSourceObjectIdsByPageForPagePlaneHide(
-                                _pagePlaneHideSourceIndex && _pagePlaneHideSourceIndex.sourceItems
-                                        ? _pagePlaneHideSourceIndex.sourceItems
-                                        : []);
-            } catch (ePagePlaneTableStyleHideIndex) {
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage = {};
-            }
 
             // SPEC-030 B.2: 페이지 해시 + 아이템 맵 → page_hashes.json / page_item_map.json (캐시 저장용)
             _marker(ctx.outputDir, "03b_pageHashes_start");

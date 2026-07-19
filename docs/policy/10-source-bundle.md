@@ -28,22 +28,24 @@ Required slots:
 - `TEXT_SLOT`: HWPX paragraph/run, TextFrame text, and table text.
 - `SHELL_SLOT`: textless label/background shell, outline, callout shell, or
   container chrome.
-- `TABLE_STYLE_SLOT`: editable HWPX table structure and source-authored table
-  appearance that HWPX table style can represent: table object, rows, columns,
-  merged cells, fixed table bounds, row/column geometry, cell text anchoring,
-  cell fill, cell border, grid stroke, and table outer outline. Page-level or
-  sibling source objects may enter this slot only when Stage 1 declares them in
-  `styleSourceObjectIds`; otherwise they remain textless visual material.
+- `TABLE_STRUCTURE_SLOT`: editable HWPX table structure: table object, rows,
+  columns, merged cells, fixed table bounds, row/column geometry, and cell text
+  anchoring. During migration the Java enum/value may still be named
+  `TABLE_STYLE_SLOT`; in V2 policy that name means table structure only, not
+  visual decoration.
+- `TABLE_DECORATION_SLOT`: table/cell visual decoration such as fill, border,
+  rounded cell plates, row bands, shadows, patterns, masks, and decorative
+  separators. This material is owned by textless graphic PNG/vector bundles,
+  normally through `SHELL_SLOT` or another graphic visual slot. It is not emitted
+  as HWPX table style.
 
 An IDML table whose source story is table-only owns the table structure slot and
 is materialized as an HWPX table unless Stage 1 assigns that same table source
 to a more specific anchored/table owner. The table cell paragraphs remain
-editable HWPX text inside the table. Nearby floating markers, source-positioned
-graphics, and unrelated visual decoration keep their own textless graphic slot.
-Cell plates, row bands, borders, and table outlines are table style only when
-the source relationship is declared in Stage 1; proximity alone is not used as a
-reason to dissolve the table into independent TextFrames or absorb graphics into
-cell style.
+editable HWPX text inside the table. Nearby floating markers, cell plates, row
+bands, borders, source-positioned graphics, and other visual decoration keep
+their own textless graphic slot; their placement is not used as a reason to
+dissolve the table into independent TextFrames.
 - `CONTENT_VISUAL_SLOT`: photo, illustration, chart, QR, complete marker, or
   graphic-only complete visual with positive source evidence. Stage 1 may assign
   this slot only when the source tree contains placed content (`Image`, `PDF`,
@@ -91,7 +93,7 @@ Executable owner priority:
    only as provenance.
 4. A broad parent/group candidate is executable only for residual visual
    material not owned by child slots. If child `SHELL_SLOT`, `CONTENT_VISUAL_SLOT`,
-  table structure/style owners cover all painted descendants,
+   table structure, or table decoration owners cover all painted descendants,
    the parent is provenance-only and must be `DROP_VISUAL`.
 5. If a broad parent hides a child source id in `hiddenVisualSourceObjectIds`,
    that child is absent from the parent rendered asset. A planned child
@@ -111,8 +113,8 @@ Executable owner priority:
 Required materialization values:
 
 - `HWPX_TEXT`
-- `HWPX_TABLE_STYLE` (migration name for HWPX table structure plus declared
-  source-authored table appearance)
+- `HWPX_TABLE_STYLE` (migration name for HWPX table structure, not cell visual
+  decoration)
 - `EXTRACTED_PNG_VECTOR`
 - `TEXTLESS_VISUAL_FRAGMENT`
 - `COMPLETE_PNG`

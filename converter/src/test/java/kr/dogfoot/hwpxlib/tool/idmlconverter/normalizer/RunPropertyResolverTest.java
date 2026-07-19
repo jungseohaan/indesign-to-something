@@ -5,14 +5,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import org.junit.Test;
 
-import java.util.function.BiFunction;
-import java.util.function.Function;
-
 import static org.junit.Assert.assertEquals;
 
 public class RunPropertyResolverTest {
     @Test
-    public void fontSizeUsesResolvedForReliableSplitSegment() {
+    public void fontSizeKeepsParagraphStyleWhenCharacterRunHasNoExplicitSize() {
         ResolvedRun rr = new ResolvedRun();
         rr.fontSize(80.0);
         IDMLCharacterRun cr = new IDMLCharacterRun();
@@ -20,69 +17,19 @@ public class RunPropertyResolverTest {
         Integer size = RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
                 rr, cr, 8.0, MatchConfidence.HIGH);
 
-        assertEquals(Integer.valueOf(8000), size);
-    }
-
-    @Test
-    public void fontSizeKeepsParagraphStyleForLowConfidenceMatch() {
-        ResolvedRun rr = new ResolvedRun();
-        rr.fontSize(80.0);
-        IDMLCharacterRun cr = new IDMLCharacterRun();
-
-        Integer size = RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
-                rr, cr, 8.0, MatchConfidence.LOW);
-
         assertEquals(Integer.valueOf(800), size);
     }
 
     @Test
-    public void fontSizeUsesResolvedWhenLowConfidenceHasNoIdmlSizeSource() {
+    public void fontSizeUsesResolvedOnlyWhenIdmlHasNoSizeSource() {
         ResolvedRun rr = new ResolvedRun();
         rr.fontSize(8.5);
         IDMLCharacterRun cr = new IDMLCharacterRun();
 
         Integer size = RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
-                rr, cr, null, MatchConfidence.LOW);
+                rr, cr, null, MatchConfidence.HIGH);
 
         assertEquals(Integer.valueOf(850), size);
-    }
-
-    @Test
-    public void textColorUsesResolvedForReliableSplitSegmentEvenWhenIdmlTintExists() {
-        ResolvedRun rr = new ResolvedRun();
-        rr.fillColor("Black");
-        Function<String, String> colorResolver = color -> {
-            if ("Black".equals(color)) return "#000000";
-            if ("BlueLabel".equals(color)) return "#2D4069";
-            return null;
-        };
-        BiFunction<String, Double, String> tintedResolver =
-                (color, tint) -> "BlueLabel".equals(color) ? "#2D4069" : null;
-
-        String color = RunPropertyResolver.resolveTextColorHexWithConfidence(
-                rr, "BlueLabel", 100.0, null,
-                colorResolver, tintedResolver, MatchConfidence.HIGH);
-
-        assertEquals("#000000", color);
-    }
-
-    @Test
-    public void textColorKeepsIdmlTintForLowConfidenceMatch() {
-        ResolvedRun rr = new ResolvedRun();
-        rr.fillColor("Black");
-        Function<String, String> colorResolver = color -> {
-            if ("Black".equals(color)) return "#000000";
-            if ("BlueLabel".equals(color)) return "#2D4069";
-            return null;
-        };
-        BiFunction<String, Double, String> tintedResolver =
-                (color, tint) -> "BlueLabel".equals(color) ? "#2D4069" : null;
-
-        String color = RunPropertyResolver.resolveTextColorHexWithConfidence(
-                rr, "BlueLabel", 100.0, null,
-                colorResolver, tintedResolver, MatchConfidence.LOW);
-
-        assertEquals("#2D4069", color);
     }
 
     @Test

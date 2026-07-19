@@ -7083,43 +7083,11 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     var objectPlans = objectPlanDiagnostics.objectPlans;
     var claimedVisibleSourceIds = {};
     var completePngTextOwnerSourceIds = {};
-    var tableStyleHiddenSourceIdsByPage = {};
     function markIds(ids) {
         for (var i = 0; ids && i < ids.length; i++) {
             if (ids[i] === null || ids[i] === undefined) continue;
             claimedVisibleSourceIds[String(ids[i])] = true;
         }
-    }
-    function addHiddenTableStyleIds(pageIndex, ids) {
-        if (pageIndex === null || pageIndex === undefined) return;
-        var pageKey = String(pageIndex);
-        if (!tableStyleHiddenSourceIdsByPage[pageKey]) tableStyleHiddenSourceIdsByPage[pageKey] = [];
-        var seen = {};
-        for (var existingIndex = 0; existingIndex < tableStyleHiddenSourceIdsByPage[pageKey].length; existingIndex++) {
-            seen[String(tableStyleHiddenSourceIdsByPage[pageKey][existingIndex])] = true;
-        }
-        for (var i = 0; ids && i < ids.length; i++) {
-            if (ids[i] === null || ids[i] === undefined) continue;
-            if (seen[String(ids[i])]) continue;
-            seen[String(ids[i])] = true;
-            tableStyleHiddenSourceIdsByPage[pageKey].push(ids[i]);
-        }
-        tableStyleHiddenSourceIdsByPage[pageKey] =
-                _sortedNumericIds(tableStyleHiddenSourceIdsByPage[pageKey]);
-    }
-    function markTableStyleSourceIds(plan) {
-        if (!plan) return;
-        if (plan.materialization !== "HWPX_TABLE_STYLE"
-                && plan.visualAction !== "PLACE_TABLE_STYLE"
-                && plan.ownershipSlot !== "TABLE_STYLE_SLOT") return;
-        var ids = [];
-        ids = ids.concat(plan.sourceObjectIds || []);
-        ids = ids.concat(plan.visualSourceObjectIds || []);
-        ids = ids.concat(plan.styleSourceObjectIds || []);
-        ids = ids.concat(plan.exportSourceObjectIds || []);
-        ids = ids.concat(plan.hiddenVisualSourceObjectIds || []);
-        markIds(ids);
-        addHiddenTableStyleIds(plan.pageIndex, ids);
     }
     function markCompletePngTextOwnerIds(plan) {
         if (!plan) return;
@@ -7143,7 +7111,6 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     for (var pi = 0; pi < objectPlans.length; pi++) {
         var existing = objectPlans[pi];
         if (!existing || existing.materialization === "PAGE_PLANE_PNG") continue;
-        markTableStyleSourceIds(existing);
         markCompletePngTextOwnerIds(existing);
         if (!_sourceCoveragePlanHasVisibleVisual(existing)) continue;
         markIds(existing.sourceObjectIds || []);
@@ -7207,8 +7174,6 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         var coverageIds = _sortedNumericIds(coverageByPage[pageKey]);
         if (coverageIds.length === 0) continue;
         var excludedInlineSourceObjectIds = _sortedNumericIds(excludedInlineByPage[pageKey] || []);
-        var hiddenTableStyleSourceObjectIds =
-                _sortedNumericIds(tableStyleHiddenSourceIdsByPage[pageKey] || []);
         var syntheticSourceId = _canonicalPagePlaneSyntheticSourceId(pageIndex);
         var plan = {
             objectPlanId: _canonicalPagePlaneObjectPlanId(pageIndex),
@@ -7229,7 +7194,6 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             visualSourceObjectIds: [syntheticSourceId],
             exportSourceObjectIds: [syntheticSourceId],
             coverageSourceObjectIds: coverageIds,
-            hiddenTableStyleSourceObjectIds: hiddenTableStyleSourceObjectIds,
             excludedInlineSourceObjectIds: excludedInlineSourceObjectIds,
             materialization: "PAGE_PLANE_PNG",
             textAction: "DROP_TEXT",
@@ -7249,8 +7213,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             required: true,
             requiredSlot: "CONTENT_VISUAL_SLOT",
             requiredSlotReason: "page_plane_canonical_visual_owner",
-            excludedInlineSourceCount: excludedInlineSourceObjectIds.length,
-            hiddenTableStyleSourceCount: hiddenTableStyleSourceObjectIds.length
+            excludedInlineSourceCount: excludedInlineSourceObjectIds.length
         };
         objectPlans.push(plan);
         appended.push({
@@ -7258,9 +7221,9 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             objectPlanId: plan.objectPlanId,
             candidateId: plan.candidateId,
             syntheticSourceObjectId: syntheticSourceId,
-            coverageSourceCount: coverageIds.length,
-            excludedInlineSourceCount: excludedInlineSourceObjectIds.length,
-            hiddenTableStyleSourceCount: hiddenTableStyleSourceObjectIds.length
+            coverageSourceCount: coverageIds.length
+            ,
+            excludedInlineSourceCount: excludedInlineSourceObjectIds.length
         });
     }
 
@@ -7281,19 +7244,14 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             appendedCount: appended.length,
             appended: appended,
             completePngTextOwnerExcludedSourceCount:
-                    _objectPlanMapKeyCount(completePngTextOwnerSourceIds),
-            hiddenTableStyleSourcePageCount:
-                    _objectPlanMapKeyCount(tableStyleHiddenSourceIdsByPage)
+                    _objectPlanMapKeyCount(completePngTextOwnerSourceIds)
         };
     }
     return {
         appendedCount: appended.length,
         appended: appended,
         completePngTextOwnerExcludedSourceCount:
-                _objectPlanMapKeyCount(completePngTextOwnerSourceIds),
-        hiddenTableStyleSourcePageCount:
-                _objectPlanMapKeyCount(tableStyleHiddenSourceIdsByPage),
-        hiddenTableStyleSourceIdsByPage: tableStyleHiddenSourceIdsByPage
+                _objectPlanMapKeyCount(completePngTextOwnerSourceIds)
     };
 }
 

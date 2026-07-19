@@ -110,7 +110,7 @@ class RunBuilder {
         text = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter
                 .replaceEHThinSpaceBacktick(text);
         tr.text(text);
-        String characterStyleRef = resolvedCharacterStyleRef(rr, cr, confidence);
+        String characterStyleRef = resolvedCharacterStyleRef(rr, cr);
         if (characterStyleRef != null) {
             tr.characterStyleRef(characterStyleRef);
         }
@@ -173,7 +173,8 @@ class RunBuilder {
         // 명시적 매핑 폰트: tracking / 10 (e.g., -30 → -3%)
         // 한국어 폰트(한글 포함 이름)는 대부분 한컴돋움 fallback → 그대로 사용
         {
-            Double trackingVal = resolveTracking(cr, rr, sc, confidence);
+            Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
+                    ? cr.tracking() : sc.tracking;
             if (trackingVal != null && trackingVal != 0) {
                 // resolved spacing policy: IDML tracking 1/1000 em → HWPX spacing % (1/100 em). 표준 변환은 /10.
                 // (이전 한국어 fontName 케이스는 × 0.5 = ×50 적용으로 자간 5배 과대 → 제거)
@@ -181,7 +182,7 @@ class RunBuilder {
             }
         }
         {
-            Double horizontalScaleVal = resolveHorizontalScale(ctx, cr, rr, grepCharStyle, sc, confidence);
+            Double horizontalScaleVal = resolveIdmlHorizontalScale(ctx, cr, grepCharStyle, sc);
             if (horizontalScaleVal != null) {
                 tr.horizontalScale((short) Math.round(horizontalScaleVal));
             }
@@ -246,15 +247,13 @@ class RunBuilder {
             tr.textColor("#000000");
         }
         // IDML CharacterRun의 underline/strikeThrough (resolved보다 우선)
-        if ((!isReliableResolvedRun(rr, confidence) || rr.underline() == null)
-                && cr.underline() != null && cr.underline()) {
+        if (cr.underline() != null && cr.underline()) {
             tr.underline(true);
         }
         if (tr.underline() && tr.underlineColor() == null && sc.underlineColor != null) {
             tr.underlineColor(sc.underlineColor);
         }
-        if ((!isReliableResolvedRun(rr, confidence) || rr.strikeThru() == null)
-                && cr.strikeThrough() != null && cr.strikeThrough()) {
+        if (cr.strikeThrough() != null && cr.strikeThrough()) {
             tr.strikeThrough(true);
         }
         // IDML UnderlineType → underlineShape 매핑 (Wavy → WAVE 등)
@@ -333,11 +332,9 @@ class RunBuilder {
         return p.contains("normal") ? null : position;
     }
 
-    private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr,
-                                                    MatchConfidence confidence) {
+    private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr) {
         String style = rr != null ? rr.charStyle() : null;
         if (isUsableCharacterStyleRef(style)) return style;
-        if (isReliableResolvedRun(rr, confidence)) return null;
         style = cr != null ? cr.appliedCharacterStyle() : null;
         if (isUsableCharacterStyleRef(style)) return style;
         return null;
@@ -613,36 +610,6 @@ class RunBuilder {
             if (v != null) return v;
         }
         return firstNonDefaultScale(sc != null ? sc.horizontalScale : null);
-    }
-
-    private static Double resolveTracking(IDMLCharacterRun cr,
-                                          ResolvedRun rr,
-                                          StoryConverter.StyleContext sc,
-                                          MatchConfidence confidence) {
-        if (isReliableResolvedRun(rr, confidence) && rr.tracking() != null) {
-            return rr.tracking();
-        }
-        return (cr != null && cr.tracking() != null && cr.tracking() != 0)
-                ? cr.tracking()
-                : (sc != null ? sc.tracking : null);
-    }
-
-    private static Double resolveHorizontalScale(ResolvedBuildContext ctx,
-                                                 IDMLCharacterRun cr,
-                                                 ResolvedRun rr,
-                                                 IDMLStyleDef grepCharStyle,
-                                                 StoryConverter.StyleContext sc,
-                                                 MatchConfidence confidence) {
-        if (isReliableResolvedRun(rr, confidence)) {
-            Double resolvedScale = firstNonDefaultScale(rr.horizontalScale());
-            if (resolvedScale != null) return resolvedScale;
-        }
-        return resolveIdmlHorizontalScale(ctx, cr, grepCharStyle, sc);
-    }
-
-    private static boolean isReliableResolvedRun(ResolvedRun rr, MatchConfidence confidence) {
-        return rr != null
-                && (confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM);
     }
 
     private static Double firstNonDefaultScale(Double v) {
@@ -1134,25 +1101,12 @@ class RunBuilder {
     static String normalizeSpaces(String s) {
         if (s == null) return "";
         return s.replace('\u2007', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
-                .replace('\u2009', ' ').replace('\u200A', ' ').replace('\u00A0', ' ')
-                .replace("\t", "");
+                .replace('\u2009', ' ').replace('\u200A', ' ').replace('\u00A0', ' ');
     }
 
-    /** 정규화된 길이에 대응하는 원본 문자열의 실제 길이. */
+    /** 정규화된 길이에 대응하는 원본 문자열의 실제 길이 (1:1 매핑이므로 동일) */
     static int findOriginalLength(String original, int normalizedLen) {
-        if (original == null || normalizedLen <= 0) return 0;
-        int normalizedCount = 0;
-        for (int i = 0; i < original.length(); i++) {
-            char ch = original.charAt(i);
-            if (ch == '\t') {
-                continue;
-            }
-            normalizedCount++;
-            if (normalizedCount >= normalizedLen) {
-                return i + 1;
-            }
-        }
-        return original.length();
+        return Math.min(normalizedLen, original.length());
     }
 
     static ResolvedRun findResolvedRun(ResolvedBuildContext ctx, List<ResolvedRun> runs, int startIdx, String text) {

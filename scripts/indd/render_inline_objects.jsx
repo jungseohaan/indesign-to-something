@@ -124,27 +124,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         return items;
     }
 
-    function collectTableStyleSourceItemsToHide() {
-        var items = [];
-        var seen = {};
-        var idsByPage = opts.hiddenTableStyleSourceObjectIdsByPage || {};
-        for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
-            var pageIndex = pageNumber - 1;
-            var ids = idsByPage[String(pageIndex)] || [];
-            for (var i = 0; i < ids.length; i++) {
-                var id = ids[i];
-                if (id === null || id === undefined) continue;
-                var key = String(id);
-                if (seen[key]) continue;
-                var item = itemById ? itemById[key] : null;
-                if (!item) continue;
-                seen[key] = true;
-                items.push(item);
-            }
-        }
-        return items;
-    }
-
     function isPagePlaneInlineTextFrameItem(item) {
         if (!item) return false;
         try {
@@ -344,7 +323,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     }
 
     var savedInlineItems = [];
-    var savedTableStyleItems = [];
     var savedDocumentTextFrames = [];
     // SPEC-030 계측 변수 (예외 경로에서도 정의되도록 미리 선언)
     var _tCollectInline = 0, _tHideInline = 0, _tCollectText = 0, _tHideText = 0;
@@ -471,8 +449,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         savedInlineItems = _hideItemsForExport(_inlineToHide);
         _tHideInline = nowMs() - _t0;
 
-        savedTableStyleItems = _hideItemsForExport(collectTableStyleSourceItemsToHide());
-
         _t0 = nowMs();
         var _textHideScope = opts.documentWideTextHide === true ? "document" : "range";
         var _textToHide = opts.documentWideTextHide === true
@@ -550,7 +526,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                     pageRelativeBounds: bounds,
                     hiddenInlineItemCount: savedInlineItems.length,
                     hiddenTextFrameCount: savedDocumentTextFrames.length,
-                    hiddenTableStyleItemCount: savedTableStyleItems.length,
                     globalPreExport: opts.globalPreExport === true
                 }
             });
@@ -559,7 +534,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     } finally {
         var _restoreStart = nowMs();
         try { restoreTextFrames(savedDocumentTextFrames); } catch (eRestoreTextFrames) {}
-        try { _restoreItemsForExport(savedTableStyleItems); } catch (eRestoreTableStyle) {}
         try { _restoreItemsForExport(savedInlineItems); } catch (eRestoreInline) {}
         try { if (savedRes !== null) app.pngExportPreferences.exportResolution = savedRes; } catch (eRestoreRes) {}
         try { if (savedTransparent !== null) app.pngExportPreferences.transparentBackground = savedTransparent; } catch (eRestoreTrans) {}
@@ -581,7 +555,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             restoreMs: _tRestore,
             hiddenTextItemCount: savedDocumentTextFrames.length,
             hiddenInlineItemCount: savedInlineItems.length,
-            hiddenTableStyleItemCount: savedTableStyleItems.length,
             textHideScope: _textHideScope
         };
         writeJson(outputDir + "/single-textless-page-plane-export.json", {

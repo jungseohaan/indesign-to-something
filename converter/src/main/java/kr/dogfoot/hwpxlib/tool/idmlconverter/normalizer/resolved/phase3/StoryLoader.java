@@ -40,11 +40,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Phase 3 IDML Story 로딩 & 분기 (W3 Step C, 재시도).
@@ -942,7 +939,6 @@ public class StoryLoader {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
             if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
-                removeDuplicateInlineObjectsFromCellFlow(ctx, resolvedCellParagraphs);
                 return resolvedCellParagraphs;
             }
         }
@@ -951,7 +947,6 @@ public class StoryLoader {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
             if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
-                removeDuplicateInlineObjectsFromCellFlow(ctx, resolvedCellParagraphs);
                 return resolvedCellParagraphs;
             }
         }
@@ -979,7 +974,6 @@ public class StoryLoader {
             StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
             sc.hasTabStops = para.hasTabStops();
             List<ResolvedRun> resolvedRuns = resolvedParagraph != null ? resolvedParagraph.runs() : null;
-            resolvedRuns = splitCellMarkerBodyRunFromSiblingStyle(resolvedCell, paraIndex, resolvedRuns);
             buildParagraphContent(ctx, ip, resolvedParagraph, resolvedRuns,
                     effectiveCellStoryId, paraIndex, sc, para);
             MathProcessor.convertMathRunsInParagraph(ctx, para);
@@ -988,7 +982,6 @@ public class StoryLoader {
             paraIndex++;
         }
         applyResolvedCellInlineGraphicRescueAnchors(ctx, idmlCell, resolvedCell, result);
-        removeDuplicateInlineObjectsFromCellFlow(ctx, result);
         for (ASTParagraph para : result) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             recordCellInlineEmbeddedIds(ctx, para);
@@ -999,159 +992,6 @@ public class StoryLoader {
             return new ArrayList<>();
         }
         return result;
-    }
-
-    private static List<ResolvedRun> splitCellMarkerBodyRunFromSiblingStyle(
-            ResolvedTable.Cell resolvedCell,
-            int paraIndex,
-            List<ResolvedRun> runs) {
-        if (resolvedCell == null || runs == null || runs.size() != 1) return runs;
-        ResolvedRun run = runs.get(0);
-        String text = run != null ? run.text() : null;
-        int splitIndex = markerBodySplitIndex(text);
-        if (splitIndex <= 0 || splitIndex >= text.length()) return runs;
-
-        String markerText = text.substring(0, splitIndex);
-        String bodyText = text.substring(splitIndex);
-        if (!isCompactCellMarker(markerText) || bodyText.trim().isEmpty()) return runs;
-
-        ResolvedRun bodyStyle = findSiblingBodyRunStyle(resolvedCell, paraIndex, run);
-        if (bodyStyle == null || sameCoreTextStyle(run, bodyStyle)) return runs;
-
-        List<ResolvedRun> split = new ArrayList<>();
-        ResolvedRun marker = copyResolvedRun(run);
-        marker.text(markerText);
-        split.add(marker);
-
-        ResolvedRun body = copyResolvedRun(bodyStyle);
-        body.text(bodyText);
-        split.add(body);
-        return split;
-    }
-
-    private static int markerBodySplitIndex(String text) {
-        if (text == null) return -1;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (ch == '\u2007' || ch == '\u2002' || ch == '\u2003') {
-                return i + 1;
-            }
-        }
-        return -1;
-    }
-
-    private static boolean isCompactCellMarker(String text) {
-        if (text == null) return false;
-        String t = text.replace("\u2007", "")
-                .replace("\u2002", "")
-                .replace("\u2003", "")
-                .trim();
-        if (t.isEmpty() || t.length() > 8) return false;
-        for (int i = 0; i < t.length(); i++) {
-            if (Character.isWhitespace(t.charAt(i))) return false;
-        }
-        return true;
-    }
-
-    private static ResolvedRun findSiblingBodyRunStyle(
-            ResolvedTable.Cell resolvedCell,
-            int paraIndex,
-            ResolvedRun markerRun) {
-        if (resolvedCell.paragraphs() == null) return null;
-        for (int i = paraIndex - 1; i >= 0; i--) {
-            ResolvedRun found = firstBodyStyleCandidate(resolvedCell.paragraphs().get(i), markerRun);
-            if (found != null) return found;
-        }
-        for (int i = paraIndex + 1; i < resolvedCell.paragraphs().size(); i++) {
-            ResolvedRun found = firstBodyStyleCandidate(resolvedCell.paragraphs().get(i), markerRun);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
-    private static ResolvedRun firstBodyStyleCandidate(ResolvedParagraph paragraph, ResolvedRun markerRun) {
-        if (paragraph == null || paragraph.runs() == null) return null;
-        for (ResolvedRun candidate : paragraph.runs()) {
-            String text = candidate != null ? candidate.text() : null;
-            if (text == null || text.trim().length() < 6) continue;
-            if (isCompactCellMarker(text)) continue;
-            if (sameCoreTextStyle(candidate, markerRun)) continue;
-            return candidate;
-        }
-        return null;
-    }
-
-    private static boolean sameCoreTextStyle(ResolvedRun a, ResolvedRun b) {
-        if (a == b) return true;
-        if (a == null || b == null) return false;
-        return eq(a.fontFamily(), b.fontFamily())
-                && eq(a.fontStyle(), b.fontStyle())
-                && eq(a.fillColor(), b.fillColor())
-                && eq(a.fontSize(), b.fontSize())
-                && eq(a.tracking(), b.tracking())
-                && eq(a.horizontalScale(), b.horizontalScale());
-    }
-
-    private static boolean eq(Object a, Object b) {
-        if (a == null && b == null) return true;
-        if (a == null || b == null) return false;
-        return a.equals(b);
-    }
-
-    private static ResolvedRun copyResolvedRun(ResolvedRun source) {
-        ResolvedRun copy = new ResolvedRun();
-        if (source == null) return copy;
-        copy.text(source.text());
-        copy.fontFamily(source.fontFamily());
-        copy.fontSize(source.fontSize());
-        copy.fontStyle(source.fontStyle());
-        copy.fillColor(source.fillColor());
-        copy.charStyle(source.charStyle());
-        copy.tracking(source.tracking());
-        copy.horizontalScale(source.horizontalScale());
-        copy.verticalScale(source.verticalScale());
-        copy.baselineShift(source.baselineShift());
-        copy.position(source.position());
-        copy.underline(source.underline());
-        copy.strikeThru(source.strikeThru());
-        copy.type(source.type());
-        copy.anchoredObjectId(source.anchoredObjectId());
-        copy.storyAnchorPlacement(source.storyAnchorPlacement());
-        return copy;
-    }
-
-    private static int removeDuplicateInlineObjectsFromCellFlow(
-            ResolvedBuildContext ctx,
-            List<ASTParagraph> paragraphs) {
-        if (paragraphs == null || paragraphs.isEmpty()) return 0;
-        Set<String> seenSourceIds = new HashSet<>();
-        int removed = 0;
-        for (ASTParagraph paragraph : paragraphs) {
-            if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) continue;
-            Iterator<ASTInlineItem> it = paragraph.items().iterator();
-            while (it.hasNext()) {
-                ASTInlineItem item = it.next();
-                if (!(item instanceof ASTInlineObject)) continue;
-                String key = inlineObjectSourceKey((ASTInlineObject) item);
-                if (key == null) continue;
-                if (!seenSourceIds.add(key)) {
-                    it.remove();
-                    removed++;
-                }
-            }
-        }
-        if (removed > 0) {
-            ConversionTiming.addCounter("phase3.storyLoader.cell.duplicateInlineObjectsRemoved", removed);
-            if (ctx != null && ctx.debugAst) {
-                System.err.println("[StoryLoader] removed duplicate inline objects from cell flow: " + removed);
-            }
-        }
-        return removed;
-    }
-
-    private static String inlineObjectSourceKey(ASTInlineObject obj) {
-        if (obj == null || obj.sourceId() == null || obj.sourceId().isEmpty()) return null;
-        return obj.sourceId();
     }
 
     private static ResolvedStory findResolvedStoryForCell(
@@ -1249,10 +1089,8 @@ public class StoryLoader {
                     && paraIndex < idmlCell.paragraphs().size())
                     ? idmlCell.paragraphs().get(paraIndex)
                     : null;
-            List<ResolvedRun> resolvedRuns = splitCellMarkerBodyRunFromSiblingStyle(
-                    resolvedCell, paraIndex, resolvedParagraph.runs());
             for (ASTParagraph para : buildResolvedCellParagraphs(
-                    ctx, idmlParagraph, resolvedParagraph, resolvedRuns, includeResolvedText)) {
+                    ctx, idmlParagraph, resolvedParagraph, includeResolvedText)) {
                 MathProcessor.convertMathRunsInParagraph(ctx, para);
                 RunPostProcessor.splitOverlineRuns(para);
                 RunPostProcessor.convertItalicRunsToEquations(para);
@@ -1271,7 +1109,6 @@ public class StoryLoader {
             ResolvedBuildContext ctx,
             IDMLParagraph idmlParagraph,
             ResolvedParagraph resolvedParagraph,
-            List<ResolvedRun> resolvedRuns,
             boolean includeTextRuns) {
         List<ASTParagraph> paragraphs = new ArrayList<>();
         if (ctx == null || resolvedParagraph == null) return paragraphs;
@@ -1285,7 +1122,7 @@ public class StoryLoader {
         ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
                 .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
                 .truncateAtParagraphBreak(false);
-        List<ResolvedRun> runs = resolvedRuns != null ? resolvedRuns : resolvedParagraph.runs();
+        List<ResolvedRun> runs = resolvedParagraph.runs();
         if (runs == null || runs.isEmpty()) {
             addNonEmptyParagraph(paragraphs, current);
             return paragraphs;

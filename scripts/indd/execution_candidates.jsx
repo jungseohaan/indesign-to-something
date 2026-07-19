@@ -453,7 +453,7 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
         candidate.textOwner = "indesign_png";
         candidate.requiresTextHidden = false;
         candidate.completePngTextAllowed = true;
-    } else {
+    } else if (objectPlan.visualAction === "DROP_VISUAL") {
         candidate.textOwner = "none";
         candidate.requiresTextHidden = false;
         candidate.completePngTextAllowed = false;
@@ -488,15 +488,6 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     }
     if (objectPlan.hiddenTextFrameIds) {
         candidate.hiddenTextFrameIds = _sortedNumericIds(objectPlan.hiddenTextFrameIds);
-    }
-    if (objectPlan.textAction === "DROP_TEXT") {
-        candidate.ownedTextFrameIds = [];
-        candidate.editableTextFrameIds = [];
-        candidate.hiddenTextFrameIds = [];
-        candidate.requiresTextHidden = false;
-    } else if (objectPlan.textAction !== "OWNED_BY_HWPX_TEXT") {
-        candidate.hiddenTextFrameIds = [];
-        candidate.requiresTextHidden = false;
     }
     if ((!candidate.ownedTextFrameIds || candidate.ownedTextFrameIds.length === 0)
             && candidate.textAction === "OWNED_BY_HWPX_TEXT") {

@@ -38,10 +38,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
@@ -50,7 +48,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -362,7 +359,7 @@ public final class TableBuilder {
         }
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
-            if (!isTableOnlyStylePlan(plan)) continue;
+            if (plan.kind == null || !plan.kind.startsWith("text_frame:table_only")) continue;
 
             ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(plan.domId));
             if (tf == null || tf.storyId() == null) continue;
@@ -637,12 +634,10 @@ public final class TableBuilder {
         traceTableCells(ctx, "TableBuilder.afterConvertTableSimple", idmlTable, astTable);
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
         inlineNestedTextFrameParagraphsInCells(ctx, astTable);
-        applyOverflowingTableOnlyVisibleRowBudget(ctx, idmlTable, astTable);
         traceTableCells(ctx, "TableBuilder.afterNestedContentRestore", idmlTable, astTable);
 
         ASTTable result = astTable;
         if (shouldPreserveTableStyleSlot(ctx, idmlTable, preserveNestedTableStyleSlot)) {
-            applyDeclaredTableStyleSources(ctx, idmlTable, result);
             ResolvedTextFrame owner = anchoredNestedTableTextFrame(ctx, idmlTable);
             absorbTextFrameOutlineIntoTable(ctx, owner, result);
             suppressRenderedVisualsOwnedByAnchoredNestedTable(ctx, owner, idmlTable, result);
@@ -786,114 +781,6 @@ public final class TableBuilder {
         return null;
     }
 
-    private static void applyOverflowingTableOnlyVisibleRowBudget(
-            ResolvedBuildContext ctx,
-            IDMLTable idmlTable,
-            ASTTable table) {
-        ResolvedTextFrame owner = tableOnlyStyleOwnerTextFrame(ctx, idmlTable);
-        if (!shouldApplyVisibleLineBudget(owner)) return;
-        ResolvedTable resolvedTable = ctx != null && ctx.resolvedData != null && idmlTable != null
-                ? ctx.resolvedData.getTableByIdOrSourceId(idmlTable.selfId())
-                : null;
-        int visibleRows = fullyVisibleRowCount(resolvedTable);
-        if (visibleRows < 0) return;
-        int removed = clearTextInRowsAtOrBelow(table, visibleRows);
-        if (removed > 0 && ctx != null && ctx.debugAst) {
-            table.debugOrNew().note("overflowing table-only carrier visible row budget: ownerTf="
-                    + owner.id() + " visibleRows=" + visibleRows + " removedParagraphs=" + removed);
-        }
-    }
-
-    private static ResolvedTextFrame tableOnlyStyleOwnerTextFrame(ResolvedBuildContext ctx, IDMLTable idmlTable) {
-        if (ctx == null || ctx.resolvedData == null || idmlTable == null || idmlTable.selfId() == null) return null;
-        int tableId = parseFlexibleId(idmlTable.selfId());
-        if (tableId < 0) return null;
-        for (ObjectPlan plan : ctx.ownershipPlansForObjectId(tableId)) {
-            if (!isDeclaredTableStylePlan(plan)) continue;
-            if (!isTableOnlyStylePlan(plan)) continue;
-            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
-            for (int textFrameId : plan.ownedTextFrameIds) {
-                ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
-                if (tf != null) return tf;
-            }
-        }
-        return null;
-    }
-
-    private static boolean isTableOnlyStylePlan(ObjectPlan plan) {
-        if (plan == null) return false;
-        boolean tableStyle = plan.visualAction == VisualAction.PLACE_TABLE_STYLE
-                || plan.materialization == Materialization.HWPX_TABLE_STYLE;
-        if (!tableStyle) return false;
-        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return true;
-        if (plan.sourceObjectIds != null && containsSourceId(plan.sourceObjectIds, plan.domId)) return true;
-        if (plan.kind != null && plan.kind.contains("table_only_text_frame")) return true;
-        return plan.reason != null && plan.reason.contains("table_only_text_frame");
-    }
-
-    private static boolean shouldApplyVisibleLineBudget(ResolvedTextFrame owner) {
-        return owner != null
-                && owner.overflows()
-                && isObjectControlOnly(owner.frameVisibleText())
-                && composedLinesAreObjectControlOnly(owner);
-    }
-
-    private static boolean composedLinesAreObjectControlOnly(ResolvedTextFrame owner) {
-        if (owner == null || owner.composedLines() == null || owner.composedLines().isEmpty()) return true;
-        for (ResolvedTextFrame.ComposedLine line : owner.composedLines()) {
-            if (line == null) continue;
-            if (!isObjectControlOnly(line.text())) return false;
-        }
-        return true;
-    }
-
-    private static boolean isObjectControlOnly(String text) {
-        if (text == null || text.isEmpty()) return true;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (Character.isWhitespace(ch) || Character.isISOControl(ch) || ch == '\uFFFC' || ch == '\uFEFF') {
-                continue;
-            }
-            return false;
-        }
-        return true;
-    }
-
-    private static int fullyVisibleRowCount(ResolvedTable table) {
-        if (table == null || table.rowHeights() == null || table.bounds() == null) return -1;
-        double[] bounds = table.bounds();
-        if (bounds.length < 4 || bounds[2] <= bounds[0]) return -1;
-        double visibleHeight = bounds[2] - bounds[0];
-        double y = 0.0;
-        int visibleRows = 0;
-        for (double rowHeight : table.rowHeights()) {
-            if (rowHeight <= 0) return -1;
-            y += rowHeight;
-            if (y <= visibleHeight + 0.35) {
-                visibleRows++;
-            } else {
-                break;
-            }
-        }
-        return visibleRows;
-    }
-
-    private static int clearTextInRowsAtOrBelow(ASTTable table, int firstHiddenRow) {
-        if (table == null || table.rows() == null) return 0;
-        int removed = 0;
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null || cell.paragraphs() == null) continue;
-                if (cell.rowIndex() >= firstHiddenRow) {
-                    removed += cell.paragraphs().size();
-                    cell.paragraphs().clear();
-                }
-            }
-        }
-        return removed;
-    }
-
     private static void stripTableCellDecoration(ASTTable table) {
         if (table == null || table.rows() == null) return;
         for (ASTTableRow row : table.rows()) {
@@ -910,353 +797,6 @@ public final class TableBuilder {
                 cell.diagonalBorder(null);
             }
         }
-    }
-
-    private static void applyDeclaredTableStyleSources(
-            ResolvedBuildContext ctx,
-            IDMLTable idmlTable,
-            ASTTable table) {
-        if (ctx == null || ctx.resolvedData == null || idmlTable == null || table == null) return;
-        int tableId = parseFlexibleId(idmlTable.selfId());
-        if (tableId < 0) return;
-        LinkedHashSet<Integer> styleSourceIds = new LinkedHashSet<>();
-        for (ObjectPlan plan : ctx.ownershipPlansForObjectId(tableId)) {
-            if (!isDeclaredTableStylePlan(plan)) continue;
-            addDeclaredStyleSourceIds(styleSourceIds, plan.styleSourceObjectIds);
-        }
-        if (styleSourceIds.isEmpty()) return;
-        int applied = 0;
-        for (Integer sourceId : styleSourceIds) {
-            if (sourceId == null || sourceId < 0) continue;
-            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
-            if (applyDeclaredTableStyleSource(ctx, table, item)) {
-                markPageItemHandled(ctx, sourceId);
-                applied++;
-            }
-        }
-        if (ctx.debugAst && applied > 0) {
-            table.debugOrNew().note("declared table style sources applied: " + applied);
-        }
-    }
-
-    private static boolean isDeclaredTableStylePlan(ObjectPlan plan) {
-        return plan != null
-                && (plan.visualAction == VisualAction.PLACE_TABLE_STYLE
-                || plan.materialization == Materialization.HWPX_TABLE_STYLE);
-    }
-
-    private static void addDeclaredStyleSourceIds(Set<Integer> target, int[] sourceIds) {
-        if (target == null || sourceIds == null) return;
-        for (int sourceId : sourceIds) {
-            if (sourceId >= 0) target.add(sourceId);
-        }
-    }
-
-    private static boolean applyDeclaredTableStyleSource(
-            ResolvedBuildContext ctx,
-            ASTTable table,
-            ResolvedPageItem item) {
-        if (ctx == null || table == null || item == null) return false;
-        if (!isTableStyleMaterialSource(item)) return false;
-        boolean applied = false;
-        String fill = resolvedFillHex(ctx, item);
-        ASTTableCell.CellBorder border = pageItemStrokeBorder(ctx, item);
-        if (fill != null && shouldApplyFillFromStyleSource(ctx, table, item)) {
-            applied |= applyFillFromStyleSource(ctx, table, item, fill);
-        }
-        if (border != null) {
-            if ("GraphicLine".equals(item.type())) {
-                applied |= applyLineBorderFromStyleSource(ctx, table, item, border);
-            } else {
-                applied |= applyRectangleBorderFromStyleSource(ctx, table, item, border);
-            }
-        }
-        return applied;
-    }
-
-    private static boolean isTableStyleMaterialSource(ResolvedPageItem item) {
-        if (item == null || item.sourceHidden()) return false;
-        String type = item.type();
-        if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)) return false;
-        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
-        if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
-        if (item.hasDropShadow() || item.gradientFeatherApplied()) return false;
-        return resolvedHasFill(item) || hasVisibleStroke(item);
-    }
-
-    private static boolean applyFillFromStyleSource(
-            ResolvedBuildContext ctx,
-            ASTTable table,
-            ResolvedPageItem item,
-            String fill) {
-        List<ASTTableCell> cells = cellsCoveredBySource(table, boundsOf(ctx, item));
-        if (cells.isEmpty() && singleCell(table) != null) {
-            cells.add(singleCell(table));
-        }
-        boolean applied = false;
-        for (ASTTableCell cell : cells) {
-            if (cell == null) continue;
-            cell.fillColor(fill);
-            applied = true;
-        }
-        return applied;
-    }
-
-    private static boolean shouldApplyFillFromStyleSource(
-            ResolvedBuildContext ctx,
-            ASTTable table,
-            ResolvedPageItem item) {
-        if (table == null || item == null) return false;
-        if (singleCell(table) != null) return true;
-        double[] sourceBounds = boundsOf(ctx, item);
-        if ("Rectangle".equals(item.type())
-                && boundsCover(sourceBounds, tableBoundsPoints(table), 0.75)) {
-            return false;
-        }
-        return true;
-    }
-
-    private static boolean applyRectangleBorderFromStyleSource(
-            ResolvedBuildContext ctx,
-            ASTTable table,
-            ResolvedPageItem item,
-            ASTTableCell.CellBorder border) {
-        double[] sourceBounds = boundsOf(ctx, item);
-        if (boundsCover(tableBoundsPoints(table), sourceBounds, 0.75)) {
-            applyOuterBorder(table, border);
-            return true;
-        }
-        List<ASTTableCell> cells = cellsCoveredBySource(table, sourceBounds);
-        if (cells.isEmpty() && singleCell(table) != null) {
-            cells.add(singleCell(table));
-        }
-        boolean applied = false;
-        for (ASTTableCell cell : cells) {
-            if (cell == null) continue;
-            applyCellBoxBorder(cell, border);
-            applied = true;
-        }
-        return applied;
-    }
-
-    private static boolean applyLineBorderFromStyleSource(
-            ResolvedBuildContext ctx,
-            ASTTable table,
-            ResolvedPageItem item,
-            ASTTableCell.CellBorder border) {
-        double[] line = boundsOf(ctx, item);
-        if (line == null || line.length < 4) return false;
-        double height = Math.abs(line[2] - line[0]);
-        double width = Math.abs(line[3] - line[1]);
-        boolean horizontal = width >= height;
-        boolean applied = false;
-        for (CellPlacement placement : cellPlacements(table)) {
-            if (placement == null || placement.cell == null) continue;
-            if (horizontal && overlapsRange(line[1], line[3], placement.left, placement.right, 0.75)) {
-                double mid = (line[0] + line[2]) / 2.0;
-                if (Math.abs(mid - placement.top) <= 1.0) {
-                    placement.cell.topBorder(preferOuterBorder(placement.cell.topBorder(), border));
-                    applied = true;
-                } else if (Math.abs(mid - placement.bottom) <= 1.0) {
-                    placement.cell.bottomBorder(preferOuterBorder(placement.cell.bottomBorder(), border));
-                    applied = true;
-                }
-            } else if (!horizontal && overlapsRange(line[0], line[2], placement.top, placement.bottom, 0.75)) {
-                double mid = (line[1] + line[3]) / 2.0;
-                if (Math.abs(mid - placement.left) <= 1.0) {
-                    placement.cell.leftBorder(preferOuterBorder(placement.cell.leftBorder(), border));
-                    applied = true;
-                } else if (Math.abs(mid - placement.right) <= 1.0) {
-                    placement.cell.rightBorder(preferOuterBorder(placement.cell.rightBorder(), border));
-                    applied = true;
-                }
-            }
-        }
-        return applied;
-    }
-
-    private static void applyCellBoxBorder(ASTTableCell cell, ASTTableCell.CellBorder border) {
-        cell.topBorder(preferOuterBorder(cell.topBorder(), border));
-        cell.bottomBorder(preferOuterBorder(cell.bottomBorder(), border));
-        cell.leftBorder(preferOuterBorder(cell.leftBorder(), border));
-        cell.rightBorder(preferOuterBorder(cell.rightBorder(), border));
-    }
-
-    private static List<ASTTableCell> cellsCoveredBySource(ASTTable table, double[] sourceBounds) {
-        List<ASTTableCell> cells = new ArrayList<>();
-        if (sourceBounds == null || sourceBounds.length < 4) return cells;
-        for (CellPlacement placement : cellPlacements(table)) {
-            if (placement == null || placement.cell == null) continue;
-            double[] cellBounds = new double[] { placement.top, placement.left, placement.bottom, placement.right };
-            if (boundsCover(sourceBounds, cellBounds, 0.75)
-                    || boundsOverlapRatio(sourceBounds, cellBounds) >= 0.65) {
-                cells.add(placement.cell);
-            }
-        }
-        return cells;
-    }
-
-    private static final class CellPlacement {
-        final ASTTableCell cell;
-        final double top;
-        final double left;
-        final double bottom;
-        final double right;
-
-        CellPlacement(ASTTableCell cell, double top, double left, double bottom, double right) {
-            this.cell = cell;
-            this.top = top;
-            this.left = left;
-            this.bottom = bottom;
-            this.right = right;
-        }
-    }
-
-    private static List<CellPlacement> cellPlacements(ASTTable table) {
-        List<CellPlacement> out = new ArrayList<>();
-        if (table == null || table.rows() == null) return out;
-        double tableTop = CoordinateConverter.hwpunitsToPoints(table.y());
-        double tableLeft = CoordinateConverter.hwpunitsToPoints(table.x());
-        double rowTop = tableTop;
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            double rowHeight = CoordinateConverter.hwpunitsToPoints(row.rowHeight());
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null) continue;
-                double left = tableLeft + widthBeforeColumn(table, cell.columnIndex());
-                double width = spannedColumnWidth(table, cell.columnIndex(), Math.max(1, cell.columnSpan()));
-                double height = spannedRowHeight(table, cell.rowIndex(), Math.max(1, cell.rowSpan()));
-                if (height <= 0) height = rowHeight;
-                out.add(new CellPlacement(cell, rowTop, left, rowTop + height, left + width));
-            }
-            rowTop += rowHeight;
-        }
-        return out;
-    }
-
-    private static double widthBeforeColumn(ASTTable table, int columnIndex) {
-        if (table == null || table.columnWidths() == null) return 0.0;
-        double sum = 0.0;
-        int end = Math.max(0, Math.min(columnIndex, table.columnWidths().size()));
-        for (int i = 0; i < end; i++) sum += CoordinateConverter.hwpunitsToPoints(table.columnWidths().get(i));
-        return sum;
-    }
-
-    private static double spannedColumnWidth(ASTTable table, int start, int span) {
-        if (table == null || table.columnWidths() == null) return 0.0;
-        double sum = 0.0;
-        int end = Math.min(table.columnWidths().size(), Math.max(0, start) + Math.max(1, span));
-        for (int i = Math.max(0, start); i < end; i++) {
-            sum += CoordinateConverter.hwpunitsToPoints(table.columnWidths().get(i));
-        }
-        return sum;
-    }
-
-    private static double spannedRowHeight(ASTTable table, int start, int span) {
-        if (table == null || table.rows() == null) return 0.0;
-        double sum = 0.0;
-        int end = Math.min(table.rows().size(), Math.max(0, start) + Math.max(1, span));
-        for (int i = Math.max(0, start); i < end; i++) {
-            ASTTableRow row = table.rows().get(i);
-            if (row != null) sum += CoordinateConverter.hwpunitsToPoints(row.rowHeight());
-        }
-        return sum;
-    }
-
-    private static double[] tableBoundsPoints(ASTTable table) {
-        if (table == null) return null;
-        double top = CoordinateConverter.hwpunitsToPoints(table.y());
-        double left = CoordinateConverter.hwpunitsToPoints(table.x());
-        double bottom = top + CoordinateConverter.hwpunitsToPoints(table.height());
-        double right = left + CoordinateConverter.hwpunitsToPoints(table.width());
-        return new double[] { top, left, bottom, right };
-    }
-
-    private static boolean boundsCover(double[] outer, double[] inner, double tolerance) {
-        if (outer == null || inner == null || outer.length < 4 || inner.length < 4) return false;
-        double t = Math.max(0.0, tolerance);
-        return inner[0] >= outer[0] - t
-                && inner[1] >= outer[1] - t
-                && inner[2] <= outer[2] + t
-                && inner[3] <= outer[3] + t;
-    }
-
-    private static double boundsOverlapRatio(double[] a, double[] b) {
-        if (a == null || b == null || a.length < 4 || b.length < 4) return 0.0;
-        double top = Math.max(a[0], b[0]);
-        double left = Math.max(a[1], b[1]);
-        double bottom = Math.min(a[2], b[2]);
-        double right = Math.min(a[3], b[3]);
-        double intersection = Math.max(0.0, bottom - top) * Math.max(0.0, right - left);
-        double bArea = Math.max(0.0, b[2] - b[0]) * Math.max(0.0, b[3] - b[1]);
-        return bArea <= 0.0 ? 0.0 : intersection / bArea;
-    }
-
-    private static boolean overlapsRange(double a0, double a1, double b0, double b1, double tolerance) {
-        double minA = Math.min(a0, a1);
-        double maxA = Math.max(a0, a1);
-        double minB = Math.min(b0, b1);
-        double maxB = Math.max(b0, b1);
-        return Math.max(minA, minB) <= Math.min(maxA, maxB) + Math.max(0.0, tolerance);
-    }
-
-    private static ASTTableCell singleCell(ASTTable table) {
-        if (table == null || table.rows() == null || table.rows().size() != 1) return null;
-        ASTTableRow row = table.rows().get(0);
-        if (row == null || row.cells() == null || row.cells().size() != 1) return null;
-        return row.cells().get(0);
-    }
-
-    private static String resolvedFillHex(ResolvedBuildContext ctx, ResolvedPageItem item) {
-        if (ctx == null || ctx.resolvedData == null || item == null || !resolvedHasFill(item)) return null;
-        String color = ctx.resolvedData.resolveTintedColorHex(item.fillColorName(), pageItemTint(item.fillTint()));
-        return color != null && color.startsWith("#") ? color : null;
-    }
-
-    private static boolean resolvedHasFill(ResolvedPageItem item) {
-        if (item == null) return false;
-        String color = item.fillColorName();
-        return color != null && !isNoneLike(color);
-    }
-
-    private static double[] boundsOf(ResolvedBuildContext ctx, ResolvedPageItem item) {
-        if (item == null) return null;
-        if (validBounds(item.pageRelativeBounds())) return item.pageRelativeBounds();
-        if (validBounds(item.visibleBounds())) return normalizePageItemBounds(ctx, item, item.visibleBounds());
-        if (validBounds(item.geometricBounds())) return normalizePageItemBounds(ctx, item, item.geometricBounds());
-        return null;
-    }
-
-    private static double[] normalizePageItemBounds(
-            ResolvedBuildContext ctx,
-            ResolvedPageItem item,
-            double[] bounds) {
-        if (!validBounds(bounds)) return bounds;
-        if (ctx == null || ctx.resolvedData == null || item == null || item.pageIndex() < 0) {
-            return bounds;
-        }
-        int pageIndex = item.pageIndex();
-        if (pageIndex >= ctx.resolvedData.pages().size()) return bounds;
-        ResolvedPage page = ctx.resolvedData.pages().get(pageIndex);
-        double[] pageBounds = page != null ? page.bounds() : null;
-        if (!validBounds(pageBounds)) return bounds;
-        double pageTop = pageBounds[0];
-        double pageLeft = pageBounds[1];
-        double pageRight = pageBounds[3];
-        boolean spreadX = pageLeft != 0.0 && (bounds[1] >= pageLeft || bounds[3] > pageRight);
-        boolean spreadY = pageTop != 0.0 && bounds[0] >= pageTop;
-        if (!spreadX && !spreadY) return bounds;
-        return new double[] {
-                bounds[0] - (spreadY ? pageTop : 0.0),
-                bounds[1] - (spreadX ? pageLeft : 0.0),
-                bounds[2] - (spreadY ? pageTop : 0.0),
-                bounds[3] - (spreadX ? pageLeft : 0.0)
-        };
-    }
-
-    private static boolean validBounds(double[] bounds) {
-        if (bounds == null || bounds.length < 4) return false;
-        return bounds[2] > bounds[0] && bounds[3] > bounds[1];
     }
 
     private static List<TablePlacement> splitSpreadWideTable(
@@ -1624,15 +1164,11 @@ public final class TableBuilder {
         ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
         border.weight(item.strokeWeight());
         border.strokeType("Solid");
-        border.tint(pageItemTint(item.strokeTint()));
-        String color = ctx.resolvedData.resolveTintedColorHex(item.strokeColorName(), pageItemTint(item.strokeTint()));
+        border.tint(item.strokeTint());
+        String color = ctx.resolvedData.resolveTintedColorHex(item.strokeColorName(), item.strokeTint());
         if (color == null || color.isEmpty() || !color.startsWith("#")) color = "#000000";
         border.color(color);
         return border;
-    }
-
-    private static double pageItemTint(double tint) {
-        return tint <= 0.0 ? 100.0 : ColorResolver.normalizeTint(tint);
     }
 
     private static void applyOuterBorder(ASTTable table, ASTTableCell.CellBorder border) {

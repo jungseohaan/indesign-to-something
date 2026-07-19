@@ -419,26 +419,6 @@ public final class ObjectPlan {
         return PolicyLayer.CONTENT;
     }
 
-    public String ownershipSlot() {
-        String role = slotRole != null ? slotRole : "";
-        if (visualAction == VisualAction.PLACE_TABLE_STYLE
-                || materialization == Materialization.HWPX_TABLE_STYLE
-                || role.contains("table_style")) {
-            return "TABLE_STYLE_SLOT";
-        }
-        if (visualAction == VisualAction.PLACE_TEXT_SHELL
-                || role.contains("shell")) {
-            return "SHELL_SLOT";
-        }
-        if (!hasVisibleVisual()
-                && (textAction == TextAction.OWNED_BY_HWPX_TEXT
-                    || textAction == TextAction.HIDDEN_SEMANTIC
-                    || materialization == Materialization.HWPX_TEXT)) {
-            return "TEXT_SLOT";
-        }
-        return "CONTENT_VISUAL_SLOT";
-    }
-
     public ObjectPlan withVisualAction(VisualAction newVisualAction, String newReason) {
         return withCurrentInlineFlow(new ObjectPlan(
                 domId,
@@ -1394,7 +1374,6 @@ public final class ObjectPlan {
                 .append("\"candidateId\":\"").append(escape(candidateId)).append("\",")
                 .append("\"planPassId\":\"").append(escape(planPassId)).append("\",")
                 .append("\"slotRole\":\"").append(escape(slotRole)).append("\",")
-                .append("\"ownershipSlot\":\"").append(escape(ownershipSlot())).append("\",")
                 .append("\"pageIndex\":").append(pageIndex).append(',')
                 .append("\"textAction\":\"").append(textAction).append("\",")
                 .append("\"visualAction\":\"").append(visualAction).append("\",")

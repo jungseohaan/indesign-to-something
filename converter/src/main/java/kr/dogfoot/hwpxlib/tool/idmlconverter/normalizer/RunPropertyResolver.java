@@ -13,7 +13,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
  * 텍스트 런(ASTTextRun)에 fontFamily/fontSize/textColor 등 핵심 속성을 적용할 때
  * 단일 우선순위 규칙을 강제하는 헬퍼.
  *
- * <p>기본 우선순위: <b>IDML CharacterRun → resolved → ParagraphStyle → default</b>
+ * <p>우선순위: <b>IDML CharacterRun → resolved → ParagraphStyle → default</b>
  *
  * <p>초기 SPEC-012 초안은 resolved 우선을 시도했으나(검증 시 회귀 발견):
  * splitIdmlRunByResolvedRuns의 rr 매칭이 불완전한 케이스에서 잘못된 resolved 런의
@@ -177,20 +177,16 @@ public final class RunPropertyResolver {
     /**
      * SPEC-016: 매칭 신뢰도를 고려한 fontSize 해석.
      *
-     * <p>HIGH/MEDIUM에서는 resolved의 effective style 크기를 우선한다. IDML
-     * CharacterStyleRange 하나가 GREP/중첩 스타일에 의해 여러 resolved run으로
-     * 나뉜 경우, raw IDML 런의 크기를 고집하면 앞 세그먼트의 스타일이 뒤 세그먼트로
-     * 번진다. LOW에서는 기존처럼 IDML/ParagraphStyle을 우선해 오매칭 회귀를 막는다.
+     * <p>fontSize는 IDML effective style 크기를 원본 진실로 본다. CharacterRun에
+     * 명시 크기가 없더라도 ParagraphStyle 크기가 있으면 resolved fontSize로
+     * 덮지 않는다. resolved fontSize는 IDML 쪽에서 크기를 전혀 확인할 수 없는
+     * 경우의 폴백으로만 사용한다.
      */
     public static Integer resolveFontSizeHwpunitsWithConfidence(
             ResolvedRun rr,
             IDMLCharacterRun cr,
             Double paragraphStyleFontSize,
             MatchConfidence confidence) {
-        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
-                && rr != null && rr.fontSize() != null && rr.fontSize() > 0) {
-            return (int) CoordinateConverter.pointsToHwpunits(rr.fontSize());
-        }
         if (cr != null && cr.fontSize() != null && cr.fontSize() > 0) {
             return (int) CoordinateConverter.pointsToHwpunits(cr.fontSize());
         }
@@ -226,14 +222,14 @@ public final class RunPropertyResolver {
             Function<String, String> colorResolver,
             BiFunction<String, Double, String> tintedColorResolver,
             MatchConfidence confidence) {
-        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
-                && rr != null && rr.fillColor() != null) {
-            String hex = resolveColor(rr.fillColor(), null,
+        if (effectiveIdmlColor != null && effectiveIdmlTint != null) {
+            String hex = resolveColor(effectiveIdmlColor, effectiveIdmlTint,
                     colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
-        if (effectiveIdmlColor != null && effectiveIdmlTint != null) {
-            String hex = resolveColor(effectiveIdmlColor, effectiveIdmlTint,
+        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
+                && rr != null && rr.fillColor() != null) {
+            String hex = resolveColor(rr.fillColor(), effectiveIdmlTint,
                     colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
