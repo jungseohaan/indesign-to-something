@@ -60,29 +60,50 @@ domId=364019  pass.inline_objects composite
 - 인용문 텍스트는 셀 텍스트로 유지 (셸 소유에서 제거)
 - "114쪽 9행"처럼 박스 안쪽에 있는 인라인 셸은 현행 유지
 
-## 해결 방안
+## 구조 정정 (2026-07-19, p187 단일 페이지 재추출로 확인)
 
-플랜 권위가 extractor 에 있으므로 **jsx 플래너에서 수정**한다.
+`extraction-plan.json` sourceItemPreview 기준 실제 소스 트리:
 
-### 규칙: 앵커 캐리어 순환 소유 금지
+```
+364019 Group (앵커된 composite 루트)
+├─ 364020 Polygon        (모서리 장식)
+├─ 364021 Rectangle      (둥근 인용 박스)
+│   └─ 364022 TextFrame  (인용문, story 364025)  ← "그러니까 내가…"
+└─ 364045 Rectangle      (파란 pill)
+    └─ 364046 TextFrame  ("구절\n풀이", story 364049)
+```
 
-`pass.inline_objects` composite 플랜 생성 시(또는 plan normalize 단계):
+**"앵커 캐리어 순환 소유" 가설은 오류.** 364022 는 앵커 캐리어가 아니라 그룹의
+자식이다 — 셸 플랜(364019)이 자식 TF 둘을 소유하는 것 자체는 composite 계약상
+정상이다. 이 가설로 구현한 jsx 정규화는 0건 매칭으로 확인 후 되돌렸다.
 
-1. 셸 플랜의 앵커 캐리어 스토리를 찾는다 (앵커 run 의 소속 스토리).
-2. `ownedTextFrameIds` 에 캐리어 스토리의 소유 프레임이 포함되면 순환 —
-   캐리어 프레임을 소유에서 제거한다.
-3. 남은 소유 프레임(라벨 텍스트)이 있고, 셸(또는 라벨 프레임)의 bounds 가
-   캐리어 프레임 경계 밖/걸침이면 `placement=FLOATING, coordinateSpace=PAGE`
-   로 승격. bounds 는 union 이 아니라 **라벨 구성요소만의 bounds** 로 재계산.
-4. 남은 소유 프레임이 없으면 승격하지 않고 현행 유지 (텍스트 유실 방지).
+문제의 본질: **인라인 그룹 셸 안의 "가장자리 마커 라벨"(pill) 텍스트가 본문
+텍스트(인용문)와 같은 채널로 실행**돼 셀 문단에 평문으로 합쳐진다는 것.
+(pill 은 sourceInfo.simpleMarkerLabelContents 성격의 소형 라벨, 그룹 bounds
+좌측 가장자리에 걸침: pill [51.9,76,60,84] vs 그룹 [51,78,61,203] 페이지 좌표.)
 
-### 후보 구현 위치
+## 해결 방안 (수정)
 
-- `scripts/indd/object_plans.jsx` — composite ownedTextFrameIds 구성부
-- 또는 `scripts/indd/candidate_normalization.jsx` — 플랜 정규화 단계
+두 층위 중 하나 또는 병행:
 
-(정확한 함수는 구현 시 특정. `pass.inline_objects` composite 의
-`shell_slot_only` slotRole 생성 경로를 추적할 것.)
+### A안 — jsx 플래너: 마커 라벨 분리 플랜
+
+`pass.inline_objects` composite 에서, 그룹의 직계 분기 중 (1) 소형 + (2)
+simpleMarkerLabel 내용 + (3) 그룹 경계 가장자리에 걸친 TF 분기(pill Rect+TF)를
+composite 소유에서 분리해 **별도 FLOATING LABEL_BACKDROP 플랜**으로 낸다.
+본문 TF(인용문)는 기존 소유 유지.
+
+### B안 — 컨버터 실행부: 다중 TF 셸의 오버레이 경로 보장
+
+`InlineFrameHandler.buildInlineShellObject` 는 visibleShellTextFrameCount>1 이면
+`attachInlineShellChildTextOverlays` 로 자식 텍스트를 셸 내 상대좌표 오버레이로
+배치하게 돼 있다. p187 출력이 평문 합류가 된 것은 이 경로가 아닌 폴백(셸 null
+→ 텍스트만 셀로)으로 빠졌기 때문으로 추정 — buildInlineShellObject 의 null
+반환 지점(1389행 가드, shellFile 부재 등)을 추적해 오버레이 경로를 살리면
+플랜 변경 없이 원본에 가까운 렌더(박스 + pill 오버레이)가 된다.
+
+**B안 우선 권장** — 플랜 계약을 건드리지 않고, 재추출 없이 기존 추출물로
+반복 검증 가능(`make reconvert EXTRACT=...`).
 
 ## 수정 파일
 
