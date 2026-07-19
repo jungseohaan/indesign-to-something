@@ -413,6 +413,44 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         sourceInfoCacheMisses: 0
     };
 
+    function sourceIndexProgress(step, current, total, desc) {
+        try {
+            if (ctx && ctx.outputDir && typeof writeProgress === "function") {
+                writeProgress(ctx.outputDir, step, current || 0, total || stats.itemCount || 0, desc || "");
+            }
+        } catch (eProgress) {}
+    }
+
+    var sourceIndexCursorLastWriteMs = 0;
+    function sourceIndexCursor(stage, itemIndex, id, kind) {
+        try {
+            if (ctx && ctx.outputDir && typeof writeJson === "function") {
+                var detailed = ctx.sourceIndexCursorDetail === true;
+                if (!detailed) {
+                    var indexNumber = Number(itemIndex);
+                    var hasIndex = itemIndex !== null && itemIndex !== undefined && !isNaN(indexNumber);
+                    var terminalStage = stage === "source_index_return"
+                            || (stage === "readItemInfo.done"
+                            && hasIndex
+                            && indexNumber === Number(stats.itemCount || 0) - 1);
+                    var periodicIndex = hasIndex && (indexNumber === 0 || (indexNumber % 250) === 0);
+                    var now = (new Date()).getTime();
+                    if (!terminalStage && !periodicIndex && now - sourceIndexCursorLastWriteMs < 750) {
+                        return;
+                    }
+                    sourceIndexCursorLastWriteMs = now;
+                }
+                writeJson(ctx.outputDir + "/_source_index_cursor.json", {
+                    stage: stage || null,
+                    itemIndex: itemIndex,
+                    total: stats.itemCount || 0,
+                    id: id !== undefined ? id : null,
+                    kind: kind !== undefined ? kind : null
+                });
+            }
+        } catch (eCursor) {}
+    }
+
     function itemId(item) {
         try { return item && item.id !== undefined ? item.id : null; } catch (e) {}
         return null;
@@ -633,8 +671,10 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return info;
     }
 
-    function readItemInfo(item) {
+    function readItemInfo(item, itemIndex) {
+        sourceIndexCursor("readItemInfo.start", itemIndex, null, null);
         var id = itemId(item);
+        sourceIndexCursor("readItemInfo.id", itemIndex, id, null);
         if (id === null || id === undefined) return null;
         var key = String(id);
         if (sourceInfoById[key]) return sourceInfoById[key];
@@ -653,6 +693,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         stats.sourceInfoCacheMisses++;
 
         var kind = _itemKind(item);
+        sourceIndexCursor("readItemInfo.kind", itemIndex, id, kind);
         stats.kindCounts[kind || "Unknown"] = (stats.kindCounts[kind || "Unknown"] || 0) + 1;
         var textFrameClass = null;
         var textLength = null;
@@ -664,11 +705,14 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var tableSourceObjectIds = [];
         var storyHasVisibleTableCellText = null;
         var parentStory = null;
+        sourceIndexCursor("readItemInfo.parentStory.before", itemIndex, id, kind);
         try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
+        sourceIndexCursor("readItemInfo.parentStory.after", itemIndex, id, kind);
         if (parentStory) {
             try { if (parentStory.id !== undefined) storyId = parentStory.id; } catch (eStoryIdAny) {}
         }
         if (kind === "TextFrame") {
+            sourceIndexCursor("readItemInfo.textFrame.before", itemIndex, id, kind);
             try { textFrameClass = classifyTextFrameCached(item); } catch (eClass) { textFrameClass = null; }
             textLength = _textLengthOfItem(item);
             try {
@@ -696,15 +740,21 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         ? false
                         : storyHasVisibleTableCellText;
             }
+            sourceIndexCursor("readItemInfo.textFrame.after", itemIndex, id, kind);
         }
+        sourceIndexCursor("readItemInfo.pageIndex.before", itemIndex, id, kind);
         var sourcePageIndex = _pageIndexOfItem(doc, item);
+        sourceIndexCursor("readItemInfo.pageIndex.after", itemIndex, id, kind);
+        sourceIndexCursor("readItemInfo.inline.before", itemIndex, id, kind);
         var storyTextInlineSlot = _itemHasDirectStoryTextInlineSlot(item);
         var tableCellStoryTextInlineSlot = false;
         if (storyTextInlineSlot === true && parentStory) {
             var inlineAnchorIds = storyTableCellInlineAnchorIdSet(parentStory, storyId);
             tableCellStoryTextInlineSlot = inlineAnchorIds[String(id)] === true;
         }
+        sourceIndexCursor("readItemInfo.inline.after", itemIndex, id, kind);
 
+        sourceIndexCursor("readItemInfo.info.before", itemIndex, id, kind);
         var info = {
             id: id,
             sourcePageIndex: sourcePageIndex,
@@ -757,7 +807,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             recoveredMissingParent: false,
             rangeTargetPageIndexes: _rangeTargetPageIndexesForId(id)
         };
+        sourceIndexCursor("readItemInfo.info.after", itemIndex, id, kind);
 
+        sourceIndexCursor("readItemInfo.extra.before", itemIndex, id, kind);
         try { info.name = item.name; } catch (eName) {}
         try {
             if (item.itemLayer) {
@@ -798,19 +850,28 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         try {
             if (item.cornerRadius > 0) info.cornerRadius = item.cornerRadius;
         } catch (eCorner) {}
+        sourceIndexCursor("readItemInfo.extra.after", itemIndex, id, kind);
 
         sourceInfoById[key] = info;
         domById[key] = item;
         sourceItems.push(info);
+        sourceIndexCursor("readItemInfo.done", itemIndex, id, kind);
         return info;
     }
 
+    sourceIndexProgress("source_index_read_items", 0, stats.itemCount, "read source objects");
     for (var i = 0; allItems && i < allItems.length; i++) {
-        try { readItemInfo(allItems[i]); } catch (eReadInfo) {}
-        if (i > 0 && i % 1000 === 0) marker("03d01_readItems_" + String(i));
+        sourceIndexProgress("source_index_read_item", i, stats.itemCount, "read source object");
+        try { readItemInfo(allItems[i], i); } catch (eReadInfo) {}
+        if (i > 0 && i % 1000 === 0) {
+            marker("03d01_readItems_" + String(i));
+            sourceIndexProgress("source_index_read_items", i, stats.itemCount, "read source objects");
+        }
     }
     appendMasterTextFrameInstanceSourceItems();
+    sourceIndexProgress("source_index_read_items", stats.itemCount, stats.itemCount, "read source objects");
     marker("03d01a_sourceIndex_readItems");
+    sourceIndexProgress("source_index_recover_parents", 0, sourceItems.length, "recover source parents");
     for (var parentPass = 0; parentPass < 8; parentPass++) {
         var appendedParent = false;
         var snapshotCount = sourceItems.length;
@@ -840,6 +901,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         if (!appendedParent) break;
     }
     marker("03d01b_sourceIndex_recoverParents");
+    sourceIndexProgress("source_index_reproject_range", 0, sourceItems.length, "reproject source range");
     var startRangePageIndex = Math.max(0, Number(ctx && ctx.startPage || 1) - 1);
     var endRangePageIndex = Math.max(startRangePageIndex, Number(ctx && (ctx.endPage || ctx.startPage) || 1) - 1);
     for (var rpi = 0; rpi < sourceItems.length; rpi++) {
@@ -865,6 +927,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         }
     }
     marker("03d01c_sourceIndex_reprojectRange");
+    sourceIndexProgress("source_index_z_order", 0, sourceItems.length, "normalize source z-order");
     normalizeSourceItemZOrder(sourceItems, ctx);
     marker("03d01d_sourceIndex_zOrder");
     stats.sourceZOrderSummary = ctx && ctx.sourceZOrderSummary
@@ -876,6 +939,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 idmlZOrderMissingCount: sourceItems.length
             };
 
+    sourceIndexProgress("source_index_child_index", 0, sourceItems.length, "build child index");
     for (var si = 0; si < sourceItems.length; si++) {
         var src = sourceItems[si];
         if (!src || src.parentId === null || src.parentId === undefined) continue;
@@ -885,8 +949,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     }
     for (var hi = 0; hi < sourceItems.length; hi++) {
         var hasChildInfo = sourceItems[hi];
-        hasChildInfo.hasChildren = !!childIdsByParentId[String(hasChildInfo.id)];
+        var indexedChildIds = childIdsByParentId[String(hasChildInfo.id)] || [];
+        hasChildInfo.childIds = indexedChildIds.length > 0 ? indexedChildIds.slice(0) : [];
+        hasChildInfo.hasChildren = indexedChildIds.length > 0;
     }
+    sourceIndexProgress("source_index_child_index", sourceItems.length, sourceItems.length, "build child index");
     marker("03d01e_sourceIndex_childIndex");
 
     function sourceInfo(sourceId) {
@@ -1436,6 +1503,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         stats.masterTextFrameInstanceSourceItemCount = appended;
     }
 
+    sourceIndexProgress("source_index_return", sourceItems.length, sourceItems.length, "return source index");
+    marker("03d01f_sourceIndex_return");
     return {
         sourceItems: sourceItems,
         sourceInfoById: sourceInfoById,

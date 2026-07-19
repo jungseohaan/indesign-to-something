@@ -15,7 +15,55 @@ function _buildObjectPlanDiagnostics(sourceItems, candidates) {
     return _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems);
 }
 
-function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems) {
+function _objectPlanDiagnosticsProgress(options, step, current, total, desc) {
+    if (!options || !options.outputDir || typeof writeProgress !== "function") return;
+    try {
+        writeProgress(options.outputDir, step, current || 0, total || 0, desc || "");
+    } catch (eObjectPlanDiagnosticsProgress) {}
+}
+
+var _objectPlanDiagnosticsCursorLastWriteMs = 0;
+function _objectPlanDiagnosticsCursor(options, stage, index, total, bundle) {
+    if (!options || !options.outputDir || typeof writeJson !== "function") return;
+    var detailed = options.objectPlanCursorDetail === true;
+    if (!detailed) {
+        var indexNumber = Number(index);
+        var hasIndex = index !== null && index !== undefined && !isNaN(indexNumber);
+        var periodicIndex = hasIndex && (indexNumber === 0 || (indexNumber % 100) === 0);
+        var terminalStage = stage === "plannerBundle.after"
+                && Number(indexNumber) === Number(total) - 1;
+        var now = (new Date()).getTime();
+        if (!terminalStage && !periodicIndex && now - _objectPlanDiagnosticsCursorLastWriteMs < 750) {
+            return;
+        }
+        _objectPlanDiagnosticsCursorLastWriteMs = now;
+    }
+    var sourceObjectIds = bundle && bundle.sourceObjectIds ? bundle.sourceObjectIds : [];
+    var visualSourceObjectIds = bundle && bundle.visualSourceObjectIds ? bundle.visualSourceObjectIds : [];
+    var ownedTextFrameIds = bundle && bundle.ownedTextFrameIds ? bundle.ownedTextFrameIds : [];
+    try {
+        writeJson(options.outputDir + "/_object_plan_cursor.json", {
+            stage: stage,
+            bundleIndex: index,
+            total: total,
+            bundleId: bundle && bundle.bundleId !== undefined ? bundle.bundleId : null,
+            bundleKind: bundle && bundle.kind !== undefined ? bundle.kind : null,
+            materialization: bundle && bundle.materialization !== undefined ? bundle.materialization : null,
+            textAction: bundle && bundle.textAction !== undefined ? bundle.textAction : null,
+            visualAction: bundle && bundle.visualAction !== undefined ? bundle.visualAction : null,
+            placement: bundle && bundle.placement !== undefined ? bundle.placement : null,
+            coordinateSpace: bundle && bundle.coordinateSpace !== undefined ? bundle.coordinateSpace : null,
+            sourceObjectIdCount: sourceObjectIds.length,
+            sourceObjectIds: sourceObjectIds.slice ? sourceObjectIds.slice(0, 24) : sourceObjectIds,
+            visualSourceObjectIdCount: visualSourceObjectIds.length,
+            visualSourceObjectIds: visualSourceObjectIds.slice ? visualSourceObjectIds.slice(0, 24) : visualSourceObjectIds,
+            ownedTextFrameIdCount: ownedTextFrameIds.length,
+            ownedTextFrameIds: ownedTextFrameIds.slice ? ownedTextFrameIds.slice(0, 24) : ownedTextFrameIds
+        });
+    } catch (eObjectPlanDiagnosticsCursor) {}
+}
+
+function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceItems, options) {
     var bundles = plannerBundles && plannerBundles.bundles ? plannerBundles.bundles : [];
     var objectPlans = [];
     var buildTimings = [];
@@ -35,6 +83,8 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         }
         buildTimings.push(row);
     }
+    _objectPlanDiagnosticsProgress(options, "object_plan_source_index", 0,
+            sourceItems ? sourceItems.length : 0, "build object plan source indexes");
     var _timingStartedAt = _objectPlanNowMs();
     var sourceById = _objectPlanSourceInfoById(sourceItems);
     var childrenByParentId = _objectPlanSourceChildrenByParentId(sourceItems);
@@ -42,11 +92,21 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         sourceItemCount: sourceItems ? sourceItems.length : 0
     });
 
+    _objectPlanDiagnosticsProgress(options, "object_plan_planner_bundles", 0,
+            bundles.length, "build object plans from planner bundles");
     _timingStartedAt = _objectPlanNowMs();
     for (var i = 0; i < bundles.length; i++) {
+        if (i === 0 || (i % 100) === 0) {
+            _objectPlanDiagnosticsProgress(options, "object_plan_planner_bundles", i,
+                    bundles.length, "build object plans from planner bundles");
+        }
+        _objectPlanDiagnosticsCursor(options, "plannerBundle.before", i, bundles.length, bundles[i]);
         var plan = _objectPlanFromPlannerBundle(bundles[i], i, sourceById);
+        _objectPlanDiagnosticsCursor(options, "plannerBundle.after", i, bundles.length, bundles[i]);
         objectPlans.push(plan);
     }
+    _objectPlanDiagnosticsProgress(options, "object_plan_planner_bundles", bundles.length,
+            bundles.length, "planner bundle object plans ready");
     _recordObjectPlanTiming("plannerBundlePlans", _timingStartedAt, {
         bundleCount: bundles.length,
         objectPlanCount: objectPlans.length

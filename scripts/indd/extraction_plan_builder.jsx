@@ -7299,11 +7299,27 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
 
 function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d01_plan_init");
+    try { writeProgress(ctx.outputDir, "planning_source_index", 0, allItems ? allItems.length : 0, "build source index"); } catch (ePlanSourceIndexProgressStart) {}
     var candidates = [];
     var candidateSeen = {};
     var sourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
+    try { writeProgress(ctx.outputDir, "planning_source_index", allItems ? allItems.length : 0, allItems ? allItems.length : 0, "source index ready"); } catch (ePlanSourceIndexProgressDone) {}
+    _marker(ctx.outputDir, "03d01g_plan_sourceIndex_returned");
     ctx._sourceIndexForRender = sourceIndex;
     var sourceItems = sourceIndex.sourceItems;
+    try {
+        _marker(ctx.outputDir, "03d01h_pagePlaneTableStyleHide_start");
+        if (!ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
+                && typeof _tableStyleSourceObjectIdsByPageForPagePlaneHide === "function") {
+            ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
+                    _tableStyleSourceObjectIdsByPageForPagePlaneHide(sourceItems || []);
+        }
+        _marker(ctx.outputDir, "03d01i_pagePlaneTableStyleHide_done");
+    } catch (ePagePlaneTableStyleHideFromPlan) {
+        ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
+                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {};
+        try { _marker(ctx.outputDir, "03d01i_pagePlaneTableStyleHide_fallback"); } catch (ePagePlaneTableStyleHideMarker) {}
+    }
     try { writeJson(ctx.outputDir + "/_source_index_stats.json", sourceIndex.stats || {}); } catch (eSourceIndexStats) {}
     _marker(ctx.outputDir, "03d02_plan_sourceItems");
 
@@ -7440,7 +7456,20 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         } catch (ePlannerBundleDiagnosticsWrite) {}
     }
     _marker(ctx.outputDir, "03d14_plan_plannerBundles");
-    var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundleDiagnostics, sourceItems);
+    writeProgress(ctx.outputDir, "object_plan_build", 0,
+            plannerBundleDiagnostics && plannerBundleDiagnostics.bundles
+                    ? plannerBundleDiagnostics.bundles.length : 0,
+            "build object plan diagnostics");
+    _marker(ctx.outputDir, "03d14a_plan_objectPlans_start");
+    var objectPlanDiagnostics = _buildObjectPlanDiagnosticsFromPlannerBundles(
+            plannerBundleDiagnostics, sourceItems, { outputDir: ctx.outputDir });
+    writeProgress(ctx.outputDir, "object_plan_build",
+            plannerBundleDiagnostics && plannerBundleDiagnostics.bundles
+                    ? plannerBundleDiagnostics.bundles.length : 0,
+            plannerBundleDiagnostics && plannerBundleDiagnostics.bundles
+                    ? plannerBundleDiagnostics.bundles.length : 0,
+            "object plan diagnostics ready");
+    _marker(ctx.outputDir, "03d14b_plan_objectPlans_built");
     var canonicalPagePlaneObjectPlanDiagnostics =
             _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagnostics);
     _marker(ctx.outputDir, "03d15_plan_objectPlans");

@@ -1091,6 +1091,12 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d_buildExtractionPlan_start");
     ctx.extractionPlan = _buildExtractionPlan(doc, ctx, allItems);
     _marker(ctx.outputDir, "03d_buildExtractionPlan_done");
+    if (ctx.deferPagePlaneCacheRestoreUntilAfterPlan === true) {
+        _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_afterPlan_start");
+        _restoreCachedSingleTextlessPagePlanes(doc, ctx);
+        _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_afterPlan_done");
+        ctx.deferPagePlaneCacheRestoreUntilAfterPlan = false;
+    }
     _extractionCandidateLookup = _buildExtractionCandidateLookup(ctx.extractionPlan);
     _marker(ctx.outputDir, "03e_buildCandidateLookup_done");
     var extractionItemById = ctx._sourceIndexForRender && ctx._sourceIndexForRender.domById
@@ -1618,16 +1624,7 @@ function main(args) {
             _marker(ctx.outputDir, "03_allPageItems");
             var allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
             ctx.rangeTargetPageIndexesBySourceId = collectRangePageItems.lastTargetPageIndexesByItemId || {};
-            try {
-                var _pagePlaneHideSourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
-                        _tableStyleSourceObjectIdsByPageForPagePlaneHide(
-                                _pagePlaneHideSourceIndex && _pagePlaneHideSourceIndex.sourceItems
-                                        ? _pagePlaneHideSourceIndex.sourceItems
-                                        : []);
-            } catch (ePagePlaneTableStyleHideIndex) {
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage = {};
-            }
+            ctx.deferPagePlaneCacheRestoreUntilAfterPlan = true;
 
             // SPEC-030 B.2: 페이지 해시 + 아이템 맵 → page_hashes.json / page_item_map.json (캐시 저장용)
             _marker(ctx.outputDir, "03b_pageHashes_start");
@@ -1640,7 +1637,8 @@ function main(args) {
             } catch (eHash) { $.writeln("[pageHash] error: " + eHash); }
             _marker(ctx.outputDir, "03b_pageHashes_done");
             _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_start");
-            _restoreCachedSingleTextlessPagePlanes(doc, ctx);
+            // Requires table-style hide ownership, which is now derived from
+            // the extraction plan source index to avoid a duplicate source-index pass.
             _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_done");
 
             _runRenderPhases(doc, ctx, allItems);

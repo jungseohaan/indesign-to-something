@@ -362,6 +362,58 @@ fn is_recoverable_osascript_connection_error(stderr: &str) -> bool {
         || stderr.contains("Connection is invalid")
 }
 
+fn is_recoverable_indesign_modal_error(message: &str) -> bool {
+    message.contains("30486")
+        || message.contains("다른 대화 상자 또는 경고")
+        || message.contains("another dialog")
+        || message.contains("modal dialog")
+        || message.contains("alert is active")
+        || message.contains("Cannot handle the request because a modal dialog or alert is active")
+}
+
+fn indesign_failure_context(output_dir: &Path, progress_path: &Path) -> String {
+    let mut lines = Vec::new();
+    if let Ok(progress) = std::fs::read_to_string(progress_path) {
+        let trimmed = progress.trim();
+        if !trimmed.is_empty() {
+            lines.push(format!("last_progress={}", trimmed));
+        }
+    }
+    for name in [
+        ".crash_marker",
+        "_source_index_cursor.json",
+        "_object_plan_cursor.json",
+        "_phase_timing.log",
+    ] {
+        let path = output_dir.join(name);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let excerpt = if name == "_phase_timing.log" {
+                trimmed
+                    .lines()
+                    .rev()
+                    .take(8)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\\n")
+            } else {
+                trimmed.to_string()
+            };
+            lines.push(format!("{}={}", name, excerpt));
+        }
+    }
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n진단:\n{}", lines.join("\n"))
+    }
+}
+
 fn applescript_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -615,6 +667,7 @@ pub async fn run_extraction(
     // - 기타: 120s
     let stale_secs_default = 120u64;
     let mut retried_open_stall = false;
+    let mut retried_modal_error = false;
 
     // .progress 파일 폴링
     // - 절대 타임아웃: 3600초 (1시간)
@@ -768,10 +821,16 @@ pub async fn run_extraction(
                         // 테스트/진단용: open 단계 정체 시 링크/sample 정보를 빨리 노출한다.
                         "open" => 300,
                         "fix_links" | "pdf_fix_links" => 1800,
-                        "idml" => {
+                        "idml"
+                        | "idml_export_to_source_folder"
+                        | "idml_sibling_reuse"
+                        | "idml_copy_fallback_export" => {
                             let pages = if total > 0 { total as u64 } else { 1 };
                             (pages * 45).clamp(900, 3300)
                         }
+                        s if s.starts_with("source_index") => 1800,
+                        "planning_source_index" => 1800,
+                        s if s.starts_with("object_plan") => 1800,
                         "planning" => 1800,
                         "spread_chunk" => 1800,
                         // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
@@ -788,6 +847,47 @@ pub async fn run_extraction(
                         "pdf_fix_links" => "PDF용 링크 갱신 중...".to_string(),
                         "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
                         "idml" => "IDML 내보내기 중...".to_string(),
+                        "idml_export_to_source_folder" if total > 0 => {
+                            format!("IDML 소스 폴더 내보내기 중... ({}페이지)", total)
+                        }
+                        "idml_export_to_source_folder" => {
+                            "IDML 소스 폴더 내보내기 중...".to_string()
+                        }
+                        "idml_sibling_reuse" => "기존 IDML 복사 중...".to_string(),
+                        "idml_copy_fallback_export" if total > 0 => {
+                            format!("IDML 복사 실패 후 재내보내기 중... ({}페이지)", total)
+                        }
+                        "idml_copy_fallback_export" => {
+                            "IDML 복사 실패 후 재내보내기 중...".to_string()
+                        }
+                        "source_index_read_item" if current > 0 && total > 0 => {
+                            format!("소스 객체 읽는 중... ({}/{})", current, total)
+                        }
+                        "source_index_read_item" => "소스 객체 읽는 중...".to_string(),
+                        "source_index_read_items" if current > 0 && total > 0 => {
+                            format!("소스 객체 읽는 중... ({}/{})", current, total)
+                        }
+                        "source_index_read_items" => "소스 객체 읽는 중...".to_string(),
+                        "source_index_recover_parents" => "소스 부모 객체 보강 중...".to_string(),
+                        "source_index_reproject_range" => {
+                            "소스 객체 페이지 범위 보정 중...".to_string()
+                        }
+                        "source_index_z_order" => "소스 z-order 정규화 중...".to_string(),
+                        "source_index_child_index" => {
+                            "소스 자식 관계 인덱스 생성 중...".to_string()
+                        }
+                        "source_index_return" | "planning_source_index" => {
+                            "소스 객체 인덱스 준비 중...".to_string()
+                        }
+                        "object_plan_source_index" => {
+                            "ObjectPlan 소스 인덱스 준비 중...".to_string()
+                        }
+                        "object_plan_planner_bundles" if current > 0 && total > 0 => {
+                            format!("ObjectPlan 생성 중... ({}/{})", current, total)
+                        }
+                        "object_plan_planner_bundles" | "object_plan_build" => {
+                            "ObjectPlan 생성 중...".to_string()
+                        }
                         "planning" => "추출 계획 생성 중...".to_string(),
                         "spread_chunk" if current > 0 && total > 0 && !desc.is_empty() => {
                             format!("스프레드 청크 추출 중... ({}/{}) {}", current, total, desc)
@@ -841,27 +941,51 @@ pub async fn run_extraction(
                             _ => "exporting",
                         };
                         emit_progress(app, phase, &display);
-                    } else if matches!(
+                    } else if (matches!(
                         step,
                         "pdf"
                             | "idml"
+                            | "idml_export_to_source_folder"
+                            | "idml_sibling_reuse"
+                            | "idml_copy_fallback_export"
                             | "open"
                             | "close_docs"
                             | "spread_chunk"
                             | "fix_links"
                             | "pdf_fix_links"
-                    ) && last_heartbeat_at.elapsed().as_secs() >= 10
+                            | "planning_source_index"
+                    ) || step.starts_with("source_index")
+                        || step.starts_with("object_plan"))
+                        && last_heartbeat_at.elapsed().as_secs() >= 10
                     {
                         let stale = last_progress_at.elapsed().as_secs();
                         let heartbeat_msg = match step {
                             "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
                             "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
+                            "idml_export_to_source_folder" => {
+                                format!("IDML 소스 폴더 내보내기 중... ({}초 경과)", stale)
+                            }
+                            "idml_sibling_reuse" => {
+                                format!("기존 IDML 복사 중... ({}초 경과)", stale)
+                            }
+                            "idml_copy_fallback_export" => {
+                                format!("IDML 복사 실패 후 재내보내기 중... ({}초 경과)", stale)
+                            }
                             "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
                             "open" => format!("문서 열기 중... ({}초 경과)", stale),
                             "fix_links" => format!("링크 상태 확인 중... ({}초 경과)", stale),
                             "pdf_fix_links" => format!("PDF용 링크 갱신 중... ({}초 경과)", stale),
                             "spread_chunk" => {
                                 format!("스프레드 청크 추출 중... ({}초 경과)", stale)
+                            }
+                            s if s.starts_with("source_index") => {
+                                format!("소스 객체 인덱스 생성 중... ({}초 경과)", stale)
+                            }
+                            "planning_source_index" => {
+                                format!("소스 객체 인덱스 준비 중... ({}초 경과)", stale)
+                            }
+                            s if s.starts_with("object_plan") => {
+                                format!("ObjectPlan 생성 중... ({}초 경과)", stale)
                             }
                             _ => display.clone(),
                         };
@@ -907,9 +1031,15 @@ pub async fn run_extraction(
                 .map_err(|e| format!("osascript 재시도 결과 수집 실패: {}", e))?;
             if !output2.status.success() {
                 let stderr2 = String::from_utf8_lossy(&output2.stderr);
-                return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr2));
+                return Err(format!(
+                    "InDesign 스크립트 실행 실패:\n{}{}",
+                    stderr2,
+                    indesign_failure_context(output_dir, &progress_path)
+                ));
             }
-        } else if is_recoverable_osascript_connection_error(&stderr) {
+        } else if is_recoverable_osascript_connection_error(&stderr)
+            || is_recoverable_indesign_modal_error(&stderr)
+        {
             let output2 = rerun_osascript_after_indesign_restart(
                 app,
                 &app_name,
@@ -917,15 +1047,27 @@ pub async fn run_extraction(
                 &script_file,
                 &progress_path,
                 &done_path,
-                "InDesign 연결 오류 복구 후 추출 재시도 중...",
+                if is_recoverable_indesign_modal_error(&stderr) {
+                    "InDesign 대화상자/경고 상태 복구 후 추출 재시도 중..."
+                } else {
+                    "InDesign 연결 오류 복구 후 추출 재시도 중..."
+                },
             )
             .await?;
             if !output2.status.success() {
                 let stderr2 = String::from_utf8_lossy(&output2.stderr);
-                return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr2));
+                return Err(format!(
+                    "InDesign 스크립트 실행 실패:\n{}{}",
+                    stderr2,
+                    indesign_failure_context(output_dir, &progress_path)
+                ));
             }
         } else {
-            return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr));
+            return Err(format!(
+                "InDesign 스크립트 실행 실패:\n{}{}",
+                stderr,
+                indesign_failure_context(output_dir, &progress_path)
+            ));
         }
     }
 
@@ -933,34 +1075,16 @@ pub async fn run_extraction(
     emit_progress(app, "checking", "추출 결과 확인 중...");
 
     // .done 시그널 파일 확인
-    if done_path.exists() {
-        let done_content = std::fs::read_to_string(&done_path)
-            .map_err(|e| format!(".done 파일 읽기 실패: {}", e))?;
-        let done_signal: DoneSignal = serde_json::from_str(&done_content)
-            .map_err(|e| format!(".done 파일 파싱 실패: {}", e))?;
-
-        if done_signal.status == "error" {
-            let msg = done_signal
-                .message
-                .unwrap_or_else(|| "알 수 없는 오류".to_string());
-            return Err(format!("InDesign 추출 오류: {}", msg));
-        } else if done_signal.status == "warning" {
-            emit_extract_warning_log(
-                app,
-                done_signal
-                    .message
-                    .as_deref()
-                    .unwrap_or("InDesign 추출 validation warning"),
-            );
-        }
-    } else {
+    if !done_path.exists() {
         for _ in 0..10 {
             sleep(Duration::from_millis(500)).await;
             if done_path.exists() {
                 break;
             }
         }
-        if done_path.exists() {
+    }
+    if done_path.exists() {
+        loop {
             let done_content = std::fs::read_to_string(&done_path)
                 .map_err(|e| format!(".done 파일 읽기 실패: {}", e))?;
             let done_signal: DoneSignal = serde_json::from_str(&done_content)
@@ -970,6 +1094,32 @@ pub async fn run_extraction(
                 let msg = done_signal
                     .message
                     .unwrap_or_else(|| "알 수 없는 오류".to_string());
+                if is_recoverable_indesign_modal_error(&msg) && !retried_modal_error {
+                    retried_modal_error = true;
+                    let output2 = rerun_osascript_after_indesign_restart(
+                        app,
+                        &app_name,
+                        output_dir,
+                        &script_file,
+                        &progress_path,
+                        &done_path,
+                        "InDesign 대화상자/경고 상태 복구 후 추출 재시도 중...",
+                    )
+                    .await?;
+                    if !output2.status.success() {
+                        let stderr2 = String::from_utf8_lossy(&output2.stderr);
+                        return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr2));
+                    }
+                    if !done_path.exists() {
+                        for _ in 0..10 {
+                            sleep(Duration::from_millis(500)).await;
+                            if done_path.exists() {
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                }
                 return Err(format!("InDesign 추출 오류: {}", msg));
             } else if done_signal.status == "warning" {
                 emit_extract_warning_log(
@@ -980,6 +1130,7 @@ pub async fn run_extraction(
                         .unwrap_or("InDesign 추출 validation warning"),
                 );
             }
+            break;
         }
     }
 
@@ -1136,12 +1287,42 @@ pub async fn run_extraction_with_skip(
             } else if last_heartbeat_at.elapsed().as_secs() >= 10 {
                 if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
                     let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
-                    if matches!(step, "pdf" | "idml" | "open" | "close_docs") {
+                    if matches!(
+                        step,
+                        "pdf"
+                            | "idml"
+                            | "idml_export_to_source_folder"
+                            | "idml_sibling_reuse"
+                            | "idml_copy_fallback_export"
+                            | "open"
+                            | "close_docs"
+                            | "planning_source_index"
+                    ) || step.starts_with("source_index")
+                        || step.starts_with("object_plan")
+                    {
                         let heartbeat_msg = match step {
                             "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
                             "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
+                            "idml_export_to_source_folder" => {
+                                format!("IDML 소스 폴더 내보내기 중... ({}초 경과)", stale)
+                            }
+                            "idml_sibling_reuse" => {
+                                format!("기존 IDML 복사 중... ({}초 경과)", stale)
+                            }
+                            "idml_copy_fallback_export" => {
+                                format!("IDML 복사 실패 후 재내보내기 중... ({}초 경과)", stale)
+                            }
                             "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
                             "open" => format!("문서 열기 중... ({}초 경과)", stale),
+                            s if s.starts_with("source_index") => {
+                                format!("소스 객체 인덱스 생성 중... ({}초 경과)", stale)
+                            }
+                            "planning_source_index" => {
+                                format!("소스 객체 인덱스 준비 중... ({}초 경과)", stale)
+                            }
+                            s if s.starts_with("object_plan") => {
+                                format!("ObjectPlan 생성 중... ({}초 경과)", stale)
+                            }
                             _ => format!("추출 중... ({}초 경과)", stale),
                         };
                         last_heartbeat_at = std::time::Instant::now();
@@ -1649,7 +1830,20 @@ async fn run_extraction_followup_chunk(
 
     if !status.status.success() {
         let stderr = String::from_utf8_lossy(&status.stderr);
-        if is_recoverable_osascript_connection_error(&stderr) {
+        if is_recoverable_osascript_connection_error(&stderr)
+            || is_recoverable_indesign_modal_error(&stderr)
+        {
+            let retry_message = if is_recoverable_indesign_modal_error(&stderr) {
+                format!(
+                    "InDesign 대화상자/경고 상태 복구 후 청크 추출 재시도 중... (페이지 {}..{})",
+                    start_page, end_page
+                )
+            } else {
+                format!(
+                    "청크 추출 재시도 중... (페이지 {}..{})",
+                    start_page, end_page
+                )
+            };
             let retried = rerun_osascript_after_indesign_restart(
                 app,
                 &app_name,
@@ -1657,10 +1851,7 @@ async fn run_extraction_followup_chunk(
                 &script_file,
                 &progress_path,
                 &done_path,
-                &format!(
-                    "청크 추출 재시도 중... (페이지 {}..{})",
-                    start_page, end_page
-                ),
+                &retry_message,
             )
             .await?;
             if !retried.status.success() {
