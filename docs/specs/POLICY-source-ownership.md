@@ -89,8 +89,9 @@ When a page issue is reported, use this lookup first:
 - Later stages execute `ObjectPlan`; they do not reinterpret ownership,
   placement, layer, or materialization.
 - Editable/searchable text is HWPX text or HWPX table text.
-- HWPX table structure is editable, but table/cell visual decoration is
-  textless graphic material unless Stage 1 explicitly says otherwise.
+- HWPX table structure is editable, and table/cell visual decoration becomes
+  HWPX table style only when Stage 1 declares the source objects in
+  `TABLE_STYLE_SLOT` / `styleSourceObjectIds`.
 - HWPX execution has three policy strata:
   `BACKGROUND_GRAPHIC < TEXTLESS_IMAGE_GROUP < TEXT_TABLE_STRUCTURE`.
   `BACKGROUND_GRAPHIC` is not a source-object meaning. It is a page-local
@@ -221,7 +222,7 @@ comparison, debugging, or rollback while migration is in progress.
 The page plane must not absorb:
 
 - editable/searchable `TEXT_SLOT` content;
-- `TABLE_STYLE_SLOT` content that is represented by HWPX table structure;
+- `TABLE_STYLE_SLOT` content that is represented by HWPX table structure/style;
 - story-flow inline or anchored images that must travel with text;
 - complete marker PNGs that intentionally own their own tiny text marker.
 
@@ -237,10 +238,10 @@ The executable HWPX policy has exactly three strata:
    z-depth alone, and it must not include `TEXT_SLOT`, `TABLE_STYLE_SLOT`,
    `COMPLETE_PNG` text owners, or story-flow inline material.
 2. `TEXTLESS_IMAGE_GROUP`: all ordinary non-text source graphics, including
-   historical decoration/content roles, table/cell decoration, masks, charts,
-   photos, shells, badges, and master page graphic fragments.
+   historical decoration/content roles, undeclared table/cell decoration, masks,
+   charts, photos, shells, badges, and master page graphic fragments.
 3. `TEXT_TABLE_STRUCTURE`: editable HWPX text and editable HWPX table
-   structure.
+   structure/style.
 
 If a rule appears to require a separate decoration/content foreground layer,
 that rule is legacy wording. Stage 1 must instead decide whether the source

@@ -2745,9 +2745,19 @@ public final class OwnershipPlanner {
             if (ownedByAnchoredTablePlan) {
                 textAction = TextAction.DROP_TEXT;
             }
-            VisualAction visualAction = VisualAction.DROP_VISUAL;
+            int[] sourceIds = tableOnlyTextFrame
+                    ? tableOnlySourceIds(domId, idmlStory)
+                    : new int[] { domId };
+            int[] styleSourceIds = tableOnlyTextFrame
+                    ? tableStyleSourceIdsForTextFrame(domId, idmlStory)
+                    : new int[0];
+            boolean ownsTableStyle = styleSourceIds.length > 0;
+            VisualAction visualAction = ownsTableStyle
+                    ? VisualAction.PLACE_TABLE_STYLE
+                    : VisualAction.DROP_VISUAL;
             if (tableOnlyTextFrame
                     && !ownedByAnchoredTablePlan
+                    && !ownsTableStyle
                     && hasHwpxTextOwnerForTextFrame(domId)) {
                 continue;
             }
@@ -2765,12 +2775,6 @@ public final class OwnershipPlanner {
                 continue;
             }
             Placement placement = placementOfTextFrame(tf, domId, textAction, visualAction);
-            int[] sourceIds = tableOnlyTextFrame
-                    ? tableOnlySourceIds(domId, idmlStory)
-                    : new int[] { domId };
-            int[] styleSourceIds = tableOnlyTextFrame
-                    ? tableOnlyStyleSourceIds(domId)
-                    : new int[0];
             plans.add(new ObjectPlan(
                     domId,
                     tableOnlyTextFrame ? "text_frame:table_only" : "text_frame",
@@ -6171,12 +6175,29 @@ public final class OwnershipPlanner {
     }
 
     private int[] tableOnlyStyleSourceIds(int textFrameDomId) {
-        // Canonical table policy: a table-only carrier owns only editable table
-        // structure. Cell fills, row bands, outlines, and other decoration stay
-        // in separate textless visual slots and must not be claimed here as
-        // table-style provenance, because doing so blocks their Stage 1 native/
-        // extracted visual owners and later causes missing table chrome.
+        // Table style source ids must name concrete source-authored appearance
+        // objects. The table carrier/table id alone is structure provenance;
+        // direct wrapper and sibling grid sources are collected separately.
         return new int[0];
+    }
+
+    private int[] tableStyleSourceIdsForTextFrame(int textFrameDomId) {
+        return tableStyleSourceIdsForTextFrame(textFrameDomId, null);
+    }
+
+    private int[] tableStyleSourceIdsForTextFrame(int textFrameDomId, IDMLStory story) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        addAll(tableOnlyStyleSourceIds(textFrameDomId), ids);
+        if (story != null && story.tables() != null) {
+            for (IDMLTable table : story.tables()) {
+                int tableId = parseFlexibleId(table != null ? table.selfId() : null);
+                if (tableId >= 0) ids.add(tableId);
+            }
+        }
+        addParentTableCarrierStyleSourceId(textFrameDomId, ids);
+        addSiblingTableCarrierStyleSourceIds(textFrameDomId, ids);
+        addRenderedTableCarrierStyleSourceIds(textFrameDomId, ids);
+        return toIntArray(ids);
     }
 
     private void addRenderedTableCarrierStyleSourceIds(int textFrameDomId, LinkedHashSet<Integer> ids) {
@@ -6310,11 +6331,17 @@ public final class OwnershipPlanner {
         String type = safe(item.type());
         if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)) return false;
         if (item.cornerRadius() > 0.01) return false;
-        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
+        if (!isAxisAlignedRotation(item.absoluteRotationAngle(), 0.1)) return false;
         if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
         if (item.hasDropShadow()) return false;
         if (item.gradientFeatherApplied()) return false;
         return hasTableStyleMaterial(item);
+    }
+
+    private static boolean isAxisAlignedRotation(double angle, double tolerance) {
+        double normalized = Math.abs(angle) % 180.0;
+        normalized = Math.min(normalized, 180.0 - normalized);
+        return normalized <= tolerance;
     }
 
     private boolean hasSourceChildren(ResolvedPageItem item) {
@@ -12584,7 +12611,7 @@ public final class OwnershipPlanner {
     private int[] tableStyleSourceIdsForPlan(ObjectPlan plan) {
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
         if (plan == null) return new int[0];
-        addAll(tableOnlyStyleSourceIds(tableStyleOwnerTextFrameId(plan)), ids);
+        addAll(tableStyleSourceIdsForTextFrame(tableStyleOwnerTextFrameId(plan)), ids);
         addDirectTableStyleSiblingSourceIds(plan, ids);
         return toIntArray(ids);
     }
@@ -12598,7 +12625,11 @@ public final class OwnershipPlanner {
     private boolean isTableStyleCarrierVisualDuplicate(ObjectPlan visualPlan, List<ObjectPlan> tableStylePlans) {
         if (visualPlan == null || tableStylePlans == null || tableStylePlans.isEmpty()) return false;
         if (!visualPlan.hasVisibleVisual()) return false;
-        if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
+        if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && visualPlan.ownedTextFrameIds != null
+                && visualPlan.ownedTextFrameIds.length > 0) {
+            return false;
+        }
         if (visualPlan.materialization == Materialization.HWPX_TABLE_STYLE) return false;
         if (visualPlan.domId < 0) return false;
 
@@ -12669,14 +12700,25 @@ public final class OwnershipPlanner {
         int ownerTextFrameId = tableStyleOwnerTextFrameId(plan);
         if (ownerTextFrameId < 0) return;
         ResolvedPageItem ownerItem = data.getPageItem(String.valueOf(ownerTextFrameId));
-        if (ownerItem == null || ownerItem.parentId() == null) return;
-        ResolvedPageItem parent = data.getPageItem(ownerItem.parentId());
-        if (parent == null || parent.childIds() == null) return;
+        if (ownerItem == null) return;
         double[] ownerBounds = boundsOf(ownerItem);
         if (ownerBounds == null || ownerBounds.length < 4) ownerBounds = plan.bounds;
-        for (int childId : parent.childIds()) {
-            collectDirectTableStyleSiblingSourceId(childId, ownerTextFrameId, ownerBounds, ids);
+        String parentId = ownerItem.parentId();
+        for (ResolvedPageItem item : data.pageItems()) {
+            if (item == null || item.id() == null) continue;
+            if (!sameNullableId(parentId, item.parentId())) continue;
+            if (ownerItem.pageIndex() >= 0 && item.pageIndex() >= 0
+                    && ownerItem.pageIndex() != item.pageIndex()) continue;
+            int sourceId = parseFlexibleId(item.id());
+            collectDirectTableStyleSiblingSourceId(sourceId, ownerTextFrameId, ownerBounds, ids);
         }
+    }
+
+    private static boolean sameNullableId(String a, String b) {
+        boolean aBlank = a == null || a.isBlank();
+        boolean bBlank = b == null || b.isBlank();
+        if (aBlank || bBlank) return aBlank == bBlank;
+        return a.equals(b);
     }
 
     private void collectDirectTableStyleSiblingSourceId(

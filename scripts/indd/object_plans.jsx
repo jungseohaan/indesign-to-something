@@ -1481,6 +1481,9 @@ function _syncObjectPlanDiagnosticsToExecutionCandidates(objectPlanDiagnostics, 
 function _shouldKeepObjectPlanAfterExecutionCandidateSync(plan, activeObjectPlanIds, activeCandidateIds) {
     if (!plan) return false;
     if (!_objectPlanHasVisibleVisual(plan)) return true;
+    if (plan.visualAction === "PLACE_TABLE_STYLE"
+            || plan.materialization === "HWPX_TABLE_STYLE"
+            || plan.ownershipSlot === "TABLE_STYLE_SLOT") return true;
     if (_objectPlanIsInlineVisibleTextFrameShellVisualOwner(plan)) return true;
     if (plan.objectPlanId && activeObjectPlanIds[String(plan.objectPlanId)]) return true;
     if (plan.candidateId && activeCandidateIds[String(plan.candidateId)]) return true;
@@ -1988,6 +1991,7 @@ function _appendTableOnlyTextFrameObjectPlans(objectPlans, sourceItems) {
         var tablePlan = _tableOnlyTextFrameObjectPlan(
                 src,
                 id,
+                sourceById,
                 pageIndex,
                 zOrder,
                 anchoredNestedTable ? "DROP_TEXT" : null,
@@ -2112,9 +2116,11 @@ function _textFrameCleanupObjectPlan(src, id, pageIndex, zOrder, reason) {
     return plan;
 }
 
-function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder, textActionOverride, reasonOverride) {
+function _tableOnlyTextFrameObjectPlan(src, id, sourceById, pageIndex, zOrder, textActionOverride, reasonOverride) {
     var tableIds = _sortedNumericIds(src.tableSourceObjectIds || []);
     var sourceIds = _sortedNumericIds([id].concat(tableIds));
+    var styleSourceObjectIds = _tableOnlyTextFrameStyleSourceObjectIds(src, id, sourceById);
+    var ownsTableStyle = styleSourceObjectIds.length > 0;
     var textAction = textActionOverride || "OWNED_BY_HWPX_TEXT";
     return {
         objectPlanId: "objectPlan.table_only_text_frame." + String(id),
@@ -2123,10 +2129,10 @@ function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder, textActionOve
         passId: "pass.table_only_text_frames",
         pageIndex: pageIndex,
         kind: "TextFrame",
-        mode: "TEXT_ONLY",
+        mode: ownsTableStyle ? "TABLE_STYLE" : "TEXT_ONLY",
         candidatePurpose: "table_only_text_frame",
         compositeRole: null,
-        slotRole: "TEXT_SLOT",
+        slotRole: ownsTableStyle ? "TABLE_STYLE_SLOT" : "TEXT_SLOT",
         layoutOnlyInlineSlot: false,
         sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
         inlineCompositeLayoutDescendant: false,
@@ -2141,31 +2147,265 @@ function _tableOnlyTextFrameObjectPlan(src, id, pageIndex, zOrder, textActionOve
         omittedClusterKindCounts: {},
         clusterHasEditableText: true,
         clusterHasTextFrame: true,
-        clusterHasPlacedContent: false,
-        clusterHasVisualSource: false,
+        clusterHasPlacedContent: ownsTableStyle,
+        clusterHasVisualSource: ownsTableStyle,
         visualSourceObjectIds: [],
-        styleSourceObjectIds: [],
+        styleSourceObjectIds: styleSourceObjectIds,
         ownedTextFrameIds: [id],
         exportSourceObjectIds: [],
         hiddenVisualSourceObjectIds: [],
-        materialization: "HWPX_TEXT",
+        materialization: ownsTableStyle ? "HWPX_TABLE_STYLE" : "HWPX_TEXT",
         textAction: textAction,
-        visualAction: "DROP_VISUAL",
+        visualAction: ownsTableStyle ? "PLACE_TABLE_STYLE" : "DROP_VISUAL",
         placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
         coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
         visualLayer: "CONTENT_VISUAL",
         zOrder: zOrder,
         reason: reasonOverride || "table_only_text_frame",
         bounds: src.bounds || null,
-        ownershipSlot: "TEXT_SLOT",
+        ownershipSlot: ownsTableStyle ? "TABLE_STYLE_SLOT" : "TEXT_SLOT",
         policyLayer: "TEXT",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
-        migrationStatus: "READY_TEXT_ONLY",
+        migrationStatus: ownsTableStyle ? "READY_EXACT_CLUSTER" : "READY_TEXT_ONLY",
         migrationBlocker: "NONE",
         migrationBlockerDetail: {},
         executable: true,
         required: true
     };
+}
+
+function _tableOnlyTextFrameStyleSourceObjectIds(src, textFrameId, sourceById) {
+    var ids = {};
+    _collectTableOnlyIntrinsicTableStyleSources(src, ids);
+    _collectTableOnlyDirectStyleOwner(src, textFrameId, sourceById, ids);
+    _collectTableOnlyCarrierStyleSiblings(src, textFrameId, sourceById, ids);
+    return _internSourceSetIds(_sortedNumericIds(_objectPlanSetKeysAsNumbers(ids)));
+}
+
+function _collectTableOnlyIntrinsicTableStyleSources(src, ids) {
+    if (!src || !ids || !src.tableSourceObjectIds) return;
+    for (var i = 0; i < src.tableSourceObjectIds.length; i++) {
+        var id = Number(src.tableSourceObjectIds[i]);
+        if (isNaN(id)) continue;
+        ids[String(id)] = true;
+    }
+}
+
+function _collectTableOnlyDirectStyleOwner(src, textFrameId, sourceById, ids) {
+    if (!src || !sourceById || !ids || !src.parentId) return;
+    var parent = sourceById[String(src.parentId)];
+    if (_isTableAttributeStyleSource(parent, textFrameId)) {
+        ids[String(parent.id)] = true;
+    }
+}
+
+function _collectTableOnlyCarrierStyleSiblings(src, textFrameId, sourceById, ids) {
+    if (!src || !sourceById || !ids) return;
+    var hasParentId = src.parentId !== null && src.parentId !== undefined;
+    var parent = hasParentId ? sourceById[String(src.parentId)] : null;
+    var carrier = parent;
+    if (parent && parent.parentId) {
+        var grandparent = sourceById[String(parent.parentId)];
+        if (grandparent) carrier = grandparent;
+    }
+    var tableOwnerBounds = _objectPlanSourceBounds(src);
+    var seenChildIds = {};
+    if (carrier) {
+        if (_isTableAttributeStyleSource(carrier, textFrameId, tableOwnerBounds, sourceById, true)) {
+            ids[String(carrier.id)] = true;
+        }
+        var carrierChildIds = _objectPlanSourceChildIds(carrier, sourceById);
+        for (var i = 0; i < carrierChildIds.length; i++) {
+            seenChildIds[String(carrierChildIds[i])] = true;
+            _collectTableOnlyCarrierStyleSourceId(
+                    carrierChildIds[i], textFrameId, tableOwnerBounds, sourceById, ids);
+        }
+    }
+    var siblingParentId = carrier && carrier.id !== undefined && carrier.id !== null
+            ? carrier.id
+            : (hasParentId ? src.parentId : null);
+    for (var key in sourceById) {
+        if (!sourceById.hasOwnProperty(key)) continue;
+        var item = sourceById[key];
+        if (!item) continue;
+        if (Number(item.id) === Number(textFrameId)) continue;
+        if (siblingParentId === null || siblingParentId === undefined) {
+            if (item.parentId !== null && item.parentId !== undefined) continue;
+        } else if (String(item.parentId) !== String(siblingParentId)) {
+            continue;
+        }
+        if (src.pageIndex !== undefined && item.pageIndex !== undefined
+                && Number(src.pageIndex) !== Number(item.pageIndex)) continue;
+        if (seenChildIds[String(item.id)]) continue;
+        _collectTableOnlyCarrierStyleSourceId(
+                item.id, textFrameId, tableOwnerBounds, sourceById, ids);
+    }
+}
+
+function _collectTableOnlyCarrierStyleSourceId(sourceId, textFrameId, tableOwnerBounds, sourceById, ids) {
+    var numericId = Number(sourceId);
+    if (isNaN(numericId) || numericId === Number(textFrameId)) return;
+    var item = sourceById ? sourceById[String(numericId)] : null;
+    if (!item) return;
+    if (item.visible === false || item.hiddenLayer === true || item.nonprinting === true) return;
+    if (item.sourceHidden === true || item.hiddenByParent === true) return;
+    if (item.isInline === true || item.storyAnchorPlacement === "INLINE") return;
+    if (_objectPlanSourceSubtreeContainsOtherTextFrame(item, textFrameId, sourceById)) return;
+    if (_objectPlanSourceKind(item) === "Group") {
+        var childIds = _objectPlanSourceChildIds(item, sourceById);
+        for (var i = 0; i < childIds.length; i++) {
+            _collectTableOnlyCarrierStyleSourceId(
+                    childIds[i], textFrameId, tableOwnerBounds, sourceById, ids);
+        }
+        return;
+    }
+    if (_isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourceById, false)) {
+        ids[String(numericId)] = true;
+    }
+}
+
+function _isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourceById, allowOwnerSubtreeContainer) {
+    if (!item) return false;
+    var id = Number(item.id);
+    if (isNaN(id) || id === Number(textFrameId)) return false;
+    if (item.visible === false || item.hiddenLayer === true || item.nonprinting === true) return false;
+    if (item.sourceHidden === true || item.hiddenByParent === true) return false;
+    if (item.isInline === true || item.storyAnchorPlacement === "INLINE") return false;
+    var kind = _objectPlanSourceKind(item);
+    if (kind === "TextFrame" || kind === "Image" || kind === "PDF" || kind === "EPS") return false;
+    if (kind !== "Rectangle" && kind !== "GraphicLine") return false;
+    if (_objectPlanSourceChildIds(item, sourceById).length > 0) {
+        var childIds = _objectPlanSourceChildIds(item, sourceById);
+        var directOwnerChild = childIds.length === 1 && Number(childIds[0]) === Number(textFrameId);
+        if (!directOwnerChild
+                && (!allowOwnerSubtreeContainer
+                || !_objectPlanSourceSubtreeContainsOnlyTableOwnerContent(
+                        item, textFrameId, sourceById))) {
+            return false;
+        }
+    }
+    if (!_objectPlanSourceHasAxisAlignedRotation(item.absoluteRotationAngle)) return false;
+    if (Math.abs(Number(item.absoluteShearAngle || 0)) > 0.1) return false;
+    if (item.hasDropShadow === true || item.gradientFeatherApplied === true) return false;
+    if (!_objectPlanSourceHasVisibleFillOrStroke(item)) return false;
+    if (tableOwnerBounds) {
+        var itemBounds = _objectPlanSourceBounds(item);
+        if (!_objectPlanBoundsNearOrInside(tableOwnerBounds, itemBounds, 2.0)) return false;
+    }
+    return true;
+}
+
+function _objectPlanSourceHasAxisAlignedRotation(angle) {
+    var value = Math.abs(Number(angle || 0));
+    if (isNaN(value)) return true;
+    var normalized = value % 180;
+    normalized = Math.min(normalized, 180 - normalized);
+    return normalized <= 0.1;
+}
+
+function _objectPlanSourceHasVisibleFillOrStroke(item) {
+    if (!item) return false;
+    var fill = String(item.fillColorName || item.fillColor || "");
+    var stroke = String(item.strokeColorName || item.strokeColor || "");
+    var strokeWeight = Number(item.strokeWeight || 0);
+    var visibleFill = fill && fill !== "None" && fill !== "[None]";
+    var visibleStroke = stroke && stroke !== "None" && stroke !== "[None]" && strokeWeight > 0;
+    return visibleFill || visibleStroke;
+}
+
+function _objectPlanBoundsNearOrInside(container, child, tolerance) {
+    if (!container || !child || container.length < 4 || child.length < 4) return false;
+    var t = Number(tolerance || 0);
+    return Number(child[0]) >= Number(container[0]) - t
+            && Number(child[1]) >= Number(container[1]) - t
+            && Number(child[2]) <= Number(container[2]) + t
+            && Number(child[3]) <= Number(container[3]) + t;
+}
+
+function _objectPlanSourceBounds(item) {
+    if (!item) return null;
+    return item.bounds || item.pageRelativeBounds || item.geometricBounds || null;
+}
+
+function _objectPlanSourceChildIds(item, sourceById) {
+    if (!item) return [];
+    if (item.childIds && item.childIds.length !== undefined) return item.childIds;
+    if (!sourceById || item.id === null || item.id === undefined) return [];
+    var ids = [];
+    var parentKey = String(item.id);
+    for (var key in sourceById) {
+        if (!sourceById.hasOwnProperty(key)) continue;
+        var child = sourceById[key];
+        if (!child || child.parentId === null || child.parentId === undefined) continue;
+        if (String(child.parentId) === parentKey) ids.push(child.id);
+    }
+    return ids;
+}
+
+function _objectPlanSourceSubtreeContainsOnlyTableOwnerContent(item, textFrameId, sourceById) {
+    if (!item || !sourceById) return false;
+    var foundOwner = false;
+
+    function visit(sourceId, depth) {
+        if (depth > 32) return false;
+        var id = Number(sourceId);
+        if (isNaN(id)) return true;
+        if (id === Number(textFrameId)) {
+            foundOwner = true;
+            return true;
+        }
+        var child = sourceById[String(id)];
+        if (!child) return true;
+        var kind = _objectPlanSourceKind(child);
+        if (kind === "TextFrame" || kind === "Image" || kind === "PDF" || kind === "EPS") {
+            return false;
+        }
+        var childIds = _objectPlanSourceChildIds(child, sourceById);
+        for (var i = 0; i < childIds.length; i++) {
+            if (!visit(childIds[i], depth + 1)) return false;
+        }
+        return true;
+    }
+
+    var childIds = _objectPlanSourceChildIds(item, sourceById);
+    for (var i = 0; i < childIds.length; i++) {
+        if (!visit(childIds[i], 0)) return false;
+    }
+    return foundOwner;
+}
+
+function _objectPlanSourceSubtreeContainsOtherTextFrame(item, textFrameId, sourceById) {
+    if (!item || !sourceById) return false;
+
+    function visit(sourceId, depth) {
+        if (depth > 32) return false;
+        var id = Number(sourceId);
+        if (isNaN(id) || id === Number(textFrameId)) return false;
+        var child = sourceById[String(id)];
+        if (!child) return false;
+        if (_objectPlanSourceKind(child) === "TextFrame") return true;
+        var childIds = _objectPlanSourceChildIds(child, sourceById);
+        for (var i = 0; i < childIds.length; i++) {
+            if (visit(childIds[i], depth + 1)) return true;
+        }
+        return false;
+    }
+
+    var childIds = _objectPlanSourceChildIds(item, sourceById);
+    for (var i = 0; i < childIds.length; i++) {
+        if (visit(childIds[i], 0)) return true;
+    }
+    return false;
+}
+
+function _objectPlanSetKeysAsNumbers(set) {
+    var values = [];
+    for (var key in set) {
+        if (!set.hasOwnProperty(key)) continue;
+        var n = Number(key);
+        if (!isNaN(n)) values.push(n);
+    }
+    return values;
 }
 
 function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
