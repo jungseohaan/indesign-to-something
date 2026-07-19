@@ -2550,12 +2550,11 @@ public class InlineFrameHandler {
                 return;
             }
         }
-        String text = normalizeInlineShellText(childTf != null ? childTf.frameVisibleText() : null);
-        if (text.isEmpty()) return;
-        ASTParagraph paraInner = new ASTParagraph();
-        paraInner.alignment(shellTextAlignment(ctx, childTf));
-        addSyntheticRunsFromTextFrame(ctx, paraInner, childTf, text);
-        obj.addParagraph(paraInner);
+        List<ASTParagraph> paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
+        if (paragraphs == null || paragraphs.isEmpty()) return;
+        for (ASTParagraph paragraph : paragraphs) {
+            obj.addParagraph(paragraph);
+        }
     }
 
     private static boolean canMaterializeShellTextFromWholeStory(
@@ -2710,6 +2709,30 @@ public class InlineFrameHandler {
                         .truncateAtParagraphBreak(false)
                         .skipBlankRuns(true)
                         .skipEmptyParagraphs(true));
+    }
+
+    private static List<ASTParagraph> buildSyntheticShellTextParagraphs(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame childTf) {
+        List<ASTParagraph> paragraphs = new ArrayList<>();
+        String rawText = childTf != null ? childTf.frameVisibleText() : null;
+        if (rawText == null) return paragraphs;
+        String cleaned = rawText
+                .replace("\uFFFC", "")
+                .replace("\r\n", "\n")
+                .replace('\r', '\n');
+        String[] parts = cleaned.split("\n", -1);
+        for (String part : parts) {
+            String text = part != null ? part.trim() : "";
+            if (text.isEmpty()) continue;
+            ASTParagraph paragraph = new ASTParagraph();
+            paragraph.alignment(shellTextAlignment(ctx, childTf));
+            addSyntheticRunsFromTextFrame(ctx, paragraph, childTf, text);
+            if (paragraph.items() != null && !paragraph.items().isEmpty()) {
+                paragraphs.add(paragraph);
+            }
+        }
+        return paragraphs;
     }
 
     private static boolean shouldUseResolvedParagraphsForInlineShell(ResolvedStory story) {
@@ -6214,6 +6237,7 @@ public class InlineFrameHandler {
 
     private static boolean shouldUseNoAutoLineWrap(ResolvedTextFrame tf, boolean hasVisualShell) {
         if (tf == null) return false;
+        if (hasSourceParagraphBreak(tf)) return false;
         if (isFixedSingleLineTitleOrLabel(tf, hasVisualShell)) return true;
         if (tf.composedLines() == null || tf.composedLines().size() < 2) return false;
         String visibleText = tf.frameVisibleText();
@@ -6228,6 +6252,16 @@ public class InlineFrameHandler {
             }
         }
         return paragraphIndices.size() == tf.composedLines().size();
+    }
+
+    private static boolean hasSourceParagraphBreak(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String visibleText = tf.frameVisibleText();
+        if (visibleText != null && (visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0)) {
+            return true;
+        }
+        if (tf.paragraphStart() != tf.paragraphEnd()) return true;
+        return tf.frameParaTexts() != null && tf.frameParaTexts().size() > 1;
     }
 
     private static boolean isFixedSingleLineTitleOrLabel(ResolvedTextFrame tf, boolean hasVisualShell) {
