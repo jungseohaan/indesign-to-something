@@ -5236,6 +5236,14 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         visualAction: visualAction,
         textAction: textAction
     });
+    if (ownershipSlot === "SHELL_SLOT"
+            && visualAction !== "PLACE_TEXT_SHELL"
+            && ownedTextFrameIds.length === 0) {
+        ownershipSlot = _objectPlanSlotFromActions({
+            visualAction: visualAction,
+            textAction: textAction
+        });
+    }
 
     return {
         objectPlanId: _objectPlanId(bundle, index),
@@ -5443,6 +5451,7 @@ function _objectPlanTextFrameSourceIds(sourceIds, sourceById) {
         if (isNaN(id)) continue;
         var src = sourceById ? sourceById[String(id)] : null;
         if (_objectPlanSourceKind(src) !== "TextFrame") continue;
+        if (src.hasText !== true) continue;
         _pushUniqueId(out, seen, id);
     }
     return _sortedNumericIds(out);
