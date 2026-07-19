@@ -604,6 +604,11 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
     public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
+        flushEHMathGroup(ehRuns, para, null);
+    }
+
+    public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para,
+                                        java.util.function.Function<String, String> colorToHex) {
         // 근호(√)·GREP 분수 구조가 포함된 EH 그룹은 화학식 경계 분할을 건너뛴다.
         // - 근호: radicand 안의 괄호(예: √(1/2)²)의 ")" 가 isChemicalFormulaBoundaryRun
         //   으로 감지돼 그룹이 통째로 쪼개지면 sqrt 구조가 파괴된다(실측: 1단원 p18
@@ -643,6 +648,10 @@ public class ASTMathGrouper {
             }
         } else {
             // 수식이 아닌 EH 폰트 텍스트 → 일반 텍스트 런으로 폴백
+            String groupFill = null;
+            for (IDMLCharacterRun r0 : ehRuns) {
+                if (r0 != null && r0.fillColor() != null) { groupFill = r0.fillColor(); break; }
+            }
             for (IDMLCharacterRun run : ehRuns) {
                 String text = run.content();
                 if (text != null && !text.isEmpty()) {
@@ -663,6 +672,11 @@ public class ASTMathGrouper {
                         if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
                     }
                     if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
+                    String fillRef = run.fillColor() != null ? run.fillColor() : groupFill;
+                    if (textRun.textColor() == null && fillRef != null && colorToHex != null) {
+                        String hex = colorToHex.apply(fillRef);
+                        if (hex != null && !hex.isEmpty()) textRun.textColor(hex);
+                    }
                     para.addItem(textRun);
                 }
             }
@@ -715,6 +729,11 @@ public class ASTMathGrouper {
      * 수식으로 변환할 수 없는 경우 (순수 텍스트 등) 일반 텍스트 런으로 폴백.
      */
     public static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        flushMathGroup(mathRuns, para, null);
+    }
+
+    public static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para,
+                                      java.util.function.Function<String, String> colorToHex) {
         if (emitBoundaryAwareChemicalFormulaGroup(mathRuns, para)) {
             return;
         }
@@ -733,6 +752,13 @@ public class ASTMathGrouper {
             para.addItem(new ASTEquation(hwpScript, sourceType));
         } else {
             // 수식이 아닌 BT 폰트 텍스트 → 일반 텍스트 런으로 폴백
+            // SPEC-042: 그룹 첫 명시 색 — 색 없는 런(상속)은 그룹 색을 따른다
+            // (한 그룹 = 한 화학식. 실측: 2H₂O 의 H 만 IDML fill 이 없어
+            // 이웃 색으로 오염되던 문제).
+            String groupFill = null;
+            for (IDMLCharacterRun r0 : mathRuns) {
+                if (r0 != null && r0.fillColor() != null) { groupFill = r0.fillColor(); break; }
+            }
             for (IDMLCharacterRun run : mathRuns) {
                 String text = run.content();
                 if (text != null && !text.isEmpty()) {
@@ -752,6 +778,13 @@ public class ASTMathGrouper {
                     textRun.grepMathFont(run.grepMathFont());
                     if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
                     if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
+                    // SPEC-042: IDML FillColor(색 참조)를 hex 로 풀어 보존 — 화학식
+                    // 강조색(주황 계수·파랑 O)이 폴백에서 검정으로 떨어지던 문제.
+                    String fillRef = run.fillColor() != null ? run.fillColor() : groupFill;
+                    if (textRun.textColor() == null && fillRef != null && colorToHex != null) {
+                        String hex = colorToHex.apply(fillRef);
+                        if (hex != null && !hex.isEmpty()) textRun.textColor(hex);
+                    }
                     para.addItem(textRun);
                 }
             }
