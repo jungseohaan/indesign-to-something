@@ -1554,9 +1554,32 @@ class MathProcessor {
         } else if ("NP".equals(type)) {
             ASTMathGrouper.flushNPMathGroup(group, tempPara);
         }
+        // SPEC-042: 폴백이 소스와 1:1 동일한 평문 런만 냈다면 손실 복제본 대신
+        // 원본 런(크기·굵기·색·첨자 보유)을 재사용한다. 텍스트 정리·디코딩이
+        // 일어난 경우(텍스트 불일치)나 수식·분절 산출이 있으면 폴백 산출을 쓴다.
+        if (reuseOriginalRunsForPlainFallback(tempPara.items(), sources, out)) {
+            return;
+        }
         backfillFlushedTextRunStyles(tempPara.items(), sources);
         backfillChemicalEquationStyleHints(tempPara.items(), sources);
         out.addAll(tempPara.items());
+    }
+
+    private static boolean reuseOriginalRunsForPlainFallback(
+            List<ASTInlineItem> emitted, List<ASTTextRun> sources, List<ASTInlineItem> out) {
+        if (emitted == null || sources == null || emitted.isEmpty()) return false;
+        if (emitted.size() != sources.size()) return false;
+        for (int i = 0; i < emitted.size(); i++) {
+            ASTInlineItem item = emitted.get(i);
+            ASTTextRun src = sources.get(i);
+            if (!(item instanceof ASTTextRun) || src == null) return false;
+            ASTTextRun run = (ASTTextRun) item;
+            if (!flushedTextMatches(src, run)) return false;
+            String ff = run.fontFamily();
+            if (ff != null && src.fontFamily() != null && !ff.equals(src.fontFamily())) return false;
+        }
+        out.addAll(sources);
+        return true;
     }
 
     /**
