@@ -1568,27 +1568,12 @@ class MathProcessor {
             while (k < sources.size() && !flushedTextMatches(sources.get(k), outRun)) k++;
             if (k >= sources.size()) continue;
             ASTTextRun src = sources.get(k);
-            int prev = k - 1;
             s = k + 1;
-            // 짧은 숫자 런 중 "문자·닫는괄호 뒤"(H₂의 2, (OH)₂의 2 — 첨자 후보)는
-            // 크기·굵기를 백필하지 않는다. 하류의 첨자 보강이 "크기 없는 폴백 런"을
-            // 조건으로 동작해, 크기를 선주입하면 첨자가 유실된다 (SPEC-042 실패 기록 3).
-            // 그룹 맨 앞이나 연산자 뒤의 숫자(2H₂O 의 계수 2)는 첨자가 아니므로 백필한다.
+            // 짧은 숫자 런(첨자 후보 — H₂의 2)은 백필하지 않는다. 하류의 첨자 보강이
+            // "크기 없는 폴백 런"을 조건으로 동작해, 여기서 크기를 선주입하면 첨자가
+            // 유실된다 (SPEC-042 실패 기록 3: 백필판에서도 동일 회귀 재현).
             String outText = outRun.text() == null ? "" : outRun.text().trim();
-            boolean scriptCandidateDigit = false;
-            if (outText.matches("\\d{1,2}")) {
-                String prevText = prev >= 0 && sources.get(prev) != null && sources.get(prev).text() != null
-                        ? sources.get(prev).text().trim() : "";
-                if (!prevText.isEmpty()) {
-                    char pc = prevText.charAt(prevText.length() - 1);
-                    scriptCandidateDigit = (pc >= 'A' && pc <= 'Z') || (pc >= 'a' && pc <= 'z') || pc == ')';
-                }
-            }
-            // 색상은 첨자 여부와 무관하게 백필 (계수·첨자 모두 원본 색 유지)
-            if (outRun.textColor() == null && src.textColor() != null) {
-                outRun.textColor(src.textColor());
-            }
-            if (scriptCandidateDigit) continue;
+            if (outText.matches("\\d{1,2}")) continue;
             if (outRun.fontSizeHwpunits() == null && src.fontSizeHwpunits() != null) {
                 outRun.fontSizeHwpunits(src.fontSizeHwpunits());
             }
