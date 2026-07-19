@@ -1653,8 +1653,15 @@ class MathProcessor {
                                   List<IDMLCharacterRun> npGroup,
                                   List<IDMLCharacterRun> ehGroup,
                                   ASTParagraph para) {
+        // SPEC-042: IDML FillColor 참조를 hex 로 푸는 리졸버 — 폴백 텍스트런 색 보존
+        java.util.function.Function<String, String> colorToHex = ctx == null
+                ? null
+                : (color -> RunBuilder.resolveColorToHex(ctx, color));
         if (btGroup != null && !btGroup.isEmpty()) {
-            ASTMathGrouper.flushMathGroup(btGroup, para);
+            String groupColor = firstGroupFillColorHex(ctx, btGroup);
+            int before = para.items().size();
+            ASTMathGrouper.flushMathGroup(btGroup, para, colorToHex);
+            applyGroupColorHintToNewChemEquations(para, before, groupColor);
             btGroup.clear();
         }
         if (npGroup != null && !npGroup.isEmpty()) {
@@ -1662,8 +1669,41 @@ class MathProcessor {
             npGroup.clear();
         }
         if (ehGroup != null && !ehGroup.isEmpty()) {
-            ASTMathGrouper.flushEHMathGroup(ehGroup, para);
+            String groupColor = firstGroupFillColorHex(ctx, ehGroup);
+            int before = para.items().size();
+            ASTMathGrouper.flushEHMathGroup(ehGroup, para, colorToHex);
+            applyGroupColorHintToNewChemEquations(para, before, groupColor);
             ehGroup.clear();
+        }
+    }
+
+    /** SPEC-042: 그룹 첫 IDML FillColor 를 hex 로 (화학식 강조색 힌트용). */
+    private static String firstGroupFillColorHex(ResolvedBuildContext ctx, List<IDMLCharacterRun> group) {
+        if (ctx == null || group == null) return null;
+        for (IDMLCharacterRun run : group) {
+            if (run == null || run.fillColor() == null) continue;
+            String hex = RunBuilder.resolveColorToHex(ctx, run.fillColor());
+            if (hex != null && !hex.isEmpty()) return hex;
+        }
+        return null;
+    }
+
+    /**
+     * SPEC-042: flush 가 새로 만든 CHEM_FORMULA 수식에 그룹 색 힌트를 주입.
+     * 다이얼로그처럼 화살표 증거로 수식으로 직행하는 경우 폴백 텍스트런 색 주입이
+     * 닿지 않으므로, FormulaRenderer 가 소비할 textColor 힌트를 여기서 채운다.
+     */
+    private static void applyGroupColorHintToNewChemEquations(ASTParagraph para, int fromIndex, String colorHex) {
+        if (para == null || para.items() == null || colorHex == null || colorHex.isEmpty()) return;
+        for (int i = Math.max(0, fromIndex); i < para.items().size(); i++) {
+            ASTInlineItem item = para.items().get(i);
+            if (!(item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item;
+            if (!"CHEM_FORMULA".equals(eq.sourceType())) continue;
+            if (eq.textColor() == null || eq.textColor().isEmpty()) {
+                eq.textColor(colorHex);
+            }
         }
     }
 
