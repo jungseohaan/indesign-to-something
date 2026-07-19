@@ -5,8 +5,9 @@
 
 ## 8. Table Structure And Decoration
 
-V2 keeps the table itself editable, but stops translating decorative cell
-appearance into HWPX table style.
+V2 keeps the table itself editable, and table-authored fill/stroke/outline
+appearance is absorbed into HWPX table style only when Stage 1 declares the
+source objects as the table's `TABLE_STYLE_SLOT`.
 
 - IDML table structure belongs to the table structure slot: table object,
   rows, columns, merged cells, fixed outer bounds, row/column geometry, and
@@ -41,28 +42,26 @@ appearance into HWPX table style.
   Executors must not emit another HWPX table/text owner for that carrier. The
   carrier may remain as provenance for placement, but not as a second visible
   `TEXT_SLOT` or table-structure owner.
-- During migration the implementation value `TABLE_STYLE_SLOT` /
-  `PLACE_TABLE_STYLE` / `HWPX_TABLE_STYLE` may still name this slot. In this
-  policy, that legacy name means table structure only.
-- IDML cell/table decoration belongs to textless graphic ownership, not HWPX
-  table style: cell fill, border, rounded plates, row bands, shadows, patterns,
-  masks, decorative separators, and table chrome are materialized from source
-  PNG/vector graphic bundles.
-- HWPX table carriers must be visually neutral except for the minimum structure
-  needed to keep rows, columns, merged cells, text anchoring, and editing
-  behavior. They must not create default white faces, synthetic borders, or
-  replacement decoration that can cover the source-owned graphic material.
+- The implementation values `TABLE_STYLE_SLOT` / `PLACE_TABLE_STYLE` /
+  `HWPX_TABLE_STYLE` name the table style channel. This channel may include the
+  IDML table structure source and source-authored table appearance such as cell
+  fill, cell border, grid stroke, and table outer outline.
+- IDML cell/table decoration belongs to HWPX table style when the source
+  relationship identifies it as table appearance: a table-only TextFrame's
+  direct fill/stroke wrapper, table cell plate, or simple grid/outline stroke
+  declared in `ObjectPlan.styleSourceObjectIds`.
+- HWPX table carriers must remain visually neutral only for appearance that is
+  not declared in `TABLE_STYLE_SLOT`. They must not create default white faces,
+  synthetic borders, or replacement decoration.
 - If a visible table/cell decoration is missing, Stage 1 must look for the
-  source graphic bundle or extraction record that should own that textless
-  material. It must not repair the issue by inventing HWPX cell fill/border.
+  source object that should be listed in `styleSourceObjectIds`. Executors must
+  not repair the issue by bounds-searching arbitrary page shapes.
 - Table outer borders are source edges, not inferred decoration. If IDML cell
-  edge metadata says an outer edge has no stroke, the HWPX table carrier must
-  keep that edge empty. Visible outer edges come from planned textless graphic
-  material, not from a representative visible inner border.
+  edge metadata and declared style sources say an outer edge has no stroke, the
+  HWPX table carrier must keep that edge empty.
 - Missing table edge weight is not a license to invent a default stroke. A table
   border fallback must not borrow a weight from another edge. If source
-  decoration is visible, it must come from planned native line/shell/textless
-  graphic sources.
+  decoration is visible, it must come from a declared table style source.
 - When a table-only carrier cell contains an inline anchored composite object,
   source objects already planned as table structure are not emitted again as
   separate shell PNGs. Distinct visual shells inside the same composite remain
@@ -82,20 +81,18 @@ appearance into HWPX table style.
   text plans unless the source explicitly anchors them inside an IDML table
   cell.
 - Non-text parent/sibling page-items near a table-only TextFrame default to
-  `SHELL_SLOT` or `CONTENT_VISUAL_SLOT`, not table structure. Stage 1 must not
-  attach a source item to table structure merely because it looks like a cell
-  fill, row band, edge, or grid primitive.
-- Composite groups, group roots, child-bearing shapes, tabs, rounded outlines,
-  badges, callout containers, and any shape protruding outside the table bounds
-  remain separate shell/content visual owners. They must not be subtracted from
-  shell PNGs merely because they are siblings of a table-only TextFrame.
-- Stage 1 extraction planning must emit `SHELL_SLOT` candidates for non-text
-  visual siblings of a table-only TextFrame carrier when those visual sources
-  are not the actual IDML table structure source. This includes composite/
-  child-bearing visual siblings, leaf source shapes that carry visible fill, and
-  stroke-only lines used as visible table/grid decoration. The executor must not
-  recover these shells later by bounds matching or by drawing replacement
-  shapes.
+  `SHELL_SLOT` or `CONTENT_VISUAL_SLOT` unless source relationship and simple
+  table-appearance role qualify them for `TABLE_STYLE_SLOT`. Stage 1 must not
+  attach a source item to table style merely because it looks nearby.
+- Composite groups, group roots, child-bearing shapes unrelated to the table
+  cell wrapper, tabs, rounded outlines, badges, callout containers, and any
+  shape protruding outside the table role remain separate shell/content visual
+  owners. They must not be subtracted from shell PNGs merely because they are
+  siblings of a table-only TextFrame.
+- Stage 1 extraction planning must emit `TABLE_STYLE_SLOT` candidates for
+  source-authored non-text visual table attributes and `SHELL_SLOT` candidates
+  for other non-text visual siblings. The executor must not recover either class
+  later by bounds matching or by drawing replacement shapes.
 - A broad direct-child shell candidate that contains a table-only TextFrame
   carrier and non-text visual sibling shells is still a carrier for those
   siblings, not the final owner of their visual channel. Stage 1 must split the
@@ -109,18 +106,18 @@ appearance into HWPX table style.
 - A rendered slot-only parent shell that contains a table-only TextFrame source
   is not executable shell material unless its visual source channel explicitly
   excludes the table structure sources.
-- A separate source shape must not be absorbed into table style. If it is
-  visible, it owns textless graphic material.
-- A `PLACE_TABLE_STYLE` plan may describe table structure and geometry only. It
-  must not project page shapes, row bands, cell plates, borders, or fills into
-  HWPX cell style.
-- Header bands, first-column bands, and table outer outlines that are source
-  fill/stroke material are textless graphic owners. They are not emitted as
-  HWPX table properties.
+- A separate source shape must not be absorbed into table style unless Stage 1
+  declares it in a table plan's `styleSourceObjectIds`.
+- A `PLACE_TABLE_STYLE` plan describes table structure, geometry, and declared
+  source-authored table appearance. It must not project undeclared page shapes,
+  row bands, cell plates, borders, or fills into HWPX cell style.
+- Header bands, first-column bands, and table outer outlines that are declared
+  table style sources are emitted as HWPX table properties. Otherwise they
+  remain textless graphic owners.
 - Native or extracted header/table imagery owns a distinct
   `SHELL_SLOT`/`CONTENT_VISUAL_SLOT` and must not duplicate table structure.
 - A source owned as table structure is not also emitted as shell/content visual;
-  a source owned as table decoration is not also emitted as HWPX table style.
+  a source owned as table style is not also emitted as shell/content visual.
 - Resolved table bounds are the canonical table content placement bounds when
   present. IDML tables live inside Stories/TextFrames, but the table grid/content
   can start below or inside its carrier frame; using the carrier as the primary
