@@ -105,6 +105,39 @@ composite 소유에서 분리해 **별도 FLOATING LABEL_BACKDROP 플랜**으로
 **B안 우선 권장** — 플랜 계약을 건드리지 않고, 재추출 없이 기존 추출물로
 반복 검증 가능(`make reconvert EXTRACT=...`).
 
+## B안 실행 경로 추적 (2026-07-19, 진행 중)
+
+p187 산출물의 실제 HWPX 구조: 셀 안 **단일 `<hp:rect>` + 단일 `<hp:drawText>`**
+에 "구절 풀이"+인용문이 문단으로 연결돼 있고 오버레이 자식 객체는 없다.
+
+확인된 사실:
+- 레거시 헬퍼(tryInlineGroupShellWithEditableChild 등)는 `hasStage1ObjectPlans`
+  가드로 전부 우회 → 이 rect 는 플랜 기반 경로 산출물
+- `buildInlineShellObject` 의 오버레이 분기 조건(`visibleShellTextFrameCount>1`)
+  은 childTfs=[364022,364046] 로 성립해야 함 (둘 다 가시 텍스트,
+  isOrcCarrierTextFrame 아님 — normalizeInlineShellText 로 확인)
+- 오버레이 소비자는 존재: `InlineFrameBuilder`/`HwpxImageBuilder` 가
+  `overlayFrames`/`isOverlay()` 처리
+
+남은 미해결: 오버레이가 AST 에서 안 만들어졌는지(분기 미진입/overlay null),
+HWPX 빌더에서 유실됐는지, 아니면 rect 를 만든 게 제3의 빌더(TableBuilder
+중첩 복원, PageOverlayBuilder, SingleColumnTableConverter)인지.
+
+### 다음 단계 (재추출 불필요 — reconvert 로 반복)
+
+1. `buildInlineShellObject` 오버레이 분기와 `attachInlineShellChildTextOverlays`
+   에 임시 디버그 로그 → `make reconvert EXTRACT=output/issues/고등문학지도서/u2/p187-20260719-094654/extract`
+2. 분기 미진입이면 childTfs/카운트 값 확인, 진입했으면 InlineFrameBuilder 의
+   overlay 렌더 경로 확인 (테이블 셀 안 INLINE_TEXT_FRAME 의 overlay 지원 여부)
+3. 오버레이가 살아나면: pill 텍스트가 셸 내 상대좌표(pill 위치)에 배치되는지
+   + 원본 스크린샷과 비교 (pill 은 박스 좌상단 모서리 걸침)
+
+### 검증용 아티팩트 (단일 페이지, 반복 사이클용)
+
+- `output/issues/고등문학지도서/u2/p187-20260719-094654/extract/` — p187 만
+- 원본 레이아웃: 회색 인용 박스 + 좌상단 모서리에 파란 pill("구절/풀이" 세로
+  2행) + 박스 안 첫머리 "114쪽 9행" — 사용자 원본 스크린샷 확보(2026-07-19)
+
 ## 수정 파일
 
 1. `scripts/indd/object_plans.jsx` (또는 candidate_normalization.jsx) — 순환
