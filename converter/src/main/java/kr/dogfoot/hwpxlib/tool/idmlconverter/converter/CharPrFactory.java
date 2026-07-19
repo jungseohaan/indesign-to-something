@@ -454,10 +454,18 @@ final class CharPrFactory {
 
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
         String textColor = equationFontTextColor(textRun, baseCharPrId);
+        // 키에는 CharPrBuilder.build 가 소비하는 스타일 인자를 전부 넣는다.
+        // subscript/superscript 가 빠져 있던 동안, 첨자 런이 만든 CharPr 을 같은
+        // 폰트·크기·색의 일반 런이 물려받아 첨자가 이웃 글자로 전이됐다
+        // (과학 u1 p47 2H₂+O₂→2H₂O 의 H 가 첨자, 2 가 일반으로 뒤바뀐 사례).
         String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
                 + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
                 + "|" + (textColor != null ? textColor : "")
-                + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "");
+                + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "")
+                + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
+                + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
+                + "|" + (textRun.characterStyleRef() != null ? textRun.characterStyleRef() : "")
+                + "|" + textRun.subscript() + "|" + textRun.superscript();
         String cached = ctx.eqFontCharPrCache.get(cacheKey);
         if (cached != null) return cached;
 

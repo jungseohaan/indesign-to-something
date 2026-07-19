@@ -291,6 +291,7 @@ packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 - **hex/decimal ID 변환**: IDML `u` + hex (`u1735`), InDesign DOM decimal (`5941`), 변환은 `parseInt("1735", 16) = 5941`
 - **Phase 3 텍스트 매칭**: `lastMatchResult[0]` 인덱스 캐시로 O(n) 가속. 인라인 수식으로 텍스트 길이 차이 시 next() 재탐색 → O(n²) 위험
 - **수식 폰트 한국어 오적용 방지**: BT/EH/NP 폰트 필터가 한국어 텍스트 보호. 단, 단일 라틴 문자는 통과 → 혼합 텍스트 경계 케이스 잔존
+- **CharPr 캐시 키는 스타일 인자 전부 포함**: `CharPrFactory` 계열 캐시 키에 CharPrBuilder.build 가 소비하는 인자(특히 subscript/superscript/fontStyle)가 하나라도 빠지면, 다른 문단이 만든 CharPr 을 물려받아 첨자가 이웃 글자로 전이된다 (SPEC-042 p47 사례: H↔2 첨자 스왑). AST 계측이 침묵인데 HWPX 에 속성이 있으면 CharPr 캐시/공유 층을 의심할 것
 - **resolved DOM 의 EH 폰트 과대 보고**: InDesign DOM 이 √ 글리프 뒤 한국어 문장까지 EH상부자 폰트로 보고할 수 있다 (IDML 은 [No character style]). resolved 셀 경로가 폰트만 보고 수식 그룹에 넣으면 lexSubSup 미매핑 스킵으로 한국어가 통째로 유실 → `MathProcessor.splitEHKoreanMixedTextRuns` 가 첫 한국어 문자에서 분리 (p20 사례, 36c2d24c)
 
 ### 환경

@@ -119,6 +119,44 @@ resolved DOM 계산값(빨강)이 충돌**하는 데이터였다 — 인쇄는 �
 검증: 유채 시퀀스 전부 #df542b 통일(파랑 0), 검정 컨텍스트 크기 원복(1100),
 SUB 무결(3/39), 텍스트 동일, 수학 u1 diff 0 + 텍스트 동일, 지도서 u2 통계 동일.
 
+## p46·p47 반응식 박스 (2026-07-19, 해결)
+
+확인문제의 반응식 박스("N₂+3H₂ → 2NH₃", "2H₂+O₂ → 2H₂O")가 첨자 없는
+평문 + 원시 화살표 글리프("?C")로 나오던 문제. 원인은 두 겹:
+
+1. **화살표 정규화 비대칭이 셸 게이트를 깨뜨림** — `ResolvedDataReader.parseRun`
+   은 story 런의 화살표 글리프를 "→" 로 정규화하지만 `frameVisibleText` 는 원문
+   ("C"/"@"/"@C"/"?C")을 그대로 가진다. 인라인 셸의 구조 보존 경로 게이트
+   (`InlineFrameHandler.canMaterializeShellTextFromWholeStory`)가 두 텍스트의
+   동일성을 요구하므로 화살표 든 프레임은 **항상** 평탄화 경로
+   (`addSyntheticRunsFromTextFrame`, 단일 소스런 통짜 텍스트)로 떨어져 런 구조
+   (첨자 position, 화살표 폰트)를 잃었다.
+   → `frameTextMatchesStoryModuloArrowGlyphs`: storyText 의 "→" 자리에 원문
+   글리프 후보(@C|?C|@|C|→)만 허용하는 비교를 추가. **스토리에 실제 BT화살표
+   폰트 런이 있을 때만** 적용 — 자유 와일드카드(`.{1,2}`)로 하면 본문에 진짜
+   "→" 문자를 쓰는 수학 u1 에서 내용이 다른 프레임까지 잘못 통과해 수식
+   그룹핑이 깨졌다 (실측 54건 회귀 → 조건 강화로 0건).
+
+2. **수식 폰트 CharPr 캐시 키에 첨자 누락** — 게이트를 고치자 p47 에서 H 가
+   첨자, 2 가 일반으로 뒤바뀌는 스왑이 드러났다. AST 는 정상(계측 확인)이고,
+   범인은 `CharPrFactory.createEquationFontCharPr` 의 `eqFontCharPrCache` 키가
+   base|폰트|크기|색|shade 만 포함하고 **subscript/superscript/fontStyle 을
+   제외**한 것. base 는 "직전 런의 charPr" 라 체인이 문서 전반에 걸쳐 이어지는데,
+   p46 박스가 만든 체인(N→755, 2˅→757, +3→758 …)을 p47 박스가 같은 키로
+   재사용하면서 한 칸 어긋난 속성을 물려받았다 (H 가 첨자 757, 첨자 2 가 일반
+   758). → 키에 fontStyle/letterSpacing/characterStyleRef/subscript/superscript
+   전부 추가 (키 분할은 항상 안전 — 병합만 위험).
+
+검증: 과학 u1 — HEAD 대비 텍스트 diff 가 정확히 목표 박스 2곳뿐, 전 반응식
+첨자가 숫자에만 적용(숫자外 SUB 런 0), ?C 잔존 0. 부수 효과로 p46 02번 문제
+보기의 반응식 5건(CH₄, CaCO₃ 등)도 평문→구조화 복원. 수학 u1 — HEAD 대비
+수식 diff 0 + 텍스트 100% 동일. (지도서는 수식이 없어 검증 대상 아님 — 사용자
+확인.)
+
+디버깅 노트: AST 세터 계측(text/subscript)이 전부 침묵인데 HWPX 에 SUB 가
+있으면 **CharPr 캐시/공유 층**을 의심할 것. `StyleRegistry.nextCharPrId` 에
+특정 id 트랩을 걸면 생성 주체 스택을 바로 잡을 수 있다.
+
 ## 미해결 (잔여)
 
 - (해소됨 — 원본 런 재사용) ~~텍스트-flow 계수~~

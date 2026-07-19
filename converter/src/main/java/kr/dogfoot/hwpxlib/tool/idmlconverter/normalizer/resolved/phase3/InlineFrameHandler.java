@@ -2567,10 +2567,56 @@ public class InlineFrameHandler {
         String frameText = normalizeInlineShellText(textFrame.frameVisibleText());
         if (frameText.isEmpty()) return false;
 
-        String storyText = normalizeInlineShellStoryText(ctx.resolvedData.getStory(textFrame.storyId()));
+        ResolvedStory story = ctx.resolvedData.getStory(textFrame.storyId());
+        String storyText = normalizeInlineShellStoryText(story);
         if (storyText.isEmpty()) return false;
         if (frameText.equals(storyText)) return true;
+        if (frameTextMatchesStoryModuloArrowGlyphs(frameText, storyText, story)) return true;
         return canMaterializeOwnedOverflowShellText(ctx, textFrame, frameText, storyText);
+    }
+
+    /**
+     * 화살표 글리프 관용 비교.
+     *
+     * <p>BT화살표 글리프 런은 ResolvedDataReader 가 story 쪽 텍스트만 "→" 로
+     * 정규화하고, frameVisibleText 는 폰트에 저장된 원문 글자("C"/"@"/"@C"/"?C")를
+     * 그대로 갖는다. 그래서 화살표가 든 반응식 프레임은 문자 그대로의 동일성
+     * 비교가 항상 실패해 구조 보존 경로 대신 평탄화 경로로 떨어졌다 — 첨자·화살표
+     * 소실 (실측: 과학 u1 p46 N₂+3H₂→2NH₃, p47 2H₂+O₂→2H₂O). storyText 의 "→"
+     * 자리에 원문 글리프 후보만 허용해 비교한다.
+     *
+     * <p>주의: 스토리에 실제 BT화살표 폰트 런이 있을 때만 적용한다. 본문에 진짜
+     * "→" 문자를 쓰는 문서(수학 u1)에서 자유 와일드카드로 비교하면, 내용이 정말
+     * 다른 프레임까지 통짜 스토리 경로로 잘못 통과해 수식 그룹핑이 깨진다.
+     */
+    private static boolean frameTextMatchesStoryModuloArrowGlyphs(
+            String frameText, String storyText, ResolvedStory story) {
+        if (frameText == null || storyText == null) return false;
+        if (!storyText.contains(BTFontGlyphMap.ARROW)) return false;
+        if (!storyHasArrowGlyphRun(story)) return false;
+        String[] parts = storyText.split(BTFontGlyphMap.ARROW, -1);
+        StringBuilder regex = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            // 실측된 화살표 원문 글리프 집합 (BTFontGlyphMap 주석 참조) + 정규화된 "→" 자신.
+            if (i > 0) regex.append("(?:@C|\\?C|@|C|→)");
+            if (!parts[i].isEmpty()) regex.append(java.util.regex.Pattern.quote(parts[i]));
+        }
+        return frameText.matches(regex.toString());
+    }
+
+    private static boolean storyHasArrowGlyphRun(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null) continue;
+                if (BTFontGlyphMap.isBTArrowFont(run.fontFamily())
+                        || BTFontGlyphMap.isBTArrowFontStyle(run.charStyle())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean canMaterializeOwnedOverflowShellText(
