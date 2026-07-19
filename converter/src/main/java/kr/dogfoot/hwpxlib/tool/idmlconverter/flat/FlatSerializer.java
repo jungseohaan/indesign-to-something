@@ -604,6 +604,9 @@ public class FlatSerializer {
         if (cell.minimumFirstBaselineOffset() != 0) {
             first = writeLongField(sb, "minimumFirstBaselineOffset", cell.minimumFirstBaselineOffset(), first);
         }
+        if (cell.squeezeLineWrap()) {
+            first = writeBooleanField(sb, "squeezeLineWrap", true, first);
+        }
 
         sb.append('}');
     }

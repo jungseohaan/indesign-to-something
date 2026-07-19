@@ -39,6 +39,7 @@ public class ASTTableCell {
     private String verticalAlign = "TopAlign";
     private String firstBaselineOffset;
     private long minimumFirstBaselineOffset;
+    private boolean squeezeLineWrap;
 
     public ASTTableCell() {
         this.paragraphs = new ArrayList<>();
@@ -112,6 +113,9 @@ public class ASTTableCell {
 
     public long minimumFirstBaselineOffset() { return minimumFirstBaselineOffset; }
     public void minimumFirstBaselineOffset(long v) { this.minimumFirstBaselineOffset = v; }
+
+    public boolean squeezeLineWrap() { return squeezeLineWrap; }
+    public void squeezeLineWrap(boolean v) { this.squeezeLineWrap = v; }
 
     /**
      * 셀 테두리 정보.
