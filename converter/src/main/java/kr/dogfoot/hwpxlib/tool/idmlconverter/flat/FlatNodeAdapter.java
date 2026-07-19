@@ -218,6 +218,7 @@ public class FlatNodeAdapter {
         astCell.verticalAlign(flatCell.verticalAlign());
         astCell.firstBaselineOffset(flatCell.firstBaselineOffset());
         astCell.minimumFirstBaselineOffset(flatCell.minimumFirstBaselineOffset());
+        astCell.squeezeLineWrap(flatCell.squeezeLineWrap());
 
         // Convert cell paragraphs from componentIds
         List<ASTParagraph> paragraphs = toParagraphs(flatCell.componentIds());

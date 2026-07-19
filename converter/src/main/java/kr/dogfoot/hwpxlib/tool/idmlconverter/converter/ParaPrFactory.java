@@ -113,7 +113,7 @@ final class ParaPrFactory {
 
         paraPr.idAnd(newId)
                 .tabPrIDRefAnd(tabPrId)
-                .condenseAnd((byte) 0)
+                .condenseAnd(astPara.squeezeLineWrap() ? (byte) 20 : (byte) 0)
                 .fontLineHeightAnd(false)
                 .snapToGridAnd(true)
                 .suppressLineNumbersAnd(false)

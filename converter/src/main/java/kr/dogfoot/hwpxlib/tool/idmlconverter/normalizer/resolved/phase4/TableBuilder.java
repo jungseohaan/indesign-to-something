@@ -637,6 +637,7 @@ public final class TableBuilder {
         traceTableCells(ctx, "TableBuilder.afterConvertTableSimple", idmlTable, astTable);
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
         inlineNestedTextFrameParagraphsInCells(ctx, astTable);
+        applyTableCellLineWrapHints(astTable);
         applyOverflowingTableOnlyVisibleRowBudget(ctx, idmlTable, astTable);
         traceTableCells(ctx, "TableBuilder.afterNestedContentRestore", idmlTable, astTable);
 
@@ -675,6 +676,7 @@ public final class TableBuilder {
                 out.addProperty("width", cell.width());
                 out.addProperty("height", cell.height());
                 out.addProperty("fillColor", cell.fillColor());
+                out.addProperty("squeezeLineWrap", cell.squeezeLineWrap());
                 out.addProperty("hasTopBorder", cell.topBorder() != null);
                 out.addProperty("hasBottomBorder", cell.bottomBorder() != null);
                 out.addProperty("hasLeftBorder", cell.leftBorder() != null);
@@ -2063,6 +2065,147 @@ public final class TableBuilder {
         return obj.cornerRadius() > 0.01;
     }
 
+    private static void applyTableCellLineWrapHints(ASTTable table) {
+        if (table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                if (cellHasSqueezeCarrier(cell) || isSourceSingleLineCell(cell)) {
+                    cell.squeezeLineWrap(true);
+                    markCellParagraphsSqueeze(cell);
+                }
+            }
+        }
+    }
+
+    private static boolean cellHasSqueezeCarrier(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraphHasSqueezeCarrier(paragraph)) return true;
+        }
+        return false;
+    }
+
+    private static boolean paragraphHasSqueezeCarrier(ASTParagraph paragraph) {
+        if (paragraph == null) return false;
+        if (paragraph.squeezeLineWrap()) return true;
+        if (paragraph.inlineTable() != null && tableHasSqueezeCarrier(paragraph.inlineTable())) return true;
+        if (paragraph.items() == null) return false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTInlineObject
+                    && inlineObjectHasSqueezeCarrier((ASTInlineObject) item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean inlineObjectHasSqueezeCarrier(ASTInlineObject obj) {
+        if (obj == null) return false;
+        if (obj.noAutoLineWrap()) return true;
+        if (obj.paragraphs() != null) {
+            for (ASTParagraph paragraph : obj.paragraphs()) {
+                if (paragraphHasSqueezeCarrier(paragraph)) return true;
+            }
+        }
+        if (obj.inlineTables() != null) {
+            for (ASTTable table : obj.inlineTables()) {
+                if (tableHasSqueezeCarrier(table)) return true;
+            }
+        }
+        if (obj.overlayFrames() != null) {
+            for (ASTInlineObject overlay : obj.overlayFrames()) {
+                if (inlineObjectHasSqueezeCarrier(overlay)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean tableHasSqueezeCarrier(ASTTable table) {
+        if (table == null || table.rows() == null) return false;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                if (cell.squeezeLineWrap() || cellHasSqueezeCarrier(cell)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void markCellParagraphsSqueeze(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph != null && !paragraph.squeezeLineWrap()) {
+                paragraph.squeezeLineWrap(true);
+            }
+        }
+    }
+
+    private static boolean isSourceSingleLineCell(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        ASTParagraph paragraph = singleTextParagraph(cell);
+        if (paragraph == null) return false;
+        int maxFont = maxFontSizeHwpunits(paragraph);
+        if (maxFont <= 0 || cell.height() <= 0) return false;
+        long contentHeight = cell.height()
+                - Math.max(0, cell.marginTop())
+                - Math.max(0, cell.marginBottom());
+        if (contentHeight <= 0) contentHeight = cell.height();
+        return contentHeight <= Math.round(maxFont * 2.1d);
+    }
+
+    private static ASTParagraph singleTextParagraph(ASTTableCell cell) {
+        ASTParagraph found = null;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null) return null;
+            if (!paragraphHasVisibleText(paragraph)) continue;
+            if (found != null) return null;
+            if (!isSingleLinePlainTextParagraph(paragraph)) return null;
+            found = paragraph;
+        }
+        return found;
+    }
+
+    private static boolean paragraphHasVisibleText(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.trim().isEmpty()) return true;
+            } else if (item != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isSingleLinePlainTextParagraph(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) return false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) return false;
+            String text = ((ASTTextRun) item).text();
+            if (text == null || text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0
+                    || text.indexOf('\u2028') >= 0 || text.indexOf('\u000b') >= 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int maxFontSizeHwpunits(ASTParagraph paragraph) {
+        int max = 0;
+        if (paragraph == null || paragraph.items() == null) return max;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            Integer fontSize = ((ASTTextRun) item).fontSizeHwpunits();
+            if (fontSize != null && fontSize > max) max = fontSize;
+        }
+        return max;
+    }
+
     private static boolean isPlannedInlineTextShellObject(ResolvedBuildContext ctx, ASTInlineObject obj) {
         if (ctx == null || obj == null || obj.sourceId() == null) return false;
         Integer domId = parseSourceObjectId(obj.sourceId());
@@ -2264,6 +2407,7 @@ public final class TableBuilder {
         cell.verticalAlign(src.verticalAlign());
         cell.firstBaselineOffset(src.firstBaselineOffset());
         cell.minimumFirstBaselineOffset(src.minimumFirstBaselineOffset());
+        cell.squeezeLineWrap(src.squeezeLineWrap());
         cell.width(src.width());
         cell.height(src.height());
         return cell;

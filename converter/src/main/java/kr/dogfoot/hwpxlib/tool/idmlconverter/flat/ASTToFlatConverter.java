@@ -254,6 +254,7 @@ public class ASTToFlatConverter {
         flatCell.verticalAlign(astCell.verticalAlign());
         flatCell.firstBaselineOffset(astCell.firstBaselineOffset());
         flatCell.minimumFirstBaselineOffset(astCell.minimumFirstBaselineOffset());
+        flatCell.squeezeLineWrap(astCell.squeezeLineWrap());
 
         // Convert cell paragraphs → FlatComponent
         for (ASTParagraph astPara : astCell.paragraphs()) {

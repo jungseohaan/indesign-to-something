@@ -2941,6 +2941,7 @@ function _objectPlanIsInlineVisibleTextFrameShellPlan(plan) {
 
 function _objectPlanOwnsInlineVisibleTextFrameSource(plan, sourceById) {
     if (!plan || !sourceById) return false;
+    if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
     var ids = [];
     if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) {
         ids = ids.concat(plan.ownedTextFrameIds);
@@ -5346,7 +5347,6 @@ function _normalizeObjectPlanBundle(bundle, sourceById) {
 function _objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById) {
     if (!bundle) return false;
     if (bundle.passId !== "pass.inline_objects") return false;
-    if (_objectPlanPlacement(bundle) !== "INLINE") return false;
     if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
     if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) return false;
     var visualIds = _objectPlanInlineEditableTextShellVisualIds(bundle, sourceById);
@@ -5377,6 +5377,8 @@ function _inlineEditableTextShellCompositeBundle(bundle, sourceById) {
     normalized.visualSourceObjectIds = visualIds;
     normalized.exportSourceObjectIds = exportIds;
     normalized.hiddenVisualSourceObjectIds = hiddenIds;
+    normalized.hiddenTextFrameIds = _sourceIdsUnion(
+            bundle.hiddenTextFrameIds || [], ownedTextFrameIds);
     normalized.ownedTextFrameIds = ownedTextFrameIds;
     normalized.ownershipSlot = "SHELL_SLOT";
     normalized.policyLayer = "DECORATION";
@@ -5905,26 +5907,46 @@ function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
 }
 
 function _objectPlanPlacement(bundle) {
-    if (bundle && bundle.tableCellInlineAnchorSource === true
-            && bundle.sourceInlineFlow === true
-            && bundle.inlineAnchorSourceObjectId) return "INLINE";
+    if (_objectPlanBundleHasExecutableInlineStoryContract(bundle)) return "INLINE";
     if (bundle && bundle.inlineTextStyleMarkerSource === true) return "INLINE";
     if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
     if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
     if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
+    if (_objectPlanBundleIsTextShellWithoutInlineStoryContract(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
     if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";
     if (bundle && bundle.passId === "pass.inline_objects") {
         var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
         if (bundle.pagePositionedAnchoredSource === true) return "FLOATING";
         if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
-        if (bundle.sourceInlineFlow === true && bundle.inlineAnchorSourceObjectId) return "INLINE";
+        if (_objectPlanBundleHasExecutableInlineStoryContract(bundle)) return "INLINE";
         if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
             return "FLOATING";
         }
         return "INLINE";
     }
     return "FLOATING";
+}
+
+function _objectPlanBundleHasExecutableInlineStoryContract(bundle) {
+    if (!bundle || !bundle.inlineAnchorSourceObjectId) return false;
+    if (bundle.tableCellInlineAnchorSource === true && bundle.sourceInlineFlow === true) return true;
+    if (bundle.tableCellStoryTextInlineSlot === true) return true;
+    if (bundle.storyTextInlineSlot === true) return true;
+    var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
+    if (bundle.pagePositionedAnchoredSource === true
+            || bundle.storyAnchorPlacement === "FLOATING_ANCHORED"
+            || anchoredPosition === "ANCHORED") {
+        return false;
+    }
+    return bundle.sourceInlineFlow === true;
+}
+
+function _objectPlanBundleIsTextShellWithoutInlineStoryContract(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    return !_objectPlanBundleHasExecutableInlineStoryContract(bundle);
 }
 
 function _objectPlanBundleIsDirectCompactStoryInlineVisual(bundle) {

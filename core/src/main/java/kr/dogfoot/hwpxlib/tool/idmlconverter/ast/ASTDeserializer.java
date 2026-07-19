@@ -258,6 +258,7 @@ public class ASTDeserializer {
         cell.verticalAlign(getString(o, "verticalAlign"));
         cell.firstBaselineOffset(getString(o, "firstBaselineOffset"));
         cell.minimumFirstBaselineOffset(getLong(o, "minimumFirstBaselineOffset"));
+        cell.squeezeLineWrap(getBool(o, "squeezeLineWrap"));
         cell.marginTop(getLong(o, "marginTop"));
         cell.marginBottom(getLong(o, "marginBottom"));
         cell.marginLeft(getLong(o, "marginLeft"));
