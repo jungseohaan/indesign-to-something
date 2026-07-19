@@ -2044,6 +2044,7 @@ public final class OwnershipPlanner {
         return plan != null
                 && plan.hasVisibleVisual()
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0;
     }

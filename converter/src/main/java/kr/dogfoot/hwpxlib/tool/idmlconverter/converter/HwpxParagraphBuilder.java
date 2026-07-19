@@ -202,7 +202,8 @@ public class HwpxParagraphBuilder {
             }
             switch (item.itemType()) {
                 case TEXT_RUN:
-                    ASTTextRun tr = (ASTTextRun) item;
+                    ASTTextRun tr = coalescedTextRunAt(astPara.items(), i);
+                    i = skipCoalescedTextRuns(astPara.items(), i);
                     if (replaceTabsInRuns && tr.text() != null && tr.text().indexOf('\t') >= 0) {
                         tr.text(tr.text().replace('\t', ' '));
                     }
@@ -230,6 +231,39 @@ public class HwpxParagraphBuilder {
 
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
+    }
+
+    private static ASTTextRun coalescedTextRunAt(java.util.List<ASTInlineItem> items, int index) {
+        ASTTextRun first = (ASTTextRun) items.get(index);
+        String firstText = first.text();
+        if (firstText == null) return first;
+        StringBuilder merged = null;
+        for (int cursor = index + 1; cursor < items.size(); cursor++) {
+            ASTInlineItem nextItem = items.get(cursor);
+            if (!(nextItem instanceof ASTTextRun)) break;
+            ASTTextRun next = (ASTTextRun) nextItem;
+            if (next.text() == null || !first.hasSameStyle(next)) break;
+            if (merged == null) merged = new StringBuilder(firstText);
+            merged.append(next.text());
+        }
+        if (merged != null) {
+            return first.copyWithText(merged.toString());
+        }
+        return first;
+    }
+
+    private static int skipCoalescedTextRuns(java.util.List<ASTInlineItem> items, int index) {
+        ASTTextRun first = (ASTTextRun) items.get(index);
+        if (first.text() == null) return index;
+        int cursor = index + 1;
+        while (cursor < items.size()) {
+            ASTInlineItem nextItem = items.get(cursor);
+            if (!(nextItem instanceof ASTTextRun)) break;
+            ASTTextRun next = (ASTTextRun) nextItem;
+            if (next.text() == null || !first.hasSameStyle(next)) break;
+            cursor++;
+        }
+        return cursor - 1;
     }
 
     private static boolean shouldDropLeadingSmallInlineObject(ASTParagraph paragraph,

@@ -161,7 +161,7 @@ public final class TextFlowAstMaterializer {
                     run.subscript(false);
                     run.superscript(false);
                 }
-                target.addItem(run);
+                appendTextRunCoalescing(target, run);
                 appended = true;
             }
         }
@@ -202,9 +202,32 @@ public final class TextFlowAstMaterializer {
                                         : color)
                                 .truncateAtParagraphBreak(false));
         for (ASTTextRun run : runs) {
-            target.addItem(run);
+            appendTextRunCoalescing(target, run);
         }
         return !runs.isEmpty();
+    }
+
+    private static void appendTextRunCoalescing(ASTParagraph target, ASTTextRun run) {
+        if (target == null || run == null) return;
+        List<ASTInlineItem> items = target.items();
+        if (items == null || items.isEmpty()) {
+            target.addItem(run);
+            return;
+        }
+        ASTInlineItem lastItem = items.get(items.size() - 1);
+        if (lastItem instanceof ASTTextRun) {
+            ASTTextRun previous = (ASTTextRun) lastItem;
+            if (canCoalesce(previous, run)) {
+                previous.text(previous.text() + run.text());
+                return;
+            }
+        }
+        target.addItem(run);
+    }
+
+    private static boolean canCoalesce(ASTTextRun a, ASTTextRun b) {
+        if (a == null || b == null || a.text() == null || b.text() == null) return false;
+        return a.hasSameStyle(b);
     }
 
     private static ResolvedRun firstVisibleSourceRun(TextFlowDocument.TextFlowParagraph paragraph) {
