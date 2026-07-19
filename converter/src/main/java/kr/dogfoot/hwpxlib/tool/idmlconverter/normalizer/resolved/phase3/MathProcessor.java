@@ -1555,7 +1555,42 @@ class MathProcessor {
             ASTMathGrouper.flushNPMathGroup(group, tempPara);
         }
         backfillFlushedTextRunStyles(tempPara.items(), sources);
+        backfillChemicalEquationStyleHints(tempPara.items(), sources);
         out.addAll(tempPara.items());
+    }
+
+    /**
+     * SPEC-042: CHEM_FORMULA 수식(스크립트 재해석으로 텍스트런이 되는 화학식)의
+     * 스타일 힌트(크기·색)를 원본 런에서 채운다. FormulaStyleResolver 가
+     * preferredBaseUnit/textColor 를 읽어 FormulaRenderer 텍스트런에 적용한다.
+     * 어댑터(IDMLCharacterRun)는 건드리지 않으므로 그룹핑 분기는 불변.
+     */
+    private static void backfillChemicalEquationStyleHints(
+            List<ASTInlineItem> emitted, List<ASTTextRun> sources) {
+        if (emitted == null || sources == null || sources.isEmpty()) return;
+        Integer size = null;
+        String color = null;
+        for (ASTTextRun src : sources) {
+            if (src == null) continue;
+            if (size == null && src.fontSizeHwpunits() != null && src.fontSizeHwpunits() > 0) {
+                size = src.fontSizeHwpunits();
+            }
+            if (color == null && src.textColor() != null && !src.textColor().isEmpty()) {
+                color = src.textColor();
+            }
+            if (size != null && color != null) break;
+        }
+        if (size == null && color == null) return;
+        for (ASTInlineItem item : emitted) {
+            if (!(item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item;
+            if (!"CHEM_FORMULA".equals(eq.sourceType())) continue;
+            if (size != null && eq.preferredBaseUnit() == null) eq.preferredBaseUnit(size);
+            if (color != null && (eq.textColor() == null || eq.textColor().isEmpty())) {
+                eq.textColor(color);
+            }
+        }
     }
 
     private static void backfillFlushedTextRunStyles(List<ASTInlineItem> emitted, List<ASTTextRun> sources) {
@@ -1569,9 +1604,10 @@ class MathProcessor {
             if (k >= sources.size()) continue;
             ASTTextRun src = sources.get(k);
             s = k + 1;
-            // 짧은 숫자 런(첨자 후보 — H₂의 2)은 백필하지 않는다. 하류의 첨자 보강이
-            // "크기 없는 폴백 런"을 조건으로 동작해, 여기서 크기를 선주입하면 첨자가
-            // 유실된다 (SPEC-042 실패 기록 3: 백필판에서도 동일 회귀 재현).
+            // 짧은 숫자 런(첨자 후보 — H₂의 2)은 백필하지 않는다. 첨자 판정이
+            // 위치 기반이라 숫자 런에 속성을 선주입하면 재그룹핑·재해석 시 첨자가
+            // 유실된다 (SPEC-042 실패 기록 3·4·5 — 계수만 백필해도 같은 문단의
+            // 첨자가 깨지는 양방향 상호작용 실측). 숫자 런은 전부 제외한다.
             String outText = outRun.text() == null ? "" : outRun.text().trim();
             if (outText.matches("\\d{1,2}")) continue;
             if (outRun.fontSizeHwpunits() == null && src.fontSizeHwpunits() != null) {

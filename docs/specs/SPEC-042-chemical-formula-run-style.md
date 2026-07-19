@@ -68,6 +68,35 @@
 미해결로 남는 문제: 계수 2 크기(17pt Bold 미복원), 화학식 색상(주황 계수·
 파랑 O — IDML FillColor 가 phase3 tr 에 없음, 제3의 tr 생성 지점 누락).
 
+## 하류 첨자 보강의 정체 규명 + 힌트 백필 (2026-07-19, 구현)
+
+ASTTextRun.subscript 세터에 스택트레이스를 심어 전 지점을 실측:
+
+1. `RunBuilder.applyPositionStyle` — resolved position (빌드 시점)
+2. `ASTMathGrouper.emitSimplePositionedTextRun` — 단독 첨자 런 (flush 시점)
+3. **`FormulaRenderer.toChemicalTextRuns`** — CHEM_FORMULA 수식을 HWPX 단계
+   에서 편집 텍스트런으로 재구성하며 **위치 기반**(원소기호 뒤 숫자→첨자,
+   맨앞/연산자 뒤 숫자→계수)으로 첨자 부여. 출력 equations=0 인 이유이자,
+   "숫자 런 시퀀스 정렬 보강"의 정체.
+
+구현: `backfillChemicalEquationStyleHints` — flush 가 낸 CHEM_FORMULA 수식에
+원본 런의 크기·색을 `preferredBaseUnit`/`textColor` 힌트로 주입.
+`FormulaStyleResolver.resolve` → `FormulaRenderer.addTextRun` 이 소비해
+화학식 텍스트런 전체(계수 포함)가 원본 크기로 나온다. 게이트
+(`usesBodyTextEquationStyle`)는 sourceType 만 보므로 힌트 주입은 흐름 불변.
+
+검증: H,2 쌍 전량 (17pt/22.5pt Bold + SUB) 복원, SUB 누락 3→3(무회귀),
+수학 u1 diff 0.
+
+## 미해결 (잔여)
+
+- **텍스트-flow 계수 5건**: 수식을 경유하지 않는 폴백 텍스트 흐름의 계수 2 는
+  여전히 소형. 계수 텍스트 백필은 같은 문단 첨자와 양방향 상호작용으로 유실
+  유발(실패 기록 4·5) — FormulaRenderer 흐름과 달리 텍스트 흐름의 첨자
+  부여 경로가 재그룹핑 재진입에 의존하는 것으로 추정, 별도 분석 필요.
+- **색상**: phase3 tr 에 IDML FillColor 미도달(제3의 tr 생성 지점 누락).
+  힌트 백필의 색 채널은 준비돼 있어 tr 색만 살리면 자동 적용된다.
+
 ## 다음 단계 (선택)
 
 1. (완료) 재현 사이클: 추출물
