@@ -2743,6 +2743,10 @@ public class InlineFrameHandler {
         String storyText = normalizeInlineShellStoryText(story);
         if (storyText.isEmpty()) return false;
         if (frameText.equals(storyText)) return true;
+        // 괄호 빈칸 스페이서: ResolvedData 가 story 쪽 앵커 런만 NBSP 로 치환하므로
+        // frameVisibleText(원문, FFFC 제거만 됨)와는 NBSP 만큼 어긋난다. NBSP 를
+        // 무시하고 같으면 같은 스토리다 (BlankAnchorSpacer 참조).
+        if (frameText.replace("\u00A0", "").equals(storyText.replace("\u00A0", ""))) return true;
         if (frameTextMatchesStoryModuloArrowGlyphs(frameText, storyText, story)) return true;
         return canMaterializeOwnedOverflowShellText(ctx, textFrame, frameText, storyText);
     }

@@ -58,6 +58,10 @@ public class EHLexer {
         String content = run.content();
         if (content == null || content.isEmpty()) return;
         content = content.replace("￼", ""); // 이미 그래픽으로 처리됨
+        // 괄호 빈칸 스페이서 치환(NBSP, BlankAnchorSpacer)이 수식 런에 새어든 경우
+        // 일반 공백으로 정규화 — NBSP 를 원자 취급하면 radicand 경계가 깨진다
+        // (실측: sqrt{15␣␣␣-}).
+        content = content.replace('\u00A0', ' ');
         if (content.isEmpty()) return;
 
         String fontRole = fontRole(run);
