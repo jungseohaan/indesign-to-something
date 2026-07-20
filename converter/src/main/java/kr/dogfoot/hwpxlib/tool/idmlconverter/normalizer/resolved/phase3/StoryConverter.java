@@ -353,6 +353,7 @@ public final class StoryConverter {
             restoreTfInlineVisuals(ctx, blocks);
             restoreInlineNanos += System.nanoTime() - stepStart;
             stepStart = System.nanoTime();
+            applySingleLineSqueezeBeforeInlineOnlyParagraphs(ctx, blocks);
             applySourceTextWrapContracts(ctx, sections, blocks);
             applyTextRangeShellPlans(ctx, sections, blocks);
             preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
@@ -407,6 +408,213 @@ public final class StoryConverter {
             if (paragraph.items() != null && !paragraph.items().isEmpty()) return paragraph;
         }
         return null;
+    }
+
+    private static void applySingleLineSqueezeBeforeInlineOnlyParagraphs(
+            ResolvedBuildContext ctx,
+            List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        int adjusted = 0;
+        int gapAdjusted = 0;
+        int gapAfterInlineOnlyAdjusted = 0;
+        int inlineOnlyCompacted = 0;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            String domIdText = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domIdText);
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) continue;
+
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> byParagraph =
+                    composedLinesByParagraph(tf);
+            if (byParagraph.isEmpty()) continue;
+
+            Set<ASTParagraph> processed = new HashSet<>();
+            for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : byParagraph.entrySet()) {
+                int paraIndex = entry.getKey();
+                List<ResolvedTextFrame.ComposedLine> lines = sortedVisibleAndInlineComposedLines(entry.getValue());
+                if (!isSingleVisibleTextComposedParagraph(lines)) continue;
+                List<ResolvedTextFrame.ComposedLine> nextLines =
+                        sortedVisibleAndInlineComposedLines(byParagraph.get(paraIndex + 1));
+                if (!isInlineOnlyComposedParagraph(nextLines)) continue;
+
+                ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
+                if (para == null) {
+                    para = paragraphAtComposedParaIndex(block.paragraphs(), paraIndex, processed);
+                }
+                if (para == null) continue;
+                if (!para.squeezeLineWrap()) {
+                    para.squeezeLineWrap(true);
+                    adjusted++;
+                }
+                processed.add(para);
+                if (applyComposedGapBeforeParagraph(
+                        para, byParagraph, paraIndex, lines)) {
+                    gapAdjusted++;
+                }
+                ASTParagraph nextPara = paragraphAtComposedParaIndex(block.paragraphs(), paraIndex + 1, null);
+                if (compactInlineOnlyCarrierParagraph(nextPara, nextLines)) {
+                    inlineOnlyCompacted++;
+                }
+            }
+
+            for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : byParagraph.entrySet()) {
+                int paraIndex = entry.getKey();
+                List<ResolvedTextFrame.ComposedLine> lines = sortedVisibleAndInlineComposedLines(entry.getValue());
+                if (!isInlineOnlyComposedParagraph(lines)) continue;
+                List<ResolvedTextFrame.ComposedLine> nextLines =
+                        sortedVisibleAndInlineComposedLines(byParagraph.get(paraIndex + 1));
+                if (!hasVisibleTextComposedParagraph(nextLines)) continue;
+
+                ASTParagraph nextPara = findParagraphForComposedLines(block.paragraphs(), nextLines, null);
+                if (nextPara == null) {
+                    nextPara = paragraphAtComposedParaIndex(block.paragraphs(), paraIndex + 1, null);
+                }
+                if (applyComposedGapAfterInlineOnlyParagraph(nextPara, lines, nextLines)) {
+                    gapAfterInlineOnlyAdjusted++;
+                }
+            }
+        }
+        if (adjusted > 0) {
+            ConversionTiming.metric("stage2.textBuilder.singleLineBeforeInlineOnly.squeezeParagraphs", adjusted);
+            ConversionTiming.addCounter("stage2.textBuilder.singleLineBeforeInlineOnly.totalSqueezeParagraphs", adjusted);
+        }
+        if (gapAdjusted > 0) {
+            ConversionTiming.metric("stage2.textBuilder.singleLineBeforeInlineOnly.previousGapAdjusted", gapAdjusted);
+            ConversionTiming.addCounter("stage2.textBuilder.singleLineBeforeInlineOnly.totalPreviousGapAdjusted", gapAdjusted);
+        }
+        if (inlineOnlyCompacted > 0) {
+            ConversionTiming.metric("stage2.textBuilder.singleLineBeforeInlineOnly.inlineOnlyCarrierCompacted", inlineOnlyCompacted);
+            ConversionTiming.addCounter("stage2.textBuilder.singleLineBeforeInlineOnly.totalInlineOnlyCarrierCompacted", inlineOnlyCompacted);
+        }
+        if (gapAfterInlineOnlyAdjusted > 0) {
+            ConversionTiming.metric("stage2.textBuilder.inlineOnlyBeforeText.gapAdjusted", gapAfterInlineOnlyAdjusted);
+            ConversionTiming.addCounter("stage2.textBuilder.inlineOnlyBeforeText.totalGapAdjusted", gapAfterInlineOnlyAdjusted);
+        }
+    }
+
+    private static boolean applyComposedGapBeforeParagraph(
+            ASTParagraph currentPara,
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> byParagraph,
+            int paraIndex,
+            List<ResolvedTextFrame.ComposedLine> currentLines) {
+        if (currentPara == null || byParagraph == null || paraIndex <= 0
+                || currentLines == null || currentLines.isEmpty()) {
+            return false;
+        }
+        List<ResolvedTextFrame.ComposedLine> previousLines =
+                sortedVisibleAndInlineComposedLines(byParagraph.get(paraIndex - 1));
+        if (!isSingleVisibleTextComposedParagraph(previousLines)) return false;
+
+        double previousBottom = lineBottom(previousLines.get(previousLines.size() - 1));
+        double currentTop = lineTop(currentLines.get(0));
+        if (!Double.isFinite(previousBottom) || !Double.isFinite(currentTop)) return false;
+        double gap = currentTop - previousBottom;
+        if (gap < 0.5 || gap > 50.0) return false;
+
+        long sourceGap = CoordinateConverter.pointsToHwpunits(gap);
+        long existing = currentPara.spaceBefore() != null ? Math.max(0L, currentPara.spaceBefore()) : 0L;
+        if (Math.abs(existing - sourceGap) <= 5) return false;
+        currentPara.spaceBefore(sourceGap);
+        return true;
+    }
+
+    private static boolean applyComposedGapAfterInlineOnlyParagraph(
+            ASTParagraph nextPara,
+            List<ResolvedTextFrame.ComposedLine> inlineOnlyLines,
+            List<ResolvedTextFrame.ComposedLine> nextLines) {
+        if (nextPara == null || nextPara.sourceTextWrapSpacing()
+                || !isInlineOnlyComposedParagraph(inlineOnlyLines)
+                || !hasVisibleTextComposedParagraph(nextLines)) {
+            return false;
+        }
+
+        double previousBottom = lineBottom(inlineOnlyLines.get(inlineOnlyLines.size() - 1));
+        double currentTop = lineTop(nextLines.get(0));
+        if (!Double.isFinite(previousBottom) || !Double.isFinite(currentTop)) return false;
+        double gap = currentTop - previousBottom;
+        if (gap < 0.5 || gap > 50.0) return false;
+
+        long sourceGap = CoordinateConverter.pointsToHwpunits(gap);
+        long existing = nextPara.spaceBefore() != null ? Math.max(0L, nextPara.spaceBefore()) : 0L;
+        if (Math.abs(existing - sourceGap) <= 5) return false;
+        nextPara.spaceBefore(sourceGap);
+        return true;
+    }
+
+    private static boolean compactInlineOnlyCarrierParagraph(
+            ASTParagraph para,
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        if (para == null || !isInlineOnlyAstParagraph(para)
+                || !isInlineOnlyComposedParagraph(lines)) {
+            return false;
+        }
+        long lineHeight = composedLineHeightHwpunits(lines);
+        long objectHeight = maxVisibleInlineObjectHeight(para);
+        long compactLineHeight = Math.max(lineHeight, objectHeight);
+        if (compactLineHeight <= 0) return false;
+
+        boolean changed = false;
+        if (para.spaceBefore() == null || para.spaceBefore() != 0L) {
+            para.spaceBefore(0L);
+            changed = true;
+        }
+        if (para.spaceAfter() == null || para.spaceAfter() != 0L) {
+            para.spaceAfter(0L);
+            changed = true;
+        }
+        int targetLineSpacing = (int) Math.min(Integer.MAX_VALUE, compactLineHeight);
+        if (para.lineSpacing() == null || !"fixed".equals(para.lineSpacingType())
+                || Math.abs(para.lineSpacing() - targetLineSpacing) > 5) {
+            para.lineSpacing(targetLineSpacing);
+            para.lineSpacingType("fixed");
+            changed = true;
+        }
+        return changed;
+    }
+
+    private static boolean isInlineOnlyAstParagraph(ASTParagraph para) {
+        if (para == null || para.inlineTable() != null || para.items() == null || para.items().isEmpty()) {
+            return false;
+        }
+        boolean hasInlineObject = false;
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (hasVisibleTextExcludingObjectControls(text)) return false;
+            } else if (item instanceof ASTInlineObject) {
+                hasInlineObject = true;
+            } else if (item instanceof ASTEquation) {
+                return false;
+            }
+        }
+        return hasInlineObject;
+    }
+
+    private static long composedLineHeightHwpunits(List<ResolvedTextFrame.ComposedLine> lines) {
+        long max = 0L;
+        if (lines == null) return max;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            double top = lineTop(line);
+            double bottom = lineBottom(line);
+            if (!Double.isFinite(top) || !Double.isFinite(bottom)) continue;
+            double height = bottom - top;
+            if (height <= 0.0 || height > 50.0) continue;
+            max = Math.max(max, CoordinateConverter.pointsToHwpunits(height));
+        }
+        return max;
+    }
+
+    private static long maxVisibleInlineObjectHeight(ASTParagraph para) {
+        long max = 0L;
+        if (para == null || para.items() == null) return max;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            if (obj.layoutOnlyInlineSlot()) continue;
+            long height = obj.height() > 0 ? obj.height() : obj.resolvedHeight();
+            if (height > max) max = height;
+        }
+        return max;
     }
 
     private static void applyComposedInkFontCaps(ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
@@ -2186,7 +2394,7 @@ public final class StoryConverter {
                     spaceAfter = CoordinateConverter.pointsToHwpunits(gap);
                 }
             }
-            result.put(current.paraIndex, new SourceTextWrapParagraphSpacing(lineSpacing, spaceAfter));
+            result.put(current.paraIndex, new SourceTextWrapParagraphSpacing(lineSpacing, spaceAfter, i > 0));
         }
         return result;
     }
@@ -2216,6 +2424,52 @@ public final class StoryConverter {
         return sorted;
     }
 
+    private static List<ResolvedTextFrame.ComposedLine> sortedVisibleAndInlineComposedLines(
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        List<ResolvedTextFrame.ComposedLine> sorted = new ArrayList<>();
+        if (lines != null) {
+            for (ResolvedTextFrame.ComposedLine line : lines) {
+                if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+                if (!hasVisibleTextExcludingObjectControls(line.text())
+                        && !hasInlineObjectControl(line.text())) continue;
+                sorted.add(line);
+            }
+        }
+        sorted.sort(Comparator.comparingDouble(StoryConverter::lineTop));
+        return sorted;
+    }
+
+    private static boolean isSingleVisibleTextComposedParagraph(
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        return lines != null
+                && lines.size() == 1
+                && hasVisibleTextExcludingObjectControls(lines.get(0).text());
+    }
+
+    private static boolean hasVisibleTextComposedParagraph(
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        if (lines == null || lines.isEmpty()) return false;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line != null && hasVisibleTextExcludingObjectControls(line.text())) return true;
+        }
+        return false;
+    }
+
+    private static boolean isInlineOnlyComposedParagraph(
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        if (lines == null || lines.isEmpty()) return false;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            String text = line != null ? line.text() : null;
+            if (hasVisibleTextExcludingObjectControls(text)) return false;
+            if (!hasInlineObjectControl(text)) return false;
+        }
+        return true;
+    }
+
+    private static boolean hasInlineObjectControl(String text) {
+        return text != null && text.indexOf('\uFFFC') >= 0;
+    }
+
     private static double medianLinePitch(List<ResolvedTextFrame.ComposedLine> lines) {
         if (lines == null || lines.size() < 2) return Double.NaN;
         List<Double> deltas = new ArrayList<>();
@@ -2238,6 +2492,11 @@ public final class StoryConverter {
         return line.bounds()[0];
     }
 
+    private static double lineBottom(ResolvedTextFrame.ComposedLine line) {
+        if (line == null || line.bounds() == null || line.bounds().length < 3) return Double.NaN;
+        return line.bounds()[2];
+    }
+
     private static boolean isFinitePositive(double value) {
         return Double.isFinite(value) && value > 0.0;
     }
@@ -2252,13 +2511,20 @@ public final class StoryConverter {
         if (para == null || spacing == null || spacing.lineSpacing == null || spacing.lineSpacing <= 0) return false;
         boolean changed = false;
         para.sourceTextWrapSpacing(true);
+        if (spacing.clearSpaceBefore) {
+            long existingBefore = para.spaceBefore() != null ? Math.max(0L, para.spaceBefore()) : 0L;
+            if (existingBefore != 0L) {
+                para.spaceBefore(0L);
+                changed = true;
+            }
+        }
         if (para.lineSpacing() == null || !"fixed".equals(para.lineSpacingType())
                 || Math.abs(para.lineSpacing() - spacing.lineSpacing.intValue()) > 5) {
             para.lineSpacing(spacing.lineSpacing.intValue());
             para.lineSpacingType("fixed");
             changed = true;
         }
-        if (spacing.spaceAfter != null && spacing.spaceAfter > 0) {
+        if (spacing.spaceAfter != null) {
             long existing = para.spaceAfter() != null ? Math.max(0L, para.spaceAfter()) : 0L;
             if (Math.abs(existing - spacing.spaceAfter) > 5) {
                 para.spaceAfter(spacing.spaceAfter);
@@ -3089,7 +3355,7 @@ public final class StoryConverter {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) {
                 if (remaining == 0) {
-                    items.add(i, lineBreak);
+                    insertLineBreakIfMissing(items, i, lineBreak);
                     return;
                 }
                 continue;
@@ -3103,24 +3369,37 @@ public final class StoryConverter {
             }
             if (remaining == 0) {
                 consumeLeadingSourceLineBreak(items, i);
-                items.add(advancePastTrailingInlineObjects(items, i, trailingInlineObjects), lineBreak);
+                insertLineBreakIfMissing(items,
+                        advancePastTrailingInlineObjects(items, i, trailingInlineObjects), lineBreak);
                 return;
             }
             if (remaining == len) {
-                consumeLeadingSourceLineBreak(items, i + 1);
-                items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
+                int insertIndex = consumeTrailingSourceLineBreak(items, i);
+                consumeLeadingSourceLineBreak(items, insertIndex);
+                insertLineBreakIfMissing(items,
+                        advancePastTrailingInlineObjects(items, insertIndex, trailingInlineObjects), lineBreak);
                 return;
             }
-            ASTTextRun before = copyTextRun(run, text.substring(0, remaining));
+            ASTTextRun before = copyTextRun(run, stripOneTrailingSourceLineBreak(text.substring(0, remaining)));
             ASTTextRun after = copyTextRun(run, stripOneLeadingSourceLineBreak(text.substring(remaining)));
             items.set(i, before);
             if (after.text() != null && !after.text().isEmpty()) {
                 items.add(i + 1, after);
             }
-            items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
+            insertLineBreakIfMissing(items,
+                    advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
             return;
         }
-        items.add(advancePastTrailingInlineObjects(items, items.size(), trailingInlineObjects), lineBreak);
+        insertLineBreakIfMissing(items,
+                advancePastTrailingInlineObjects(items, items.size(), trailingInlineObjects), lineBreak);
+    }
+
+    private static void insertLineBreakIfMissing(List<ASTInlineItem> items, int index, ASTBreak lineBreak) {
+        if (items == null || lineBreak == null) return;
+        int pos = Math.max(0, Math.min(index, items.size()));
+        if (pos > 0 && isLineBreak(items.get(pos - 1))) return;
+        if (pos < items.size() && isLineBreak(items.get(pos))) return;
+        items.add(pos, lineBreak);
     }
 
     private static void consumeLeadingSourceLineBreak(List<ASTInlineItem> items, int index) {
@@ -3136,6 +3415,22 @@ public final class StoryConverter {
         }
     }
 
+    private static int consumeTrailingSourceLineBreak(List<ASTInlineItem> items, int index) {
+        if (items == null || index < 0 || index >= items.size()) return index;
+        ASTInlineItem item = items.get(index);
+        if (!(item instanceof ASTTextRun)) return index;
+        ASTTextRun run = (ASTTextRun) item;
+        String stripped = stripOneTrailingSourceLineBreak(run.text());
+        if (stripped == null || stripped.isEmpty()) {
+            items.remove(index);
+            return index;
+        }
+        if (!stripped.equals(run.text())) {
+            run.text(stripped);
+        }
+        return index + 1;
+    }
+
     private static String stripOneLeadingSourceLineBreak(String text) {
         if (text == null || text.isEmpty()) return text;
         char ch = text.charAt(0);
@@ -3148,6 +3443,21 @@ public final class StoryConverter {
         }
         return text;
     }
+
+    private static String stripOneTrailingSourceLineBreak(String text) {
+        if (text == null || text.isEmpty()) return text;
+        int len = text.length();
+        char ch = text.charAt(len - 1);
+        if (ch == '\n') {
+            int prev = len > 1 && text.charAt(len - 2) == '\r' ? 2 : 1;
+            return text.substring(0, len - prev);
+        }
+        if (ch == '\r' || ch == '\u2028') {
+            return text.substring(0, len - 1);
+        }
+        return text;
+    }
+
 
     private static int advancePastTrailingInlineObjects(
             List<ASTInlineItem> items, int index, int trailingInlineObjects) {
@@ -3255,10 +3565,12 @@ public final class StoryConverter {
     private static final class SourceTextWrapParagraphSpacing {
         final Long lineSpacing;
         final Long spaceAfter;
+        final boolean clearSpaceBefore;
 
-        SourceTextWrapParagraphSpacing(Long lineSpacing, Long spaceAfter) {
+        SourceTextWrapParagraphSpacing(Long lineSpacing, Long spaceAfter, boolean clearSpaceBefore) {
             this.lineSpacing = lineSpacing;
             this.spaceAfter = spaceAfter;
+            this.clearSpaceBefore = clearSpaceBefore;
         }
     }
 
