@@ -722,6 +722,12 @@ public final class OwnershipPlanner {
         for (int paragraphIndex = 0; paragraphIndex < story.paragraphs().size(); paragraphIndex++) {
             ResolvedParagraph paragraph = story.paragraphs().get(paragraphIndex);
             if (paragraph == null || paragraph.runs() == null || paragraph.runs().size() < 2) continue;
+            // 화학식(H₂O, 2H₂O 등)은 첫 원소 런과 첨자 런 사이에 스타일 경계(charStyle=
+            // 하부자, position=SUBSCRIPT)가 있어 leading-run 셸 분리에 오검된다. 이 첫
+            // 글자를 별도 셸로 떼어내면 원본 스타일을 잃고(빈 charPr) 레이아웃이 깨진다
+            // (실측: 과학 u1 p17 파랑 H₂O 의 H 가 58pt rect 로 분리). 화학식 문단은
+            // 배지/라벨이 아니므로 range 분리 대상에서 제외한다.
+            if (isChemicalFormulaParagraph(paragraph)) continue;
             int paragraphVisibleCursor = 0;
             int firstTextRunIndex = -1;
             ResolvedRun firstTextRun = null;
@@ -894,6 +900,49 @@ public final class OwnershipPlanner {
             if (!textRangeVisibleText(run.text()).trim().isEmpty()) return i;
         }
         return -1;
+    }
+
+    /**
+     * 문단이 화학식(H₂O, 2H₂O, 2H₂+O₂ 등)인가.
+     *
+     * <p>화학식은 첫 원소와 첨자 사이에 정상적인 스타일 경계가 있어 leading-run 셸
+     * 분리에 오검된다. 가시 텍스트가 원소기호(H,O,Na…)·숫자·화학 연산자(+,→ 등)로만
+     * 이루어지고 원소기호가 하나 이상이면 화학식으로 본다. 배지/라벨(한글·다양한
+     * 라틴 단어)은 이 조건에 걸리지 않는다.
+     */
+    private static boolean isChemicalFormulaParagraph(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return false;
+        StringBuilder sb = new StringBuilder();
+        boolean sawSubscriptRun = false;
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.isInlineAnchor()) continue;
+            String v = textRangeVisibleText(run.text());
+            if (v == null) continue;
+            sb.append(v);
+            String pos = run.position();
+            String cs = run.charStyle();
+            if ((pos != null && pos.toLowerCase(java.util.Locale.ROOT).contains("subscript"))
+                    || (cs != null && (cs.contains("하부자") || cs.contains("첨자")))) {
+                sawSubscriptRun = true;
+            }
+        }
+        String text = sb.toString().replace(" ", "").replace(" ", "")
+                .replace("￼", "").trim();
+        if (text.isEmpty() || text.length() > 24) return false;
+        // 첨자 런이 있어야 화학식 오검 대상(단순 라틴 단어 배제)
+        if (!sawSubscriptRun) return false;
+        boolean sawUpper = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 'A' && c <= 'Z') { sawUpper = true; continue; }
+            if (c >= 'a' && c <= 'z') continue;              // 원소 두 번째 글자 (He, Na…)
+            if (Character.isDigit(c)) continue;              // 첨자·계수
+            if (c == '+' || c == '-' || c == '→'        // 연산자·화살표
+                    || c == '(' || c == ')') continue;
+            if (Character.isWhitespace(c)) continue;
+            return false;                                    // 그 외 문자(한글 등) → 화학식 아님
+        }
+        return sawUpper;
     }
 
     private static boolean hasSourceStyleBoundary(ResolvedRun a, ResolvedRun b) {
