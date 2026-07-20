@@ -354,8 +354,11 @@ public final class StoryConverter {
             restoreInlineNanos += System.nanoTime() - stepStart;
             stepStart = System.nanoTime();
             applySingleLineSqueezeBeforeInlineOnlyParagraphs(ctx, blocks);
+            clearParagraphSpacingBeforeInlineOnlyCarriers(blocks);
             applySourceTextWrapContracts(ctx, sections, blocks);
             applyTextRangeShellPlans(ctx, sections, blocks);
+            clearParagraphSpacingBeforeInlineOnlyCarriers(blocks);
+            restoreComposedGapAfterInlineOnlyCarriers(ctx, blocks);
             preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
             replaceDottedInlineImagesWithTabLeaders(ctx, blocks);
             coalesceDotLeaderAnswerVisualBreaks(blocks);
@@ -398,6 +401,27 @@ public final class StoryConverter {
         }
     }
 
+    private static void clearParagraphSpacingBeforeInlineOnlyCarriers(List<ASTTextFrameBlock> blocks) {
+        if (blocks == null || blocks.isEmpty()) return;
+        int cleared = 0;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null) continue;
+            List<ASTParagraph> paragraphs = block.paragraphs();
+            for (int i = 0; i + 1 < paragraphs.size(); i++) {
+                ASTParagraph current = paragraphs.get(i);
+                ASTParagraph next = paragraphs.get(i + 1);
+                if (!isInlineOnlyAstParagraph(next)) continue;
+                if (clearSpaceAfterBeforeInlineOnlyCarrier(current)) {
+                    cleared++;
+                }
+            }
+        }
+        if (cleared > 0) {
+            ConversionTiming.metric("stage2.textBuilder.inlineOnlyCarrier.previousSpaceAfterCleared", cleared);
+            ConversionTiming.addCounter("stage2.textBuilder.inlineOnlyCarrier.totalPreviousSpaceAfterCleared", cleared);
+        }
+    }
+
     private static ASTParagraph firstMaterializedParagraph(ASTTextFrameBlock block) {
         if (block == null || block.paragraphs() == null) return null;
         for (ASTParagraph paragraph : block.paragraphs()) {
@@ -418,6 +442,7 @@ public final class StoryConverter {
         int gapAdjusted = 0;
         int gapAfterInlineOnlyAdjusted = 0;
         int inlineOnlyCompacted = 0;
+        int spaceBeforeInlineOnlyCleared = 0;
         for (ASTTextFrameBlock block : blocks) {
             if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
             String domIdText = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
@@ -452,6 +477,12 @@ public final class StoryConverter {
                     gapAdjusted++;
                 }
                 ASTParagraph nextPara = paragraphAtComposedParaIndex(block.paragraphs(), paraIndex + 1, null);
+                if (nextPara != null
+                        && isInlineOnlyAstParagraph(nextPara)
+                        && isInlineOnlyComposedParagraph(nextLines)
+                        && clearSpaceAfterBeforeInlineOnlyCarrier(para)) {
+                    spaceBeforeInlineOnlyCleared++;
+                }
                 if (compactInlineOnlyCarrierParagraph(nextPara, nextLines)) {
                     inlineOnlyCompacted++;
                 }
@@ -486,10 +517,20 @@ public final class StoryConverter {
             ConversionTiming.metric("stage2.textBuilder.singleLineBeforeInlineOnly.inlineOnlyCarrierCompacted", inlineOnlyCompacted);
             ConversionTiming.addCounter("stage2.textBuilder.singleLineBeforeInlineOnly.totalInlineOnlyCarrierCompacted", inlineOnlyCompacted);
         }
+        if (spaceBeforeInlineOnlyCleared > 0) {
+            ConversionTiming.metric("stage2.textBuilder.singleLineBeforeInlineOnly.previousSpaceAfterCleared", spaceBeforeInlineOnlyCleared);
+            ConversionTiming.addCounter("stage2.textBuilder.singleLineBeforeInlineOnly.totalPreviousSpaceAfterCleared", spaceBeforeInlineOnlyCleared);
+        }
         if (gapAfterInlineOnlyAdjusted > 0) {
             ConversionTiming.metric("stage2.textBuilder.inlineOnlyBeforeText.gapAdjusted", gapAfterInlineOnlyAdjusted);
             ConversionTiming.addCounter("stage2.textBuilder.inlineOnlyBeforeText.totalGapAdjusted", gapAfterInlineOnlyAdjusted);
         }
+    }
+
+    private static boolean clearSpaceAfterBeforeInlineOnlyCarrier(ASTParagraph para) {
+        if (para == null || para.spaceAfter() == null || para.spaceAfter() == 0L) return false;
+        para.spaceAfter(0L);
+        return true;
     }
 
     private static boolean applyComposedGapBeforeParagraph(
@@ -522,7 +563,7 @@ public final class StoryConverter {
             ASTParagraph nextPara,
             List<ResolvedTextFrame.ComposedLine> inlineOnlyLines,
             List<ResolvedTextFrame.ComposedLine> nextLines) {
-        if (nextPara == null || nextPara.sourceTextWrapSpacing()
+        if (nextPara == null
                 || !isInlineOnlyComposedParagraph(inlineOnlyLines)
                 || !hasVisibleTextComposedParagraph(nextLines)) {
             return false;
@@ -539,6 +580,46 @@ public final class StoryConverter {
         if (Math.abs(existing - sourceGap) <= 5) return false;
         nextPara.spaceBefore(sourceGap);
         return true;
+    }
+
+    private static void restoreComposedGapAfterInlineOnlyCarriers(
+            ResolvedBuildContext ctx,
+            List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        int adjusted = 0;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            String domIdText = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domIdText);
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) continue;
+
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> byParagraph =
+                    composedLinesByParagraph(tf);
+            if (byParagraph.isEmpty()) continue;
+
+            for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : byParagraph.entrySet()) {
+                int paraIndex = entry.getKey();
+                List<ResolvedTextFrame.ComposedLine> lines =
+                        sortedVisibleAndInlineComposedLines(entry.getValue());
+                if (!isInlineOnlyComposedParagraph(lines)) continue;
+
+                List<ResolvedTextFrame.ComposedLine> nextLines =
+                        sortedVisibleAndInlineComposedLines(byParagraph.get(paraIndex + 1));
+                if (!hasVisibleTextComposedParagraph(nextLines)) continue;
+
+                ASTParagraph nextPara = findParagraphForComposedLines(block.paragraphs(), nextLines, null);
+                if (nextPara == null) {
+                    nextPara = paragraphAtComposedParaIndex(block.paragraphs(), paraIndex + 1, null);
+                }
+                if (applyComposedGapAfterInlineOnlyParagraph(nextPara, lines, nextLines)) {
+                    adjusted++;
+                }
+            }
+        }
+        if (adjusted > 0) {
+            ConversionTiming.metric("stage2.textBuilder.inlineOnlyCarrier.postShellGapAdjusted", adjusted);
+            ConversionTiming.addCounter("stage2.textBuilder.inlineOnlyCarrier.totalPostShellGapAdjusted", adjusted);
+        }
     }
 
     private static boolean compactInlineOnlyCarrierParagraph(

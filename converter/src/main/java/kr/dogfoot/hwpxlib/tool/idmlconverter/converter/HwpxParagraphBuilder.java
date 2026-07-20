@@ -171,7 +171,10 @@ public class HwpxParagraphBuilder {
         // lineSpacing/spaceAfter에 반영되어 있으므로 후속 자동 보정으로 덮지 않는다.
         long maxInlineH = lineSpacingResolver.maxInlineObjectHeight(astPara);
         boolean hasMixedFontSizes = lineSpacingResolver.hasMixedFontSizeRuns(astPara);
-        if (!astPara.sourceTextWrapSpacing() && (maxInlineH > 0 || hasMixedFontSizes)) {
+        boolean inlineObjectOnlyCarrier = lineSpacingResolver.isInlineObjectOnlyCarrier(astPara);
+        if (!inlineObjectOnlyCarrier
+                && !astPara.sourceTextWrapSpacing()
+                && (maxInlineH > 0 || hasMixedFontSizes)) {
             paraPrId = lineSpacingResolver.applyBetweenLinesSpacing(paraPrId, astPara);
         }
 

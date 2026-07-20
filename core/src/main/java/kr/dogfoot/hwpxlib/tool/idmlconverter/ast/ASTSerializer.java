@@ -692,6 +692,7 @@ public class ASTSerializer {
         if (obj.cornerRadius() != 0.0) first = writeDoubleField(sb, "cornerRadius", obj.cornerRadius(), first);
         if (obj.shellShapeType() != null) first = writeStringField(sb, "shellShapeType", obj.shellShapeType(), first);
         if (obj.noAutoLineWrap()) first = writeBooleanField(sb, "noAutoLineWrap", true, first);
+        if (obj.squeezeLineWrap()) first = writeBooleanField(sb, "squeezeLineWrap", true, first);
 
         if (obj.textWrapTop() != 0) first = writeLongField(sb, "textWrapTop", obj.textWrapTop(), first);
         if (obj.textWrapLeft() != 0) first = writeLongField(sb, "textWrapLeft", obj.textWrapLeft(), first);

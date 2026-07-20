@@ -79,6 +79,54 @@ final class LineSpacingResolver {
         return max;
     }
 
+    /**
+     * 본문 문단에 섞인 인라인 객체가 아니라, 앵커/인라인 shell 자체를 한 줄로
+     * 운반하기 위한 carrier 문단인지 판별한다. 이런 문단은 인라인 객체 높이가
+     * 이미 행 높이에 참여하므로 BETWEEN_LINES 자동 여백을 덧대면 원본보다
+     * shell 앞뒤 간격이 과하게 벌어진다.
+     */
+    boolean isInlineObjectOnlyCarrier(ASTParagraph astPara) {
+        boolean hasInlineObject = false;
+        for (ASTInlineItem item : astPara.items()) {
+            if (item == null) continue;
+            switch (item.itemType()) {
+                case INLINE_OBJECT:
+                    hasInlineObject = true;
+                    break;
+                case TEXT_RUN:
+                    ASTTextRun tr = (ASTTextRun) item;
+                    if (hasMeaningfulText(tr.text())) {
+                        return false;
+                    }
+                    break;
+                default:
+                    return false;
+            }
+        }
+        return hasInlineObject;
+    }
+
+    private static boolean hasMeaningfulText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int offset = 0; offset < text.length(); ) {
+            int cp = text.codePointAt(offset);
+            offset += Character.charCount(cp);
+            if (isLayoutOnlyCodePoint(cp)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isLayoutOnlyCodePoint(int cp) {
+        return Character.isWhitespace(cp)
+                || Character.isSpaceChar(cp)
+                || cp == 0xFFFC  // object replacement character
+                || cp == 0x200B  // zero-width space
+                || cp == 0x200C
+                || cp == 0x200D
+                || cp == 0xFEFF;
+    }
+
     long maxFractionEquationHeight(ASTParagraph astPara) {
         long max = 0;
         for (ASTInlineItem item : astPara.items()) {
