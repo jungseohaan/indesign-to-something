@@ -339,6 +339,7 @@ public class ASTDeserializer {
         para.autoLeadingPercent(getBoxedInt(o, "autoLeadingPercent"));
         para.letterSpacing(getBoxedShort(o, "letterSpacing"));
         para.squeezeLineWrap(getBool(o, "squeezeLineWrap"));
+        para.keepLineWrap(getBool(o, "keepLineWrap"));
         para.sourceTextWrapSpacing(getBool(o, "sourceTextWrapSpacing"));
 
         // shading
