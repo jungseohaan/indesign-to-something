@@ -509,12 +509,6 @@ public class HwpxTableBuilder {
     private static LineWrapMethod tableCellLineWrap(ASTTableCell cell) {
         if (cell == null) return LineWrapMethod.BREAK;
         if (cell.squeezeLineWrap()) return LineWrapMethod.SQUEEZE;
-        if (cell.paragraphs() == null) return LineWrapMethod.BREAK;
-        for (ASTParagraph paragraph : cell.paragraphs()) {
-            if (paragraph != null && paragraph.squeezeLineWrap()) {
-                return LineWrapMethod.SQUEEZE;
-            }
-        }
         return LineWrapMethod.BREAK;
     }
 

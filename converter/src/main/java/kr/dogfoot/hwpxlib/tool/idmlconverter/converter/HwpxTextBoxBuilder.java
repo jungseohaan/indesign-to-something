@@ -45,14 +45,14 @@ public class HwpxTextBoxBuilder {
     }
 
     static LineWrapMethod textFrameLineWrap(ASTTextFrameBlock block) {
-        return block != null && block.noAutoLineWrap() && isSingleLineNoWrapCandidate(block)
-                ? LineWrapMethod.SQUEEZE
+        return block != null && block.noAutoLineWrap()
+                ? LineWrapMethod.KEEP
                 : LineWrapMethod.BREAK;
     }
 
     static LineWrapMethod inlineTextFrameLineWrap(ASTInlineObject obj) {
         return obj != null && obj.noAutoLineWrap()
-                ? LineWrapMethod.SQUEEZE
+                ? LineWrapMethod.KEEP
                 : LineWrapMethod.BREAK;
     }
 

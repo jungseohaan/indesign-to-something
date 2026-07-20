@@ -42,6 +42,7 @@ final class ParaPrFactory {
                 || para.spaceBefore() != null
                 || para.spaceAfter() != null
                 || para.lineSpacing() != null
+                || para.keepLineWrap()
                 || para.squeezeLineWrap()
                 || para.hasTabStops()
                 || para.shadingOn();
@@ -154,7 +155,7 @@ final class ParaPrFactory {
                 .keepWithNextAnd(astPara.keepWithNext())
                 .keepLinesAnd(astPara.keepLinesTogether())
                 .pageBreakBeforeAnd(astPara.pageBreakBefore())
-                .lineWrap(astPara.squeezeLineWrap() ? LineWrap.SQUEEZE : LineWrap.BREAK);
+                .lineWrap(paragraphLineWrap(astPara));
 
         paraPr.createAutoSpacing();
         paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
@@ -262,14 +263,14 @@ final class ParaPrFactory {
                     && ((ASTBreak) item).breakType() == ASTBreak.BreakType.LINE) {
                 return true;
             }
-            if (item instanceof ASTTextRun) {
-                String text = ((ASTTextRun) item).text();
-                if (text != null && (text.indexOf('\n') >= 0 || text.indexOf('\u2028') >= 0)) {
-                    return true;
-                }
-            }
         }
         return false;
+    }
+
+    private static LineWrap paragraphLineWrap(ASTParagraph para) {
+        if (para != null && para.keepLineWrap()) return LineWrap.KEEP;
+        if (para != null && para.squeezeLineWrap()) return LineWrap.SQUEEZE;
+        return LineWrap.BREAK;
     }
 
     private static boolean shouldPreferAutoLeadingPercent(ASTParagraph para, Integer fixedLeading) {

@@ -24,6 +24,9 @@ public class ASTParagraph {
     // Stage 1/2 execution hint: apply HWPX paragraph lineWrap=SQUEEZE to this
     // paragraph only, without changing the owning TextFrame/drawText box.
     private boolean squeezeLineWrap;
+    // Stage 1/2 execution hint: preserve source-composed line boundaries without
+    // condensing text. This maps to HWPX paragraph lineWrap=KEEP.
+    private boolean keepLineWrap;
     // Stage 1 SOURCE_TEXT_WRAP execution hint: keep source-composed paragraph
     // spacing from being replaced by generic paragraph style rules.
     private boolean sourceTextWrapSpacing;
@@ -115,6 +118,9 @@ public class ASTParagraph {
 
     public boolean squeezeLineWrap() { return squeezeLineWrap; }
     public void squeezeLineWrap(boolean v) { this.squeezeLineWrap = v; }
+
+    public boolean keepLineWrap() { return keepLineWrap; }
+    public void keepLineWrap(boolean v) { this.keepLineWrap = v; }
 
     public boolean sourceTextWrapSpacing() { return sourceTextWrapSpacing; }
     public void sourceTextWrapSpacing(boolean v) { this.sourceTextWrapSpacing = v; }

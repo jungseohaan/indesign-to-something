@@ -2071,7 +2071,7 @@ public final class TableBuilder {
             if (row == null || row.cells() == null) continue;
             for (ASTTableCell cell : row.cells()) {
                 if (cell == null) continue;
-                if (cellHasSqueezeCarrier(cell) || isSourceSingleLineCell(cell)) {
+                if (isSourceSingleLineCell(cell)) {
                     cell.squeezeLineWrap(true);
                     markCellParagraphsSqueeze(cell);
                 }
@@ -2103,7 +2103,6 @@ public final class TableBuilder {
 
     private static boolean inlineObjectHasSqueezeCarrier(ASTInlineObject obj) {
         if (obj == null) return false;
-        if (obj.noAutoLineWrap()) return true;
         if (obj.paragraphs() != null) {
             for (ASTParagraph paragraph : obj.paragraphs()) {
                 if (paragraphHasSqueezeCarrier(paragraph)) return true;
