@@ -181,14 +181,14 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var visibleVisualSourceResolution = _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans);
-    _recordObjectPlanTiming("resolveDuplicateVisibleVisualSources", _timingStartedAt, {
+    var nestedInlineTextShellResolution =
+            _resolveObjectPlanNestedInlineTextShellOwners(objectPlans, sourceById);
+    _recordObjectPlanTiming("resolveNestedInlineTextShellOwners", _timingStartedAt, {
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var nestedInlineTextShellResolution =
-            _resolveObjectPlanNestedInlineTextShellOwners(objectPlans);
-    _recordObjectPlanTiming("resolveNestedInlineTextShellOwners", _timingStartedAt, {
+    var visibleVisualSourceResolution = _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans);
+    _recordObjectPlanTiming("resolveDuplicateVisibleVisualSources", _timingStartedAt, {
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
@@ -1114,6 +1114,19 @@ function _objectPlanUnionTwoBounds(a, b) {
     ];
 }
 
+function _objectPlanTranslateBounds(bounds, deltaTop, deltaLeft) {
+    bounds = _objectPlanNormalizeBounds(bounds);
+    if (!bounds) return null;
+    var dt = Number(deltaTop || 0);
+    var dl = Number(deltaLeft || 0);
+    return [
+        bounds[0] + dt,
+        bounds[1] + dl,
+        bounds[2] + dt,
+        bounds[3] + dl
+    ];
+}
+
 function _objectPlanBoundsDifferent(a, b, eps) {
     a = _objectPlanNormalizeBounds(a);
     b = _objectPlanNormalizeBounds(b);
@@ -1240,9 +1253,7 @@ function _appendInlineVisibleTextFrameShellObjectPlans(objectPlans, sourceItems)
         if (!_objectPlanSourceIsInlineVisibleTextFrameShell(src)) continue;
         var id = _objectPlanTextFrameIdValue(src);
         if (id === null || id === undefined || typeof id !== "number" || isNaN(id)) continue;
-        if (_objectPlanDecisionIndexHasSourceShellDecision(objectPlans, id)
-                || _objectPlanDecisionIndexHasVisibleShell(decisionIndex, id)
-                || _objectPlanDecisionIndexHasVisualDecision(decisionIndex, id)) {
+        if (_objectPlanDecisionIndexHasVisualDecision(decisionIndex, id)) {
             summary.skippedExistingVisualDecisionCount++;
             continue;
         }
@@ -2631,6 +2642,24 @@ function _objectPlanSourceBounds(item) {
     return item.bounds || item.pageRelativeBounds || item.geometricBounds || null;
 }
 
+function _objectPlanUnionSourceBoundsForIds(ids, sourceById) {
+    if (!ids || !sourceById) return null;
+    var out = null;
+    var seen = {};
+    for (var i = 0; i < ids.length; i++) {
+        var id = Number(ids[i]);
+        if (isNaN(id)) continue;
+        var key = String(id);
+        if (seen[key]) continue;
+        seen[key] = true;
+        var item = sourceById[key];
+        var bounds = _objectPlanSourceBounds(item);
+        if (!bounds) continue;
+        out = _objectPlanUnionTwoBounds(out, bounds);
+    }
+    return out;
+}
+
 function _objectPlanSourceChildIds(item, sourceById) {
     if (!item) return [];
     if (item.childIds && item.childIds.length !== undefined) return item.childIds;
@@ -3224,6 +3253,8 @@ function _objectPlanIsInlineVisibleTextFrameShellTextOwner(plan) {
     if (plan.ownershipSlot !== "SHELL_SLOT") return false;
     if (plan.slotRole !== "inline_text_frame_shell_slot"
             && plan.compositeRole !== "inline_visible_text_frame_shell"
+            && plan.slotRole !== "direct_child_shell_slot"
+            && plan.compositeRole !== "direct_child_shell_slot"
             && plan.slotRole !== "inline_editable_text_shell_composite"
             && plan.compositeRole !== "inline_editable_text_shell_composite") {
         return false;
@@ -3236,6 +3267,8 @@ function _objectPlanIsInlineVisibleTextFrameShellPlan(plan) {
     if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
     if (plan.slotRole === "inline_text_frame_shell_slot"
             || plan.compositeRole === "inline_visible_text_frame_shell"
+            || plan.slotRole === "direct_child_shell_slot"
+            || plan.compositeRole === "direct_child_shell_slot"
             || plan.slotRole === "inline_editable_text_shell_composite"
             || plan.compositeRole === "inline_editable_text_shell_composite") {
         return true;
@@ -3306,6 +3339,10 @@ function _objectPlanInlineVisibleTextFrameShellPriority(plan) {
     var score = 1000;
     var objectPlanId = String(plan.objectPlanId || "");
     if (objectPlanId.indexOf("objectPlan.inline_visible_textframe_shell.") === 0) score += 500;
+    if (plan.slotRole === "direct_child_shell_slot"
+            || plan.compositeRole === "direct_child_shell_slot") {
+        score += 900;
+    }
     if (plan.slotRole === "inline_editable_text_shell_composite"
             || plan.compositeRole === "inline_editable_text_shell_composite") {
         score += 700;
@@ -3423,7 +3460,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
     };
 }
 
-function _resolveObjectPlanNestedInlineTextShellOwners(objectPlans) {
+function _resolveObjectPlanNestedInlineTextShellOwners(objectPlans, sourceById) {
     var plans = objectPlans || [];
     var droppedPlanCount = 0;
     var droppedObjectPlanIds = [];
@@ -3467,10 +3504,13 @@ function _resolveObjectPlanNestedInlineTextShellOwners(objectPlans) {
 
     for (var i = 0; i < plans.length; i++) {
         var child = plans[i];
-        if (!_objectPlanIsDirectChildInlineTextShell(child)) continue;
+        if (!_objectPlanIsNestedInlineTextShellChild(child)) continue;
         var parent = _objectPlanFindContainingInlineTextShellPlan(child, plans);
         if (!parent) continue;
         nestedShellDuplicateCount++;
+        if (_objectPlanTrimContainingInlineTextShellParent(parent, child, sourceById)) {
+            continue;
+        }
         child.hiddenVisualSourceObjectIds = _sourceIdsUnion(
                 child.hiddenVisualSourceObjectIds || [],
                 _sourceIdsUnion(
@@ -3503,6 +3543,109 @@ function _resolveObjectPlanNestedInlineTextShellOwners(objectPlans) {
     };
 }
 
+function _objectPlanTrimContainingInlineTextShellParent(parent, child, sourceById) {
+    if (!parent || !child) return false;
+    var originalPlanBounds = _objectPlanNormalizeBounds(parent.bounds);
+    var originalSourceBounds = _objectPlanUnionSourceBoundsForIds(parent.sourceObjectIds || [], sourceById);
+    var childSourceIds = _sourceIdsUnion(
+            child.sourceObjectIds || [],
+            _sourceIdsUnion(child.visualSourceObjectIds || [], child.exportSourceObjectIds || []));
+    var childOwnedTextIds = child.ownedTextFrameIds || [];
+    var removedIds = _sourceIdsUnion(childSourceIds, childOwnedTextIds);
+    if (!removedIds || removedIds.length === 0) return false;
+
+    parent.ownedTextFrameIds = _sourceIdsMinus(parent.ownedTextFrameIds || [], childOwnedTextIds);
+    var residualVisualIds = _objectPlanExecutableResidualInlineShellVisualIds(
+            _sourceIdsMinus(parent.visualSourceObjectIds || [], removedIds), sourceById);
+    var residualExportIds = _objectPlanExecutableResidualInlineShellVisualIds(
+            _sourceIdsMinus(parent.exportSourceObjectIds || [], removedIds), sourceById);
+    var residualStyleIds = _objectPlanResidualInlineShellStyleSourceIds(parent, sourceById);
+    parent.visualSourceObjectIds = _sourceIdsUnion(residualVisualIds, residualStyleIds);
+    parent.exportSourceObjectIds = _sourceIdsUnion(residualExportIds, residualStyleIds);
+    parent.styleSourceObjectIds = _sourceIdsUnion(parent.styleSourceObjectIds || [], residualStyleIds);
+    parent.hiddenVisualSourceObjectIds = _sourceIdsMinus(
+            _sourceIdsUnion(parent.hiddenVisualSourceObjectIds || [], removedIds),
+            _sourceIdsUnion(parent.visualSourceObjectIds || [],
+                    _sourceIdsUnion(parent.exportSourceObjectIds || [], parent.styleSourceObjectIds || [])));
+    var residualBoundsIds = _sourceIdsUnion(parent.visualSourceObjectIds || [],
+            _sourceIdsUnion(parent.exportSourceObjectIds || [],
+                    _sourceIdsUnion(parent.styleSourceObjectIds || [], parent.ownedTextFrameIds || [])));
+    var residualSourceBounds = _objectPlanUnionSourceBoundsForIds(residualBoundsIds, sourceById);
+    if (residualSourceBounds) {
+        var residualPlanBounds = residualSourceBounds;
+        if (originalPlanBounds && originalSourceBounds) {
+            residualPlanBounds = _objectPlanTranslateBounds(
+                    residualSourceBounds,
+                    originalPlanBounds[0] - originalSourceBounds[0],
+                    originalPlanBounds[1] - originalSourceBounds[1]);
+        }
+        parent.bounds = residualPlanBounds;
+        parent.sourceBounds = residualSourceBounds;
+        parent.boundsResolution = "TRIMMED_TO_RESIDUAL_INLINE_TEXT_SHELL_SLOT";
+    }
+    parent.nestedInlineTextShellResolution = "PARENT_TRIMMED_FOR_NESTED_CHILD_SLOT";
+    if (!parent.nestedInlineTextShellChildObjectPlanIds) {
+        parent.nestedInlineTextShellChildObjectPlanIds = [];
+    }
+    var childPlanId = child.objectPlanId || child.bundleId || child.candidateId || child.primarySourceObjectId;
+    var childPlanSeen = false;
+    for (var cpi = 0; cpi < parent.nestedInlineTextShellChildObjectPlanIds.length; cpi++) {
+        if (String(parent.nestedInlineTextShellChildObjectPlanIds[cpi]) === String(childPlanId)) {
+            childPlanSeen = true;
+            break;
+        }
+    }
+    if (!childPlanSeen) parent.nestedInlineTextShellChildObjectPlanIds.push(childPlanId);
+    parent.reason = String(parent.reason || "") + ":nested_inline_child_shell_slot_trimmed";
+
+    if (parent.visualSourceObjectIds.length === 0
+            && parent.exportSourceObjectIds.length === 0
+            && parent.ownedTextFrameIds.length === 0) {
+        parent.visualAction = "DROP_VISUAL";
+        parent.materialization = parent.ownedTextFrameIds.length > 0 ? "HWPX_TEXT" : "HWPX_TEXT";
+    }
+    if (parent.ownedTextFrameIds.length === 0) {
+        parent.textAction = "DROP_TEXT";
+    }
+    if (parent.visualAction === "DROP_VISUAL" && parent.ownedTextFrameIds.length === 0) {
+        parent.layoutOnlyInlineSlot = true;
+        parent.nestedInlineTextShellResolution = "PARENT_DROPPED_AFTER_CHILD_SLOT_SPLIT";
+    }
+
+    child.nestedInlineTextShellResolution = "KEPT_NESTED_CHILD_SLOT_PARENT_TRIMMED";
+    child.nestedInlineTextShellCanonicalObjectPlanId =
+            child.objectPlanId || child.bundleId || child.candidateId || null;
+    child.reason = String(child.reason || "") + ":nested_inline_child_shell_slot_kept";
+    return true;
+}
+
+function _objectPlanExecutableResidualInlineShellVisualIds(ids, sourceById) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; ids && i < ids.length; i++) {
+        var id = Number(ids[i]);
+        if (isNaN(id)) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        var kind = src ? _objectPlanSourceKind(src) : "";
+        if (kind === "Group") continue;
+        _pushUniqueId(out, seen, id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanResidualInlineShellStyleSourceIds(plan, sourceById) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; plan && plan.ownedTextFrameIds && i < plan.ownedTextFrameIds.length; i++) {
+        var id = Number(plan.ownedTextFrameIds[i]);
+        if (isNaN(id)) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        if (!_objectPlanSourceIsInlineVisibleTextFrameShell(src)) continue;
+        _pushUniqueId(out, seen, id);
+    }
+    return _sortedNumericIds(out);
+}
+
 function _objectPlanIsAnchoredTableStyleShell(plan, anchoredTableTextFrameIds) {
     if (!plan || plan.visualAction !== "PLACE_TEXT_SHELL") return false;
     if (!anchoredTableTextFrameIds) return false;
@@ -3521,8 +3664,8 @@ function _objectPlanFindContainingInlineTextShellPlan(child, plans) {
         if (parent === child) continue;
         if (!_objectPlanIsVisibleInlineTextShell(parent)) continue;
         if (parent.pageIndex !== child.pageIndex) continue;
-        if (!_objectPlanOwnedTextFramesOverlap(parent, child)) continue;
         if (!_objectPlanSourceIdsContainAll(parent.sourceObjectIds || [], child.sourceObjectIds || [])) continue;
+        if (!_objectPlanParentInlineShellContainsChildSlot(parent, child)) continue;
         if ((parent.sourceObjectIds || []).length <= (child.sourceObjectIds || []).length) continue;
         if (!best || (parent.sourceObjectIds || []).length > (best.sourceObjectIds || []).length) {
             best = parent;
@@ -3531,10 +3674,34 @@ function _objectPlanFindContainingInlineTextShellPlan(child, plans) {
     return best;
 }
 
+function _objectPlanParentInlineShellContainsChildSlot(parent, child) {
+    if (!parent || !child) return false;
+    if (_objectPlanOwnedTextFramesOverlap(parent, child)) return true;
+    if (!_objectPlanIsNestedInlineTextShellChild(child)) return false;
+    var childVisualIds = _sourceIdsUnion(
+            child.visualSourceObjectIds || [],
+            _sourceIdsUnion(child.exportSourceObjectIds || [], child.sourceObjectIds || []));
+    if (!childVisualIds || childVisualIds.length === 0) return false;
+    var parentIds = _sourceIdSet(_sourceIdsUnion(
+            parent.visualSourceObjectIds || [],
+            _sourceIdsUnion(parent.exportSourceObjectIds || [], parent.sourceObjectIds || [])));
+    for (var i = 0; i < childVisualIds.length; i++) {
+        if (parentIds[String(childVisualIds[i])]) return true;
+    }
+    return false;
+}
+
 function _objectPlanIsDirectChildInlineTextShell(plan) {
     if (!_objectPlanIsVisibleInlineTextShell(plan)) return false;
     return plan.slotRole === "direct_child_shell_slot"
             || plan.compositeRole === "direct_child_shell_slot";
+}
+
+function _objectPlanIsNestedInlineTextShellChild(plan) {
+    if (!_objectPlanIsVisibleInlineTextShell(plan)) return false;
+    return _objectPlanIsDirectChildInlineTextShell(plan)
+            || plan.slotRole === "inline_text_frame_shell_slot"
+            || plan.compositeRole === "inline_visible_text_frame_shell";
 }
 
 function _objectPlanIsVisibleInlineTextShell(plan) {
@@ -3720,9 +3887,9 @@ function _objectPlanVisibleVisualSourcePriority(plan) {
     }
     if (plan.visualAction === "PLACE_TEXT_SHELL") score += 220;
     if (plan.ownershipSlot === "SHELL_SLOT") score += 160;
+    if (plan.slotRole === "direct_child_shell_slot") score += 180;
+    if (plan.compositeRole === "direct_child_shell_slot") score += 160;
     if (plan.slotRole === "shell_slot_only" || plan.mode === "SLOT_ONLY") score += 80;
-    if (plan.slotRole === "direct_child_shell_slot") score += 70;
-    if (plan.compositeRole === "direct_child_shell_slot") score += 60;
     if (plan.passId === "pass.image_placed_frames") score += 120;
     if (plan.passId === "pass.inline_objects") score += 100;
     if (plan.passId === "pass.decoration_groups") score += 50;
