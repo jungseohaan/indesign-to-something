@@ -469,13 +469,20 @@ public final class FramePlacer {
         for (int i = 0; i < paraTexts.size() - 1; i++) {
             if (!isInlineOnlyParagraphText(paraTexts.get(i))) continue;
             if (!hasVisibleTextParagraphAfter(paraTexts, i + 1)) continue;
-            ParagraphRangeBounds before = boundsForParagraphRange(tf, start, i, storyStart);
-            if (before != null) ranges.add(before);
+            if (!inlineSlotAnchorsForParagraph(ctx, tf, i).isEmpty()) {
+                return Collections.emptyList();
+            }
+            if (start <= i - 1) {
+                ParagraphRangeBounds before = boundsForParagraphRange(ctx, tf, start, i - 1, storyStart, false);
+                if (before != null) ranges.add(before);
+            }
+            ParagraphRangeBounds inlineOnly = boundsForParagraphRange(ctx, tf, i, i, storyStart, true);
+            if (inlineOnly != null) ranges.add(inlineOnly);
             start = i + 1;
             split = true;
         }
         if (!split) return Collections.emptyList();
-        ParagraphRangeBounds tail = boundsForParagraphRange(tf, start, paraTexts.size() - 1, storyStart);
+        ParagraphRangeBounds tail = boundsForParagraphRange(ctx, tf, start, paraTexts.size() - 1, storyStart, false);
         if (tail != null) ranges.add(tail);
         return ranges.size() > 1 ? ranges : Collections.emptyList();
     }
@@ -545,10 +552,12 @@ public final class FramePlacer {
     }
 
     private static ParagraphRangeBounds boundsForParagraphRange(
+            ResolvedBuildContext ctx,
             ResolvedTextFrame tf,
             int localStart,
             int localEnd,
-            int storyStart) {
+            int storyStart,
+            boolean inlineOnlyRange) {
         if (tf == null || tf.composedLines() == null) return null;
         double top = Double.POSITIVE_INFINITY;
         double left = Double.POSITIVE_INFINITY;
@@ -572,7 +581,122 @@ public final class FramePlacer {
         left -= pad;
         bottom += pad;
         right += pad;
+        if (inlineOnlyRange) {
+            double[] expanded = expandInlineOnlyRangeBoundsWithSourceVisuals(
+                    ctx, tf, localStart, new double[] { top, left, bottom, right });
+            if (expanded != null) {
+                top = expanded[0];
+                left = expanded[1];
+                bottom = expanded[2];
+                right = expanded[3];
+            }
+        }
         return new ParagraphRangeBounds(storyStart + localStart, storyStart + localEnd, top, left, bottom, right);
+    }
+
+    private static double[] expandInlineOnlyRangeBoundsWithSourceVisuals(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            int localParagraphIndex,
+            double[] rangeBounds) {
+        if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null
+                || tf == null || rangeBounds == null || rangeBounds.length < 4) {
+            return null;
+        }
+        double[] tfBounds = tf.pageRelativeBounds();
+        if (tfBounds == null || tfBounds.length < 4) tfBounds = tf.geometricBounds();
+        if (tfBounds == null || tfBounds.length < 4) return null;
+        Set<Integer> anchoredObjectIds = inlineSlotAnchorsForParagraph(ctx, tf, localParagraphIndex);
+        // Story-flow inline anchors already prove ownership/placement. Their ObjectPlan bounds
+        // are in the inline object's execution coordinate space, so unioning them into the
+        // host TextFrame's page-local paragraph bounds moves the carrier block. Keep the
+        // composed-line location here; the HWPX table wrapper later grows to the inline
+        // object's actual materialized size.
+        if (!anchoredObjectIds.isEmpty()) {
+            return null;
+        }
+        double[] out = new double[] { rangeBounds[0], rangeBounds[1], rangeBounds[2], rangeBounds[3] };
+        boolean expanded = false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.placement != Placement.INLINE || !plan.hasVisibleVisual()) continue;
+            if (plan.pageIndex >= 0 && tf.pageIndex() >= 0 && plan.pageIndex != tf.pageIndex()) continue;
+            double[] planBounds = inlinePlanSourceBounds(ctx, plan);
+            if (planBounds == null || planBounds.length < 4) continue;
+            if (!overlaps(rangeBounds, plan.bounds != null ? plan.bounds : planBounds)
+                    && !overlaps(rangeBounds, planBounds)) {
+                continue;
+            }
+            if (!inlinePlanAnchoredInTextFrame(ctx, tfBounds, plan)) continue;
+            out[0] = Math.min(out[0], planBounds[0]);
+            out[1] = Math.min(out[1], planBounds[1]);
+            out[2] = Math.max(out[2], planBounds[2]);
+            out[3] = Math.max(out[3], planBounds[3]);
+            expanded = true;
+        }
+        return expanded ? out : null;
+    }
+
+    private static Set<Integer> inlineSlotAnchorsForParagraph(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            int localParagraphIndex) {
+        Set<Integer> ids = new HashSet<>();
+        if (ctx == null || ctx.textFlowDocument == null || tf == null || tf.storyId() == null) return ids;
+        TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(tf.storyId());
+        if (unit == null || unit.paragraphs == null) return ids;
+        for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
+            if (paragraph == null || paragraph.index != localParagraphIndex || paragraph.atoms == null) continue;
+            collectInlineSlotAnchorIds(paragraph.atoms, ids);
+        }
+        return ids;
+    }
+
+    private static void collectInlineSlotAnchorIds(
+            List<TextFlowDocument.TextFlowAtom> atoms,
+            Set<Integer> ids) {
+        if (atoms == null || ids == null) return;
+        for (TextFlowDocument.TextFlowAtom atom : atoms) {
+            if (!(atom instanceof TextFlowDocument.InlineSlotAtom)) continue;
+            TextFlowDocument.InlineSlotAtom slot = (TextFlowDocument.InlineSlotAtom) atom;
+            if (slot.anchoredObjectId != null) ids.add(slot.anchoredObjectId);
+        }
+    }
+
+    private static boolean planMatchesAnySourceId(ObjectPlan plan, Set<Integer> ids) {
+        if (plan == null || ids == null || ids.isEmpty()) return false;
+        if (ids.contains(plan.domId)) return true;
+        for (Integer id : ids) {
+            if (id == null) continue;
+            if (containsInt(plan.sourceObjectIds, id)
+                    || containsInt(plan.visualSourceObjectIds, id)
+                    || containsInt(plan.exportSourceObjectIds, id)
+                    || containsInt(plan.inlineFlowSourceObjectIds, id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean inlinePlanAnchoredInTextFrame(
+            ResolvedBuildContext ctx,
+            double[] tfBounds,
+            ObjectPlan plan) {
+        int[] sourceIds = plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0
+                ? plan.sourceObjectIds : plan.visualSourceObjectIds;
+        if (sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (item == null || !item.isInline() || !item.storyTextInlineSlot()) continue;
+            double[] bounds = item.pageRelativeBounds();
+            if (bounds == null || bounds.length < 4) bounds = item.geometricBounds();
+            if (bounds != null && bounds.length >= 4 && overlaps(tfBounds, bounds)) return true;
+        }
+        return false;
+    }
+
+    private static double[] inlinePlanSourceBounds(ResolvedBuildContext ctx, ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return null;
+        return plan.bounds;
     }
 
     private static int storyParagraphCount(ResolvedBuildContext ctx, String storyId) {

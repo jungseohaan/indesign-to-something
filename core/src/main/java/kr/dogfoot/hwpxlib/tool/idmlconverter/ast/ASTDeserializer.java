@@ -446,6 +446,7 @@ public class ASTDeserializer {
         obj.cornerRadius(getDouble(o, "cornerRadius"));
         if (o.has("shellShapeType")) obj.shellShapeType(getString(o, "shellShapeType"));
         obj.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
+        obj.squeezeLineWrap(getBool(o, "squeezeLineWrap"));
 
         obj.textMarginTop(getLong(o, "textMarginTop"));
         obj.textMarginLeft(getLong(o, "textMarginLeft"));
