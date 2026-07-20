@@ -270,6 +270,10 @@ public class ASTSerializer {
         if (tf.anchoredFlowWithText()) {
             first = writeBooleanField(sb, "anchoredFlowWithText", true, first);
         }
+        if (tf.hasParagraphRange()) {
+            first = writeIntField(sb, "paragraphRangeStart", tf.paragraphRangeStart(), first);
+            first = writeIntField(sb, "paragraphRangeEnd", tf.paragraphRangeEnd(), first);
+        }
 
         // paragraphs
         if (tf.paragraphs() != null && !tf.paragraphs().isEmpty()) {

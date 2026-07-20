@@ -23,6 +23,9 @@ class ParagraphDistributor {
 
     static void distributeParagraphs(ResolvedBuildContext ctx, List<ASTParagraph> paragraphs,
                                        List<ASTTextFrameBlock> blocks, String storyId) {
+        if (assignExplicitParagraphRanges(paragraphs, blocks)) {
+            return;
+        }
         // 단일 프레임: frameVisibleText와 Story 텍스트 길이 비교
         if (blocks.size() == 1) {
             ASTTextFrameBlock block = blocks.get(0);
@@ -121,6 +124,31 @@ class ParagraphDistributor {
                 }
             }
         }
+    }
+
+    private static boolean assignExplicitParagraphRanges(
+            List<ASTParagraph> paragraphs,
+            List<ASTTextFrameBlock> blocks) {
+        if (paragraphs == null || blocks == null || blocks.isEmpty()) return false;
+        boolean anyRange = false;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block != null && block.hasParagraphRange()) {
+                anyRange = true;
+            } else {
+                return false;
+            }
+        }
+        if (!anyRange) return false;
+
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || !block.hasParagraphRange()) continue;
+            int start = Math.max(0, block.paragraphRangeStart());
+            int end = Math.min(paragraphs.size() - 1, block.paragraphRangeEnd());
+            for (int i = start; i <= end; i++) {
+                block.addParagraph(paragraphs.get(i));
+            }
+        }
+        return true;
     }
 
     private static ASTTextFrameBlock sourceFrameForInlineOnlyParagraph(

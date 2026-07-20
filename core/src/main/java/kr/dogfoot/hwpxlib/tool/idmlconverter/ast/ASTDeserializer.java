@@ -187,6 +187,8 @@ public class ASTDeserializer {
         tf.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
         tf.plannedVisualTextOverlay(getBool(o, "plannedVisualTextOverlay"));
         tf.anchoredFlowWithText(getBool(o, "anchoredFlowWithText"));
+        tf.paragraphRangeStart(o.has("paragraphRangeStart") ? getInt(o, "paragraphRangeStart") : -1);
+        tf.paragraphRangeEnd(o.has("paragraphRangeEnd") ? getInt(o, "paragraphRangeEnd") : -1);
 
         if (o.has("paragraphs")) {
             for (JsonElement e : o.getAsJsonArray("paragraphs")) {
