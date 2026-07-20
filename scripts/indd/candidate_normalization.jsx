@@ -1402,28 +1402,38 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (src.textFrameClass !== "editable") return null;
         if (!sourceHasMeaningfulEditableText(textFrameId)) return null;
         if (!sourceHasTextFrameShellStyle(textFrameId)) return null;
-        if (sourceHasInlineAnchorAncestorExcludingSelf(textFrameId)) return null;
+        var parentIsInlineComposite = parentCandidate && parentCandidate.passId === "pass.inline_objects";
+        if (!parentIsInlineComposite && sourceHasInlineAnchorAncestorExcludingSelf(textFrameId)) return null;
         if (textFrameStyleShellCoveredByInlineDirectChildShell(textFrameId, parentCandidate.pageIndex)) return null;
         if (options.skipCoveredByExistingCandidate !== false
                 && textFrameStyleShellCoveredByExistingCandidate(textFrameId, parentCandidate.pageIndex)) {
             return null;
         }
+        var passId = parentIsInlineComposite ? "pass.inline_objects" : "pass.editable_textframe_visual_shells";
+        var candidatePurpose = parentIsInlineComposite ? "INLINE_CANDIDATE" : "SHELL_CANDIDATE";
+        var unit = parentIsInlineComposite ? "INLINE_OBJECT" : "TEXT_FRAME";
+        var compositeRole = parentIsInlineComposite
+                ? "inline_visible_text_frame_shell"
+                : "textframe_style_shell_slot";
+        var slotRole = parentIsInlineComposite
+                ? "inline_text_frame_shell_slot"
+                : "direct_child_shell_slot";
         return {
-            candidateId: _candidateId("pass.editable_textframe_visual_shells", textFrameId, parentCandidate.pageIndex),
-            passId: "pass.editable_textframe_visual_shells",
+            candidateId: _candidateId(passId, textFrameId, parentCandidate.pageIndex),
+            passId: passId,
             sourceObjectIds: [textFrameId],
             primarySourceObjectId: textFrameId,
             pageIndex: parentCandidate.pageIndex,
             kind: "TextFrame",
-            unit: "TEXT_FRAME",
+            unit: unit,
             mode: "TEXTLESS_CANDIDATE",
-            candidatePurpose: "SHELL_CANDIDATE",
+            candidatePurpose: candidatePurpose,
             bounds: src.bounds || null,
             parentId: src.parentId,
             parentKind: src.parentKind || null,
             composite: false,
-            compositeRole: "textframe_style_shell_slot",
-            slotRole: "direct_child_shell_slot",
+            compositeRole: compositeRole,
+            slotRole: slotRole,
             exportSourceObjectIds: [textFrameId],
             exportTargetObjectId: textFrameId,
             hiddenVisualSourceObjectIds: [],
@@ -1435,6 +1445,8 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
             textOwner: "hwpx_tf",
             containsEditableText: false,
             completePngTextAllowed: false,
+            placement: parentIsInlineComposite ? "INLINE" : parentCandidate.placement,
+            coordinateSpace: parentIsInlineComposite ? "STORY_FLOW" : parentCandidate.coordinateSpace,
             zOrder: src.zOrder !== undefined ? src.zOrder : parentCandidate.zOrder,
             required: parentCandidate.required === true
         };
@@ -2151,15 +2163,23 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         }
         for (var ci = 0; ci < candidates.length; ci++) {
             var parentCandidate = candidates[ci];
-            if (!parentCandidate || parentCandidate.passId !== "pass.decoration_groups") continue;
-            if (parentCandidate.candidatePurpose !== "SHELL_CANDIDATE") continue;
+            if (!parentCandidate) continue;
+            if (parentCandidate.passId !== "pass.decoration_groups"
+                    && parentCandidate.passId !== "pass.inline_objects") continue;
+            if (parentCandidate.passId === "pass.decoration_groups"
+                    && parentCandidate.candidatePurpose !== "SHELL_CANDIDATE") continue;
+            if (parentCandidate.passId === "pass.inline_objects"
+                    && parentCandidate.candidatePurpose !== "INLINE_CANDIDATE") continue;
             if (!parentCandidate.sourceObjectIds || parentCandidate.sourceObjectIds.length === 0) continue;
             var parentSourceSet = _sourceIdSet(parentCandidate.sourceObjectIds);
             var editableIds = editableTextIdsInSourceSet(parentCandidate.sourceObjectIds, parentCandidate.pageIndex);
             for (var ti = 0; editableIds && ti < editableIds.length; ti++) {
                 var textFrameId = editableIds[ti];
                 if (!parentSourceSet[String(textFrameId)]) continue;
-                var key = "pass.editable_textframe_visual_shells|" + parentCandidate.pageIndex
+                var passId = parentCandidate.passId === "pass.inline_objects"
+                        ? "pass.inline_objects"
+                        : "pass.editable_textframe_visual_shells";
+                var key = passId + "|" + parentCandidate.pageIndex
                         + "|" + _sourceSetKey([textFrameId]);
                 if (existingByKey[key]) continue;
                 var tfShell = makeTextFrameStyleShellSlotCandidate(parentCandidate, textFrameId);
@@ -3162,9 +3182,14 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
 	}
 	for (var styleParentIdx = 0; styleParentIdx < normalized.length; styleParentIdx++) {
 		var styleParent = normalized[styleParentIdx];
-        if (!styleParent || styleParent.passId !== "pass.decoration_groups") continue;
-        if (styleParent.candidatePurpose !== "SHELL_CANDIDATE") continue;
-        if (!styleParent.sourceObjectIds || styleParent.sourceObjectIds.length === 0) continue;
+	        if (!styleParent) continue;
+	        if (styleParent.passId !== "pass.decoration_groups"
+                    && styleParent.passId !== "pass.inline_objects") continue;
+	        if (styleParent.passId === "pass.decoration_groups"
+                    && styleParent.candidatePurpose !== "SHELL_CANDIDATE") continue;
+	        if (styleParent.passId === "pass.inline_objects"
+                    && styleParent.candidatePurpose !== "INLINE_CANDIDATE") continue;
+	        if (!styleParent.sourceObjectIds || styleParent.sourceObjectIds.length === 0) continue;
         var styleEditableIds = editableTextIdsInSourceSet(styleParent.sourceObjectIds, styleParent.pageIndex);
         for (var stei = 0; styleEditableIds && stei < styleEditableIds.length; stei++) {
 			var styleTextFrameId = styleEditableIds[stei];

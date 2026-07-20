@@ -1414,13 +1414,25 @@ public class InlineFrameHandler {
             int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
             boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
             boolean embedCompositeShellText = shouldEmbedOwnedCompositeInlineTextShell(ctx, shellPlan, childTfs);
-            boolean preserveSourceCanvas = extractedShellImageOwnsGeometry(shellPlan)
-                    || shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
+            boolean compactSplitCanvas = shouldCompactSplitInlineTextShellCanvas(shellPlan);
+            ImageCropResult splitCanvasCrop = null;
+            if (compactSplitCanvas) {
+                splitCanvasCrop = cropInlineTextShellAlphaPadding(shellImage, shellBounds);
+                shellImage = splitCanvasCrop.image;
+            }
+            boolean preserveSourceCanvas = !compactSplitCanvas
+                    && (extractedShellImageOwnsGeometry(shellPlan)
+                    || shouldPreserveInlineShellSourceCanvas(ctx, shellPlan));
             boolean preserveCanvasGeometry = preserveSourceCanvas && !embedCompositeShellText;
             SourceCanvasGeometry canvasGeometry = preserveCanvasGeometry
                     ? sourceCanvasGeometryForExtractedShell(shellPlan, shellImage)
                     : null;
-            double[] executionBounds = canvasGeometry != null
+            boolean useCroppedExecutionBounds = splitCanvasCrop != null
+                    && splitCanvasCrop.sourceBounds != null
+                    && !isDirectChildInlineTextShellSlot(shellPlan);
+            double[] executionBounds = useCroppedExecutionBounds
+                    ? splitCanvasCrop.sourceBounds
+                    : canvasGeometry != null
                     ? canvasGeometry.sourceCanvasBounds
                     : shellBounds;
             double w = 0;
@@ -1462,13 +1474,14 @@ public class InlineFrameHandler {
             boolean usedNativeShellStyle = false;
             boolean transparentSparseShell = shouldPreserveTransparentInlineShell(shellImage);
             boolean preserveImageCanvas = preserveSourceCanvas && !embedCompositeShellText;
+            boolean forceVerticalImageTrim = compactSplitCanvas || embedCompositeShellText;
             if (transparentSparseShell) {
                 imageData = prepareTransparentInlineTextShellImageData(
                         ctx, shellPlan, executionBounds, shellImage,
-                        preserveImageCanvas, embedCompositeShellText);
+                        preserveImageCanvas, forceVerticalImageTrim);
             } else {
                 imageData = prepareInlineTextShellImageData(
-                        shellImage, preserveImageCanvas, embedCompositeShellText);
+                        shellImage, preserveImageCanvas, forceVerticalImageTrim);
             }
             if (embedCompositeShellText) {
                 if (useImageFill) {
@@ -1477,8 +1490,10 @@ public class InlineFrameHandler {
                 }
                 obj.squeezeLineWrap(shouldSqueezeCompositeInlineShellText(childTfs));
                 applyCompositeInlineShellTextMargins(
+                        ctx,
                         obj,
-                        scaleBounds(executionBounds, ctx.scaleFactor),
+                        shellPlan.pageIndex,
+                        executionBounds,
                         childTfs);
                 buildCompositeInlineShellParagraph(ctx, childTfs, obj);
                 for (ResolvedTextFrame childTf : childTfs) {
@@ -2090,6 +2105,22 @@ public class InlineFrameHandler {
         if (groupW <= 0 || groupH <= 0 || textW <= 0 || textH <= 0) return;
         if (textW > groupW * 1.25 || textH > groupH * 1.25) return;
 
+        if (shellPlanTextFrameOwnsItsShell(shellPlan, childTf)) {
+            double[] inset = childTf.insetSpacing();
+            if (inset != null && inset.length >= 4) {
+                obj.textMarginTop(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[0])));
+                obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[1])));
+                obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[2])));
+                obj.textMarginRight(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[3])));
+            } else {
+                obj.textMarginTop(0L);
+                obj.textMarginLeft(0L);
+                obj.textMarginBottom(0L);
+                obj.textMarginRight(0L);
+            }
+            return;
+        }
+
         double left = Math.max(0, textBounds[1] - groupBounds[1]);
         double top = Math.max(0, textBounds[0] - groupBounds[0]);
         double right = Math.max(0, groupBounds[3] - textBounds[3]);
@@ -2102,16 +2133,33 @@ public class InlineFrameHandler {
         obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom));
     }
 
+    private static boolean shellPlanTextFrameOwnsItsShell(ObjectPlan shellPlan, ResolvedTextFrame childTf) {
+        if (shellPlan == null || childTf == null) return false;
+        int textFrameId = parseIntOrDefault(childTf.id(), -1);
+        if (textFrameId < 0) return false;
+        return containsInt(shellPlan.ownedTextFrameIds, textFrameId)
+                && (containsInt(shellPlan.visualSourceObjectIds, textFrameId)
+                || containsInt(shellPlan.exportSourceObjectIds, textFrameId)
+                || containsInt(shellPlan.styleSourceObjectIds, textFrameId));
+    }
+
     private static void applyCompositeInlineShellTextMargins(
+            ResolvedBuildContext ctx,
             ASTInlineObject obj,
+            int pageIndex,
             double[] shellBounds,
             java.util.List<ResolvedTextFrame> childTfs) {
-        if (obj == null || !validBounds(shellBounds) || childTfs == null || childTfs.isEmpty()) return;
+        if (ctx == null || obj == null || !validBounds(shellBounds) || childTfs == null || childTfs.isEmpty()) return;
         double[] textUnion = null;
+        double[] shellPageBounds = null;
         for (ResolvedTextFrame childTf : childTfs) {
             if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
             if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
-            double[] b = childTf.geometricBounds();
+            if (!validBounds(shellPageBounds)) {
+                shellPageBounds = normalizeShellBoundsToTextFramePageLocal(ctx, pageIndex, shellBounds, childTf);
+                if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
+            }
+            double[] b = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
             if (!validBounds(b)) continue;
             if (textUnion == null) {
                 textUnion = new double[] { b[0], b[1], b[2], b[3] };
@@ -2122,24 +2170,25 @@ public class InlineFrameHandler {
                 textUnion[3] = Math.max(textUnion[3], b[3]);
             }
         }
-        if (!validBounds(textUnion)) return;
-        double shellW = Math.abs(shellBounds[3] - shellBounds[1]);
-        double shellH = Math.abs(shellBounds[2] - shellBounds[0]);
+        if (!validBounds(textUnion) || !validBounds(shellPageBounds)) return;
+        double shellW = Math.abs(shellPageBounds[3] - shellPageBounds[1]);
+        double shellH = Math.abs(shellPageBounds[2] - shellPageBounds[0]);
         double textW = Math.abs(textUnion[3] - textUnion[1]);
         double textH = Math.abs(textUnion[2] - textUnion[0]);
         if (shellW <= 0 || shellH <= 0 || textW <= 0 || textH <= 0) return;
         if (textW > shellW * 1.25 || textH > shellH * 1.25) return;
 
-        double left = Math.max(0, textUnion[1] - shellBounds[1]);
-        double top = Math.max(0, textUnion[0] - shellBounds[0]);
-        double right = Math.max(0, shellBounds[3] - textUnion[3]);
-        double bottom = Math.max(0, shellBounds[2] - textUnion[2]);
+        double left = Math.max(0, textUnion[1] - shellPageBounds[1]);
+        double top = Math.max(0, textUnion[0] - shellPageBounds[0]);
+        double right = Math.max(0, shellPageBounds[3] - textUnion[3]);
+        double bottom = Math.max(0, shellPageBounds[2] - textUnion[2]);
         if (left + top + right + bottom < 0.1) return;
 
-        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left));
-        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top));
-        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right));
-        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom));
+        double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left * scale));
+        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top * scale));
+        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right * scale));
+        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom * scale));
     }
 
     private static double[] scaleBounds(double[] bounds, double scale) {
@@ -2499,6 +2548,16 @@ public class InlineFrameHandler {
         }
     }
 
+    private static final class ImageCropResult {
+        final BufferedImage image;
+        final double[] sourceBounds;
+
+        ImageCropResult(BufferedImage image, double[] sourceBounds) {
+            this.image = image;
+            this.sourceBounds = sourceBounds;
+        }
+    }
+
     private static byte[] prepareInlineTextShellImageData(BufferedImage img) throws Exception {
         return prepareInlineTextShellImageData(img, false);
     }
@@ -2585,6 +2644,103 @@ public class InlineFrameHandler {
             g.dispose();
         }
         return out;
+    }
+
+    private static BufferedImage trimInlineTextShellAlphaPadding(BufferedImage img) {
+        if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return img;
+        int[] visible = alphaVisibleBounds(img);
+        if (visible == null) return img;
+        int left = visible[0];
+        int top = visible[1];
+        int right = visible[2];
+        int bottom = visible[3];
+        if (left <= 0 && top <= 0 && right >= img.getWidth() && bottom >= img.getHeight()) {
+            return img;
+        }
+        int w = right - left;
+        int h = bottom - top;
+        if (w <= 1 || h <= 1) return img;
+
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.drawImage(img,
+                    0, 0, w, h,
+                    left, top, right, bottom,
+                    null);
+        } finally {
+            g.dispose();
+        }
+        return out;
+    }
+
+    private static ImageCropResult cropInlineTextShellAlphaPadding(BufferedImage img, double[] sourceBounds) {
+        if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) {
+            return new ImageCropResult(img, sourceBounds);
+        }
+        int[] visible = alphaVisibleBounds(img);
+        if (visible == null) return new ImageCropResult(img, sourceBounds);
+        int left = visible[0];
+        int right = visible[2];
+        if (left <= 0 && right >= img.getWidth()) {
+            return new ImageCropResult(img, sourceBounds);
+        }
+        int w = right - left;
+        int h = img.getHeight();
+        if (w <= 1 || h <= 1) return new ImageCropResult(img, sourceBounds);
+
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.drawImage(img,
+                    0, 0, w, h,
+                    left, 0, right, img.getHeight(),
+                    null);
+        } finally {
+            g.dispose();
+        }
+
+        double[] croppedSourceBounds = sourceBounds;
+        if (validBounds(sourceBounds)) {
+            double sourceW = Math.abs(sourceBounds[3] - sourceBounds[1]);
+            double sourceH = Math.abs(sourceBounds[2] - sourceBounds[0]);
+            if (sourceW > 0.0 && sourceH > 0.0) {
+                double sourceLeft = sourceBounds[1] + (sourceW * ((double) left / (double) img.getWidth()));
+                double sourceRight = sourceBounds[1] + (sourceW * ((double) right / (double) img.getWidth()));
+                if (Double.isFinite(sourceLeft) && Double.isFinite(sourceRight)
+                        && sourceRight > sourceLeft) {
+                    croppedSourceBounds = new double[] { sourceBounds[0], sourceLeft, sourceBounds[2], sourceRight };
+                }
+            }
+        }
+        return new ImageCropResult(out, croppedSourceBounds);
+    }
+
+    private static boolean shouldCompactSplitInlineTextShellCanvas(ObjectPlan plan) {
+        if (plan == null || plan.placement != Placement.INLINE) return false;
+        if (!ShellRole.isTextShell(plan)) return false;
+        return shouldCompactSplitInlineTextShellFollower(plan)
+                || "direct_child_shell_slot".equals(plan.slotRole);
+    }
+
+    private static boolean isDirectChildInlineTextShellSlot(ObjectPlan plan) {
+        return plan != null && "direct_child_shell_slot".equals(plan.slotRole);
+    }
+
+    private static boolean shouldCompactSplitInlineTextShellFollower(ObjectPlan plan) {
+        if (plan == null || plan.placement != Placement.INLINE) return false;
+        if (!ShellRole.isTextShell(plan)) return false;
+        if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) return false;
+        if (plan.hiddenVisualSourceObjectIds == null || plan.hiddenVisualSourceObjectIds.length == 0) return false;
+        int hiddenOrder = firstSourceIndex(plan.sourceObjectIds, plan.hiddenVisualSourceObjectIds);
+        int visibleOrder = Integer.MAX_VALUE;
+        visibleOrder = Math.min(visibleOrder, firstSourceIndex(plan.sourceObjectIds, plan.visualSourceObjectIds));
+        visibleOrder = Math.min(visibleOrder, firstSourceIndex(plan.sourceObjectIds, plan.exportSourceObjectIds));
+        visibleOrder = Math.min(visibleOrder, firstSourceIndex(plan.sourceObjectIds, plan.styleSourceObjectIds));
+        visibleOrder = Math.min(visibleOrder, firstSourceIndex(plan.sourceObjectIds, plan.ownedTextFrameIds));
+        return hiddenOrder != Integer.MAX_VALUE
+                && visibleOrder != Integer.MAX_VALUE
+                && hiddenOrder < visibleOrder;
     }
 
     private static BufferedImage blendTransparentShellOverPagePlane(
@@ -5003,6 +5159,7 @@ public class InlineFrameHandler {
             item.keepInline(true);
             out.add(item);
         }
+        suppressTrailingGapBetweenInlineShellSequence(out);
         return out.isEmpty() ? null : out;
     }
 
@@ -5028,6 +5185,9 @@ public class InlineFrameHandler {
         candidates.addAll(byOwnedText.values());
         java.util.Collections.sort(candidates, new java.util.Comparator<ObjectPlan>() {
             public int compare(ObjectPlan a, ObjectPlan b) {
+                int orderA = inlineAnchorSourceOrder(ctx, anchoredObjectId, a);
+                int orderB = inlineAnchorSourceOrder(ctx, anchoredObjectId, b);
+                if (orderA != orderB) return Integer.compare(orderA, orderB);
                 int byBounds = compareInlinePlanReadingOrder(a, b);
                 if (byBounds != 0) return byBounds;
                 return Integer.compare(planDepthOrder(a), planDepthOrder(b));
@@ -5814,7 +5974,18 @@ public class InlineFrameHandler {
             item.keepInline(true);
             out.add(item);
         }
+        suppressTrailingGapBetweenInlineShellSequence(out);
         return out.isEmpty() ? null : out;
+    }
+
+    private static void suppressTrailingGapBetweenInlineShellSequence(List<? extends ASTInlineItem> items) {
+        if (items == null || items.size() <= 1) return;
+        for (int i = 0; i < items.size() - 1; i++) {
+            ASTInlineItem item = items.get(i);
+            if (item instanceof ASTInlineObject) {
+                ((ASTInlineObject) item).suppressInlineTrailingGap(true);
+            }
+        }
     }
 
     private static ASTInlineObject buildNativeInlineShellObject(
@@ -6079,7 +6250,10 @@ public class InlineFrameHandler {
             if (plan.placement != Placement.INLINE) continue;
             if (!ShellRole.isTextShell(plan)) continue;
             if (!hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan)) continue;
-            if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
+            if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)
+                    && !isNestedInlineTextShellPlanForAnchor(ctx, plan, anchoredObjectId)) {
+                continue;
+            }
             if (!isExecutableTextlessShellCarrier(plan)) continue;
             String key = ownedTextFrameKey(plan);
             ObjectPlan existing = byOwnedText.get(key);
@@ -6090,12 +6264,97 @@ public class InlineFrameHandler {
         candidates.addAll(byOwnedText.values());
         java.util.Collections.sort(candidates, new java.util.Comparator<ObjectPlan>() {
             public int compare(ObjectPlan a, ObjectPlan b) {
+                int orderA = inlineAnchorSourceOrder(ctx, anchoredObjectId, a);
+                int orderB = inlineAnchorSourceOrder(ctx, anchoredObjectId, b);
+                if (orderA != orderB) return Integer.compare(orderA, orderB);
                 int byBounds = compareInlinePlanReadingOrder(a, b);
                 if (byBounds != 0) return byBounds;
                 return Integer.compare(planDepthOrder(a), planDepthOrder(b));
             }
         });
         return candidates;
+    }
+
+    private static boolean isNestedInlineTextShellPlanForAnchor(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            int anchoredObjectId) {
+        if (ctx == null || plan == null || anchoredObjectId < 0) return false;
+        String anchorId = String.valueOf(anchoredObjectId);
+        Set<String> descendants = ctx.descendantSet(anchorId, 8);
+        if (descendants == null || descendants.isEmpty()) return false;
+        return containsAnyStringId(descendants, plan.sourceObjectIds)
+                || containsAnyStringId(descendants, plan.visualSourceObjectIds)
+                || containsAnyStringId(descendants, plan.exportSourceObjectIds)
+                || containsAnyStringId(descendants, plan.ownedTextFrameIds);
+    }
+
+    private static int inlineAnchorSourceOrder(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ObjectPlan plan) {
+        ObjectPlan carrier = findInlineAnchorCarrierPlan(ctx, anchoredObjectId);
+        if (carrier == null || carrier.sourceObjectIds == null || carrier.sourceObjectIds.length == 0) {
+            return Integer.MAX_VALUE;
+        }
+        int best = Integer.MAX_VALUE;
+        best = Math.min(best, firstSourceIndex(carrier.sourceObjectIds, plan != null ? plan.visualSourceObjectIds : null));
+        best = Math.min(best, firstSourceIndex(carrier.sourceObjectIds, plan != null ? plan.exportSourceObjectIds : null));
+        best = Math.min(best, firstSourceIndex(carrier.sourceObjectIds, plan != null ? plan.styleSourceObjectIds : null));
+        best = Math.min(best, firstSourceIndex(carrier.sourceObjectIds, plan != null ? plan.ownedTextFrameIds : null));
+        if (best == Integer.MAX_VALUE) {
+            best = firstSourceIndexExcluding(
+                    carrier.sourceObjectIds,
+                    plan != null ? plan.sourceObjectIds : null,
+                    anchoredObjectId);
+        }
+        return best;
+    }
+
+    private static ObjectPlan findInlineAnchorCarrierPlan(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return null;
+        ObjectPlan best = null;
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
+            if (plan == null || plan.placement != Placement.INLINE) continue;
+            if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
+            if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
+            if (best == null || plan.sourceObjectIds.length > best.sourceObjectIds.length) {
+                best = plan;
+            }
+        }
+        return best;
+    }
+
+    private static int firstSourceIndex(int[] orderedSourceIds, int[] ids) {
+        if (orderedSourceIds == null || ids == null || orderedSourceIds.length == 0 || ids.length == 0) {
+            return Integer.MAX_VALUE;
+        }
+        int best = Integer.MAX_VALUE;
+        for (int i = 0; i < orderedSourceIds.length; i++) {
+            if (containsInt(ids, orderedSourceIds[i])) {
+                best = i;
+                break;
+            }
+        }
+        return best;
+    }
+
+    private static int firstSourceIndexExcluding(int[] orderedSourceIds, int[] ids, int excludedId) {
+        if (orderedSourceIds == null || ids == null || orderedSourceIds.length == 0 || ids.length == 0) {
+            return Integer.MAX_VALUE;
+        }
+        int best = Integer.MAX_VALUE;
+        for (int i = 0; i < orderedSourceIds.length; i++) {
+            int sourceId = orderedSourceIds[i];
+            if (sourceId == excludedId) continue;
+            if (containsInt(ids, sourceId)) {
+                best = i;
+                break;
+            }
+        }
+        return best;
     }
 
     private static String ownedTextFrameKey(ObjectPlan plan) {

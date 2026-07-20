@@ -87,6 +87,9 @@ public class ASTInlineObject extends ASTInlineItem {
     // true이면 Stage 1에서 visual/text를 모두 page plane 등에 양보한 inline source의
     // 흐름 예약용 객체다. HWPX 출력은 visible graphic이 아니라 layout-only carrier로만 실행한다.
     private boolean layoutOnlyInlineSlot;
+    // 같은 source carrier 안에서 여러 inline text shell slot이 연속 실행될 때,
+    // HWPX 기본 trailing gap이 원본의 맞물린 shell 간격을 벌리지 않도록 한다.
+    private boolean suppressInlineTrailingGap;
 
     // Stage 1 ownership plan execution hints. Inline writers must not discard
     // source z/layer because inline shells can overlap page-positioned carriers.
@@ -255,6 +258,8 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public boolean layoutOnlyInlineSlot() { return layoutOnlyInlineSlot; }
     public void layoutOnlyInlineSlot(boolean v) { this.layoutOnlyInlineSlot = v; }
+    public boolean suppressInlineTrailingGap() { return suppressInlineTrailingGap; }
+    public void suppressInlineTrailingGap(boolean v) { this.suppressInlineTrailingGap = v; }
 
     public int plannedZOrder() { return plannedZOrder; }
     public void plannedZOrder(int v) { this.plannedZOrder = v; }

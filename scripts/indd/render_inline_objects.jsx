@@ -838,7 +838,9 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 ? inlineCandidate.hiddenTextFrameIds.slice(0)
                                 : (inlineCandidate.editableTextFrameIds || []).slice(0);
                         if (inlineHiddenTextFrameIds.length > 0) {
-                            savedInlineTextFrames = hideTextFrames(inItem);
+                            savedInlineTextFrames = hideTextFrames(inItem, {
+                                textFrameIds: inlineHiddenTextFrameIds
+                            });
                         }
                     }
                 } catch (eWalk) {}

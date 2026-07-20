@@ -342,7 +342,8 @@ final class InlineFrameBuilder {
             rect.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
                     .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
         } else {
-            rect.outMargin().leftAnd(0L).rightAnd(INLINE_TEXT_FRAME_TRAILING_GAP).topAnd(0L).bottomAnd(0L);
+            long trailingGap = obj.suppressInlineTrailingGap() ? 0L : INLINE_TEXT_FRAME_TRAILING_GAP;
+            rect.outMargin().leftAnd(0L).rightAnd(trailingGap).topAnd(0L).bottomAnd(0L);
         }
     }
 
