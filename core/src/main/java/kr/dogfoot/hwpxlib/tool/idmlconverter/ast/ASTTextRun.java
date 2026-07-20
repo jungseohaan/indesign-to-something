@@ -1,5 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.ast;
 
+import java.util.Objects;
+
 /**
  * 텍스트 런 — 동일 스타일의 연속 문자열.
  */
@@ -82,5 +84,51 @@ public class ASTTextRun extends ASTInlineItem {
 
     public boolean grepStyleApplied() { return grepStyleApplied; }
     public void grepStyleApplied(boolean v) { this.grepStyleApplied = v; }
+
+    public boolean hasSameStyle(ASTTextRun other) {
+        if (other == null) return false;
+        return Objects.equals(characterStyleRef, other.characterStyleRef)
+                && Objects.equals(fontFamily, other.fontFamily)
+                && Objects.equals(fontStyle, other.fontStyle)
+                && Objects.equals(fontSizeHwpunits, other.fontSizeHwpunits)
+                && Objects.equals(textColor, other.textColor)
+                && Objects.equals(shadeColor, other.shadeColor)
+                && Objects.equals(letterSpacing, other.letterSpacing)
+                && subscript == other.subscript
+                && superscript == other.superscript
+                && grepMathFont == other.grepMathFont
+                && underline == other.underline
+                && Objects.equals(underlineColor, other.underlineColor)
+                && Objects.equals(underlineShape, other.underlineShape)
+                && strikeThrough == other.strikeThrough
+                && Objects.equals(horizontalScale, other.horizontalScale)
+                && Objects.equals(verticalScale, other.verticalScale)
+                && Objects.equals(baselineShift, other.baselineShift)
+                && grepStyleApplied == other.grepStyleApplied;
+    }
+
+    public ASTTextRun copyWithText(String value) {
+        ASTTextRun copy = new ASTTextRun();
+        copy.characterStyleRef(characterStyleRef);
+        copy.text(value);
+        copy.fontFamily(fontFamily);
+        copy.fontStyle(fontStyle);
+        copy.fontSizeHwpunits(fontSizeHwpunits);
+        copy.textColor(textColor);
+        copy.shadeColor(shadeColor);
+        copy.letterSpacing(letterSpacing);
+        copy.subscript(subscript);
+        copy.superscript(superscript);
+        copy.grepMathFont(grepMathFont);
+        copy.underline(underline);
+        copy.underlineColor(underlineColor);
+        copy.underlineShape(underlineShape);
+        copy.strikeThrough(strikeThrough);
+        copy.horizontalScale(horizontalScale);
+        copy.verticalScale(verticalScale);
+        copy.baselineShift(baselineShift);
+        copy.grepStyleApplied(grepStyleApplied);
+        return copy;
+    }
 
 }

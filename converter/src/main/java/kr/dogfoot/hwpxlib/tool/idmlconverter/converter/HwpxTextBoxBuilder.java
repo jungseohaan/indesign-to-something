@@ -45,15 +45,15 @@ public class HwpxTextBoxBuilder {
     }
 
     static LineWrapMethod textFrameLineWrap(ASTTextFrameBlock block) {
-        return block != null && block.noAutoLineWrap() && isSingleLineNoWrapCandidate(block)
-                ? LineWrapMethod.SQUEEZE
+        return block != null && block.noAutoLineWrap()
+                ? LineWrapMethod.KEEP
                 : LineWrapMethod.BREAK;
     }
 
     static LineWrapMethod inlineTextFrameLineWrap(ASTInlineObject obj) {
-        return obj != null && obj.noAutoLineWrap()
-                ? LineWrapMethod.SQUEEZE
-                : LineWrapMethod.BREAK;
+        if (obj != null && obj.squeezeLineWrap()) return LineWrapMethod.SQUEEZE;
+        if (obj != null && obj.noAutoLineWrap()) return LineWrapMethod.KEEP;
+        return LineWrapMethod.BREAK;
     }
 
     private static boolean isSingleLineNoWrapCandidate(ASTTextFrameBlock block) {
@@ -281,7 +281,7 @@ public class HwpxTextBoxBuilder {
         try {
             String itemId = ImageInserter.registerImage(
                     ctx.hwpxFile,
-                    AlphaSafePng.flattenOntoWhiteIfNeeded(pngData),
+                    AlphaSafePng.prepareTextBoxImageFill(pngData),
                     "png");
             if (itemId == null) return false;
             rect.createFillBrush();
@@ -961,7 +961,7 @@ public class HwpxTextBoxBuilder {
             try {
                 String itemId = ImageInserter.registerImage(
                         ctx.hwpxFile,
-                        AlphaSafePng.flattenOntoWhiteIfNeeded(block.imageFillData()),
+                        AlphaSafePng.prepareTextBoxImageFill(block.imageFillData()),
                         "png");
                 if (itemId != null) {
                     bf.createFillBrush();

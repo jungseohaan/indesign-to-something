@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.PreparedVisualImage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualCropper;
@@ -19,9 +20,16 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Coord
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextRangeShellPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
+import java.awt.AlphaComposite;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.Shape;
+import java.awt.geom.Ellipse2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.List;
@@ -49,6 +57,12 @@ public final class BackgroundInjector {
             if (ownershipPlan == null) {
                 ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
                         "SKIP_NO_OBJECT_PLAN", "visible candidate has no OwnershipPlanner ObjectPlan");
+                continue;
+            }
+            if (ctx.isRenderedDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
+                ctx.recordRenderedDecision(rg, ownershipPlan, "Stage3.VisualBuilder.Phase6",
+                        "SKIP_ALREADY_HANDLED_RENDERED_VISUAL",
+                        "rendered visual already materialized by an earlier ownership executor");
                 continue;
             }
             if (ownershipPlan.placement != Placement.FLOATING) {
@@ -147,9 +161,14 @@ public final class BackgroundInjector {
                     || rg.isWhiteStroke()
                     || needsPageCrop;
             try {
+                boolean needsTextRangeShellKnockout = isPageTextlessPlane(ownershipPlan)
+                        && !ctx.textRangeShellPlansForPage(rg.pageIndex()).isEmpty();
                 BufferedImage img = needsFullImageDecode
                         ? VisualTfInlineCompositor.loadImageForPlacement(ctx, rg, ownershipPlan, prepared.imageData)
                         : null;
+                if (img == null && needsTextRangeShellKnockout) {
+                    img = VisualTfInlineCompositor.loadImageForPlacement(ctx, rg, ownershipPlan, prepared.imageData);
+                }
                 if (img == null && !needsFullImageDecode) {
                     int[] dims = VisualPngHeader.readDimensions(prepared.imageData);
                     if (dims != null) {
@@ -164,7 +183,7 @@ public final class BackgroundInjector {
                 if (img != null && hasCropSourceBounds
                         && shouldIgnoreCropSourceBoundsByImageAspect(
                         bounds, cropSourceBounds, img.getWidth(), img.getHeight())) {
-                    hasCropSourceBounds = false;
+                        hasCropSourceBounds = false;
                     cropRefLeft = rawLeft;
                     cropRefTop = rawTop;
                     cropRefRight = rawRight;
@@ -177,6 +196,15 @@ public final class BackgroundInjector {
                             "Phase6",
                             "IGNORE_CROP_SOURCE_BOUNDS_ASPECT_MISMATCH",
                             "rendered png aspect already matches visible bounds; skip secondary crop-source contract");
+                }
+                if (img != null && needsTextRangeShellKnockout) {
+                    BufferedImage knocked = knockOutTextRangeShellsFromPagePlane(
+                            ctx, img, rg.pageIndex(), rawLeft, rawTop, fullW, fullH);
+                    if (knocked != img) {
+                        prepared.imageData = VisualCropper.encodePng(knocked);
+                        img.flush();
+                        img = knocked;
+                    }
                 }
                 if (img != null && needsContainerShellKnockout) {
                     BufferedImage transparentShell = VisualCropper.knockOutPaperLikeFill(img);
@@ -262,6 +290,54 @@ public final class BackgroundInjector {
             return plan.cropSourceBounds;
         }
         return rg != null ? rg.cropSourceBounds() : null;
+    }
+
+    private static boolean isPageTextlessPlane(ObjectPlan plan) {
+        return plan != null && "page_textless_plane".equals(plan.slotRole);
+    }
+
+    private static BufferedImage knockOutTextRangeShellsFromPagePlane(
+            ResolvedBuildContext ctx,
+            BufferedImage img,
+            int pageIndex,
+            double rawLeft,
+            double rawTop,
+            double fullW,
+            double fullH) {
+        if (ctx == null || img == null || fullW <= 0 || fullH <= 0) return img;
+        List<TextRangeShellPlan> plans = ctx.textRangeShellPlansForPage(pageIndex);
+        if (plans.isEmpty()) return img;
+        BufferedImage out = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        g.drawImage(img, 0, 0, null);
+        g.setComposite(AlphaComposite.Clear);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        double sx = img.getWidth() / fullW;
+        double sy = img.getHeight() / fullH;
+        for (TextRangeShellPlan plan : plans) {
+            if (plan == null || plan.shellBounds == null || plan.shellBounds.length < 4) continue;
+            double top = plan.shellBounds[0];
+            double left = plan.shellBounds[1];
+            double bottom = plan.shellBounds[2];
+            double right = plan.shellBounds[3];
+            if (!(bottom > top && right > left)) continue;
+            double pad = Math.max(0.3, plan.strokeWeight);
+            double x = (left - rawLeft - pad) * sx;
+            double y = (top - rawTop - pad) * sy;
+            double w = (right - left + pad * 2.0) * sx;
+            double h = (bottom - top + pad * 2.0) * sy;
+            if (w <= 0 || h <= 0) continue;
+            Shape shape;
+            if ("Oval".equals(plan.shellType)) {
+                shape = new Ellipse2D.Double(x, y, w, h);
+            } else {
+                double arc = Math.min(w, h);
+                shape = new RoundRectangle2D.Double(x, y, w, h, arc, arc);
+            }
+            g.fill(shape);
+        }
+        g.dispose();
+        return out;
     }
 
     private static boolean hasUsableCropSourceBounds(double[] crop, double[] bounds) {

@@ -42,6 +42,7 @@ final class ParaPrFactory {
                 || para.spaceBefore() != null
                 || para.spaceAfter() != null
                 || para.lineSpacing() != null
+                || para.keepLineWrap()
                 || para.squeezeLineWrap()
                 || para.hasTabStops()
                 || para.shadingOn();
@@ -113,7 +114,7 @@ final class ParaPrFactory {
 
         paraPr.idAnd(newId)
                 .tabPrIDRefAnd(tabPrId)
-                .condenseAnd((byte) 0)
+                .condenseAnd(astPara.squeezeLineWrap() ? (byte) 20 : (byte) 0)
                 .fontLineHeightAnd(false)
                 .snapToGridAnd(true)
                 .suppressLineNumbersAnd(false)
@@ -154,7 +155,7 @@ final class ParaPrFactory {
                 .keepWithNextAnd(astPara.keepWithNext())
                 .keepLinesAnd(astPara.keepLinesTogether())
                 .pageBreakBeforeAnd(astPara.pageBreakBefore())
-                .lineWrap(astPara.squeezeLineWrap() ? LineWrap.SQUEEZE : LineWrap.BREAK);
+                .lineWrap(paragraphLineWrap(astPara));
 
         paraPr.createAutoSpacing();
         paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
@@ -197,19 +198,26 @@ final class ParaPrFactory {
             lsType = baseStyle.lineSpacingType();
         }
         boolean hasSourceFixedLeading = "fixed".equals(lsType) && lsValue != null && lsValue > 0;
+        boolean preserveSourceTextWrapSpacing = astPara.sourceTextWrapSpacing()
+                && "fixed".equals(lsType)
+                && lsValue != null
+                && lsValue > 0;
         // SPEC-031: DSL para rule — 줄간격 오버라이드 (dslCtx는 위에서 이미 applyParaRule 호출됨)
         if (dslCtx.targetLineSpacingPct != null
-                && !(preserveSourceFixedLeading && hasSourceFixedLeading)) {
+                && !(preserveSourceFixedLeading && hasSourceFixedLeading)
+                && !preserveSourceTextWrapSpacing) {
             lsValue = dslCtx.targetLineSpacingPct;
             lsType = "percent";
         }
         if (!preserveSourceFixedLeading
+                && !preserveSourceTextWrapSpacing
                 && "fixed".equals(lsType)
                 && shouldPreferAutoLeadingPercent(astPara, lsValue)) {
             lsValue = astPara.autoLeadingPercent();
             lsType = "percent";
         }
         if ("fixed".equals(lsType)
+                && !preserveSourceTextWrapSpacing
                 && shouldPreferBetweenLinesForSourceComposedMultiline(astPara, lsValue)) {
             int dominantFont = dominantTextFontSize(astPara);
             lsValue = Math.max(lsValue - dominantFont, dominantFont / 3);
@@ -255,14 +263,14 @@ final class ParaPrFactory {
                     && ((ASTBreak) item).breakType() == ASTBreak.BreakType.LINE) {
                 return true;
             }
-            if (item instanceof ASTTextRun) {
-                String text = ((ASTTextRun) item).text();
-                if (text != null && (text.indexOf('\n') >= 0 || text.indexOf('\u2028') >= 0)) {
-                    return true;
-                }
-            }
         }
         return false;
+    }
+
+    private static LineWrap paragraphLineWrap(ASTParagraph para) {
+        if (para != null && para.keepLineWrap()) return LineWrap.KEEP;
+        if (para != null && para.squeezeLineWrap()) return LineWrap.SQUEEZE;
+        return LineWrap.BREAK;
     }
 
     private static boolean shouldPreferAutoLeadingPercent(ASTParagraph para, Integer fixedLeading) {

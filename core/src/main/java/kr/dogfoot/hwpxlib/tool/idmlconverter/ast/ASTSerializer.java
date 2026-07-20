@@ -270,6 +270,10 @@ public class ASTSerializer {
         if (tf.anchoredFlowWithText()) {
             first = writeBooleanField(sb, "anchoredFlowWithText", true, first);
         }
+        if (tf.hasParagraphRange()) {
+            first = writeIntField(sb, "paragraphRangeStart", tf.paragraphRangeStart(), first);
+            first = writeIntField(sb, "paragraphRangeEnd", tf.paragraphRangeEnd(), first);
+        }
 
         // paragraphs
         if (tf.paragraphs() != null && !tf.paragraphs().isEmpty()) {
@@ -383,6 +387,9 @@ public class ASTSerializer {
         first = writeStringField(sb, "firstBaselineOffset", cell.firstBaselineOffset(), first);
         if (cell.minimumFirstBaselineOffset() != 0) {
             first = writeLongField(sb, "minimumFirstBaselineOffset", cell.minimumFirstBaselineOffset(), first);
+        }
+        if (cell.squeezeLineWrap()) {
+            first = writeBooleanField(sb, "squeezeLineWrap", true, first);
         }
 
         // margins
@@ -537,6 +544,12 @@ public class ASTSerializer {
         if (para.squeezeLineWrap()) {
             first = writeBooleanField(sb, "squeezeLineWrap", true, first);
         }
+        if (para.keepLineWrap()) {
+            first = writeBooleanField(sb, "keepLineWrap", true, first);
+        }
+        if (para.sourceTextWrapSpacing()) {
+            first = writeBooleanField(sb, "sourceTextWrapSpacing", true, first);
+        }
         // shading
         if (para.shadingOn()) {
             first = writeBooleanField(sb, "shadingOn", true, first);
@@ -679,6 +692,7 @@ public class ASTSerializer {
         if (obj.cornerRadius() != 0.0) first = writeDoubleField(sb, "cornerRadius", obj.cornerRadius(), first);
         if (obj.shellShapeType() != null) first = writeStringField(sb, "shellShapeType", obj.shellShapeType(), first);
         if (obj.noAutoLineWrap()) first = writeBooleanField(sb, "noAutoLineWrap", true, first);
+        if (obj.squeezeLineWrap()) first = writeBooleanField(sb, "squeezeLineWrap", true, first);
 
         if (obj.textWrapTop() != 0) first = writeLongField(sb, "textWrapTop", obj.textWrapTop(), first);
         if (obj.textWrapLeft() != 0) first = writeLongField(sb, "textWrapLeft", obj.textWrapLeft(), first);

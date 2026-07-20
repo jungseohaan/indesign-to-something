@@ -118,6 +118,9 @@ public class ASTInlineObject extends ASTInlineItem {
     private String verticalJustification;
     // 원본 InDesign 조판에서 각 composed line이 별도 문단인 경우 HWP 자동 줄감기 금지.
     private boolean noAutoLineWrap;
+    // HWPX drawText 안에서 원본 단일행 텍스트를 한 줄로 압축 유지한다.
+    // noAutoLineWrap은 KEEP으로 매핑되므로, source single-line shell text의 SQUEEZE는 별도 힌트로 둔다.
+    private boolean squeezeLineWrap;
 
     public ItemType itemType() { return ItemType.INLINE_OBJECT; }
 
@@ -295,4 +298,7 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public boolean noAutoLineWrap() { return noAutoLineWrap; }
     public void noAutoLineWrap(boolean v) { this.noAutoLineWrap = v; }
+
+    public boolean squeezeLineWrap() { return squeezeLineWrap; }
+    public void squeezeLineWrap(boolean v) { this.squeezeLineWrap = v; }
 }

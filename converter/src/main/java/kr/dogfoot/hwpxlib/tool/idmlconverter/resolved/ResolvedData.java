@@ -1501,18 +1501,60 @@ public class ResolvedData {
      * @param idmlPageWidthPts IDML 첫 페이지의 폭 (points)
      */
     public void normalizeToPoints(double idmlPageWidthPts) {
-        if (pages.isEmpty() || idmlPageWidthPts <= 0) return;
-        double resolvedPageWidth = pages.get(0).width();
-        if (resolvedPageWidth <= 0) return;
+        try {
+            if (pages.isEmpty() || idmlPageWidthPts <= 0) return;
+            double resolvedPageWidth = pages.get(0).width();
+            if (resolvedPageWidth <= 0) return;
 
-        double scale = idmlPageWidthPts / resolvedPageWidth;
-        this.scaleFactor = scale;
-        if (Math.abs(scale - 1.0) < 0.01) return;  // 이미 points
+            double scale = idmlPageWidthPts / resolvedPageWidth;
+            this.scaleFactor = scale;
+            if (Math.abs(scale - 1.0) < 0.01) return;  // 이미 points
 
-        System.out.println("[ResolvedData] 좌표 단위 정규화: scale=" + String.format("%.4f", scale)
-                + " (resolved " + String.format("%.1f", resolvedPageWidth)
-                + " → " + String.format("%.1f", idmlPageWidthPts) + " pt)");
-        applyScale(scale);
+            System.out.println("[ResolvedData] 좌표 단위 정규화: scale=" + String.format("%.4f", scale)
+                    + " (resolved " + String.format("%.1f", resolvedPageWidth)
+                    + " → " + String.format("%.1f", idmlPageWidthPts) + " pt)");
+            applyScale(scale);
+        } finally {
+            // 좌표가 pt 로 확정된 뒤에만 폭 판정이 유효하므로 여기서 수행한다.
+            replaceBlankSpacerAnchorRuns();
+        }
+    }
+
+    /**
+     * 괄호 빈칸 스페이서 앵커 런을 NBSP 텍스트 런으로 치환한다.
+     *
+     * <p>IDMLStoryParser 가 IDML 쪽에서 같은 치환을 하므로, resolved 쪽도 대칭으로
+     * 치환해야 IDML-resolved 텍스트 동일성 게이트(셸 구조 보존 경로 등)가 유지된다.
+     * BlankAnchorSpacer 참조 (과학 u1 p46 "( )" 사례).
+     */
+    private void replaceBlankSpacerAnchorRuns() {
+        for (ResolvedStory story : storyMap.values()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph para : story.paragraphs()) {
+                if (para == null || para.runs() == null) continue;
+                java.util.List<ResolvedRun> runs = para.runs();
+                for (int i = 0; i < runs.size(); i++) {
+                    ResolvedRun run = runs.get(i);
+                    if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
+                    ResolvedPageItem item = getPageItem(String.valueOf(run.anchoredObjectId()));
+                    String spacer = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer
+                            .BlankAnchorSpacer.spacerTextForPageItem(item);
+                    if (spacer == null) continue;
+                    // 수식 폰트 런 사이의 스페이서는 치환하지 않는다 (수식 lexer 보호).
+                    ResolvedRun prev = i > 0 ? runs.get(i - 1) : null;
+                    ResolvedRun next = i + 1 < runs.size() ? runs.get(i + 1) : null;
+                    if ((prev != null && kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer
+                                .BlankAnchorSpacer.isEquationFontRun(prev.fontFamily()))
+                            || (next != null && kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer
+                                .BlankAnchorSpacer.isEquationFontRun(next.fontFamily()))) {
+                        continue;
+                    }
+                    run.type(null);
+                    run.anchoredObjectId(null);
+                    run.text(spacer);
+                }
+            }
+        }
     }
 
     private void applyScale(double s) {

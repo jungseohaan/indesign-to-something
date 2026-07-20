@@ -73,13 +73,18 @@ class MathProcessor {
 
         List<ASTInlineItem> newItems = new ArrayList<>();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
+        // SPEC-042: 그룹에 들어간 원본 ASTTextRun — flush 결과 텍스트런에 크기·굵기·
+        // 첨자를 백필하기 위해 어댑터와 병렬로 유지 (어댑터 자체에 실으면 그룹핑
+        // 하류 경로가 바뀌어 첨자 회귀가 났다. SPEC-042 실패 기록 참조)
+        List<ASTTextRun> mathGroupSrc = new ArrayList<>();
         String mathType = null; // "EH", "BT", "NP"
 
         for (int i = 0; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 newItems.add(item);
                 continue;
@@ -97,8 +102,9 @@ class MathProcessor {
 
             FormulaCluster formulaCluster = collectFormulaEquationCluster(items, i);
             if (formulaCluster != null) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 newItems.add(formulaCluster.equation);
                 i = formulaCluster.endExclusive - 1;
@@ -106,8 +112,9 @@ class MathProcessor {
             }
 
             if (currentType != null && isSimplePositionedTextRun(tr)) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 newItems.add(item);
                 continue;
@@ -115,8 +122,9 @@ class MathProcessor {
 
             boolean formulaBoundaryOnly = isFormulaBoundaryText(tr.text());
             if (formulaBoundaryOnly) {
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
+                mathGroupSrc.clear();
                 mathType = null;
                 inheritFormulaBoundaryTextColor(items, i, tr);
                 newItems.add(item);
@@ -144,12 +152,15 @@ class MathProcessor {
                     mathType = currentType;
                     IDMLCharacterRun cr = mathRunFromTextRun(tr, ff);
                     mathGroup.add(cr);
+                    mathGroupSrc.add(tr);
                 } else {
-                    flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                    flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                     mathGroup.clear();
+                    mathGroupSrc.clear();
                     mathType = currentType;
                     IDMLCharacterRun cr = mathRunFromTextRun(tr, ff);
                     mathGroup.add(cr);
+                    mathGroupSrc.add(tr);
                 }
             } else {
                 // EH 그룹이 열려있으면 비EH 런의 bridge 가능성 확인
@@ -188,15 +199,17 @@ class MathProcessor {
                 if (bridge) {
                     IDMLCharacterRun cr = mathRunFromTextRun(tr, tr.fontFamily() != null ? tr.fontFamily() : "");
                     mathGroup.add(cr);
+                    mathGroupSrc.add(tr);
                 } else {
-                    flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                    flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                     mathGroup.clear();
+                    mathGroupSrc.clear();
                     mathType = null;
                     newItems.add(item);
                 }
             }
         }
-        flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+        flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
 
         if (newItems.size() != items.size() || !newItems.equals(items)) {
             items.clear();
@@ -1522,6 +1535,125 @@ class MathProcessor {
         return true;
     }
 
+    /**
+     * SPEC-042: flush 후, 어댑터 변환으로 손실된 원본 런 스타일(크기·굵기·첨자)을
+     * 결과 텍스트런에 백필한다. 어댑터(IDMLCharacterRun)에 직접 실으면 그룹핑
+     * 하류 경로가 바뀌어 첨자 회귀가 나므로(SPEC-042 실패 기록), flush 산출물에만
+     * 비어 있는 속성을 채운다. 매칭은 순서 보존 텍스트 일치(1:1)로, 분절·병합된
+     * 산출물(수식 스크립트 등)은 건드리지 않는다.
+     */
+    private static void flushResolvedMathGroupWithBackfill(ResolvedBuildContext ctx, List<IDMLCharacterRun> group,
+                                         List<ASTTextRun> sources, String type,
+                                         List<ASTInlineItem> out, ASTParagraph ignoredPara) {
+        if (group == null || group.isEmpty()) return;
+        ASTParagraph tempPara = new ASTParagraph();
+        if ("EH".equals(type)) {
+            ASTMathGrouper.flushEHMathGroup(group, tempPara);
+        } else if ("BT".equals(type)) {
+            ASTMathGrouper.flushMathGroup(group, tempPara);
+        } else if ("NP".equals(type)) {
+            ASTMathGrouper.flushNPMathGroup(group, tempPara);
+        }
+        // SPEC-042: 폴백이 소스와 1:1 동일한 평문 런만 냈다면 손실 복제본 대신
+        // 원본 런(크기·굵기·색·첨자 보유)을 재사용한다. 텍스트 정리·디코딩이
+        // 일어난 경우(텍스트 불일치)나 수식·분절 산출이 있으면 폴백 산출을 쓴다.
+        if (reuseOriginalRunsForPlainFallback(tempPara.items(), sources, out)) {
+            return;
+        }
+        backfillFlushedTextRunStyles(tempPara.items(), sources);
+        backfillChemicalEquationStyleHints(tempPara.items(), sources);
+        out.addAll(tempPara.items());
+    }
+
+    private static boolean reuseOriginalRunsForPlainFallback(
+            List<ASTInlineItem> emitted, List<ASTTextRun> sources, List<ASTInlineItem> out) {
+        if (emitted == null || sources == null || emitted.isEmpty()) return false;
+        if (emitted.size() != sources.size()) return false;
+        for (int i = 0; i < emitted.size(); i++) {
+            ASTInlineItem item = emitted.get(i);
+            ASTTextRun src = sources.get(i);
+            if (!(item instanceof ASTTextRun) || src == null) return false;
+            ASTTextRun run = (ASTTextRun) item;
+            if (!flushedTextMatches(src, run)) return false;
+            String ff = run.fontFamily();
+            if (ff != null && src.fontFamily() != null && !ff.equals(src.fontFamily())) return false;
+        }
+        out.addAll(sources);
+        return true;
+    }
+
+    /**
+     * SPEC-042: CHEM_FORMULA 수식(스크립트 재해석으로 텍스트런이 되는 화학식)의
+     * 스타일 힌트(크기·색)를 원본 런에서 채운다. FormulaStyleResolver 가
+     * preferredBaseUnit/textColor 를 읽어 FormulaRenderer 텍스트런에 적용한다.
+     * 어댑터(IDMLCharacterRun)는 건드리지 않으므로 그룹핑 분기는 불변.
+     */
+    private static void backfillChemicalEquationStyleHints(
+            List<ASTInlineItem> emitted, List<ASTTextRun> sources) {
+        if (emitted == null || sources == null || sources.isEmpty()) return;
+        Integer size = null;
+        String color = null;
+        for (ASTTextRun src : sources) {
+            if (src == null) continue;
+            if (size == null && src.fontSizeHwpunits() != null && src.fontSizeHwpunits() > 0) {
+                size = src.fontSizeHwpunits();
+            }
+            if (color == null && src.textColor() != null && !src.textColor().isEmpty()) {
+                color = src.textColor();
+            }
+            if (size != null && color != null) break;
+        }
+        if (size == null && color == null) return;
+        for (ASTInlineItem item : emitted) {
+            if (!(item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item;
+            if (!"CHEM_FORMULA".equals(eq.sourceType())) continue;
+            if (size != null && eq.preferredBaseUnit() == null) eq.preferredBaseUnit(size);
+            if (color != null && (eq.textColor() == null || eq.textColor().isEmpty())) {
+                eq.textColor(color);
+            }
+        }
+    }
+
+    private static void backfillFlushedTextRunStyles(List<ASTInlineItem> emitted, List<ASTTextRun> sources) {
+        if (emitted == null || sources == null || sources.isEmpty()) return;
+        int s = 0;
+        for (ASTInlineItem item : emitted) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun outRun = (ASTTextRun) item;
+            int k = s;
+            while (k < sources.size() && !flushedTextMatches(sources.get(k), outRun)) k++;
+            if (k >= sources.size()) continue;
+            ASTTextRun src = sources.get(k);
+            s = k + 1;
+            // 짧은 숫자 런(첨자 후보 — H₂의 2)은 백필하지 않는다. 첨자 판정이
+            // 위치 기반이라 숫자 런에 속성을 선주입하면 재그룹핑·재해석 시 첨자가
+            // 유실된다 (SPEC-042 실패 기록 3·4·5 — 계수만 백필해도 같은 문단의
+            // 첨자가 깨지는 양방향 상호작용 실측). 숫자 런은 전부 제외한다.
+            String outText = outRun.text() == null ? "" : outRun.text().trim();
+            if (outText.matches("\\d{1,2}")) continue;
+            if (outRun.fontSizeHwpunits() == null && src.fontSizeHwpunits() != null) {
+                outRun.fontSizeHwpunits(src.fontSizeHwpunits());
+            }
+            if (outRun.fontStyle() == null && src.fontStyle() != null) {
+                outRun.fontStyle(src.fontStyle());
+            }
+            if (!outRun.subscript() && !outRun.superscript()) {
+                if (src.subscript()) outRun.subscript(true);
+                else if (src.superscript()) outRun.superscript(true);
+            }
+        }
+    }
+
+    private static boolean flushedTextMatches(ASTTextRun src, ASTTextRun out) {
+        String a = src != null ? src.text() : null;
+        String b = out != null ? out.text() : null;
+        if (a == null || b == null) return false;
+        String at = a.trim();
+        return !at.isEmpty() && at.equals(b.trim());
+    }
+
     private static void flushResolvedMathGroup(ResolvedBuildContext ctx, List<IDMLCharacterRun> group, String type,
                                          List<ASTInlineItem> out, ASTParagraph ignoredPara) {
         if (group == null || group.isEmpty()) return;
@@ -1544,8 +1676,15 @@ class MathProcessor {
                                   List<IDMLCharacterRun> npGroup,
                                   List<IDMLCharacterRun> ehGroup,
                                   ASTParagraph para) {
+        // SPEC-042: IDML FillColor 참조를 hex 로 푸는 리졸버 — 폴백 텍스트런 색 보존
+        java.util.function.Function<String, String> colorToHex = ctx == null
+                ? null
+                : (color -> RunBuilder.resolveColorToHex(ctx, color));
         if (btGroup != null && !btGroup.isEmpty()) {
-            ASTMathGrouper.flushMathGroup(btGroup, para);
+            String groupColor = firstGroupFillColorHex(ctx, btGroup);
+            int before = para.items().size();
+            ASTMathGrouper.flushMathGroup(btGroup, para, colorToHex);
+            applyGroupColorHintToNewChemEquations(para, before, groupColor);
             btGroup.clear();
         }
         if (npGroup != null && !npGroup.isEmpty()) {
@@ -1553,8 +1692,41 @@ class MathProcessor {
             npGroup.clear();
         }
         if (ehGroup != null && !ehGroup.isEmpty()) {
-            ASTMathGrouper.flushEHMathGroup(ehGroup, para);
+            String groupColor = firstGroupFillColorHex(ctx, ehGroup);
+            int before = para.items().size();
+            ASTMathGrouper.flushEHMathGroup(ehGroup, para, colorToHex);
+            applyGroupColorHintToNewChemEquations(para, before, groupColor);
             ehGroup.clear();
+        }
+    }
+
+    /** SPEC-042: 그룹 첫 IDML FillColor 를 hex 로 (화학식 강조색 힌트용). */
+    private static String firstGroupFillColorHex(ResolvedBuildContext ctx, List<IDMLCharacterRun> group) {
+        if (ctx == null || group == null) return null;
+        for (IDMLCharacterRun run : group) {
+            if (run == null || run.fillColor() == null) continue;
+            String hex = RunBuilder.resolveColorToHex(ctx, run.fillColor());
+            if (hex != null && !hex.isEmpty()) return hex;
+        }
+        return null;
+    }
+
+    /**
+     * SPEC-042: flush 가 새로 만든 CHEM_FORMULA 수식에 그룹 색 힌트를 주입.
+     * 다이얼로그처럼 화살표 증거로 수식으로 직행하는 경우 폴백 텍스트런 색 주입이
+     * 닿지 않으므로, FormulaRenderer 가 소비할 textColor 힌트를 여기서 채운다.
+     */
+    private static void applyGroupColorHintToNewChemEquations(ASTParagraph para, int fromIndex, String colorHex) {
+        if (para == null || para.items() == null || colorHex == null || colorHex.isEmpty()) return;
+        for (int i = Math.max(0, fromIndex); i < para.items().size(); i++) {
+            ASTInlineItem item = para.items().get(i);
+            if (!(item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item;
+            if (!"CHEM_FORMULA".equals(eq.sourceType())) continue;
+            if (eq.textColor() == null || eq.textColor().isEmpty()) {
+                eq.textColor(colorHex);
+            }
         }
     }
 

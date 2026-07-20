@@ -14,6 +14,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Polic
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextRangeShellPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDiagnostics;
@@ -444,6 +445,14 @@ public final class ResolvedBuildContext {
     public final java.util.Map<Integer, SimpleButtonLabelPlan> simpleButtonLabelPlansByTextFrameId =
             new java.util.HashMap<>();
 
+    /** Stage 1 text-range shell label plans. Key: owner TextFrame DOM id. */
+    private final java.util.Map<Integer, java.util.List<TextRangeShellPlan>> textRangeShellPlansByTextFrameId =
+            new java.util.LinkedHashMap<>();
+
+    /** Stage 1 text-range shell label plans. Key: page index. */
+    private final java.util.Map<Integer, java.util.List<TextRangeShellPlan>> textRangeShellPlansByPageIndex =
+            new java.util.LinkedHashMap<>();
+
     /** Stage 1 anchored table plans. Key: owner TextFrame DOM id. */
     private final java.util.Map<Integer, java.util.List<AnchoredTablePlan>> anchoredTablePlansByOwnerTextFrameId =
             new java.util.LinkedHashMap<>();
@@ -468,6 +477,37 @@ public final class ResolvedBuildContext {
         SimpleButtonLabelPlan plan = simpleButtonLabelPlans.get(anchorDomId);
         if (plan != null) return plan;
         return simpleButtonLabelPlansByTextFrameId.get(anchorDomId);
+    }
+
+    public void addTextRangeShellPlan(TextRangeShellPlan plan) {
+        if (plan == null) return;
+        textRangeShellPlansByTextFrameId
+                .computeIfAbsent(plan.textFrameId, k -> new java.util.ArrayList<>())
+                .add(plan);
+        textRangeShellPlansByPageIndex
+                .computeIfAbsent(plan.pageIndex, k -> new java.util.ArrayList<>())
+                .add(plan);
+    }
+
+    public java.util.List<TextRangeShellPlan> textRangeShellPlansForTextFrame(int textFrameId) {
+        java.util.List<TextRangeShellPlan> plans = textRangeShellPlansByTextFrameId.get(textFrameId);
+        if (plans == null || plans.isEmpty()) return java.util.Collections.emptyList();
+        return plans;
+    }
+
+    public java.util.List<TextRangeShellPlan> textRangeShellPlansForPage(int pageIndex) {
+        java.util.List<TextRangeShellPlan> plans = textRangeShellPlansByPageIndex.get(pageIndex);
+        if (plans == null || plans.isEmpty()) return java.util.Collections.emptyList();
+        return plans;
+    }
+
+    public java.util.List<TextRangeShellPlan> textRangeShellPlans() {
+        if (textRangeShellPlansByTextFrameId.isEmpty()) return java.util.Collections.emptyList();
+        java.util.List<TextRangeShellPlan> all = new java.util.ArrayList<>();
+        for (java.util.List<TextRangeShellPlan> plans : textRangeShellPlansByTextFrameId.values()) {
+            if (plans != null) all.addAll(plans);
+        }
+        return all;
     }
 
     public void addAnchoredTablePlan(AnchoredTablePlan plan) {
@@ -569,6 +609,8 @@ public final class ResolvedBuildContext {
     public void clearOwnershipPlansForRewrite() {
         ownershipPlans.clear();
         ownershipPlanLines.clear();
+        textRangeShellPlansByTextFrameId.clear();
+        textRangeShellPlansByPageIndex.clear();
         ownershipPlanIndexDirty = true;
         ownershipPlanRenderedCache.clear();
         descendantSetCache.clear();

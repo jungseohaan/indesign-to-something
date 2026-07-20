@@ -503,14 +503,31 @@ public class IDMLStoryParser {
                         || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
                     IDMLCharacterRun.InlineGraphic graphic = parseInlineGraphicElement(elem);
 
-                    if (pendingAce8 > 0) {
-                        pendingAce8--;
-                    } else {
-                        contentBuilder.append('\uFFFC');
+                    // 괄호 빈칸 스페이서 — 파싱 직후 한 번만 치환 (화살표 정규화와 같은 전략).
+                    //
+                    // "( )" 답란의 안쪽 공백은 스페이스가 아니라 fill/stroke 없는 납작한
+                    // 인라인 Rectangle 로 폭을 확보한 조판이다. 이 앵커를 하류 경로별로
+                    // 살리려 하면 경로마다 대응해야 하므로, 여기서 같은 폭의 NBSP 텍스트로
+                    // 바꿔 모든 하류가 평범한 텍스트로 다루게 한다 (과학 u1 p46 사례).
+                    String blankSpacer = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer
+                            .BlankAnchorSpacer.spacerTextForGraphic(graphic);
+                    if (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer
+                            .BlankAnchorSpacer.isEquationFontRun(currentRun.fontFamily())) {
+                        blankSpacer = null;
                     }
-                    int graphicIdx = currentRun.inlineGraphics().size();
-                    currentRun.addInlineGraphic(graphic);
-                    currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, graphicIdx);
+                    if (blankSpacer != null) {
+                        if (pendingAce8 > 0) pendingAce8--;
+                        contentBuilder.append(blankSpacer);
+                    } else {
+                        if (pendingAce8 > 0) {
+                            pendingAce8--;
+                        } else {
+                            contentBuilder.append('\uFFFC');
+                        }
+                        int graphicIdx = currentRun.inlineGraphics().size();
+                        currentRun.addInlineGraphic(graphic);
+                        currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, graphicIdx);
+                    }
                 }
             }
 

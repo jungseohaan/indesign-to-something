@@ -166,10 +166,15 @@ public class HwpxParagraphBuilder {
         }
 
         // 인라인 객체 또는 혼합 폰트 크기가 있으면 BETWEEN_LINES(여백만) 줄간격 적용
-        // → 큰 인라인 객체/큰 폰트 런이 줄간격을 자연스럽게 확장
+        // → 큰 인라인 객체/큰 폰트 런이 줄간격을 자연스럽게 확장.
+        // 단, source-composed line bounds로 복원한 문단은 원본 조판 간격이 이미
+        // lineSpacing/spaceAfter에 반영되어 있으므로 후속 자동 보정으로 덮지 않는다.
         long maxInlineH = lineSpacingResolver.maxInlineObjectHeight(astPara);
         boolean hasMixedFontSizes = lineSpacingResolver.hasMixedFontSizeRuns(astPara);
-        if (maxInlineH > 0 || hasMixedFontSizes) {
+        boolean inlineObjectOnlyCarrier = lineSpacingResolver.isInlineObjectOnlyCarrier(astPara);
+        if (!inlineObjectOnlyCarrier
+                && !astPara.sourceTextWrapSpacing()
+                && (maxInlineH > 0 || hasMixedFontSizes)) {
             paraPrId = lineSpacingResolver.applyBetweenLinesSpacing(paraPrId, astPara);
         }
 
@@ -202,7 +207,8 @@ public class HwpxParagraphBuilder {
             }
             switch (item.itemType()) {
                 case TEXT_RUN:
-                    ASTTextRun tr = (ASTTextRun) item;
+                    ASTTextRun tr = coalescedTextRunAt(astPara.items(), i);
+                    i = skipCoalescedTextRuns(astPara.items(), i);
                     if (replaceTabsInRuns && tr.text() != null && tr.text().indexOf('\t') >= 0) {
                         tr.text(tr.text().replace('\t', ' '));
                     }
@@ -230,6 +236,39 @@ public class HwpxParagraphBuilder {
 
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
+    }
+
+    private static ASTTextRun coalescedTextRunAt(java.util.List<ASTInlineItem> items, int index) {
+        ASTTextRun first = (ASTTextRun) items.get(index);
+        String firstText = first.text();
+        if (firstText == null) return first;
+        StringBuilder merged = null;
+        for (int cursor = index + 1; cursor < items.size(); cursor++) {
+            ASTInlineItem nextItem = items.get(cursor);
+            if (!(nextItem instanceof ASTTextRun)) break;
+            ASTTextRun next = (ASTTextRun) nextItem;
+            if (next.text() == null || !first.hasSameStyle(next)) break;
+            if (merged == null) merged = new StringBuilder(firstText);
+            merged.append(next.text());
+        }
+        if (merged != null) {
+            return first.copyWithText(merged.toString());
+        }
+        return first;
+    }
+
+    private static int skipCoalescedTextRuns(java.util.List<ASTInlineItem> items, int index) {
+        ASTTextRun first = (ASTTextRun) items.get(index);
+        if (first.text() == null) return index;
+        int cursor = index + 1;
+        while (cursor < items.size()) {
+            ASTInlineItem nextItem = items.get(cursor);
+            if (!(nextItem instanceof ASTTextRun)) break;
+            ASTTextRun next = (ASTTextRun) nextItem;
+            if (next.text() == null || !first.hasSameStyle(next)) break;
+            cursor++;
+        }
+        return cursor - 1;
     }
 
     private static boolean shouldDropLeadingSmallInlineObject(ASTParagraph paragraph,

@@ -239,12 +239,75 @@ public class ASTTextFrameBlock extends ASTBlock {
     private int storyTotalTextLength;
     private int frameVisibleTextLength;
     private String frameVisibleText; // wrap 분할 시 블록별 보이는 텍스트
+    private int paragraphRangeStart = -1;
+    private int paragraphRangeEnd = -1;
     public int storyTotalTextLength() { return storyTotalTextLength; }
     public void storyTotalTextLength(int v) { this.storyTotalTextLength = v; }
     public int frameVisibleTextLength() { return frameVisibleTextLength; }
     public void frameVisibleTextLength(int v) { this.frameVisibleTextLength = v; }
     public String frameVisibleText() { return frameVisibleText; }
     public void frameVisibleText(String v) { this.frameVisibleText = v; }
+    public int paragraphRangeStart() { return paragraphRangeStart; }
+    public void paragraphRangeStart(int v) { this.paragraphRangeStart = v; }
+    public int paragraphRangeEnd() { return paragraphRangeEnd; }
+    public void paragraphRangeEnd(int v) { this.paragraphRangeEnd = v; }
+    public boolean hasParagraphRange() {
+        return paragraphRangeStart >= 0 && paragraphRangeEnd >= paragraphRangeStart;
+    }
+
+    public ASTTextFrameBlock copyWithoutParagraphs() {
+        ASTTextFrameBlock copy = new ASTTextFrameBlock();
+        copy.sourceId(sourceId());
+        copy.debug(debug());
+        copy.x = x;
+        copy.y = y;
+        copy.width = width;
+        copy.height = height;
+        copy.columnCount = columnCount;
+        copy.columnGutter = columnGutter;
+        copy.columnWidths = columnWidths;
+        copy.zOrder = zOrder;
+        copy.verticalText = verticalText;
+        copy.verticalJustification = verticalJustification;
+        copy.insetTop = insetTop;
+        copy.insetLeft = insetLeft;
+        copy.insetBottom = insetBottom;
+        copy.insetRight = insetRight;
+        copy.fillColor = fillColor;
+        copy.imageFillData = imageFillData;
+        copy.nativeGraphicsAllowed = nativeGraphicsAllowed;
+        copy.forceNativeFill = forceNativeFill;
+        copy.forceImageFill = forceImageFill;
+        copy.strokeColor = strokeColor;
+        copy.strokeWeight = strokeWeight;
+        copy.strokeType = strokeType;
+        copy.fillTint = fillTint;
+        copy.strokeTint = strokeTint;
+        copy.cornerRadius = cornerRadius;
+        copy.fromGroup = fromGroup;
+        copy.storyId = storyId;
+        copy.distributed = distributed;
+        copy.innerFrameId = innerFrameId;
+        copy.rotationAngle = rotationAngle;
+        copy.wrapperFillColor = wrapperFillColor;
+        copy.wrapperFillTint = wrapperFillTint;
+        copy.dropShadow = dropShadow;
+        copy.textWrapSquare = textWrapSquare;
+        copy.inlineToFloating = inlineToFloating;
+        copy.plannedVisualTextOverlay = plannedVisualTextOverlay;
+        copy.plannedShellVisualLayer = plannedShellVisualLayer;
+        copy.anchoredFlowWithText = anchoredFlowWithText;
+        copy.pathPointsX = pathPointsX;
+        copy.pathPointsY = pathPointsY;
+        copy.noAutoLineWrap = noAutoLineWrap;
+        copy.sourceComposedFixedText = sourceComposedFixedText;
+        copy.storyTotalTextLength = storyTotalTextLength;
+        copy.frameVisibleTextLength = frameVisibleTextLength;
+        copy.frameVisibleText = frameVisibleText;
+        copy.paragraphRangeStart = paragraphRangeStart;
+        copy.paragraphRangeEnd = paragraphRangeEnd;
+        return copy;
+    }
 
     /**
      * 배경 전용 블록인지 판별.

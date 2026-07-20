@@ -19,6 +19,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Mater
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextLayoutContract;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextRangeRef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
@@ -1141,6 +1142,7 @@ public class ResolvedToASTBuilder {
                 .withExtractionSourceObjectIds(
                         jsonIntArray(o, "exportSourceObjectIds"),
                         jsonIntArray(o, "hiddenVisualSourceObjectIds"))
+                .withOwnedTextRanges(jsonTextRangeRefs(o, "ownedTextRanges"))
                 .withSourceTreeDiagnostics(
                         jsonSourceSetArray(o, "sourceRootObjectIds", "sourceRootSetId", sourceSetRefs),
                         jsonSourceSetArray(o, "clusterSourceObjectIds", "clusterSourceSetId", sourceSetRefs),
@@ -1516,6 +1518,31 @@ public class ResolvedToASTBuilder {
             out.add(value);
         }
         return out.toArray(new String[0]);
+    }
+
+    private static TextRangeRef[] jsonTextRangeRefs(JsonObject o, String key) {
+        if (o == null || key == null || !o.has(key) || !o.get(key).isJsonArray()) {
+            return new TextRangeRef[0];
+        }
+        JsonArray arr = o.getAsJsonArray(key);
+        List<TextRangeRef> out = new ArrayList<>();
+        for (JsonElement element : arr) {
+            if (element == null || !element.isJsonObject()) continue;
+            JsonObject range = element.getAsJsonObject();
+            int textFrameId = jsonInt(range, "textFrameId", -1);
+            if (textFrameId < 0) continue;
+            out.add(new TextRangeRef(
+                    textFrameId,
+                    jsonString(range, "storyId"),
+                    jsonInt(range, "paragraphIndex", 0),
+                    jsonInt(range, "runIndex", 0),
+                    jsonInt(range, "start", 0),
+                    jsonInt(range, "end", 0),
+                    jsonInt(range, "paragraphStart", 0),
+                    jsonInt(range, "paragraphEnd", 0),
+                    jsonString(range, "text")));
+        }
+        return out.toArray(new TextRangeRef[0]);
     }
 
     private static int[] jsonSourceSetArray(

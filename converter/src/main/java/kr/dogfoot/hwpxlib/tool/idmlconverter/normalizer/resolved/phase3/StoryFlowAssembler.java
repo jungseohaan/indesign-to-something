@@ -12,6 +12,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -20,7 +23,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Builds source story flow before any container placement decision.
@@ -43,6 +48,12 @@ public final class StoryFlowAssembler {
             ResolvedBuildContext ctx,
             IDMLTable idmlTable,
             IDMLTableCell idmlCell) {
+        if (isResolvedInlineAnchorOnlyCell(ctx, idmlTable, idmlCell)) {
+            List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
+            if (inlineShellFlow != null && !inlineShellFlow.isEmpty()) {
+                return inlineShellFlow;
+            }
+        }
         List<ASTParagraph> cellFlow = StoryLoader.astParagraphsForCell(ctx, idmlTable, idmlCell, null);
         if (hasMeaningfulFlowContent(cellFlow)) {
             return cellFlow;
@@ -57,6 +68,25 @@ public final class StoryFlowAssembler {
         }
         List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
         return inlineShellFlow != null ? inlineShellFlow : new ArrayList<ASTParagraph>();
+    }
+
+    private static boolean isResolvedInlineAnchorOnlyCell(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null) return false;
+        ResolvedTable resolvedTable = idmlTable != null
+                ? ctx.resolvedData.getTableByIdOrSourceId(idmlTable.selfId())
+                : null;
+        if (resolvedTable == null && idmlCell.selfId() != null) {
+            resolvedTable = ctx.resolvedData.getTableByIdOrSourceId(idmlCell.selfId());
+        }
+        if (resolvedTable == null) return false;
+        ResolvedTable.Cell resolvedCell = resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex());
+        return resolvedCell != null
+                && !resolvedCell.hasTextRuns()
+                && resolvedCell.inlineAnchorIds() != null
+                && !resolvedCell.inlineAnchorIds().isEmpty();
     }
 
     private static boolean hasMeaningfulFlowContent(List<ASTParagraph> paragraphs) {
@@ -124,9 +154,13 @@ public final class StoryFlowAssembler {
             return new ArrayList<ASTParagraph>();
         }
         List<ASTParagraph> paragraphs = new ArrayList<>();
+        Set<Integer> appendedAnchorIds = new LinkedHashSet<>();
+        Set<String> consumedOwnershipKeys = new LinkedHashSet<>();
 
-        appendPlannedInlineObjectsFromResolvedTableCell(ctx, idmlTable, idmlCell, paragraphs);
-        appendPlannedInlineTextShellsFromCellAnchors(ctx, idmlCell, paragraphs);
+        appendPlannedInlineObjectsFromResolvedTableCell(
+                ctx, idmlTable, idmlCell, paragraphs, appendedAnchorIds, consumedOwnershipKeys);
+        appendPlannedInlineTextShellsFromCellAnchors(
+                ctx, idmlCell, paragraphs, appendedAnchorIds, consumedOwnershipKeys);
 
         if (idmlCell.textFrameStoryRefs() == null || idmlCell.textFrameStoryRefs().isEmpty()) {
             return paragraphs;
@@ -142,6 +176,7 @@ public final class StoryFlowAssembler {
             for (ResolvedTextFrame tf : frames) {
                 int tfDomId = parseDomId(tf);
                 if (tfDomId < 0) continue;
+                if (!consumeInlineOwnershipKeyForOwnedTextFrame(ctx, tfDomId, consumedOwnershipKeys)) continue;
                 ASTInlineObject inlineShell =
                         InlineFrameHandler.loadPlannedInlineTextShellForOwnedTextFrame(ctx, tfDomId);
                 if (inlineShell == null) continue;
@@ -157,7 +192,9 @@ public final class StoryFlowAssembler {
             ResolvedBuildContext ctx,
             IDMLTable idmlTable,
             IDMLTableCell idmlCell,
-            List<ASTParagraph> paragraphs) {
+            List<ASTParagraph> paragraphs,
+            Set<Integer> appendedAnchorIds,
+            Set<String> consumedOwnershipKeys) {
         if (ctx == null || ctx.resolvedData == null
                 || idmlCell == null || paragraphs == null) {
             return;
@@ -178,13 +215,18 @@ public final class StoryFlowAssembler {
         ASTParagraph paragraph = new ASTParagraph();
         for (Integer anchorId : resolvedCell.inlineAnchorIds()) {
             if (anchorId == null || anchorId < 0) continue;
+            if (appendedAnchorIds != null && appendedAnchorIds.contains(anchorId)) continue;
             if (!cellContainsInlineAnchor(idmlCell, anchorId)) continue;
-            if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, anchorId)) continue;
             List<ASTInlineItem> plannedItems =
-                    InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchorId, null, null);
-            if (plannedItems != null) {
+                    InlineFrameHandler.loadPlannedCellInlineCarrierItems(ctx, anchorId);
+            if ((plannedItems == null || plannedItems.isEmpty())
+                    && InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, anchorId)) {
+                plannedItems = InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchorId, null, null);
+            }
+            if (plannedItems != null && !plannedItems.isEmpty()) {
                 InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchorId, paragraph);
-                appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
+                int added = appendInlineItemsKeepingObjectsInline(paragraph, plannedItems, ctx, consumedOwnershipKeys);
+                if (added > 0 && appendedAnchorIds != null) appendedAnchorIds.add(anchorId);
             }
         }
         if (paragraph.items() != null && !paragraph.items().isEmpty()) {
@@ -197,6 +239,9 @@ public final class StoryFlowAssembler {
         for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
             if (paragraph == null || paragraph.characterRuns() == null) continue;
             for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (containsInlineAnchorDomId(run, anchorId)) return true;
+                if (containsInlineGraphicDomId(run.inlineGraphics(), anchorId)) return true;
+                if (containsInlineFrameDomId(run.inlineFrames(), anchorId)) return true;
                 for (String inlineId : inlineGraphicIdsInRunOrder(run)) {
                     if (parseInlineObjectDomId(inlineId) == anchorId) return true;
                 }
@@ -208,7 +253,9 @@ public final class StoryFlowAssembler {
     private static void appendPlannedInlineTextShellsFromCellAnchors(
             ResolvedBuildContext ctx,
             IDMLTableCell idmlCell,
-            List<ASTParagraph> paragraphs) {
+            List<ASTParagraph> paragraphs,
+            Set<Integer> appendedAnchorIds,
+            Set<String> consumedOwnershipKeys) {
         if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null || paragraphs == null) {
             return;
         }
@@ -221,17 +268,23 @@ public final class StoryFlowAssembler {
                 for (String inlineId : inlineIds) {
                     int domId = parseInlineObjectDomId(inlineId);
                     if (domId < 0) continue;
-                    if (paragraph == null) {
-                        paragraph = new ASTParagraph();
-                        if (idmlParagraph.appliedParagraphStyle() != null) {
-                            paragraph.paragraphStyleRef(idmlParagraph.appliedParagraphStyle());
-                        }
-                    }
+                    if (appendedAnchorIds != null && appendedAnchorIds.contains(domId)) continue;
                     List<ASTInlineItem> plannedItems =
-                            InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, null, null);
-                    if (plannedItems != null) {
+                            InlineFrameHandler.loadPlannedCellInlineCarrierItems(ctx, domId);
+                    if ((plannedItems == null || plannedItems.isEmpty())
+                            && InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)) {
+                        plannedItems = InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, null, null);
+                    }
+                    if (plannedItems != null && !plannedItems.isEmpty()) {
+                        if (paragraph == null) {
+                            paragraph = new ASTParagraph();
+                            if (idmlParagraph.appliedParagraphStyle() != null) {
+                                paragraph.paragraphStyleRef(idmlParagraph.appliedParagraphStyle());
+                            }
+                        }
                         InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, paragraph);
-                        appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
+                        int added = appendInlineItemsKeepingObjectsInline(paragraph, plannedItems, ctx, consumedOwnershipKeys);
+                        if (added > 0 && appendedAnchorIds != null) appendedAnchorIds.add(domId);
                     }
                 }
             }
@@ -244,14 +297,111 @@ public final class StoryFlowAssembler {
     private static void appendInlineItemsKeepingObjectsInline(
             ASTParagraph paragraph,
             List<ASTInlineItem> items) {
-        if (paragraph == null || items == null) return;
+        appendInlineItemsKeepingObjectsInline(paragraph, items, null, null);
+    }
+
+    private static int appendInlineItemsKeepingObjectsInline(
+            ASTParagraph paragraph,
+            List<ASTInlineItem> items,
+            ResolvedBuildContext ctx,
+            Set<String> consumedOwnershipKeys) {
+        if (paragraph == null || items == null) return 0;
+        int added = 0;
         for (ASTInlineItem item : items) {
             if (item == null) continue;
             if (item instanceof ASTInlineObject) {
-                ((ASTInlineObject) item).keepInline(true);
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (!consumeInlineOwnershipKey(ctx, obj, consumedOwnershipKeys)) {
+                    continue;
+                }
+                obj.keepInline(true);
             }
             paragraph.addItem(item);
+            added++;
         }
+        return added;
+    }
+
+    private static boolean consumeInlineOwnershipKey(
+            ResolvedBuildContext ctx,
+            ASTInlineObject obj,
+            Set<String> consumedOwnershipKeys) {
+        if (consumedOwnershipKeys == null) return true;
+        String key = inlineOwnershipExecutionKey(ctx, obj);
+        if (key == null || key.isEmpty()) return true;
+        if (consumedOwnershipKeys.contains(key)) return false;
+        consumedOwnershipKeys.add(key);
+        return true;
+    }
+
+    private static boolean consumeInlineOwnershipKeyForOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId,
+            Set<String> consumedOwnershipKeys) {
+        if (consumedOwnershipKeys == null || ctx == null || textFrameDomId < 0) return true;
+        String key = inlineOwnershipExecutionKeyForOwnedTextFrame(ctx, textFrameDomId);
+        if (key == null || key.isEmpty()) return true;
+        if (consumedOwnershipKeys.contains(key)) return false;
+        consumedOwnershipKeys.add(key);
+        return true;
+    }
+
+    private static String inlineOwnershipExecutionKey(
+            ResolvedBuildContext ctx,
+            ASTInlineObject obj) {
+        if (ctx == null || obj == null) return null;
+        int domId = parseInlineObjectDomId(obj.sourceId());
+        if (domId < 0) return null;
+        ObjectPlan plan = ctx.findOwnershipPlanForDomId(domId);
+        if (plan == null) return null;
+        if (plan.objectPlanId != null && !plan.objectPlanId.isEmpty()) {
+            return "objectPlan:" + plan.objectPlanId;
+        }
+        String bundle = plan.sourceBundleKey != null && !plan.sourceBundleKey.isEmpty()
+                ? plan.sourceBundleKey
+                : "dom:" + plan.domId;
+        return "bundle:" + bundle
+                + ":slot:" + safeString(plan.slotRole)
+                + ":visual:" + plan.visualAction
+                + ":text:" + plan.textAction
+                + ":placement:" + plan.placement;
+    }
+
+    private static String inlineOwnershipExecutionKeyForOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || textFrameDomId < 0) return null;
+        for (ObjectPlan plan : ctx.ownershipPlansForOwnedTextFrame(textFrameDomId)) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!containsInt(plan.ownedTextFrameIds, textFrameDomId)) continue;
+            return inlineOwnershipExecutionKey(plan);
+        }
+        return null;
+    }
+
+    private static String inlineOwnershipExecutionKey(ObjectPlan plan) {
+        if (plan == null) return null;
+        if (plan.objectPlanId != null && !plan.objectPlanId.isEmpty()) {
+            return "objectPlan:" + plan.objectPlanId;
+        }
+        String bundle = plan.sourceBundleKey != null && !plan.sourceBundleKey.isEmpty()
+                ? plan.sourceBundleKey
+                : "dom:" + plan.domId;
+        return "bundle:" + bundle
+                + ":slot:" + safeString(plan.slotRole)
+                + ":visual:" + plan.visualAction
+                + ":text:" + plan.textAction
+                + ":placement:" + plan.placement;
+    }
+
+    private static boolean containsInt(int[] values, int target) {
+        if (values == null || values.length == 0) return false;
+        for (int value : values) {
+            if (value == target) return true;
+        }
+        return false;
     }
 
     private static List<String> inlineGraphicIdsInRunOrder(IDMLCharacterRun run) {
@@ -259,19 +409,34 @@ public final class StoryFlowAssembler {
         if (run == null) return ids;
         if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) {
             for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
-                if (anchor == null || anchor.type() != IDMLCharacterRun.InlineAnchorType.GRAPHIC) continue;
-                if (run.inlineGraphics() == null || anchor.index() < 0
-                        || anchor.index() >= run.inlineGraphics().size()) {
-                    continue;
+                if (anchor == null) continue;
+                if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC) {
+                    if (run.inlineGraphics() == null || anchor.index() < 0
+                            || anchor.index() >= run.inlineGraphics().size()) {
+                        continue;
+                    }
+                    IDMLCharacterRun.InlineGraphic graphic = run.inlineGraphics().get(anchor.index());
+                    if (graphic != null && graphic.selfId() != null) ids.add(graphic.selfId());
+                } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+                    if (run.inlineFrames() == null || anchor.index() < 0
+                            || anchor.index() >= run.inlineFrames().size()) {
+                        continue;
+                    }
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame =
+                            run.inlineFrames().get(anchor.index());
+                    if (frame != null && frame.selfId() != null) ids.add(frame.selfId());
                 }
-                IDMLCharacterRun.InlineGraphic graphic = run.inlineGraphics().get(anchor.index());
-                if (graphic != null && graphic.selfId() != null) ids.add(graphic.selfId());
             }
             return ids;
         }
         if (run.inlineGraphics() != null) {
             for (IDMLCharacterRun.InlineGraphic graphic : run.inlineGraphics()) {
                 if (graphic != null && graphic.selfId() != null) ids.add(graphic.selfId());
+            }
+        }
+        if (run.inlineFrames() != null) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame : run.inlineFrames()) {
+                if (frame != null && frame.selfId() != null) ids.add(frame.selfId());
             }
         }
         return ids;
@@ -281,22 +446,82 @@ public final class StoryFlowAssembler {
         if (id == null || id.isEmpty()) return -1;
         String s = id;
         if (s.startsWith("child_")) s = s.substring("child_".length());
-        if (s.startsWith("u") || s.startsWith("U")) s = s.substring(1);
+        boolean hexId = s.startsWith("u") || s.startsWith("U");
+        if (hexId) s = s.substring(1);
         int end = 0;
         while (end < s.length()) {
             char c = s.charAt(end);
-            boolean hex = (c >= '0' && c <= '9')
+            boolean valid = hexId
+                    ? ((c >= '0' && c <= '9')
                     || (c >= 'a' && c <= 'f')
-                    || (c >= 'A' && c <= 'F');
-            if (!hex) break;
+                    || (c >= 'A' && c <= 'F'))
+                    : (c >= '0' && c <= '9');
+            if (!valid) break;
             end++;
         }
         if (end == 0) return -1;
         try {
-            return Integer.parseInt(s.substring(0, end), 16);
+            return Integer.parseInt(s.substring(0, end), hexId ? 16 : 10);
         } catch (NumberFormatException e) {
             return -1;
         }
+    }
+
+    private static boolean containsInlineAnchorDomId(IDMLCharacterRun run, int anchorId) {
+        if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) return false;
+        for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+            if (anchor == null) continue;
+            if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+                List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame> frames = run.inlineFrames();
+                int index = anchor.index();
+                if (frames != null && index >= 0 && index < frames.size()
+                        && idMatches(frames.get(index).selfId(), anchorId)) {
+                    return true;
+                }
+            } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC) {
+                List<IDMLCharacterRun.InlineGraphic> graphics = run.inlineGraphics();
+                int index = anchor.index();
+                if (graphics != null && index >= 0 && index < graphics.size()
+                        && inlineGraphicContainsDomId(graphics.get(index), anchorId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsInlineGraphicDomId(
+            List<IDMLCharacterRun.InlineGraphic> graphics,
+            int anchorId) {
+        if (graphics == null || graphics.isEmpty()) return false;
+        for (IDMLCharacterRun.InlineGraphic graphic : graphics) {
+            if (inlineGraphicContainsDomId(graphic, anchorId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean inlineGraphicContainsDomId(
+            IDMLCharacterRun.InlineGraphic graphic,
+            int anchorId) {
+        if (graphic == null) return false;
+        if (idMatches(graphic.selfId(), anchorId)) return true;
+        if (containsInlineGraphicDomId(graphic.childGraphics(), anchorId)) return true;
+        return containsInlineFrameDomId(graphic.childTextFrames(), anchorId);
+    }
+
+    private static boolean containsInlineFrameDomId(
+            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame> frames,
+            int anchorId) {
+        if (frames == null || frames.isEmpty()) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame : frames) {
+            if (frame == null) continue;
+            if (idMatches(frame.selfId(), anchorId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean idMatches(String sourceId, int domId) {
+        return parseInlineObjectDomId(sourceId) == domId;
     }
 
     private static List<ASTParagraph> buildNestedTextFrameStoryFlow(

@@ -357,6 +357,7 @@ public class HwpxTableBuilder {
         copy.verticalAlign(source.verticalAlign());
         copy.firstBaselineOffset(source.firstBaselineOffset());
         copy.minimumFirstBaselineOffset(source.minimumFirstBaselineOffset());
+        copy.squeezeLineWrap(source.squeezeLineWrap());
         for (ASTParagraph paragraph : source.paragraphs()) {
             copy.addParagraph(paragraph);
         }
@@ -468,7 +469,7 @@ public class HwpxTableBuilder {
                 SubList subList = tc.subList();
                 subList.idAnd("")
                         .textDirectionAnd(TextDirection.HORIZONTAL)
-                        .lineWrapAnd(LineWrapMethod.BREAK);
+                        .lineWrapAnd(tableCellLineWrap(astCell));
 
                 // 수직 정렬
                 String vAlign = astCell.verticalAlign();
@@ -503,6 +504,12 @@ public class HwpxTableBuilder {
     private static boolean usesEmboxFirstBaseline(ASTTableCell cell) {
         if (cell == null || cell.firstBaselineOffset() == null) return false;
         return "EmboxHeight".equalsIgnoreCase(cell.firstBaselineOffset());
+    }
+
+    private static LineWrapMethod tableCellLineWrap(ASTTableCell cell) {
+        if (cell == null) return LineWrapMethod.BREAK;
+        if (cell.squeezeLineWrap()) return LineWrapMethod.SQUEEZE;
+        return LineWrapMethod.BREAK;
     }
 
     private static long transferTopInsetToFirstParagraph(ASTTableCell cell) {

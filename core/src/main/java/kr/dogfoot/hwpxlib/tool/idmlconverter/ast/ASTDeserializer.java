@@ -187,6 +187,8 @@ public class ASTDeserializer {
         tf.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
         tf.plannedVisualTextOverlay(getBool(o, "plannedVisualTextOverlay"));
         tf.anchoredFlowWithText(getBool(o, "anchoredFlowWithText"));
+        tf.paragraphRangeStart(o.has("paragraphRangeStart") ? getInt(o, "paragraphRangeStart") : -1);
+        tf.paragraphRangeEnd(o.has("paragraphRangeEnd") ? getInt(o, "paragraphRangeEnd") : -1);
 
         if (o.has("paragraphs")) {
             for (JsonElement e : o.getAsJsonArray("paragraphs")) {
@@ -258,6 +260,7 @@ public class ASTDeserializer {
         cell.verticalAlign(getString(o, "verticalAlign"));
         cell.firstBaselineOffset(getString(o, "firstBaselineOffset"));
         cell.minimumFirstBaselineOffset(getLong(o, "minimumFirstBaselineOffset"));
+        cell.squeezeLineWrap(getBool(o, "squeezeLineWrap"));
         cell.marginTop(getLong(o, "marginTop"));
         cell.marginBottom(getLong(o, "marginBottom"));
         cell.marginLeft(getLong(o, "marginLeft"));
@@ -338,6 +341,8 @@ public class ASTDeserializer {
         para.autoLeadingPercent(getBoxedInt(o, "autoLeadingPercent"));
         para.letterSpacing(getBoxedShort(o, "letterSpacing"));
         para.squeezeLineWrap(getBool(o, "squeezeLineWrap"));
+        para.keepLineWrap(getBool(o, "keepLineWrap"));
+        para.sourceTextWrapSpacing(getBool(o, "sourceTextWrapSpacing"));
 
         // shading
         para.shadingOn(getBool(o, "shadingOn"));
@@ -441,6 +446,7 @@ public class ASTDeserializer {
         obj.cornerRadius(getDouble(o, "cornerRadius"));
         if (o.has("shellShapeType")) obj.shellShapeType(getString(o, "shellShapeType"));
         obj.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
+        obj.squeezeLineWrap(getBool(o, "squeezeLineWrap"));
 
         obj.textMarginTop(getLong(o, "textMarginTop"));
         obj.textMarginLeft(getLong(o, "textMarginLeft"));

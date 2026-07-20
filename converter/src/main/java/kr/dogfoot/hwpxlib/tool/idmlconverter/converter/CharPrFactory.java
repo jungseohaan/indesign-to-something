@@ -185,9 +185,11 @@ final class CharPrFactory {
     }
 
     /**
-     * 텍스트 내의 탭(\t)과 줄바꿈(\n, U+2028) 문자를 HWPX 요소로 변환.
-     * 각 탭/줄바꿈은 별도의 T 요소로 분리 (한글 렌더링 호환).
-     * indentToHerePosition > 0이면 lineBreak 직후 탭을 삽입하여 들여쓰기 재현.
+     * 텍스트 내의 탭과 source text-run separator를 HWPX 요소로 변환한다.
+     *
+     * <p>명시적 줄바꿈은 Stage 2에서 ASTBreak로 승격된 것만 보존한다. 텍스트런 내부의
+     * \n/U+2028은 IDML Content에 섞인 soft separator이므로 HWPX 강제 lineBreak로
+     * 내보내지 않고 공백으로 접는다.
      */
     void addTextWithSpecialChars(Run run, String text, long indentToHerePosition) {
         StringBuilder buf = new StringBuilder();
@@ -200,13 +202,8 @@ final class CharPrFactory {
                 }
                 run.addNewT().addNewTab();
             } else if (c == '\n' || c == '\u2028') {
-                if (buf.length() > 0) {
-                    run.addNewT().addText(buf.toString());
-                    buf.setLength(0);
-                }
-                run.addNewT().addNewLineBreak();
-                if (indentToHerePosition > 0) {
-                    run.addNewT().addNewTab();
+                if (buf.length() == 0 || buf.charAt(buf.length() - 1) != ' ') {
+                    buf.append(' ');
                 }
             } else if (c == '\r') {
                 // \r 무시 (\r\n의 경우 \n이 처리)
@@ -454,10 +451,18 @@ final class CharPrFactory {
 
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
         String textColor = equationFontTextColor(textRun, baseCharPrId);
+        // 키에는 CharPrBuilder.build 가 소비하는 스타일 인자를 전부 넣는다.
+        // subscript/superscript 가 빠져 있던 동안, 첨자 런이 만든 CharPr 을 같은
+        // 폰트·크기·색의 일반 런이 물려받아 첨자가 이웃 글자로 전이됐다
+        // (과학 u1 p47 2H₂+O₂→2H₂O 의 H 가 첨자, 2 가 일반으로 뒤바뀐 사례).
         String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
                 + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
                 + "|" + (textColor != null ? textColor : "")
-                + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "");
+                + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "")
+                + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
+                + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
+                + "|" + (textRun.characterStyleRef() != null ? textRun.characterStyleRef() : "")
+                + "|" + textRun.subscript() + "|" + textRun.superscript();
         String cached = ctx.eqFontCharPrCache.get(cacheKey);
         if (cached != null) return cached;
 

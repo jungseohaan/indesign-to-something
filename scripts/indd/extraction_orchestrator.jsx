@@ -718,6 +718,10 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
             summary.reason = "table_style_source_hide_requires_fresh_page_plane";
             return summary;
         }
+        if (ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount > 0) {
+            summary.reason = "source_bundle_text_range_shell_hide_requires_fresh_page_plane";
+            return summary;
+        }
         var cacheDir = Folder(ctx.pagePlaneCacheDir);
         if (!cacheDir.exists) {
             summary.reason = "cache_dir_missing";
@@ -816,6 +820,10 @@ function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
             summary.reason = "table_style_source_hide_not_cached";
             return summary;
         }
+        if (ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount > 0) {
+            summary.reason = "source_bundle_text_range_shell_hide_not_cached";
+            return summary;
+        }
         var cacheDir = _ensureFolder(ctx.pagePlaneCacheDir);
         var pageHashes = readJson(ctx.outputDir + "/page_hashes.json") || {};
         var frames = pageTextlessGroupResult && pageTextlessGroupResult.frames
@@ -912,6 +920,12 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
                         sourceIndex && sourceIndex.sourceItems ? sourceIndex.sourceItems : []);
         var inlineCandidates = _globalSingleTextlessInlineHideCandidates(
                 sourceIndex && sourceIndex.sourceItems ? sourceIndex.sourceItems : []);
+        var sourceBundleTextRangeShellInlineCandidates =
+                _globalSourceBundleTextRangeShellInlineHideCandidates(
+                        sourceIndex && sourceIndex.sourceItems ? sourceIndex.sourceItems : []);
+        ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount =
+                sourceBundleTextRangeShellInlineCandidates.length;
+        inlineCandidates = inlineCandidates.concat(sourceBundleTextRangeShellInlineCandidates);
         var result = exportSingleTextlessPagePlanes(
                 doc,
                 ctx.outputDir,
@@ -1034,6 +1048,106 @@ function _globalSingleTextlessInlineHideCandidates(sourceItems) {
     return candidates;
 }
 
+function _globalSourceBundleTextRangeShellInlineHideCandidates(sourceItems) {
+    var candidates = [];
+    if (!sourceItems || sourceItems.length === 0) return candidates;
+    var sourceById = {};
+    var childrenByParentId = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!src || src.id === null || src.id === undefined) continue;
+        sourceById[String(src.id)] = src;
+        if (src.parentId !== null && src.parentId !== undefined && String(src.parentId) !== "") {
+            var key = String(src.parentId);
+            if (!childrenByParentId[key]) childrenByParentId[key] = [];
+            childrenByParentId[key].push(src);
+        }
+    }
+    function visibleShell(src) {
+        if (!src || src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        var kind = String(src.kind || src.type || "");
+        if (kind !== "Polygon" && kind !== "Rectangle" && kind !== "Oval") return false;
+        return src.hasVisibleFill === true || src.hasVisibleStroke === true;
+    }
+    function editableTextFrame(src) {
+        return !!(src
+                && String(src.kind || src.type || "") === "TextFrame"
+                && src.textFrameClass === "editable"
+                && src.hasText === true
+                && src.visible !== false
+                && src.hiddenLayer !== true
+                && src.nonprinting !== true
+                && src.leadingStyledTextRanges
+                && src.leadingStyledTextRanges.length > 0);
+    }
+    function center(bounds, axis) {
+        if (!bounds || bounds.length < 4) return 0;
+        return axis === 0 ? (Number(bounds[0]) + Number(bounds[2])) / 2
+                : (Number(bounds[1]) + Number(bounds[3])) / 2;
+    }
+    var seen = {};
+    for (var gi = 0; gi < sourceItems.length; gi++) {
+        var group = sourceItems[gi];
+        if (!group || String(group.kind || group.type || "") !== "Group") continue;
+        var children = childrenByParentId[String(group.id)] || [];
+        var textFrames = [];
+        var shells = [];
+        var otherVisible = 0;
+        for (var ci = 0; ci < children.length; ci++) {
+            var child = children[ci];
+            if (editableTextFrame(child)) {
+                textFrames.push(child);
+            } else if (visibleShell(child)) {
+                shells.push(child);
+            } else if (child && child.visible !== false && child.hiddenLayer !== true && child.nonprinting !== true) {
+                otherVisible++;
+            }
+        }
+        if (textFrames.length === 0 || shells.length === 0 || otherVisible > 0) continue;
+        var rangeCount = 0;
+        for (var ti = 0; ti < textFrames.length; ti++) {
+            rangeCount += textFrames[ti].leadingStyledTextRanges
+                    ? textFrames[ti].leadingStyledTextRanges.length
+                    : 0;
+        }
+        if (rangeCount === 0) continue;
+        shells.sort(function(a, b) {
+            var ay = center(a.bounds, 0);
+            var by = center(b.bounds, 0);
+            if (ay !== by) return ay - by;
+            var ax = center(a.bounds, 1);
+            var bx = center(b.bounds, 1);
+            if (ax !== bx) return ax - bx;
+            return Number(a.zOrder || 0) - Number(b.zOrder || 0);
+        });
+        var pairCount = Math.min(shells.length, rangeCount);
+        for (var pi = 0; pi < pairCount; pi++) {
+            var shell = shells[pi];
+            var shellId = Number(shell.id);
+            var textFrameId = Number(textFrames[0].id);
+            if (isNaN(shellId) || isNaN(textFrameId) || seen[String(shellId)]) continue;
+            seen[String(shellId)] = true;
+            candidates.push({
+                candidateId: "global.source_bundle_text_range_shell.inline_hide." + String(shellId),
+                passId: "pass.inline_objects",
+                pageIndex: shell.pageIndex,
+                kind: shell.kind || "Polygon",
+                primarySourceObjectId: shellId,
+                exportTargetObjectId: shellId,
+                sourceObjectIds: [shellId, textFrameId],
+                exportSourceObjectIds: [shellId],
+                visualAction: "PLACE_TEXT_SHELL",
+                materialization: "EXTRACTED_PNG_VECTOR",
+                placement: "INLINE",
+                coordinateSpace: "STORY_FLOW",
+                compositeRole: "source_bundle_text_range_shell",
+                slotRole: "source_bundle_text_range_shell_slot"
+            });
+        }
+    }
+    return candidates;
+}
+
 function _runSpreadChunkExtraction(doc, ctx) {
     var chunks = _selectedSpreadChunks(doc, ctx);
     if (!chunks || chunks.length === 0) {
@@ -1091,6 +1205,12 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d_buildExtractionPlan_start");
     ctx.extractionPlan = _buildExtractionPlan(doc, ctx, allItems);
     _marker(ctx.outputDir, "03d_buildExtractionPlan_done");
+    if (ctx.deferPagePlaneCacheRestoreUntilAfterPlan === true) {
+        _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_afterPlan_start");
+        _restoreCachedSingleTextlessPagePlanes(doc, ctx);
+        _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_afterPlan_done");
+        ctx.deferPagePlaneCacheRestoreUntilAfterPlan = false;
+    }
     _extractionCandidateLookup = _buildExtractionCandidateLookup(ctx.extractionPlan);
     _marker(ctx.outputDir, "03e_buildCandidateLookup_done");
     var extractionItemById = ctx._sourceIndexForRender && ctx._sourceIndexForRender.domById
@@ -1618,16 +1738,7 @@ function main(args) {
             _marker(ctx.outputDir, "03_allPageItems");
             var allItems = collectRangePageItems(doc, ctx.startPage, ctx.endPage);
             ctx.rangeTargetPageIndexesBySourceId = collectRangePageItems.lastTargetPageIndexesByItemId || {};
-            try {
-                var _pagePlaneHideSourceIndex = _buildSourceIndexFromAllItems(doc, ctx, allItems);
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
-                        _tableStyleSourceObjectIdsByPageForPagePlaneHide(
-                                _pagePlaneHideSourceIndex && _pagePlaneHideSourceIndex.sourceItems
-                                        ? _pagePlaneHideSourceIndex.sourceItems
-                                        : []);
-            } catch (ePagePlaneTableStyleHideIndex) {
-                ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage = {};
-            }
+            ctx.deferPagePlaneCacheRestoreUntilAfterPlan = true;
 
             // SPEC-030 B.2: 페이지 해시 + 아이템 맵 → page_hashes.json / page_item_map.json (캐시 저장용)
             _marker(ctx.outputDir, "03b_pageHashes_start");
@@ -1640,7 +1751,8 @@ function main(args) {
             } catch (eHash) { $.writeln("[pageHash] error: " + eHash); }
             _marker(ctx.outputDir, "03b_pageHashes_done");
             _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_start");
-            _restoreCachedSingleTextlessPagePlanes(doc, ctx);
+            // Requires table-style hide ownership, which is now derived from
+            // the extraction plan source index to avoid a duplicate source-index pass.
             _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_done");
 
             _runRenderPhases(doc, ctx, allItems);

@@ -426,7 +426,313 @@ public final class FramePlacer {
                     block.forceNativeFill(false);
                 }
             }
+            addTextFrameBlockOrParagraphRangeSplits(ctx, section, tf, block);
+        }
+    }
+
+    private static void addTextFrameBlockOrParagraphRangeSplits(
+            ResolvedBuildContext ctx,
+            ASTSection section,
+            ResolvedTextFrame tf,
+            ASTTextFrameBlock block) {
+        List<ParagraphRangeBounds> ranges = paragraphRangesSplitByInlineVisualBreak(ctx, tf);
+        if (ranges.isEmpty()) {
             section.addBlock(block);
+            return;
+        }
+        for (ParagraphRangeBounds range : ranges) {
+            ASTTextFrameBlock part = block.copyWithoutParagraphs();
+            part.paragraphRangeStart(range.start);
+            part.paragraphRangeEnd(range.end);
+            part.x(CoordinateConverter.pointsToHwpunits(range.left));
+            part.y(CoordinateConverter.pointsToHwpunits(range.top));
+            part.width(CoordinateConverter.pointsToHwpunits(Math.max(0.1, range.right - range.left)));
+            part.height(CoordinateConverter.pointsToHwpunits(Math.max(0.1, range.bottom - range.top)));
+            section.addBlock(part);
+        }
+    }
+
+    private static List<ParagraphRangeBounds> paragraphRangesSplitByInlineVisualBreak(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || tf == null || tf.isInline()) return Collections.emptyList();
+        List<String> paraTexts = tf.frameParaTexts();
+        if (paraTexts == null || paraTexts.size() < 3) return Collections.emptyList();
+        if (tf.composedLines() == null || tf.composedLines().isEmpty()) return Collections.emptyList();
+        if (!hasVisibleInlineVisualPlanInTextFrame(ctx, tf)) return Collections.emptyList();
+
+        int storyParaCount = storyParagraphCount(ctx, tf.storyId());
+        int storyStart = storyParagraphStart(tf, storyParaCount);
+        List<ParagraphRangeBounds> ranges = new ArrayList<>();
+        int start = 0;
+        boolean split = false;
+        for (int i = 0; i < paraTexts.size() - 1; i++) {
+            if (!isInlineOnlyParagraphText(paraTexts.get(i))) continue;
+            if (!hasVisibleTextParagraphAfter(paraTexts, i + 1)) continue;
+            if (!inlineSlotAnchorsForParagraph(ctx, tf, i).isEmpty()) {
+                return Collections.emptyList();
+            }
+            if (start <= i - 1) {
+                ParagraphRangeBounds before = boundsForParagraphRange(ctx, tf, start, i - 1, storyStart, false);
+                if (before != null) ranges.add(before);
+            }
+            ParagraphRangeBounds inlineOnly = boundsForParagraphRange(ctx, tf, i, i, storyStart, true);
+            if (inlineOnly != null) ranges.add(inlineOnly);
+            start = i + 1;
+            split = true;
+        }
+        if (!split) return Collections.emptyList();
+        ParagraphRangeBounds tail = boundsForParagraphRange(ctx, tf, start, paraTexts.size() - 1, storyStart, false);
+        if (tail != null) ranges.add(tail);
+        return ranges.size() > 1 ? ranges : Collections.emptyList();
+    }
+
+    private static boolean hasVisibleInlineVisualPlanInTextFrame(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null || tf == null) return false;
+        double[] tfBounds = tf.pageRelativeBounds();
+        if (tfBounds == null || tfBounds.length < 4) tfBounds = tf.geometricBounds();
+        if (tfBounds == null || tfBounds.length < 4) return false;
+        boolean hasSamePageVisibleInlinePlan = false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.placement != Placement.INLINE || !plan.hasVisibleVisual()) continue;
+            if (plan.pageIndex >= 0 && tf.pageIndex() >= 0 && plan.pageIndex != tf.pageIndex()) continue;
+            hasSamePageVisibleInlinePlan = true;
+            int[] sourceIds = plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0
+                    ? plan.sourceObjectIds : plan.visualSourceObjectIds;
+            if (sourceIds == null) continue;
+            for (int sourceId : sourceIds) {
+                ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+                if (item == null || !item.isInline() || !item.storyTextInlineSlot()) continue;
+                double[] bounds = item.pageRelativeBounds();
+                if (bounds == null || bounds.length < 4) bounds = item.geometricBounds();
+                if (bounds != null && bounds.length >= 4 && overlaps(tfBounds, bounds)) return true;
+            }
+        }
+        return hasSamePageVisibleInlinePlan;
+    }
+
+    private static boolean isInlineOnlyParagraphText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean sawObject = false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '￼') {
+                sawObject = true;
+                continue;
+            }
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch) || ch == '\u2007' || ch == '\u2003') {
+                continue;
+            }
+            return false;
+        }
+        return sawObject;
+    }
+
+    private static boolean hasVisibleTextParagraphAfter(List<String> paraTexts, int start) {
+        for (int i = Math.max(0, start); i < paraTexts.size(); i++) {
+            if (!isInlineOnlyParagraphText(paraTexts.get(i))
+                    && hasVisibleText(paraTexts.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasVisibleText(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '￼') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch) || ch == '\u2007' || ch == '\u2003') {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static ParagraphRangeBounds boundsForParagraphRange(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            int localStart,
+            int localEnd,
+            int storyStart,
+            boolean inlineOnlyRange) {
+        if (tf == null || tf.composedLines() == null) return null;
+        double top = Double.POSITIVE_INFINITY;
+        double left = Double.POSITIVE_INFINITY;
+        double bottom = Double.NEGATIVE_INFINITY;
+        double right = Double.NEGATIVE_INFINITY;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.paraIndex() < localStart || line.paraIndex() > localEnd) continue;
+            double[] b = line.bounds();
+            if (b == null || b.length < 4) continue;
+            top = Math.min(top, b[0]);
+            left = Math.min(left, b[1]);
+            bottom = Math.max(bottom, b[2]);
+            right = Math.max(right, b[3]);
+        }
+        if (!Double.isFinite(top) || !Double.isFinite(left)
+                || !Double.isFinite(bottom) || !Double.isFinite(right)) {
+            return null;
+        }
+        double pad = 2.0;
+        top -= pad;
+        left -= pad;
+        bottom += pad;
+        right += pad;
+        if (inlineOnlyRange) {
+            double[] expanded = expandInlineOnlyRangeBoundsWithSourceVisuals(
+                    ctx, tf, localStart, new double[] { top, left, bottom, right });
+            if (expanded != null) {
+                top = expanded[0];
+                left = expanded[1];
+                bottom = expanded[2];
+                right = expanded[3];
+            }
+        }
+        return new ParagraphRangeBounds(storyStart + localStart, storyStart + localEnd, top, left, bottom, right);
+    }
+
+    private static double[] expandInlineOnlyRangeBoundsWithSourceVisuals(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            int localParagraphIndex,
+            double[] rangeBounds) {
+        if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null
+                || tf == null || rangeBounds == null || rangeBounds.length < 4) {
+            return null;
+        }
+        double[] tfBounds = tf.pageRelativeBounds();
+        if (tfBounds == null || tfBounds.length < 4) tfBounds = tf.geometricBounds();
+        if (tfBounds == null || tfBounds.length < 4) return null;
+        Set<Integer> anchoredObjectIds = inlineSlotAnchorsForParagraph(ctx, tf, localParagraphIndex);
+        // Story-flow inline anchors already prove ownership/placement. Their ObjectPlan bounds
+        // are in the inline object's execution coordinate space, so unioning them into the
+        // host TextFrame's page-local paragraph bounds moves the carrier block. Keep the
+        // composed-line location here; the HWPX table wrapper later grows to the inline
+        // object's actual materialized size.
+        if (!anchoredObjectIds.isEmpty()) {
+            return null;
+        }
+        double[] out = new double[] { rangeBounds[0], rangeBounds[1], rangeBounds[2], rangeBounds[3] };
+        boolean expanded = false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.placement != Placement.INLINE || !plan.hasVisibleVisual()) continue;
+            if (plan.pageIndex >= 0 && tf.pageIndex() >= 0 && plan.pageIndex != tf.pageIndex()) continue;
+            double[] planBounds = inlinePlanSourceBounds(ctx, plan);
+            if (planBounds == null || planBounds.length < 4) continue;
+            if (!overlaps(rangeBounds, plan.bounds != null ? plan.bounds : planBounds)
+                    && !overlaps(rangeBounds, planBounds)) {
+                continue;
+            }
+            if (!inlinePlanAnchoredInTextFrame(ctx, tfBounds, plan)) continue;
+            out[0] = Math.min(out[0], planBounds[0]);
+            out[1] = Math.min(out[1], planBounds[1]);
+            out[2] = Math.max(out[2], planBounds[2]);
+            out[3] = Math.max(out[3], planBounds[3]);
+            expanded = true;
+        }
+        return expanded ? out : null;
+    }
+
+    private static Set<Integer> inlineSlotAnchorsForParagraph(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            int localParagraphIndex) {
+        Set<Integer> ids = new HashSet<>();
+        if (ctx == null || ctx.textFlowDocument == null || tf == null || tf.storyId() == null) return ids;
+        TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(tf.storyId());
+        if (unit == null || unit.paragraphs == null) return ids;
+        for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
+            if (paragraph == null || paragraph.index != localParagraphIndex || paragraph.atoms == null) continue;
+            collectInlineSlotAnchorIds(paragraph.atoms, ids);
+        }
+        return ids;
+    }
+
+    private static void collectInlineSlotAnchorIds(
+            List<TextFlowDocument.TextFlowAtom> atoms,
+            Set<Integer> ids) {
+        if (atoms == null || ids == null) return;
+        for (TextFlowDocument.TextFlowAtom atom : atoms) {
+            if (!(atom instanceof TextFlowDocument.InlineSlotAtom)) continue;
+            TextFlowDocument.InlineSlotAtom slot = (TextFlowDocument.InlineSlotAtom) atom;
+            if (slot.anchoredObjectId != null) ids.add(slot.anchoredObjectId);
+        }
+    }
+
+    private static boolean planMatchesAnySourceId(ObjectPlan plan, Set<Integer> ids) {
+        if (plan == null || ids == null || ids.isEmpty()) return false;
+        if (ids.contains(plan.domId)) return true;
+        for (Integer id : ids) {
+            if (id == null) continue;
+            if (containsInt(plan.sourceObjectIds, id)
+                    || containsInt(plan.visualSourceObjectIds, id)
+                    || containsInt(plan.exportSourceObjectIds, id)
+                    || containsInt(plan.inlineFlowSourceObjectIds, id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean inlinePlanAnchoredInTextFrame(
+            ResolvedBuildContext ctx,
+            double[] tfBounds,
+            ObjectPlan plan) {
+        int[] sourceIds = plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0
+                ? plan.sourceObjectIds : plan.visualSourceObjectIds;
+        if (sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (item == null || !item.isInline() || !item.storyTextInlineSlot()) continue;
+            double[] bounds = item.pageRelativeBounds();
+            if (bounds == null || bounds.length < 4) bounds = item.geometricBounds();
+            if (bounds != null && bounds.length >= 4 && overlaps(tfBounds, bounds)) return true;
+        }
+        return false;
+    }
+
+    private static double[] inlinePlanSourceBounds(ResolvedBuildContext ctx, ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return null;
+        return plan.bounds;
+    }
+
+    private static int storyParagraphCount(ResolvedBuildContext ctx, String storyId) {
+        if (ctx == null || ctx.resolvedData == null || storyId == null) return -1;
+        ResolvedStory story = ctx.resolvedData.getStory(storyId);
+        return story != null && story.paragraphs() != null ? story.paragraphs().size() : -1;
+    }
+
+    private static int storyParagraphStart(ResolvedTextFrame tf, int storyParaCount) {
+        if (tf == null || storyParaCount <= 0) return 0;
+        int start = tf.paragraphStart();
+        if (start >= 0 && start < storyParaCount) return start;
+        return 0;
+    }
+
+    private static boolean overlaps(double[] a, double[] b) {
+        return a != null && b != null && a.length >= 4 && b.length >= 4
+                && Math.max(a[0], b[0]) < Math.min(a[2], b[2])
+                && Math.max(a[1], b[1]) < Math.min(a[3], b[3]);
+    }
+
+    private static final class ParagraphRangeBounds {
+        final int start;
+        final int end;
+        final double top;
+        final double left;
+        final double bottom;
+        final double right;
+
+        ParagraphRangeBounds(int start, int end, double top, double left, double bottom, double right) {
+            this.start = start;
+            this.end = end;
+            this.top = top;
+            this.left = left;
+            this.bottom = bottom;
+            this.right = right;
         }
     }
 

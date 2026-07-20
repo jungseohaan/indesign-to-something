@@ -1405,11 +1405,29 @@ public class InlineFrameHandler {
         if (shellPlan.bounds == null || shellPlan.bounds.length < 4) return null;
         try {
             double[] shellBounds = shellPlan.bounds;
+            File pngFile = new File(ctx.basePath, shellFile);
+            if (!pngFile.exists() || !pngFile.isFile()) return null;
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            BufferedImage shellImage = VisualCropper.knockOutPaperLikeFill(img);
+            int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
+            boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
+            boolean embedCompositeShellText = shouldEmbedOwnedCompositeInlineTextShell(ctx, shellPlan, childTfs);
+            boolean preserveSourceCanvas = extractedShellImageOwnsGeometry(shellPlan)
+                    || shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
+            boolean preserveCanvasGeometry = preserveSourceCanvas && !embedCompositeShellText;
+            SourceCanvasGeometry canvasGeometry = preserveCanvasGeometry
+                    ? sourceCanvasGeometryForExtractedShell(shellPlan, shellImage)
+                    : null;
+            double[] executionBounds = canvasGeometry != null
+                    ? canvasGeometry.sourceCanvasBounds
+                    : shellBounds;
             double w = 0;
             double h = 0;
-            if (shellBounds != null && shellBounds.length >= 4) {
-                w = Math.abs(shellBounds[3] - shellBounds[1]) * ctx.scaleFactor;
-                h = Math.abs(shellBounds[2] - shellBounds[0]) * ctx.scaleFactor;
+            if (executionBounds != null && executionBounds.length >= 4) {
+                w = Math.abs(executionBounds[3] - executionBounds[1]) * ctx.scaleFactor;
+                h = Math.abs(executionBounds[2] - executionBounds[0]) * ctx.scaleFactor;
             }
             if ((w <= 0 || h <= 0) && anchorItem != null && anchorItem.geometricBounds() != null) {
                 double[] grpBounds = anchorItem.geometricBounds();
@@ -1425,6 +1443,13 @@ public class InlineFrameHandler {
             obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
+            double[] pageLocalBounds = normalizeInlineBoundsToPageLocal(ctx, shellPlan.pageIndex, executionBounds);
+            if (validBounds(pageLocalBounds)) {
+                obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(pageLocalBounds[1] * ctx.scaleFactor));
+                obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pageLocalBounds[0] * ctx.scaleFactor));
+                obj.resolvedWidth(obj.width());
+                obj.resolvedHeight(obj.height());
+            }
             if (!extractedShellImageOwnsGeometry(shellPlan)) {
                 applyInlineShellShapeStyle(ctx, anchorItem, obj);
                 applyOwnedTextFrameShellShapeStyle(ctx, childTfs, obj);
@@ -1433,32 +1458,41 @@ public class InlineFrameHandler {
             obj.noAutoLineWrap(childTfs.size() == 1 && shouldUseNoAutoLineWrap(childTfs.get(0), true));
             obj.verticalJustification(inlineTextShellVerticalJustification(ctx, shellPlan, anchorItem, childTfs));
 
-            File pngFile = new File(ctx.basePath, shellFile);
-            if (!pngFile.exists() || !pngFile.isFile()) return null;
-            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             boolean useImageFill = true;
             boolean usedNativeShellStyle = false;
-            BufferedImage img = ImageIO.read(pngFile);
-            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-            BufferedImage shellImage = VisualCropper.knockOutPaperLikeFill(img);
             boolean transparentSparseShell = shouldPreserveTransparentInlineShell(shellImage);
+            boolean preserveImageCanvas = preserveSourceCanvas && !embedCompositeShellText;
             if (transparentSparseShell) {
-                imageData = prepareTransparentInlineTextShellImageData(ctx, shellPlan, shellImage);
+                imageData = prepareTransparentInlineTextShellImageData(
+                        ctx, shellPlan, executionBounds, shellImage,
+                        preserveImageCanvas, embedCompositeShellText);
             } else {
-                boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
-                imageData = prepareInlineTextShellImageData(shellImage, preserveSourceCanvas);
+                imageData = prepareInlineTextShellImageData(
+                        shellImage, preserveImageCanvas, embedCompositeShellText);
             }
-            int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
-            boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
-            if (visibleShellTextFrameCount > 1 || separatedHwpxTextChannel || transparentSparseShell) {
+            if (embedCompositeShellText) {
+                if (useImageFill) {
+                    obj.imageFillData(imageData);
+                    obj.forceImageFill(true);
+                }
+                obj.squeezeLineWrap(shouldSqueezeCompositeInlineShellText(childTfs));
+                applyCompositeInlineShellTextMargins(
+                        obj,
+                        scaleBounds(executionBounds, ctx.scaleFactor),
+                        childTfs);
+                buildCompositeInlineShellParagraph(ctx, childTfs, obj);
+                for (ResolvedTextFrame childTf : childTfs) {
+                    markInlineShellChildTextPlaced(ctx, childTf);
+                }
+            } else if (visibleShellTextFrameCount > 1 || separatedHwpxTextChannel || transparentSparseShell) {
                 if (useImageFill) {
                     obj.imageFillData(imageData);
                     obj.forceImageFill(true);
                 }
                 boolean embeddedSingleChild = visibleShellTextFrameCount == 1
-                        && embedSingleInlineShellChildText(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
+                        && embedSingleInlineShellChildText(ctx, shellPlan.pageIndex, executionBounds, childTfs, obj);
                 if (!embeddedSingleChild) {
-                    attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, shellBounds, childTfs, obj);
+                    attachInlineShellChildTextOverlays(ctx, shellPlan.pageIndex, executionBounds, childTfs, obj);
                 }
                 for (ResolvedTextFrame childTf : childTfs) {
                     markInlineShellChildTextPlaced(ctx, childTf);
@@ -1478,6 +1512,7 @@ public class InlineFrameHandler {
                 }
             }
             if (shell != null) {
+                ctx.markRenderedVisualHandled(shell.id());
                 ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
                         "PLACE_INLINE_TEXT_SHELL",
                         usedNativeShellStyle
@@ -1551,6 +1586,62 @@ public class InlineFrameHandler {
         if (!hasHwpxTextOwnershipForChildren(ctx, shellPlan, childTfs)) return false;
         if (visibleShellTextFrameCount(childTfs) > 1) return true;
         return shouldAttachSingleShellTextAsOverlay(ctx, shellPlan, childTfs);
+    }
+
+    private static boolean shouldEmbedOwnedCompositeInlineTextShell(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (shellPlan == null || childTfs == null || childTfs.isEmpty()) return false;
+        if (shellPlan.placement != Placement.INLINE) return false;
+        if (shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (!hasHwpxTextOwnershipForChildren(ctx, shellPlan, childTfs)) return false;
+        return visibleShellTextFrameCount(childTfs) > 1;
+    }
+
+    private static boolean shouldSqueezeCompositeInlineShellText(
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (childTfs == null || childTfs.isEmpty()) return false;
+        java.util.List<double[]> sourceLineBounds = new ArrayList<>();
+        int visibleCount = 0;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
+            visibleCount++;
+            if (!shouldUseNoAutoLineWrap(childTf, true)) return false;
+            double[] lineBounds = primaryComposedLineBounds(childTf);
+            if (!validBounds(lineBounds)) return false;
+            sourceLineBounds.add(lineBounds);
+        }
+        if (visibleCount < 2 || sourceLineBounds.size() != visibleCount) return false;
+        return sourceLinesOccupySingleRow(sourceLineBounds);
+    }
+
+    private static double[] primaryComposedLineBounds(ResolvedTextFrame tf) {
+        if (tf == null || tf.composedLines() == null || tf.composedLines().isEmpty()) return null;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || !validBounds(line.bounds())) continue;
+            String text = normalizeInlineShellText(line.text());
+            if (!text.isEmpty()) return line.bounds();
+        }
+        return null;
+    }
+
+    private static boolean sourceLinesOccupySingleRow(java.util.List<double[]> lineBounds) {
+        if (lineBounds == null || lineBounds.size() < 2) return false;
+        double minCenterY = Double.POSITIVE_INFINITY;
+        double maxCenterY = Double.NEGATIVE_INFINITY;
+        double maxHeight = 0.0;
+        for (double[] b : lineBounds) {
+            if (!validBounds(b)) return false;
+            double h = Math.abs(b[2] - b[0]);
+            if (h <= 0.0) return false;
+            double centerY = (b[0] + b[2]) / 2.0;
+            minCenterY = Math.min(minCenterY, centerY);
+            maxCenterY = Math.max(maxCenterY, centerY);
+            maxHeight = Math.max(maxHeight, h);
+        }
+        return maxCenterY - minCenterY <= Math.max(0.75, maxHeight * 0.55);
     }
 
     private static boolean shouldAttachSingleShellTextAsOverlay(
@@ -1712,8 +1803,22 @@ public class InlineFrameHandler {
         overlay.resolvedWidth(overlay.width());
         overlay.resolvedHeight(overlay.height());
 
-        buildBadgeParagraph(ctx, childTf, overlay);
+        buildInlineShellOverlayParagraph(ctx, childTf, overlay);
         return overlay.paragraphs() == null || overlay.paragraphs().isEmpty() ? null : overlay;
+    }
+
+    private static void buildInlineShellOverlayParagraph(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame childTf,
+            ASTInlineObject overlay) {
+        if (childTf == null || overlay == null) return;
+        List<ASTParagraph> paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
+        if (paragraphs == null || paragraphs.isEmpty()) return;
+        fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, overlay, childTf, ctx);
+        capInlineShellParagraphLeadingToFrame(paragraphs, overlay, childTf, ctx);
+        for (ASTParagraph paragraph : paragraphs) {
+            overlay.addParagraph(paragraph);
+        }
     }
 
     private static void applyInlineShellOverlayTextInsets(
@@ -1833,22 +1938,42 @@ public class InlineFrameHandler {
                 spacer.text(" ");
                 para.addItem(spacer);
             }
-            TextFlowDocument.TextFlowUnit textFlow =
-                    childTf.storyId() != null && ctx.textFlowDocument != null
-                            ? ctx.textFlowDocument.byStoryId(childTf.storyId())
-                            : null;
-            if (!TextFlowAstMaterializer.appendFirstVisibleTextRuns(
-                    ctx, para, textFlow, InlineFrameHandler::normalizeInlineShellText)) {
-                ResolvedStory story = childTf.storyId() != null ? ctx.resolvedData.getStory(childTf.storyId()) : null;
-                if (appendFirstVisibleShellStoryRuns(ctx, para, story)) {
-                    added = true;
-                    continue;
-                }
-                addSyntheticRunsFromTextFrame(ctx, para, childTf, text);
-            }
+            addSyntheticRunsFromTextFrame(ctx, para, childTf, text);
             added = true;
         }
+        applyCompositeInlineShellLineMetrics(ctx, para, ordered);
         if (added) obj.addParagraph(para);
+    }
+
+    private static void applyCompositeInlineShellLineMetrics(
+            ResolvedBuildContext ctx,
+            ASTParagraph para,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (ctx == null || para == null || childTfs == null || childTfs.isEmpty()) return;
+        double[] textUnion = null;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
+            double[] b = childTf.geometricBounds();
+            if (!validBounds(b)) continue;
+            if (textUnion == null) {
+                textUnion = new double[] { b[0], b[1], b[2], b[3] };
+            } else {
+                textUnion[0] = Math.min(textUnion[0], b[0]);
+                textUnion[1] = Math.min(textUnion[1], b[1]);
+                textUnion[2] = Math.max(textUnion[2], b[2]);
+                textUnion[3] = Math.max(textUnion[3], b[3]);
+            }
+        }
+        if (!validBounds(textUnion)) return;
+        double sourceLineHeight = Math.abs(textUnion[2] - textUnion[0]);
+        if (sourceLineHeight <= 0 || !Double.isFinite(sourceLineHeight)) return;
+        int lineHeight = (int) Math.min(Integer.MAX_VALUE,
+                Math.max(1L, CoordinateConverter.pointsToHwpunits(sourceLineHeight)));
+        para.lineSpacing(lineHeight);
+        para.lineSpacingType("fixed");
+        para.spaceBefore(0L);
+        para.spaceAfter(0L);
     }
 
     private static boolean appendFirstVisibleShellStoryRuns(
@@ -1975,6 +2100,56 @@ public class InlineFrameHandler {
         obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top));
         obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right));
         obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom));
+    }
+
+    private static void applyCompositeInlineShellTextMargins(
+            ASTInlineObject obj,
+            double[] shellBounds,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (obj == null || !validBounds(shellBounds) || childTfs == null || childTfs.isEmpty()) return;
+        double[] textUnion = null;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
+            double[] b = childTf.geometricBounds();
+            if (!validBounds(b)) continue;
+            if (textUnion == null) {
+                textUnion = new double[] { b[0], b[1], b[2], b[3] };
+            } else {
+                textUnion[0] = Math.min(textUnion[0], b[0]);
+                textUnion[1] = Math.min(textUnion[1], b[1]);
+                textUnion[2] = Math.max(textUnion[2], b[2]);
+                textUnion[3] = Math.max(textUnion[3], b[3]);
+            }
+        }
+        if (!validBounds(textUnion)) return;
+        double shellW = Math.abs(shellBounds[3] - shellBounds[1]);
+        double shellH = Math.abs(shellBounds[2] - shellBounds[0]);
+        double textW = Math.abs(textUnion[3] - textUnion[1]);
+        double textH = Math.abs(textUnion[2] - textUnion[0]);
+        if (shellW <= 0 || shellH <= 0 || textW <= 0 || textH <= 0) return;
+        if (textW > shellW * 1.25 || textH > shellH * 1.25) return;
+
+        double left = Math.max(0, textUnion[1] - shellBounds[1]);
+        double top = Math.max(0, textUnion[0] - shellBounds[0]);
+        double right = Math.max(0, shellBounds[3] - textUnion[3]);
+        double bottom = Math.max(0, shellBounds[2] - textUnion[2]);
+        if (left + top + right + bottom < 0.1) return;
+
+        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left));
+        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top));
+        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right));
+        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom));
+    }
+
+    private static double[] scaleBounds(double[] bounds, double scale) {
+        if (!validBounds(bounds) || scale == 0.0 || !Double.isFinite(scale)) return bounds;
+        return new double[] {
+                bounds[0] * scale,
+                bounds[1] * scale,
+                bounds[2] * scale,
+                bounds[3] * scale
+        };
     }
 
     private static double[] inlineShellMarginReferenceBounds(
@@ -2270,30 +2445,156 @@ public class InlineFrameHandler {
         return bos.toByteArray();
     }
 
+    private static SourceCanvasGeometry sourceCanvasGeometryForExtractedShell(
+            ObjectPlan shellPlan,
+            BufferedImage shellImage) {
+        if (shellPlan == null || !validBounds(shellPlan.bounds) || shellImage == null) return null;
+        if (shellImage.getWidth() <= 2 || shellImage.getHeight() <= 2) return null;
+        int[] visible = alphaVisibleBounds(shellImage);
+        if (visible == null) return null;
+        int visibleW = visible[2] - visible[0];
+        int visibleH = visible[3] - visible[1];
+        if (visibleW <= 0 || visibleH <= 0) return null;
+        double sourceW = Math.abs(shellPlan.bounds[3] - shellPlan.bounds[1]);
+        double sourceH = Math.abs(shellPlan.bounds[2] - shellPlan.bounds[0]);
+        if (sourceW <= 0.0 || sourceH <= 0.0) return null;
+
+        double canvasLeft = shellPlan.bounds[1] - ((double) visible[0] / (double) visibleW) * sourceW;
+        double canvasTop = shellPlan.bounds[0] - ((double) visible[1] / (double) visibleH) * sourceH;
+        double canvasRight = canvasLeft + ((double) shellImage.getWidth() / (double) visibleW) * sourceW;
+        double canvasBottom = canvasTop + ((double) shellImage.getHeight() / (double) visibleH) * sourceH;
+        if (!Double.isFinite(canvasLeft) || !Double.isFinite(canvasTop)
+                || !Double.isFinite(canvasRight) || !Double.isFinite(canvasBottom)
+                || canvasRight <= canvasLeft || canvasBottom <= canvasTop) {
+            return null;
+        }
+        return new SourceCanvasGeometry(new double[] { canvasTop, canvasLeft, canvasBottom, canvasRight });
+    }
+
+    private static int[] alphaVisibleBounds(BufferedImage img) {
+        if (img == null) return null;
+        int left = img.getWidth();
+        int top = img.getHeight();
+        int right = -1;
+        int bottom = -1;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int a = (img.getRGB(x, y) >>> 24) & 0xFF;
+                if (a <= 8) continue;
+                if (x < left) left = x;
+                if (x + 1 > right) right = x + 1;
+                if (y < top) top = y;
+                if (y + 1 > bottom) bottom = y + 1;
+            }
+        }
+        if (right <= left || bottom <= top) return null;
+        return new int[] { left, top, right, bottom };
+    }
+
+    private static final class SourceCanvasGeometry {
+        final double[] sourceCanvasBounds;
+
+        SourceCanvasGeometry(double[] sourceCanvasBounds) {
+            this.sourceCanvasBounds = sourceCanvasBounds;
+        }
+    }
+
     private static byte[] prepareInlineTextShellImageData(BufferedImage img) throws Exception {
         return prepareInlineTextShellImageData(img, false);
     }
 
     private static byte[] prepareInlineTextShellImageData(BufferedImage img, boolean preserveSourceCanvas) throws Exception {
+        return prepareInlineTextShellImageData(img, preserveSourceCanvas, false);
+    }
+
+    private static byte[] prepareInlineTextShellImageData(
+            BufferedImage img,
+            boolean preserveSourceCanvas,
+            boolean forceVerticalAlphaTrim) throws Exception {
         BufferedImage shell = VisualCropper.knockOutPaperLikeFill(img);
+        if (!preserveSourceCanvas) {
+            shell = trimInlineTextShellVerticalAlphaPadding(shell, forceVerticalAlphaTrim);
+        }
         return flattenOntoWhite(shell);
     }
 
     private static byte[] prepareTransparentInlineTextShellImageData(
             ResolvedBuildContext ctx,
             ObjectPlan shellPlan,
-            BufferedImage shellImage) throws Exception {
-        BufferedImage blended = blendTransparentShellOverPagePlane(ctx, shellPlan, shellImage);
+            double[] sourceBounds,
+            BufferedImage shellImage,
+            boolean preserveSourceCanvas) throws Exception {
+        return prepareTransparentInlineTextShellImageData(
+                ctx, shellPlan, sourceBounds, shellImage, preserveSourceCanvas, false);
+    }
+
+    private static byte[] prepareTransparentInlineTextShellImageData(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            double[] sourceBounds,
+            BufferedImage shellImage,
+            boolean preserveSourceCanvas,
+            boolean forceVerticalAlphaTrim) throws Exception {
+        if (!preserveSourceCanvas) {
+            shellImage = trimInlineTextShellVerticalAlphaPadding(shellImage, forceVerticalAlphaTrim);
+        }
+        BufferedImage blended = blendTransparentShellOverPagePlane(ctx, shellPlan, sourceBounds, shellImage);
         if (blended != null) return encodeRgbPng(blended);
         return flattenOntoWhite(shellImage);
+    }
+
+    private static BufferedImage trimInlineTextShellVerticalAlphaPadding(BufferedImage img) {
+        return trimInlineTextShellVerticalAlphaPadding(img, false);
+    }
+
+    private static BufferedImage trimInlineTextShellVerticalAlphaPadding(
+            BufferedImage img,
+            boolean forceSparseTrim) {
+        if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return img;
+        int top = img.getHeight();
+        int bottom = -1;
+        for (int y = 0; y < img.getHeight(); y++) {
+            boolean rowVisible = false;
+            for (int x = 0; x < img.getWidth(); x++) {
+                if (((img.getRGB(x, y) >>> 24) & 0xFF) > 8) {
+                    rowVisible = true;
+                    break;
+                }
+            }
+            if (rowVisible) {
+                if (top == img.getHeight()) top = y;
+                bottom = y;
+            }
+        }
+        if (bottom < top) return img;
+        int visibleH = bottom - top + 1;
+        int paddingH = img.getHeight() - visibleH;
+        double visibleRatio = (double) visibleH / (double) img.getHeight();
+        double paddingRatio = (double) paddingH / (double) img.getHeight();
+        if ((!forceSparseTrim && visibleRatio < 0.45) || paddingRatio < 0.20) return img;
+        if (visibleH >= img.getHeight()) return img;
+
+        BufferedImage out = new BufferedImage(img.getWidth(), visibleH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.drawImage(img,
+                    0, 0, img.getWidth(), visibleH,
+                    0, top, img.getWidth(), bottom + 1,
+                    null);
+        } finally {
+            g.dispose();
+        }
+        return out;
     }
 
     private static BufferedImage blendTransparentShellOverPagePlane(
             ResolvedBuildContext ctx,
             ObjectPlan shellPlan,
+            double[] sourceBounds,
             BufferedImage shellImage) {
         if (ctx == null || ctx.basePath == null || shellPlan == null || shellImage == null) return null;
-        if (!validBounds(shellPlan.bounds)) return null;
+        double[] bounds = validBounds(sourceBounds) ? sourceBounds : shellPlan.bounds;
+        if (!validBounds(bounds)) return null;
         double pageW = localPageWidth(ctx, shellPlan.pageIndex);
         double pageH = localPageHeight(ctx, shellPlan.pageIndex);
         if (pageW <= 0.0 || pageH <= 0.0) return null;
@@ -2306,7 +2607,7 @@ public class InlineFrameHandler {
             BufferedImage pagePlane = ImageIO.read(pagePlaneFile);
             if (pagePlane == null || pagePlane.getWidth() <= 0 || pagePlane.getHeight() <= 0) return null;
 
-            double[] b = normalizeInlineBoundsToPageLocal(ctx, shellPlan.pageIndex, shellPlan.bounds);
+            double[] b = normalizeInlineBoundsToPageLocal(ctx, shellPlan.pageIndex, bounds);
             if (!validBounds(b)) return null;
             int sx1 = (int) Math.round((b[1] / pageW) * pagePlane.getWidth());
             int sy1 = (int) Math.round((b[0] / pageH) * pagePlane.getHeight());
@@ -2717,6 +3018,8 @@ public class InlineFrameHandler {
             }
             if (paragraphs != null && !paragraphs.isEmpty()) {
                 applyIdmlRunTintFallbackToParagraphs(ctx, childTf, paragraphs);
+                fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+                capInlineShellParagraphLeadingToFrame(paragraphs, obj, childTf, ctx);
                 for (ASTParagraph paragraph : paragraphs) {
                     obj.addParagraph(paragraph);
                 }
@@ -2725,9 +3028,166 @@ public class InlineFrameHandler {
         }
         List<ASTParagraph> paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
         if (paragraphs == null || paragraphs.isEmpty()) return;
+        fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+        capInlineShellParagraphLeadingToFrame(paragraphs, obj, childTf, ctx);
         for (ASTParagraph paragraph : paragraphs) {
             obj.addParagraph(paragraph);
         }
+    }
+
+    private static void fitSingleLineInlineTextShellBoxToComposedLine(
+            List<ASTParagraph> paragraphs,
+            ASTInlineObject obj,
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx) {
+        if (paragraphs == null || paragraphs.isEmpty() || obj == null || childTf == null) return;
+        if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                && obj.kind() != ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
+            return;
+        }
+        if (!isSourceSingleLineTextFrame(childTf)) return;
+        long frameHeight = obj.height();
+        if (frameHeight <= 0) return;
+        long composedLineHeight = maxComposedLineHeightHwpunits(childTf, ctx, frameHeight);
+        if (composedLineHeight <= 0) return;
+        if (frameHeight <= Math.round(composedLineHeight * 1.5)) return;
+
+        long fontHeight = 0L;
+        for (ASTParagraph paragraph : paragraphs) {
+            fontHeight = Math.max(fontHeight, reasonableFontSizeHwpunits(paragraph, frameHeight));
+        }
+        long verticalPadding = inlineShellVerticalInsetPaddingHwpunits(
+                childTf, ctx, composedLineHeight, frameHeight);
+        long targetHeight = Math.max(composedLineHeight, fontHeight) + verticalPadding;
+        long minimumHeight = Math.max(composedLineHeight, fontHeight);
+        long maximumShrinkHeight = Math.round(frameHeight * 0.45);
+        targetHeight = Math.max(targetHeight, Math.max(minimumHeight, maximumShrinkHeight));
+        if (targetHeight <= 0 || targetHeight >= Math.round(frameHeight * 0.95)) return;
+
+        obj.height(targetHeight);
+        if (obj.resolvedHeight() > 0) {
+            obj.resolvedHeight(targetHeight);
+        }
+
+        long verticalMargins = Math.max(0L, obj.textMarginTop()) + Math.max(0L, obj.textMarginBottom());
+        if (verticalMargins > Math.round(targetHeight * 0.5)) {
+            long boundedMargin = Math.min(
+                    Math.round(targetHeight * 0.12),
+                    Math.max(0L, verticalPadding / 2));
+            obj.textMarginTop(boundedMargin);
+            obj.textMarginBottom(boundedMargin);
+        }
+    }
+
+    private static long inlineShellVerticalInsetPaddingHwpunits(
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx,
+            long composedLineHeight,
+            long frameHeight) {
+        if (childTf == null) return 0L;
+        double[] inset = childTf.insetSpacing();
+        if (inset == null || inset.length < 3) return 0L;
+        double top = Math.max(0.0, inset[0]);
+        double bottom = Math.max(0.0, inset[2]);
+        if (!Double.isFinite(top + bottom) || top + bottom <= 0.0) return 0L;
+        long padding = inlineShellSourceHeightRatioToHwpunits(childTf, top + bottom, frameHeight);
+        if (padding <= 0L) {
+            double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+            padding = CoordinateConverter.pointsToHwpunits((top + bottom) * scale);
+        }
+        if (composedLineHeight > 0) {
+            padding = Math.min(padding, Math.round(composedLineHeight * 0.3));
+        }
+        return Math.max(0L, padding);
+    }
+
+    private static void capInlineShellParagraphLeadingToFrame(
+            List<ASTParagraph> paragraphs,
+            ASTInlineObject obj,
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx) {
+        if (paragraphs == null || paragraphs.isEmpty() || obj == null) return;
+        if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                && obj.kind() != ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
+            return;
+        }
+        long frameHeight = obj.height();
+        if (frameHeight <= 0) return;
+        long contentHeight = frameHeight
+                - Math.max(0L, obj.textMarginTop())
+                - Math.max(0L, obj.textMarginBottom());
+        if (contentHeight <= 0) contentHeight = frameHeight;
+        if (contentHeight < Math.round(frameHeight * 0.5)) {
+            contentHeight = frameHeight;
+        }
+        long composedLineHeight = maxComposedLineHeightHwpunits(childTf, ctx, frameHeight);
+
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) continue;
+            Integer current = paragraph.lineSpacing();
+            boolean currentFixed = "fixed".equals(paragraph.lineSpacingType());
+            if (currentFixed && current != null && current <= contentHeight) continue;
+
+            long minimum = Math.max(reasonableFontSizeHwpunits(paragraph, frameHeight), composedLineHeight);
+            long target = contentHeight;
+            if (minimum > target && minimum <= frameHeight) {
+                target = minimum;
+            }
+            if (target <= 0) continue;
+            if (currentFixed && current != null && target >= current) continue;
+            paragraph.lineSpacing((int) Math.min(Integer.MAX_VALUE, target));
+            paragraph.lineSpacingType("fixed");
+        }
+    }
+
+    private static long reasonableFontSizeHwpunits(ASTParagraph paragraph, long frameHeight) {
+        long max = 0L;
+        if (paragraph == null || paragraph.items() == null) return max;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            Integer fontSize = ((ASTTextRun) item).fontSizeHwpunits();
+            if (fontSize != null
+                    && fontSize > max
+                    && (frameHeight <= 0 || fontSize <= Math.round(frameHeight * 1.2))) {
+                max = fontSize;
+            }
+        }
+        return max;
+    }
+
+    private static long maxComposedLineHeightHwpunits(
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx,
+            long frameHeight) {
+        if (childTf == null || childTf.composedLines() == null) return 0L;
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        long max = 0L;
+        for (ResolvedTextFrame.ComposedLine line : childTf.composedLines()) {
+            if (line == null || line.bounds() == null || line.bounds().length < 3) continue;
+            double rawHeight = Math.abs(line.bounds()[2] - line.bounds()[0]);
+            if (!Double.isFinite(rawHeight) || rawHeight <= 0.0 || rawHeight > 100.0) continue;
+            long ratioHeight = inlineShellSourceHeightRatioToHwpunits(childTf, rawHeight, frameHeight);
+            if (ratioHeight > 0) {
+                max = Math.max(max, ratioHeight);
+            } else {
+                max = Math.max(max, CoordinateConverter.pointsToHwpunits(rawHeight * scale));
+            }
+        }
+        return max;
+    }
+
+    private static long inlineShellSourceHeightRatioToHwpunits(
+            ResolvedTextFrame childTf,
+            double sourceHeight,
+            long frameHeight) {
+        if (childTf == null || sourceHeight <= 0.0 || frameHeight <= 0) return 0L;
+        double[] bounds = childTf.geometricBounds();
+        if (bounds == null || bounds.length < 3) return 0L;
+        double sourceFrameHeight = Math.abs(bounds[2] - bounds[0]);
+        if (!Double.isFinite(sourceFrameHeight) || sourceFrameHeight <= 0.0) return 0L;
+        double ratio = sourceHeight / sourceFrameHeight;
+        if (!Double.isFinite(ratio) || ratio <= 0.0 || ratio > 1.5) return 0L;
+        return Math.round(frameHeight * ratio);
     }
 
     private static boolean canMaterializeShellTextFromWholeStory(
@@ -2739,10 +3199,69 @@ public class InlineFrameHandler {
         String frameText = normalizeInlineShellText(textFrame.frameVisibleText());
         if (frameText.isEmpty()) return false;
 
-        String storyText = normalizeInlineShellStoryText(ctx.resolvedData.getStory(textFrame.storyId()));
+        ResolvedStory story = ctx.resolvedData.getStory(textFrame.storyId());
+        String storyText = normalizeInlineShellStoryText(story);
         if (storyText.isEmpty()) return false;
         if (frameText.equals(storyText)) return true;
+        // 괄호 빈칸 스페이서: ResolvedData 가 story 쪽 앵커 런만 NBSP 로 치환하므로
+        // frameVisibleText(원문, FFFC 제거만 됨)와는 NBSP 만큼 어긋난다. NBSP 를
+        // 무시하고 같으면 같은 스토리다 (BlankAnchorSpacer 참조).
+        // 아래 sameTextIgnoringWhitespace 의 \\s+ 는 NBSP 를 잡지 못하므로 별도 비교다.
+        if (frameText.replace("\u00A0", "").equals(storyText.replace("\u00A0", ""))) return true;
+        if (sameTextIgnoringWhitespace(frameText, storyText)) return true;
+        if (frameTextMatchesStoryModuloArrowGlyphs(frameText, storyText, story)) return true;
         return canMaterializeOwnedOverflowShellText(ctx, textFrame, frameText, storyText);
+    }
+
+    private static boolean sameTextIgnoringWhitespace(String a, String b) {
+        if (a == null || b == null) return false;
+        String compactA = a.replaceAll("\\s+", "");
+        String compactB = b.replaceAll("\\s+", "");
+        return !compactA.isEmpty() && compactA.equals(compactB);
+    }
+
+    /**
+     * 화살표 글리프 관용 비교.
+     *
+     * <p>BT화살표 글리프 런은 ResolvedDataReader 가 story 쪽 텍스트만 "→" 로
+     * 정규화하고, frameVisibleText 는 폰트에 저장된 원문 글자("C"/"@"/"@C"/"?C")를
+     * 그대로 갖는다. 그래서 화살표가 든 반응식 프레임은 문자 그대로의 동일성
+     * 비교가 항상 실패해 구조 보존 경로 대신 평탄화 경로로 떨어졌다 — 첨자·화살표
+     * 소실 (실측: 과학 u1 p46 N₂+3H₂→2NH₃, p47 2H₂+O₂→2H₂O). storyText 의 "→"
+     * 자리에 원문 글리프 후보만 허용해 비교한다.
+     *
+     * <p>주의: 스토리에 실제 BT화살표 폰트 런이 있을 때만 적용한다. 본문에 진짜
+     * "→" 문자를 쓰는 문서(수학 u1)에서 자유 와일드카드로 비교하면, 내용이 정말
+     * 다른 프레임까지 통짜 스토리 경로로 잘못 통과해 수식 그룹핑이 깨진다.
+     */
+    private static boolean frameTextMatchesStoryModuloArrowGlyphs(
+            String frameText, String storyText, ResolvedStory story) {
+        if (frameText == null || storyText == null) return false;
+        if (!storyText.contains(BTFontGlyphMap.ARROW)) return false;
+        if (!storyHasArrowGlyphRun(story)) return false;
+        String[] parts = storyText.split(BTFontGlyphMap.ARROW, -1);
+        StringBuilder regex = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            // 실측된 화살표 원문 글리프 집합 (BTFontGlyphMap 주석 참조) + 정규화된 "→" 자신.
+            if (i > 0) regex.append("(?:@C|\\?C|@|C|→)");
+            if (!parts[i].isEmpty()) regex.append(java.util.regex.Pattern.quote(parts[i]));
+        }
+        return frameText.matches(regex.toString());
+    }
+
+    private static boolean storyHasArrowGlyphRun(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null) continue;
+                if (BTFontGlyphMap.isBTArrowFont(run.fontFamily())
+                        || BTFontGlyphMap.isBTArrowFontStyle(run.charStyle())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean canMaterializeOwnedOverflowShellText(
@@ -2934,7 +3453,7 @@ public class InlineFrameHandler {
                                                       ResolvedTextFrame textFrame,
                                                       String text) {
         if (paragraph == null || text == null || text.isEmpty()) return;
-        ResolvedRun sourceRun = firstResolvedRun(ctx, textFrame);
+        ResolvedRun sourceRun = firstResolvedRun(ctx, textFrame, text);
 
         // 화살표 글리프 정규화.
         //
@@ -2981,31 +3500,92 @@ public class InlineFrameHandler {
     }
 
     private static ResolvedRun firstResolvedRun(ResolvedBuildContext ctx, ResolvedTextFrame textFrame) {
+        return firstResolvedRun(ctx, textFrame, null);
+    }
+
+    private static ResolvedRun firstResolvedRun(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame textFrame,
+            String desiredText) {
         if (ctx == null || ctx.resolvedData == null || textFrame == null || textFrame.storyId() == null) {
             return null;
         }
+        String desiredKey = styleRunTextKey(desiredText);
         if (ctx.textFlowDocument != null) {
-            ResolvedRun textFlowRun = ctx.textFlowDocument.firstVisibleTextRunByStoryId(textFrame.storyId());
+            ResolvedRun textFlowRun = firstTextFlowRunByStoryId(ctx, textFrame.storyId(), desiredKey);
             if (textFlowRun != null) return textFlowRun;
         }
         ResolvedStory story = ctx.resolvedData.getStory(textFrame.storyId());
         if (story != null && story.paragraphs() != null) {
+            ResolvedRun firstVisible = null;
             for (ResolvedParagraph rp : story.paragraphs()) {
                 if (rp == null || rp.runs() == null || rp.runs().isEmpty()) continue;
                 for (ResolvedRun run : rp.runs()) {
                     if (run == null || run.isInlineAnchor() || run.text() == null) continue;
-                    String visible = run.text()
-                            .replace("\uFFFC", "")
-                            .replace("\r", "")
-                            .replace("\n", "")
-                            .trim();
-                    if (!visible.isEmpty()) {
+                    String key = styleRunTextKey(run.text());
+                    if (key.isEmpty()) continue;
+                    if (!desiredKey.isEmpty() && (key.equals(desiredKey) || key.contains(desiredKey) || desiredKey.contains(key))) {
                         return run;
                     }
+                    if (firstVisible == null) firstVisible = run;
+                }
+            }
+            return firstVisible;
+        }
+        return null;
+    }
+
+    private static ResolvedRun firstTextFlowRunByStoryId(
+            ResolvedBuildContext ctx,
+            String storyId,
+            String desiredKey) {
+        if (ctx == null || ctx.textFlowDocument == null || storyId == null) return null;
+        TextFlowDocument.TextFlowUnit unit = ctx.textFlowDocument.byStoryId(storyId);
+        return firstTextFlowRun(unit, desiredKey, new ResolvedRun[1]);
+    }
+
+    private static ResolvedRun firstTextFlowRun(
+            TextFlowDocument.TextFlowUnit unit,
+            String desiredKey,
+            ResolvedRun[] firstVisible) {
+        if (unit == null) return null;
+        for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
+            if (paragraph == null) continue;
+            for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
+                if (atom instanceof TextFlowDocument.TextAtom) {
+                    TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
+                    String key = styleRunTextKey(textAtom.text);
+                    if (key.isEmpty() || textAtom.sourceRun == null) continue;
+                    if (!desiredKey.isEmpty() && (key.equals(desiredKey) || key.contains(desiredKey) || desiredKey.contains(key))) {
+                        return textAtom.sourceRun;
+                    }
+                    if (firstVisible != null && firstVisible[0] == null) {
+                        firstVisible[0] = textAtom.sourceRun;
+                    }
+                } else if (atom instanceof TextFlowDocument.InlineSlotAtom) {
+                    ResolvedRun nested = firstTextFlowRun(
+                            ((TextFlowDocument.InlineSlotAtom) atom).nestedFlow,
+                            desiredKey,
+                            firstVisible);
+                    if (nested != null) return nested;
                 }
             }
         }
-        return null;
+        return firstVisible != null ? firstVisible[0] : null;
+    }
+
+    private static String styleRunTextKey(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int offset = 0; offset < text.length(); ) {
+            int cp = text.codePointAt(offset);
+            offset += Character.charCount(cp);
+            if (cp == 0xFFFC || cp == '\r' || cp == '\n') continue;
+            if (Character.isWhitespace(cp) || Character.isSpaceChar(cp)) continue;
+            if (cp == 0x200B || cp == 0x200C || cp == 0x200D || cp == 0xFEFF) continue;
+            sb.appendCodePoint(cp);
+        }
+        return sb.toString();
     }
 
     private static void applyIdmlRunTintFallback(ResolvedBuildContext ctx,
@@ -4383,6 +4963,94 @@ public class InlineFrameHandler {
         return items;
     }
 
+    public static List<ASTInlineItem> loadPlannedCellInlineCarrierItems(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.ownershipPlans == null || anchoredObjectId < 0) {
+            return null;
+        }
+        List<ObjectPlan> plans = findCellInlineCarrierTextShellOwnerPlans(ctx, anchoredObjectId);
+        if (plans.isEmpty()) return null;
+
+        List<ASTInlineItem> out = new ArrayList<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+                continue;
+            }
+            List<ResolvedTextFrame> childTfs = new ArrayList<>();
+            for (int childId : plan.ownedTextFrameIds) {
+                ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(childId));
+                if (childTf == null) {
+                    childTfs.clear();
+                    break;
+                }
+                childTfs.add(childTf);
+            }
+            if (childTfs.isEmpty()) continue;
+
+            ASTInlineObject item = null;
+            if (plan.materialization == Materialization.NATIVE_SOURCE_SHAPE
+                    && plan.placement == Placement.INLINE
+                    && plan.coordinateSpace == CoordinateSpace.STORY_FLOW) {
+                item = buildNativeInlineShellObject(ctx, plan, anchoredObjectId, childTfs);
+            } else {
+                RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, anchoredObjectId);
+                int shellId = shell != null ? shell.id() : plan.domId;
+                ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shellId));
+                item = buildInlineShellObject(ctx, shellId, anchorItem, childTfs, shell, plan);
+            }
+            if (item == null) continue;
+            item.keepInline(true);
+            out.add(item);
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    private static List<ObjectPlan> findCellInlineCarrierTextShellOwnerPlans(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        List<ObjectPlan> candidates = new ArrayList<>();
+        if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return candidates;
+        Map<String, ObjectPlan> byOwnedText = new java.util.LinkedHashMap<>();
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
+            if (plan == null) continue;
+            if (!ShellRole.isTextShell(plan)) continue;
+            if (!hasHwpxTextOwnershipForOwnedTextFrameIds(ctx, plan)) continue;
+            if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
+            if (!isExecutableTextlessShellCarrier(plan)) continue;
+            if (!isCellInlineCarrierExecutableShellPlan(ctx, plan, anchoredObjectId)) continue;
+            String key = ownedTextFrameKey(plan);
+            ObjectPlan existing = byOwnedText.get(key);
+            if (existing == null || inlineTextShellPlanPriority(plan) > inlineTextShellPlanPriority(existing)) {
+                byOwnedText.put(key, plan);
+            }
+        }
+        candidates.addAll(byOwnedText.values());
+        java.util.Collections.sort(candidates, new java.util.Comparator<ObjectPlan>() {
+            public int compare(ObjectPlan a, ObjectPlan b) {
+                int byBounds = compareInlinePlanReadingOrder(a, b);
+                if (byBounds != 0) return byBounds;
+                return Integer.compare(planDepthOrder(a), planDepthOrder(b));
+            }
+        });
+        return candidates;
+    }
+
+    private static boolean isCellInlineCarrierExecutableShellPlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            int anchoredObjectId) {
+        if (plan == null) return false;
+        if (plan.placement == Placement.INLINE && plan.coordinateSpace == CoordinateSpace.STORY_FLOW) {
+            return true;
+        }
+        if (plan.placement != Placement.FLOATING || plan.coordinateSpace != CoordinateSpace.PAGE) {
+            return false;
+        }
+        RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, anchoredObjectId);
+        return hasExplicitInlineSourceEvidence(ctx, plan, shell, anchoredObjectId);
+    }
+
     private static List<ASTInlineItem> loadLayoutOnlyInlineSlotChildTextItems(
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
@@ -4979,10 +5647,10 @@ public class InlineFrameHandler {
         if (ctx == null || anchoredObjectId < 0) return null;
         ObjectPlan plan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
         if (plan == null || plan.bounds == null || plan.bounds.length < 4) return null;
-        // ObjectPlan bounds are already normalized to InDesign points.  Applying
-        // ctx.scaleFactor here turns points into millimeter-sized HWPX spacers.
-        double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
-        double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
+        double[] boundsPt = renderedBoundsPoints(ctx, plan.bounds);
+        if (boundsPt == null || boundsPt.length < 4) return null;
+        double w = Math.abs(boundsPt[3] - boundsPt[1]);
+        double h = Math.abs(boundsPt[2] - boundsPt[0]);
         if (w <= 0 && h <= 0) return null;
         if (isVerticalFlowSpacerStyle(ctx, anchoredObjectId)) {
             w = 0.1;
@@ -5660,7 +6328,8 @@ public class InlineFrameHandler {
             obj.keepInline(true);
             obj.verticalJustification("CenterAlign");
 
-            double[] bounds = plan.bounds;
+            double[] bounds = renderedBoundsPoints(ctx, plan.bounds);
+            if (bounds == null || bounds.length < 4) return null;
             double bw = Math.abs(bounds[3] - bounds[1]);
             double bh = Math.abs(bounds[2] - bounds[0]);
             if (bw <= 0 || bh <= 0) return null;
@@ -5958,7 +6627,7 @@ public class InlineFrameHandler {
         try {
             BufferedImage img = ImageIO.read(new java.io.ByteArrayInputStream(png));
             if (img != null) {
-                return flattenOntoWhite(img);
+                return prepareInlineTextShellImageData(img, true);
             }
         } catch (Exception ignored) {}
         return png;

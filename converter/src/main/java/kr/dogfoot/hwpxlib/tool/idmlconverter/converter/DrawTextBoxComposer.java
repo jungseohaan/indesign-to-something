@@ -75,7 +75,7 @@ final class DrawTextBoxComposer {
         // 통합 플로팅 배지: imageFill을 전역 native-graphics OFF와 무관하게 칠한다(텍스트는 검색
         // 가능 런 유지 → source ownership policy 위배 아님). 좁은 범위(forceImageFill 플래그)로 한정해 회귀 방지.
         spec.forceImageFill = block.forceImageFill();
-        spec.nativeGraphicsAllowed = false;
+        spec.nativeGraphicsAllowed = block.nativeGraphicsAllowed() || block.forceNativeFill();
         spec.marginLeft = block.insetLeft();
         spec.marginRight = block.insetRight();
         spec.marginTop = block.insetTop();
@@ -84,9 +84,6 @@ final class DrawTextBoxComposer {
         spec.lineWrap = HwpxTextBoxBuilder.textFrameLineWrap(block);
         spec.verticalAlign = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
         spec.paragraphs = block.paragraphs();
-        if (block.noAutoLineWrap()) {
-            markParagraphLocalSqueeze(spec.paragraphs);
-        }
         return spec;
     }
 
@@ -112,19 +109,7 @@ final class DrawTextBoxComposer {
         spec.verticalAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
         spec.paragraphs = obj.paragraphs();
         spec.inlineTables = obj.inlineTables();
-        if (obj.noAutoLineWrap()) {
-            markParagraphLocalSqueeze(spec.paragraphs);
-        }
         return spec;
-    }
-
-    private static void markParagraphLocalSqueeze(List<ASTParagraph> paragraphs) {
-        if (paragraphs == null || paragraphs.isEmpty()) return;
-        for (ASTParagraph paragraph : paragraphs) {
-            if (paragraph != null) {
-                paragraph.squeezeLineWrap(true);
-            }
-        }
     }
 
     SubList apply(Rectangle rect, Spec spec) {

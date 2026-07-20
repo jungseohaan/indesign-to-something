@@ -156,9 +156,6 @@ final class SingleColumnTableConverter {
             }
         }
         suppressFirstParagraphSpaceBefore(paragraphs);
-        if (block.noAutoLineWrap()) {
-            markParagraphLocalSqueeze(paragraphs);
-        }
 
         // suppressBorder: 배경 사각형이 테두리를 담당하므로 개별 컬럼은 테두리/배경 없이
         String cellBfId = suppressBorder
@@ -234,15 +231,6 @@ final class SingleColumnTableConverter {
             paragraphBuilder.fillSubListContent(subList, paragraphs, null, 0);
         } finally {
             ctx.insideTableCell = savedInsideTableCell;
-        }
-    }
-
-    private static void markParagraphLocalSqueeze(java.util.List<ASTParagraph> paragraphs) {
-        if (paragraphs == null || paragraphs.isEmpty()) return;
-        for (ASTParagraph paragraph : paragraphs) {
-            if (paragraph != null) {
-                paragraph.squeezeLineWrap(true);
-            }
         }
     }
 

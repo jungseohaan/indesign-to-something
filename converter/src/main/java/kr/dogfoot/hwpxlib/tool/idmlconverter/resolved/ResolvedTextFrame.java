@@ -198,6 +198,8 @@ public class ResolvedTextFrame {
 
     public static class ComposedRun {
         private String text;
+        private int start = -1;
+        private int end = -1;
         private String fillColor;
         private Double fontSize;
         private String fontFamily;
@@ -205,6 +207,10 @@ public class ResolvedTextFrame {
 
         public String text() { return text; }
         public void text(String v) { this.text = v; }
+        public int start() { return start; }
+        public void start(int v) { this.start = v; }
+        public int end() { return end; }
+        public void end(int v) { this.end = v; }
         public String fillColor() { return fillColor; }
         public void fillColor(String v) { this.fillColor = v; }
         public Double fontSize() { return fontSize; }

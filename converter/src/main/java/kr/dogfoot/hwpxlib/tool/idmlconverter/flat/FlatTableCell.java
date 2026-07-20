@@ -34,6 +34,7 @@ public class FlatTableCell {
     private String verticalAlign = "TopAlign";
     private String firstBaselineOffset;
     private long minimumFirstBaselineOffset;
+    private boolean squeezeLineWrap;
 
     public FlatTableCell() {
         this.componentIds = new ArrayList<>();
@@ -105,6 +106,9 @@ public class FlatTableCell {
 
     public long minimumFirstBaselineOffset() { return minimumFirstBaselineOffset; }
     public void minimumFirstBaselineOffset(long v) { this.minimumFirstBaselineOffset = v; }
+
+    public boolean squeezeLineWrap() { return squeezeLineWrap; }
+    public void squeezeLineWrap(boolean v) { this.squeezeLineWrap = v; }
 
     /**
      * 셀 테두리 정보.
