@@ -108,13 +108,13 @@ public final class RunPropertyResolver {
                     colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
+        if (paragraphStyleColorHex != null) {
+            return paragraphStyleColorHex;
+        }
         if (rr != null && rr.fillColor() != null) {
             String hex = resolveColor(rr.fillColor(), effectiveIdmlTint,
                     colorResolver, tintedColorResolver);
             if (hex != null) return hex;
-        }
-        if (paragraphStyleColorHex != null) {
-            return paragraphStyleColorHex;
         }
         return null;
     }
@@ -226,8 +226,15 @@ public final class RunPropertyResolver {
             Function<String, String> colorResolver,
             BiFunction<String, Double, String> tintedColorResolver,
             MatchConfidence confidence) {
+        // Text color is ownership-sensitive: source IDML/GREP/style metadata must
+        // authorize a color before resolved composed-line values may override it.
+        // InDesign DOM can report a previous inline label's Paper fill on the
+        // following editable body range, while the IDML CharacterStyleRange has
+        // no FillColor. Font metrics still need resolved values, but color does
+        // not get the same blanket HIGH/MEDIUM priority.
         if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
-                && rr != null && rr.fillColor() != null) {
+                && rr != null && rr.fillColor() != null
+                && (effectiveIdmlColor != null || paragraphStyleColorHex != null)) {
             String hex = resolveColor(rr.fillColor(), null,
                     colorResolver, tintedColorResolver);
             if (hex != null) return hex;
@@ -237,8 +244,15 @@ public final class RunPropertyResolver {
                     colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
-        return resolveTextColorHex(rr, effectiveIdmlColor, effectiveIdmlTint,
-                paragraphStyleColorHex, colorResolver, tintedColorResolver);
+        if (effectiveIdmlColor != null) {
+            String hex = resolveColor(effectiveIdmlColor, effectiveIdmlTint,
+                    colorResolver, tintedColorResolver);
+            if (hex != null) return hex;
+        }
+        if (paragraphStyleColorHex != null) {
+            return paragraphStyleColorHex;
+        }
+        return null;
     }
 
     private static String resolveColor(String color,

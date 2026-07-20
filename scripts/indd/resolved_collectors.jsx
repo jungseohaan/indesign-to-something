@@ -300,6 +300,45 @@ function measureFontMetrics(doc) {
     return results;
 }
 
+function collectComposedLineRuns(line) {
+    var result = [];
+    if (!line) return result;
+    var cursor = 0;
+    try {
+        var ranges = line.textStyleRanges.everyItem().getElements();
+        for (var ri = 0; ranges && ri < ranges.length; ri++) {
+            var rng = ranges[ri];
+            var text = "";
+            try { text = String(rng.contents || ""); } catch (eText) { text = ""; }
+            var run = {
+                text: text,
+                start: cursor,
+                end: cursor + text.length
+            };
+            cursor = run.end;
+            try {
+                var fill = rng.fillColor;
+                if (fill && fill.name) run.fillColor = String(fill.name);
+            } catch (eFill) {}
+            try {
+                var font = rng.appliedFont;
+                if (font && font.fontFamily) run.fontFamily = String(font.fontFamily);
+            } catch (eFont) {}
+            try {
+                if (rng.fontStyle !== undefined && rng.fontStyle !== null) {
+                    run.fontStyle = String(rng.fontStyle);
+                }
+            } catch (eStyle) {}
+            try {
+                var size = Number(rng.pointSize);
+                if (isFinite(size)) run.fontSize = size;
+            } catch (eSize) {}
+            result.push(run);
+        }
+    } catch (eRanges) {}
+    return result;
+}
+
 
 function collectComposedLines(tf) {
     var result = [];
@@ -346,6 +385,10 @@ function collectComposedLines(tf) {
         } catch (e) { continue; }
 
         try { lineData.text = line.contents; } catch (e) {}
+        try {
+            var lineRuns = collectComposedLineRuns(line);
+            if (lineRuns && lineRuns.length > 0) lineData.runs = lineRuns;
+        } catch (eLineRuns) {}
 
         // \r로 끝나면 단락 끝 → 다음 라인은 새 단락
         if (lineData.text && lineData.text.charAt(lineData.text.length - 1) === "\r") {

@@ -24,6 +24,84 @@ function _itemParentKind(item) {
     try { return item && item.parent && item.parent.constructor ? item.parent.constructor.name : null; } catch (e) { return null; }
 }
 
+function _sourceIndexTextStyleValue(obj, key) {
+    try {
+        var value = obj ? obj[key] : null;
+        if (value && value.name !== undefined) return String(value.name);
+        if (value !== undefined && value !== null) return String(value);
+    } catch (eValue) {}
+    return "";
+}
+
+function _sourceIndexVisibleText(text) {
+    return String(text || "")
+            .replace(/[\uFFFC\u0003\u0007\b\r]/g, "");
+}
+
+function _sourceIndexRunStyleKey(run) {
+    var parts = [];
+    parts.push(_sourceIndexTextStyleValue(run, "appliedFont"));
+    parts.push(_sourceIndexTextStyleValue(run, "fontStyle"));
+    parts.push(_sourceIndexTextStyleValue(run, "appliedCharacterStyle"));
+    parts.push(_sourceIndexTextStyleValue(run, "fillColor"));
+    parts.push(_sourceIndexTextStyleValue(run, "pointSize"));
+    parts.push(_sourceIndexTextStyleValue(run, "tracking"));
+    parts.push(_sourceIndexTextStyleValue(run, "horizontalScale"));
+    return parts.join("|");
+}
+
+function _sourceIndexLeadingStyledStoryRunRanges(textFrame) {
+    var ranges = [];
+    try {
+        if (!textFrame || !textFrame.parentStory) return ranges;
+        var paragraphs = textFrame.parentStory.paragraphs.everyItem().getElements();
+        for (var pi = 0; paragraphs && pi < paragraphs.length; pi++) {
+            var paragraph = paragraphs[pi];
+            var runs = null;
+            try { runs = paragraph.textStyleRanges.everyItem().getElements(); } catch (eRuns) { runs = null; }
+            if (!runs || runs.length < 2) continue;
+            var firstIndex = -1;
+            var firstRun = null;
+            var firstText = "";
+            for (var ri = 0; ri < runs.length; ri++) {
+                var visible = _sourceIndexVisibleText(runs[ri].contents);
+                if (visible.replace(/\s+/g, "").length === 0) continue;
+                firstIndex = ri;
+                firstRun = runs[ri];
+                firstText = visible;
+                break;
+            }
+            if (!firstRun) continue;
+            var nextRun = null;
+            for (var ni = firstIndex + 1; ni < runs.length; ni++) {
+                var nextVisible = _sourceIndexVisibleText(runs[ni].contents);
+                if (nextVisible.replace(/\s+/g, "").length === 0) continue;
+                nextRun = runs[ni];
+                break;
+            }
+            if (!nextRun) continue;
+            if (_sourceIndexRunStyleKey(firstRun) === _sourceIndexRunStyleKey(nextRun)) continue;
+            var raw = String(firstRun.contents || "");
+            var start = 0;
+            while (start < raw.length && /\s/.test(raw.charAt(start))) start++;
+            var end = raw.length;
+            while (end > start && /\s/.test(raw.charAt(end - 1))) end--;
+            var text = _sourceIndexVisibleText(raw.substring(start, end));
+            if (!text || text.replace(/\s+/g, "").length === 0) continue;
+            ranges.push({
+                paragraphIndex: pi,
+                runIndex: firstIndex,
+                start: start,
+                end: end,
+                paragraphStart: 0,
+                paragraphEnd: text.length,
+                text: text
+            });
+        }
+    } catch (eLeadingRanges) {}
+    return ranges;
+}
+
 function _itemHasDirectStoryTextInlineSlot(item) {
     try {
         if (!item || !item.parent) return false;
@@ -681,6 +759,15 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         if (cachedSourceInfoById && cachedSourceInfoById[key]) {
             var cachedInfo = cloneCachedSourceInfo(cachedSourceInfoById[key], id);
             if (cachedInfo) {
+                if (String(cachedInfo.kind || "") === "TextFrame"
+                        && cachedInfo.leadingStyledTextRanges === undefined) {
+                    try {
+                        cachedInfo.leadingStyledTextRanges =
+                                _sourceIndexLeadingStyledStoryRunRanges(item);
+                    } catch (eCachedLeadingRanges) {
+                        cachedInfo.leadingStyledTextRanges = [];
+                    }
+                }
                 var cachedKind = cachedInfo.kind || "Unknown";
                 stats.kindCounts[cachedKind] = (stats.kindCounts[cachedKind] || 0) + 1;
                 stats.sourceInfoCacheHits++;
@@ -701,6 +788,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var markerOnlyContents = null;
         var simpleMarkerLabelContents = null;
         var storyId = null;
+        var leadingStyledTextRanges = [];
         var tableCountInStory = null;
         var tableSourceObjectIds = [];
         var storyHasVisibleTableCellText = null;
@@ -728,6 +816,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         _plainTextOfTextFrameForOwnership(item));
             } catch (eSimpleMarkerLabel) {
                 simpleMarkerLabelContents = null;
+            }
+            try {
+                leadingStyledTextRanges = _sourceIndexLeadingStyledStoryRunRanges(item);
+            } catch (eLeadingStyledTextRanges) {
+                leadingStyledTextRanges = [];
             }
             try {
                 var tableMeta = storyTableMeta(parentStory, storyId);
@@ -780,6 +873,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             markerOnlyContents: markerOnlyContents,
             simpleMarkerLabelContents: simpleMarkerLabelContents,
             storyId: storyId,
+            leadingStyledTextRanges: leadingStyledTextRanges,
             tableCountInStory: tableCountInStory,
             hasTablesInStory: tableCountInStory !== null ? tableCountInStory > 0 : null,
             tableSourceObjectIds: tableSourceObjectIds,

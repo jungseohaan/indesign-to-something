@@ -1459,7 +1459,8 @@ public final class OwnershipPlanValidator {
                                     + " materialization=" + plan.materialization);
                 }
                 if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                        && (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)) {
+                        && (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0)
+                        && (plan.ownedTextRanges == null || plan.ownedTextRanges.length == 0)) {
                     warn("STAGE4_TEXT_SHELL_MISSING_OWNED_TEXT",
                             "plan=" + planRef(plan));
                 }
@@ -1553,6 +1554,9 @@ public final class OwnershipPlanValidator {
     private int[] textFrameSourceIds(ObjectPlan plan) {
         if (plan != null && plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) {
             return plan.ownedTextFrameIds;
+        }
+        if (plan != null && plan.ownedTextRanges != null && plan.ownedTextRanges.length > 0) {
+            return new int[0];
         }
         if (plan == null || plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0
                 || ctx.resolvedData == null) {

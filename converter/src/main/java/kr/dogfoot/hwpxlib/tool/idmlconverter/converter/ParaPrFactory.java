@@ -197,19 +197,26 @@ final class ParaPrFactory {
             lsType = baseStyle.lineSpacingType();
         }
         boolean hasSourceFixedLeading = "fixed".equals(lsType) && lsValue != null && lsValue > 0;
+        boolean preserveSourceTextWrapSpacing = astPara.sourceTextWrapSpacing()
+                && "fixed".equals(lsType)
+                && lsValue != null
+                && lsValue > 0;
         // SPEC-031: DSL para rule — 줄간격 오버라이드 (dslCtx는 위에서 이미 applyParaRule 호출됨)
         if (dslCtx.targetLineSpacingPct != null
-                && !(preserveSourceFixedLeading && hasSourceFixedLeading)) {
+                && !(preserveSourceFixedLeading && hasSourceFixedLeading)
+                && !preserveSourceTextWrapSpacing) {
             lsValue = dslCtx.targetLineSpacingPct;
             lsType = "percent";
         }
         if (!preserveSourceFixedLeading
+                && !preserveSourceTextWrapSpacing
                 && "fixed".equals(lsType)
                 && shouldPreferAutoLeadingPercent(astPara, lsValue)) {
             lsValue = astPara.autoLeadingPercent();
             lsType = "percent";
         }
         if ("fixed".equals(lsType)
+                && !preserveSourceTextWrapSpacing
                 && shouldPreferBetweenLinesForSourceComposedMultiline(astPara, lsValue)) {
             int dominantFont = dominantTextFontSize(astPara);
             lsValue = Math.max(lsValue - dominantFont, dominantFont / 3);

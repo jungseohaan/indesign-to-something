@@ -128,6 +128,13 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var sourceBundleTextRangeShells = _appendSourceBundleTextRangeShellObjectPlans(
+            objectPlans, sourceItems, sourceById, childrenByParentId);
+    _recordObjectPlanTiming("appendSourceBundleTextRangeShellPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        createdPlanCount: sourceBundleTextRangeShells.summary.createdPlanCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     _appendEmptyEditableTextFrameObjectPlans(objectPlans, sourceItems);
     _recordObjectPlanTiming("appendEmptyEditableTextFramePlans", _timingStartedAt, {
         objectPlanCount: objectPlans.length
@@ -1250,6 +1257,242 @@ function _appendInlineVisibleTextFrameShellObjectPlans(objectPlans, sourceItems)
     return { summary: summary };
 }
 
+function _appendSourceBundleTextRangeShellObjectPlans(objectPlans, sourceItems, sourceById, childrenByParentId) {
+    var summary = {
+        observedBundleCount: 0,
+        createdPlanCount: 0,
+        skippedCount: 0,
+        createdObjectPlanIds: []
+    };
+    if (!objectPlans || !sourceItems || !sourceById || !childrenByParentId) return { summary: summary };
+    var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
+    var usedShellIds = {};
+    var usedRanges = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var group = sourceItems[i];
+        if (!group || String(group.kind || group.type || "") !== "Group") continue;
+        var bundle = _sourceBundleTextRangeShellBundle(group, sourceById, childrenByParentId);
+        if (!bundle) {
+            summary.skippedCount++;
+            continue;
+        }
+        summary.observedBundleCount++;
+        var pairCount = Math.min(bundle.shells.length, bundle.ranges.length);
+        for (var pi = 0; pi < pairCount; pi++) {
+            var shell = bundle.shells[pi];
+            var range = bundle.ranges[pi];
+            var shellId = _objectPlanNumericSourceId(shell);
+            var textFrameId = _objectPlanNumericSourceId(range ? range.textFrame : null);
+            var rangeRef = range ? range.range : null;
+            var rangeKey = _sourceBundleTextRangeShellRangeKey(rangeRef, textFrameId);
+            if (shellId === null || textFrameId === null || !rangeRef
+                    || usedShellIds[String(shellId)] === true
+                    || usedRanges[rangeKey] === true
+                    || _objectPlanDecisionIndexHasVisualDecision(decisionIndex, shellId)) {
+                summary.skippedCount++;
+                continue;
+            }
+            var plan = _sourceBundleTextRangeShellObjectPlan(shell, textFrameId, rangeRef);
+            if (!plan) {
+                summary.skippedCount++;
+                continue;
+            }
+            objectPlans.push(plan);
+            _addObjectPlanToDecisionIndex(decisionIndex, plan);
+            usedShellIds[String(shellId)] = true;
+            usedRanges[rangeKey] = true;
+            summary.createdPlanCount++;
+            summary.createdObjectPlanIds.push(plan.objectPlanId);
+        }
+        summary.skippedCount += Math.abs(bundle.shells.length - bundle.ranges.length);
+    }
+    return { summary: summary };
+}
+
+function _sourceBundleTextRangeShellBundle(group, sourceById, childrenByParentId) {
+    if (!group || !sourceById || !childrenByParentId) return null;
+    var children = childrenByParentId[String(group.id)] || [];
+    if (!children || children.length < 2) return null;
+    var textFrames = [];
+    var shells = [];
+    var otherVisibleChildCount = 0;
+    for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (!child) continue;
+        if (_sourceBundleTextRangeShellEditableTextFrame(child)) {
+            textFrames.push(child);
+            continue;
+        }
+        if (_sourceBundleTextRangeShellVisibleShell(child)) {
+            shells.push(child);
+            continue;
+        }
+        if (child.visible !== false && child.hiddenLayer !== true && child.nonprinting !== true) {
+            otherVisibleChildCount++;
+        }
+    }
+    if (textFrames.length === 0 || shells.length === 0 || otherVisibleChildCount > 0) return null;
+    var ranges = [];
+    for (var ti = 0; ti < textFrames.length; ti++) {
+        var tf = textFrames[ti];
+        var tfId = _objectPlanNumericSourceId(tf);
+        if (tfId === null) continue;
+        var tfRanges = tf.leadingStyledTextRanges || [];
+        for (var ri = 0; ri < tfRanges.length; ri++) {
+            var range = _sourceBundleTextRangeShellRange(tfRanges[ri], tf, tfId);
+            if (range) ranges.push({ textFrame: tf, range: range });
+        }
+    }
+    if (ranges.length === 0) return null;
+    shells.sort(function(a, b) {
+        var ay = _sourceBundleBoundsCenter(a && a.bounds, 0);
+        var by = _sourceBundleBoundsCenter(b && b.bounds, 0);
+        if (ay !== by) return ay - by;
+        var ax = _sourceBundleBoundsCenter(a && a.bounds, 1);
+        var bx = _sourceBundleBoundsCenter(b && b.bounds, 1);
+        if (ax !== bx) return ax - bx;
+        return Number(a.zOrder || 0) - Number(b.zOrder || 0);
+    });
+    ranges.sort(function(a, b) {
+        var ar = a.range;
+        var br = b.range;
+        if (ar.paragraphIndex !== br.paragraphIndex) return ar.paragraphIndex - br.paragraphIndex;
+        if (ar.runIndex !== br.runIndex) return ar.runIndex - br.runIndex;
+        return Number(a.textFrame.zOrder || 0) - Number(b.textFrame.zOrder || 0);
+    });
+    return { shells: shells, ranges: ranges };
+}
+
+function _sourceBundleTextRangeShellEditableTextFrame(src) {
+    return !!(src
+            && String(src.kind || src.type || "") === "TextFrame"
+            && src.textFrameClass === "editable"
+            && src.hasText === true
+            && src.visible !== false
+            && src.hiddenLayer !== true
+            && src.nonprinting !== true
+            && src.leadingStyledTextRanges
+            && src.leadingStyledTextRanges.length > 0);
+}
+
+function _sourceBundleTextRangeShellVisibleShell(src) {
+    if (!src || src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    var kind = String(src.kind || src.type || "");
+    if (kind !== "Polygon" && kind !== "Rectangle" && kind !== "Oval") return false;
+    if (!src.bounds || src.bounds.length < 4) return false;
+    return src.hasVisibleFill === true || src.hasVisibleStroke === true;
+}
+
+function _sourceBundleTextRangeShellRange(raw, tf, textFrameId) {
+    if (!raw || !raw.text) return null;
+    return {
+        textFrameId: textFrameId,
+        storyId: tf && tf.storyId !== undefined && tf.storyId !== null ? String(tf.storyId) : null,
+        paragraphIndex: Number(raw.paragraphIndex || 0),
+        runIndex: Number(raw.runIndex || 0),
+        start: Number(raw.start || 0),
+        end: Number(raw.end || 0),
+        paragraphStart: Number(raw.paragraphStart || 0),
+        paragraphEnd: Number(raw.paragraphEnd || String(raw.text || "").length),
+        text: String(raw.text || "")
+    };
+}
+
+function _sourceBundleBoundsCenter(bounds, axis) {
+    if (!bounds || bounds.length < 4) return 0;
+    return axis === 0 ? (Number(bounds[0]) + Number(bounds[2])) / 2
+            : (Number(bounds[1]) + Number(bounds[3])) / 2;
+}
+
+function _sourceBundleTextRangeShellRangeKey(range, textFrameId) {
+    if (!range) return "";
+    return String(textFrameId) + ":" + String(range.paragraphIndex) + ":"
+            + String(range.runIndex) + ":" + String(range.start) + ":" + String(range.end);
+}
+
+function _sourceBundleTextRangeShellObjectPlan(shell, textFrameId, range) {
+    var shellId = _objectPlanNumericSourceId(shell);
+    if (shellId === null || textFrameId === null || !range) return null;
+    var sourceIds = _internSourceSetIds([shellId, textFrameId]);
+    var shellIds = _internSourceSetIds([shellId]);
+    var textIds = _internSourceSetIds([textFrameId]);
+    var pageIndex = shell.pageIndex !== undefined && shell.pageIndex !== null ? shell.pageIndex : -1;
+    var sourceSetId = _sourceSetId(sourceIds);
+    var shellSetId = _sourceSetId(shellIds);
+    return {
+        objectPlanId: "objectPlan.source_bundle_text_range_shell." + String(shellId),
+        bundleId: "sourceBundle.textRangeShell." + String(shellId),
+        candidateId: _candidateId("pass.inline_objects", shellId, pageIndex)
+                + ".source_bundle_text_range_shell",
+        passId: "pass.inline_objects",
+        pageIndex: pageIndex,
+        kind: shell.kind || "Polygon",
+        unit: "INLINE_OBJECT",
+        mode: "TEXTLESS_CANDIDATE",
+        candidatePurpose: "INLINE_CANDIDATE",
+        compositeRole: "source_bundle_text_range_shell",
+        slotRole: "source_bundle_text_range_shell_slot",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: true,
+        inlineCompositeLayoutDescendant: false,
+        inlineAnchorSourceObjectId: textFrameId,
+        inlineSourceTreeClosed: false,
+        inlineFlowSourceObjectIds: textIds,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: shellId,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: sourceSetId,
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: shellSetId,
+        styleSourceSetId: shellSetId,
+        exportSourceSetId: shellSetId,
+        hiddenSourceSetId: _sourceSetId([]),
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: sourceIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: { TextFrame: 1, Polygon: shell.kind === "Polygon" ? 1 : 0 },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: true,
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: true,
+        visualSourceObjectIds: shellIds,
+        styleSourceObjectIds: shellIds,
+        ownedTextFrameIds: [],
+        exportSourceObjectIds: shellIds,
+        exportTargetObjectId: shellId,
+        atomicExportTargetObjectId: shellId,
+        atomicExportTargetObjectIds: shellIds,
+        atomicTextlessVectorContent: true,
+        atomicContentVisualSlot: false,
+        hiddenVisualSourceObjectIds: [],
+        excludedInlineSourceObjectIds: [],
+        ownedTextRanges: [range],
+        materialization: "EXTRACTED_PNG_VECTOR",
+        textAction: "OWNED_BY_HWPX_TEXT",
+        visualAction: "PLACE_TEXT_SHELL",
+        placement: "INLINE",
+        coordinateSpace: "STORY_FLOW",
+        visualLayer: "LABEL_BACKDROP",
+        zOrder: shell.zOrder !== undefined && shell.zOrder !== null ? shell.zOrder : 0,
+        reason: "source_bundle_text_range_shell",
+        bounds: shell.bounds || null,
+        renderSourceBounds: shell.bounds || null,
+        cropSourceBounds: shell.bounds || null,
+        ownershipSlot: "SHELL_SLOT",
+        policyLayer: "DECORATION",
+        clusterRelation: "SOURCE_BUNDLE_TEXT_RANGE_SHELL",
+        migrationStatus: "READY_EXACT_CLUSTER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
+        executable: true,
+        required: true
+    };
+}
+
 function _objectPlanDecisionIndexHasSourceShellDecision(objectPlans, sourceId) {
     var key = String(sourceId);
     for (var i = 0; objectPlans && i < objectPlans.length; i++) {
@@ -1689,6 +1932,7 @@ function _slimObjectPlanForWrite(plan) {
         "ownedTextFrameIds",
         "ownedTextFrameIdKeys",
         "ownedTextFrameSetId",
+        "ownedTextRanges",
         "exportSourceObjectIds",
         "exportSourceSetId",
         "exportTargetObjectId",

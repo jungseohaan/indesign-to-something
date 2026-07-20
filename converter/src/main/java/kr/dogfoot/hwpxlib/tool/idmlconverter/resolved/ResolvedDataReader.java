@@ -291,6 +291,8 @@ public class ResolvedDataReader {
                         JsonObject rObj = runsArr.get(j).getAsJsonObject();
                         ResolvedTextFrame.ComposedRun cr = new ResolvedTextFrame.ComposedRun();
                         cr.text(getString(rObj, "text"));
+                        cr.start(getInt(rObj, "start", -1));
+                        cr.end(getInt(rObj, "end", -1));
                         cr.fillColor(getString(rObj, "fillColor"));
                         cr.fontSize(getResolvedFontSize(rObj));
                         cr.fontFamily(getString(rObj, "fontFamily"));

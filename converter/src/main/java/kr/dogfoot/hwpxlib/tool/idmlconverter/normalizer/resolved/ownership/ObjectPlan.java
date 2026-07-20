@@ -25,6 +25,7 @@ public final class ObjectPlan {
     public final int[] exportSourceObjectIds;
     public final int[] hiddenVisualSourceObjectIds;
     public final int[] ownedTextFrameIds;
+    public TextRangeRef[] ownedTextRanges;
     public String[] ownedTextFrameIdKeys;
     public final int[] descendantVisualObjectIds;
     public final String sourceBundleKey;
@@ -275,6 +276,7 @@ public final class ObjectPlan {
         this.ownedTextFrameIds = ownedTextFrameIds != null
                 ? Arrays.copyOf(ownedTextFrameIds, ownedTextFrameIds.length)
                 : new int[0];
+        this.ownedTextRanges = new TextRangeRef[0];
         this.ownedTextFrameIdKeys = new String[0];
         this.descendantVisualObjectIds = descendantVisualObjectIds != null
                 ? Arrays.copyOf(descendantVisualObjectIds, descendantVisualObjectIds.length)
@@ -330,6 +332,7 @@ public final class ObjectPlan {
                 base.hiddenVisualSourceObjectIds,
                 base.hiddenVisualSourceObjectIds.length);
         this.ownedTextFrameIds = Arrays.copyOf(base.ownedTextFrameIds, base.ownedTextFrameIds.length);
+        this.ownedTextRanges = copyTextRanges(base.ownedTextRanges);
         this.ownedTextFrameIdKeys = copyStringArray(base.ownedTextFrameIdKeys);
         this.descendantVisualObjectIds = Arrays.copyOf(
                 base.descendantVisualObjectIds,
@@ -1226,6 +1229,7 @@ public final class ObjectPlan {
     private ObjectPlan withCurrentInlineFlow(ObjectPlan plan) {
         return plan.withObjectPlanId(objectPlanId)
                 .withOwnedTextFrameIdKeys(ownedTextFrameIdKeys)
+                .withOwnedTextRanges(ownedTextRanges)
                 .withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds)
                 .withTextLayoutContract(textLayoutContract);
     }
@@ -1240,8 +1244,22 @@ public final class ObjectPlan {
         return this;
     }
 
+    public ObjectPlan withOwnedTextRanges(TextRangeRef[] ranges) {
+        this.ownedTextRanges = copyTextRanges(ranges);
+        return this;
+    }
+
     private static String[] copyStringArray(String[] values) {
         return values != null ? Arrays.copyOf(values, values.length) : new String[0];
+    }
+
+    private static TextRangeRef[] copyTextRanges(TextRangeRef[] values) {
+        if (values == null || values.length == 0) return new TextRangeRef[0];
+        TextRangeRef[] copy = new TextRangeRef[values.length];
+        for (int i = 0; i < values.length; i++) {
+            copy[i] = values[i] != null ? values[i].copy() : null;
+        }
+        return copy;
     }
 
     public ObjectPlan withPageIndexAndBounds(int newPageIndex, double[] newBounds, String newReason) {
@@ -1413,6 +1431,7 @@ public final class ObjectPlan {
                 .append("\"inlineSourceTreeClosed\":").append(inlineSourceTreeClosed).append(',')
                 .append("\"inlineFlowSourceObjectIds\":").append(intArrayJson(inlineFlowSourceObjectIds)).append(',')
                 .append("\"ownedTextFrameIds\":").append(intArrayJson(ownedTextFrameIds)).append(',')
+                .append("\"ownedTextRanges\":").append(textRangeArrayJson(ownedTextRanges)).append(',')
                 .append("\"ownedTextFrameIdKeys\":").append(stringArrayJson(ownedTextFrameIdKeys)).append(',')
                 .append("\"descendantVisualObjectIds\":").append(intArrayJson(descendantVisualObjectIds)).append(',')
                 .append("\"sourceBundleKey\":\"").append(escape(sourceBundleKey)).append("\",")
@@ -1472,6 +1491,17 @@ public final class ObjectPlan {
         for (int i = 0; i < values.length; i++) {
             if (i > 0) sb.append(',');
             sb.append('"').append(escape(values[i])).append('"');
+        }
+        sb.append(']');
+        return sb.toString();
+    }
+
+    public static String textRangeArrayJson(TextRangeRef[] values) {
+        if (values == null || values.length == 0) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(values[i] != null ? values[i].toJson() : "null");
         }
         sb.append(']');
         return sb.toString();
