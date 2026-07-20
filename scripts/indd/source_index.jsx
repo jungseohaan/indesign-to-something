@@ -38,6 +38,18 @@ function _sourceIndexVisibleText(text) {
             .replace(/[\uFFFC\u0003\u0007\b\r]/g, "");
 }
 
+// 화학식/수식 전용 폰트(BT수식·BTM·EH·NP)인가.
+// Java kr.dogfoot...BTFontGlyphMap/EHFontGlyphMap/NPFontGlyphMap 과 동일 기준.
+function _sourceIndexIsFormulaFont(fontName) {
+    if (!fontName) return false;
+    var f = String(fontName);
+    return f.indexOf("BT수식") >= 0
+            || f.indexOf("BTM") >= 0
+            || f.indexOf("BT화살표") >= 0
+            || f.indexOf("EH") === 0
+            || f.indexOf("NP_") === 0;
+}
+
 function _sourceIndexRunStyleKey(run) {
     var parts = [];
     parts.push(_sourceIndexTextStyleValue(run, "appliedFont"));
@@ -81,6 +93,14 @@ function _sourceIndexLeadingStyledStoryRunRanges(textFrame) {
             }
             if (!nextRun) continue;
             if (_sourceIndexRunStyleKey(firstRun) === _sourceIndexRunStyleKey(nextRun)) continue;
+            // 선두-다음 런 경계가 "화학식/수식 폰트 진입"(한글 본문 → BT수식/EH/NP)
+            // 때문이면, 이는 라벨 경계가 아니라 문장 중 화학식이다. 이 선두 range 를
+            // 셸로 떼면 배경(말풍선)이 별도 PNG 로 분리되고 본문 앞이 잘린다(실측:
+            // 과학 u1 말풍선 "반응물인 수소의 화학식은 H₂,…"). 화학식 없는 같은
+            // 페이지 말풍선처럼 range 를 만들지 않아 배경이 페이지 배경에 남게 한다.
+            var firstFont = _sourceIndexTextStyleValue(firstRun, "appliedFont");
+            var nextFont = _sourceIndexTextStyleValue(nextRun, "appliedFont");
+            if (!_sourceIndexIsFormulaFont(firstFont) && _sourceIndexIsFormulaFont(nextFont)) continue;
             var raw = String(firstRun.contents || "");
             var start = 0;
             while (start < raw.length && /\s/.test(raw.charAt(start))) start++;
