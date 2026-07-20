@@ -631,6 +631,7 @@ function _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex)
     for (var i = 0; i < sourceIds.length; i++) {
         var src = clusterIndex.sourceInfo(sourceIds[i]);
         if (!src) continue;
+        if (_plannerBundleSourceIsStoryFlowInline(src)) continue;
         if (String(src.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED"
                 || String(src.anchoredPosition || "").toUpperCase() === "ANCHORED") {
             cache[cacheKey] = true;
@@ -639,6 +640,16 @@ function _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex)
     }
     cache[cacheKey] = false;
     return false;
+}
+
+function _plannerBundleSourceIsStoryFlowInline(src) {
+    if (!src) return false;
+    if (src.storyTextInlineSlot === true) return true;
+    var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+    var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+    return placement === "INLINE"
+            || anchoredPosition === "INLINE_POSITION"
+            || anchoredPosition === "INLINEPOSITION";
 }
 
 function _plannerBundleSourceSetHasTableCellInlineAnchor(sourceIds, clusterIndex) {
@@ -702,11 +713,17 @@ function _plannerBundleSourceHasAncestorInSet(sourceId, ancestorSet, clusterInde
 }
 
 function _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex) {
-    if (!sourceIds || sourceIds.length !== 1 || !clusterIndex || !clusterIndex.sourceInfo) return null;
-    var src = clusterIndex.sourceInfo(sourceIds[0]);
-    if (!src || src.storyTextInlineSlot !== true) return null;
-    var id = Number(sourceIds[0]);
-    return isNaN(id) ? null : id;
+    if (!sourceIds || sourceIds.length < 1 || !clusterIndex || !clusterIndex.sourceInfo) return null;
+    var roots = _plannerBundleSourceRootObjectIds(sourceIds, clusterIndex);
+    var candidates = roots && roots.length > 0 ? roots : sourceIds;
+    for (var i = 0; i < candidates.length; i++) {
+        var src = clusterIndex.sourceInfo(candidates[i]);
+        if (!src) continue;
+        if (!_plannerBundleSourceIsStoryFlowInline(src)) continue;
+        var id = Number(candidates[i]);
+        if (!isNaN(id)) return id;
+    }
+    return null;
 }
 
 function _plannerBundleCache(clusterIndex, name) {

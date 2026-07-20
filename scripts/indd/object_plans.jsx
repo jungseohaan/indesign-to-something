@@ -5970,16 +5970,21 @@ function _objectPlanPlacement(bundle) {
     if (_objectPlanBundleHasExecutableInlineStoryContract(bundle)) return "INLINE";
     if (bundle && bundle.inlineTextStyleMarkerSource === true) return "INLINE";
     if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
-    if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
     if (_objectPlanBundleIsInlineCompositeLayoutDescendantVisual(bundle)) return "FLOATING";
     if (_objectPlanBundleIsTextShellWithoutInlineStoryContract(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
     if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";
+    if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
     if (bundle && bundle.passId === "pass.inline_objects") {
         var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
-        if (bundle.pagePositionedAnchoredSource === true) return "FLOATING";
         if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
         if (_objectPlanBundleHasExecutableInlineStoryContract(bundle)) return "INLINE";
+        if (bundle.sourceInlineFlow === true
+                || bundle.storyTextInlineSlot === true
+                || bundle.storyAnchorPlacement === "INLINE") {
+            return "INLINE";
+        }
+        if (bundle.pagePositionedAnchoredSource === true) return "FLOATING";
         if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
             return "FLOATING";
         }
@@ -5993,6 +5998,7 @@ function _objectPlanBundleHasExecutableInlineStoryContract(bundle) {
     if (bundle.tableCellInlineAnchorSource === true && bundle.sourceInlineFlow === true) return true;
     if (bundle.tableCellStoryTextInlineSlot === true) return true;
     if (bundle.storyTextInlineSlot === true) return true;
+    if (bundle.sourceInlineFlow === true || bundle.storyAnchorPlacement === "INLINE") return true;
     var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
     if (bundle.pagePositionedAnchoredSource === true
             || bundle.storyAnchorPlacement === "FLOATING_ANCHORED"
