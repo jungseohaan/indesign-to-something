@@ -2758,6 +2758,8 @@ public class InlineFrameHandler {
             }
             if (paragraphs != null && !paragraphs.isEmpty()) {
                 applyIdmlRunTintFallbackToParagraphs(ctx, childTf, paragraphs);
+                fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+                capInlineShellParagraphLeadingToFrame(paragraphs, obj, childTf, ctx);
                 for (ASTParagraph paragraph : paragraphs) {
                     obj.addParagraph(paragraph);
                 }
@@ -2766,9 +2768,166 @@ public class InlineFrameHandler {
         }
         List<ASTParagraph> paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
         if (paragraphs == null || paragraphs.isEmpty()) return;
+        fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+        capInlineShellParagraphLeadingToFrame(paragraphs, obj, childTf, ctx);
         for (ASTParagraph paragraph : paragraphs) {
             obj.addParagraph(paragraph);
         }
+    }
+
+    private static void fitSingleLineInlineTextShellBoxToComposedLine(
+            List<ASTParagraph> paragraphs,
+            ASTInlineObject obj,
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx) {
+        if (paragraphs == null || paragraphs.isEmpty() || obj == null || childTf == null) return;
+        if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                && obj.kind() != ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
+            return;
+        }
+        if (!isSourceSingleLineTextFrame(childTf)) return;
+        long frameHeight = obj.height();
+        if (frameHeight <= 0) return;
+        long composedLineHeight = maxComposedLineHeightHwpunits(childTf, ctx, frameHeight);
+        if (composedLineHeight <= 0) return;
+        if (frameHeight <= Math.round(composedLineHeight * 1.5)) return;
+
+        long fontHeight = 0L;
+        for (ASTParagraph paragraph : paragraphs) {
+            fontHeight = Math.max(fontHeight, reasonableFontSizeHwpunits(paragraph, frameHeight));
+        }
+        long verticalPadding = inlineShellVerticalInsetPaddingHwpunits(
+                childTf, ctx, composedLineHeight, frameHeight);
+        long targetHeight = Math.max(composedLineHeight, fontHeight) + verticalPadding;
+        long minimumHeight = Math.max(composedLineHeight, fontHeight);
+        long maximumShrinkHeight = Math.round(frameHeight * 0.45);
+        targetHeight = Math.max(targetHeight, Math.max(minimumHeight, maximumShrinkHeight));
+        if (targetHeight <= 0 || targetHeight >= Math.round(frameHeight * 0.95)) return;
+
+        obj.height(targetHeight);
+        if (obj.resolvedHeight() > 0) {
+            obj.resolvedHeight(targetHeight);
+        }
+
+        long verticalMargins = Math.max(0L, obj.textMarginTop()) + Math.max(0L, obj.textMarginBottom());
+        if (verticalMargins > Math.round(targetHeight * 0.5)) {
+            long boundedMargin = Math.min(
+                    Math.round(targetHeight * 0.12),
+                    Math.max(0L, verticalPadding / 2));
+            obj.textMarginTop(boundedMargin);
+            obj.textMarginBottom(boundedMargin);
+        }
+    }
+
+    private static long inlineShellVerticalInsetPaddingHwpunits(
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx,
+            long composedLineHeight,
+            long frameHeight) {
+        if (childTf == null) return 0L;
+        double[] inset = childTf.insetSpacing();
+        if (inset == null || inset.length < 3) return 0L;
+        double top = Math.max(0.0, inset[0]);
+        double bottom = Math.max(0.0, inset[2]);
+        if (!Double.isFinite(top + bottom) || top + bottom <= 0.0) return 0L;
+        long padding = inlineShellSourceHeightRatioToHwpunits(childTf, top + bottom, frameHeight);
+        if (padding <= 0L) {
+            double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+            padding = CoordinateConverter.pointsToHwpunits((top + bottom) * scale);
+        }
+        if (composedLineHeight > 0) {
+            padding = Math.min(padding, Math.round(composedLineHeight * 0.3));
+        }
+        return Math.max(0L, padding);
+    }
+
+    private static void capInlineShellParagraphLeadingToFrame(
+            List<ASTParagraph> paragraphs,
+            ASTInlineObject obj,
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx) {
+        if (paragraphs == null || paragraphs.isEmpty() || obj == null) return;
+        if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                && obj.kind() != ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
+            return;
+        }
+        long frameHeight = obj.height();
+        if (frameHeight <= 0) return;
+        long contentHeight = frameHeight
+                - Math.max(0L, obj.textMarginTop())
+                - Math.max(0L, obj.textMarginBottom());
+        if (contentHeight <= 0) contentHeight = frameHeight;
+        if (contentHeight < Math.round(frameHeight * 0.5)) {
+            contentHeight = frameHeight;
+        }
+        long composedLineHeight = maxComposedLineHeightHwpunits(childTf, ctx, frameHeight);
+
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) continue;
+            Integer current = paragraph.lineSpacing();
+            boolean currentFixed = "fixed".equals(paragraph.lineSpacingType());
+            if (currentFixed && current != null && current <= contentHeight) continue;
+
+            long minimum = Math.max(reasonableFontSizeHwpunits(paragraph, frameHeight), composedLineHeight);
+            long target = contentHeight;
+            if (minimum > target && minimum <= frameHeight) {
+                target = minimum;
+            }
+            if (target <= 0) continue;
+            if (currentFixed && current != null && target >= current) continue;
+            paragraph.lineSpacing((int) Math.min(Integer.MAX_VALUE, target));
+            paragraph.lineSpacingType("fixed");
+        }
+    }
+
+    private static long reasonableFontSizeHwpunits(ASTParagraph paragraph, long frameHeight) {
+        long max = 0L;
+        if (paragraph == null || paragraph.items() == null) return max;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            Integer fontSize = ((ASTTextRun) item).fontSizeHwpunits();
+            if (fontSize != null
+                    && fontSize > max
+                    && (frameHeight <= 0 || fontSize <= Math.round(frameHeight * 1.2))) {
+                max = fontSize;
+            }
+        }
+        return max;
+    }
+
+    private static long maxComposedLineHeightHwpunits(
+            ResolvedTextFrame childTf,
+            ResolvedBuildContext ctx,
+            long frameHeight) {
+        if (childTf == null || childTf.composedLines() == null) return 0L;
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        long max = 0L;
+        for (ResolvedTextFrame.ComposedLine line : childTf.composedLines()) {
+            if (line == null || line.bounds() == null || line.bounds().length < 3) continue;
+            double rawHeight = Math.abs(line.bounds()[2] - line.bounds()[0]);
+            if (!Double.isFinite(rawHeight) || rawHeight <= 0.0 || rawHeight > 100.0) continue;
+            long ratioHeight = inlineShellSourceHeightRatioToHwpunits(childTf, rawHeight, frameHeight);
+            if (ratioHeight > 0) {
+                max = Math.max(max, ratioHeight);
+            } else {
+                max = Math.max(max, CoordinateConverter.pointsToHwpunits(rawHeight * scale));
+            }
+        }
+        return max;
+    }
+
+    private static long inlineShellSourceHeightRatioToHwpunits(
+            ResolvedTextFrame childTf,
+            double sourceHeight,
+            long frameHeight) {
+        if (childTf == null || sourceHeight <= 0.0 || frameHeight <= 0) return 0L;
+        double[] bounds = childTf.geometricBounds();
+        if (bounds == null || bounds.length < 3) return 0L;
+        double sourceFrameHeight = Math.abs(bounds[2] - bounds[0]);
+        if (!Double.isFinite(sourceFrameHeight) || sourceFrameHeight <= 0.0) return 0L;
+        double ratio = sourceHeight / sourceFrameHeight;
+        if (!Double.isFinite(ratio) || ratio <= 0.0 || ratio > 1.5) return 0L;
+        return Math.round(frameHeight * ratio);
     }
 
     private static boolean canMaterializeShellTextFromWholeStory(
