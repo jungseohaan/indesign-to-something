@@ -312,10 +312,21 @@ class RunBuilder {
     }
 
     private static void applyPositionStyle(ASTTextRun target, ResolvedRun rr, IDMLCharacterRun cr) {
-        String position = explicitPosition(rr != null ? rr.position() : null);
-        if (position == null) {
-            position = explicitPosition(cr != null ? cr.position() : null);
+        String idmlPosition = explicitPosition(cr != null ? cr.position() : null);
+        String resolvedPosition = explicitPosition(rr != null ? rr.position() : null);
+
+        // resolved DOM 이 첨자 위치를 인접 문자로 흘리는 데이터가 있다. 화학 반응식
+        // 생성물 "2H₂O" 에서 계수 2·hairspace 까지 SUBSCRIPT 로 보고해, 텍스트만 같은
+        // 계수 2 가 진짜 첨자 2(SUBSCRIPT rr)로 오매칭되면 계수가 아래첨자로 깨진다
+        // (실측: 과학 u1 pg25/26/28 검정 생성물 박스, IDML 원본은 계수=00_영문 +
+        // Position=None). IDML CR 이 "명시적으로 비첨자"(position=normal/null +
+        // 첨자 계열 charStyle 아님)인데 resolved 만 script 를 주장하면 무시한다.
+        if (resolvedPosition != null && idmlPosition == null
+                && cr != null && !isScriptCharacterStyle(cr.appliedCharacterStyle())) {
+            resolvedPosition = null;
         }
+
+        String position = resolvedPosition != null ? resolvedPosition : idmlPosition;
         if (position == null) return;
         String p = position.toLowerCase(Locale.ROOT);
         if (p.contains("superscript")) {
@@ -327,6 +338,15 @@ class RunBuilder {
         }
     }
 
+    /** 문자 스타일 이름이 첨자(상부자/하부자/super/subscript)를 표기하는가. */
+    static boolean isScriptCharacterStyle(String charStyleRef) {
+        if (charStyleRef == null) return false;
+        String s = charStyleRef.toLowerCase(Locale.ROOT);
+        return s.contains("상부자") || s.contains("하부자")
+                || s.contains("위첨자") || s.contains("아래첨자")
+                || s.contains("superscript") || s.contains("subscript");
+    }
+
     private static String explicitPosition(String position) {
         if (position == null || position.trim().isEmpty()) return null;
         String p = position.toLowerCase(Locale.ROOT);
@@ -335,11 +355,18 @@ class RunBuilder {
 
     private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr,
                                                     MatchConfidence confidence) {
-        String style = rr != null ? rr.charStyle() : null;
-        if (isUsableCharacterStyleRef(style)) return style;
+        String rrStyle = rr != null ? rr.charStyle() : null;
+        String crStyle = cr != null ? cr.appliedCharacterStyle() : null;
+        // resolved 가 첨자 charStyle(하부자/상부자)을 붙였는데 IDML CR 은 비첨자
+        // charStyle 이면, resolved 첨자 위치 흘림에 의한 오매칭이다(applyPositionStyle
+        // 가드와 같은 원리 — 화학 반응식 계수 2 가 이웃 첨자 2 의 스타일을 물려받아
+        // 하류 applyPositionFromCharacterStyle 에서 다시 첨자화되던 문제). IDML 을 쓴다.
+        if (isScriptCharacterStyle(rrStyle) && crStyle != null && !isScriptCharacterStyle(crStyle)) {
+            return isUsableCharacterStyleRef(crStyle) ? crStyle : null;
+        }
+        if (isUsableCharacterStyleRef(rrStyle)) return rrStyle;
         if (isReliableResolvedRun(rr, confidence)) return null;
-        style = cr != null ? cr.appliedCharacterStyle() : null;
-        if (isUsableCharacterStyleRef(style)) return style;
+        if (isUsableCharacterStyleRef(crStyle)) return crStyle;
         return null;
     }
 
