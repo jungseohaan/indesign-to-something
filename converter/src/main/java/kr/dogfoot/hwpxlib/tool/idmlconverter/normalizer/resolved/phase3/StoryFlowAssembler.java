@@ -12,6 +12,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -152,9 +155,12 @@ public final class StoryFlowAssembler {
         }
         List<ASTParagraph> paragraphs = new ArrayList<>();
         Set<Integer> appendedAnchorIds = new LinkedHashSet<>();
+        Set<String> consumedOwnershipKeys = new LinkedHashSet<>();
 
-        appendPlannedInlineObjectsFromResolvedTableCell(ctx, idmlTable, idmlCell, paragraphs, appendedAnchorIds);
-        appendPlannedInlineTextShellsFromCellAnchors(ctx, idmlCell, paragraphs, appendedAnchorIds);
+        appendPlannedInlineObjectsFromResolvedTableCell(
+                ctx, idmlTable, idmlCell, paragraphs, appendedAnchorIds, consumedOwnershipKeys);
+        appendPlannedInlineTextShellsFromCellAnchors(
+                ctx, idmlCell, paragraphs, appendedAnchorIds, consumedOwnershipKeys);
 
         if (idmlCell.textFrameStoryRefs() == null || idmlCell.textFrameStoryRefs().isEmpty()) {
             return paragraphs;
@@ -170,6 +176,7 @@ public final class StoryFlowAssembler {
             for (ResolvedTextFrame tf : frames) {
                 int tfDomId = parseDomId(tf);
                 if (tfDomId < 0) continue;
+                if (!consumeInlineOwnershipKeyForOwnedTextFrame(ctx, tfDomId, consumedOwnershipKeys)) continue;
                 ASTInlineObject inlineShell =
                         InlineFrameHandler.loadPlannedInlineTextShellForOwnedTextFrame(ctx, tfDomId);
                 if (inlineShell == null) continue;
@@ -186,7 +193,8 @@ public final class StoryFlowAssembler {
             IDMLTable idmlTable,
             IDMLTableCell idmlCell,
             List<ASTParagraph> paragraphs,
-            Set<Integer> appendedAnchorIds) {
+            Set<Integer> appendedAnchorIds,
+            Set<String> consumedOwnershipKeys) {
         if (ctx == null || ctx.resolvedData == null
                 || idmlCell == null || paragraphs == null) {
             return;
@@ -217,8 +225,8 @@ public final class StoryFlowAssembler {
             }
             if (plannedItems != null && !plannedItems.isEmpty()) {
                 InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchorId, paragraph);
-                appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
-                if (appendedAnchorIds != null) appendedAnchorIds.add(anchorId);
+                int added = appendInlineItemsKeepingObjectsInline(paragraph, plannedItems, ctx, consumedOwnershipKeys);
+                if (added > 0 && appendedAnchorIds != null) appendedAnchorIds.add(anchorId);
             }
         }
         if (paragraph.items() != null && !paragraph.items().isEmpty()) {
@@ -246,7 +254,8 @@ public final class StoryFlowAssembler {
             ResolvedBuildContext ctx,
             IDMLTableCell idmlCell,
             List<ASTParagraph> paragraphs,
-            Set<Integer> appendedAnchorIds) {
+            Set<Integer> appendedAnchorIds,
+            Set<String> consumedOwnershipKeys) {
         if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null || paragraphs == null) {
             return;
         }
@@ -274,8 +283,8 @@ public final class StoryFlowAssembler {
                             }
                         }
                         InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, paragraph);
-                        appendInlineItemsKeepingObjectsInline(paragraph, plannedItems);
-                        if (appendedAnchorIds != null) appendedAnchorIds.add(domId);
+                        int added = appendInlineItemsKeepingObjectsInline(paragraph, plannedItems, ctx, consumedOwnershipKeys);
+                        if (added > 0 && appendedAnchorIds != null) appendedAnchorIds.add(domId);
                     }
                 }
             }
@@ -288,14 +297,111 @@ public final class StoryFlowAssembler {
     private static void appendInlineItemsKeepingObjectsInline(
             ASTParagraph paragraph,
             List<ASTInlineItem> items) {
-        if (paragraph == null || items == null) return;
+        appendInlineItemsKeepingObjectsInline(paragraph, items, null, null);
+    }
+
+    private static int appendInlineItemsKeepingObjectsInline(
+            ASTParagraph paragraph,
+            List<ASTInlineItem> items,
+            ResolvedBuildContext ctx,
+            Set<String> consumedOwnershipKeys) {
+        if (paragraph == null || items == null) return 0;
+        int added = 0;
         for (ASTInlineItem item : items) {
             if (item == null) continue;
             if (item instanceof ASTInlineObject) {
-                ((ASTInlineObject) item).keepInline(true);
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (!consumeInlineOwnershipKey(ctx, obj, consumedOwnershipKeys)) {
+                    continue;
+                }
+                obj.keepInline(true);
             }
             paragraph.addItem(item);
+            added++;
         }
+        return added;
+    }
+
+    private static boolean consumeInlineOwnershipKey(
+            ResolvedBuildContext ctx,
+            ASTInlineObject obj,
+            Set<String> consumedOwnershipKeys) {
+        if (consumedOwnershipKeys == null) return true;
+        String key = inlineOwnershipExecutionKey(ctx, obj);
+        if (key == null || key.isEmpty()) return true;
+        if (consumedOwnershipKeys.contains(key)) return false;
+        consumedOwnershipKeys.add(key);
+        return true;
+    }
+
+    private static boolean consumeInlineOwnershipKeyForOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId,
+            Set<String> consumedOwnershipKeys) {
+        if (consumedOwnershipKeys == null || ctx == null || textFrameDomId < 0) return true;
+        String key = inlineOwnershipExecutionKeyForOwnedTextFrame(ctx, textFrameDomId);
+        if (key == null || key.isEmpty()) return true;
+        if (consumedOwnershipKeys.contains(key)) return false;
+        consumedOwnershipKeys.add(key);
+        return true;
+    }
+
+    private static String inlineOwnershipExecutionKey(
+            ResolvedBuildContext ctx,
+            ASTInlineObject obj) {
+        if (ctx == null || obj == null) return null;
+        int domId = parseInlineObjectDomId(obj.sourceId());
+        if (domId < 0) return null;
+        ObjectPlan plan = ctx.findOwnershipPlanForDomId(domId);
+        if (plan == null) return null;
+        if (plan.objectPlanId != null && !plan.objectPlanId.isEmpty()) {
+            return "objectPlan:" + plan.objectPlanId;
+        }
+        String bundle = plan.sourceBundleKey != null && !plan.sourceBundleKey.isEmpty()
+                ? plan.sourceBundleKey
+                : "dom:" + plan.domId;
+        return "bundle:" + bundle
+                + ":slot:" + safeString(plan.slotRole)
+                + ":visual:" + plan.visualAction
+                + ":text:" + plan.textAction
+                + ":placement:" + plan.placement;
+    }
+
+    private static String inlineOwnershipExecutionKeyForOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || textFrameDomId < 0) return null;
+        for (ObjectPlan plan : ctx.ownershipPlansForOwnedTextFrame(textFrameDomId)) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!containsInt(plan.ownedTextFrameIds, textFrameDomId)) continue;
+            return inlineOwnershipExecutionKey(plan);
+        }
+        return null;
+    }
+
+    private static String inlineOwnershipExecutionKey(ObjectPlan plan) {
+        if (plan == null) return null;
+        if (plan.objectPlanId != null && !plan.objectPlanId.isEmpty()) {
+            return "objectPlan:" + plan.objectPlanId;
+        }
+        String bundle = plan.sourceBundleKey != null && !plan.sourceBundleKey.isEmpty()
+                ? plan.sourceBundleKey
+                : "dom:" + plan.domId;
+        return "bundle:" + bundle
+                + ":slot:" + safeString(plan.slotRole)
+                + ":visual:" + plan.visualAction
+                + ":text:" + plan.textAction
+                + ":placement:" + plan.placement;
+    }
+
+    private static boolean containsInt(int[] values, int target) {
+        if (values == null || values.length == 0) return false;
+        for (int value : values) {
+            if (value == target) return true;
+        }
+        return false;
     }
 
     private static List<String> inlineGraphicIdsInRunOrder(IDMLCharacterRun run) {
