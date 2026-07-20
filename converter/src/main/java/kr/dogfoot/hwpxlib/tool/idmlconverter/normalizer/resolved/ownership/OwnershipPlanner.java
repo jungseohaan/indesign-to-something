@@ -99,6 +99,7 @@ public final class OwnershipPlanner {
         recordLegacyBridgeDiagnostics(legacyBridgePlanStart, preBridgePlanJsons, legacyBridgeSkipped);
         timed("ensureOwnedTextFramePlansForVisibleTextShells", this::ensureOwnedTextFramePlansForVisibleTextShells);
         timed("ensureSourceTextWrapContracts", this::ensureSourceTextWrapContracts);
+        timed("declareSourceBundleTextRangeShellPlans", this::declareSourceBundleTextRangeShellPlans);
         timed("finalizeOwnedTextFrameDepthContracts.afterShellOwnedTextPlans", this::finalizeOwnedTextFrameDepthContracts);
         timed("normalizeStage1ContractsBeforeValidation", this::normalizeStage1ContractsBeforeValidation);
         timed("dropNativeSourceShapePlans", this::dropNativeSourceShapePlans);
@@ -606,6 +607,412 @@ public final class OwnershipPlanner {
                     + ",\"skipped\":" + skipped
                     + ",\"detail\":\"SOURCE_TEXT_WRAP contracts are declared from resolved.composedLines wrap indents and executed by Stage 2\"}");
         }
+    }
+
+    private void declareSourceBundleTextRangeShellPlans() {
+        if (data == null || data.pageItems() == null) return;
+        int observed = 0;
+        int planned = 0;
+        int skipped = 0;
+        Set<Integer> usedShellIds = new HashSet<>();
+        Set<String> usedRanges = new HashSet<>();
+        for (ResolvedPageItem group : data.pageItems()) {
+            if (group == null || !"Group".equals(safe(group.type())) || group.childIds() == null) continue;
+            TextRangeShellBundle source = textRangeShellBundle(group);
+            if (source == null) {
+                skipped++;
+                continue;
+            }
+            observed++;
+            int pairCount = Math.min(source.shells.size(), source.ranges.size());
+            for (int i = 0; i < pairCount; i++) {
+                ResolvedPageItem shell = source.shells.get(i);
+                TextRangeCandidate rangeCandidate = source.ranges.get(i);
+                TextRangeRef range = rangeCandidate != null ? rangeCandidate.range : null;
+                int shellId = parseFlexibleId(shell != null ? shell.id() : null);
+                String rangeKey = textRangeKey(range);
+                if (shellId < 0 || usedShellIds.contains(shellId) || usedRanges.contains(rangeKey)) {
+                    skipped++;
+                    continue;
+                }
+                TextRangeShellPlan textRangeShell = textRangeShellPlanFromGroupedSource(
+                        shell, rangeCandidate != null ? rangeCandidate.textFrame : null, range);
+                ObjectPlan objectPlan = objectPlanFromGroupedTextRangeShell(
+                        textRangeShell, rangeCandidate != null ? rangeCandidate.textFrame : null);
+                if (textRangeShell == null || objectPlan == null) {
+                    skipped++;
+                    continue;
+                }
+                ctx.addTextRangeShellPlan(textRangeShell);
+                if (!hasImportedSourceBundleTextRangeShellPlan(shellId)) {
+                    plans.add(objectPlan);
+                }
+                usedShellIds.add(shellId);
+                usedRanges.add(rangeKey);
+                planned++;
+            }
+            skipped += Math.abs(source.shells.size() - source.ranges.size());
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceBundleTextRangeShells.observed", observed);
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceBundleTextRangeShells.plansAdded", planned);
+        ConversionTiming.metric("stage1.ownershipPlanner.sourceBundleTextRangeShells.skipped", skipped);
+        if (planned > 0 && ctx.ownershipWarningLines != null) {
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE1_SOURCE_BUNDLE_TEXT_RANGE_SHELLS_DECLARED\""
+                    + ",\"observed\":" + observed
+                    + ",\"plansAdded\":" + planned
+                    + ",\"skipped\":" + skipped
+                    + ",\"detail\":\"source Group exposes editable TextFrame children and textless closed-shell children; styled leading story ranges are assigned to shell slots within the same source bundle\"}");
+        }
+    }
+
+    private TextRangeShellBundle textRangeShellBundle(ResolvedPageItem group) {
+        if (group == null || group.childIds() == null || group.childIds().length < 2) return null;
+        List<ResolvedTextFrame> childTextFrames = new ArrayList<>();
+        List<ResolvedPageItem> childShells = new ArrayList<>();
+        int otherVisibleChildCount = 0;
+        for (int childId : group.childIds()) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(childId));
+            if (isVisibleEditableTextFrameSource(tf)) {
+                childTextFrames.add(tf);
+                continue;
+            }
+            ResolvedPageItem item = data.getPageItem(String.valueOf(childId));
+            if (isVisibleTextlessShellSource(item)) {
+                childShells.add(item);
+                continue;
+            }
+            if (item != null && !item.sourceHidden()) otherVisibleChildCount++;
+        }
+        if (childTextFrames.isEmpty() || childShells.isEmpty()) return null;
+        if (otherVisibleChildCount > 0) return null;
+        List<TextRangeCandidate> ranges = new ArrayList<>();
+        for (ResolvedTextFrame tf : childTextFrames) {
+            ResolvedStory story = data.getStory(tf.storyId());
+            if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) continue;
+            ranges.addAll(leadingStyledStoryRunRanges(tf, story));
+        }
+        if (ranges.isEmpty()) return null;
+        childShells.sort((a, b) -> {
+            double[] ab = sourceBounds(a);
+            double[] bb = sourceBounds(b);
+            int cmp = Double.compare(centerY(ab), centerY(bb));
+            if (cmp != 0) return cmp;
+            cmp = Double.compare(centerX(ab), centerX(bb));
+            if (cmp != 0) return cmp;
+            return Integer.compare(a.zOrder(), b.zOrder());
+        });
+        ranges.sort((a, b) -> {
+            int cmp = Integer.compare(a.pageIndex, b.pageIndex);
+            if (cmp != 0) return cmp;
+            cmp = Double.compare(a.lineTop, b.lineTop);
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(a.range.textFrameId, b.range.textFrameId);
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(a.range.paragraphIndex, b.range.paragraphIndex);
+            if (cmp != 0) return cmp;
+            return Integer.compare(a.range.runIndex, b.range.runIndex);
+        });
+        return new TextRangeShellBundle(childShells, ranges);
+    }
+
+    private List<TextRangeCandidate> leadingStyledStoryRunRanges(ResolvedTextFrame tf, ResolvedStory story) {
+        List<TextRangeCandidate> ranges = new ArrayList<>();
+        int textFrameId = parseFlexibleId(tf != null ? tf.id() : null);
+        if (textFrameId < 0 || tf == null || story == null || story.paragraphs() == null) return ranges;
+        for (int paragraphIndex = 0; paragraphIndex < story.paragraphs().size(); paragraphIndex++) {
+            ResolvedParagraph paragraph = story.paragraphs().get(paragraphIndex);
+            if (paragraph == null || paragraph.runs() == null || paragraph.runs().size() < 2) continue;
+            int paragraphVisibleCursor = 0;
+            int firstTextRunIndex = -1;
+            ResolvedRun firstTextRun = null;
+            for (int runIndex = 0; runIndex < paragraph.runs().size(); runIndex++) {
+                ResolvedRun run = paragraph.runs().get(runIndex);
+                if (run == null || run.isInlineAnchor()) continue;
+                String visible = textRangeVisibleText(run.text());
+                if (visible.trim().isEmpty()) {
+                    paragraphVisibleCursor += visible.length();
+                    continue;
+                }
+                firstTextRunIndex = runIndex;
+                firstTextRun = run;
+                break;
+            }
+            if (firstTextRunIndex < 0 || firstTextRun == null) continue;
+            int nextTextRunIndex = nextVisibleTextRunIndex(paragraph, firstTextRunIndex + 1);
+            if (nextTextRunIndex < 0) continue;
+            ResolvedRun nextTextRun = paragraph.runs().get(nextTextRunIndex);
+            if (!hasSourceStyleBoundary(firstTextRun, nextTextRun)) continue;
+            String raw = firstTextRun.text();
+            String text = textRangeVisibleText(raw).trim();
+            if (text.isEmpty()) continue;
+            int start = firstNonRangeWhitespace(raw);
+            int end = lastNonRangeWhitespace(raw);
+            int paragraphStart = paragraphVisibleCursor + textRangeVisibleLength(raw, 0, start);
+            int paragraphEnd = paragraphStart + text.length();
+            TextRangeRef range = new TextRangeRef(
+                    textFrameId,
+                    tf.storyId(),
+                    paragraphIndex,
+                    firstTextRunIndex,
+                    start,
+                    end,
+                    paragraphStart,
+                    paragraphEnd,
+                    text);
+            ranges.add(new TextRangeCandidate(tf, range, composedLineTop(tf, paragraphIndex), tf.pageIndex()));
+        }
+        return ranges;
+    }
+
+    private TextRangeShellPlan textRangeShellPlanFromGroupedSource(
+            ResolvedPageItem shell,
+            ResolvedTextFrame tf,
+            TextRangeRef range) {
+        if (shell == null || tf == null || range == null) return null;
+        int shellId = parseFlexibleId(shell.id());
+        if (shellId < 0) return null;
+        double[] bounds = sourceBounds(shell);
+        if (!validBounds(bounds)) return null;
+        String fill = data.resolveTintedColorHex(shell.fillColorName(), shell.fillTint());
+        String stroke = data.resolveTintedColorHex(shell.strokeColorName(), shell.strokeTint());
+        return new TextRangeShellPlan(
+                shellId,
+                range.textFrameId,
+                tf.storyId(),
+                tf.pageIndex(),
+                shell.zOrder(),
+                range,
+                shell.type(),
+                bounds,
+                fill,
+                stroke,
+                shell.strokeWeight(),
+                shell.cornerRadius());
+    }
+
+    private ObjectPlan objectPlanFromGroupedTextRangeShell(
+            TextRangeShellPlan shellPlan,
+            ResolvedTextFrame tf) {
+        if (shellPlan == null || shellPlan.range == null || shellPlan.shellBounds == null) return null;
+        ObjectPlan plan = new ObjectPlan(
+                shellPlan.shellDomId,
+                "text_range_shell:source_bundle",
+                shellPlan.pageIndex,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.PLACE_TEXT_SHELL,
+                VisualLayer.LABEL_BACKDROP,
+                Placement.INLINE,
+                null,
+                new int[] { shellPlan.shellDomId, shellPlan.textFrameId },
+                new int[] { shellPlan.shellDomId },
+                new int[] { shellPlan.shellDomId },
+                new int[0],
+                new int[0],
+                "p" + shellPlan.pageIndex + ":text-range-shell:" + shellPlan.shellDomId,
+                Materialization.EXTRACTED_PNG_VECTOR,
+                CoordinateSpace.STORY_FLOW,
+                null,
+                shellPlan.zOrder,
+                "source_bundle_text_range_shell",
+                null,
+                shellPlan.shellBounds,
+                tf != null ? tf.layerId() : null,
+                tf != null ? tf.layerName() : null,
+                tf != null ? tf.layerIndex() : -1);
+        return plan.withExtractionCandidate(
+                        "cand.source_bundle_text_range_shell." + shellPlan.shellDomId,
+                        "pass.source_bundle_text_range_shells",
+                        "text_range_shell_slot")
+                .withExtractionSourceObjectIds(new int[] { shellPlan.shellDomId }, new int[0])
+                .withOwnedTextRanges(new TextRangeRef[] { shellPlan.range })
+                .withObjectPlanId("objectPlan.source_bundle_text_range_shell." + shellPlan.shellDomId);
+    }
+
+    private boolean hasImportedSourceBundleTextRangeShellPlan(int shellId) {
+        if (shellId < 0 || plans == null) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR) continue;
+            if (!contains(plan.visualSourceObjectIds, shellId)
+                    && !contains(plan.exportSourceObjectIds, shellId)) {
+                continue;
+            }
+            String slot = safe(plan.slotRole);
+            String kind = safe(plan.kind);
+            if ("source_bundle_text_range_shell_slot".equals(slot)
+                    || kind.contains("source_bundle_text_range_shell")
+                    || (plan.ownedTextRanges != null && plan.ownedTextRanges.length > 0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isVisibleTextlessShellSource(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if (!"Polygon".equals(type) && !"Rectangle".equals(type) && !"Oval".equals(type)) return false;
+        if (!hasVisibleSourceStyle(item)) return false;
+        return validBounds(sourceBounds(item));
+    }
+
+    private static boolean hasVisibleSourceStyle(ResolvedPageItem item) {
+        if (item == null) return false;
+        String fill = item.fillColorName();
+        if (fill != null && !"None".equals(fill) && !"[None]".equals(fill)
+                && !"Swatch/None".equals(fill)) {
+            return true;
+        }
+        String stroke = item.strokeColorName();
+        return stroke != null && !"None".equals(stroke) && !"[None]".equals(stroke)
+                && !"Swatch/None".equals(stroke) && item.strokeWeight() > 0;
+    }
+
+    private static String textRangeKey(TextRangeRef range) {
+        if (range == null) return "";
+        return range.textFrameId + ":" + range.paragraphIndex + ":" + range.runIndex
+                + ":" + range.start + ":" + range.end;
+    }
+
+    private static String textRangeVisibleText(String text) {
+        if (text == null) return "";
+        return text.replace("\uFFFC", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\b", "")
+                .replace("\r", "")
+                .replace("\n", "");
+    }
+
+    private static int nextVisibleTextRunIndex(ResolvedParagraph paragraph, int startIndex) {
+        if (paragraph == null || paragraph.runs() == null) return -1;
+        for (int i = Math.max(0, startIndex); i < paragraph.runs().size(); i++) {
+            ResolvedRun run = paragraph.runs().get(i);
+            if (run == null || run.isInlineAnchor()) continue;
+            if (!textRangeVisibleText(run.text()).trim().isEmpty()) return i;
+        }
+        return -1;
+    }
+
+    private static boolean hasSourceStyleBoundary(ResolvedRun a, ResolvedRun b) {
+        if (a == null || b == null) return false;
+        if (!sameNullable(a.fontFamily(), b.fontFamily())) return true;
+        if (!sameNullable(a.fontStyle(), b.fontStyle())) return true;
+        if (!sameNullable(a.fontSize(), b.fontSize())) return true;
+        if (!sameNullable(a.fillColor(), b.fillColor())) return true;
+        if (!sameNullable(a.charStyle(), b.charStyle())) return true;
+        if (!sameNullable(a.tracking(), b.tracking())) return true;
+        if (!sameNullable(a.horizontalScale(), b.horizontalScale())) return true;
+        if (!sameNullable(a.verticalScale(), b.verticalScale())) return true;
+        if (!sameNullable(a.baselineShift(), b.baselineShift())) return true;
+        if (!sameNullable(a.position(), b.position())) return true;
+        if (!sameNullable(a.underline(), b.underline())) return true;
+        return !sameNullable(a.strikeThru(), b.strikeThru());
+    }
+
+    private static boolean sameNullable(Object a, Object b) {
+        if (a == null) return b == null;
+        return a.equals(b);
+    }
+
+    private static double composedLineTop(ResolvedTextFrame tf, int paragraphIndex) {
+        if (tf == null || tf.composedLines() == null) return 0.0;
+        double top = Double.POSITIVE_INFINITY;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.paraIndex() != paragraphIndex) continue;
+            double[] b = line.bounds();
+            if (!validBounds(b)) continue;
+            top = Math.min(top, b[0]);
+        }
+        return Double.isFinite(top) ? top : 0.0;
+    }
+
+    private static int textRangeVisibleLength(String text, int start, int end) {
+        if (text == null || end <= start) return 0;
+        int safeStart = Math.max(0, Math.min(start, text.length()));
+        int safeEnd = Math.max(safeStart, Math.min(end, text.length()));
+        return textRangeVisibleText(text.substring(safeStart, safeEnd)).length();
+    }
+
+    private static int firstNonRangeWhitespace(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int i = 0;
+        while (i < text.length()) {
+            char ch = text.charAt(i);
+            if (!isRangeWhitespaceOrControl(ch)) break;
+            i++;
+        }
+        return i;
+    }
+
+    private static int lastNonRangeWhitespace(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int end = text.length();
+        while (end > 0) {
+            char ch = text.charAt(end - 1);
+            if (!isRangeWhitespaceOrControl(ch)) break;
+            end--;
+        }
+        return end;
+    }
+
+    private static boolean isRangeWhitespaceOrControl(char ch) {
+        return Character.isWhitespace(ch) || ch == '\u0007' || ch == '\u0008'
+                || ch == '\uFFFC' || ch == '\u0003';
+    }
+
+    private static final class TextRangeShellBundle {
+        final List<ResolvedPageItem> shells;
+        final List<TextRangeCandidate> ranges;
+
+        TextRangeShellBundle(
+                List<ResolvedPageItem> shells,
+                List<TextRangeCandidate> ranges) {
+            this.shells = shells;
+            this.ranges = ranges;
+        }
+    }
+
+    private static final class TextRangeCandidate {
+        final ResolvedTextFrame textFrame;
+        final TextRangeRef range;
+        final double lineTop;
+        final int pageIndex;
+
+        TextRangeCandidate(
+                ResolvedTextFrame textFrame,
+                TextRangeRef range,
+                double lineTop,
+                int pageIndex) {
+            this.textFrame = textFrame;
+            this.range = range;
+            this.lineTop = lineTop;
+            this.pageIndex = pageIndex;
+        }
+    }
+
+    private double[] sourceBounds(ResolvedPageItem item) {
+        if (item == null) return null;
+        double[] b = item.pageRelativeBounds();
+        if (!validBounds(b)) b = item.geometricBounds();
+        return validBounds(b) ? b : null;
+    }
+
+    private static boolean validBounds(double[] b) {
+        return b != null && b.length >= 4
+                && Double.isFinite(b[0]) && Double.isFinite(b[1])
+                && Double.isFinite(b[2]) && Double.isFinite(b[3])
+                && b[2] > b[0] && b[3] > b[1];
+    }
+
+    private static double centerX(double[] b) {
+        return validBounds(b) ? (b[1] + b[3]) / 2.0 : 0.0;
+    }
+
+    private static double centerY(double[] b) {
+        return validBounds(b) ? (b[0] + b[2]) / 2.0 : 0.0;
     }
 
     private TextLayoutContract sourceTextWrapContractForTextFrame(
@@ -1926,6 +2333,7 @@ public final class OwnershipPlanner {
             if (shell.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (shell.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (shell.ownedTextFrameIds != null && shell.ownedTextFrameIds.length > 0) continue;
+            if (shell.ownedTextRanges != null && shell.ownedTextRanges.length > 0) continue;
             warn("TEXTLESS_SHELL_TEXT_ACTION_REPAIR_SUPPRESSED",
                     "plan=" + planRef(shell)
                             + " expectedTextAction=DROP_TEXT because no ownedTextFrameIds are declared");
@@ -4716,7 +5124,19 @@ public final class OwnershipPlanner {
     }
 
     private boolean isAllowedNativeSourceShapePlan(ObjectPlan plan) {
-        return isDirectInlineTextFrameDrawTextPlan(plan);
+        return isDirectInlineTextFrameDrawTextPlan(plan)
+                || isDeclaredTextRangeNativeShellPlan(plan);
+    }
+
+    private static boolean isDeclaredTextRangeNativeShellPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.materialization == Materialization.NATIVE_SOURCE_SHAPE
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.placement == Placement.FLOATING
+                && plan.coordinateSpace == CoordinateSpace.PAGE
+                && plan.ownedTextRanges != null
+                && plan.ownedTextRanges.length > 0;
     }
 
     private boolean isDirectInlineTextFrameDrawTextPlan(ObjectPlan plan) {

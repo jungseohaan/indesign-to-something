@@ -7314,10 +7314,16 @@ function _buildExtractionPlan(doc, ctx, allItems) {
             ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
                     _tableStyleSourceObjectIdsByPageForPagePlaneHide(sourceItems || []);
         }
+        if (typeof _globalSourceBundleTextRangeShellInlineHideCandidates === "function") {
+            ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount =
+                    _globalSourceBundleTextRangeShellInlineHideCandidates(sourceItems || []).length;
+        }
         _marker(ctx.outputDir, "03d01i_pagePlaneTableStyleHide_done");
     } catch (ePagePlaneTableStyleHideFromPlan) {
         ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
                 ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {};
+        ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount =
+                ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount || 0;
         try { _marker(ctx.outputDir, "03d01i_pagePlaneTableStyleHide_fallback"); } catch (ePagePlaneTableStyleHideMarker) {}
     }
     try { writeJson(ctx.outputDir + "/_source_index_stats.json", sourceIndex.stats || {}); } catch (eSourceIndexStats) {}

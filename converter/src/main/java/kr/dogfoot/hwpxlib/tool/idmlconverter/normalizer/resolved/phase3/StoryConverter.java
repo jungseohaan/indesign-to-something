@@ -33,6 +33,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Shell
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextLayoutContract;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextRangeShellPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowAstMaterializer;
@@ -104,6 +105,7 @@ public final class StoryConverter {
                 if (plan.placement != Placement.INLINE) continue;
                 if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
                 if (!ShellRole.isTextShell(plan)) continue;
+                if (plan.ownedTextRanges != null && plan.ownedTextRanges.length > 0) continue;
                 if (plan.ownedTextFrameIds == null) continue;
                 for (int ownedId : plan.ownedTextFrameIds) {
                     if (ownedId == id) return true;
@@ -352,6 +354,7 @@ public final class StoryConverter {
             restoreInlineNanos += System.nanoTime() - stepStart;
             stepStart = System.nanoTime();
             applySourceTextWrapContracts(ctx, sections, blocks);
+            applyTextRangeShellPlans(ctx, sections, blocks);
             preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
             replaceDottedInlineImagesWithTabLeaders(ctx, blocks);
             coalesceDotLeaderAnswerVisualBreaks(blocks);
@@ -1515,6 +1518,7 @@ public final class StoryConverter {
         int observed = 0;
         int applied = 0;
         int insertedBreaks = 0;
+        int spacingAdjusted = 0;
         int skipped = 0;
         for (ASTTextFrameBlock block : new ArrayList<>(blocks)) {
             if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
@@ -1535,9 +1539,12 @@ public final class StoryConverter {
             }
             boolean changedBlock = false;
             Set<ASTParagraph> processed = new HashSet<>();
+            Map<Integer, SourceTextWrapParagraphSpacing> spacingByPara =
+                    sourceTextWrapParagraphSpacingByPara(linesByPara);
+            double defaultIndentToHerePt = sourceTextWrapDefaultIndentToHere(linesByPara);
             for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : linesByPara.entrySet()) {
                 List<ResolvedTextFrame.ComposedLine> lines = entry.getValue();
-                if (lines == null || lines.size() < 2) continue;
+                if (lines == null || lines.isEmpty()) continue;
                 ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
                 if (para == null) {
                     para = paragraphAtComposedParaIndex(block.paragraphs(), entry.getKey(), processed);
@@ -1546,14 +1553,25 @@ public final class StoryConverter {
                     skipped++;
                     continue;
                 }
-                if (insertComposedLineBreaks(para, lines)) {
+                boolean changedParagraph = false;
+                if (lines.size() >= 2 && insertComposedLineBreaks(para, lines)) {
                     applySourceTextWrapAlignment(para, contract);
                     para.squeezeLineWrap(true);
+                    changedParagraph = true;
+                    insertedBreaks += Math.max(0, lines.size() - 1);
+                } else if (lines.size() >= 2) {
+                    skipped++;
+                }
+                if (applySourceTextWrapParagraphSpacing(para, spacingByPara.get(entry.getKey()))) {
+                    changedParagraph = true;
+                    spacingAdjusted++;
+                }
+                if (applySourceTextWrapIndentToHere(para, lines, defaultIndentToHerePt)) {
+                    changedParagraph = true;
+                }
+                if (changedParagraph) {
                     processed.add(para);
                     changedBlock = true;
-                    insertedBreaks += Math.max(0, lines.size() - 1);
-                } else {
-                    skipped++;
                 }
             }
             if (changedBlock) applied++;
@@ -1562,11 +1580,13 @@ public final class StoryConverter {
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsObserved", observed);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.lineCarriers", 0);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.hardLineBreaks", insertedBreaks);
+            ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.paragraphSpacingAdjusted", spacingAdjusted);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsApplied", applied);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.squeezeParagraphs", applied);
             ConversionTiming.metric("stage2.textBuilder.sourceTextWrap.contractsSkipped", skipped);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsObserved", observed);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalHardLineBreaks", insertedBreaks);
+            ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalParagraphSpacingAdjusted", spacingAdjusted);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsApplied", applied);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalSqueezeParagraphs", applied);
             ConversionTiming.addCounter("stage2.textBuilder.sourceTextWrap.totalContractsSkipped", skipped);
@@ -1576,11 +1596,676 @@ public final class StoryConverter {
                         + ",\"applied\":" + applied
                         + ",\"lineCarriers\":0"
                         + ",\"hardLineBreaks\":" + insertedBreaks
+                        + ",\"paragraphSpacingAdjusted\":" + spacingAdjusted
                         + ",\"squeezeParagraphs\":" + applied
                         + ",\"skipped\":" + skipped
-                        + ",\"detail\":\"SOURCE_TEXT_WRAP: source composed-line hard line breaks plus paragraph-local alignment/SQUEEZE inside the original editable TextFrame; per-line floating carriers remain disabled\"}");
+                        + ",\"detail\":\"SOURCE_TEXT_WRAP: source composed-line hard line breaks plus paragraph-local spacing/alignment/SQUEEZE inside the original editable TextFrame; per-line floating carriers remain disabled\"}");
             }
         }
+    }
+
+    private static void applyTextRangeShellPlans(
+            ResolvedBuildContext ctx, List<ASTSection> sections, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || sections == null || blocks == null) return;
+        int observed = 0;
+        int applied = 0;
+        int skipped = 0;
+        Set<String> appliedRanges = new HashSet<>();
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            int textFrameId = parseIntOrMinusOne(domId);
+            if (textFrameId < 0) continue;
+            List<TextRangeShellPlan> plans = ctx.textRangeShellPlansForTextFrame(textFrameId);
+            if (plans.isEmpty()) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+            ASTSection section = sectionContainingBlock(sections, block);
+            if (tf == null || section == null) {
+                skipped += plans.size();
+                continue;
+            }
+            List<TextRangeShellPlan> sorted = new ArrayList<>(plans);
+            sorted.sort((a, b) -> Integer.compare(b.range.paragraphIndex, a.range.paragraphIndex));
+            for (TextRangeShellPlan plan : sorted) {
+                observed++;
+                String key = textRangeShellExecutionKey(plan);
+                if (!appliedRanges.add(key)) continue;
+                int localParaIndex = plan.range.paragraphIndex - Math.max(0, tf.paragraphStart());
+                if (localParaIndex < 0 || localParaIndex >= block.paragraphs().size()) {
+                    localParaIndex = plan.range.paragraphIndex;
+                }
+                if (localParaIndex < 0 || localParaIndex >= block.paragraphs().size()) {
+                    skipped++;
+                    continue;
+                }
+                ASTParagraph sourcePara = block.paragraphs().get(localParaIndex);
+                ASTTextRun labelRunTemplate = copyTextRangeFromParagraph(sourcePara, plan);
+                byte[] shellPng = loadTextRangeShellPng(ctx, plan);
+                if (labelRunTemplate == null || shellPng == null || shellPng.length == 0) {
+                    skipped++;
+                    continue;
+                }
+                ASTTextRun labelRun = removeTextRangeFromParagraph(sourcePara, plan);
+                if (labelRun == null || labelRun.text() == null || labelRun.text().isEmpty()) {
+                    skipped++;
+                    continue;
+                }
+                ASTInlineObject labelObject = buildTextRangeShellInlineObject(plan, labelRunTemplate, shellPng);
+                if (labelObject == null) {
+                    skipped++;
+                    continue;
+                }
+                sourcePara.items().add(0, labelObject);
+                applied++;
+            }
+        }
+        ConversionTiming.metric("stage2.textBuilder.textRangeShells.observed", observed);
+        ConversionTiming.metric("stage2.textBuilder.textRangeShells.applied", applied);
+        ConversionTiming.metric("stage2.textBuilder.textRangeShells.skipped", skipped);
+        if (observed > 0 && ctx.ownershipWarningLines != null) {
+            ctx.ownershipWarningLines.add("{\"code\":\"STAGE2_TEXT_RANGE_SHELLS_EXECUTED\""
+                    + ",\"observed\":" + observed
+                    + ",\"applied\":" + applied
+                    + ",\"skipped\":" + skipped
+                    + ",\"detail\":\"ownedTextRanges were removed from source TextFrame text and materialized as inline imageFill shell + editable drawText objects\"}");
+        }
+    }
+
+    private static ASTInlineObject buildTextRangeShellInlineObject(
+            TextRangeShellPlan plan,
+            ASTTextRun labelRun,
+            byte[] shellPng) {
+        if (plan == null || plan.shellBounds == null || plan.shellBounds.length < 4
+                || labelRun == null || shellPng == null || shellPng.length == 0) {
+            return null;
+        }
+        double top = plan.shellBounds[0];
+        double left = plan.shellBounds[1];
+        double bottom = plan.shellBounds[2];
+        double right = plan.shellBounds[3];
+        if (!(bottom > top && right > left)) return null;
+        long w = CoordinateConverter.pointsToHwpunits(right - left);
+        long h = CoordinateConverter.pointsToHwpunits(bottom - top);
+        if (w <= 0 || h <= 0) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.sourceId("text_range_shell_" + plan.shellDomId);
+        obj.width(w);
+        obj.height(h);
+        obj.imageFillData(shellPng);
+        obj.forceImageFill(true);
+        obj.keepInline(true);
+        obj.affectsLineSpacing(true);
+        obj.textWrapMode("None");
+        obj.anchoredPosition("InlinePosition");
+        obj.verticalJustification("CenterAlign");
+        obj.noAutoLineWrap(true);
+        obj.plannedZOrder(plan.zOrder);
+        obj.plannedVisualLayer("LABEL_BACKDROP");
+
+        ASTParagraph paragraph = new ASTParagraph();
+        paragraph.alignment("CenterAlign");
+        paragraph.spaceBefore(0L);
+        paragraph.spaceAfter(0L);
+        paragraph.lineSpacingType("fixed");
+        paragraph.lineSpacing((int) h);
+        paragraph.addItem(labelRun.copyWithText(plan.range != null ? plan.range.text : labelRun.text()));
+        obj.addParagraph(paragraph);
+        return obj;
+    }
+
+    private static ASTTextRun copyTextRangeFromParagraph(ASTParagraph paragraph, TextRangeShellPlan plan) {
+        if (paragraph == null || plan == null || plan.range == null) return null;
+        ASTTextRun run = textRunAt(paragraph, plan.range.runIndex);
+        if (run != null && run.text() != null) {
+            String text = run.text();
+            int s = Math.max(0, Math.min(plan.range.start, text.length()));
+            int e = Math.max(s, Math.min(plan.range.end, text.length()));
+            if (e > s && plan.range.text != null && plan.range.text.equals(text.substring(s, e))) {
+                return run.copyWithText(text.substring(s, e));
+            }
+        }
+        if (paragraph.items() == null || plan.range.text == null || plan.range.text.isEmpty()) return null;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun textRun = (ASTTextRun) item;
+            String text = textRun.text();
+            if (text != null && text.contains(plan.range.text)) {
+                return textRun.copyWithText(plan.range.text);
+            }
+        }
+        return null;
+    }
+
+    private static byte[] loadTextRangeShellPng(ResolvedBuildContext ctx, TextRangeShellPlan plan) {
+        if (ctx == null || ctx.basePath == null || plan == null) return null;
+        RenderedGroup shell = ctx.inlineObjectById(plan.shellDomId);
+        if (shell == null || shell.file() == null || shell.file().isEmpty()) return null;
+        File pngFile = new File(ctx.basePath, shell.file());
+        if (!pngFile.exists() || !pngFile.isFile()) return null;
+        try {
+            return Files.readAllBytes(pngFile.toPath());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static ASTTextRun removeTextRangeFromParagraph(ASTParagraph paragraph, TextRangeShellPlan plan) {
+        if (paragraph == null || paragraph.items() == null || plan == null || plan.range == null) return null;
+        ASTTextRun run = textRunAt(paragraph, plan.range.runIndex);
+        ASTTextRun removed = null;
+        if (run != null) {
+            removed = removeRangeFromRun(run, plan.range.start, plan.range.end, plan.range.text);
+        }
+        if (removed == null) {
+            removed = removeFirstTextOccurrence(paragraph, plan.range.text);
+        }
+        if (removed != null) {
+            stripLeadingBodySpacing(paragraph);
+            removeEmptyTextRuns(paragraph);
+        }
+        return removed;
+    }
+
+    private static ASTTextRun textRunAt(ASTParagraph paragraph, int runIndex) {
+        if (paragraph == null || paragraph.items() == null || runIndex < 0) return null;
+        int textRunIndex = 0;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            if (textRunIndex == runIndex) return (ASTTextRun) item;
+            textRunIndex++;
+        }
+        return null;
+    }
+
+    private static ASTTextRun removeRangeFromRun(
+            ASTTextRun run,
+            int start,
+            int end,
+            String expectedText) {
+        if (run == null || run.text() == null || expectedText == null || expectedText.isEmpty()) return null;
+        String text = run.text();
+        int s = Math.max(0, Math.min(start, text.length()));
+        int e = Math.max(s, Math.min(end, text.length()));
+        if (e <= s || !expectedText.equals(text.substring(s, e))) {
+            int idx = text.indexOf(expectedText);
+            if (idx < 0) return null;
+            s = idx;
+            e = idx + expectedText.length();
+        }
+        ASTTextRun removed = run.copyWithText(text.substring(s, e));
+        run.text(text.substring(0, s) + text.substring(e));
+        return removed;
+    }
+
+    private static ASTTextRun removeFirstTextOccurrence(ASTParagraph paragraph, String expectedText) {
+        if (paragraph == null || paragraph.items() == null || expectedText == null || expectedText.isEmpty()) {
+            return null;
+        }
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null) continue;
+            int idx = text.indexOf(expectedText);
+            if (idx < 0) continue;
+            ASTTextRun removed = run.copyWithText(expectedText);
+            run.text(text.substring(0, idx) + text.substring(idx + expectedText.length()));
+            return removed;
+        }
+        return null;
+    }
+
+    private static void stripLeadingBodySpacing(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.isEmpty()) continue;
+            String stripped = stripLeadingSourceLabelGap(text);
+            if (!stripped.equals(text)) run.text(stripped);
+            return;
+        }
+    }
+
+    private static String stripLeadingSourceLabelGap(String text) {
+        if (text == null || text.isEmpty()) return "";
+        int i = 0;
+        while (i < text.length()) {
+            char ch = text.charAt(i);
+            if (ch == ' ' || ch == '\t' || ch == '\u0007' || ch == '\u0008') {
+                i++;
+                continue;
+            }
+            break;
+        }
+        return i > 0 ? text.substring(i) : text;
+    }
+
+    private static void removeEmptyTextRuns(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return;
+        Iterator<ASTInlineItem> it = paragraph.items().iterator();
+        while (it.hasNext()) {
+            ASTInlineItem item = it.next();
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text == null || text.isEmpty()) it.remove();
+            }
+        }
+    }
+
+    private static ASTTextFrameBlock buildTextRangeShellBlock(TextRangeShellPlan plan, ASTTextRun labelRun) {
+        if (plan == null || plan.shellBounds == null || plan.shellBounds.length < 4 || labelRun == null) return null;
+        double top = plan.shellBounds[0];
+        double left = plan.shellBounds[1];
+        double bottom = plan.shellBounds[2];
+        double right = plan.shellBounds[3];
+        if (!(bottom > top && right > left)) return null;
+        double w = right - left;
+        double h = bottom - top;
+        ASTTextFrameBlock block = new ASTTextFrameBlock();
+        block.sourceId("text_range_shell_" + plan.shellDomId);
+        block.storyId(plan.storyId);
+        block.x(CoordinateConverter.pointsToHwpunits(left));
+        block.y(CoordinateConverter.pointsToHwpunits(top));
+        block.width(CoordinateConverter.pointsToHwpunits(w));
+        block.height(CoordinateConverter.pointsToHwpunits(h));
+        block.zOrder(plan.zOrder);
+        block.columnCount(1);
+        block.verticalJustification("CenterAlign");
+        block.noAutoLineWrap(true);
+        block.nativeGraphicsAllowed(true);
+        block.forceNativeFill(true);
+        block.plannedShellVisualLayer("LABEL_BACKDROP");
+        block.fillColor(plan.fillColorHex);
+        block.strokeColor(plan.strokeColorHex);
+        block.strokeWeight(plan.strokeWeight);
+        double radius = plan.cornerRadius;
+        if (radius <= 0 && ("Polygon".equals(plan.shellType) || "Rectangle".equals(plan.shellType))) {
+            radius = Math.min(w, h) / 2.0;
+        }
+        if ("Oval".equals(plan.shellType)) {
+            radius = Math.min(w, h) / 2.0;
+        }
+        block.cornerRadius(radius);
+
+        ASTParagraph paragraph = new ASTParagraph();
+        paragraph.alignment("CenterAlign");
+        paragraph.spaceBefore(0L);
+        paragraph.spaceAfter(0L);
+        paragraph.lineSpacingType("fixed");
+        paragraph.lineSpacing((int) CoordinateConverter.pointsToHwpunits(h));
+        paragraph.addItem(labelRun.copyWithText(plan.range != null ? plan.range.text : labelRun.text()));
+        block.addParagraph(paragraph);
+        return block;
+    }
+
+    private static int textRangeShellVisibleZOrder(TextRangeShellPlan plan, ASTTextFrameBlock ownerBlock) {
+        int shellZ = plan != null ? plan.zOrder : 0;
+        int ownerZ = ownerBlock != null ? ownerBlock.zOrder() : shellZ;
+        return Math.max(shellZ, ownerZ + 1);
+    }
+
+    private static ASTSection sectionContainingBlock(List<ASTSection> sections, ASTBlock target) {
+        if (sections == null || target == null) return null;
+        for (ASTSection section : sections) {
+            if (section != null && section.blocks() != null && section.blocks().contains(target)) {
+                return section;
+            }
+        }
+        return null;
+    }
+
+    private static void addBlockByZOrder(ASTSection section, ASTBlock block) {
+        if (section == null || section.blocks() == null || block == null) return;
+        int z = blockZOrder(block);
+        int index = 0;
+        while (index < section.blocks().size()) {
+            ASTBlock existing = section.blocks().get(index);
+            if (blockZOrder(existing) > z) break;
+            index++;
+        }
+        section.blocks().add(index, block);
+    }
+
+    private static int blockZOrder(ASTBlock block) {
+        if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
+        if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
+        if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
+        return Integer.MAX_VALUE;
+    }
+
+    private static String textRangeShellExecutionKey(TextRangeShellPlan plan) {
+        if (plan == null || plan.range == null) return "";
+        return plan.shellDomId + ":" + plan.range.textFrameId + ":"
+                + plan.range.paragraphIndex + ":" + plan.range.runIndex + ":"
+                + plan.range.start + ":" + plan.range.end;
+    }
+
+    private static int parseIntOrMinusOne(String value) {
+        if (value == null || value.isEmpty()) return -1;
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private static double sourceTextWrapDefaultIndentToHere(
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara) {
+        if (linesByPara == null || linesByPara.isEmpty()) return Double.NaN;
+        List<Double> values = new ArrayList<>();
+        for (List<ResolvedTextFrame.ComposedLine> lines : linesByPara.values()) {
+            if (lines == null) continue;
+            for (ResolvedTextFrame.ComposedLine line : lines) {
+                if (line == null || !hasVisibleTextExcludingObjectControls(line.text())) continue;
+                double indent = line.wrapIndentLeft();
+                if (indent >= 0.5 && indent <= 80.0) values.add(indent);
+            }
+        }
+        if (values.isEmpty()) return Double.NaN;
+        values.sort(Double::compareTo);
+        return values.get(values.size() / 2);
+    }
+
+    private static boolean applySourceTextWrapIndentToHere(
+            ASTParagraph para,
+            List<ResolvedTextFrame.ComposedLine> lines,
+            double defaultIndentPt) {
+        if (para == null || para.items() == null || lines == null || lines.isEmpty()) return false;
+        boolean hasIndentControl = false;
+        double indentPt = Double.NaN;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null) continue;
+            String text = line.text();
+            if (text != null && (text.indexOf('\u0007') >= 0 || text.indexOf('\u0008') >= 0)) {
+                hasIndentControl = true;
+            }
+            double lineIndent = line.wrapIndentLeft();
+            if (lineIndent >= 0.5 && lineIndent <= 80.0) {
+                indentPt = Double.isFinite(indentPt) ? Math.min(indentPt, lineIndent) : lineIndent;
+            }
+        }
+        if (!hasIndentControl) return false;
+        if (!Double.isFinite(indentPt) || indentPt <= 0.0) indentPt = defaultIndentPt;
+        if (!Double.isFinite(indentPt) || indentPt <= 0.0) return false;
+
+        long indent = CoordinateConverter.pointsToHwpunits(indentPt);
+        if (indent <= 0) return false;
+        boolean changed = false;
+        if (para.indentToHerePosition() <= 0 || Math.abs(para.indentToHerePosition() - indent) > 5) {
+            para.indentToHerePosition(indent);
+            changed = true;
+        }
+        if (addTabStopIfMissing(para, indent)) {
+            changed = true;
+        }
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || (text.indexOf('\u0007') < 0 && text.indexOf('\u0008') < 0)) continue;
+            String replaced = replaceIndentToHereControlsWithTab(text);
+            if (!replaced.equals(text)) {
+                run.text(replaced);
+                changed = true;
+            }
+        }
+        if (insertIndentToHereTabAfterSourcePrefix(para, lines)) {
+            changed = true;
+        }
+        return changed;
+    }
+
+    private static boolean insertIndentToHereTabAfterSourcePrefix(
+            ASTParagraph para,
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        if (para == null || para.items() == null || lines == null) return false;
+        String prefix = sourceIndentToHerePrefix(lines);
+        if (prefix.isEmpty()) return false;
+
+        List<ASTTextRun> textRuns = new ArrayList<>();
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTTextRun) textRuns.add((ASTTextRun) item);
+        }
+        if (textRuns.isEmpty()) return false;
+
+        int runIndex = -1;
+        int offsetInRun = -1;
+        int cursor = 0;
+        for (int i = 0; i < textRuns.size(); i++) {
+            ASTTextRun run = textRuns.get(i);
+            String text = run.text();
+            if (text == null || text.isEmpty()) continue;
+            int nextCursor = cursor + text.length();
+            if (prefix.length() <= nextCursor) {
+                runIndex = i;
+                offsetInRun = prefix.length() - cursor;
+                break;
+            }
+            cursor = nextCursor;
+        }
+        if (runIndex < 0 || offsetInRun < 0) return false;
+        ASTTextRun run = textRuns.get(runIndex);
+        String text = run.text();
+        if (text == null) text = "";
+        if (offsetInRun < 0 || offsetInRun > text.length()) return false;
+
+        if (offsetInRun < text.length()) {
+            String before = text.substring(0, offsetInRun);
+            String after = stripLeadingHorizontalWhitespace(text.substring(offsetInRun));
+            if (after.startsWith("\t")) return false;
+            run.text(before + "\t" + after);
+            return true;
+        }
+
+        for (int i = runIndex + 1; i < textRuns.size(); i++) {
+            ASTTextRun next = textRuns.get(i);
+            String nextText = next.text();
+            if (nextText == null) nextText = "";
+            String stripped = stripLeadingHorizontalWhitespace(nextText);
+            if (stripped.startsWith("\t")) return false;
+            next.text("\t" + stripped);
+            return true;
+        }
+        return false;
+    }
+
+    private static String sourceIndentToHerePrefix(List<ResolvedTextFrame.ComposedLine> lines) {
+        if (lines == null) return "";
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null || line.text() == null) continue;
+            String text = line.text();
+            int idx = text.indexOf('\u0007');
+            if (idx < 0) idx = text.indexOf('\u0008');
+            if (idx < 0) continue;
+            return stripTrailingHorizontalWhitespace(text.substring(0, idx));
+        }
+        return "";
+    }
+
+    private static String stripLeadingHorizontalWhitespace(String text) {
+        if (text == null || text.isEmpty()) return "";
+        int i = 0;
+        while (i < text.length()) {
+            char ch = text.charAt(i);
+            if (ch == '\n' || ch == '\r' || !Character.isWhitespace(ch)) break;
+            i++;
+        }
+        return i > 0 ? text.substring(i) : text;
+    }
+
+    private static String stripTrailingHorizontalWhitespace(String text) {
+        if (text == null || text.isEmpty()) return "";
+        int end = text.length();
+        while (end > 0) {
+            char ch = text.charAt(end - 1);
+            if (ch == '\n' || ch == '\r' || !Character.isWhitespace(ch)) break;
+            end--;
+        }
+        return end < text.length() ? text.substring(0, end) : text;
+    }
+
+    private static boolean addTabStopIfMissing(ASTParagraph para, long position) {
+        if (para == null || position <= 0) return false;
+        long tolerance = CoordinateConverter.pointsToHwpunits(1.0);
+        if (para.tabStops() != null) {
+            for (ASTTabStop tab : para.tabStops()) {
+                if (tab != null && Math.abs(tab.position() - position) <= tolerance) return false;
+            }
+        }
+        para.addTabStop(new ASTTabStop(position, "left", null));
+        return true;
+    }
+
+    private static String replaceIndentToHereControlsWithTab(String text) {
+        if (text == null || text.isEmpty()) return text != null ? text : "";
+        StringBuilder out = new StringBuilder(text.length());
+        boolean pendingTab = false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\u0007' || ch == '\u0008') {
+                while (out.length() > 0 && Character.isWhitespace(out.charAt(out.length() - 1))
+                        && out.charAt(out.length() - 1) != '\n'
+                        && out.charAt(out.length() - 1) != '\r') {
+                    out.setLength(out.length() - 1);
+                }
+                if (out.length() == 0 || out.charAt(out.length() - 1) != '\t') {
+                    out.append('\t');
+                }
+                pendingTab = true;
+            } else if (pendingTab && Character.isWhitespace(ch)
+                    && ch != '\n' && ch != '\r' && ch != '\t') {
+                continue;
+            } else {
+                out.append(ch);
+                pendingTab = false;
+            }
+        }
+        return out.toString();
+    }
+
+    private static Map<Integer, SourceTextWrapParagraphSpacing> sourceTextWrapParagraphSpacingByPara(
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara) {
+        Map<Integer, SourceTextWrapParagraphSpacing> result = new HashMap<>();
+        if (linesByPara == null || linesByPara.isEmpty()) return result;
+        List<SourceTextWrapParagraphLines> entries = new ArrayList<>();
+        for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : linesByPara.entrySet()) {
+            List<ResolvedTextFrame.ComposedLine> sorted = sortedVisibleComposedLines(entry.getValue());
+            if (sorted.isEmpty()) continue;
+            double firstTop = lineTop(sorted.get(0));
+            if (!isFinitePositive(firstTop)) continue;
+            double intraPitch = medianLinePitch(sorted);
+            entries.add(new SourceTextWrapParagraphLines(entry.getKey(), sorted, firstTop, intraPitch));
+        }
+        entries.sort(Comparator.comparingDouble(e -> e.firstTop));
+        double defaultLinePitch = sourceTextWrapDefaultLinePitch(entries);
+        for (int i = 0; i < entries.size(); i++) {
+            SourceTextWrapParagraphLines current = entries.get(i);
+            SourceTextWrapParagraphLines next = i + 1 < entries.size() ? entries.get(i + 1) : null;
+            double nextFirstTop = next != null ? next.firstTop : Double.NaN;
+            double linePitch = current.intraPitch;
+            if (!isUsefulSourcePitch(linePitch)) {
+                linePitch = defaultLinePitch;
+            }
+            if (!isUsefulSourcePitch(linePitch) && isFinitePositive(nextFirstTop)) {
+                linePitch = nextFirstTop - current.firstTop;
+            }
+            if (!isUsefulSourcePitch(linePitch)) continue;
+
+            Long lineSpacing = CoordinateConverter.pointsToHwpunits(linePitch);
+            Long spaceAfter = null;
+            if (isFinitePositive(nextFirstTop)) {
+                double occupied = linePitch * current.lines.size();
+                double gap = (nextFirstTop - current.firstTop) - occupied;
+                if (gap >= -0.1 && gap < 0.5) {
+                    spaceAfter = 0L;
+                } else if (gap >= 0.5 && gap <= 50.0) {
+                    spaceAfter = CoordinateConverter.pointsToHwpunits(gap);
+                }
+            }
+            result.put(current.paraIndex, new SourceTextWrapParagraphSpacing(lineSpacing, spaceAfter));
+        }
+        return result;
+    }
+
+    private static double sourceTextWrapDefaultLinePitch(List<SourceTextWrapParagraphLines> entries) {
+        if (entries == null || entries.isEmpty()) return Double.NaN;
+        List<Double> values = new ArrayList<>();
+        for (SourceTextWrapParagraphLines entry : entries) {
+            if (entry != null && isUsefulSourcePitch(entry.intraPitch)) values.add(entry.intraPitch);
+        }
+        if (values.isEmpty()) return Double.NaN;
+        values.sort(Double::compareTo);
+        return values.get(values.size() / 2);
+    }
+
+    private static List<ResolvedTextFrame.ComposedLine> sortedVisibleComposedLines(
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        List<ResolvedTextFrame.ComposedLine> sorted = new ArrayList<>();
+        if (lines != null) {
+            for (ResolvedTextFrame.ComposedLine line : lines) {
+                if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+                if (!hasVisibleTextExcludingObjectControls(line.text())) continue;
+                sorted.add(line);
+            }
+        }
+        sorted.sort(Comparator.comparingDouble(StoryConverter::lineTop));
+        return sorted;
+    }
+
+    private static double medianLinePitch(List<ResolvedTextFrame.ComposedLine> lines) {
+        if (lines == null || lines.size() < 2) return Double.NaN;
+        List<Double> deltas = new ArrayList<>();
+        double previous = Double.NaN;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            double top = lineTop(line);
+            if (Double.isFinite(previous)) {
+                double delta = top - previous;
+                if (isUsefulSourcePitch(delta)) deltas.add(delta);
+            }
+            previous = top;
+        }
+        if (deltas.isEmpty()) return Double.NaN;
+        deltas.sort(Double::compareTo);
+        return deltas.get(deltas.size() / 2);
+    }
+
+    private static double lineTop(ResolvedTextFrame.ComposedLine line) {
+        if (line == null || line.bounds() == null || line.bounds().length < 1) return Double.NaN;
+        return line.bounds()[0];
+    }
+
+    private static boolean isFinitePositive(double value) {
+        return Double.isFinite(value) && value > 0.0;
+    }
+
+    private static boolean isUsefulSourcePitch(double pitch) {
+        return Double.isFinite(pitch) && pitch >= 4.0 && pitch <= 50.0;
+    }
+
+    private static boolean applySourceTextWrapParagraphSpacing(
+            ASTParagraph para,
+            SourceTextWrapParagraphSpacing spacing) {
+        if (para == null || spacing == null || spacing.lineSpacing == null || spacing.lineSpacing <= 0) return false;
+        boolean changed = false;
+        para.sourceTextWrapSpacing(true);
+        if (para.lineSpacing() == null || !"fixed".equals(para.lineSpacingType())
+                || Math.abs(para.lineSpacing() - spacing.lineSpacing.intValue()) > 5) {
+            para.lineSpacing(spacing.lineSpacing.intValue());
+            para.lineSpacingType("fixed");
+            changed = true;
+        }
+        if (spacing.spaceAfter != null && spacing.spaceAfter > 0) {
+            long existing = para.spaceAfter() != null ? Math.max(0L, para.spaceAfter()) : 0L;
+            if (Math.abs(existing - spacing.spaceAfter) > 5) {
+                para.spaceAfter(spacing.spaceAfter);
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     private static void applySourceTextWrapAlignment(ASTParagraph para, TextLayoutContract contract) {
@@ -2546,6 +3231,34 @@ public final class StoryConverter {
             this.textOffsetsAfterNormalizedChars = textOffsetsAfterNormalizedChars != null
                     ? textOffsetsAfterNormalizedChars : new int[] { 0 };
             this.textLength = textLength;
+        }
+    }
+
+    private static final class SourceTextWrapParagraphLines {
+        final int paraIndex;
+        final List<ResolvedTextFrame.ComposedLine> lines;
+        final double firstTop;
+        final double intraPitch;
+
+        SourceTextWrapParagraphLines(
+                int paraIndex,
+                List<ResolvedTextFrame.ComposedLine> lines,
+                double firstTop,
+                double intraPitch) {
+            this.paraIndex = paraIndex;
+            this.lines = lines;
+            this.firstTop = firstTop;
+            this.intraPitch = intraPitch;
+        }
+    }
+
+    private static final class SourceTextWrapParagraphSpacing {
+        final Long lineSpacing;
+        final Long spaceAfter;
+
+        SourceTextWrapParagraphSpacing(Long lineSpacing, Long spaceAfter) {
+            this.lineSpacing = lineSpacing;
+            this.spaceAfter = spaceAfter;
         }
     }
 
