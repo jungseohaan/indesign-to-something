@@ -802,6 +802,162 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
         }
     } catch (e) {}
 
+    function _masterDynamicStoryInfo(story) {
+        var rawContents = "";
+        try { rawContents = String(story.contents || ""); } catch (eContents) {}
+        var textVariableCount = 0;
+        try { textVariableCount = story.textVariableInstances.length || 0; } catch (eTextVarCount) {}
+        var hasPageMarker = rawContents.indexOf("\u0018") >= 0
+                || rawContents.indexOf("<?ACE 18?>") >= 0;
+        var stripped = rawContents
+                .replace(/<\?ACE 18\?>/g, "")
+                .replace(/\uFEFF/g, "")
+                .replace(/\uFFFC/g, "")
+                .replace(/\u0016/g, "")
+                .replace(/\u0018/g, "")
+                .replace(/[\s\r\n]/g, "");
+        return {
+            hasPageMarker: hasPageMarker,
+            textVariableCount: textVariableCount,
+            hasTextVariables: textVariableCount > 0,
+            isTextVariableOnly: !hasPageMarker && textVariableCount > 0 && stripped.length === 0
+        };
+    }
+
+    function _masterDynamicStyleName(obj, propName) {
+        try {
+            var value = obj[propName];
+            if (value && value.name !== undefined) return String(value.name);
+            if (value !== undefined && value !== null) return String(value);
+        } catch (eValue) {}
+        return null;
+    }
+
+    function _masterDynamicRunFromRange(range, text) {
+        var run = { text: text };
+        try {
+            var font = range.appliedFont;
+            if (font) run.fontFamily = String(font.name || font);
+        } catch (eFont) {}
+        try { if (range.fontStyle !== undefined && range.fontStyle !== null) run.fontStyle = String(range.fontStyle); } catch (eFontStyle) {}
+        try { if (range.pointSize !== undefined && range.pointSize !== null) run.fontSize = range.pointSize; } catch (eFontSize) {}
+        try {
+            var fill = range.fillColor;
+            if (fill) run.fillColor = String(fill.name || fill);
+        } catch (eFill) {}
+        var charStyle = _masterDynamicStyleName(range, "appliedCharacterStyle");
+        if (charStyle) run.charStyle = charStyle;
+        try { if (range.tracking !== undefined && range.tracking !== null) run.tracking = range.tracking; } catch (eTracking) {}
+        try { if (range.horizontalScale !== undefined && range.horizontalScale !== null) run.horizontalScale = range.horizontalScale; } catch (eHScale) {}
+        try { if (range.verticalScale !== undefined && range.verticalScale !== null) run.verticalScale = range.verticalScale; } catch (eVScale) {}
+        try { if (range.baselineShift !== undefined && range.baselineShift !== null) run.baselineShift = range.baselineShift; } catch (eBaseline) {}
+        try { if (range.position !== undefined && range.position !== null) run.position = String(range.position); } catch (ePosition) {}
+        try { run.underline = !!range.underline; } catch (eUnderline) {}
+        try { run.strikeThru = !!range.strikeThru; } catch (eStrike) {}
+        return run;
+    }
+
+    function _masterDynamicRangeText(range, pageNumStr) {
+        var raw = "";
+        try { raw = String(range.contents || ""); } catch (eRaw) {}
+        var tvText = "";
+        try {
+            var tvs = range.textVariableInstances;
+            for (var tv = 0; tvs && tv < tvs.length; tv++) {
+                try { tvText += String(tvs[tv].resultText || ""); } catch (eTvText) {}
+            }
+        } catch (eTvRange) {}
+        var text = tvText.length > 0 ? tvText : raw;
+        text = text
+                .replace(/<\?ACE 18\?>/g, pageNumStr)
+                .replace(/\u0018/g, pageNumStr)
+                .replace(/[\uFEFF\u0016\uFFFC\u0003\u0007\b]/g, "")
+                .replace(/\r/g, "");
+        return text;
+    }
+
+    function _buildMasterDynamicStoryClone(story, cloneStoryId, pageNumStr, fallbackParagraphStyle,
+            fallbackJustification, fallbackLeading) {
+        var paragraphs = [];
+        try {
+            var sourceParas = story.paragraphs.everyItem().getElements();
+            for (var pi = 0; sourceParas && pi < sourceParas.length; pi++) {
+                var para = sourceParas[pi];
+                var runs = [];
+                var ranges = null;
+                try { ranges = para.textStyleRanges.everyItem().getElements(); } catch (eRanges) { ranges = null; }
+                for (var ri = 0; ranges && ri < ranges.length; ri++) {
+                    var text = _masterDynamicRangeText(ranges[ri], pageNumStr);
+                    if (text.length === 0) continue;
+                    runs.push(_masterDynamicRunFromRange(ranges[ri], text));
+                }
+                if (runs.length === 0) continue;
+                var p = {
+                    styleName: _masterDynamicStyleName(para, "appliedParagraphStyle") || fallbackParagraphStyle || "[단락 스타일 없음]",
+                    leading: null,
+                    autoLeading: null,
+                    justification: null,
+                    spaceBefore: null,
+                    spaceAfter: null,
+                    firstLineIndent: null,
+                    leftIndent: null,
+                    rightIndent: null,
+                    shadingOn: false,
+                    shadingColor: null,
+                    shadingTint: null,
+                    tabStops: [],
+                    runs: runs
+                };
+                try { p.leading = para.leading; } catch (eLeading) { p.leading = fallbackLeading; }
+                try { p.autoLeading = para.autoLeading; } catch (eAutoLeading) {}
+                try { p.justification = String(para.justification); } catch (eJustification) { p.justification = fallbackJustification || null; }
+                try { p.spaceBefore = para.spaceBefore; } catch (eSpaceBefore) {}
+                try { p.spaceAfter = para.spaceAfter; } catch (eSpaceAfter) {}
+                try { p.firstLineIndent = para.firstLineIndent; } catch (eFirstIndent) {}
+                try { p.leftIndent = para.leftIndent; } catch (eLeftIndent) {}
+                try { p.rightIndent = para.rightIndent; } catch (eRightIndent) {}
+                paragraphs.push(p);
+            }
+        } catch (eBuildDynamic) {}
+        if (paragraphs.length === 0) {
+            paragraphs.push({
+                styleName: fallbackParagraphStyle || "[단락 스타일 없음]",
+                leading: fallbackLeading !== undefined ? fallbackLeading : null,
+                autoLeading: null,
+                justification: fallbackJustification || null,
+                spaceBefore: null, spaceAfter: null,
+                firstLineIndent: null, leftIndent: null, rightIndent: null,
+                shadingOn: false, shadingColor: null, shadingTint: null,
+                tabStops: [], runs: [{ text: pageNumStr }]
+            });
+        }
+        var length = 0;
+        for (var lp = 0; lp < paragraphs.length; lp++) {
+            for (var lr = 0; paragraphs[lp].runs && lr < paragraphs[lp].runs.length; lr++) {
+                length += String(paragraphs[lp].runs[lr].text || "").length;
+            }
+        }
+        return {
+            id: cloneStoryId,
+            length: length,
+            paragraphCount: paragraphs.length,
+            paragraphs: paragraphs,
+            tables: []
+        };
+    }
+
+    function _masterDynamicStoryPlainText(storyClone) {
+        var out = "";
+        for (var pi = 0; storyClone && storyClone.paragraphs && pi < storyClone.paragraphs.length; pi++) {
+            if (pi > 0) out += "\n";
+            var para = storyClone.paragraphs[pi];
+            for (var ri = 0; para.runs && ri < para.runs.length; ri++) {
+                out += String(para.runs[ri].text || "");
+            }
+        }
+        return out;
+    }
+
     // 4) 마스터 스프레드 순회 → 각 TextFrame 인스턴스화
     var msArr = [];
     try { msArr = doc.masterSpreads.everyItem().getElements(); } catch (e) {}
@@ -832,19 +988,20 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             try { cls = classifyTextFrameCached(mtf); } catch (e) {}
             var hashiraSpecialType = null; // "pagenum" | "textvar"
             var hashiraTextVarResolved = null;
+            var hashiraDynamicInfo = null;
             if (s25 && s25.hashiraEditable) {
                 var hashiraStoryContents = "";
                 var hashiraTextVariableInstances = null;
                 try { hashiraStoryContents = mtf.parentStory.contents || ""; } catch (eHSC) {}
                 try { hashiraTextVariableInstances = mtf.parentStory.textVariableInstances; } catch (eHTVI0) {}
+                hashiraDynamicInfo = _masterDynamicStoryInfo(mtf.parentStory);
 
                 // Case A: auto page number TF. It uses the auto page marker but
                 // does not expose TextVariableInstance entries. This must be
                 // resolved in the source extraction stage, not recreated later
                 // by Java master-page fallback code.
                 try {
-                    if (hashiraStoryContents.indexOf("\u0018") >= 0
-                            && (!hashiraTextVariableInstances || hashiraTextVariableInstances.length === 0)) {
+                    if (hashiraDynamicInfo.hasPageMarker) {
                         hashiraSpecialType = "pagenum";
                     }
                 } catch (eHP) {}
@@ -852,7 +1009,8 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 // Case B: text variable TF (contents\uFEFF\u0016\uFFFC 이외 가시 텍스트 없음)
                 if (!hashiraSpecialType) {
                     try {
-                        if (hashiraTextVariableInstances && hashiraTextVariableInstances.length > 0) {
+                        if (hashiraDynamicInfo.isTextVariableOnly
+                                && hashiraTextVariableInstances && hashiraTextVariableInstances.length > 0) {
                             var tvStripRaw = "";
                             try { tvStripRaw = hashiraStoryContents.replace(/\uFEFF/g, "").replace(/\uFFFC/g, "").replace(/\u0016/g, "").replace(/\u0018/g, "").replace(/[\s\r\n]/g, ""); } catch (eTS) {}
                             if (tvStripRaw.length === 0) {
@@ -869,8 +1027,8 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     } catch (eHTF) {}
                 }
             }
-            // textvar(running header)는 resolved master TF로 새 배치하지 않는다.
-            // 기존 master TF 안 placeholder 치환 경로만 사용한다.
+            // textvar-only(running header)는 resolved master TF로 새 배치하지 않는다.
+            // page marker가 섞인 동적 하시라는 페이지 번호까지 함께 사라지므로 pagenum 경로로 clone한다.
             if (hashiraSpecialType === "textvar") continue;
             if (cls !== "editable" && !hashiraSpecialType) continue;
             var baseId = ""; try { baseId = mtf.id.toString(); } catch (e) { continue; }
@@ -1004,11 +1162,14 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                         ];
                     }
                 } catch (e) {}
+                var dynamicStoryClone = null;
                 // hashira special: per-page frameVisibleText 오버라이드
                 if (hashiraSpecialType === "pagenum") {
                     var pageNumStr = "";
                     try { pageNumStr = String(doc.pages[docPgIdx].name); } catch (ePN) {}
-                    clone.frameVisibleText = pageNumStr;
+                    dynamicStoryClone = _buildMasterDynamicStoryClone(mtf.parentStory, cloneStoryId, pageNumStr,
+                            hashiraParaStyleName, hashiraJustification, hashiraLeading);
+                    clone.frameVisibleText = _masterDynamicStoryPlainText(dynamicStoryClone);
                 } else if (hashiraSpecialType === "textvar") {
                     clone.frameVisibleText = hashiraTextVarResolved;
                 }
@@ -1019,7 +1180,10 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 // 스토리도 clone (synthetic id) — Java StoryConverter 가 독립 처리.
                 if (cloneStoryId) {
                     var stClone;
-                    if (hashiraSpecialType) {
+                    if (hashiraSpecialType && dynamicStoryClone) {
+                        stories.push(dynamicStoryClone);
+                        storyClones++;
+                    } else if (hashiraSpecialType) {
                         // hashira special: synthetic story — resolved text 직접 삽입
                         var hResolvedText = clone.frameVisibleText || "";
                         var hRun = { text: hResolvedText };
