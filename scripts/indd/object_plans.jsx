@@ -2599,7 +2599,11 @@ function _isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourc
             return false;
         }
     }
-    if (!_objectPlanSourceHasAxisAlignedRotation(item.absoluteRotationAngle)) return false;
+    if (kind === "GraphicLine") {
+        if (!_objectPlanSourceHasOrthogonalRotation(item.absoluteRotationAngle)) return false;
+    } else if (!_objectPlanSourceHasAxisAlignedRotation(item.absoluteRotationAngle)) {
+        return false;
+    }
     if (Math.abs(Number(item.absoluteShearAngle || 0)) > 0.1) return false;
     if (item.hasDropShadow === true || item.gradientFeatherApplied === true) return false;
     if (!_objectPlanSourceHasVisibleFillOrStroke(item)) return false;
@@ -2618,6 +2622,14 @@ function _objectPlanSourceHasAxisAlignedRotation(angle) {
     return normalized <= 0.1;
 }
 
+function _objectPlanSourceHasOrthogonalRotation(angle) {
+    var value = Math.abs(Number(angle || 0));
+    if (isNaN(value)) return true;
+    var normalized = value % 90;
+    normalized = Math.min(normalized, 90 - normalized);
+    return normalized <= 0.1;
+}
+
 function _objectPlanSourceHasVisibleFillOrStroke(item) {
     if (!item) return false;
     var fill = String(item.fillColorName || item.fillColor || "");
@@ -2626,6 +2638,73 @@ function _objectPlanSourceHasVisibleFillOrStroke(item) {
     var visibleFill = fill && fill !== "None" && fill !== "[None]";
     var visibleStroke = stroke && stroke !== "None" && stroke !== "[None]" && strokeWeight > 0;
     return visibleFill || visibleStroke;
+}
+
+function _objectPlanSourceHasVisibleFillOnly(item) {
+    if (!item) return false;
+    var fill = String(item.fillColorName || item.fillColor || "");
+    var stroke = String(item.strokeColorName || item.strokeColor || "");
+    var strokeWeight = Number(item.strokeWeight || 0);
+    var visibleFill = fill && fill !== "None" && fill !== "[None]";
+    var visibleStroke = stroke && stroke !== "None" && stroke !== "[None]" && strokeWeight > 0;
+    return visibleFill && !visibleStroke;
+}
+
+function _objectPlanSourceHasForegroundTableOverlay(item, textFrameId, tableOwnerBounds, sourceById) {
+    if (!item || !sourceById || item.parentId === null || item.parentId === undefined) return false;
+    var parentId = String(item.parentId);
+    var sourceId = Number(item.id);
+    var sourceZ = Number(item.zOrder || 0);
+    var sourceBounds = _objectPlanSourceBounds(item);
+    for (var key in sourceById) {
+        if (!sourceById.hasOwnProperty(key)) continue;
+        var sibling = sourceById[key];
+        if (!sibling || sibling.parentId === null || sibling.parentId === undefined) continue;
+        if (String(sibling.parentId) !== parentId) continue;
+        var siblingId = Number(sibling.id);
+        if (isNaN(siblingId) || siblingId === sourceId || siblingId === Number(textFrameId)) continue;
+        if (sibling.visible === false || sibling.hiddenLayer === true || sibling.nonprinting === true) continue;
+        if (sibling.sourceHidden === true || sibling.hiddenByParent === true) continue;
+        if (item.pageIndex !== undefined && sibling.pageIndex !== undefined
+                && Number(item.pageIndex) !== Number(sibling.pageIndex)) continue;
+        var siblingZ = Number(sibling.zOrder || 0);
+        if (!isNaN(sourceZ) && !isNaN(siblingZ) && siblingZ <= sourceZ) continue;
+        var siblingBounds = _objectPlanSourceBounds(sibling);
+        if (!_objectPlanBoundsTouchOrOverlap(sourceBounds, siblingBounds, 0.75)
+                && !_objectPlanBoundsTouchOrOverlap(tableOwnerBounds, siblingBounds, 0.75)) {
+            continue;
+        }
+        if (_objectPlanSourceIsTableForegroundOverlay(sibling, textFrameId, sourceById, 0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function _objectPlanSourceIsTableForegroundOverlay(item, textFrameId, sourceById, depth) {
+    if (!item || depth > 32) return false;
+    var id = Number(item.id);
+    if (!isNaN(id) && id === Number(textFrameId)) return false;
+    var kind = _objectPlanSourceKind(item);
+    if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+    if (kind === "TextFrame") return _objectPlanSourceHasVisibleFillOrStroke(item);
+    if (kind === "GraphicLine") return false;
+    var childIds = _objectPlanSourceChildIds(item, sourceById);
+    if (!childIds || childIds.length === 0) return false;
+    for (var i = 0; i < childIds.length; i++) {
+        var child = sourceById ? sourceById[String(childIds[i])] : null;
+        if (_objectPlanSourceIsTableForegroundOverlay(child, textFrameId, sourceById, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function _objectPlanBoundsTouchOrOverlap(a, b, tolerance) {
+    if (!a || !b || a.length < 4 || b.length < 4) return false;
+    var t = Number(tolerance || 0);
+    return Math.max(Number(a[0]), Number(b[0])) <= Math.min(Number(a[2]), Number(b[2])) + t
+            && Math.max(Number(a[1]), Number(b[1])) <= Math.min(Number(a[3]), Number(b[3])) + t;
 }
 
 function _objectPlanBoundsNearOrInside(container, child, tolerance) {
@@ -4665,6 +4744,7 @@ function _objectPlanEligibleForPageBackgroundPlane(plan) {
     if (!plan) return false;
     if (plan.absorbedByObjectPlanId) return false;
     if (plan.compositeRole === "table_carrier_textless_shell"
+            || plan.compositeRole === "table_carrier_sibling_decoration"
             || plan.slotRole === "table_textless_shell_slot") {
         return false;
     }

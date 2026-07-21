@@ -6812,7 +6812,11 @@ public final class OwnershipPlanner {
         String type = safe(item.type());
         if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)) return false;
         if (item.cornerRadius() > 0.01) return false;
-        if (!isAxisAlignedRotation(item.absoluteRotationAngle(), 0.1)) return false;
+        if ("GraphicLine".equals(type)) {
+            if (!isOrthogonalRotation(item.absoluteRotationAngle(), 0.1)) return false;
+        } else if (!isAxisAlignedRotation(item.absoluteRotationAngle(), 0.1)) {
+            return false;
+        }
         if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
         if (item.hasDropShadow()) return false;
         if (item.gradientFeatherApplied()) return false;
@@ -6822,6 +6826,12 @@ public final class OwnershipPlanner {
     private static boolean isAxisAlignedRotation(double angle, double tolerance) {
         double normalized = Math.abs(angle) % 180.0;
         normalized = Math.min(normalized, 180.0 - normalized);
+        return normalized <= tolerance;
+    }
+
+    private static boolean isOrthogonalRotation(double angle, double tolerance) {
+        double normalized = Math.abs(angle) % 90.0;
+        normalized = Math.min(normalized, 90.0 - normalized);
         return normalized <= tolerance;
     }
 

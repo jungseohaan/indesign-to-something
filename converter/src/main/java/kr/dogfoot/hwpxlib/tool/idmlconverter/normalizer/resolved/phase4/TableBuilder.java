@@ -45,7 +45,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -650,8 +653,253 @@ public final class TableBuilder {
         } else {
             stripTableCellDecoration(result);
         }
+        applyPlannedTableCarrierCellVisuals(ctx, idmlTable, result);
         traceTableCells(ctx, "TableBuilder.afterStyleSlotPolicy", idmlTable, result);
         return result;
+    }
+
+    private static void applyPlannedTableCarrierCellVisuals(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || idmlTable == null || table == null) return;
+        String carrierParentId = tableCarrierParentId(ctx, idmlTable);
+        if (carrierParentId == null || carrierParentId.isEmpty()) return;
+        List<RenderedGroup> rendered = ctx.resolvedData.allRenderedFloatingItems();
+        if (rendered == null || rendered.isEmpty()) return;
+        if (ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()) return;
+
+        int applied = 0;
+        Set<String> seenPlans = new HashSet<>();
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (!isPlannedTableCarrierCellVisual(plan)) continue;
+            if (!planSourcesBelongToCarrier(ctx, plan, carrierParentId)) continue;
+            String seenKey = plan.objectPlanId != null ? plan.objectPlanId : plan.candidateId;
+            if (seenKey != null && !seenPlans.add(seenKey)) continue;
+            RenderedGroup rg = renderedGroupForPlan(rendered, plan);
+            if (rg == null) continue;
+            double[] cellBounds = normalizeSourceBoundsForTable(ctx, table,
+                    validBounds(plan.bounds) ? plan.bounds : rg.bounds());
+            ASTTableCell cell = targetCellForRenderedTableVisual(table, cellBounds);
+            if (cell == null) continue;
+            ASTInlineObject object = tableCellVisualInlineObject(ctx, plan, rg, cellBounds);
+            if (object == null) continue;
+            addVisualObjectToCell(cell, object);
+            markTableCellVisualHandled(ctx, plan, rg);
+            applied++;
+        }
+        if (applied > 0 && ctx.debugAst) {
+            table.debugOrNew().note("planned table carrier cell visuals applied: " + applied);
+        }
+    }
+
+    private static RenderedGroup renderedGroupForPlan(List<RenderedGroup> rendered, ObjectPlan plan) {
+        if (rendered == null || plan == null) return null;
+        RenderedGroup fallback = null;
+        for (RenderedGroup rg : rendered) {
+            if (rg == null) continue;
+            if (plan.renderId != null && rg.id() == plan.renderId) {
+                if (sameText(rg.file(), plan.file)) return rg;
+                if (fallback == null) fallback = rg;
+            }
+            if (plan.candidateId != null && plan.candidateId.equals(rg.candidateId())) {
+                if (sameText(rg.file(), plan.file)) return rg;
+                if (fallback == null) fallback = rg;
+            }
+            if (plan.file != null && !plan.file.isEmpty() && plan.file.equals(rg.file())
+                    && sameIntSet(plan.exportSourceObjectIds, rg.exportSourceObjectIds())) {
+                return rg;
+            }
+        }
+        return fallback;
+    }
+
+    private static boolean sameText(String a, String b) {
+        if (a == null || a.isEmpty()) return b == null || b.isEmpty();
+        return a.equals(b);
+    }
+
+    private static boolean sameIntSet(int[] a, int[] b) {
+        if (a == null || b == null || a.length != b.length) return false;
+        Set<Integer> seen = new HashSet<>();
+        for (int v : a) seen.add(v);
+        for (int v : b) {
+            if (!seen.remove(v)) return false;
+        }
+        return seen.isEmpty();
+    }
+
+    private static boolean isPlannedTableCarrierCellVisual(ObjectPlan plan) {
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (!"pass.decoration_groups".equals(plan.planPassId)) return false;
+        if (plan.slotRole == null) return false;
+        return "table_cell_content_visual_slot".equals(plan.slotRole)
+                || "table_cell_shell_slot".equals(plan.slotRole);
+    }
+
+    private static String tableCarrierParentId(ResolvedBuildContext ctx, IDMLTable idmlTable) {
+        String storyId = tableStoryDomId(idmlTable);
+        if (storyId == null || storyId.isEmpty()) return null;
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || !storyId.equals(tf.storyId())) continue;
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(tf.id());
+            if (item != null && item.parentId() != null && !item.parentId().isEmpty()) {
+                return item.parentId();
+            }
+        }
+        return null;
+    }
+
+    private static String tableStoryDomId(IDMLTable idmlTable) {
+        if (idmlTable == null || idmlTable.selfId() == null) return null;
+        String selfId = idmlTable.selfId();
+        int i = selfId.indexOf('i');
+        if (!selfId.startsWith("u") || i <= 1) return null;
+        try {
+            return String.valueOf(Integer.parseInt(selfId.substring(1, i), 16));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static boolean planSourcesBelongToCarrier(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            String carrierParentId) {
+        if (ctx == null || ctx.resolvedData == null || plan == null || carrierParentId == null) return false;
+        int[] ids = plan.exportSourceObjectIds != null && plan.exportSourceObjectIds.length > 0
+                ? plan.exportSourceObjectIds
+                : plan.sourceObjectIds;
+        for (int id : ids) {
+            if (sourceHasAncestor(ctx, id, carrierParentId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean sourceHasAncestor(
+            ResolvedBuildContext ctx,
+            int sourceId,
+            String ancestorId) {
+        if (sourceId < 0 || ancestorId == null || ancestorId.isEmpty()) return false;
+        Set<String> visited = new HashSet<>();
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+        while (item != null) {
+            String parentId = item.parentId();
+            if (parentId == null || parentId.isEmpty()) return false;
+            if (ancestorId.equals(parentId)) return true;
+            if (!visited.add(parentId)) return false;
+            item = ctx.resolvedData.getPageItem(parentId);
+        }
+        return false;
+    }
+
+    private static ASTTableCell targetCellForRenderedTableVisual(
+            ASTTable table,
+            double[] bounds) {
+        ASTTableCell centered = cellContainingSourceCenter(table, bounds);
+        if (centered != null) return centered;
+        List<ASTTableCell> covered = cellsCoveredBySource(table, bounds);
+        return covered.isEmpty() ? null : covered.get(0);
+    }
+
+    private static ASTTableCell cellContainingSourceCenter(ASTTable table, double[] sourceBounds) {
+        if (!validBounds(sourceBounds)) return null;
+        double y = (sourceBounds[0] + sourceBounds[2]) / 2.0;
+        double x = (sourceBounds[1] + sourceBounds[3]) / 2.0;
+        ASTTableCell best = null;
+        double bestArea = Double.MAX_VALUE;
+        for (CellPlacement placement : cellPlacements(table)) {
+            if (placement == null || placement.cell == null) continue;
+            if (y < placement.top - 0.75 || y > placement.bottom + 0.75
+                    || x < placement.left - 0.75 || x > placement.right + 0.75) {
+                continue;
+            }
+            double area = Math.max(0.0, placement.bottom - placement.top)
+                    * Math.max(0.0, placement.right - placement.left);
+            if (best == null || area < bestArea) {
+                best = placement.cell;
+                bestArea = area;
+            }
+        }
+        return best;
+    }
+
+    private static ASTInlineObject tableCellVisualInlineObject(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            double[] bounds) {
+        if (ctx == null || rg == null || rg.file() == null || rg.file().isEmpty()) return null;
+        File file = new File(ctx.resolvedData.basePath(), rg.file());
+        if (!file.isFile()) return null;
+        byte[] data;
+        BufferedImage image = null;
+        try {
+            data = Files.readAllBytes(file.toPath());
+            image = ImageIO.read(file);
+        } catch (Exception e) {
+            return null;
+        }
+        if (!validBounds(bounds)) return null;
+        long width = CoordinateConverter.pointsToHwpunits(Math.max(0.1, bounds[3] - bounds[1]));
+        long height = CoordinateConverter.pointsToHwpunits(Math.max(0.1, bounds[2] - bounds[0]));
+        if (width <= 0 || height <= 0) return null;
+        ASTInlineObject object = new ASTInlineObject();
+        object.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
+        object.sourceId(plan != null && plan.objectPlanId != null ? plan.objectPlanId : String.valueOf(rg.id()));
+        object.imageFormat("png");
+        object.imageData(data);
+        object.imagePath(rg.file());
+        object.bundlePath(rg.file());
+        object.width(width);
+        object.height(height);
+        object.resolvedWidth(width);
+        object.resolvedHeight(height);
+        object.resolvedPageX(CoordinateConverter.pointsToHwpunits(bounds[1]));
+        object.resolvedPageY(CoordinateConverter.pointsToHwpunits(bounds[0]));
+        object.keepInline(true);
+        object.affectsLineSpacing(true);
+        object.plannedZOrder(plan != null ? plan.zOrder : rg.zOrder());
+        object.plannedVisualLayer(plan != null && plan.visualLayer != null
+                ? plan.visualLayer.name()
+                : rg.visualLayer());
+        if (image != null) {
+            object.pixelWidth(image.getWidth());
+            object.pixelHeight(image.getHeight());
+        }
+        return object;
+    }
+
+    private static void addVisualObjectToCell(ASTTableCell cell, ASTInlineObject object) {
+        if (cell == null || object == null) return;
+        ASTParagraph paragraph = new ASTParagraph();
+        paragraph.alignment("center");
+        paragraph.items().add(object);
+        if (cell.paragraphs() == null || cell.paragraphs().isEmpty()) {
+            cell.addParagraph(paragraph);
+        } else {
+            cell.paragraphs().add(paragraph);
+        }
+    }
+
+    private static void markTableCellVisualHandled(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            RenderedGroup rg) {
+        if (ctx == null) return;
+        if (rg != null) ctx.markRenderedVisualHandled(rg.id());
+        markIdsHandled(ctx, plan != null ? plan.sourceObjectIds : null);
+        markIdsHandled(ctx, plan != null ? plan.visualSourceObjectIds : null);
+        markIdsHandled(ctx, plan != null ? plan.exportSourceObjectIds : null);
+        markIdsHandled(ctx, rg != null ? rg.sourceObjectIds() : null);
+        markIdsHandled(ctx, rg != null ? rg.exportSourceObjectIds() : null);
+    }
+
+    private static void markIdsHandled(ResolvedBuildContext ctx, int[] ids) {
+        if (ctx == null || ids == null) return;
+        for (int id : ids) {
+            if (id >= 0) ctx.markRenderedVisualHandled(id);
+        }
     }
 
     private static void traceTableCells(
@@ -776,7 +1024,18 @@ public final class TableBuilder {
         return ctx != null
                 && idmlTable.selfId() != null
                 && (ctx.isAnchoredNestedTableSource(idmlTable.selfId())
-                || ctx.isTableStyleOwnedByObjectPlan(idmlTable.selfId()));
+                || ctx.isTableStyleOwnedByObjectPlan(idmlTable.selfId())
+                || hasDeclaredTableStylePlanForTable(ctx, idmlTable));
+    }
+
+    private static boolean hasDeclaredTableStylePlanForTable(ResolvedBuildContext ctx, IDMLTable idmlTable) {
+        if (ctx == null || idmlTable == null || idmlTable.selfId() == null) return false;
+        int tableId = parseFlexibleId(idmlTable.selfId());
+        if (tableId < 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectId(tableId)) {
+            if (isDeclaredTableStylePlan(plan)) return true;
+        }
+        return false;
     }
 
     private static ResolvedTextFrame anchoredNestedTableTextFrame(ResolvedBuildContext ctx, IDMLTable idmlTable) {
@@ -980,6 +1239,9 @@ public final class TableBuilder {
         if (item == null || item.sourceHidden()) return false;
         String type = item.type();
         if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)) return false;
+        if ("GraphicLine".equals(type)) {
+            return hasVisibleStroke(item);
+        }
         if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
         if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
         if (item.hasDropShadow() || item.gradientFeatherApplied()) return false;
@@ -991,7 +1253,8 @@ public final class TableBuilder {
             ASTTable table,
             ResolvedPageItem item,
             String fill) {
-        List<ASTTableCell> cells = cellsCoveredBySource(table, boundsOf(ctx, item));
+        double[] sourceBounds = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
+        List<ASTTableCell> cells = cellsCoveredBySource(table, sourceBounds);
         if (cells.isEmpty() && singleCell(table) != null) {
             cells.add(singleCell(table));
         }
@@ -1010,7 +1273,7 @@ public final class TableBuilder {
             ResolvedPageItem item) {
         if (table == null || item == null) return false;
         if (singleCell(table) != null) return true;
-        double[] sourceBounds = boundsOf(ctx, item);
+        double[] sourceBounds = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
         if ("Rectangle".equals(item.type())
                 && boundsCover(sourceBounds, tableBoundsPoints(table), 0.75)) {
             return false;
@@ -1023,7 +1286,7 @@ public final class TableBuilder {
             ASTTable table,
             ResolvedPageItem item,
             ASTTableCell.CellBorder border) {
-        double[] sourceBounds = boundsOf(ctx, item);
+        double[] sourceBounds = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
         if (boundsCover(tableBoundsPoints(table), sourceBounds, 0.75)) {
             applyOuterBorder(table, border);
             return true;
@@ -1046,7 +1309,7 @@ public final class TableBuilder {
             ASTTable table,
             ResolvedPageItem item,
             ASTTableCell.CellBorder border) {
-        double[] line = boundsOf(ctx, item);
+        double[] line = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
         if (line == null || line.length < 4) return false;
         double height = Math.abs(line[2] - line[0]);
         double width = Math.abs(line[3] - line[1]);
@@ -1096,6 +1359,44 @@ public final class TableBuilder {
             }
         }
         return cells;
+    }
+
+    private static double[] normalizeSourceBoundsForTable(
+            ResolvedBuildContext ctx,
+            ASTTable table,
+            double[] sourceBounds) {
+        if (!validStyleSourceBounds(sourceBounds) || table == null) return sourceBounds;
+        double[] tableBounds = tableBoundsPoints(table);
+        if (!validBounds(tableBounds)) return sourceBounds;
+        double originalScore = tableOverlapScore(tableBounds, sourceBounds);
+        double scale = ctx != null && ctx.resolvedData != null && ctx.resolvedData.scaleFactor() > 0.0
+                ? ctx.resolvedData.scaleFactor()
+                : 1.0;
+        if (Math.abs(scale - 1.0) < 0.001) return sourceBounds;
+        double[] scaled = new double[] {
+                sourceBounds[0] * scale,
+                sourceBounds[1] * scale,
+                sourceBounds[2] * scale,
+                sourceBounds[3] * scale
+        };
+        double scaledScore = tableOverlapScore(tableBounds, scaled);
+        return scaledScore > originalScore ? scaled : sourceBounds;
+    }
+
+    private static double tableOverlapScore(double[] tableBounds, double[] sourceBounds) {
+        if (!validBounds(tableBounds) || !validStyleSourceBounds(sourceBounds)) return 0.0;
+        double score = boundsOverlapRatio(tableBounds, sourceBounds);
+        double centerY = (sourceBounds[0] + sourceBounds[2]) / 2.0;
+        double centerX = (sourceBounds[1] + sourceBounds[3]) / 2.0;
+        if (centerY >= tableBounds[0] - 0.75 && centerY <= tableBounds[2] + 0.75
+                && centerX >= tableBounds[1] - 0.75 && centerX <= tableBounds[3] + 0.75) {
+            score += 1.0;
+        }
+        if (boundsCover(tableBounds, sourceBounds, 0.75)
+                || boundsCover(sourceBounds, tableBounds, 0.75)) {
+            score += 0.5;
+        }
+        return score;
     }
 
     private static final class CellPlacement {
@@ -1223,9 +1524,9 @@ public final class TableBuilder {
 
     private static double[] boundsOf(ResolvedBuildContext ctx, ResolvedPageItem item) {
         if (item == null) return null;
-        if (validBounds(item.pageRelativeBounds())) return item.pageRelativeBounds();
-        if (validBounds(item.visibleBounds())) return normalizePageItemBounds(ctx, item, item.visibleBounds());
-        if (validBounds(item.geometricBounds())) return normalizePageItemBounds(ctx, item, item.geometricBounds());
+        if (validStyleSourceBounds(item.pageRelativeBounds())) return item.pageRelativeBounds();
+        if (validStyleSourceBounds(item.visibleBounds())) return normalizePageItemBounds(ctx, item, item.visibleBounds());
+        if (validStyleSourceBounds(item.geometricBounds())) return normalizePageItemBounds(ctx, item, item.geometricBounds());
         return null;
     }
 
@@ -1233,13 +1534,12 @@ public final class TableBuilder {
             ResolvedBuildContext ctx,
             ResolvedPageItem item,
             double[] bounds) {
-        if (!validBounds(bounds)) return bounds;
+        if (!validStyleSourceBounds(bounds)) return bounds;
         if (ctx == null || ctx.resolvedData == null || item == null || item.pageIndex() < 0) {
             return bounds;
         }
         int pageIndex = item.pageIndex();
-        if (pageIndex >= ctx.resolvedData.pages().size()) return bounds;
-        ResolvedPage page = ctx.resolvedData.pages().get(pageIndex);
+        ResolvedPage page = resolvedPageByIndex(ctx, pageIndex);
         double[] pageBounds = page != null ? page.bounds() : null;
         if (!validBounds(pageBounds)) return bounds;
         double pageTop = pageBounds[0];
@@ -1256,9 +1556,27 @@ public final class TableBuilder {
         };
     }
 
+    private static ResolvedPage resolvedPageByIndex(ResolvedBuildContext ctx, int pageIndex) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null) return null;
+        for (ResolvedPage page : ctx.resolvedData.pages()) {
+            if (page != null && page.index() == pageIndex) return page;
+        }
+        if (pageIndex >= 0 && pageIndex < ctx.resolvedData.pages().size()) {
+            return ctx.resolvedData.pages().get(pageIndex);
+        }
+        return null;
+    }
+
     private static boolean validBounds(double[] bounds) {
         if (bounds == null || bounds.length < 4) return false;
         return bounds[2] > bounds[0] && bounds[3] > bounds[1];
+    }
+
+    private static boolean validStyleSourceBounds(double[] bounds) {
+        if (bounds == null || bounds.length < 4) return false;
+        return bounds[2] >= bounds[0]
+                && bounds[3] >= bounds[1]
+                && (bounds[2] > bounds[0] || bounds[3] > bounds[1]);
     }
 
     private static List<TablePlacement> splitSpreadWideTable(
