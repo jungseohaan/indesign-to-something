@@ -153,6 +153,15 @@ public class ASTMathGrouper {
                 result.add(run);
                 continue;
             }
+            // SPEC-050: overline(선분) 마커 Ó(U+00D3)를 담은 런은 기하 선분 표기
+            // (PA̅, OB̅)이지 화학식이 아니다. 원소기호로 분리하면 "PAÓ=PBÓ"가
+            // ["P","AÓ=","PB","Ó"]로 쪼개져 overline 마킹이 PA 전체를 못 보고 A만
+            // 감싸며, P는 일반 텍스트로 새고 PB의 overline은 소거된다(u5 p166 실측).
+            // Ó는 화학식에 등장하지 않으므로 이 스킵이 정상 화학식 분리를 저해하지 않는다.
+            if (text.indexOf('Ó') >= 0) {
+                result.add(run);
+                continue;
+            }
             // "정체"(正體=정상 위치) 문자스타일은 본문 라틴(인명·연도)이지 화학식이 아니다.
             // 원소기호로 분리하면 Pythagoras 의 P(인)·B(붕소)가 별도 수식 런으로 쪼개져
             // 색상·이탤릭이 유실된다(실측: 1단원 "Pythagoras, B.C. 569?~475?").
