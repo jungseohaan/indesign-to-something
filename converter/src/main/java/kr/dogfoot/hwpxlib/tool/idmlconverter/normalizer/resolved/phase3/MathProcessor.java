@@ -583,6 +583,17 @@ class MathProcessor {
             return null;
         }
 
+        // 화학식(CHEM_FORMULA)은 toChemicalTextRuns 로 낱글자 텍스트화된다. 그런데
+        // hwpScript 에 화학식과 무관한 다글자 HWP 수식 키워드(angle/DEG/TIMES/div/
+        // sqrt/over…)가 들어 있으면 낱글자화 시 그 키워드가 대문자 원소기호로 오인돼
+        // raw 로 노출된다(실측: u5 p166 ∠PAO=∠PBO=90° → EH상부자 ù→"DEG" 가 포함된
+        // "PBO=90 DEG" 가 D·E·G 낱글자로 깨짐). 이런 조각은 진짜 화학식이 아니라 각
+        // 기호/도(°)가 섞인 텍스트이므로 CHEM_FORMULA 로 방출하지 않고 null 을 반환해
+        // 원본 텍스트 런을 보존한다(decodeStrayGlyphInBodyFont 가 ù→° 로 처리).
+        if (containsNonChemicalFormulaKeyword(hwpScript)) {
+            return null;
+        }
+
         ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
         color = resolvedFormulaTextColor(items, start, end, color);
         if (color != null) eq.textColor(color);
@@ -1306,6 +1317,36 @@ class MathProcessor {
             return result;
         }
         return result;
+    }
+
+    // toChemicalTextRuns 가 낱글자로 풀면 raw 노출되는 다글자 HWP 수식 키워드.
+    // 이들이 스크립트에 있으면 화학식(원소기호+숫자)이 아니므로 CHEM_FORMULA
+    // 낱글자 렌더 대상에서 제외한다. HWP 수식 예약어(EHFontEquationConverter
+    // mapUnicodeToHwp 가 방출하는 것들)만 나열해 화학 원소기호(He/Na 등)와 혼동을
+    // 피한다. 단어 경계로 검사(angle 이 triangle 등에 부분매칭되지 않게).
+    private static final String[] NON_CHEMICAL_FORMULA_KEYWORDS = {
+            "angle", "DEG", "TIMES", "div", "sqrt", "over",
+            "LEQ", "GEQ", "INF", "rarrow", "equiv", "notin", "SUBSET"
+    };
+
+    private static boolean containsNonChemicalFormulaKeyword(String script) {
+        if (script == null || script.isEmpty()) return false;
+        for (String kw : NON_CHEMICAL_FORMULA_KEYWORDS) {
+            int from = 0;
+            while (true) {
+                int idx = script.indexOf(kw, from);
+                if (idx < 0) break;
+                char before = idx > 0 ? script.charAt(idx - 1) : ' ';
+                int after = idx + kw.length();
+                char next = after < script.length() ? script.charAt(after) : ' ';
+                // 앞뒤가 라틴 문자가 아니면(공백/연산자/숫자/경계) 독립 키워드로 인정
+                if (!isAsciiLetter(before) && !isAsciiLetter(next)) {
+                    return true;
+                }
+                from = idx + 1;
+            }
+        }
+        return false;
     }
 
     private static boolean isFormulaClusterText(String text) {
