@@ -6371,6 +6371,7 @@ function _objectPlanVisualAction(bundle, sourceById) {
     if (bundle.layoutOnlyInlineSlot === true) return "DROP_VISUAL";
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
     if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) return "ABSORB_TEXT_STYLE";
+    if (_objectPlanBundleIsTextRangeDecorationShell(bundle)) return "ABSORB_TEXT_STYLE";
     if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return "DROP_VISUAL";
     if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) {
         return _objectPlanPlacement(bundle) === "INLINE"
@@ -6397,6 +6398,16 @@ function _objectPlanVisualAction(bundle, sourceById) {
                 : "PLACE_FLOATING_PNG";
     }
     return "DROP_VISUAL";
+}
+
+function _objectPlanBundleIsTextRangeDecorationShell(bundle) {
+    if (!bundle) return false;
+    if (bundle.textRangeDecorationShell !== true) return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (!bundle.styleSourceObjectIds || bundle.styleSourceObjectIds.length === 0) return false;
+    if (bundle.containsEditableText === true || bundle.completePngTextAllowed === true) return false;
+    return true;
 }
 
 function _objectPlanBundleIsInlineVectorTextStyleMarker(bundle) {

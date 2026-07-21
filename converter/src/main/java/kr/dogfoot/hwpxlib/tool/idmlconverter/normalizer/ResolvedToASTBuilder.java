@@ -1219,7 +1219,11 @@ public class ResolvedToASTBuilder {
         boolean tableStyle = "HWPX_TABLE_STYLE".equals(materialization)
                 && ("DROP_VISUAL".equals(visualAction) || "PLACE_TABLE_STYLE".equals(visualAction));
         if (!absorbTextStyle && !tableStyle) return false;
-        if (absorbTextStyle && !"INLINE".equals(jsonString(o, "placement"))) return false;
+        if (absorbTextStyle
+                && jsonIntArray(o, "ownedTextFrameIds").length == 0
+                && jsonTextRangeRefs(o, "ownedTextRanges").length == 0) {
+            return false;
+        }
         return jsonIntArray(o, "styleSourceObjectIds").length > 0
                 || jsonIntArray(o, "sourceObjectIds").length > 0;
     }

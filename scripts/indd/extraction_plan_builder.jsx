@@ -402,11 +402,12 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
             }
             if (localTableTextFrameIds.length === 0) continue;
             localTableTextFrameIds = sortedIds(localTableTextFrameIds);
+            var textRangeDecorationShell = role === "SHELL_SLOT";
             var visualAction = role === "CONTENT_VISUAL_SLOT" ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
             var visualLayer = role === "CONTENT_VISUAL_SLOT" ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
             var slotRole = role === "CONTENT_VISUAL_SLOT"
                     ? "table_cell_content_visual_slot"
-                    : "table_cell_shell_slot";
+                    : "text_range_decoration_shell_slot";
             var candidateId = sourceIds.length > 1
                     ? _candidateCompositeId("pass.decoration_groups", Number(pageIndex), sourceIds,
                             "table_carrier_sibling_decoration")
@@ -436,11 +437,12 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
                 exportTargetObjectId: exportSourceIds.length === 1 ? exportSourceIds[0] : null,
                 hiddenVisualSourceObjectIds: [],
                 visualSourceObjectIds: sourceIds.slice(0),
-                styleSourceObjectIds: [],
+                styleSourceObjectIds: textRangeDecorationShell ? sourceIds.slice(0) : [],
                 ownedTextFrameIds: [],
                 editableTextFrameIds: [],
                 hiddenTextFrameIds: [],
                 decoratedTextFrameIds: localTableTextFrameIds,
+                textRangeDecorationShell: textRangeDecorationShell,
                 requiresTextHidden: false,
                 textOwner: "none",
                 containsEditableText: false,
