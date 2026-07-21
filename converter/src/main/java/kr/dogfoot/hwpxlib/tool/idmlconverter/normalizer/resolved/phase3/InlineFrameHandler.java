@@ -1739,10 +1739,11 @@ public class InlineFrameHandler {
 
         double[] inset = childTf.insetSpacing();
         if (inset != null && inset.length >= 4) {
-            top += Math.max(0.0, inset[0]);
-            left += Math.max(0.0, inset[1]);
-            bottom += Math.max(0.0, inset[2]);
-            right += Math.max(0.0, inset[3]);
+            double[] insetInBoundsUnits = textFrameInsetInBoundsUnits(ctx, childTf, tb);
+            top += insetInBoundsUnits[0];
+            left += insetInBoundsUnits[1];
+            bottom += insetInBoundsUnits[2];
+            right += insetInBoundsUnits[3];
         }
 
         shellObj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left * scale));
@@ -2228,19 +2229,34 @@ public class InlineFrameHandler {
         if (!validBounds(b) || tf == null) return b;
         double[] inset = tf.insetSpacing();
         if (inset == null || inset.length < 4) return b;
-        double unitScale = textFrameBoundsUseUnscaledPageRelativeUnits(ctx, tf, b)
-                ? 1.0 / Math.max(0.000001, ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0)
-                : 1.0;
-        double top = Math.max(0.0, inset[0]) * unitScale;
-        double left = Math.max(0.0, inset[1]) * unitScale;
-        double bottom = Math.max(0.0, inset[2]) * unitScale;
-        double right = Math.max(0.0, inset[3]) * unitScale;
+        double[] insetInBoundsUnits = textFrameInsetInBoundsUnits(ctx, tf, b);
+        double top = insetInBoundsUnits[0];
+        double left = insetInBoundsUnits[1];
+        double bottom = insetInBoundsUnits[2];
+        double right = insetInBoundsUnits[3];
         double contentTop = b[0] + top;
         double contentLeft = b[1] + left;
         double contentBottom = b[2] - bottom;
         double contentRight = b[3] - right;
         if (contentBottom <= contentTop || contentRight <= contentLeft) return b;
         return new double[] { contentTop, contentLeft, contentBottom, contentRight };
+    }
+
+    private static double[] textFrameInsetInBoundsUnits(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            double[] bounds) {
+        double[] inset = tf != null ? tf.insetSpacing() : null;
+        if (inset == null || inset.length < 4) return new double[] {0.0, 0.0, 0.0, 0.0};
+        double unitScale = textFrameBoundsUseUnscaledPageRelativeUnits(ctx, tf, bounds)
+                ? 1.0 / Math.max(0.000001, ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0)
+                : 1.0;
+        return new double[] {
+                Math.max(0.0, inset[0]) * unitScale,
+                Math.max(0.0, inset[1]) * unitScale,
+                Math.max(0.0, inset[2]) * unitScale,
+                Math.max(0.0, inset[3]) * unitScale
+        };
     }
 
     private static boolean textFrameBoundsUseUnscaledPageRelativeUnits(
