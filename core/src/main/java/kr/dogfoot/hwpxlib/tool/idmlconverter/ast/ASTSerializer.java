@@ -310,6 +310,12 @@ public class ASTSerializer {
         if (table.fixedOuterBounds()) {
             first = writeBooleanField(sb, "fixedOuterBounds", true, first);
         }
+        if (table.inlineOffsetX() != 0) {
+            first = writeLongField(sb, "inlineOffsetX", table.inlineOffsetX(), first);
+        }
+        if (table.inlineOffsetY() != 0) {
+            first = writeLongField(sb, "inlineOffsetY", table.inlineOffsetY(), first);
+        }
         first = writeIntField(sb, "rowCount", table.rowCount(), first);
         first = writeIntField(sb, "colCount", table.colCount(), first);
         first = writeStringField(sb, "appliedTableStyle", table.appliedTableStyle(), first);

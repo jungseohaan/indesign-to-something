@@ -22,6 +22,8 @@ public class ASTTable extends ASTBlock {
     private boolean flowWithText;
     private boolean anchoredFlowWithText;
     private boolean fixedOuterBounds;
+    private long inlineOffsetX;
+    private long inlineOffsetY;
 
     // 테이블 스타일
     private String appliedTableStyle;
@@ -70,6 +72,12 @@ public class ASTTable extends ASTBlock {
 
     public boolean fixedOuterBounds() { return fixedOuterBounds; }
     public void fixedOuterBounds(boolean v) { this.fixedOuterBounds = v; }
+
+    public long inlineOffsetX() { return inlineOffsetX; }
+    public void inlineOffsetX(long v) { this.inlineOffsetX = v; }
+
+    public long inlineOffsetY() { return inlineOffsetY; }
+    public void inlineOffsetY(long v) { this.inlineOffsetY = v; }
 
     public String appliedTableStyle() { return appliedTableStyle; }
     public void appliedTableStyle(String v) { this.appliedTableStyle = v; }
