@@ -1708,9 +1708,21 @@ public final class StoryConverter {
     private static boolean hasInlineTable(List<ASTParagraph> paragraphs, String sourceId) {
         if (paragraphs == null || sourceId == null) return false;
         for (ASTParagraph paragraph : paragraphs) {
-            if (paragraph != null && paragraph.inlineTable() != null
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null
                     && sourceId.equals(paragraph.inlineTable().sourceId())) {
                 return true;
+            }
+            if (paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.inlineTables() == null) continue;
+                for (ASTTable table : obj.inlineTables()) {
+                    if (table != null && sourceId.equals(table.sourceId())) {
+                        return true;
+                    }
+                }
             }
         }
         return false;

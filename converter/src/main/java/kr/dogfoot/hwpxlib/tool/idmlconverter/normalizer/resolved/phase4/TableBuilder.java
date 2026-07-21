@@ -90,6 +90,7 @@ public final class TableBuilder {
         int detachedInlinePageLevel;    // table-only inline TF → page-level table
         int tableOnlyPlansPlaced;       // ObjectPlan(text_frame:table_only) → ASTTable
         int tableOnlyPlansSkippedAnchored;
+        int tableOnlyPlansSkippedInlineFlow;
         int duplicateInlineTablesRemoved;
         int nestedTableBlocksAbsorbed;
         int total;
@@ -366,6 +367,10 @@ public final class TableBuilder {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (!isTableOnlyStylePlan(plan)) continue;
+            if (isInlineStoryFlowTableStylePlan(plan)) {
+                report.tableOnlyPlansSkippedInlineFlow++;
+                continue;
+            }
 
             ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(plan.domId));
             if (tf == null || tf.storyId() == null) continue;
@@ -432,6 +437,14 @@ public final class TableBuilder {
                 report.total++;
             }
         }
+    }
+
+    private static boolean isInlineStoryFlowTableStylePlan(ObjectPlan plan) {
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && (plan.materialization == Materialization.HWPX_TABLE_STYLE
+                || plan.visualAction == VisualAction.PLACE_TABLE_STYLE);
     }
 
     private static boolean isConsumedByAnchoredTablePlan(
@@ -600,6 +613,7 @@ public final class TableBuilder {
         ConversionTiming.metric(prefix + "tablesPlaced", report.total);
         ConversionTiming.metric(prefix + "tableOnlyPlansPlaced", report.tableOnlyPlansPlaced);
         ConversionTiming.metric(prefix + "tableOnlyPlansSkippedAnchored", report.tableOnlyPlansSkippedAnchored);
+        ConversionTiming.metric(prefix + "tableOnlyPlansSkippedInlineFlow", report.tableOnlyPlansSkippedInlineFlow);
         ConversionTiming.metric(prefix + "nestedTableBlocksAbsorbed", report.nestedTableBlocksAbsorbed);
         ConversionTiming.metric(prefix + "tableOnlyPlansMs", millis(report.tableOnlyPlansNanos));
         ConversionTiming.metric(prefix + "storyLoadMs", millis(report.storyLoadNanos));
