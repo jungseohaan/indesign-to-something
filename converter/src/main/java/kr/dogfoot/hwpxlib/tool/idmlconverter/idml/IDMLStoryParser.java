@@ -462,18 +462,20 @@ public class IDMLStoryParser {
                         if (contentBuilder.charAt(ci) == '\uFFFC') pendingAce8++;
                     }
                 } else if ("TextFrame".equals(tag)) {
-                    if (pendingAce8 > 0) {
-                        pendingAce8--; // ACE 8이 이미 \uFFFC를 삽입했으므로 중복 삽입 안 함
+                    if (canConsumeTrailingAce8Anchor(contentBuilder, pendingAce8)) {
+                        pendingAce8--; // ACE 8이 바로 앞에 있는 경우만 인라인 앵커로 소비
                     } else {
+                        pendingAce8 = materializePendingAce8AsLayoutMarker(contentBuilder, pendingAce8);
                         contentBuilder.append('\uFFFC'); // ACE 8 없는 인라인 TextFrame → 앵커 삽입
                     }
                     int frameIdx = currentRun.inlineFrames().size();
                     parseInlineTextFrame(elem, currentRun);
                     currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.FRAME, frameIdx);
                 } else if ("Group".equals(tag)) {
-                    if (pendingAce8 > 0) {
+                    if (canConsumeTrailingAce8Anchor(contentBuilder, pendingAce8)) {
                         pendingAce8--;
                     } else {
+                        pendingAce8 = materializePendingAce8AsLayoutMarker(contentBuilder, pendingAce8);
                         contentBuilder.append('\uFFFC');
                     }
                     int graphicIdx = currentRun.inlineGraphics().size();
@@ -516,12 +518,23 @@ public class IDMLStoryParser {
                         blankSpacer = null;
                     }
                     if (blankSpacer != null) {
-                        if (pendingAce8 > 0) pendingAce8--;
-                        contentBuilder.append(blankSpacer);
+                        if (canConsumeTrailingAce8Anchor(contentBuilder, pendingAce8)) {
+                            pendingAce8--;
+                            int anchorIdx = contentBuilder.lastIndexOf("\uFFFC");
+                            if (anchorIdx >= 0) {
+                                contentBuilder.replace(anchorIdx, anchorIdx + 1, blankSpacer);
+                            } else {
+                                contentBuilder.append(blankSpacer);
+                            }
+                        } else {
+                            pendingAce8 = materializePendingAce8AsLayoutMarker(contentBuilder, pendingAce8);
+                            contentBuilder.append(blankSpacer);
+                        }
                     } else {
-                        if (pendingAce8 > 0) {
+                        if (canConsumeTrailingAce8Anchor(contentBuilder, pendingAce8)) {
                             pendingAce8--;
                         } else {
+                            pendingAce8 = materializePendingAce8AsLayoutMarker(contentBuilder, pendingAce8);
                             contentBuilder.append('\uFFFC');
                         }
                         int graphicIdx = currentRun.inlineGraphics().size();
@@ -550,6 +563,21 @@ public class IDMLStoryParser {
             result.add(currentPara);
         }
         return result;
+    }
+
+    private static boolean canConsumeTrailingAce8Anchor(StringBuilder contentBuilder, int pendingAce8) {
+        return pendingAce8 > 0
+                && contentBuilder != null
+                && contentBuilder.length() > 0
+                && contentBuilder.charAt(contentBuilder.length() - 1) == '\uFFFC';
+    }
+
+    private static int materializePendingAce8AsLayoutMarker(StringBuilder contentBuilder, int pendingAce8) {
+        if (pendingAce8 <= 0 || contentBuilder == null || contentBuilder.length() == 0) return pendingAce8;
+        int idx = contentBuilder.lastIndexOf("\uFFFC");
+        if (idx < 0) return pendingAce8;
+        contentBuilder.setCharAt(idx, '\u0008');
+        return pendingAce8 - 1;
     }
 
     private static void applyNestedStyles(IDMLParagraph para, IDMLDocument doc) {
