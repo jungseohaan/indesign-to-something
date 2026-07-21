@@ -1045,8 +1045,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             textLength = _textLengthOfItem(item);
             try {
                 rawContents = String(item.contents || "");
-                markerOnlyContents = rawContents.replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC\uFEFF]/g, "").length === 0
-                        && /[\u0016\u0018\u0003\uFFFC\uFEFF]/.test(rawContents);
+                markerOnlyContents = rawContents.replace(/[\s\r\n\t\u0007\u0008\u0016\u0018\u0003\uFFFC\uFEFF]/g, "").length === 0
+                        && /[\u0007\u0008\u0016\u0018\u0003\uFFFC\uFEFF]/.test(rawContents);
             } catch (eRawContents) {
                 rawContents = null;
                 markerOnlyContents = null;

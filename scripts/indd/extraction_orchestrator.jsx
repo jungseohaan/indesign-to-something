@@ -1049,7 +1049,6 @@ function _tableStyleSourceObjectIdsByPageForPagePlaneHide(sourceItems) {
         if (!src || String(src.kind || "") !== "TextFrame") continue;
         if (src.hasTablesInStory !== true) continue;
         if (src.storyHasVisibleTableCellText !== true) continue;
-        if (src.markerOnlyContents === false) continue;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
         var id = Number(src.id);
         if (isNaN(id)) continue;
