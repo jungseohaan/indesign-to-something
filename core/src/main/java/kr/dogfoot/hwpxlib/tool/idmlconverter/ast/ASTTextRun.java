@@ -25,8 +25,12 @@ public class ASTTextRun extends ASTInlineItem {
     private Short verticalScale;   // 세로 비율 (%, 100 = normal)
     private Short baselineShift;   // 기준선 이동 (%, 양수=위)
     private boolean grepStyleApplied; // GREP 스타일에서 색상/폰트가 동적 적용됨 (resolved 보강 시 보호)
+    private boolean explicitNormalPosition; // SPEC-053: IDML/resolved position 이 명시적 NORMAL(첨자 아님)
 
     public ItemType itemType() { return ItemType.TEXT_RUN; }
+
+    public boolean explicitNormalPosition() { return explicitNormalPosition; }
+    public void explicitNormalPosition(boolean v) { this.explicitNormalPosition = v; }
 
     public String characterStyleRef() { return characterStyleRef; }
     public void characterStyleRef(String v) { this.characterStyleRef = v; }
@@ -128,6 +132,7 @@ public class ASTTextRun extends ASTInlineItem {
         copy.verticalScale(verticalScale);
         copy.baselineShift(baselineShift);
         copy.grepStyleApplied(grepStyleApplied);
+        copy.explicitNormalPosition(explicitNormalPosition);
         return copy;
     }
 
