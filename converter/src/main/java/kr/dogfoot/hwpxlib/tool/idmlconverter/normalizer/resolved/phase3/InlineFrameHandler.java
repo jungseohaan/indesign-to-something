@@ -1302,6 +1302,10 @@ public class InlineFrameHandler {
                 badgeImage = trimSimpleButtonBadgeImage(imageData, img);
                 imageData = badgeImage.imageData;
                 img = badgeImage.image;
+            } else if (isInlineCompletePngTextOwnerPlan(matchedPlan)) {
+                badgeImage = trimVerticalTransparentPaddingPreserveWidth(imageData, img);
+                imageData = badgeImage.imageData;
+                img = badgeImage.image;
             }
             if (matchedPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                     && !ShellRole.isTextShell(matchedPlan)) {
@@ -1404,13 +1408,26 @@ public class InlineFrameHandler {
         if (shellFile == null || shellFile.isEmpty()) return null;
         if (shellPlan.bounds == null || shellPlan.bounds.length < 4) return null;
         try {
-            double[] shellBounds = shellPlan.bounds;
+            double[] renderBounds = validBounds(shellPlan.renderSourceBounds)
+                    ? shellPlan.renderSourceBounds
+                    : shellPlan.bounds;
+            boolean useNativeSourceShell = canUseNativeInlineTextFrameShell(shellPlan, childTfs);
+            double[] shellBounds = useNativeSourceShell
+                    ? shellPlan.bounds
+                    : plannedInlineShellCropBounds(shellPlan, renderBounds);
             File pngFile = new File(ctx.basePath, shellFile);
             if (!pngFile.exists() || !pngFile.isFile()) return null;
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             BufferedImage shellImage = VisualCropper.knockOutPaperLikeFill(img);
+            boolean plannedSourceCropApplied = !useNativeSourceShell
+                    && validBounds(renderBounds)
+                    && validBounds(shellBounds)
+                    && boundsDiffer(renderBounds, shellBounds, 0.01);
+            if (plannedSourceCropApplied) {
+                shellImage = cropImageByPlannedSourceBounds(shellImage, renderBounds, shellBounds);
+            }
             int visibleShellTextFrameCount = visibleShellTextFrameCount(childTfs);
             boolean separatedHwpxTextChannel = shouldAttachSeparatedHwpxTextAsOverlay(ctx, shellPlan, childTfs);
             boolean embedCompositeShellText = shouldEmbedOwnedCompositeInlineTextShell(ctx, shellPlan, childTfs);
@@ -1455,7 +1472,7 @@ public class InlineFrameHandler {
                 obj.resolvedWidth(obj.width());
                 obj.resolvedHeight(obj.height());
             }
-            if (!extractedShellImageOwnsGeometry(shellPlan)) {
+            if (useNativeSourceShell || !extractedShellImageOwnsGeometry(shellPlan)) {
                 applyInlineShellShapeStyle(ctx, anchorItem, obj);
                 applyOwnedTextFrameShellShapeStyle(ctx, childTfs, obj);
             }
@@ -1463,10 +1480,12 @@ public class InlineFrameHandler {
             obj.noAutoLineWrap(childTfs.size() == 1 && shouldUseNoAutoLineWrap(childTfs.get(0), true));
             obj.verticalJustification(inlineTextShellVerticalJustification(ctx, shellPlan, anchorItem, childTfs));
 
-            boolean useImageFill = true;
-            boolean usedNativeShellStyle = false;
-            boolean transparentSparseShell = shouldPreserveTransparentInlineShell(shellImage);
-            boolean preserveImageCanvas = preserveSourceCanvas && !embedCompositeShellText;
+            boolean useImageFill = !(useNativeSourceShell && obj.nativeGraphicsAllowed());
+            boolean usedNativeShellStyle = !useImageFill;
+            boolean transparentSparseShell = !useNativeSourceShell
+                    && shouldPreserveTransparentInlineShell(shellImage);
+            boolean preserveImageCanvas = (preserveSourceCanvas || plannedSourceCropApplied)
+                    && !embedCompositeShellText;
             boolean forceVerticalImageTrim = compactSplitCanvas || embedCompositeShellText;
             if (transparentSparseShell) {
                 imageData = prepareTransparentInlineTextShellImageData(
@@ -1515,7 +1534,7 @@ public class InlineFrameHandler {
                     if (isOrcCarrierTextFrame(childTf)) {
                         continue;
                     }
-                    buildBadgeParagraph(ctx, childTf, obj);
+                    buildBadgeParagraph(ctx, childTf, obj, useNativeSourceShell);
                     markInlineShellChildTextPlaced(ctx, childTf);
                 }
             }
@@ -1739,10 +1758,11 @@ public class InlineFrameHandler {
 
         double[] inset = childTf.insetSpacing();
         if (inset != null && inset.length >= 4) {
-            top += Math.max(0.0, inset[0]);
-            left += Math.max(0.0, inset[1]);
-            bottom += Math.max(0.0, inset[2]);
-            right += Math.max(0.0, inset[3]);
+            double[] insetInBoundsUnits = textFrameInsetInBoundsUnits(ctx, childTf, tb);
+            top += insetInBoundsUnits[0];
+            left += insetInBoundsUnits[1];
+            bottom += insetInBoundsUnits[2];
+            right += insetInBoundsUnits[3];
         }
 
         shellObj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left * scale));
@@ -1846,6 +1866,25 @@ public class InlineFrameHandler {
         if (plan.file == null || plan.file.isBlank()) return false;
         return plan.materialization == Materialization.EXTRACTED_PNG_VECTOR
                 || plan.materialization == Materialization.TEXTLESS_VISUAL_FRAGMENT;
+    }
+
+    private static boolean canUseNativeInlineTextFrameShell(
+            ObjectPlan plan,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (childTfs == null || childTfs.size() != 1) return false;
+        ResolvedTextFrame tf = childTfs.get(0);
+        if (tf == null) return false;
+        int[] ownedIds = plan.ownedTextFrameIds;
+        int[] sourceIds = plan.sourceObjectIds;
+        if (ownedIds == null || ownedIds.length != 1 || sourceIds == null || sourceIds.length != 1) return false;
+        String domId = tf.id();
+        if (domId == null) return false;
+        if (!domId.equals(String.valueOf(ownedIds[0])) || !domId.equals(String.valueOf(sourceIds[0]))) {
+            return false;
+        }
+        return true;
     }
 
     private static void applyPlannedInlineExecutionHints(ASTInlineObject obj, ObjectPlan plan) {
@@ -2228,19 +2267,34 @@ public class InlineFrameHandler {
         if (!validBounds(b) || tf == null) return b;
         double[] inset = tf.insetSpacing();
         if (inset == null || inset.length < 4) return b;
-        double unitScale = textFrameBoundsUseUnscaledPageRelativeUnits(ctx, tf, b)
-                ? 1.0 / Math.max(0.000001, ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0)
-                : 1.0;
-        double top = Math.max(0.0, inset[0]) * unitScale;
-        double left = Math.max(0.0, inset[1]) * unitScale;
-        double bottom = Math.max(0.0, inset[2]) * unitScale;
-        double right = Math.max(0.0, inset[3]) * unitScale;
+        double[] insetInBoundsUnits = textFrameInsetInBoundsUnits(ctx, tf, b);
+        double top = insetInBoundsUnits[0];
+        double left = insetInBoundsUnits[1];
+        double bottom = insetInBoundsUnits[2];
+        double right = insetInBoundsUnits[3];
         double contentTop = b[0] + top;
         double contentLeft = b[1] + left;
         double contentBottom = b[2] - bottom;
         double contentRight = b[3] - right;
         if (contentBottom <= contentTop || contentRight <= contentLeft) return b;
         return new double[] { contentTop, contentLeft, contentBottom, contentRight };
+    }
+
+    private static double[] textFrameInsetInBoundsUnits(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            double[] bounds) {
+        double[] inset = tf != null ? tf.insetSpacing() : null;
+        if (inset == null || inset.length < 4) return new double[] {0.0, 0.0, 0.0, 0.0};
+        double unitScale = textFrameBoundsUseUnscaledPageRelativeUnits(ctx, tf, bounds)
+                ? 1.0 / Math.max(0.000001, ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0)
+                : 1.0;
+        return new double[] {
+                Math.max(0.0, inset[0]) * unitScale,
+                Math.max(0.0, inset[1]) * unitScale,
+                Math.max(0.0, inset[2]) * unitScale,
+                Math.max(0.0, inset[3]) * unitScale
+        };
     }
 
     private static boolean textFrameBoundsUseUnscaledPageRelativeUnits(
@@ -2584,6 +2638,73 @@ public class InlineFrameHandler {
             return null;
         }
         return new SourceCanvasGeometry(new double[] { canvasTop, canvasLeft, canvasBottom, canvasRight });
+    }
+
+    private static double[] plannedInlineShellCropBounds(ObjectPlan shellPlan, double[] renderBounds) {
+        if (shellPlan == null) return renderBounds;
+        double[] crop = shellPlan.cropSourceBounds;
+        if (!validBounds(crop) || !validBounds(renderBounds)) {
+            return validBounds(shellPlan.bounds) ? shellPlan.bounds : renderBounds;
+        }
+        if (!boundsInside(renderBounds, crop, 0.75)) {
+            return validBounds(shellPlan.bounds) ? shellPlan.bounds : renderBounds;
+        }
+        return crop;
+    }
+
+    private static BufferedImage cropImageByPlannedSourceBounds(
+            BufferedImage image,
+            double[] renderBounds,
+            double[] cropBounds) {
+        if (image == null || image.getWidth() <= 1 || image.getHeight() <= 1) return image;
+        if (!validBounds(renderBounds) || !validBounds(cropBounds)) return image;
+        if (!boundsInside(renderBounds, cropBounds, 0.75)) return image;
+        double renderW = renderBounds[3] - renderBounds[1];
+        double renderH = renderBounds[2] - renderBounds[0];
+        if (renderW <= 0.0 || renderH <= 0.0) return image;
+
+        int sx1 = (int) Math.floor(((cropBounds[1] - renderBounds[1]) / renderW) * image.getWidth());
+        int sy1 = (int) Math.floor(((cropBounds[0] - renderBounds[0]) / renderH) * image.getHeight());
+        int sx2 = (int) Math.ceil(((cropBounds[3] - renderBounds[1]) / renderW) * image.getWidth());
+        int sy2 = (int) Math.ceil(((cropBounds[2] - renderBounds[0]) / renderH) * image.getHeight());
+        sx1 = clamp(sx1, 0, image.getWidth());
+        sx2 = clamp(sx2, 0, image.getWidth());
+        sy1 = clamp(sy1, 0, image.getHeight());
+        sy2 = clamp(sy2, 0, image.getHeight());
+        if (sx2 <= sx1 || sy2 <= sy1) return image;
+        int w = sx2 - sx1;
+        int h = sy2 - sy1;
+        if (w >= image.getWidth() && h >= image.getHeight()) return image;
+
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.drawImage(image,
+                    0, 0, w, h,
+                    sx1, sy1, sx2, sy2,
+                    null);
+        } finally {
+            g.dispose();
+        }
+        return out;
+    }
+
+    private static boolean boundsInside(double[] outer, double[] inner, double tolerance) {
+        if (!validBounds(outer) || !validBounds(inner)) return false;
+        double t = Math.max(0.0, tolerance);
+        return inner[0] >= outer[0] - t
+                && inner[1] >= outer[1] - t
+                && inner[2] <= outer[2] + t
+                && inner[3] <= outer[3] + t;
+    }
+
+    private static boolean boundsDiffer(double[] a, double[] b, double eps) {
+        if (!validBounds(a) || !validBounds(b)) return false;
+        double e = Math.max(0.0, eps);
+        return Math.abs(a[0] - b[0]) > e
+                || Math.abs(a[1] - b[1]) > e
+                || Math.abs(a[2] - b[2]) > e
+                || Math.abs(a[3] - b[3]) > e;
     }
 
     private static int[] alphaVisibleBounds(BufferedImage img) {
@@ -3231,6 +3352,14 @@ public class InlineFrameHandler {
 
     /** 배지/셸 텍스트 단락 빌드. 원본 story 문단이 있으면 짧은 라벨도 그 정렬/런 속성을 그대로 쓴다. */
     private static void buildBadgeParagraph(ResolvedBuildContext ctx, ResolvedTextFrame childTf, ASTInlineObject obj) {
+        buildBadgeParagraph(ctx, childTf, obj, false);
+    }
+
+    private static void buildBadgeParagraph(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame childTf,
+            ASTInlineObject obj,
+            boolean preserveSourceShellBox) {
         if (ctx != null
                 && ctx.resolvedData != null
                 && childTf != null
@@ -3243,7 +3372,9 @@ public class InlineFrameHandler {
             }
             if (paragraphs != null && !paragraphs.isEmpty()) {
                 applyIdmlRunTintFallbackToParagraphs(ctx, childTf, paragraphs);
-                fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+                if (!preserveSourceShellBox) {
+                    fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+                }
                 capInlineShellParagraphLeadingToFrame(paragraphs, obj, childTf, ctx);
                 for (ASTParagraph paragraph : paragraphs) {
                     obj.addParagraph(paragraph);
@@ -3253,7 +3384,9 @@ public class InlineFrameHandler {
         }
         List<ASTParagraph> paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
         if (paragraphs == null || paragraphs.isEmpty()) return;
-        fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+        if (!preserveSourceShellBox) {
+            fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
+        }
         capInlineShellParagraphLeadingToFrame(paragraphs, obj, childTf, ctx);
         for (ASTParagraph paragraph : paragraphs) {
             obj.addParagraph(paragraph);
@@ -4781,6 +4914,11 @@ public class InlineFrameHandler {
                     if (img == null) return null;
                     // 2x2 이하 빈 이미지 무시
                     if (img.getWidth() <= 2 && img.getHeight() <= 2) return null;
+                    if (isInlineCompletePngTextOwnerPlan(plan)) {
+                        BadgeImageData trimmed = trimVerticalTransparentPaddingPreserveWidth(imageData, img);
+                        imageData = trimmed.imageData;
+                        img = trimmed.image;
+                    }
 
                     ASTInlineObject obj = new ASTInlineObject();
                     obj.kind(ASTInlineObject.ObjectKind.IMAGE);
@@ -6701,6 +6839,15 @@ public class InlineFrameHandler {
                 && Math.abs(plan.bounds[2] - plan.bounds[0]) > 0;
     }
 
+    private static boolean isInlineCompletePngTextOwnerPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_PNG
+                && plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                && plan.placement == Placement.INLINE
+                && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && plan.materialization == Materialization.COMPLETE_PNG;
+    }
+
     private static int visibleTextLength(String text) {
         if (text == null) return 0;
         return text
@@ -6738,6 +6885,43 @@ public class InlineFrameHandler {
         Graphics2D g = cropped.createGraphics();
         try {
             g.drawImage(originalImage, 0, 0, w, h, x, y, x + w, y + h, null);
+        } finally {
+            g.dispose();
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(cropped, "png", out);
+        return new BadgeImageData(out.toByteArray(), cropped);
+    }
+
+    private static BadgeImageData trimVerticalTransparentPaddingPreserveWidth(
+            byte[] originalData,
+            BufferedImage originalImage) throws java.io.IOException {
+        if (originalImage == null || originalImage.getWidth() <= 0 || originalImage.getHeight() <= 0) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+        int[] alpha = alphaBounds(originalImage);
+        if (alpha == null) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+        int y = alpha[1];
+        int h = alpha[3];
+        if (y <= 0 && h >= originalImage.getHeight()) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+        if (h <= 1) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+
+        BufferedImage cropped = new BufferedImage(
+                originalImage.getWidth(),
+                h,
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = cropped.createGraphics();
+        try {
+            g.drawImage(originalImage,
+                    0, 0, originalImage.getWidth(), h,
+                    0, y, originalImage.getWidth(), y + h,
+                    null);
         } finally {
             g.dispose();
         }

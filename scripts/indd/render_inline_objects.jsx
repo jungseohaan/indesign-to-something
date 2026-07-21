@@ -925,6 +925,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             file: "rendered_frames/" + inFileName,
                             parentStoryId: parentStoryId,
                             bounds: _inlineRenderedBounds,
+                            renderSourceBounds: inlineCandidate.renderSourceBounds || _inlineRenderedBounds,
+                            cropSourceBounds: inlineCandidate.cropSourceBounds || null,
                             pageIndex: inPageIdx,
                             type: _inlinePlannedPageVisual ? "page_object" : "inline_object",
                             placementRole: _inlinePlannedPageVisual ? "page_object" : "inline_object",
@@ -959,7 +961,9 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 textHiddenBeforeExport: _inlineHasHiddenText,
                                 exportTargetType: inItem && inItem.constructor ? inItem.constructor.name : null,
                                 sourceBounds: _inlineSourceBounds,
-                                pageRelativeBounds: _inlineRenderedBounds
+                                pageRelativeBounds: _inlineRenderedBounds,
+                                renderSourceBounds: inlineCandidate.renderSourceBounds || _inlineRenderedBounds,
+                                cropSourceBounds: inlineCandidate.cropSourceBounds || null
                             }
                         };
                         try {

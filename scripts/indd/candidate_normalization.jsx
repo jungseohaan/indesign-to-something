@@ -1541,6 +1541,13 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
     function canHaveDirectChildShellSlots(candidate) {
         if (!candidate) return false;
         if (candidate.sourceDeclaredClosedTextShell === true) return false;
+        if (candidate.passId === "pass.inline_objects"
+                && candidate.inlineSourceTreeClosed === true
+                && (candidate.slotRole === "inline_flow_visual_root"
+                    || candidate.compositeRole === "inline_flow_visual_root"
+                    || candidate.reason === "inline_flow_visual_root")) {
+            return false;
+        }
         if (_isDirectChildShellSlotCandidate(candidate)) {
             if (candidate.passId === "pass.decoration_groups"
                     && candidate.candidatePurpose === "SHELL_CANDIDATE"
@@ -2004,6 +2011,10 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         for (var ci = 0; ci < originalCandidateCount; ci++) {
             var parentCandidate = candidates[ci];
             if (!parentCandidate || parentCandidate.passId !== "pass.inline_objects") continue;
+            if (parentCandidate.slotRole === "inline_flow_visual_root"
+                    || parentCandidate.compositeRole === "inline_flow_visual_root") {
+                continue;
+            }
             if (parentCandidate.suppressedByDirectChildShellSlots === true) continue;
             var visualIds = parentCandidate.visualSourceObjectIds || parentCandidate.exportSourceObjectIds || [];
             visualIds = _sourceIdsUnion(visualIds, parentCandidate.styleSourceObjectIds || []);

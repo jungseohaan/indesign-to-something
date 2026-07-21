@@ -1008,11 +1008,20 @@ public class ASTTableConverter {
                 if (domId == null) continue;
                 TextHiddenShellMatch shell = findTextHiddenShellForInlineObject(resolvedData, domId);
                 if (shell == null || shell.renderedGroup == null) continue;
-                applyExtractedShellAsInlineFrameFill(obj, shell.renderedGroup, resolvedData, domId);
+                if (!hasPlannedInlineShellFill(obj, shell.plan)) {
+                    applyExtractedShellAsInlineFrameFill(obj, shell.renderedGroup, resolvedData, domId);
+                }
                 populateInlineShellOwnedText(obj, shell.plan, resolvedData);
                 removeStandaloneShellImage(para, shell.renderedGroup.id());
             }
         }
+    }
+
+    private static boolean hasPlannedInlineShellFill(ASTInlineObject obj, ObjectPlan plan) {
+        return obj != null
+                && plan != null
+                && ((obj.imageFillData() != null && obj.imageFillData().length > 0)
+                        || obj.nativeGraphicsAllowed());
     }
 
     private static TextHiddenShellMatch findTextHiddenShellForInlineObject(

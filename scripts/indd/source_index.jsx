@@ -401,6 +401,76 @@ function _itemBounds(item) {
     }
 }
 
+function _itemGeometricBounds(item) {
+    try {
+        var b = item && item.geometricBounds;
+        if (!b || b.length < 4) return null;
+        return [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
+    } catch (e) {
+        return null;
+    }
+}
+
+function _itemVisibleBounds(item) {
+    try {
+        var b = item && item.visibleBounds;
+        if (!b || b.length < 4) return null;
+        return [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
+    } catch (e) {
+        return null;
+    }
+}
+
+function _itemPathBounds(item) {
+    try {
+        var kind = _itemKind(item);
+        if (kind !== "Rectangle" && kind !== "Oval"
+                && kind !== "Polygon" && kind !== "GraphicLine") {
+            return null;
+        }
+        if (!item || !item.paths || item.paths.length < 1) return null;
+        var top = Number.POSITIVE_INFINITY;
+        var left = Number.POSITIVE_INFINITY;
+        var bottom = Number.NEGATIVE_INFINITY;
+        var right = Number.NEGATIVE_INFINITY;
+        for (var pi = 0; pi < item.paths.length; pi++) {
+            var path = item.paths[pi];
+            var pts = null;
+            try { pts = path.entirePath; } catch (ePath) { pts = null; }
+            if ((!pts || pts.length < 1) && path.pathPoints) {
+                pts = [];
+                try {
+                    for (var ppi = 0; ppi < path.pathPoints.length; ppi++) {
+                        var anchor = path.pathPoints[ppi].anchor;
+                        if (anchor && anchor.length >= 2) pts.push(anchor);
+                    }
+                } catch (ePathPoints) {
+                    pts = null;
+                }
+            }
+            if (!pts || pts.length < 1) continue;
+            for (var i = 0; i < pts.length; i++) {
+                var pt = pts[i];
+                if (!pt || pt.length < 2) continue;
+                var x = Number(pt[0]);
+                var y = Number(pt[1]);
+                if (!isFinite(x) || !isFinite(y)) continue;
+                if (y < top) top = y;
+                if (x < left) left = x;
+                if (y > bottom) bottom = y;
+                if (x > right) right = x;
+            }
+        }
+        if (!isFinite(top) || !isFinite(left) || !isFinite(bottom) || !isFinite(right)
+                || bottom <= top || right <= left) {
+            return null;
+        }
+        return [top, left, bottom, right];
+    } catch (e) {
+        return null;
+    }
+}
+
 function _itemLayerName(item) {
     try { return item && item.itemLayer ? String(item.itemLayer.name) : null; } catch (e) { return null; }
 }
@@ -556,7 +626,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         itemCount: allItems ? allItems.length : 0,
         kindCounts: {},
         sourceInfoCacheHits: 0,
-        sourceInfoCacheMisses: 0
+        sourceInfoCacheMisses: 0,
+        readItemInfoErrors: [],
+        recoveredParentReadErrors: []
     };
 
     function sourceIndexProgress(step, current, total, desc) {
@@ -1024,6 +1096,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             parentId: _itemParentId(item),
             parentKind: _itemParentKind(item),
             bounds: _itemBounds(item),
+            geometricBounds: _itemGeometricBounds(item),
+            visibleBounds: _itemVisibleBounds(item),
+            pathBounds: _itemPathBounds(item),
             sourceOrder: sourceItems.length,
             zOrder: sourceItems.length,
             name: null,
@@ -1135,7 +1210,16 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     sourceIndexProgress("source_index_read_items", 0, stats.itemCount, "read source objects");
     for (var i = 0; allItems && i < allItems.length; i++) {
         sourceIndexProgress("source_index_read_item", i, stats.itemCount, "read source object");
-        try { readItemInfo(allItems[i], i); } catch (eReadInfo) {}
+        try { readItemInfo(allItems[i], i); } catch (eReadInfo) {
+            if (stats.readItemInfoErrors.length < 50) {
+                stats.readItemInfoErrors.push({
+                    itemIndex: i,
+                    id: itemId(allItems[i]),
+                    kind: _itemKind(allItems[i]),
+                    message: String(eReadInfo && eReadInfo.message || eReadInfo || "")
+                });
+            }
+        }
         if (i > 0 && i % 1000 === 0) {
             marker("03d01_readItems_" + String(i));
             sourceIndexProgress("source_index_read_items", i, stats.itemCount, "read source objects");
@@ -1169,7 +1253,17 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                     }
                     appendedParent = true;
                 }
-            } catch (eReadMissingParent) {}
+            } catch (eReadMissingParent) {
+                if (stats.recoveredParentReadErrors.length < 50) {
+                    stats.recoveredParentReadErrors.push({
+                        childId: childInfo.id,
+                        parentId: childInfo.parentId,
+                        parentKind: _itemKind(parentDom),
+                        message: String(eReadMissingParent && eReadMissingParent.message
+                                || eReadMissingParent || "")
+                    });
+                }
+            }
         }
         if (!appendedParent) break;
     }
