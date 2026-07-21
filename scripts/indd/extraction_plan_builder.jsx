@@ -7473,6 +7473,18 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         }
         markIds(ids);
     }
+    try {
+        if (typeof _tableStyleSourceObjectIdsByPageForPagePlaneHide === "function") {
+            var sourceBasedTableStyleHiddenIdsByPage =
+                    _tableStyleSourceObjectIdsByPageForPagePlaneHide(sourceItems || []);
+            for (var sourceBasedPageKey in sourceBasedTableStyleHiddenIdsByPage) {
+                if (!sourceBasedTableStyleHiddenIdsByPage.hasOwnProperty(sourceBasedPageKey)) continue;
+                var sourceBasedIds = sourceBasedTableStyleHiddenIdsByPage[sourceBasedPageKey] || [];
+                addHiddenTableStyleIds(Number(sourceBasedPageKey), sourceBasedIds);
+                markIds(sourceBasedIds);
+            }
+        }
+    } catch (eSourceBasedTableStyleHide) {}
     for (var pi = 0; pi < objectPlans.length; pi++) {
         var existing = objectPlans[pi];
         if (!existing || existing.materialization === "PAGE_PLANE_PNG") continue;
