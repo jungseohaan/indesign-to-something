@@ -665,12 +665,71 @@ function _indexSingleTextlessPagePlaneFrames(result) {
     return byPageIndex;
 }
 
-function _pagePlaneCacheFileName(pageIndex, pageHash) {
+// SPEC-049: 페이지 평면 숨김 정책의 결정론적 서명.
+// 페이지 평면은 세 종류의 숨김 정책에 의존한다:
+//   1. table-style source hide (pagePlaneHiddenTableStyleSourceObjectIdsByPage)
+//   2. source-bundle text-range shell hide (…ShellHideCandidateCount)
+//   3. mixed-bundle placed-visual hide (…MixedBundlePlacedVisualHideCandidateCount)
+// 셋 다 sourceItems / extractionPlan 에서 순수 도출되어 같은 INDD → 같은 값이다.
+// 이 서명을 캐시 파일명에 넣어 "같은 페이지 + 같은 숨김 정책 = 같은 캐시 파일"을
+// 보장한다. 정책이 (추출기 변경 등으로) 달라지면 서명이 바뀌어 자동 miss →
+// 오염된 캐시 재사용을 막는다. 숨김이 하나도 없으면 null(레거시 파일명 유지).
+function _pagePlaneHideSignature(ctx) {
+    if (!ctx) return null;
+    var byPage = ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage;
+    var shellCount = ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount || 0;
+    var mixedCount = ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount || 0;
+    var tableKeyCount = (byPage ? _objectPlanMapKeyCount(byPage) : 0);
+    if (tableKeyCount === 0 && shellCount === 0 && mixedCount === 0) return null;
+    // (1) table-style: 페이지 인덱스 오름차순, 각 페이지의 object id 오름차순으로
+    // 정규화해 순회 순서에 무관한 안정적 문자열을 만든다.
+    var parts = [];
+    if (byPage && tableKeyCount > 0) {
+        var pageKeys = [];
+        for (var pk in byPage) {
+            if (byPage.hasOwnProperty(pk)) pageKeys.push(pk);
+        }
+        pageKeys.sort(function (a, b) { return Number(a) - Number(b); });
+        for (var i = 0; i < pageKeys.length; i++) {
+            var key = pageKeys[i];
+            var ids = byPage[key];
+            var idList = [];
+            if (ids) {
+                if (ids.length !== undefined && typeof ids !== "string") {
+                    for (var j = 0; j < ids.length; j++) idList.push(String(ids[j]));
+                } else {
+                    for (var idk in ids) {
+                        if (ids.hasOwnProperty(idk)) idList.push(String(idk));
+                    }
+                }
+            }
+            idList.sort();
+            parts.push(key + ":" + idList.join(","));
+        }
+    }
+    // (2)(3) shell / mixed 는 결정론적 후보 카운트로 서명한다 (id 목록은 ctx 에
+    // 저장되지 않지만, 같은 INDD 면 카운트도 동일하므로 서명 목적에 충분하다).
+    var raw = "T=" + parts.join("|") + ";S=" + shellCount + ";M=" + mixedCount;
+    // djb2 해시 → 8자리 hex.
+    var h = 5381;
+    for (var c = 0; c < raw.length; c++) {
+        h = ((h * 33) ^ raw.charCodeAt(c)) | 0;
+    }
+    return "hs" + (h >>> 0).toString(16);
+}
+
+function _pagePlaneCacheFileName(pageIndex, pageHash, hideSig) {
     // The cache directory is already keyed by immutable INDD path/size/mtime,
     // extractor version, graphics mode, and perf mode. The legacy page_hashes
     // include session-local DOM ids for some generated instances, so using them
     // in the file name makes deterministic source pages miss the cache.
-    return "page_textless_plane_p" + String(pageIndex + 1) + ".png";
+    //
+    // SPEC-049: when table-style source hiding is active, the page plane depends
+    // on which sources are hidden. hideSig (deterministic per INDD) is appended
+    // so cached planes only match when produced under the same hide set.
+    var base = "page_textless_plane_p" + String(pageIndex + 1);
+    if (hideSig) base += "_" + hideSig;
+    return base + ".png";
 }
 
 function _copyFileReplacingGeneric(src, dest, label) {
@@ -713,19 +772,11 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
             summary.reason = "cache_not_configured";
             return summary;
         }
-        if (ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
-                && _objectPlanMapKeyCount(ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage) > 0) {
-            summary.reason = "table_style_source_hide_requires_fresh_page_plane";
-            return summary;
-        }
-        if (ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount > 0) {
-            summary.reason = "source_bundle_text_range_shell_hide_requires_fresh_page_plane";
-            return summary;
-        }
-        if (ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0) {
-            summary.reason = "mixed_bundle_placed_visual_hide_requires_fresh_page_plane";
-            return summary;
-        }
+        // SPEC-049: 세 종류의 숨김 정책(table-style / text-range-shell /
+        // mixed-bundle-placed-visual)은 더 이상 캐시를 무효화하지 않는다. 셋 다
+        // 결정론적이므로 서명(hideSig)을 캐시 파일명에 반영해 안전하게 재사용한다.
+        var hideSig = _pagePlaneHideSignature(ctx);
+        summary.hideSignature = hideSig || null;
         var cacheDir = Folder(ctx.pagePlaneCacheDir);
         if (!cacheDir.exists) {
             summary.reason = "cache_dir_missing";
@@ -756,7 +807,7 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
                 summary.entries.push(entry);
                 continue;
             }
-            var cacheFile = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash));
+            var cacheFile = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash, hideSig));
             entry.cacheFile = cacheFile.fsName;
             if (!cacheFile.exists) {
                 summary.missCount++;
@@ -819,19 +870,10 @@ function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
             summary.reason = "cache_not_configured";
             return summary;
         }
-        if (ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
-                && _objectPlanMapKeyCount(ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage) > 0) {
-            summary.reason = "table_style_source_hide_not_cached";
-            return summary;
-        }
-        if (ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount > 0) {
-            summary.reason = "source_bundle_text_range_shell_hide_not_cached";
-            return summary;
-        }
-        if (ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0) {
-            summary.reason = "mixed_bundle_placed_visual_hide_not_cached";
-            return summary;
-        }
+        // SPEC-049: 세 종류의 숨김 정책은 더 이상 캐시 저장을 막지 않는다.
+        // 숨김 서명(hideSig)을 파일명에 반영해 저장한다.
+        var hideSig = _pagePlaneHideSignature(ctx);
+        summary.hideSignature = hideSig || null;
         var cacheDir = _ensureFolder(ctx.pagePlaneCacheDir);
         var pageHashes = readJson(ctx.outputDir + "/page_hashes.json") || {};
         var frames = pageTextlessGroupResult && pageTextlessGroupResult.frames
@@ -859,7 +901,7 @@ function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
                 continue;
             }
             var src = File(ctx.outputDir + "/" + frame.file);
-            var dest = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash));
+            var dest = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash, hideSig));
             entry.cacheFile = dest.fsName;
             if (!src.exists) {
                 summary.skippedCount++;
@@ -1213,6 +1255,23 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d_buildExtractionPlan_start");
     ctx.extractionPlan = _buildExtractionPlan(doc, ctx, allItems);
     _marker(ctx.outputDir, "03d_buildExtractionPlan_done");
+    // SPEC-049: mixed-bundle placed-visual 숨김 후보 카운트를 plan 완료 직후에
+    // 미리 계산한다. 실제 렌더/세팅은 하위 단계(image_placed_frames pass)에서
+    // 그대로 일어나지만, 페이지 평면 캐시 서명(_pagePlaneHideSignature)이
+    // restore(아래) 와 store(렌더 후) 양쪽에서 동일한 값을 봐야 hit 이 성립하므로,
+    // restore 이전에 결정론적 카운트를 확정해 둔다. extractionPlan 에서 순수
+    // 도출되므로 여기서 계산해도 하위 단계 값과 항상 일치한다.
+    try {
+        if (ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount === undefined
+                || ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount === null) {
+            var mixedPreCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.image_placed_frames");
+            ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount =
+                    (mixedPreCandidates && mixedPreCandidates.length) || 0;
+        }
+    } catch (eMixedPreCount) {
+        ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount =
+                ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount || 0;
+    }
     if (ctx.deferPagePlaneCacheRestoreUntilAfterPlan === true) {
         _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_afterPlan_start");
         _restoreCachedSingleTextlessPagePlanes(doc, ctx);
@@ -1426,8 +1485,13 @@ function _runRenderPhases(doc, ctx, allItems) {
         hiddenTableStyleSourceObjectIdsByPage:
                 ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {}
     };
-    if (ctx.globalSingleTextlessPagePlanesByPageIndex
-            && !(ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0)) {
+    // SPEC-049: restore 가 서명(hideSig) 기반으로 hit 을 판정했다면
+    // globalSingleTextlessPagePlanesByPageIndex 는 현재 숨김 정책(table-style /
+    // text-range-shell / mixed-bundle 포함)과 동일한 서명의 캐시다. 따라서
+    // mixed-bundle 후보가 있어도 재사용은 안전하다. 이전의 mixedBundle>0 가드는
+    // restore/store 가드와 함께 제거한다 (그 가드가 없으면 hit 이어도 fresh export
+    // 되어 캐시가 무의미해진다).
+    if (ctx.globalSingleTextlessPagePlanesByPageIndex) {
         pagePlaneExportOptions.precomputedPagePlanesByPageIndex =
                 ctx.globalSingleTextlessPagePlanesByPageIndex;
     }
