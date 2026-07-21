@@ -112,10 +112,30 @@
    로 확장. `hideSig` 가 있으면 `page_textless_plane_p{N}_{hideSig}.png`,
    없으면 기존 `page_textless_plane_p{N}.png` (하위 호환).
 
-> **보수적 범위 결정**: 이번 SPEC은 `table_style_source_hide` 가드만 완화한다.
-> `source_bundle_text_range_shell_hide` / `mixed_bundle_placed_visual_hide` 두
-> 가드는 동일 논리로 완화 가능하나, 별도 검증이 필요하므로 이 SPEC 범위 밖으로
-> 둔다(같은 서명 메커니즘을 확장하면 됨).
+### 범위: 세 가드 모두 완화
+
+초기 구현은 `table_style_source_hide` 가드만 풀었으나, 중3과학 u1 1차 검증에서
+같은 문서가 `source_bundle_text_range_shell_hide` 가드에도 걸려 캐시 저장이
+여전히 skip됨을 확인했다(`reason: source_bundle_text_range_shell_hide_not_cached`).
+세 가드 모두 결정론적 원천을 가지므로 서명에 통합한다:
+
+| 숨김 정책 | 원천 | 결정성 |
+|---|---|---|
+| table-style source hide | `pagePlaneHiddenTableStyleSourceObjectIdsByPage` (sourceItems 도출) | object id 집합 |
+| source-bundle text-range shell hide | `_globalSourceBundleTextRangeShellInlineHideCandidates(sourceItems).length` | 후보 카운트 |
+| mixed-bundle placed-visual hide | `_pngExtractionCandidatesForPass(plan, "pass.image_placed_frames").length` | 후보 카운트 |
+
+서명 `_pagePlaneHideSignature(ctx)` = `djb2("T=" + tableIds + ";S=" + shellCount + ";M=" + mixedCount)`.
+
+**타이밍 주의 (핵심 트랩)**: 캐시 서명은 **restore 시점**과 **store 시점**에서
+동일한 ctx 값을 봐야 hit 이 성립한다. table-style/shell 카운트는 plan 빌드 중
+(`_buildExtractionPlan`) 세팅되어 restore(plan 완료 직후) 시점에 이미 존재하지만,
+**mixed-bundle 카운트는 원래 렌더 파이프라인 하위 단계(`pass.image_placed_frames`)
+에서야 세팅**되어 restore 시점엔 미설정(undefined→0)이었다. 이 비대칭을 두면
+restore 서명(M=0)과 store 서명(M=실제값)이 달라져 캐시가 영영 hit 되지 않는다.
+→ plan 완료 직후 restore 이전에 mixed 카운트를 미리 계산해 ctx 에 확정한다
+(`extraction_orchestrator.jsx` `03d_buildExtractionPlan_done` 직후). 순수 함수라
+하위 단계의 재계산 값과 항상 일치한다.
 
 ## 수정 파일
 
