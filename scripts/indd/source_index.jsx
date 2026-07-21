@@ -62,6 +62,49 @@ function _sourceIndexRunStyleKey(run) {
     return parts.join("|");
 }
 
+function _sourceIndexIsSubscriptRun(run) {
+    if (!run) return false;
+    var position = _sourceIndexTextStyleValue(run, "position").toLowerCase();
+    var charStyle = _sourceIndexTextStyleValue(run, "appliedCharacterStyle");
+    if (position.indexOf("subscript") >= 0) return true;
+    if (charStyle.indexOf("하부자") >= 0 || charStyle.indexOf("첨자") >= 0) return true;
+    return false;
+}
+
+function _sourceIndexIsChemicalFormulaParagraphRuns(runs) {
+    if (!runs || runs.length < 2) return false;
+    var text = "";
+    var sawSubscriptRun = false;
+    for (var ri = 0; ri < runs.length; ri++) {
+        var run = runs[ri];
+        if (!run) continue;
+        var visible = _sourceIndexVisibleText(run.contents);
+        if (!visible) continue;
+        text += visible;
+        if (_sourceIndexIsSubscriptRun(run)) sawSubscriptRun = true;
+    }
+    text = String(text || "")
+            .replace(/[\u200A\u2009\uFFFC]/g, "")
+            .replace(/^\s+|\s+$/g, "");
+    if (!text || text.length > 24) return false;
+    // 첨자 런이 있어야 text-range-shell 오검 대상이다. 단순 라틴 라벨은 제외한다.
+    if (!sawSubscriptRun) return false;
+    var sawUpper = false;
+    for (var i = 0; i < text.length; i++) {
+        var c = text.charAt(i);
+        if (c >= "A" && c <= "Z") {
+            sawUpper = true;
+            continue;
+        }
+        if (c >= "a" && c <= "z") continue;
+        if (c >= "0" && c <= "9") continue;
+        if (c === "+" || c === "-" || c === "→" || c === "(" || c === ")") continue;
+        if (/\s/.test(c)) continue;
+        return false;
+    }
+    return sawUpper;
+}
+
 function _sourceIndexLeadingStyledStoryRunRanges(textFrame) {
     var ranges = [];
     try {
@@ -72,6 +115,11 @@ function _sourceIndexLeadingStyledStoryRunRanges(textFrame) {
             var runs = null;
             try { runs = paragraph.textStyleRanges.everyItem().getElements(); } catch (eRuns) { runs = null; }
             if (!runs || runs.length < 2) continue;
+            // 화학식(H₂O, 2H₂O 등)은 원소 런과 첨자 런 사이에 정상적인 스타일 경계가 있다.
+            // 이 경계를 라벨/배지용 text-range-shell 로 해석하면 첫 원소가 별도 inline
+            // shell 로 분리되어 p17 수식 박스가 다시 깨진다. Java SPEC-046 가드와 같은
+            // source metadata 단계의 방어로, 화학식 문단은 range 생성 자체를 하지 않는다.
+            if (_sourceIndexIsChemicalFormulaParagraphRuns(runs)) continue;
             var firstIndex = -1;
             var firstRun = null;
             var firstText = "";
