@@ -1553,13 +1553,43 @@ class MathProcessor {
         // 본문 라틴 주석이 첨자로 깨진다(실측: 1단원 "상부자(정체)" 스타일의
         // Pythagoras·B.C.569?~475? 가 위첨자화). "정체"면 첨자로 만들지 않는다.
         if (style.contains("정체") || style.contains("정자")) return;
-        if (style.contains("superscript") || style.contains("상부자") || style.contains("위첨자")) {
+        boolean sup = style.contains("superscript") || style.contains("상부자") || style.contains("위첨자");
+        boolean sub = style.contains("subscript") || style.contains("하부자") || style.contains("아래첨자");
+        if (!sup && !sub) return;
+        // SPEC-053: IDML/resolved 가 position 을 명시적으로 NORMAL(첨자 아님)로 보고했으면
+        // charStyle 폰트명이 "상부자"여도 첨자화하지 않는다. 상부자 폰트로 조판한 도형
+        // 라벨(원 O, □ABCD)이 위첨자로 깨지던 문제(실측: u5 p174).
+        if (tr.explicitNormalPosition()) return;
+        // SPEC-053: charStyle 이름의 "상부자/하부자"만으론 첨자화하지 않는다. 이 이름은
+        // "EH상부자 폰트로 조판"을 뜻할 뿐 반드시 위/아래첨자 위치는 아니다. 도형 라벨
+        // (원 O, □ABCD)이나 한글 캡션(확산하기)까지 폰트명만 보고 위첨자화하면 깨진다
+        // (실측: u5 p174 원 O·□ABCD, "확산하기"·"사고"). 진짜 첨자는 화학식/지수처럼
+        // 숫자·1~2 라틴 글자의 짧은 토큰이다. 그 외(한글·3+ 라틴·기호)는 첨자로 보지
+        // 않는다. 실제 SUPERSCRIPT/SUBSCRIPT position 은 상류 applyPositionStyle 이 이미
+        // 처리했으므로 이 이름-폴백 축소가 진짜 첨자를 놓치지 않는다.
+        if (!isPlausibleScriptToken(tr.text())) return;
+        if (sup) {
             tr.superscript(true);
             tr.subscript(false);
-        } else if (style.contains("subscript") || style.contains("하부자") || style.contains("아래첨자")) {
+        } else {
             tr.subscript(true);
             tr.superscript(false);
         }
+    }
+
+    /** 첨자에 타당한 짧은 토큰(숫자·1~2 라틴 글자, 지수/화학식 계수)인가. */
+    private static boolean isPlausibleScriptToken(String text) {
+        if (text == null) return false;
+        String t = text.trim();
+        if (t.isEmpty() || t.length() > 2) return false;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            boolean ok = (c >= '0' && c <= '9')
+                    || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                    || c == '+' || c == '-' || c == '(' || c == ')';
+            if (!ok) return false;
+        }
+        return true;
     }
 
     private static boolean isSimplePositionedTextRun(ASTTextRun tr) {

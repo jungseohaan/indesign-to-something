@@ -49,7 +49,8 @@ public final class TextControlNormalizer {
 
         out = out.replace('\uE285', '\u25A1')
                 .replace('\uE287', '\u25A1')
-                .replace('\uE288', '\u25A1');
+                .replace('\uE288', '\u25A1')
+                .replace('\uE22D', '\u25A1'); // SPEC-053: □ABCD 사각형 기호(u5 p174)
 
         if (markOverline && out.indexOf('\u00D3') >= 0) {
             out = markOverlineSegments(out);

@@ -312,8 +312,18 @@ class RunBuilder {
     }
 
     private static void applyPositionStyle(ASTTextRun target, ResolvedRun rr, IDMLCharacterRun cr) {
-        String idmlPosition = explicitPosition(cr != null ? cr.position() : null);
-        String resolvedPosition = explicitPosition(rr != null ? rr.position() : null);
+        // SPEC-053: IDML/resolved 가 position 을 명시적으로 "첨자 아님"으로 보고했으면
+        // 표시해 둔다. NORMAL 또는 OpentypePositionFromBaseline(폰트 자체가 위치를
+        // 정의 — 상부자 폰트로 도형 라벨을 조판한 경우) 둘 다 첨자가 아니다. 하류
+        // applyPositionFromCharacterStyle 의 이름-폴백이 이 런을 위첨자화하지 못하게 한다
+        // (실측: u5 p174 원 O·□ABCD 가 상부자 폰트명 때문에 위첨자로 깨짐).
+        String rawResolvedPos = rr != null ? rr.position() : null;
+        String rawIdmlPos = cr != null ? cr.position() : null;
+        if (isNonScriptPosition(rawResolvedPos) || isNonScriptPosition(rawIdmlPos)) {
+            target.explicitNormalPosition(true);
+        }
+        String idmlPosition = explicitPosition(rawIdmlPos);
+        String resolvedPosition = explicitPosition(rawResolvedPos);
 
         // resolved DOM 이 첨자 위치를 인접 문자로 흘리는 데이터가 있다. 화학 반응식
         // 생성물 "2H₂O" 에서 계수 2·hairspace 까지 SUBSCRIPT 로 보고해, 텍스트만 같은
@@ -351,6 +361,13 @@ class RunBuilder {
         if (position == null || position.trim().isEmpty()) return null;
         String p = position.toLowerCase(Locale.ROOT);
         return p.contains("normal") ? null : position;
+    }
+
+    /** position 이 명시적으로 "첨자 아님"인가 (NORMAL / OpentypePositionFromBaseline). */
+    private static boolean isNonScriptPosition(String position) {
+        if (position == null || position.trim().isEmpty()) return false;
+        String p = position.toLowerCase(Locale.ROOT);
+        return p.contains("normal") || p.contains("frombaseline");
     }
 
     private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr,
