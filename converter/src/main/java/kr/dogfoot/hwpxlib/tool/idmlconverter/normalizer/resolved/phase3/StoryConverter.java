@@ -2616,11 +2616,24 @@ public final class StoryConverter {
     }
 
     private static void applySourceTextWrapAlignment(ASTParagraph para, TextLayoutContract contract) {
-        if (para == null || contract == null || contract.wrapSide == null) return;
-        String wrapSide = contract.wrapSide.trim().toUpperCase(Locale.ROOT);
-        if ("LEFT".equals(wrapSide)) {
-            para.alignment("right");
+        if (para == null || contract == null) return;
+        String alignment = para.alignment();
+        if (alignment == null || alignment.trim().isEmpty() || isLeftAlignedJustification(alignment)) {
+            para.alignment("left");
         }
+    }
+
+    private static boolean isLeftAlignedJustification(String alignment) {
+        if (alignment == null) return false;
+        String normalized = alignment.trim()
+                .toLowerCase(Locale.ROOT)
+                .replace("_", "")
+                .replace("-", "")
+                .replace(" ", "");
+        return "left".equals(normalized)
+                || "leftalign".equals(normalized)
+                || "leftjustified".equals(normalized)
+                || "leftjustify".equals(normalized);
     }
 
     private static TextLayoutContract sourceTextWrapContractForTextFrame(
