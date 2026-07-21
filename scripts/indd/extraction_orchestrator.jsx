@@ -1485,8 +1485,13 @@ function _runRenderPhases(doc, ctx, allItems) {
         hiddenTableStyleSourceObjectIdsByPage:
                 ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {}
     };
-    if (ctx.globalSingleTextlessPagePlanesByPageIndex
-            && !(ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0)) {
+    // SPEC-049: restore 가 서명(hideSig) 기반으로 hit 을 판정했다면
+    // globalSingleTextlessPagePlanesByPageIndex 는 현재 숨김 정책(table-style /
+    // text-range-shell / mixed-bundle 포함)과 동일한 서명의 캐시다. 따라서
+    // mixed-bundle 후보가 있어도 재사용은 안전하다. 이전의 mixedBundle>0 가드는
+    // restore/store 가드와 함께 제거한다 (그 가드가 없으면 hit 이어도 fresh export
+    // 되어 캐시가 무의미해진다).
+    if (ctx.globalSingleTextlessPagePlanesByPageIndex) {
         pagePlaneExportOptions.precomputedPagePlanesByPageIndex =
                 ctx.globalSingleTextlessPagePlanesByPageIndex;
     }

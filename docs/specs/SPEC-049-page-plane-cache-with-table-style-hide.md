@@ -1,7 +1,26 @@
 # SPEC-049: 테이블스타일 숨김 문서의 페이지 평면 캐시 활성화
 
-> 작성: 2026-07-21. 상태: **구현 완료, 캐시 재사용 육안 검증 대기**. 우선순위: P1.
+> 작성: 2026-07-21. 상태: **구현 완료 · 검증 통과 (2026-07-21)**. 우선순위: P1.
 > 상위 컨텍스트: [SPEC-030](SPEC-030-indesign-extraction-performance.md) (추출 속도 개선).
+
+## 검증 결과 (중3과학 u1, 8-49p, 42페이지)
+
+| 실행 | 06b1 페이지 평면 export | 총 추출 | 비고 |
+|---|---:|---:|---|
+| 1차 (fresh, 캐시 저장) | **177.0s** | 468s | store `status: ok`, 42/42 PNG 저장, sig `hsed97ae06` |
+| 3차 (캐시 hit) | **0.2s** | **289s** | restore `status: hit`, 42/42, reuse 경로 `exportLoopMs=0` |
+
+- **06b1 177s → 0.2s** (사실상 제거), **총 추출 468s → 289s (-38%, -179s)**.
+- correctness 회귀 0: 캐시 복원 PNG가 fresh 렌더와 **픽셀 동일**(md5 일치),
+  변환 결과 동일(`frames=888 images=370 warnings=0`).
+
+> **추가로 발견·수정한 트랩 (reuse 분기 가드)**: restore/store 가드를 풀어도
+> export 옵션 분기(`06b_pageTextlessGroups` 직후,
+> `pagePlaneExportOptions.precomputedPagePlanesByPageIndex` 설정)에
+> `!(pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0)` 조건이 남아 있어,
+> restore hit 이어도 mixed-bundle 후보가 있으면 precomputed plane 이 전달되지 않아
+> fresh export 를 그대로 실행했다(2차 검증에서 06b1 이 여전히 177s). restore 가
+> 이미 서명으로 안전을 보장하므로 이 가드도 제거해야 캐시가 실효를 가진다.
 
 ## 문제
 
@@ -140,17 +159,19 @@ restore 서명(M=0)과 store 서명(M=실제값)이 달라져 캐시가 영영 h
 ## 수정 파일
 
 1. `scripts/indd/extraction_orchestrator.jsx`
-   - `_pagePlaneHideSignature(ctx)` 신규 — 숨김 맵 → 결정론적 서명 문자열
+   - `_pagePlaneHideSignature(ctx)` 신규 — 세 숨김 정책 → 결정론적 서명(prefix `hs`)
    - `_pagePlaneCacheFileName(pageIndex, pageHash, hideSig)` — 서명 인자 추가
-   - `_restoreCachedSingleTextlessPagePlanes` — table-style 가드 제거, 서명 사용
-   - `_storeCachedSingleTextlessPagePlanes` — table-style 가드 제거, 서명 사용
+   - `_restoreCachedSingleTextlessPagePlanes` — 세 가드 제거, 서명 사용
+   - `_storeCachedSingleTextlessPagePlanes` — 세 가드 제거, 서명 사용
+   - `_buildExtractionPlan` 완료 직후 — mixed-bundle 후보 카운트 선계산
+     (restore/store 서명 대칭 보장)
+   - export 옵션 분기 — `precomputedPagePlanesByPageIndex` 설정의 mixedBundle 가드 제거
 
 ## 검증
 
-- [ ] `mvn -pl converter -am -DskipTests package` (변환기 무영향 확인)
-- [ ] 중3과학 u1 (8-49p) 1차 추출 → 캐시 store 성공 확인
-      (`single-textless-page-plane-cache-store.json` `status: ok`)
-- [ ] 동일 케이스 2차 추출 → 캐시 hit 확인
-      (`cache-restore.json` `status: hit`, `06b1` 구간 ≈0초)
-- [ ] 1차/2차 출력 HWPX diff 0 (페이지 평면 PNG 픽셀 동일)
-- [ ] 표 없는 문서 회귀 없음 (기존 캐시 경로 유지)
+- [x] `mvn -pl converter -am -DskipTests package` — 변환기 무영향, exit 0
+- [x] 1차 추출 → 캐시 store 성공 (`status: ok`, storedCount 42, sig `hsed97ae06`)
+- [x] 3차 추출 → 캐시 hit (`status: hit` 42/42, `06b1` 177s→0.2s)
+- [x] fresh vs cache-hit 출력 동일 — PNG md5 픽셀 동일, `frames=888 images=370 warnings=0`
+- [x] 총 추출 468s → 289s (-38%)
+- [ ] 표 없는 문서 회귀 없음 (기존 캐시 경로 유지) — 미검증(별도 케이스 필요)
