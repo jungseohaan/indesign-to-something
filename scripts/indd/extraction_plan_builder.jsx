@@ -6802,6 +6802,37 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
                     || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
                     || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
+    function hasInlineFlowDescendantContract(sourceId, visiting) {
+        var src = source(sourceId);
+        if (!src) return false;
+        var key = String(sourceId);
+        visiting = visiting || {};
+        if (visiting[key]) return true;
+        visiting[key] = true;
+        if (isTextLike(src)) return isInlineFlow(src);
+        var children = childIdsByParentId[key] || [];
+        if (children.length === 0) return isInlineFlow(src);
+        var hasInlineLeaf = false;
+        for (var ci = 0; ci < children.length; ci++) {
+            var child = source(children[ci]);
+            if (!child) continue;
+            if (child.visible === false || child.hiddenLayer === true || child.nonprinting === true) continue;
+            if (isTextLike(child) || (childIdsByParentId[String(child.id)] || []).length === 0) {
+                if (!isInlineFlow(child)) return false;
+                hasInlineLeaf = true;
+                continue;
+            }
+            if (!hasInlineFlowDescendantContract(child.id, visiting)) return false;
+            hasInlineLeaf = true;
+        }
+        return hasInlineLeaf;
+    }
+    function isInlineFlowContainerByChildContract(src, child) {
+        if (!src || !child) return false;
+        if (String(src.kind || "") !== "Group") return false;
+        if (!isInlineFlow(child) && !hasInlineFlowDescendantContract(child.id, {})) return false;
+        return hasInlineFlowDescendantContract(src.id, {});
+    }
     function canBeInlineVisualContainer(src, child) {
         if (!src || isTextLike(src)) return false;
         var kind = String(src.kind || "");
@@ -6817,7 +6848,7 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
                 && String(src.pageIndex) !== String(child.pageIndex)) {
             return false;
         }
-        return isInlineFlow(src);
+        return isInlineFlow(src) || isInlineFlowContainerByChildContract(src, child);
     }
     function descendants(id) {
         var key = String(id);
@@ -7016,6 +7047,7 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             continue;
         }
         if (candidateSeen) candidateSeen[candidateId] = true;
+        var ownsTextByCompletePng = hiddenTextIds.length > 1;
         appended.push({
             candidateId: candidateId,
             passId: "pass.inline_objects",
@@ -7041,13 +7073,17 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             ownedTextFrameIds: hiddenTextIds.slice(0),
             editableTextFrameIds: hiddenTextIds.slice(0),
             hiddenTextFrameIds: hiddenTextIds.slice(0),
-            requiresTextHidden: hiddenTextIds.length > 0,
-            textOwner: hiddenTextIds.length > 0 ? "hwpx_tf" : "none",
+            requiresTextHidden: hiddenTextIds.length > 0 && ownsTextByCompletePng !== true,
+            textOwner: ownsTextByCompletePng
+                    ? "indesign_png"
+                    : (hiddenTextIds.length > 0 ? "hwpx_tf" : "none"),
             containsEditableText: false,
-            completePngTextAllowed: false,
+            completePngTextAllowed: ownsTextByCompletePng,
             ownershipSlot: "CONTENT_VISUAL_SLOT",
-            materialization: "EXTRACTED_PNG_VECTOR",
-            textAction: hiddenTextIds.length > 0 ? "OWNED_BY_HWPX_TEXT" : "DROP_TEXT",
+            materialization: ownsTextByCompletePng ? "COMPLETE_PNG" : "EXTRACTED_PNG_VECTOR",
+            textAction: ownsTextByCompletePng
+                    ? "OWNED_BY_PNG"
+                    : (hiddenTextIds.length > 0 ? "OWNED_BY_HWPX_TEXT" : "DROP_TEXT"),
             visualAction: "PLACE_INLINE_PNG",
             visualLayer: "CONTENT_VISUAL",
             placement: "INLINE",

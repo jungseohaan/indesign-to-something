@@ -1302,6 +1302,10 @@ public class InlineFrameHandler {
                 badgeImage = trimSimpleButtonBadgeImage(imageData, img);
                 imageData = badgeImage.imageData;
                 img = badgeImage.image;
+            } else if (isInlineCompletePngTextOwnerPlan(matchedPlan)) {
+                badgeImage = trimVerticalTransparentPaddingPreserveWidth(imageData, img);
+                imageData = badgeImage.imageData;
+                img = badgeImage.image;
             }
             if (matchedPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                     && !ShellRole.isTextShell(matchedPlan)) {
@@ -4910,6 +4914,11 @@ public class InlineFrameHandler {
                     if (img == null) return null;
                     // 2x2 이하 빈 이미지 무시
                     if (img.getWidth() <= 2 && img.getHeight() <= 2) return null;
+                    if (isInlineCompletePngTextOwnerPlan(plan)) {
+                        BadgeImageData trimmed = trimVerticalTransparentPaddingPreserveWidth(imageData, img);
+                        imageData = trimmed.imageData;
+                        img = trimmed.image;
+                    }
 
                     ASTInlineObject obj = new ASTInlineObject();
                     obj.kind(ASTInlineObject.ObjectKind.IMAGE);
@@ -6830,6 +6839,15 @@ public class InlineFrameHandler {
                 && Math.abs(plan.bounds[2] - plan.bounds[0]) > 0;
     }
 
+    private static boolean isInlineCompletePngTextOwnerPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_PNG
+                && plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                && plan.placement == Placement.INLINE
+                && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && plan.materialization == Materialization.COMPLETE_PNG;
+    }
+
     private static int visibleTextLength(String text) {
         if (text == null) return 0;
         return text
@@ -6867,6 +6885,43 @@ public class InlineFrameHandler {
         Graphics2D g = cropped.createGraphics();
         try {
             g.drawImage(originalImage, 0, 0, w, h, x, y, x + w, y + h, null);
+        } finally {
+            g.dispose();
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(cropped, "png", out);
+        return new BadgeImageData(out.toByteArray(), cropped);
+    }
+
+    private static BadgeImageData trimVerticalTransparentPaddingPreserveWidth(
+            byte[] originalData,
+            BufferedImage originalImage) throws java.io.IOException {
+        if (originalImage == null || originalImage.getWidth() <= 0 || originalImage.getHeight() <= 0) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+        int[] alpha = alphaBounds(originalImage);
+        if (alpha == null) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+        int y = alpha[1];
+        int h = alpha[3];
+        if (y <= 0 && h >= originalImage.getHeight()) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+        if (h <= 1) {
+            return new BadgeImageData(originalData, originalImage);
+        }
+
+        BufferedImage cropped = new BufferedImage(
+                originalImage.getWidth(),
+                h,
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = cropped.createGraphics();
+        try {
+            g.drawImage(originalImage,
+                    0, 0, originalImage.getWidth(), h,
+                    0, y, originalImage.getWidth(), y + h,
+                    null);
         } finally {
             g.dispose();
         }

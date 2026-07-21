@@ -3444,6 +3444,9 @@ function _objectPlanInlineVisibleTextFrameShellPriority(plan, sourceById) {
         return 0;
     }
     var score = 1000;
+    if (_objectPlanIsClosedInlineFlowRootPlan(plan)) {
+        score += 1400;
+    }
     var objectPlanId = String(plan.objectPlanId || "");
     if (objectPlanId.indexOf("objectPlan.inline_visible_textframe_shell.") === 0) score += 500;
     if (plan.slotRole === "direct_child_shell_slot"
@@ -3461,6 +3464,17 @@ function _objectPlanInlineVisibleTextFrameShellPriority(plan, sourceById) {
     }
     if (plan.visualAction === "PLACE_TEXT_SHELL") score += 50;
     return score;
+}
+
+function _objectPlanIsClosedInlineFlowRootPlan(plan) {
+    if (!plan) return false;
+    if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
+    if (plan.inlineSourceTreeClosed !== true) return false;
+    if (!plan.inlineAnchorSourceObjectId) return false;
+    if (String(plan.inlineAnchorSourceObjectId) !== String(plan.primarySourceObjectId)) return false;
+    if (String(plan.candidateId || "").indexOf("inline_flow_visual_root") >= 0) return true;
+    return plan.slotRole === "inline_flow_visual_root"
+            || plan.compositeRole === "inline_flow_visual_root";
 }
 
 function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {

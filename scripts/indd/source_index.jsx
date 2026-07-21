@@ -423,6 +423,11 @@ function _itemVisibleBounds(item) {
 
 function _itemPathBounds(item) {
     try {
+        var kind = _itemKind(item);
+        if (kind !== "Rectangle" && kind !== "Oval"
+                && kind !== "Polygon" && kind !== "GraphicLine") {
+            return null;
+        }
         if (!item || !item.paths || item.paths.length < 1) return null;
         var top = Number.POSITIVE_INFINITY;
         var left = Number.POSITIVE_INFINITY;
@@ -621,7 +626,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         itemCount: allItems ? allItems.length : 0,
         kindCounts: {},
         sourceInfoCacheHits: 0,
-        sourceInfoCacheMisses: 0
+        sourceInfoCacheMisses: 0,
+        readItemInfoErrors: [],
+        recoveredParentReadErrors: []
     };
 
     function sourceIndexProgress(step, current, total, desc) {
@@ -1203,7 +1210,16 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     sourceIndexProgress("source_index_read_items", 0, stats.itemCount, "read source objects");
     for (var i = 0; allItems && i < allItems.length; i++) {
         sourceIndexProgress("source_index_read_item", i, stats.itemCount, "read source object");
-        try { readItemInfo(allItems[i], i); } catch (eReadInfo) {}
+        try { readItemInfo(allItems[i], i); } catch (eReadInfo) {
+            if (stats.readItemInfoErrors.length < 50) {
+                stats.readItemInfoErrors.push({
+                    itemIndex: i,
+                    id: itemId(allItems[i]),
+                    kind: _itemKind(allItems[i]),
+                    message: String(eReadInfo && eReadInfo.message || eReadInfo || "")
+                });
+            }
+        }
         if (i > 0 && i % 1000 === 0) {
             marker("03d01_readItems_" + String(i));
             sourceIndexProgress("source_index_read_items", i, stats.itemCount, "read source objects");
@@ -1237,7 +1253,17 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                     }
                     appendedParent = true;
                 }
-            } catch (eReadMissingParent) {}
+            } catch (eReadMissingParent) {
+                if (stats.recoveredParentReadErrors.length < 50) {
+                    stats.recoveredParentReadErrors.push({
+                        childId: childInfo.id,
+                        parentId: childInfo.parentId,
+                        parentKind: _itemKind(parentDom),
+                        message: String(eReadMissingParent && eReadMissingParent.message
+                                || eReadMissingParent || "")
+                    });
+                }
+            }
         }
         if (!appendedParent) break;
     }
