@@ -70,6 +70,27 @@ public final class ParagraphTextHelpers {
         return sb.toString();
     }
 
+    /**
+     * 원본 Story 흐름 좌표계에서의 문단 텍스트를 반환한다.
+     *
+     * <p>편집/검색용 plain text는 inline text shell 내부 문단까지 펼쳐야 하지만,
+     * TextFrame range/frame-break 계산에서 inline object는 InDesign Story 안에서
+     * 단일 object replacement marker로만 길이에 참여한다.</p>
+     */
+    public static String getParaStoryFlowText(ASTParagraph para) {
+        StringBuilder sb = new StringBuilder();
+        if (para == null || para.items() == null) return "";
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTTextRun) {
+                String t = ((ASTTextRun) item).text();
+                if (t != null) sb.append(t);
+            } else if (item instanceof ASTInlineObject) {
+                sb.append('\uFFFC');
+            }
+        }
+        return sb.toString();
+    }
+
     private static void appendInlineObjectPlainText(StringBuilder sb, ASTInlineObject obj) {
         if (obj == null) return;
         if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) {

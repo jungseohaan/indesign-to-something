@@ -29,11 +29,14 @@ class ParagraphDistributor {
         // 단일 프레임: frameVisibleText와 Story 텍스트 길이 비교
         if (blocks.size() == 1) {
             ASTTextFrameBlock block = blocks.get(0);
+            if (assignSingleFrameVisibleRangeWhenFrameBreaks(ctx, paragraphs, block, storyId)) {
+                return;
+            }
             // Story 텍스트가 길고 frameVisibleText가 거의 비어있으면 할당하지 않음
             // (다른 페이지의 프레임에서 실제로 표시되는 텍스트가 이 프레임에 잘못 할당되는 것 방지)
             int storyLen = 0;
             for (ASTParagraph p : paragraphs) {
-                String pt = ParagraphTextHelpers.getParaPlainText(p);
+                String pt = ParagraphTextHelpers.getParaStoryFlowText(p);
                 if (pt != null) storyLen += pt.length();
             }
             int visLen = block.frameVisibleTextLength();
@@ -56,7 +59,7 @@ class ParagraphDistributor {
         List<int[]> paraRanges = new ArrayList<>(); // [startCharIdx, endCharIdx]
         for (ASTParagraph p : paragraphs) {
             int s = storyTextBuilder.length();
-            String pt = ParagraphTextHelpers.getParaPlainText(p);
+            String pt = ParagraphTextHelpers.getParaStoryFlowText(p);
             storyTextBuilder.append(pt != null ? pt : "");
             paraRanges.add(new int[]{s, storyTextBuilder.length()});
         }
@@ -123,6 +126,77 @@ class ParagraphDistributor {
                     }
                 }
             }
+        }
+    }
+
+    private static boolean assignSingleFrameVisibleRangeWhenFrameBreaks(
+            ResolvedBuildContext ctx,
+            List<ASTParagraph> paragraphs,
+            ASTTextFrameBlock block,
+            String storyId) {
+        if (ctx == null || paragraphs == null || paragraphs.isEmpty() || block == null) return false;
+        String visibleText = block.frameVisibleText();
+        if (visibleText == null || visibleText.indexOf('\u0016') < 0) return false;
+
+        List<ASTTextFrameBlock> single = new ArrayList<>();
+        single.add(block);
+        StoryFlowRanges ranges = storyFlowRanges(paragraphs);
+        if (ranges.storyText.isEmpty()) return false;
+        TextFrameRangeOwnershipPlanner.FrameRangePlan rangePlan =
+                TextFrameRangeOwnershipPlanner.plan(ctx, single, ranges.storyText);
+        int frameStart = rangePlan.start(0);
+        int frameEnd = rangePlan.end(0);
+        if (frameEnd <= frameStart || frameEnd >= ranges.storyText.length()) return false;
+
+        for (int i = 0; i < paragraphs.size(); i++) {
+            int paraStart = ranges.paraRanges.get(i)[0];
+            int paraEnd = ranges.paraRanges.get(i)[1];
+            if (paraEnd <= frameStart) continue;
+            if (paraStart >= frameEnd) break;
+            if (paraStart >= frameStart && paraEnd <= frameEnd) {
+                block.addParagraph(paragraphs.get(i));
+            } else if (paraStart < frameEnd && paraEnd > frameEnd) {
+                int cutLen = frameEnd - paraStart;
+                String fullText = ParagraphTextHelpers.getParaStoryFlowText(paragraphs.get(i));
+                String cutText = (fullText != null && cutLen < fullText.length()) ? fullText.substring(0, cutLen) : fullText;
+                ASTParagraph trimmed = ParagraphTextHelpers.createSplitParagraph(paragraphs.get(i), cutText);
+                if (trimmed != null) {
+                    block.addParagraph(trimmed);
+                }
+            } else if (paraStart < frameStart && paraEnd > frameStart) {
+                int skipLen = frameStart - paraStart;
+                String fullText = ParagraphTextHelpers.getParaStoryFlowText(paragraphs.get(i));
+                String contText = (fullText != null && skipLen < fullText.length()) ? fullText.substring(skipLen) : "";
+                ASTParagraph continuation = ParagraphTextHelpers.createContinuationParagraph(paragraphs.get(i), skipLen, contText);
+                if (continuation != null) {
+                    block.addParagraph(continuation);
+                }
+            }
+        }
+        return true;
+    }
+
+    private static StoryFlowRanges storyFlowRanges(List<ASTParagraph> paragraphs) {
+        StringBuilder storyTextBuilder = new StringBuilder();
+        List<int[]> paraRanges = new ArrayList<>();
+        if (paragraphs != null) {
+            for (ASTParagraph p : paragraphs) {
+                int s = storyTextBuilder.length();
+                String pt = ParagraphTextHelpers.getParaStoryFlowText(p);
+                storyTextBuilder.append(pt != null ? pt : "");
+                paraRanges.add(new int[]{s, storyTextBuilder.length()});
+            }
+        }
+        return new StoryFlowRanges(storyTextBuilder.toString(), paraRanges);
+    }
+
+    private static final class StoryFlowRanges {
+        final String storyText;
+        final List<int[]> paraRanges;
+
+        StoryFlowRanges(String storyText, List<int[]> paraRanges) {
+            this.storyText = storyText != null ? storyText : "";
+            this.paraRanges = paraRanges != null ? paraRanges : new ArrayList<>();
         }
     }
 
