@@ -319,6 +319,13 @@ class RunPostProcessor {
             if (c >= 0xAC00 && c <= 0xD7AF) return false;
         }
 
+        // 각도값·다글자 HWP 키워드만 있는 약한 조각은 수식 오브젝트가 아니라 텍스트다.
+        // 원본에 실질 수식 구조(분수 over·근호 sqrt·첨자 ^/_·위첨자 ²³) 없이
+        // 등호+숫자+각(angle)/도(DEG) 만 있으면 텍스트로 둔다(실측: u5 p166 =90ù
+        // → =90°. HWP 수식 키워드 DEG/angle 은 텍스트로 새면 낱글자로 깨지므로,
+        // 애초에 수식으로 만들지 않고 텍스트+글리프 디코딩 경로로 보낸다).
+        if (isWeakAngleDegreeScript(trimmed)) return false;
+
         if (FormulaClassifier.containsEquationSyntax(trimmed)) return true;
         if (containsEHEncodedEvidence(mathRuns)) return true;
 
@@ -334,6 +341,37 @@ class RunPostProcessor {
             if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) letters++;
         }
         return letters == 1;
+    }
+
+    /**
+     * "약한 각도/도 조각" 판별: 실질 수식 구조가 없고 등호/숫자/공백과
+     * angle·DEG 키워드로만 이루어진 스크립트. 이런 조각은 수식 오브젝트가 아니라
+     * 각 기호·도(°)가 섞인 텍스트이므로 텍스트로 폴백해야 한다(u5 p166 =90°).
+     * 분수(over)·근호(sqrt/root)·첨자(^/_)·위첨자(²³)·기타 수식 기호가 있으면
+     * false(진짜 수식이므로 건드리지 않음).
+     */
+    private static boolean isWeakAngleDegreeScript(String script) {
+        if (script == null || script.isEmpty()) return false;
+        String lower = script.toLowerCase(java.util.Locale.ROOT);
+        // 강한 수식 구조가 하나라도 있으면 약한 조각이 아니다.
+        if (lower.contains("over") || lower.contains("sqrt") || lower.contains("root")
+                || lower.contains("overline") || lower.contains("rarrow")) {
+            return false;
+        }
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if ("^_²³√±×÷π∑∫∞{}[]<>≤≥".indexOf(c) >= 0) return false;
+        }
+        // angle/DEG 키워드가 반드시 있어야 이 판정 대상(그 외 일반 =수식은 기존 로직).
+        if (!lower.contains("angle") && !lower.contains("deg")) return false;
+        // 남은 문자가 등호/숫자/공백/마침표/쉼표 + angle·DEG 키워드 뿐인지 확인.
+        String stripped = lower.replace("angle", "").replace("deg", "");
+        for (int i = 0; i < stripped.length(); i++) {
+            char c = stripped.charAt(i);
+            if (Character.isDigit(c) || c == '=' || c == ' ' || c == '.' || c == ',' || c == '-') continue;
+            return false; // 그 외 문자(다른 라틴 변수 등)가 있으면 약한 조각 아님
+        }
+        return true;
     }
 
     private static boolean containsEHEncodedEvidence(List<IDMLCharacterRun> mathRuns) {
@@ -356,7 +394,11 @@ class RunPostProcessor {
             String text = run.content();
             if (text == null || text.isEmpty()) continue;
             ASTTextRun tr = new ASTTextRun();
-            tr.text(text.replace("`", ""));
+            // EH 글리프(ù→°, Û→² 등)를 디코딩한다. 이탤릭 수식 버퍼가 텍스트로
+            // 폴백될 때 raw EH 글리프가 그대로 노출되지 않게 한다(실측: u5 p166
+            // =90ù 가 =90° 로. flushEHMathGroup 폴백과 동일 처리).
+            String decoded = EHFontGlyphMap.decodeStrayGlyphText(text.replace("`", ""), run.fontFamily());
+            tr.text(decoded);
             tr.fontFamily(run.fontFamily());
             tr.characterStyleRef(run.appliedCharacterStyle());
             if (run.fontStyle() != null) tr.fontStyle(run.fontStyle());
