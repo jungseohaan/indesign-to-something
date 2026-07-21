@@ -116,6 +116,15 @@ function _pushExtractionCandidate(candidates, seen, passId, item, attrs) {
         textOwner: attrs.textOwner || null,
         containsEditableText: attrs.containsEditableText === true,
         completePngTextAllowed: attrs.completePngTextAllowed === true,
+        textWrapMode: attrs.textWrapMode || null,
+        textWrapSide: attrs.textWrapSide || null,
+        textWrapTop: attrs.textWrapTop !== undefined ? attrs.textWrapTop : null,
+        textWrapLeft: attrs.textWrapLeft !== undefined ? attrs.textWrapLeft : null,
+        textWrapBottom: attrs.textWrapBottom !== undefined ? attrs.textWrapBottom : null,
+        textWrapRight: attrs.textWrapRight !== undefined ? attrs.textWrapRight : null,
+        textWrapSourceObjectId: attrs.textWrapSourceObjectId !== undefined
+                ? attrs.textWrapSourceObjectId
+                : null,
         clipParentShellOwnerSourceId: attrs.clipParentShellOwnerSourceId !== undefined
                 ? attrs.clipParentShellOwnerSourceId
                 : null,

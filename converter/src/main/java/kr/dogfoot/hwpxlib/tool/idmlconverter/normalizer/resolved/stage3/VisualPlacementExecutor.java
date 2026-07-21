@@ -86,6 +86,12 @@ public final class VisualPlacementExecutor {
         if (plan.visualLayer != null) {
             fig.visualLayer(plan.visualLayer);
         }
+        fig.textWrapMode(rg.textWrapMode());
+        fig.textWrapSide(rg.textWrapSide());
+        fig.textWrapTop(rg.textWrapTop());
+        fig.textWrapLeft(rg.textWrapLeft());
+        fig.textWrapBottom(rg.textWrapBottom());
+        fig.textWrapRight(rg.textWrapRight());
         fig.sourceLayerIndex(plan.sourceLayerIndex);
         fig.fromGroup(plan.fromGroup);
         fig.sourceId("page_obj_" + rg.id());

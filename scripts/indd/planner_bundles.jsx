@@ -356,6 +356,23 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
                 declaredCandidate.atomicExportTargetObjectIds || []),
         atomicTextlessVectorContent: declaredCandidate.atomicTextlessVectorContent === true,
         atomicContentVisualSlot: declaredCandidate.atomicContentVisualSlot === true,
+        textWrapMode: declaredCandidate.textWrapMode || null,
+        textWrapSide: declaredCandidate.textWrapSide || null,
+        textWrapTop: declaredCandidate.textWrapTop !== undefined
+                ? declaredCandidate.textWrapTop
+                : null,
+        textWrapLeft: declaredCandidate.textWrapLeft !== undefined
+                ? declaredCandidate.textWrapLeft
+                : null,
+        textWrapBottom: declaredCandidate.textWrapBottom !== undefined
+                ? declaredCandidate.textWrapBottom
+                : null,
+        textWrapRight: declaredCandidate.textWrapRight !== undefined
+                ? declaredCandidate.textWrapRight
+                : null,
+        textWrapSourceObjectId: declaredCandidate.textWrapSourceObjectId !== undefined
+                ? declaredCandidate.textWrapSourceObjectId
+                : null,
         hiddenVisualSourceObjectIds: hiddenVisualSourceObjectIds,
         visualSourceObjectIds: slotSources.visualSourceObjectIds,
         styleSourceObjectIds: slotSources.styleSourceObjectIds,

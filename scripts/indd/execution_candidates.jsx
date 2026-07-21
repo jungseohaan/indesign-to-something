@@ -303,6 +303,13 @@ function _executionCandidateContractFields() {
         "atomicExportTargetObjectIds",
         "atomicTextlessVectorContent",
         "atomicContentVisualSlot",
+        "textWrapMode",
+        "textWrapSide",
+        "textWrapTop",
+        "textWrapLeft",
+        "textWrapBottom",
+        "textWrapRight",
+        "textWrapSourceObjectId",
         "materialization",
         "textAction",
         "visualAction",
@@ -532,6 +539,15 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     }
     candidate.atomicTextlessVectorContent = objectPlan.atomicTextlessVectorContent === true;
     candidate.atomicContentVisualSlot = objectPlan.atomicContentVisualSlot === true;
+    candidate.textWrapMode = objectPlan.textWrapMode || null;
+    candidate.textWrapSide = objectPlan.textWrapSide || null;
+    candidate.textWrapTop = objectPlan.textWrapTop !== undefined ? objectPlan.textWrapTop : null;
+    candidate.textWrapLeft = objectPlan.textWrapLeft !== undefined ? objectPlan.textWrapLeft : null;
+    candidate.textWrapBottom = objectPlan.textWrapBottom !== undefined ? objectPlan.textWrapBottom : null;
+    candidate.textWrapRight = objectPlan.textWrapRight !== undefined ? objectPlan.textWrapRight : null;
+    candidate.textWrapSourceObjectId = objectPlan.textWrapSourceObjectId !== undefined
+            ? objectPlan.textWrapSourceObjectId
+            : null;
     candidate.hiddenVisualSourceObjectIds = _objectPlanExecutionHiddenVisualSourceObjectIds(
             objectPlan,
             candidate.executionSourceObjectIds || candidate.sourceObjectIds || [],

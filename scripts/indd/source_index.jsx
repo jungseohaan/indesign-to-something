@@ -769,6 +769,95 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         return info;
     }
 
+    function _enumNameForSourceIndex(value) {
+        if (value === null || value === undefined) return null;
+        var s = String(value || "");
+        if (s.indexOf(".") >= 0) s = s.substring(s.lastIndexOf(".") + 1);
+        s = s.replace(/_/g, "");
+        if (s === "NOTEXTWRAP" || s === "NONE") return "None";
+        if (s === "BOUNDINGBOXTEXTWRAP") return "BoundingBoxTextWrap";
+        if (s === "JUMPOBJECTTEXTWRAP") return "JumpObjectTextWrap";
+        if (s === "CONTOURTEXTWRAP" || s === "CONTOUR") return "Contour";
+        if (s === "BOTH_SIDES" || s === "BOTHSIDES") return "BothSides";
+        if (s === "LEFT_SIDE" || s === "LEFTSIDE") return "LeftSide";
+        if (s === "RIGHT_SIDE" || s === "RIGHTSIDE") return "RightSide";
+        if (s === "LARGEST_AREA" || s === "LARGESTAREA") return "LargestArea";
+        return String(value || "");
+    }
+
+    function _itemTextWrapInfoForSourceIndex(item) {
+        if (!item) return null;
+        var pref = null;
+        var savedMeasurementUnit = null;
+        var measurementUnitChanged = false;
+        try {
+            if (app && app.scriptPreferences && MeasurementUnits && MeasurementUnits.POINTS) {
+                savedMeasurementUnit = app.scriptPreferences.measurementUnit;
+                app.scriptPreferences.measurementUnit = MeasurementUnits.POINTS;
+                measurementUnitChanged = true;
+            }
+        } catch (eSetTextWrapMeasurementUnit) {}
+        try {
+            if (item.textWrapPreferences) {
+                try {
+                    if (item.textWrapPreferences.length !== undefined
+                            && item.textWrapPreferences.length > 0) {
+                        pref = item.textWrapPreferences[0];
+                    }
+                } catch (eTextWrapPrefList) {}
+                if (!pref) {
+                    try { pref = item.textWrapPreferences.item(0); } catch (eTextWrapPrefItem) {}
+                }
+                if (!pref) {
+                    try { pref = item.textWrapPreferences.firstItem(); } catch (eTextWrapPrefFirst) {}
+                }
+                if (!pref) pref = item.textWrapPreferences;
+            }
+        } catch (eTextWrapPrefs) {}
+        if (!pref) {
+            if (measurementUnitChanged) {
+                try { app.scriptPreferences.measurementUnit = savedMeasurementUnit; } catch (eRestoreNoPrefMeasurementUnit) {}
+            }
+            return null;
+        }
+        var mode = null;
+        try { mode = _enumNameForSourceIndex(pref.textWrapMode); } catch (eTextWrapMode) {}
+        if (!mode) {
+            if (measurementUnitChanged) {
+                try { app.scriptPreferences.measurementUnit = savedMeasurementUnit; } catch (eRestoreNoModeMeasurementUnit) {}
+            }
+            return null;
+        }
+        var side = null;
+        try { side = _enumNameForSourceIndex(pref.textWrapSide); } catch (eTextWrapSide) {}
+        if (!side) side = "BothSides";
+        var offsets = [0, 0, 0, 0];
+        try {
+            var raw = pref.textWrapOffset;
+            if (raw && raw.length !== undefined) {
+                for (var oi = 0; oi < 4 && oi < raw.length; oi++) {
+                    offsets[oi] = Number(raw[oi] || 0);
+                }
+            } else if (raw) {
+                try { offsets[0] = Number(raw.top || raw.Top || 0); } catch (eTop) {}
+                try { offsets[1] = Number(raw.left || raw.Left || 0); } catch (eLeft) {}
+                try { offsets[2] = Number(raw.bottom || raw.Bottom || 0); } catch (eBottom) {}
+                try { offsets[3] = Number(raw.right || raw.Right || 0); } catch (eRight) {}
+            }
+        } catch (eTextWrapOffset) {}
+        if (measurementUnitChanged) {
+            try { app.scriptPreferences.measurementUnit = savedMeasurementUnit; } catch (eRestoreTextWrapMeasurementUnit) {}
+        }
+        return {
+            mode: mode,
+            side: side,
+            top: offsets[0],
+            left: offsets[1],
+            bottom: offsets[2],
+            right: offsets[3]
+        };
+    }
+
     function readItemInfo(item, itemIndex) {
         sourceIndexCursor("readItemInfo.start", itemIndex, null, null);
         var id = itemId(item);
@@ -788,6 +877,17 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         cachedInfo.leadingStyledTextRanges = [];
                     }
                 }
+                try {
+                    var cachedTw = _itemTextWrapInfoForSourceIndex(item);
+                    if (cachedTw && cachedTw.mode) {
+                        cachedInfo.textWrapMode = cachedTw.mode;
+                        cachedInfo.textWrapSide = cachedTw.side;
+                        cachedInfo.textWrapTop = cachedTw.top;
+                        cachedInfo.textWrapLeft = cachedTw.left;
+                        cachedInfo.textWrapBottom = cachedTw.bottom;
+                        cachedInfo.textWrapRight = cachedTw.right;
+                    }
+                } catch (eCachedTextWrapInfo) {}
                 var cachedKind = cachedInfo.kind || "Unknown";
                 stats.kindCounts[cachedKind] = (stats.kindCounts[cachedKind] || 0) + 1;
                 stats.sourceInfoCacheHits++;
@@ -924,6 +1024,17 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         sourceIndexCursor("readItemInfo.info.after", itemIndex, id, kind);
 
         sourceIndexCursor("readItemInfo.extra.before", itemIndex, id, kind);
+        try {
+            var tw = _itemTextWrapInfoForSourceIndex(item);
+            if (tw && tw.mode) {
+                info.textWrapMode = tw.mode;
+                info.textWrapSide = tw.side;
+                info.textWrapTop = tw.top;
+                info.textWrapLeft = tw.left;
+                info.textWrapBottom = tw.bottom;
+                info.textWrapRight = tw.right;
+            }
+        } catch (eTextWrapInfo) {}
         try { info.name = item.name; } catch (eName) {}
         try {
             if (item.itemLayer) {

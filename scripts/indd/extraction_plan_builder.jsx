@@ -7144,6 +7144,208 @@ function _singleTextlessPlaneEmptyDiagnostics(candidates, mode, reason) {
     };
 }
 
+function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, candidates, candidateSeen) {
+    var sourceById = {};
+    var childIdsByParentId = {};
+    var appended = 0;
+    var skipped = {
+        noPlacedVisual: 0,
+        noMixedOwnerGroup: 0,
+        noSourceIds: 0,
+        duplicate: 0
+    };
+
+    for (var si = 0; sourceItems && si < sourceItems.length; si++) {
+        var src = sourceItems[si];
+        if (!src || src.id === null || src.id === undefined) continue;
+        sourceById[String(src.id)] = src;
+        if (src.parentId !== null && src.parentId !== undefined) {
+            var parentKey = String(src.parentId);
+            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+            childIdsByParentId[parentKey].push(src.id);
+        }
+    }
+
+    function sourceKind(src) {
+        return String((src && (src.kind || src.type || src.itemType)) || "");
+    }
+
+    function isPagePositioned(src) {
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (src.pageIndex === null || src.pageIndex === undefined || Number(src.pageIndex) < 0) return false;
+        if (src.storyTextInlineSlot === true || src.tableCellStoryTextInlineSlot === true) return false;
+        if (src.storyAnchorPlacement && String(src.storyAnchorPlacement) !== "PAGE") return false;
+        if (String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION") return false;
+        return true;
+    }
+
+    function hasPlacedVisualBranch(src) {
+        if (!src) return false;
+        var kind = sourceKind(src);
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+        return src.hasPlacedVisual === true;
+    }
+
+    function subtreeHasEditableText(sourceId, visited) {
+        var key = String(sourceId);
+        if (visited[key]) return false;
+        visited[key] = true;
+        var src = sourceById[key];
+        if (!src) return false;
+        if (sourceKind(src) === "TextFrame"
+                && src.textFrameClass === "editable"
+                && (src.hasText === true || Number(src.textLength || 0) > 0)) {
+            return true;
+        }
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (subtreeHasEditableText(children[ci], visited)) return true;
+        }
+        return false;
+    }
+
+    function groupHasEditableTextOutsideSubtree(groupId, subtreeRootId) {
+        var children = childIdsByParentId[String(groupId)] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            var childId = children[ci];
+            if (String(childId) === String(subtreeRootId)) continue;
+            if (subtreeHasEditableText(childId, {})) return true;
+        }
+        return false;
+    }
+
+    function mixedOwnerGroupForPlacedBranch(src) {
+        var parentId = src ? src.parentId : null;
+        var guard = 0;
+        while (parentId !== null && parentId !== undefined && guard < 32) {
+            var parent = sourceById[String(parentId)];
+            if (!parent || sourceKind(parent) !== "Group") break;
+            if (parent.hiddenLayer === true || parent.visible === false || parent.nonprinting === true) break;
+            if (parent.pageIndex !== null && parent.pageIndex !== undefined
+                    && src.pageIndex !== null && src.pageIndex !== undefined
+                    && Number(parent.pageIndex) !== Number(src.pageIndex)) {
+                break;
+            }
+            if (groupHasEditableTextOutsideSubtree(parent.id, src.id)) return parent;
+            parentId = parent.parentId;
+            guard++;
+        }
+        return null;
+    }
+
+    function nonNoneTextWrapSource(src) {
+        if (!src) return null;
+        var mode = String(src.textWrapMode || "");
+        if (!mode || mode === "None") return null;
+        return src;
+    }
+
+    function textWrapContractForPlacedBranch(src, ownerGroup) {
+        var contractSource = nonNoneTextWrapSource(src) || nonNoneTextWrapSource(ownerGroup);
+        var parentId = src ? src.parentId : null;
+        var guard = 0;
+        while (!contractSource && parentId !== null && parentId !== undefined && guard < 32) {
+            var parent = sourceById[String(parentId)];
+            contractSource = nonNoneTextWrapSource(parent);
+            if (contractSource) break;
+            parentId = parent ? parent.parentId : null;
+            guard++;
+        }
+        if (!contractSource) return null;
+        return {
+            sourceObjectId: contractSource.id,
+            mode: contractSource.textWrapMode,
+            side: contractSource.textWrapSide || "BothSides",
+            top: Number(contractSource.textWrapTop || 0),
+            left: Number(contractSource.textWrapLeft || 0),
+            bottom: Number(contractSource.textWrapBottom || 0),
+            right: Number(contractSource.textWrapRight || 0)
+        };
+    }
+
+    function pageLocalSourceObjectIds(sourceId, pageIndex) {
+        try {
+            var ids = sourceIndex && sourceIndex.pageLocalSourceObjectIds
+                    ? sourceIndex.pageLocalSourceObjectIds(sourceId, pageIndex)
+                    : null;
+            if (ids && ids.length > 0) return _sortedNumericIds(ids);
+        } catch (ePageLocalMixedPlacedVisual) {}
+        return [sourceId];
+    }
+
+    for (var i = 0; sourceItems && i < sourceItems.length; i++) {
+        var itemInfo = sourceItems[i];
+        if (!isPagePositioned(itemInfo)) continue;
+        if (!hasPlacedVisualBranch(itemInfo)) {
+            skipped.noPlacedVisual++;
+            continue;
+        }
+        var ownerGroup = mixedOwnerGroupForPlacedBranch(itemInfo);
+        if (!ownerGroup) {
+            skipped.noMixedOwnerGroup++;
+            continue;
+        }
+        var sourceObjectIds = pageLocalSourceObjectIds(itemInfo.id, itemInfo.pageIndex);
+        if (!sourceObjectIds || sourceObjectIds.length === 0) {
+            skipped.noSourceIds++;
+            continue;
+        }
+        var before = candidates ? candidates.length : 0;
+        var item = null;
+        try { item = sourceIndex && sourceIndex.domItem ? sourceIndex.domItem(itemInfo.id) : null; } catch (eDomItemMixedPlacedVisual) {}
+        var candidateAttrs = {
+            sourceId: itemInfo.id,
+            sourceObjectIds: sourceObjectIds,
+            visualSourceObjectIds: sourceObjectIds,
+            exportSourceObjectIds: sourceObjectIds,
+            exportTargetObjectId: itemInfo.id,
+            pageIndex: itemInfo.pageIndex,
+            kind: itemInfo.kind,
+            unit: "ITEM",
+            mode: "ORIGINAL_VISUAL",
+            candidatePurpose: "CONTENT_CANDIDATE",
+            compositeRole: sourceObjectIds.length > 1
+                    ? "mixed_bundle_placed_visual_branch"
+                    : null,
+            slotRole: "content_visual_slot",
+            bounds: itemInfo.bounds,
+            parentId: itemInfo.parentId,
+            parentKind: itemInfo.parentKind,
+            anchoredPosition: itemInfo.anchoredPosition,
+            storyAnchorPlacement: itemInfo.storyAnchorPlacement,
+            zOrder: itemInfo.zOrder,
+            textOwner: "none",
+            containsEditableText: false,
+            mixedOwnerGroupSourceObjectId: ownerGroup.id,
+            requiredSlot: "CONTENT_VISUAL_SLOT",
+            requiredSlotReason: "mixed_source_bundle_placed_visual_branch"
+        };
+        var textWrapContract = textWrapContractForPlacedBranch(itemInfo, ownerGroup);
+        if (textWrapContract) {
+            candidateAttrs.textWrapMode = textWrapContract.mode;
+            candidateAttrs.textWrapSide = textWrapContract.side;
+            candidateAttrs.textWrapTop = textWrapContract.top;
+            candidateAttrs.textWrapLeft = textWrapContract.left;
+            candidateAttrs.textWrapBottom = textWrapContract.bottom;
+            candidateAttrs.textWrapRight = textWrapContract.right;
+            candidateAttrs.textWrapSourceObjectId = textWrapContract.sourceObjectId;
+        }
+        _pushExtractionCandidate(candidates, candidateSeen,
+                "pass.image_placed_frames", item, candidateAttrs);
+        if ((candidates ? candidates.length : 0) > before) {
+            appended++;
+        } else {
+            skipped.duplicate++;
+        }
+    }
+
+    return {
+        appendedCount: appended,
+        skipped: skipped
+    };
+}
+
 function _canonicalPagePlaneSyntheticSourceId(pageIndex) {
     return -940000000 + Number(pageIndex || 0);
 }
@@ -7441,6 +7643,12 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     } catch (eSinglePlaneBasePerf) {}
     _marker(ctx.outputDir, "03d05_plan_baseCandidates");
     _marker(ctx.outputDir, "03d05a_plan_textFrameStyleShellCandidates");
+    var mixedBundlePlacedVisualCandidateDiagnostics =
+            _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, candidates, candidateSeen);
+    try {
+        writeJson(ctx.outputDir + "/mixed-bundle-placed-visual-candidates.json",
+                mixedBundlePlacedVisualCandidateDiagnostics || {});
+    } catch (eMixedBundlePlacedVisualDiagnostics) {}
 
     var planCache = _createExtractionPlanSourceIndexCache(doc, sourceIndex);
     _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems, candidates, candidateSeen, planCache);

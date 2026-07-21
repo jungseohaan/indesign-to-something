@@ -724,6 +724,23 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
         return false;
     }
 
+    function _plannedCandidateRenderedBounds(candidate, fallbackBounds) {
+        if (!candidate) return fallbackBounds;
+        var plannedPageVisual = false;
+        try {
+            plannedPageVisual = String(candidate.placement || "") === "FLOATING"
+                    || String(candidate.coordinateSpace || "") === "PAGE";
+        } catch (ePlannedPageVisual) {}
+        if (!plannedPageVisual) return fallbackBounds;
+        if (candidate.bounds && candidate.bounds.length >= 4) {
+            return arrCopy(candidate.bounds);
+        }
+        if (candidate.pageRelativeBounds && candidate.pageRelativeBounds.length >= 4) {
+            return arrCopy(candidate.pageRelativeBounds);
+        }
+        return fallbackBounds;
+    }
+
     try {
 
     // 인라인 객체 추출: ExtractionPlan의 inline 후보만 개별 PNG로 렌더
@@ -896,23 +913,42 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         }
 
                         var _inlineHasHiddenText = inlineHiddenTextFrameIds && inlineHiddenTextFrameIds.length > 0;
+                        var _inlineRenderedBounds = _plannedCandidateRenderedBounds(inlineCandidate, inBounds);
+                        var _inlineCandidatePassId = inlineCandidate.passId || "pass.inline_objects";
+                        var _inlinePlannedPageVisual = inlineCandidate.placement === "FLOATING"
+                                || inlineCandidate.coordinateSpace === "PAGE";
                         var _inlineBaseEntry = {
                             id: inId,
-                            planPassId: "pass.inline_objects",
+                            planPassId: _inlineCandidatePassId,
                             candidateId: _inlineCandidateMatch.candidateId,
                             candidateMatchStrategy: _inlineCandidateMatch.strategy,
                             file: "rendered_frames/" + inFileName,
                             parentStoryId: parentStoryId,
-                            bounds: inBounds,
+                            bounds: _inlineRenderedBounds,
                             pageIndex: inPageIdx,
-                            type: "inline_object",
-                            placementRole: "inline_object",
+                            type: _inlinePlannedPageVisual ? "page_object" : "inline_object",
+                            placementRole: _inlinePlannedPageVisual ? "page_object" : "inline_object",
+                            placement: inlineCandidate.placement || null,
+                            coordinateSpace: inlineCandidate.coordinateSpace || null,
+                            visualAction: inlineCandidate.visualAction || null,
+                            visualLayer: inlineCandidate.visualLayer || null,
+                            policyLayer: inlineCandidate.policyLayer || null,
+                            materialization: inlineCandidate.materialization || null,
+                            slotRole: inlineCandidate.slotRole || null,
+                            textWrapMode: inlineCandidate.textWrapMode || null,
+                            textWrapSide: inlineCandidate.textWrapSide || null,
+                            textWrapTop: inlineCandidate.textWrapTop || 0,
+                            textWrapLeft: inlineCandidate.textWrapLeft || 0,
+                            textWrapBottom: inlineCandidate.textWrapBottom || 0,
+                            textWrapRight: inlineCandidate.textWrapRight || 0,
+                            textWrapSourceObjectId: inlineCandidate.textWrapSourceObjectId || null,
                             visualOwner: "indesign_png",
                             textOwner: _inlineHasHiddenText ? "hwpx_tf" : "none",
                             containsText: false,
                             containsEditableText: false,
                             placementAllowed: true,
-                            reason: _inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only",
+                            reason: _inlineHasHiddenText ? "inline_text_hidden"
+                                    : (_inlinePlannedPageVisual ? "planned_page_content_visual" : "inline_graphic_only"),
                             sourceObjectIds: _inlineEntrySourceIds,
                             childIds: inlineHiddenTextFrameIds,
                             exportSanity: {
@@ -923,7 +959,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 textHiddenBeforeExport: _inlineHasHiddenText,
                                 exportTargetType: inItem && inItem.constructor ? inItem.constructor.name : null,
                                 sourceBounds: _inlineSourceBounds,
-                                pageRelativeBounds: inBounds
+                                pageRelativeBounds: _inlineRenderedBounds
                             }
                         };
                         try {
