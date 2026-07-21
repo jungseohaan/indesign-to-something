@@ -58,7 +58,9 @@ class RunPostProcessor {
         for (ASTInlineItem it : items) {
             if (it instanceof ASTTextRun) {
                 String t = ((ASTTextRun) it).text();
-                if (t != null && t.indexOf('\uE000') >= 0) { hasMarker = true; break; }
+                if (t != null && (t.indexOf('\uE000') >= 0 || t.indexOf('\uE002') >= 0)) {
+                    hasMarker = true; break;
+                }
             }
         }
         if (!hasMarker) return;
@@ -71,6 +73,24 @@ class RunPostProcessor {
             }
             ASTTextRun run = (ASTTextRun) item;
             String text = run.text();
+            // SPEC-052: 경계 마커(U+E002) = "앞 런 끝 대문자에 overline". InDesign DOM 이
+            // AM|Ó|BM|Ó 로 overline 마커를 별도 런으로 분리한 경우(u5 p168). 직전에 추가된
+            // TextRun 의 끝 연속 대문자를 떼어 overline{...} 수식으로 바꾸고, 마커는 버린다.
+            if (text != null && text.indexOf('\uE002') >= 0) {
+                wrapPreviousTrailingCapitalsAsOverline(newItems);
+                String residual = text.replace(String.valueOf('\uE002'), "");
+                if (!residual.isEmpty()) {
+                    ASTTextRun tr = new ASTTextRun();
+                    tr.text(residual);
+                    tr.fontFamily(run.fontFamily());
+                    tr.fontStyle(run.fontStyle());
+                    tr.fontSizeHwpunits(run.fontSizeHwpunits());
+                    tr.textColor(run.textColor());
+                    tr.shadeColor(run.shadeColor());
+                    newItems.add(tr);
+                }
+                continue;
+            }
             if (text == null || text.indexOf('\uE000') < 0) {
                 newItems.add(item);
                 continue;
@@ -118,6 +138,68 @@ class RunPostProcessor {
         }
         items.clear();
         items.addAll(newItems);
+    }
+
+    /**
+     * SPEC-052: 경계 마커()를 만났을 때, newItems 의 마지막 ASTTextRun 끝
+     * 연속 대문자를 떼어 overline{…} ASTEquation 으로 교체한다. 대문자 앞의
+     * 숫자 계수(예: 2AM̅)는 overline 밖에 남긴다(2 overline{AM}).
+     * 직전이 TextRun 이 아니거나 끝이 대문자가 아니면 아무것도 하지 않는다.
+     */
+    private static void wrapPreviousTrailingCapitalsAsOverline(List<ASTInlineItem> newItems) {
+        if (newItems == null || newItems.isEmpty()) return;
+        // 직전 런들이 낱글자(A|M 등)로 쪼개져 있을 수 있으므로, newItems 를 뒤에서부터
+        // 훑어 연속된 영문자 런을 모두 모은다(실측: u5 p168 AM 이 A|M 두 런). 한 런
+        // 안에서는 끝 연속 영문자만, 그 앞이 통째로 영문 런이면 계속 이어붙인다.
+        StringBuilder lettersRev = new StringBuilder();
+        int removeFrom = newItems.size(); // 이 인덱스부터 끝까지 제거
+        String head = null;               // 영문 시작 런의 비영문 앞부분
+        ASTTextRun anchorRun = null;      // 스타일 상속용(가장 뒤 런)
+        for (int idx = newItems.size() - 1; idx >= 0; idx--) {
+            ASTInlineItem it = newItems.get(idx);
+            if (!(it instanceof ASTTextRun)) break;
+            ASTTextRun tr = (ASTTextRun) it;
+            String t = tr.text();
+            if (t == null || t.isEmpty()) break;
+            if (anchorRun == null) anchorRun = tr;
+            // 이 런의 끝에서부터 연속 영문자 길이
+            int end = t.length();
+            int s = end;
+            while (s > 0) {
+                char c = t.charAt(s - 1);
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) s--;
+                else break;
+            }
+            if (s >= end) break; // 이 런 끝이 영문이 아니면 여기서 멈춤
+            // 이 런의 영문 꼬리를 앞쪽에 이어붙인다(역순 수집이므로 prepend)
+            lettersRev.insert(0, t, s, end);
+            if (s > 0) {
+                // 런 중간부터 영문 시작 → 여기가 경계. 앞부분은 head 로 보존하고 종료.
+                head = t.substring(0, s);
+                removeFrom = idx;
+                break;
+            }
+            // 런 전체가 영문(A|M 처럼 낱글자 통째) → 이 런도 제거 대상, 더 앞으로.
+            removeFrom = idx;
+            // 계속 앞 런을 검사
+        }
+        String letters = lettersRev.toString();
+        if (letters.isEmpty()) return;
+        // removeFrom..끝 런 제거
+        while (newItems.size() > removeFrom) {
+            newItems.remove(newItems.size() - 1);
+        }
+        if (head != null && !head.isEmpty() && anchorRun != null) {
+            ASTTextRun headRun = new ASTTextRun();
+            headRun.text(head);
+            headRun.fontFamily(anchorRun.fontFamily());
+            headRun.fontStyle(anchorRun.fontStyle());
+            headRun.fontSizeHwpunits(anchorRun.fontSizeHwpunits());
+            headRun.textColor(anchorRun.textColor());
+            headRun.shadeColor(anchorRun.shadeColor());
+            newItems.add(headRun);
+        }
+        newItems.add(new ASTEquation("overline{" + letters + "}", "EH_FONT"));
     }
 
     /**
