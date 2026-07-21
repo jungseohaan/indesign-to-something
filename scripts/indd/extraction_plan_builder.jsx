@@ -153,13 +153,85 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
         if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
         return src.markerOnlyContents === true;
     }
-    function isVisibleDecorationSibling(src) {
+    function sourceKind(src) {
+        return String(src && (src.kind || src.type) || "");
+    }
+    function hasPaint(src) {
         if (!src) return false;
-        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
-        if (String(src.kind || "") === "TextFrame") return false;
         return src.hasVisibleFill === true
                 || src.hasVisibleStroke === true
                 || src.hasCandidateVectorPaint === true;
+    }
+    function isPlacedContentKind(kind) {
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+    function sourceSubtreeIds(src, seen) {
+        var out = [];
+        if (!src || src.id === null || src.id === undefined) return out;
+        seen = seen || {};
+        function visit(id) {
+            var key = String(id);
+            if (seen[key]) return;
+            seen[key] = true;
+            out.push(Number(id));
+            var childList = childrenByParent[key] || [];
+            for (var ci = 0; ci < childList.length; ci++) {
+                if (!childList[ci] || childList[ci].id === null || childList[ci].id === undefined) continue;
+                visit(childList[ci].id);
+            }
+        }
+        visit(src.id);
+        return sortedIds(out);
+    }
+    function sourceHasPlacedContentInTree(src, visiting) {
+        if (!src) return false;
+        var key = String(src.id);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        if (isPlacedContentKind(sourceKind(src))) return true;
+        if (src.hasPlacedVisual === true || src.hasPlacedVisualInSubtree === true) return true;
+        var children = childrenByParent[key] || [];
+        for (var i = 0; i < children.length; i++) {
+            if (sourceHasPlacedContentInTree(children[i], visiting)) return true;
+        }
+        return false;
+    }
+    function isPaintOnlyTextFrameShell(src) {
+        if (!src || sourceKind(src) !== "TextFrame") return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (src.hasText === true || Number(src.textLength || 0) > 0) return false;
+        return hasPaint(src);
+    }
+    function sourceHasPaintOnlyTextFrameShellInTree(src, visiting) {
+        if (!src) return false;
+        var key = String(src.id);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        if (isPaintOnlyTextFrameShell(src)) return true;
+        var children = childrenByParent[key] || [];
+        for (var i = 0; i < children.length; i++) {
+            if (sourceHasPaintOnlyTextFrameShellInTree(children[i], visiting)) return true;
+        }
+        return false;
+    }
+    function tableCarrierSiblingVisualRole(src) {
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        var kind = sourceKind(src);
+        if (sourceHasPlacedContentInTree(src)) return "CONTENT_VISUAL_SLOT";
+        if (isPaintOnlyTextFrameShell(src) || sourceHasPaintOnlyTextFrameShellInTree(src)) {
+            return "SHELL_SLOT";
+        }
+        if (kind === "GraphicLine") return null;
+        if ((kind === "Rectangle" || kind === "Oval" || kind === "Polygon")
+                && !childrenByParent[String(src.id)]
+                && hasPaint(src)) {
+            return null;
+        }
+        if (kind === "Group" && hasPaint(src)) return "SHELL_SLOT";
+        return null;
     }
     function candidateExists(pageIndex, sourceIds) {
         var key = _sourceSetKey(sortedIds(sourceIds.slice(0)));
@@ -266,10 +338,11 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
         var children = childrenByParent[parentId];
         var tableTextFrameIds = [];
         var tableSeen = {};
-        var visualIds = [];
-        var visualSeen = {};
+        var visualIdsByRole = {
+            CONTENT_VISUAL_SLOT: [],
+            SHELL_SLOT: []
+        };
         var pageIndex = null;
-        var zOrder = null;
         var b = null;
         for (var ci2 = 0; ci2 < children.length; ci2++) {
             var child = children[ci2];
@@ -278,34 +351,48 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
                 tableTextFrameIds.push(child);
                 continue;
             }
-            if (!isVisibleDecorationSibling(child)) continue;
+            var visualRole = tableCarrierSiblingVisualRole(child);
+            if (!visualRole) continue;
             if (isPageWideBackgroundDecorationSibling(child)) {
                 appendPageWideBackgroundDecorationCandidate(child, Number(child.pageIndex));
                 continue;
             }
-            visualIds.push({
+            visualIdsByRole[visualRole].push({
                 id: child.id,
                 bounds: child.bounds || null,
-                zOrder: Number(child.zOrder || 0)
+                zOrder: Number(child.zOrder || 0),
+                sourceObjectIds: sourceSubtreeIds(child, {})
             });
         }
-        if (tableTextFrameIds.length === 0 || visualIds.length === 0) continue;
+        if (tableTextFrameIds.length === 0) continue;
         if (pageIndex === null || pageIndex === undefined || Number(pageIndex) < 0) continue;
-        var components = connectedVisualComponents(visualIds);
-        for (var cc = 0; cc < components.length; cc++) {
-            var component = components[cc];
+        var roles = ["CONTENT_VISUAL_SLOT", "SHELL_SLOT"];
+        for (var roleIndex = 0; roleIndex < roles.length; roleIndex++) {
+            var role = roles[roleIndex];
+            var visualIds = visualIdsByRole[role] || [];
+            if (visualIds.length === 0) continue;
+            var components = connectedVisualComponents(visualIds);
+            for (var cc = 0; cc < components.length; cc++) {
+                var component = components[cc];
             var componentBounds = null;
             var componentZ = null;
             var sourceIds = [];
+            var exportSourceIds = [];
             var localSeen = {};
+            var exportSeen = {};
             for (var vi = 0; vi < component.length; vi++) {
-                pushId(sourceIds, localSeen, component[vi].id);
+                pushId(exportSourceIds, exportSeen, component[vi].id);
+                var treeIds = component[vi].sourceObjectIds || [component[vi].id];
+                for (var tsi = 0; tsi < treeIds.length; tsi++) {
+                    pushId(sourceIds, localSeen, treeIds[tsi]);
+                }
                 componentBounds = unionBounds(componentBounds, component[vi].bounds || null);
                 componentZ = componentZ === null
                         ? component[vi].zOrder
                         : Math.min(componentZ, component[vi].zOrder);
             }
             sourceIds = sortedIds(sourceIds);
+            exportSourceIds = sortedIds(exportSourceIds);
             var localTableTextFrameIds = [];
             var localTableSeen = {};
             for (var ti = 0; ti < tableTextFrameIds.length; ti++) {
@@ -315,6 +402,11 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
             }
             if (localTableTextFrameIds.length === 0) continue;
             localTableTextFrameIds = sortedIds(localTableTextFrameIds);
+            var visualAction = role === "CONTENT_VISUAL_SLOT" ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
+            var visualLayer = role === "CONTENT_VISUAL_SLOT" ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
+            var slotRole = role === "CONTENT_VISUAL_SLOT"
+                    ? "table_cell_content_visual_slot"
+                    : "table_cell_shell_slot";
             var candidateId = sourceIds.length > 1
                     ? _candidateCompositeId("pass.decoration_groups", Number(pageIndex), sourceIds,
                             "table_carrier_sibling_decoration")
@@ -338,10 +430,10 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
                 parentKind: sourceById[String(parentId)] ? sourceById[String(parentId)].kind || null : null,
                 composite: sourceIds.length > 1,
                 compositeRole: "table_carrier_sibling_decoration",
-                slotRole: "shell_slot_only",
+                slotRole: slotRole,
                 tableDecorationRole: "table_carrier_sibling_decoration",
-                exportSourceObjectIds: sourceIds.slice(0),
-                exportTargetObjectId: sourceIds.length === 1 ? sourceIds[0] : null,
+                exportSourceObjectIds: exportSourceIds.slice(0),
+                exportTargetObjectId: exportSourceIds.length === 1 ? exportSourceIds[0] : null,
                 hiddenVisualSourceObjectIds: [],
                 visualSourceObjectIds: sourceIds.slice(0),
                 styleSourceObjectIds: [],
@@ -353,11 +445,11 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
                 textOwner: "none",
                 containsEditableText: false,
                 completePngTextAllowed: false,
-                ownershipSlot: "SHELL_SLOT",
+                ownershipSlot: role,
                 materialization: "EXTRACTED_PNG_VECTOR",
                 textAction: "DROP_TEXT",
-                visualAction: "PLACE_TEXT_SHELL",
-                visualLayer: "LABEL_BACKDROP",
+                visualAction: visualAction,
+                visualLayer: visualLayer,
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
                 zOrder: componentZ !== null ? componentZ : 0,
@@ -366,6 +458,7 @@ function _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates,
                 reason: "table_carrier_sibling_decoration"
             });
             appended++;
+            }
         }
     }
     return { appendedCount: appended };
@@ -7386,9 +7479,21 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     candidates = _absorbInlineDecorationDescendantsIntoTextShellCandidates(candidates, sourceItems);
     _marker(ctx.outputDir, "03d11a_plan_absorbInlineTextShellDecorationDescendants");
     _marker(ctx.outputDir, "03d12_plan_multiTextParentGroups");
+    var tableCarrierTextlessShellAppendDiagnostics =
+            _appendTableCarrierTextlessShellCandidates(sourceItems, candidates, candidateSeen);
+    try {
+        writeJson(ctx.outputDir + "/table-carrier-textless-shell-candidates.json",
+                tableCarrierTextlessShellAppendDiagnostics || {});
+    } catch (eTableCarrierTextlessShellWrite) {}
     var tableCarrierTextlessShellDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
             "table_carrier_visual_shell_covered_by_page_plane");
     _marker(ctx.outputDir, "03d12a0_plan_tableCarrierTextlessShells");
+    var tableCarrierSiblingDecorationAppendDiagnostics =
+            _appendTableCarrierSiblingDecorationCandidates(sourceItems, candidates, candidateSeen);
+    try {
+        writeJson(ctx.outputDir + "/table-carrier-sibling-decoration-candidates.json",
+                tableCarrierSiblingDecorationAppendDiagnostics || {});
+    } catch (eTableCarrierSiblingDecorationWrite) {}
     var tableCarrierSiblingDecorationDiagnostics = _singleTextlessPlaneEmptyDiagnostics(candidates, ctx.graphicsMode,
             "table_carrier_sibling_decoration_covered_by_page_plane");
     _marker(ctx.outputDir, "03d12a1_plan_tableCarrierSiblingDecorations");

@@ -1381,6 +1381,15 @@ function _runRenderPhases(doc, ctx, allItems) {
         for (var tir = 0; tir < inlineResult.tableInlineRendered.length; tir++)
             renderedFloatingItems.push(inlineResult.tableInlineRendered[tir]);
     }
+    _requireExtractionPass(ctx, "pass.decoration_groups");
+    var decorationPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.decoration_groups");
+    var decorationResult = exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+            allItems, extractionItemById,
+            decorationPngCandidates);
+    _addRenderMeta(decorationResult.items, null, "pass.decoration_groups");
+    for (var dri = 0; decorationResult.items && dri < decorationResult.items.length; dri++) {
+        renderedFloatingItems.push(decorationResult.items[dri]);
+    }
     try { $.gc(); } catch (e) {}
     // exportInlineObjects의 finally 블록이 true로 복원하지만, 예외 전파 등 만일의 경우를 대비한 안전망.
     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}

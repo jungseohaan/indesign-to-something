@@ -744,6 +744,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             || inlineCandidate.compositeRole === "inline_editable_text_shell_composite"
                             || inlineCandidate.slotRole === "table_textless_shell_slot"
                             || inlineCandidate.compositeRole === "table_carrier_textless_shell"
+                            || inlineCandidate.slotRole === "table_cell_shell_slot"
+                            || inlineCandidate.compositeRole === "table_carrier_sibling_decoration"
                             || inlineCandidate.slotRole === "source_bundle_text_range_shell_slot"
                             || inlineCandidate.compositeRole === "source_bundle_text_range_shell")
                         && (inlineCandidate.exportSourceObjectIds && inlineCandidate.exportSourceObjectIds.length > 0);
