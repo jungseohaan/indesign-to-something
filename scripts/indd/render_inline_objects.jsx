@@ -770,6 +770,16 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         && inlineCandidate.placement === "INLINE"
                         && inlineCandidate.compositeRole === "empty_inline_textframe_visual"
                         && (inlineCandidate.exportSourceObjectIds && inlineCandidate.exportSourceObjectIds.length > 0);
+                // Stage 1 may assign a closed nested source group to one inline
+                // COMPLETE_PNG slot.  The source group itself is not anchored;
+                // its ancestor carries the story anchor.  Execute that explicit
+                // plan instead of reclassifying the nested group as non-inline.
+                var plannedInlineCompletePng = inlineCandidate.visualAction === "PLACE_INLINE_PNG"
+                        && inlineCandidate.placement === "INLINE"
+                        && inlineCandidate.coordinateSpace === "STORY_FLOW"
+                        && inlineCandidate.materialization === "COMPLETE_PNG"
+                        && inlineCandidate.textAction === "OWNED_BY_PNG"
+                        && inlineCandidate.completePngTextAllowed === true;
                 if (inItem.constructor.name === "TextFrame" && !plannedTextFrameShell && !plannedInlineTextFrameVisual) {
                     inlineStats.textFrameSkipped++;
                     continue;
@@ -778,6 +788,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 var plannedPageVisual = inlineCandidate.placement === "FLOATING"
                         && inlineCandidate.visualAction === "PLACE_FLOATING_PNG";
                 if (!isInlineItem(inItem) && !plannedDirectChildShellSlot && !plannedPageVisual
+                        && !plannedInlineCompletePng
                         && !plannedTextFrameShell) {
                     inlineStats.notInlineSkipped++;
                     continue;
@@ -785,11 +796,13 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 try {
                     var inParent = inItem.parent;
                     if (!plannedDirectChildShellSlot && !plannedPageVisual && !plannedTextFrameShell
+                            && !plannedInlineCompletePng
                             && inParent && inParent.constructor.name === "Group" && isInlineItem(inParent)) {
                         inlineStats.parentInlineSkipped++;
                         continue;
                     }
                     if (!plannedDirectChildShellSlot && !plannedPageVisual && !plannedTextFrameShell
+                            && !plannedInlineCompletePng
                             && inParent && inParent.constructor.name === "Rectangle" && isInlineItem(inParent)) {
                         inlineStats.parentInlineSkipped++;
                         continue;
@@ -913,6 +926,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         }
 
                         var _inlineHasHiddenText = inlineHiddenTextFrameIds && inlineHiddenTextFrameIds.length > 0;
+                        var _inlineOwnsCompletePngText = plannedInlineCompletePng;
                         var _inlineRenderedBounds = _plannedCandidateRenderedBounds(inlineCandidate, inBounds);
                         var _inlineCandidatePassId = inlineCandidate.passId || "pass.inline_objects";
                         var _inlinePlannedPageVisual = inlineCandidate.placement === "FLOATING"
@@ -945,12 +959,14 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             textWrapRight: inlineCandidate.textWrapRight || 0,
                             textWrapSourceObjectId: inlineCandidate.textWrapSourceObjectId || null,
                             visualOwner: "indesign_png",
-                            textOwner: _inlineHasHiddenText ? "hwpx_tf" : "none",
-                            containsText: false,
-                            containsEditableText: false,
+                            textOwner: _inlineOwnsCompletePngText ? "indesign_png"
+                                    : (_inlineHasHiddenText ? "hwpx_tf" : "none"),
+                            containsText: _inlineOwnsCompletePngText,
+                            containsEditableText: _inlineOwnsCompletePngText,
                             placementAllowed: true,
-                            reason: _inlineHasHiddenText ? "inline_text_hidden"
-                                    : (_inlinePlannedPageVisual ? "planned_page_content_visual" : "inline_graphic_only"),
+                            reason: _inlineOwnsCompletePngText ? "inline_graphic_only"
+                                    : (_inlineHasHiddenText ? "inline_text_hidden"
+                                    : (_inlinePlannedPageVisual ? "planned_page_content_visual" : "inline_graphic_only")),
                             sourceObjectIds: _inlineEntrySourceIds,
                             childIds: inlineHiddenTextFrameIds,
                             exportSanity: {
@@ -973,7 +989,9 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 containsText: _inlineBaseEntry.containsText,
                                 containsEditableText: _inlineBaseEntry.containsEditableText,
                                 placementAllowed: true,
-                                editableTextFrameIds: inlineHiddenTextFrameIds,
+                                editableTextFrameIds: _inlineOwnsCompletePngText
+                                        ? (inlineCandidate.editableTextFrameIds || [])
+                                        : inlineHiddenTextFrameIds,
                                 sourceObjectIds: _inlineEntrySourceIds,
                                 exportSourceObjectIds: inlineCandidate.exportSourceObjectIds || [],
                                 hiddenVisualSourceObjectIds: inlineCandidate.hiddenVisualSourceObjectIds || [],

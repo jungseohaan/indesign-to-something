@@ -181,6 +181,11 @@ function _inlineCompleteMarkerDecisionForOwnership(item, editableTextFrameIds, i
 function _inlineCompositeCompletePngDecisionForOwnership(item, editableTextFrameIds, itemById) {
     var ids = editableTextFrameIds || [];
     if (!item || ids.length === 0) return false;
+    // A shell that directly composes multiple editable TFs is an atomic inline
+    // label.  Keep the closed source bundle as one COMPLETE_PNG instead of
+    // requiring every TF fragment to independently match the single-marker
+    // vocabulary.  A shell with one TF still uses the stricter marker rule.
+    if (ids.length > 1) return true;
     var markerById = {};
 
     function maybeReadTextFrame(tf) {
@@ -403,6 +408,21 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
         return _sortedNumericIds(ids);
     }
 
+    function closedSourceSubtree(sourceId) {
+        var ids = [];
+        var seenIds = {};
+        function visit(id) {
+            if (id === null || id === undefined || seenIds[String(id)]) return;
+            if (!sourceInfoById[String(id)]) return;
+            seenIds[String(id)] = true;
+            ids.push(id);
+            var children = childIdsByParentId[String(id)] || [];
+            for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
+        }
+        visit(sourceId);
+        return _sortedNumericIds(ids);
+    }
+
     for (var si = 0; sourceItems && si < sourceItems.length; si++) {
         var sourceEntry = sourceItems[si];
         if (!sourceEntry || sourceEntry.id === null || sourceEntry.id === undefined) continue;
@@ -414,16 +434,18 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
         if (!shellItem) continue;
         var editableTextFrameIds = directEditableTextChildren(sourceEntry.id);
         if (!editableTextFrameIds || editableTextFrameIds.length === 0) continue;
-        var sourceObjectIds = [sourceEntry.id].concat(editableTextFrameIds);
-        sourceObjectIds = _sortedNumericIds(sourceObjectIds);
         var completeMarkerOwnsText = _inlineCompositeCompletePngDecisionForOwnership(
                 shellItem, editableTextFrameIds);
-        var completeExportSourceIds = completeMarkerOwnsText ? _sortedNumericIds(sourceObjectIds) : [];
+        var sourceObjectIds = completeMarkerOwnsText
+                ? closedSourceSubtree(sourceEntry.id)
+                : _sortedNumericIds([sourceEntry.id].concat(editableTextFrameIds));
+        var completeExportSourceIds = completeMarkerOwnsText ? [sourceEntry.id] : [];
         var requiresTextHidden = editableTextFrameIds.length > 0 && !completeMarkerOwnsText;
         _pushExtractionCandidate(candidates, seen, "pass.inline_objects", shellItem, {
             sourceObjectIds: sourceObjectIds,
             exportSourceObjectIds: completeExportSourceIds,
             visualSourceObjectIds: completeExportSourceIds,
+            exportTargetObjectId: completeMarkerOwnsText ? sourceEntry.id : null,
             pageIndex: sourceEntry.pageIndex,
             unit: "INLINE_OBJECT",
             mode: "TEXTLESS_CANDIDATE",
@@ -436,7 +458,12 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
             containsEditableText: completeMarkerOwnsText,
             completePngTextAllowed: completeMarkerOwnsText,
             materialization: completeMarkerOwnsText ? "COMPLETE_PNG" : null,
-            textAction: completeMarkerOwnsText ? "OWNED_BY_PNG" : null
+            textAction: completeMarkerOwnsText ? "OWNED_BY_PNG" : null,
+            visualAction: completeMarkerOwnsText ? "PLACE_INLINE_PNG" : null,
+            ownershipSlot: completeMarkerOwnsText ? "CONTENT_VISUAL_SLOT" : null,
+            placement: "INLINE",
+            coordinateSpace: "STORY_FLOW",
+            inlineSourceTreeClosed: completeMarkerOwnsText
         });
     }
 }

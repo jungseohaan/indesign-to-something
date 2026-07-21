@@ -159,6 +159,14 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         if (candidateExportSourceIds(candidate).length === 0) return false;
         return true;
     }
+    function isExplicitInlineCompletePngTextOwner(candidate) {
+        return !!candidate
+                && candidate.passId === "pass.inline_objects"
+                && candidate.materialization === "COMPLETE_PNG"
+                && candidate.textOwner === "indesign_png"
+                && candidate.completePngTextAllowed === true
+                && candidateOwnedTextFrameIds(candidate).length > 0;
+    }
     function textShellCarrierCanBeReplacedByOwner(candidate, owner) {
         if (!isVisibleTextShellCarrier(candidate)) return true;
         if (!owner || owner === candidate) return true;
@@ -330,6 +338,36 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
             nativeShellOwnersByPage[pageKey].push(owner);
         }
     }
+    // Split an explicitly complete atomic child out of any broader ancestor
+    // text-shell candidate.  The parent keeps provenance for the full carrier,
+    // but no longer executes the child's visual or text slots.
+    for (var aci = 0; aci < candidates.length; aci++) {
+        var atomicChild = candidates[aci];
+        if (!isExplicitInlineCompletePngTextOwner(atomicChild)) continue;
+        var parentShells = shellOwnersByPage[String(atomicChild.pageIndex)] || [];
+        for (var psi = 0; psi < parentShells.length; psi++) {
+            var parentShell = parentShells[psi];
+            if (!parentShell || parentShell === atomicChild) continue;
+            if (!containsAllIds(parentShell.sourceObjectIds || [], atomicChild.sourceObjectIds || [])) continue;
+            parentShell.visualSourceObjectIds = _sourceIdsMinus(
+                    parentShell.visualSourceObjectIds || [], atomicChild.sourceObjectIds || []);
+            parentShell.exportSourceObjectIds = _sourceIdsMinus(
+                    parentShell.exportSourceObjectIds || [], atomicChild.sourceObjectIds || []);
+            parentShell.executionSourceObjectIds = _sourceIdsMinus(
+                    parentShell.executionSourceObjectIds || parentShell.sourceObjectIds || [],
+                    atomicChild.sourceObjectIds || []);
+            parentShell.excludedInlineSourceObjectIds = _sourceIdsUnion(
+                    parentShell.excludedInlineSourceObjectIds || [], atomicChild.sourceObjectIds || []);
+            parentShell.hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                    parentShell.hiddenVisualSourceObjectIds || [], atomicChild.sourceObjectIds || []);
+            parentShell.ownedTextFrameIds = _sourceIdsMinus(
+                    parentShell.ownedTextFrameIds || [], atomicChild.ownedTextFrameIds || []);
+            parentShell.editableTextFrameIds = _sourceIdsMinus(
+                    parentShell.editableTextFrameIds || [], atomicChild.ownedTextFrameIds || []);
+            parentShell.hiddenTextFrameIds = _sourceIdsMinus(
+                    parentShell.hiddenTextFrameIds || [], atomicChild.ownedTextFrameIds || []);
+        }
+    }
     for (var vi = 0; vi < candidates.length; vi++) {
         var visualOwner = candidates[vi];
         if (visualOwner && visualOwner.visualAction !== "DROP_VISUAL") {
@@ -392,7 +430,8 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
         var compositeOwners = visualOnlyCompositeOwnersByPage[String(candidate && candidate.pageIndex)] || [];
         var candidateVisibleIds = visibleCandidateSourceIds(candidate);
         var exactVisibleOwner = exactVisibleOwnersBySlotKey[exactVisibleSlotKey(candidate)];
-        if (exactVisibleOwner && exactVisibleOwner !== candidate) {
+        if (exactVisibleOwner && exactVisibleOwner !== candidate
+                && !isExplicitInlineCompletePngTextOwner(candidate)) {
             if (!textShellCarrierCanBeReplacedByOwner(candidate, exactVisibleOwner)) {
                 filtered.push(candidate);
                 continue;
@@ -409,7 +448,8 @@ function _canonicalizeSourceSlotSubsumedCandidatesWithDiagnostics(candidates, so
                 continue;
             }
         }
-        if (candidate && candidateOwnershipSlot(candidate) !== "SHELL_SLOT") {
+        if (candidate && candidateOwnershipSlot(candidate) !== "SHELL_SLOT"
+                && !isExplicitInlineCompletePngTextOwner(candidate)) {
             var shellOwners = shellOwnersByPage[String(candidate.pageIndex)] || [];
             var shellSubsumingOwner = null;
             for (var soi = 0; soi < shellOwners.length; soi++) {

@@ -2083,6 +2083,7 @@ function _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems) {
         ownedTextFrameCount: 0,
         mutatedTextFramePlanCount: 0,
         mutatedShellPlanCount: 0,
+        partiallySplitShellPlanCount: 0,
         addedCleanupPlanCount: 0
     };
     if (!objectPlans || !sourceItems) return { summary: summary };
@@ -2142,9 +2143,32 @@ function _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems) {
     for (var s = 0; s < objectPlans.length; s++) {
         var shellPlan = objectPlans[s];
         if (!shellPlan || shellPlan.visualAction !== "PLACE_TEXT_SHELL") continue;
-        if (!_objectPlanAllOwnedTextFramesIn(shellPlan, ownedTextFrameIds)) continue;
-        _markObjectPlanOwnedByPngCleanup(shellPlan);
-        summary.mutatedShellPlanCount++;
+        var shellOwnedTextIds = shellPlan.ownedTextFrameIds || [];
+        var pngOwnedIdsInShell = [];
+        for (var soi = 0; soi < shellOwnedTextIds.length; soi++) {
+            var shellTextId = String(shellOwnedTextIds[soi]);
+            if (ownedTextFrameIds[shellTextId] !== undefined) {
+                pngOwnedIdsInShell.push(shellOwnedTextIds[soi]);
+            }
+        }
+        if (pngOwnedIdsInShell.length === 0) continue;
+        if (_objectPlanAllOwnedTextFramesIn(shellPlan, ownedTextFrameIds)) {
+            _markObjectPlanOwnedByPngCleanup(shellPlan);
+            summary.mutatedShellPlanCount++;
+            continue;
+        }
+        // A broader textless shell can retain its unrelated HWPX text slot,
+        // but it must yield the child TF ids owned by a nested COMPLETE_PNG.
+        shellPlan.ownedTextFrameIds = _sourceIdsMinus(
+                shellOwnedTextIds, pngOwnedIdsInShell);
+        shellPlan.editableTextFrameIds = _sourceIdsMinus(
+                shellPlan.editableTextFrameIds || [], pngOwnedIdsInShell);
+        shellPlan.hiddenTextFrameIds = _sourceIdsMinus(
+                shellPlan.hiddenTextFrameIds || [], pngOwnedIdsInShell);
+        shellPlan.pngOwnedChildTextFrameIds = _sortedNumericIds(pngOwnedIdsInShell);
+        shellPlan.reason = String(shellPlan.reason || "")
+                + ":png_owned_child_text_slot_split";
+        summary.partiallySplitShellPlanCount++;
     }
 
     for (var addKey in ownedTextFrameIds) {
@@ -3524,13 +3548,23 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
         if (!owners || owners.length < 2) continue;
         duplicateSourceCount++;
         var canonical = null;
-        for (var inlineOwnerIndex = 0; inlineOwnerIndex < owners.length; inlineOwnerIndex++) {
-            var inlineOwner = owners[inlineOwnerIndex];
-            if (!_objectPlanIsInlineVisibleTextFrameShellVisualOwner(inlineOwner)) continue;
+        for (var completeOwnerIndex = 0; completeOwnerIndex < owners.length; completeOwnerIndex++) {
+            var completeOwner = owners[completeOwnerIndex];
+            if (!_objectPlanIsInlineCompletePngTextOwner(completeOwner)) continue;
             if (!canonical
-                    || _objectPlanInlineVisibleTextFrameShellPriority(inlineOwner)
-                        > _objectPlanInlineVisibleTextFrameShellPriority(canonical)) {
-                canonical = inlineOwner;
+                    || _compareObjectPlanVisibleVisualSourcePriority(completeOwner, canonical) < 0) {
+                canonical = completeOwner;
+            }
+        }
+        if (!canonical) {
+            for (var inlineOwnerIndex = 0; inlineOwnerIndex < owners.length; inlineOwnerIndex++) {
+                var inlineOwner = owners[inlineOwnerIndex];
+                if (!_objectPlanIsInlineVisibleTextFrameShellVisualOwner(inlineOwner)) continue;
+                if (!canonical
+                        || _objectPlanInlineVisibleTextFrameShellPriority(inlineOwner)
+                            > _objectPlanInlineVisibleTextFrameShellPriority(canonical)) {
+                    canonical = inlineOwner;
+                }
             }
         }
         if (!canonical) {
@@ -3589,6 +3623,40 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             candidate.visualAction = "DROP_VISUAL";
             candidate.materialization = "HWPX_TEXT";
             droppedPlanCount++;
+        }
+    }
+
+    // An atomic COMPLETE_PNG owns its closed descendant source tree, not only
+    // the root id listed in visualSourceObjectIds.  Broader ancestor shells may
+    // keep their own shell root, but must not export any child of that atomic
+    // content slot.
+    for (var cpi = 0; cpi < plans.length; cpi++) {
+        var completePlan = plans[cpi];
+        if (!_objectPlanIsInlineCompletePngTextOwner(completePlan)) continue;
+        var completeSourceIds = completePlan.sourceObjectIds || [];
+        if (completeSourceIds.length === 0) continue;
+        var completeRootId = completePlan.primarySourceObjectId;
+        for (var api = 0; api < plans.length; api++) {
+            var ancestorPlan = plans[api];
+            if (!ancestorPlan || ancestorPlan === completePlan) continue;
+            if (String(ancestorPlan.pageIndex) !== String(completePlan.pageIndex)) continue;
+            if (!_sourceSetContainsAll(ancestorPlan.sourceObjectIds || [], [completeRootId])) continue;
+            var previousVisualIds = ancestorPlan.visualSourceObjectIds || [];
+            var previousExportIds = ancestorPlan.exportSourceObjectIds || [];
+            var nextVisualIds = _sourceIdsMinus(previousVisualIds, completeSourceIds);
+            var nextExportIds = _sourceIdsMinus(previousExportIds, completeSourceIds);
+            if (nextVisualIds.length === previousVisualIds.length
+                    && nextExportIds.length === previousExportIds.length) continue;
+            ancestorPlan.visualSourceObjectIds = _sortedNumericIds(nextVisualIds);
+            ancestorPlan.exportSourceObjectIds = _sortedNumericIds(nextExportIds);
+            ancestorPlan.hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                    ancestorPlan.hiddenVisualSourceObjectIds || [], completeSourceIds);
+            ancestorPlan.reason = String(ancestorPlan.reason || "")
+                    + ":nested_complete_png_source_tree_split";
+            mutatedPlanCount++;
+            mutatedPlanIds.push(
+                    ancestorPlan.objectPlanId || ancestorPlan.bundleId
+                            || ancestorPlan.candidateId || ("plan.index." + api));
         }
     }
 
@@ -4021,6 +4089,14 @@ function _compareObjectPlanVisibleVisualSourcePriority(a, b) {
 function _objectPlanVisibleVisualSourcePriority(plan) {
     if (!plan) return 0;
     var score = 0;
+    // An explicit complete PNG owns both the visual and its declared text slot.
+    // A broader ancestor text shell must yield overlapping visible sources to
+    // this closed atomic bundle, otherwise the PNG loses its render material.
+    if (plan.materialization === "COMPLETE_PNG"
+            && plan.textAction === "OWNED_BY_PNG"
+            && plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) {
+        score += 1000;
+    }
     if (_objectPlanIsInlineVisibleTextFrameShellVisualOwner(plan)) {
         score += _objectPlanInlineVisibleTextFrameShellPriority(plan);
     }

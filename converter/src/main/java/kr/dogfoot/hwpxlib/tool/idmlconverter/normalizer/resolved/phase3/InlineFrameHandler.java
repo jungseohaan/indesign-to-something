@@ -4951,12 +4951,6 @@ public class InlineFrameHandler {
                     if (img == null) return null;
                     // 2x2 이하 빈 이미지 무시
                     if (img.getWidth() <= 2 && img.getHeight() <= 2) return null;
-                    if (isInlineCompletePngTextOwnerPlan(plan)) {
-                        BadgeImageData trimmed = trimVerticalTransparentPaddingPreserveWidth(imageData, img);
-                        imageData = trimmed.imageData;
-                        img = trimmed.image;
-                    }
-
                     ASTInlineObject obj = new ASTInlineObject();
                     obj.kind(ASTInlineObject.ObjectKind.IMAGE);
                     obj.keepInline(true);
@@ -4976,6 +4970,21 @@ public class InlineFrameHandler {
                         double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor; // right - left
                         double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor; // bottom - top
                         if (bw <= 0 || bh <= 0) return null;
+                        if (isInlineCompletePngTextOwnerPlan(plan)
+                                && img.getWidth() > 0 && img.getHeight() > 0) {
+                            // Keep the source pixels intact. Transparent carrier
+                            // padding must not reduce the visible marker height:
+                            // scale the whole canvas so its visible alpha height
+                            // matches the ObjectPlan height.
+                            int[] visiblePixels = alphaBounds(img);
+                            if (visiblePixels != null && visiblePixels[3] > 0) {
+                                double pointsPerPixel = bh / (double) visiblePixels[3];
+                                bw = img.getWidth() * pointsPerPixel;
+                                bh = img.getHeight() * pointsPerPixel;
+                            } else {
+                                bh = bw * ((double) img.getHeight() / (double) img.getWidth());
+                            }
+                        }
                         long wHu = CoordinateConverter.pointsToHwpunits(bw);
                         long hHu = CoordinateConverter.pointsToHwpunits(bh);
                         obj.width(wHu);
@@ -5287,6 +5296,15 @@ public class InlineFrameHandler {
                 findRenderedGroupByInlineAnchorId(ctx, anchoredObjectId),
                 anchoredObjectId) != null) {
             return new ArrayList<>();
+        }
+        ObjectPlan directCompletePngPlan =
+                directInlineCompletePngPlan(ctx, anchoredObjectId);
+        if (directCompletePngPlan != null) {
+            ASTInlineObject completePng = loadCompleteInlinePngFromPlan(
+                    ctx, directCompletePngPlan, anchoredObjectId);
+            List<ASTInlineItem> directCompleteItems = new ArrayList<>();
+            if (completePng != null) directCompleteItems.add(completePng);
+            return directCompleteItems;
         }
         boolean hasDirectPlan = hasDirectExecutableInlinePlan(ctx, anchoredObjectId);
         if (!hasDirectPlan && (closedCarrierItems == null || closedCarrierItems.isEmpty())) return null;
@@ -5784,6 +5802,19 @@ public class InlineFrameHandler {
         boolean textAdded = false;
         boolean previousWasText = false;
         for (int sourceId : flowIds) {
+            ObjectPlan completePngPlan = !imageAdded
+                    ? directInlineCompletePngPlan(ctx, sourceId)
+                    : null;
+            if (completePngPlan != null) {
+                ASTInlineObject completePng =
+                        loadCompleteInlinePngFromPlan(ctx, completePngPlan, sourceId);
+                if (completePng == null) return null;
+                if (!out.isEmpty()) appendLineBreak(out);
+                out.add(completePng);
+                imageAdded = true;
+                previousWasText = false;
+                continue;
+            }
             if (isClosedCarrierFlowTextSource(ctx, carrier.plan, sourceId)) {
                 ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(sourceId));
                 if (tf == null || tf.sourceHidden()) continue;
@@ -5812,8 +5843,34 @@ public class InlineFrameHandler {
                 previousWasText = false;
             }
         }
+        if (!textAdded && carrier.plan.ownedTextFrameIds != null) {
+            List<ResolvedTextFrame> remainingTextFrames = new ArrayList<>();
+            for (int textFrameId : carrier.plan.ownedTextFrameIds) {
+                ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
+                if (tf != null && !tf.sourceHidden()) remainingTextFrames.add(tf);
+            }
+            if (!remainingTextFrames.isEmpty()) {
+                if (!out.isEmpty()) appendLineBreak(out);
+                appendClosedCarrierTextItems(ctx, out, remainingTextFrames);
+                textAdded = true;
+            }
+        }
         if (!textAdded || !imageAdded) return null;
         return out;
+    }
+
+    private static ObjectPlan directInlineCompletePngPlan(
+            ResolvedBuildContext ctx,
+            int sourceId) {
+        if (ctx == null || ctx.ownershipPlans == null) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (!isExecutableCompleteSimpleButtonInlinePlan(plan)) continue;
+            if (plan.domId == sourceId
+                    || (plan.renderId != null && plan.renderId == sourceId)) {
+                return plan;
+            }
+        }
+        return null;
     }
 
     public static boolean applyClosedInlineCarrierTextAlignment(
@@ -5855,7 +5912,8 @@ public class InlineFrameHandler {
         for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
             if (plan == null
                     || plan.placement != Placement.INLINE
-                    || plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                    || (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                        && plan.visualAction != VisualAction.PLACE_TEXT_SHELL)) {
                 continue;
             }
             boolean direct = isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
@@ -6828,23 +6886,29 @@ public class InlineFrameHandler {
         RenderedGroup completeRender = findCompleteSimpleButtonLabelRender(ctx, anchoredObjectId);
         ObjectPlan plan = completeRender != null ? ctx.findOwnershipPlanForRendered(completeRender) : null;
         if (!isExecutableCompleteSimpleButtonInlinePlan(plan)) return null;
+        return loadCompleteInlinePngFromPlan(ctx, plan, anchoredObjectId);
+    }
+
+    private static ASTInlineObject loadCompleteInlinePngFromPlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            int sourceId) {
+        if (ctx == null || ctx.basePath == null || !isExecutableCompleteSimpleButtonInlinePlan(plan)) {
+            return null;
+        }
         File pngFile = new File(ctx.basePath, plan.file);
         if (!pngFile.exists() || !pngFile.isFile()) return null;
         try {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-            BadgeImageData badgeImage = trimSimpleButtonBadgeImage(imageData, img);
-            imageData = badgeImage.imageData;
-            img = badgeImage.image;
-
             ASTInlineObject obj = new ASTInlineObject();
             obj.kind(ASTInlineObject.ObjectKind.IMAGE);
             obj.imageData(imageData);
             obj.imageFormat("png");
             obj.pixelWidth(img.getWidth());
             obj.pixelHeight(img.getHeight());
-            obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+            obj.sourceId("u" + Integer.toHexString(sourceId));
             obj.keepInline(true);
             obj.verticalJustification("CenterAlign");
 
@@ -6853,6 +6917,17 @@ public class InlineFrameHandler {
             double bw = Math.abs(bounds[3] - bounds[1]);
             double bh = Math.abs(bounds[2] - bounds[0]);
             if (bw <= 0 || bh <= 0) return null;
+            int[] visiblePixels = alphaBounds(img);
+            if (visiblePixels != null && visiblePixels[3] > 0) {
+                // Keep every source pixel. Scale the untouched canvas so the
+                // visible ink height, rather than the transparent canvas height,
+                // matches the ObjectPlan's physical height.
+                double pointsPerPixel = bh / (double) visiblePixels[3];
+                bw = img.getWidth() * pointsPerPixel;
+                bh = img.getHeight() * pointsPerPixel;
+            } else {
+                bh = bw * ((double) img.getHeight() / (double) img.getWidth());
+            }
             obj.width(CoordinateConverter.pointsToHwpunits(bw));
             obj.height(CoordinateConverter.pointsToHwpunits(bh));
             return obj;
