@@ -1028,9 +1028,9 @@ public final class ResolvedBuildContext {
         if (rg == null || placement == null) return null;
         String objectPlanId = objectPlanIdFromRenderUnitId(rg.renderUnitId());
         if (objectPlanId == null || objectPlanId.isEmpty()) return null;
-        ObjectPlan plan = renderedOnly(ownershipPlanByObjectPlanId.get(objectPlanId));
+        ObjectPlan plan = plannerDeclaredOrRenderedOnly(ownershipPlanByObjectPlanId.get(objectPlanId));
         if (plan == null) {
-            plan = renderedOnly(ownershipPlanByObjectPlanId.get(sourceBundleKeyFromObjectPlanId(objectPlanId)));
+            plan = plannerDeclaredOrRenderedOnly(ownershipPlanByObjectPlanId.get(sourceBundleKeyFromObjectPlanId(objectPlanId)));
         }
         if (isPlannerDeclaredOwnershipPlan(plan)
                 && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
@@ -1041,13 +1041,13 @@ public final class ResolvedBuildContext {
 
     private ObjectPlan plannerDeclaredCandidatePlanForRendered(RenderedGroup rg, Placement placement) {
         if (rg == null || placement == null) return null;
-        ObjectPlan plan = renderedOnly(ownershipPlanByCandidateKey.get(
+        ObjectPlan plan = plannerDeclaredOrRenderedOnly(ownershipPlanByCandidateKey.get(
                 candidateKey(rg.pageIndex(), placement, rg.candidateId())));
         if (isPlannerDeclaredOwnershipPlan(plan)
                 && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
             return plan;
         }
-        plan = renderedOnly(ownershipPlanByCandidateId.get(candidateIdKey(rg.candidateId())));
+        plan = plannerDeclaredOrRenderedOnly(ownershipPlanByCandidateId.get(candidateIdKey(rg.candidateId())));
         if (isPlannerDeclaredOwnershipPlan(plan)
                 && plannerDeclaredPlanCompatibleWithRendered(plan, rg)) {
             return plan;
@@ -1172,6 +1172,19 @@ public final class ResolvedBuildContext {
             return null;
         }
         return plan;
+    }
+
+    private static ObjectPlan plannerDeclaredOrRenderedOnly(ObjectPlan plan) {
+        if (plan == null) return null;
+        if (isPlannerDeclaredStyleOnlyPlan(plan)) return plan;
+        return renderedOnly(plan);
+    }
+
+    private static boolean isPlannerDeclaredStyleOnlyPlan(ObjectPlan plan) {
+        if (!isPlannerDeclaredOwnershipPlan(plan)) return false;
+        if (plan.visualAction == VisualAction.ABSORB_TEXT_STYLE) return true;
+        return plan.materialization == Materialization.HWPX_TABLE_STYLE
+                || plan.visualAction == VisualAction.PLACE_TABLE_STYLE;
     }
 
     private static boolean hasExecutableRenderedVisualContract(ObjectPlan plan) {

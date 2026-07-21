@@ -11,6 +11,8 @@ public class ResolvedTable {
     public static class Cell {
         private int row;
         private int col;
+        private int rowSpan = 1;
+        private int colSpan = 1;
         private String fillColor;
         private double fillTint = 100;
         private final List<ResolvedParagraph> paragraphs = new ArrayList<>();
@@ -22,6 +24,12 @@ public class ResolvedTable {
 
         public int col() { return col; }
         public void col(int v) { this.col = v; }
+
+        public int rowSpan() { return rowSpan; }
+        public void rowSpan(int v) { this.rowSpan = Math.max(1, v); }
+
+        public int colSpan() { return colSpan; }
+        public void colSpan(int v) { this.colSpan = Math.max(1, v); }
 
         public String fillColor() { return fillColor; }
         public void fillColor(String v) { this.fillColor = v; }

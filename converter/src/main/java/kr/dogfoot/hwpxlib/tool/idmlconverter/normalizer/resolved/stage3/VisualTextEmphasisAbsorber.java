@@ -4,6 +4,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
@@ -12,7 +15,12 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Visua
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -30,6 +38,27 @@ public final class VisualTextEmphasisAbsorber {
 
     private VisualTextEmphasisAbsorber() {}
 
+    public static int absorbPlannedTextEmphasisStyles(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections) {
+        if (ctx == null || ctx.resolvedData == null || ctx.ownershipPlans == null
+                || sections == null || sections.isEmpty()) {
+            return 0;
+        }
+        int applied = 0;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (!isAbsorbableTextEmphasisPlan(ctx, null, plan)) continue;
+            String color = inferEmphasisColorFromSourceStyle(ctx, plan);
+            if (color == null) continue;
+            double[] bounds = plan.bounds;
+            if (bounds == null || bounds.length < 4) continue;
+            if (applyTextEmphasisPlan(ctx, sections, plan, plan.pageIndex, bounds, color)) {
+                applied++;
+            }
+        }
+        return applied;
+    }
+
     /**
      * A very thin visual object that tracks one composed text line is better
      * represented as text emphasis than as a floating PNG. This keeps the
@@ -42,11 +71,24 @@ public final class VisualTextEmphasisAbsorber {
             double[] rbRaw) {
         if (ctx == null || ctx.resolvedData == null || sections == null || rg == null) return false;
         ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+        if (!isAbsorbableTextEmphasisPlan(ctx, rg, plan)) {
+            return false;
+        }
+
+        TableParagraphMatch tableMatch = findBestTableParagraphMatch(ctx, sections, rg.pageIndex(), rbRaw, plan);
+        if (tableMatch != null) {
+            byte[] png = BackgroundInjector.loadPng(ctx, rg);
+            String color = inferEmphasisColorFromPng(png);
+            if (color != null && applyCharacterShadeToParagraph(tableMatch.paragraph, color)) {
+                return true;
+            }
+        }
+
         if (!isAbsorbableTextEmphasisBackdrop(ctx, rg, rbRaw, plan)) {
             return false;
         }
 
-        TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw, plan);
+        TextLineMatch match = findBestTextLineMatch(ctx, rg.pageIndex(), rbRaw, plan);
         if (match == null || match.tf == null || match.line == null) {
             return false;
         }
@@ -62,6 +104,41 @@ public final class VisualTextEmphasisAbsorber {
         }
 
         return applyCharacterShadeToComposedLine(para, match.line, color);
+    }
+
+    private static boolean applyTextEmphasisPlan(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections,
+            ObjectPlan plan,
+            int pageIndex,
+            double[] bounds,
+            String color) {
+        TableParagraphMatch tableMatch = findBestTableParagraphMatch(ctx, sections, pageIndex, bounds, plan);
+        if (tableMatch != null && applyCharacterShadeToParagraph(tableMatch.paragraph, color)) {
+            return true;
+        }
+        TextLineMatch match = findBestTextLineMatch(ctx, pageIndex, bounds, plan);
+        if (match == null || match.tf == null || match.line == null) return false;
+        ASTParagraph para = findAstParagraphForLine(ctx, sections, pageIndex, match.tf, match.line);
+        return para != null && applyCharacterShadeToComposedLine(para, match.line, color);
+    }
+
+    private static boolean applyCharacterShadeToParagraph(ASTParagraph para, String color) {
+        int len = paragraphTextLength(para);
+        if (len <= 0) return false;
+        return shadeParagraphTextRange(para, 0, len, color);
+    }
+
+    private static int paragraphTextLength(ASTParagraph para) {
+        if (para == null || para.items() == null) return 0;
+        int len = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null) len += text.length();
+            }
+        }
+        return len;
     }
 
     private static boolean applyCharacterShadeToComposedLine(
@@ -232,19 +309,13 @@ public final class VisualTextEmphasisAbsorber {
             double[] rbRaw,
             ObjectPlan plan) {
         if (rbRaw == null || rbRaw.length < 4) return false;
-        if (plan == null || plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) return false;
-        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
-            ctx.recordRenderedDecision(rg, plan, "Stage3.VisualTextEmphasisAbsorber",
-                    "SKIP_ABSORB_TEXT_STYLE_MISSING_OWNED_TEXT_FRAME",
-                    "ABSORB_TEXT_STYLE execution requires Stage 1 ownedTextFrameIds");
-            return false;
-        }
+        if (!isAbsorbableTextEmphasisPlan(ctx, rg, plan)) return false;
 
         double w = rbRaw[3] - rbRaw[1];
         double h = rbRaw[2] - rbRaw[0];
         if (w < 25.0 || h < 2.5 || h > 18.0 || w / h < 3.0) return false;
 
-        TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw, plan);
+        TextLineMatch match = findBestTextLineMatch(ctx, rg.pageIndex(), rbRaw, plan);
         if (match == null || match.line == null || match.line.bounds() == null) return false;
         double[] lb = match.line.bounds();
         double lineH = Math.max(0.1, lb[2] - lb[0]);
@@ -266,6 +337,274 @@ public final class VisualTextEmphasisAbsorber {
         // A true underline is usually much thinner than the text line. Keep it in
         // the underline path rather than converting it to character shading.
         return h >= Math.max(2.5, lineH * 0.25);
+    }
+
+    private static boolean isAbsorbableTextEmphasisPlan(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            ObjectPlan plan) {
+        if (plan == null || plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) return false;
+        boolean hasOwnedTextFrame = plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0;
+        boolean hasOwnedTextRange = plan.ownedTextRanges != null && plan.ownedTextRanges.length > 0;
+        if (!hasOwnedTextFrame && !hasOwnedTextRange) {
+            if (ctx != null && rg != null) {
+                ctx.recordRenderedDecision(rg, plan, "Stage3.VisualTextEmphasisAbsorber",
+                        "SKIP_ABSORB_TEXT_STYLE_MISSING_OWNED_TEXT_TARGET",
+                        "ABSORB_TEXT_STYLE execution requires Stage 1 owned text target metadata");
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private static String inferEmphasisColorFromSourceStyle(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan) {
+        if (ctx == null || ctx.resolvedData == null || plan == null) return null;
+        String color = inferEmphasisColorFromSourceIds(ctx, plan.styleSourceObjectIds);
+        if (color != null) return color;
+        return inferEmphasisColorFromSourceIds(ctx, plan.sourceObjectIds);
+    }
+
+    private static String inferEmphasisColorFromSourceIds(
+            ResolvedBuildContext ctx,
+            int[] sourceIds) {
+        if (sourceIds == null) return null;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            String color = inferEmphasisColorFromPageItem(ctx, item);
+            if (color != null) return color;
+        }
+        return null;
+    }
+
+    private static String inferEmphasisColorFromPageItem(
+            ResolvedBuildContext ctx,
+            ResolvedPageItem item) {
+        if (ctx == null || ctx.resolvedData == null || item == null) return null;
+        String fill = tintedSourceColor(ctx, item.fillColorName(), item.fillTint(), item.opacity());
+        if (fill != null) return fill;
+        return tintedSourceColor(ctx, item.strokeColorName(), item.strokeTint(), item.opacity());
+    }
+
+    private static String tintedSourceColor(
+            ResolvedBuildContext ctx,
+            String colorName,
+            double tint,
+            double opacity) {
+        if (ctx == null || ctx.resolvedData == null || colorName == null
+                || colorName.contains("None") || colorName.contains("[None]")) {
+            return null;
+        }
+        String hex = ctx.resolvedData.resolveTintedColorHex(colorName, tint);
+        if (hex == null) return null;
+        if (opacity >= 0.0 && opacity < 100.0) {
+            hex = ColorResolver.blendColorWithWhite(hex, opacity / 100.0);
+        }
+        return hex;
+    }
+
+    private static final class TableParagraphMatch {
+        ASTParagraph paragraph;
+        double score;
+    }
+
+    private static TableParagraphMatch findBestTableParagraphMatch(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections,
+            int pageIndex,
+            double[] rbRaw,
+            ObjectPlan plan) {
+        if (ctx == null || ctx.resolvedData == null || sections == null
+                || rbRaw == null || rbRaw.length < 4 || plan == null) {
+            return null;
+        }
+        int pageIdx = ctx.toSectionIndex.applyAsInt(pageIndex);
+        if (pageIdx < 0 || pageIdx >= sections.size()) return null;
+        ASTSection section = sections.get(pageIdx);
+        if (section == null || section.blocks() == null) return null;
+
+        TableParagraphMatch best = null;
+        for (ResolvedTable table : ctx.resolvedData.tables()) {
+            if (table == null || table.bounds() == null || !tableMatchesOwnedTextFrame(ctx, table, plan, pageIndex)) {
+                continue;
+            }
+            ResolvedTable.Cell resolvedCell = bestResolvedCellForBounds(table, rbRaw);
+            if (resolvedCell == null || !resolvedCellHasText(resolvedCell)) continue;
+            ASTTableCell astCell = findAstCellForResolvedCell(section, table, resolvedCell);
+            if (astCell == null || astCell.paragraphs() == null || astCell.paragraphs().isEmpty()) continue;
+            ASTParagraph paragraph = findAstParagraphForResolvedCell(astCell, resolvedCell);
+            if (paragraph == null) continue;
+            double score = tableCellOverlapScore(table, resolvedCell, rbRaw);
+            if (score < 0.15) continue;
+            if (best == null || score > best.score) {
+                best = new TableParagraphMatch();
+                best.paragraph = paragraph;
+                best.score = score;
+            }
+        }
+        return best;
+    }
+
+    private static boolean tableMatchesOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTable table,
+            ObjectPlan plan,
+            int pageIndex) {
+        if (ctx == null || ctx.resolvedData == null || table == null || plan == null
+                || plan.ownedTextFrameIds == null) {
+            return false;
+        }
+        String storyId = table.storyId();
+        if (storyId == null || storyId.isEmpty()) return false;
+        for (int id : plan.ownedTextFrameIds) {
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(id));
+            if (tf == null || tf.storyId() == null) continue;
+            if (tf.pageIndex() != pageIndex) continue;
+            if (storyId.equals(tf.storyId())) return true;
+        }
+        return false;
+    }
+
+    private static ResolvedTable.Cell bestResolvedCellForBounds(ResolvedTable table, double[] bounds) {
+        ResolvedTable.Cell best = null;
+        double bestScore = 0.0;
+        for (ResolvedTable.Cell cell : table.cells()) {
+            if (cell == null) continue;
+            double score = tableCellOverlapScore(table, cell, bounds);
+            if (score > bestScore) {
+                best = cell;
+                bestScore = score;
+            }
+        }
+        return bestScore > 0.0 ? best : null;
+    }
+
+    private static double tableCellOverlapScore(ResolvedTable table, ResolvedTable.Cell cell, double[] bounds) {
+        double[] cb = tableCellBounds(table, cell);
+        if (cb == null || bounds == null || bounds.length < 4) return 0.0;
+        double overlap = BackgroundInjector.overlapArea(bounds, cb);
+        if (overlap <= 0.0) return 0.0;
+        return overlap / Math.max(0.1, BackgroundInjector.area(bounds));
+    }
+
+    private static double[] tableCellBounds(ResolvedTable table, ResolvedTable.Cell cell) {
+        if (table == null || cell == null || table.bounds() == null || table.bounds().length < 4
+                || table.rowHeights() == null || table.columnWidths() == null) {
+            return null;
+        }
+        int row = cell.row();
+        int col = cell.col();
+        if (row < 0 || col < 0 || row >= table.rowHeights().length || col >= table.columnWidths().length) {
+            return null;
+        }
+        double top = table.bounds()[0];
+        for (int r = 0; r < row; r++) top += table.rowHeights()[r];
+        double bottom = top;
+        int rowEnd = Math.min(table.rowHeights().length, row + Math.max(1, cell.rowSpan()));
+        for (int r = row; r < rowEnd; r++) bottom += table.rowHeights()[r];
+
+        double left = table.bounds()[1];
+        for (int c = 0; c < col; c++) left += table.columnWidths()[c];
+        double right = left;
+        int colEnd = Math.min(table.columnWidths().length, col + Math.max(1, cell.colSpan()));
+        for (int c = col; c < colEnd; c++) right += table.columnWidths()[c];
+        return new double[] { top, left, bottom, right };
+    }
+
+    private static boolean resolvedCellHasText(ResolvedTable.Cell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        for (ResolvedParagraph paragraph : cell.paragraphs()) {
+            if (compactResolvedParagraphText(paragraph).length() > 0) return true;
+        }
+        return false;
+    }
+
+    private static ASTTableCell findAstCellForResolvedCell(
+            ASTSection section,
+            ResolvedTable table,
+            ResolvedTable.Cell resolvedCell) {
+        if (section == null || table == null || resolvedCell == null) return null;
+        ASTTableCell fallback = null;
+        String resolvedText = compactResolvedCellText(resolvedCell);
+        for (ASTBlock block : section.blocks()) {
+            if (!(block instanceof ASTTable)) continue;
+            ASTTable astTable = (ASTTable) block;
+            if (astTable.rowCount() != table.rowCount() || astTable.colCount() != table.columnCount()) {
+                continue;
+            }
+            ASTTableCell cell = astCellAt(astTable, resolvedCell.row(), resolvedCell.col());
+            if (cell == null) continue;
+            if (fallback == null) fallback = cell;
+            if (resolvedText.isEmpty() || compactAstCellText(cell).contains(resolvedText)) {
+                return cell;
+            }
+        }
+        return fallback;
+    }
+
+    private static ASTTableCell astCellAt(ASTTable table, int row, int col) {
+        if (table == null || table.rows() == null) return null;
+        for (ASTTableRow astRow : table.rows()) {
+            if (astRow == null || astRow.cells() == null) continue;
+            for (ASTTableCell cell : astRow.cells()) {
+                if (cell != null && cell.rowIndex() == row && cell.columnIndex() == col) {
+                    return cell;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static ASTParagraph findAstParagraphForResolvedCell(
+            ASTTableCell astCell,
+            ResolvedTable.Cell resolvedCell) {
+        if (astCell == null || astCell.paragraphs() == null || astCell.paragraphs().isEmpty()) return null;
+        if (resolvedCell != null && resolvedCell.paragraphs() != null) {
+            for (ResolvedParagraph resolvedParagraph : resolvedCell.paragraphs()) {
+                String resolvedText = compactResolvedParagraphText(resolvedParagraph);
+                if (resolvedText.isEmpty()) continue;
+                for (ASTParagraph astParagraph : astCell.paragraphs()) {
+                    if (paragraphContainsCompactLine(astParagraph, resolvedText)) {
+                        return astParagraph;
+                    }
+                }
+            }
+        }
+        for (ASTParagraph paragraph : astCell.paragraphs()) {
+            if (paragraphTextLength(paragraph) > 0) return paragraph;
+        }
+        return null;
+    }
+
+    private static String compactResolvedCellText(ResolvedTable.Cell cell) {
+        if (cell == null || cell.paragraphs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedParagraph paragraph : cell.paragraphs()) {
+            sb.append(compactResolvedParagraphText(paragraph));
+        }
+        return sb.toString();
+    }
+
+    private static String compactResolvedParagraphText(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.isInlineAnchor()) continue;
+            String text = run.text();
+            if (text == null) continue;
+            sb.append(buildCompactTextMap(text).compact);
+        }
+        return sb.toString();
+    }
+
+    private static String compactAstCellText(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            sb.append(buildParagraphCompactTextMap(paragraph).compact);
+        }
+        return sb.toString();
     }
 
     private static int countMatchedLineOverlaps(
@@ -305,10 +644,10 @@ public final class VisualTextEmphasisAbsorber {
 
     private static TextLineMatch findBestTextLineMatch(
             ResolvedBuildContext ctx,
-            RenderedGroup rg,
+            int pageIndex,
             double[] rbRaw,
             ObjectPlan plan) {
-        if (ctx == null || ctx.resolvedData == null || rg == null || rbRaw == null) return null;
+        if (ctx == null || ctx.resolvedData == null || rbRaw == null) return null;
         TextLineMatch best = null;
         double[] scaledRb = new double[] {
                 rbRaw[0] * ctx.scaleFactor,
@@ -317,7 +656,7 @@ public final class VisualTextEmphasisAbsorber {
                 rbRaw[3] * ctx.scaleFactor
         };
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
-            if (tf == null || tf.pageIndex() != rg.pageIndex()) continue;
+            if (tf == null || tf.pageIndex() != pageIndex) continue;
             if (!isPlannedOwnedTextFrame(plan, tf)) continue;
             if (!BackgroundInjector.hasSemanticText(tf)) continue;
             List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();

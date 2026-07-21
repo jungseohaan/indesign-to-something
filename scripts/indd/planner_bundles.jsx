@@ -323,6 +323,9 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         candidatePurpose: candidate.candidatePurpose || null,
         compositeRole: candidate.compositeRole || null,
         slotRole: declaredCandidate.slotRole || null,
+        textRangeDecorationShell: declaredCandidate.textRangeDecorationShell === true,
+        decoratedTextFrameIds: _sortedNumericIds(
+                declaredCandidate.decoratedTextFrameIds || []),
         layoutOnlyInlineSlot: candidate.layoutOnlyInlineSlot === true,
         ownedByNativeShellSourceObjectIds: _sortedNumericIds(
                 candidate.ownedByNativeShellSourceObjectIds || []),
@@ -1575,6 +1578,18 @@ function _plannerBundleTextFramesAreSimpleMarkers(textFrameIds, clusterIndex) {
 function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
     var ids = [];
     var seen = {};
+    if (_plannerBundleIsTextRangeDecorationShellCandidate(candidate)) {
+        for (var di = 0; candidate.decoratedTextFrameIds && di < candidate.decoratedTextFrameIds.length; di++) {
+            var decoratedId = candidate.decoratedTextFrameIds[di];
+            var decoratedSource = clusterIndex && clusterIndex.sourceInfo
+                    ? clusterIndex.sourceInfo(decoratedId)
+                    : null;
+            if (!decoratedSource || decoratedSource.kind !== "TextFrame") continue;
+            if (decoratedSource.textFrameClass !== "editable") continue;
+            _pushUniqueId(ids, seen, decoratedId);
+        }
+        return _sortedNumericIds(ids);
+    }
     if (candidate && (candidate.compositeRole === "table_carrier_textless_shell"
             || candidate.compositeRole === "table_carrier_sibling_decoration"
             || candidate.tableDecorationRole === "table_carrier_sibling_decoration")) {
@@ -1639,6 +1654,15 @@ function _plannerBundleDeclaredOwnedTextFrameIds(candidate, clusterIndex) {
     addDeclared(candidate ? candidate.editableTextFrameIds : null);
     addDeclared(candidate ? candidate.hiddenTextFrameIds : null);
     return _sortedNumericIds(ids);
+}
+
+function _plannerBundleIsTextRangeDecorationShellCandidate(candidate) {
+    if (!candidate) return false;
+    if (candidate.textRangeDecorationShell !== true) return false;
+    if (candidate.ownershipSlot !== "SHELL_SLOT") return false;
+    if (!candidate.decoratedTextFrameIds || candidate.decoratedTextFrameIds.length === 0) return false;
+    return candidate.containsEditableText !== true
+            && candidate.completePngTextAllowed !== true;
 }
 
 function _plannerBundleSourceIsInlineOwnedForParentShell(src) {

@@ -348,6 +348,8 @@ public class ResolvedDataReader {
         ResolvedTable.Cell cell = new ResolvedTable.Cell();
         cell.row(getInt(o, "row", -1));
         cell.col(getInt(o, "col", -1));
+        cell.rowSpan(getInt(o, "rowSpan", 1));
+        cell.colSpan(getInt(o, "colSpan", 1));
         cell.fillColor(getString(o, "fillColor"));
         cell.fillTint(getDouble(o, "fillTint", 100));
         if (o.has("paragraphs") && o.get("paragraphs").isJsonArray()) {

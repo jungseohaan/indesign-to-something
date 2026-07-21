@@ -23,6 +23,11 @@ public final class VisualBuilder {
         if (ctx == null || sections == null || sections.isEmpty()) return;
 
         try (ConversionTiming.Scope ignored =
+                     ConversionTiming.time("stage3.visualBuilder.textEmphasisStyleAbsorber")) {
+            VisualTextEmphasisAbsorber.absorbPlannedTextEmphasisStyles(ctx, sections);
+        }
+
+        try (ConversionTiming.Scope ignored =
                      ConversionTiming.time("stage3.visualBuilder.legacyBackgroundInjector")) {
             BackgroundInjector.inject(ctx, sections);
         }
