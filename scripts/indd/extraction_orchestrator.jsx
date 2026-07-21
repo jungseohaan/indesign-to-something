@@ -665,12 +665,60 @@ function _indexSingleTextlessPagePlaneFrames(result) {
     return byPageIndex;
 }
 
-function _pagePlaneCacheFileName(pageIndex, pageHash) {
+// SPEC-049: 테이블스타일 숨김 집합의 결정론적 서명.
+// pagePlaneHiddenTableStyleSourceObjectIdsByPage 는 sourceItems 에서 순수하게
+// 도출되므로 같은 INDD → 같은 서명이다. 서명을 캐시 파일명에 넣어 "같은 페이지 +
+// 같은 숨김 집합 = 같은 캐시 파일"을 보장한다. 숨김 정책이 (추출기 변경 등으로)
+// 달라지면 서명이 바뀌어 자동으로 miss → 오염된 캐시 재사용을 막는다.
+function _pagePlaneHideSignature(ctx) {
+    if (!ctx) return null;
+    var byPage = ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage;
+    if (!byPage || _objectPlanMapKeyCount(byPage) === 0) return null;
+    // 페이지 인덱스 오름차순, 각 페이지의 object id 오름차순으로 정규화해
+    // 순회 순서에 무관한 안정적 문자열을 만든다.
+    var pageKeys = [];
+    for (var pk in byPage) {
+        if (byPage.hasOwnProperty(pk)) pageKeys.push(pk);
+    }
+    pageKeys.sort(function (a, b) { return Number(a) - Number(b); });
+    var parts = [];
+    for (var i = 0; i < pageKeys.length; i++) {
+        var pk = pageKeys[i];
+        var ids = byPage[pk];
+        var idList = [];
+        if (ids) {
+            if (ids.length !== undefined && typeof ids !== "string") {
+                for (var j = 0; j < ids.length; j++) idList.push(String(ids[j]));
+            } else {
+                for (var idk in ids) {
+                    if (ids.hasOwnProperty(idk)) idList.push(String(idk));
+                }
+            }
+        }
+        idList.sort();
+        parts.push(pk + ":" + idList.join(","));
+    }
+    var raw = parts.join("|");
+    // djb2 해시 → 8자리 hex.
+    var h = 5381;
+    for (var c = 0; c < raw.length; c++) {
+        h = ((h * 33) ^ raw.charCodeAt(c)) | 0;
+    }
+    return "ts" + (h >>> 0).toString(16);
+}
+
+function _pagePlaneCacheFileName(pageIndex, pageHash, hideSig) {
     // The cache directory is already keyed by immutable INDD path/size/mtime,
     // extractor version, graphics mode, and perf mode. The legacy page_hashes
     // include session-local DOM ids for some generated instances, so using them
     // in the file name makes deterministic source pages miss the cache.
-    return "page_textless_plane_p" + String(pageIndex + 1) + ".png";
+    //
+    // SPEC-049: when table-style source hiding is active, the page plane depends
+    // on which sources are hidden. hideSig (deterministic per INDD) is appended
+    // so cached planes only match when produced under the same hide set.
+    var base = "page_textless_plane_p" + String(pageIndex + 1);
+    if (hideSig) base += "_" + hideSig;
+    return base + ".png";
 }
 
 function _copyFileReplacingGeneric(src, dest, label) {
@@ -713,11 +761,10 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
             summary.reason = "cache_not_configured";
             return summary;
         }
-        if (ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
-                && _objectPlanMapKeyCount(ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage) > 0) {
-            summary.reason = "table_style_source_hide_requires_fresh_page_plane";
-            return summary;
-        }
+        // SPEC-049: table-style source hide 는 더 이상 캐시를 무효화하지 않는다.
+        // 숨김 집합의 결정론적 서명(hideSig)을 캐시 파일명에 반영해 안전하게 재사용한다.
+        var hideSig = _pagePlaneHideSignature(ctx);
+        summary.hideSignature = hideSig || null;
         if (ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount > 0) {
             summary.reason = "source_bundle_text_range_shell_hide_requires_fresh_page_plane";
             return summary;
@@ -756,7 +803,7 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
                 summary.entries.push(entry);
                 continue;
             }
-            var cacheFile = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash));
+            var cacheFile = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash, hideSig));
             entry.cacheFile = cacheFile.fsName;
             if (!cacheFile.exists) {
                 summary.missCount++;
@@ -819,11 +866,10 @@ function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
             summary.reason = "cache_not_configured";
             return summary;
         }
-        if (ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage
-                && _objectPlanMapKeyCount(ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage) > 0) {
-            summary.reason = "table_style_source_hide_not_cached";
-            return summary;
-        }
+        // SPEC-049: table-style source hide 는 더 이상 캐시 저장을 막지 않는다.
+        // 숨김 서명(hideSig)을 파일명에 반영해 저장한다.
+        var hideSig = _pagePlaneHideSignature(ctx);
+        summary.hideSignature = hideSig || null;
         if (ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount > 0) {
             summary.reason = "source_bundle_text_range_shell_hide_not_cached";
             return summary;
@@ -859,7 +905,7 @@ function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
                 continue;
             }
             var src = File(ctx.outputDir + "/" + frame.file);
-            var dest = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash));
+            var dest = File(cacheDir.fsName + "/" + _pagePlaneCacheFileName(pageIndex, hash, hideSig));
             entry.cacheFile = dest.fsName;
             if (!src.exists) {
                 summary.skippedCount++;
