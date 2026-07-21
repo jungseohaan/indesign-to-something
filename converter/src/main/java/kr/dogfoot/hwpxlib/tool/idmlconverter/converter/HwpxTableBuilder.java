@@ -386,6 +386,7 @@ public class HwpxTableBuilder {
         long savedBlockInsetLeft = ctx.blockInsetLeft;
         long savedBlockInsetTop = ctx.blockInsetTop;
         long savedCellContentYCursor = ctx.cellContentYCursor;
+        String savedCurrentCellFillColor = ctx.currentCellFillColor;
 
         ctx.insideTableCell = true;
         long rowYOffset = 0;
@@ -485,8 +486,15 @@ public class HwpxTableBuilder {
                 long cellContentWidth = astCell.width() - astCell.marginLeft() - astCell.marginRight();
                 HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(astCell.paragraphs(), cellContentWidth);
 
-                // 셀 내용 (단락) 추가 — drawText/단일컬럼과 동일한 공용 루틴
-                paragraphBuilder.fillSubListContent(subList, astCell.paragraphs(), null, astCell.height(), singleCellTable);
+                // 셀 내용 (단락) 추가 — drawText/단일컬럼과 동일한 공용 루틴.
+                // 현재 셀의 TABLE_STYLE_SLOT fill을 inline shell 이미지 브러시에 전달한다.
+                String savedCellFillForContent = ctx.currentCellFillColor;
+                ctx.currentCellFillColor = astCell.fillColor();
+                try {
+                    paragraphBuilder.fillSubListContent(subList, astCell.paragraphs(), null, astCell.height(), singleCellTable);
+                } finally {
+                    ctx.currentCellFillColor = savedCellFillForContent;
+                }
             }
 
             rowYOffset += astRow.rowHeight();
@@ -499,6 +507,7 @@ public class HwpxTableBuilder {
         ctx.blockInsetLeft = savedBlockInsetLeft;
         ctx.blockInsetTop = savedBlockInsetTop;
         ctx.cellContentYCursor = savedCellContentYCursor;
+        ctx.currentCellFillColor = savedCurrentCellFillColor;
     }
 
     private static boolean usesEmboxFirstBaseline(ASTTableCell cell) {

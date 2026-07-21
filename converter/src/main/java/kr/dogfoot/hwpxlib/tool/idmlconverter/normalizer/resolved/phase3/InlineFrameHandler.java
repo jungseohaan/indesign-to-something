@@ -1421,19 +1421,12 @@ public class InlineFrameHandler {
                 shellImage = splitCanvasCrop.image;
             }
             boolean preserveSourceCanvas = !compactSplitCanvas
-                    && (extractedShellImageOwnsGeometry(shellPlan)
-                    || shouldPreserveInlineShellSourceCanvas(ctx, shellPlan));
-            boolean preserveCanvasGeometry = preserveSourceCanvas && !embedCompositeShellText;
-            SourceCanvasGeometry canvasGeometry = preserveCanvasGeometry
-                    ? sourceCanvasGeometryForExtractedShell(shellPlan, shellImage)
-                    : null;
+                    && shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
             boolean useCroppedExecutionBounds = splitCanvasCrop != null
                     && splitCanvasCrop.sourceBounds != null
                     && !isDirectChildInlineTextShellSlot(shellPlan);
             double[] executionBounds = useCroppedExecutionBounds
                     ? splitCanvasCrop.sourceBounds
-                    : canvasGeometry != null
-                    ? canvasGeometry.sourceCanvasBounds
                     : shellBounds;
             double w = 0;
             double h = 0;
@@ -2574,7 +2567,7 @@ public class InlineFrameHandler {
         if (!preserveSourceCanvas) {
             shell = trimInlineTextShellVerticalAlphaPadding(shell, forceVerticalAlphaTrim);
         }
-        return flattenOntoWhite(shell);
+        return VisualCropper.encodePng(shell);
     }
 
     private static byte[] prepareTransparentInlineTextShellImageData(
@@ -2597,9 +2590,12 @@ public class InlineFrameHandler {
         if (!preserveSourceCanvas) {
             shellImage = trimInlineTextShellVerticalAlphaPadding(shellImage, forceVerticalAlphaTrim);
         }
+        if (shellPlan != null && shellPlan.placement == Placement.INLINE) {
+            return VisualCropper.encodePng(shellImage);
+        }
         BufferedImage blended = blendTransparentShellOverPagePlane(ctx, shellPlan, sourceBounds, shellImage);
         if (blended != null) return encodeRgbPng(blended);
-        return flattenOntoWhite(shellImage);
+        return VisualCropper.encodePng(shellImage);
     }
 
     private static BufferedImage trimInlineTextShellVerticalAlphaPadding(BufferedImage img) {
@@ -3199,6 +3195,9 @@ public class InlineFrameHandler {
         if (paragraphs == null || paragraphs.isEmpty() || obj == null || childTf == null) return;
         if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
                 && obj.kind() != ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
+            return;
+        }
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
             return;
         }
         if (!isSourceSingleLineTextFrame(childTf)) return;

@@ -3108,8 +3108,8 @@ function _resolveObjectPlanDuplicateTextOwners(objectPlans, sourceById) {
             if (_objectPlanIsInlineVisibleTextFrameShellPlan(inlineOwner)
                     || _objectPlanOwnsInlineVisibleTextFrameSource(inlineOwner, sourceById)) {
                 if (!canonical
-                        || _objectPlanInlineVisibleTextFrameShellPriority(inlineOwner)
-                            > _objectPlanInlineVisibleTextFrameShellPriority(canonical)) {
+                        || _objectPlanInlineVisibleTextFrameShellPriority(inlineOwner, sourceById)
+                            > _objectPlanInlineVisibleTextFrameShellPriority(canonical, sourceById)) {
                     canonical = inlineOwner;
                 }
             }
@@ -3305,7 +3305,9 @@ function _objectPlanHasExecutableInlineShellCarrier(plan, sourceById) {
         if (isNaN(id)) continue;
         if (owned[String(id)]) continue;
         var src = sourceById ? sourceById[String(id)] : null;
-        if (!src || !_objectPlanSourceKindIsTextOnly(_objectPlanSourceKind(src))) {
+        if (!src) return true;
+        if (_objectPlanSourceKindIsTextOnly(_objectPlanSourceKind(src))) continue;
+        if (src.hasPlacedVisual === true || _objectPlanSourceHasVisibleFramePaint(src)) {
             return true;
         }
     }
@@ -3332,7 +3334,7 @@ function _promoteObjectPlanInlineVisibleTextFrameShellFromOwnedSource(plan, sour
     return false;
 }
 
-function _objectPlanInlineVisibleTextFrameShellPriority(plan) {
+function _objectPlanInlineVisibleTextFrameShellPriority(plan, sourceById) {
     if (!_objectPlanIsInlineVisibleTextFrameShellPlan(plan)) {
         return 0;
     }
@@ -3347,7 +3349,7 @@ function _objectPlanInlineVisibleTextFrameShellPriority(plan) {
             || plan.compositeRole === "inline_editable_text_shell_composite") {
         score += 700;
     }
-    if (_objectPlanHasExecutableInlineShellCarrier(plan, null)) score += 300;
+    if (_objectPlanHasExecutableInlineShellCarrier(plan, sourceById)) score += 300;
     if (plan.materialization === "NATIVE_SOURCE_SHAPE"
             || plan.materialization === "EXTRACTED_PNG_VECTOR") {
         score += 100;

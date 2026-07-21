@@ -281,7 +281,7 @@ public class HwpxTextBoxBuilder {
         try {
             String itemId = ImageInserter.registerImage(
                     ctx.hwpxFile,
-                    AlphaSafePng.prepareTextBoxImageFill(pngData),
+                    AlphaSafePng.prepareTextBoxImageFill(pngData, ctx.currentCellFillColor),
                     "png");
             if (itemId == null) return false;
             rect.createFillBrush();
@@ -961,7 +961,7 @@ public class HwpxTextBoxBuilder {
             try {
                 String itemId = ImageInserter.registerImage(
                         ctx.hwpxFile,
-                        AlphaSafePng.prepareTextBoxImageFill(block.imageFillData()),
+                        AlphaSafePng.prepareTextBoxImageFill(block.imageFillData(), ctx.currentCellFillColor),
                         "png");
                 if (itemId != null) {
                     bf.createFillBrush();
