@@ -765,12 +765,12 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 }
                 try {
                     var inParent = inItem.parent;
-                    if (!plannedDirectChildShellSlot && !plannedPageVisual
+                    if (!plannedDirectChildShellSlot && !plannedPageVisual && !plannedTextFrameShell
                             && inParent && inParent.constructor.name === "Group" && isInlineItem(inParent)) {
                         inlineStats.parentInlineSkipped++;
                         continue;
                     }
-                    if (!plannedDirectChildShellSlot && !plannedPageVisual
+                    if (!plannedDirectChildShellSlot && !plannedPageVisual && !plannedTextFrameShell
                             && inParent && inParent.constructor.name === "Rectangle" && isInlineItem(inParent)) {
                         inlineStats.parentInlineSkipped++;
                         continue;

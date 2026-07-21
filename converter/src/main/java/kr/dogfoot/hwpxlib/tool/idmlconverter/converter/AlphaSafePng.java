@@ -12,22 +12,39 @@ final class AlphaSafePng {
     }
 
     static byte[] prepareTextBoxImageFill(byte[] pngData) {
+        return prepareTextBoxImageFill(pngData, null);
+    }
+
+    static byte[] prepareTextBoxImageFill(byte[] pngData, String backgroundColor) {
         if (pngData == null || pngData.length == 0) return pngData;
         try {
             BufferedImage src = ImageIO.read(new ByteArrayInputStream(pngData));
             if (src == null) return pngData;
-            BufferedImage normalized = trimVerticalTransparentPadding(src);
-            if (hasNonOpaqueAlpha(normalized)) {
-                return flattenOntoWhite(normalized);
+            Color bg = parseRgb(backgroundColor);
+            if (bg == null) return pngData;
+            if (!hasNonOpaqueAlpha(src)) {
+                byte[] replaced = replaceBorderConnectedPaper(src, bg);
+                return replaced != null ? replaced : pngData;
             }
-            if (normalized != src) {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                ImageIO.write(normalized, "png", out);
-                return out.toByteArray();
-            }
-            return pngData;
+            return flattenOnto(src, bg);
         } catch (Exception ignore) {
             return pngData;
+        }
+    }
+
+    private static Color parseRgb(String color) {
+        if (color == null) return null;
+        String hex = color.trim();
+        if (hex.startsWith("#")) hex = hex.substring(1);
+        if (hex.length() == 8) {
+            hex = hex.substring(2);
+        }
+        if (hex.length() != 6) return null;
+        try {
+            int rgb = Integer.parseInt(hex, 16);
+            return new Color(rgb);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -36,17 +53,17 @@ final class AlphaSafePng {
         try {
             BufferedImage src = ImageIO.read(new ByteArrayInputStream(pngData));
             if (src == null || !hasNonOpaqueAlpha(src)) return pngData;
-            return flattenOntoWhite(src);
+            return flattenOnto(src, Color.WHITE);
         } catch (Exception ignore) {
             return pngData;
         }
     }
 
-    private static byte[] flattenOntoWhite(BufferedImage src) throws Exception {
+    private static byte[] flattenOnto(BufferedImage src, Color background) throws Exception {
         BufferedImage flat = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_RGB);
         Graphics2D g = flat.createGraphics();
         try {
-            g.setColor(Color.WHITE);
+            g.setColor(background);
             g.fillRect(0, 0, src.getWidth(), src.getHeight());
             g.drawImage(src, 0, 0, null);
         } finally {
@@ -55,6 +72,70 @@ final class AlphaSafePng {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ImageIO.write(flat, "png", out);
         return out.toByteArray();
+    }
+
+    private static byte[] replaceBorderConnectedPaper(BufferedImage src, Color background) throws Exception {
+        int width = src.getWidth();
+        int height = src.getHeight();
+        if (width <= 0 || height <= 0) return null;
+
+        BufferedImage out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.drawImage(src, 0, 0, null);
+        } finally {
+            g.dispose();
+        }
+
+        boolean[] seen = new boolean[width * height];
+        int[] queue = new int[width * height];
+        int head = 0;
+        int tail = 0;
+
+        for (int x = 0; x < width; x++) {
+            tail = enqueuePaper(out, seen, queue, tail, width, x, 0);
+            tail = enqueuePaper(out, seen, queue, tail, width, x, height - 1);
+        }
+        for (int y = 1; y < height - 1; y++) {
+            tail = enqueuePaper(out, seen, queue, tail, width, 0, y);
+            tail = enqueuePaper(out, seen, queue, tail, width, width - 1, y);
+        }
+
+        if (tail == 0) return null;
+        int bgRgb = background.getRGB() & 0x00ffffff;
+        int replaced = 0;
+        while (head < tail) {
+            int pos = queue[head++];
+            int x = pos % width;
+            int y = pos / width;
+            out.setRGB(x, y, 0xff000000 | bgRgb);
+            replaced++;
+            if (x > 0) tail = enqueuePaper(out, seen, queue, tail, width, x - 1, y);
+            if (x + 1 < width) tail = enqueuePaper(out, seen, queue, tail, width, x + 1, y);
+            if (y > 0) tail = enqueuePaper(out, seen, queue, tail, width, x, y - 1);
+            if (y + 1 < height) tail = enqueuePaper(out, seen, queue, tail, width, x, y + 1);
+        }
+        if (replaced == 0) return null;
+
+        ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
+        ImageIO.write(out, "png", outBytes);
+        return outBytes.toByteArray();
+    }
+
+    private static int enqueuePaper(
+            BufferedImage image,
+            boolean[] seen,
+            int[] queue,
+            int tail,
+            int width,
+            int x,
+            int y) {
+        int pos = y * width + x;
+        if (seen[pos]) return tail;
+        seen[pos] = true;
+        if (isNonWhiteRgb(image.getRGB(x, y))) return tail;
+        queue[tail++] = pos;
+        return tail;
     }
 
     private static BufferedImage trimVerticalTransparentPadding(BufferedImage src) {

@@ -149,6 +149,12 @@ public class HwpxParagraphBuilder {
         if (astPara.lineSpacing() != null && astPara.lineSpacing() == 0) {
             astPara.lineSpacing(null); // lineSpacing=0은 무의미 → null로 복원
         }
+        if (astPara.alignment() == null) {
+            String carrierAlignment = inferObjectOnlyCarrierAlignment(astPara);
+            if (carrierAlignment != null) {
+                astPara.alignment(carrierAlignment);
+            }
+        }
         // SPEC-031: DSL para rule이 있으면 기존 override 없이도 createOverrideParaPr 호출
         boolean hasDslParaRules = kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry
                 .hasParaRule(astPara.paragraphStyleRef());
@@ -236,6 +242,48 @@ public class HwpxParagraphBuilder {
 
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
+    }
+
+    private static String inferObjectOnlyCarrierAlignment(ASTParagraph para) {
+        if (para == null || para.alignment() != null || para.items() == null || para.items().isEmpty()) {
+            return null;
+        }
+        String resolved = null;
+        boolean foundObject = false;
+        for (ASTInlineItem item : para.items()) {
+            if (item == null) continue;
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.trim().isEmpty()) return null;
+                continue;
+            }
+            if (item.itemType() != ASTInlineItem.ItemType.INLINE_OBJECT) return null;
+            String alignment = inlineObjectTextAlignment((ASTInlineObject) item);
+            if (alignment == null) return null;
+            if (resolved == null) {
+                resolved = alignment;
+            } else if (!resolved.equalsIgnoreCase(alignment)) {
+                return null;
+            }
+            foundObject = true;
+        }
+        return foundObject ? resolved : null;
+    }
+
+    private static String inlineObjectTextAlignment(ASTInlineObject obj) {
+        if (obj == null || obj.paragraphs() == null || obj.paragraphs().isEmpty()) return null;
+        String resolved = null;
+        for (ASTParagraph paragraph : obj.paragraphs()) {
+            if (paragraph == null) continue;
+            String alignment = paragraph.alignment();
+            if (alignment == null || alignment.isEmpty()) return null;
+            if (resolved == null) {
+                resolved = alignment;
+            } else if (!resolved.equalsIgnoreCase(alignment)) {
+                return null;
+            }
+        }
+        return resolved;
     }
 
     private static ASTTextRun coalescedTextRunAt(java.util.List<ASTInlineItem> items, int index) {
