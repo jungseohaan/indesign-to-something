@@ -986,10 +986,29 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
         emitted: 0
     };
     var sourceInfoById = {};
+    var childIdsByParentId = {};
     for (var ii = 0; sourceItems && ii < sourceItems.length; ii++) {
         var info = sourceItems[ii];
         if (!info || info.id === null || info.id === undefined) continue;
         sourceInfoById[String(info.id)] = info;
+        if (info.parentId !== null && info.parentId !== undefined) {
+            var parentKey = String(info.parentId);
+            if (!childIdsByParentId[parentKey]) childIdsByParentId[parentKey] = [];
+            childIdsByParentId[parentKey].push(info.id);
+        }
+    }
+
+    function directEditableTextChildIds(sourceId) {
+        var ids = [];
+        var children = childIdsByParentId[String(sourceId)] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            var child = sourceInfoById[String(children[ci])];
+            if (child && child.kind === "TextFrame"
+                    && child.textFrameClass === "editable" && child.hasText === true) {
+                ids.push(child.id);
+            }
+        }
+        return _sortedNumericIds(ids);
     }
 
     function pageIndexInCurrentExtraction(pageIndex) {
@@ -1002,6 +1021,10 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
         var parent = sourceInfoById[String(sourceInfo.parentId)];
         if (!parent || !_isInlineFlowItemBySourceInfo(parent)) return false;
         var parentKind = String(parent.kind || "");
+        if (String(sourceInfo.kind || "") === "Group"
+                && directEditableTextChildIds(sourceInfo.id).length > 1) {
+            return false;
+        }
         return parentKind === "Group" || parentKind === "Rectangle";
     }
 
@@ -1048,10 +1071,15 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
                     : _collectTextFrameIds(inlineItem, true, true);
         } catch (eInlineEditableIds) {}
 
-        var inlineRequiresTextHidden = inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0;
-        var inlineVisualSourceIds = inlineRequiresTextHidden
+        var ownsTextByCompletePng = String(sourceInfo.kind || "") === "Group"
+                && directEditableTextChildIds(sourceInfo.id).length > 1;
+        var inlineRequiresTextHidden = inlineEditableTextFrameIds
+                && inlineEditableTextFrameIds.length > 0 && !ownsTextByCompletePng;
+        var inlineVisualSourceIds = ownsTextByCompletePng
+                ? [sourceInfo.id]
+                : (inlineRequiresTextHidden
                 ? []
-                : _inlineCarrierVisualSourceObjectIds(inlineItem, sourceInfo, inlineSourceIds);
+                : _inlineCarrierVisualSourceObjectIds(inlineItem, sourceInfo, inlineSourceIds));
         if (!inlineRequiresTextHidden
                 && (!inlineVisualSourceIds || inlineVisualSourceIds.length === 0)) {
             stats.skippedNoVisualSource++;
@@ -1067,14 +1095,20 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
             mode: "TEXTLESS_CANDIDATE",
             candidatePurpose: "INLINE_CANDIDATE",
             editableTextFrameIds: inlineEditableTextFrameIds,
-            ownedTextFrameIds: [],
+            ownedTextFrameIds: ownsTextByCompletePng ? inlineEditableTextFrameIds : [],
             hiddenTextFrameIds: inlineRequiresTextHidden ? inlineEditableTextFrameIds : [],
             requiresTextHidden: inlineRequiresTextHidden,
-            textOwner: inlineRequiresTextHidden ? "hwpx_tf" : "none",
-            containsEditableText: false,
-            completePngTextAllowed: false,
-            materialization: null,
-            textAction: inlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null
+            textOwner: ownsTextByCompletePng ? "indesign_png" : (inlineRequiresTextHidden ? "hwpx_tf" : "none"),
+            containsEditableText: ownsTextByCompletePng,
+            completePngTextAllowed: ownsTextByCompletePng,
+            materialization: ownsTextByCompletePng ? "COMPLETE_PNG" : null,
+            textAction: ownsTextByCompletePng ? "OWNED_BY_PNG" : (inlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null),
+            visualAction: ownsTextByCompletePng ? "PLACE_INLINE_PNG" : null,
+            ownershipSlot: ownsTextByCompletePng ? "CONTENT_VISUAL_SLOT" : null,
+            exportTargetObjectId: ownsTextByCompletePng ? sourceInfo.id : null,
+            placement: "INLINE",
+            coordinateSpace: "STORY_FLOW",
+            inlineSourceTreeClosed: ownsTextByCompletePng
         };
         if (!inlineRequiresTextHidden) {
             attrs.compositeRole = "inline_textless_native_shape";
