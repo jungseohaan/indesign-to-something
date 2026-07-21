@@ -21,8 +21,11 @@ final class AlphaSafePng {
             BufferedImage src = ImageIO.read(new ByteArrayInputStream(pngData));
             if (src == null) return pngData;
             Color bg = parseRgb(backgroundColor);
-            if (bg == null) return pngData;
-            if (!hasNonOpaqueAlpha(src)) {
+            boolean hasAlpha = hasNonOpaqueAlpha(src);
+            if (bg == null) {
+                return hasAlpha ? flattenOnto(src, Color.WHITE) : pngData;
+            }
+            if (!hasAlpha) {
                 byte[] replaced = replaceBorderConnectedPaper(src, bg);
                 return replaced != null ? replaced : pngData;
             }

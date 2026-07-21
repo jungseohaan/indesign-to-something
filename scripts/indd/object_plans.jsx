@@ -2258,7 +2258,8 @@ function _promoteObjectPlanInlineVisibleTextFrameShell(plan, src, sourceId) {
     plan.required = true;
     plan.bounds = src.bounds || plan.bounds || null;
     plan.renderSourceBounds = src.bounds || plan.renderSourceBounds || null;
-    plan.cropSourceBounds = src.bounds || plan.cropSourceBounds || null;
+    plan.cropSourceBounds = _objectPlanInlineTextFrameShellCropBounds(src)
+            || src.bounds || plan.cropSourceBounds || null;
     plan.reason = String(plan.reason || "editable_text_frame")
             + ":inline_visible_text_frame_shell";
 }
@@ -2728,6 +2729,23 @@ function _objectPlanSourceBounds(item) {
     return item.bounds || item.pageRelativeBounds || item.geometricBounds || null;
 }
 
+function _objectPlanInlineTextFrameShellCropBounds(src) {
+    if (!src) return null;
+    var sourceBounds = src.bounds || src.pageRelativeBounds || src.geometricBounds || null;
+    var pathBounds = src.pathBounds || null;
+    if (!sourceBounds || sourceBounds.length < 4 || !pathBounds || pathBounds.length < 4) {
+        return sourceBounds;
+    }
+    var sourceMetrics = _objectPlanSourceBoundsMetrics(sourceBounds);
+    var pathMetrics = _objectPlanSourceBoundsMetrics(pathBounds);
+    var sourceArea = sourceMetrics ? sourceMetrics.width * sourceMetrics.height : 0;
+    var pathArea = pathMetrics ? pathMetrics.width * pathMetrics.height : 0;
+    if (sourceArea <= 0 || pathArea <= 0) return sourceBounds;
+    if (!_objectPlanBoundsNearOrInside(sourceBounds, pathBounds, 0.75)) return sourceBounds;
+    if (pathArea >= sourceArea * 0.98) return sourceBounds;
+    return pathBounds;
+}
+
 function _objectPlanUnionSourceBoundsForIds(ids, sourceById) {
     if (!ids || !sourceById) return null;
     var out = null;
@@ -2965,6 +2983,7 @@ function _emptyInlineTextFrameVisualObjectPlan(src, id, pageIndex, zOrder) {
 function _inlineVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
     var sourceIds = _internSourceSetIds([id]);
     var sourceSetId = _sourceSetId(sourceIds);
+    var cropSourceBounds = _objectPlanInlineTextFrameShellCropBounds(src);
     return {
         objectPlanId: "objectPlan.inline_visible_textframe_shell." + String(id),
         bundleId: "textFrame.inlineVisibleShell." + String(id),
@@ -3022,7 +3041,7 @@ function _inlineVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
         reason: "stage1_inline_visible_text_frame_shell_from_source_inventory",
         bounds: src.bounds || null,
         renderSourceBounds: src.bounds || null,
-        cropSourceBounds: src.bounds || null,
+        cropSourceBounds: cropSourceBounds || src.bounds || null,
         ownershipSlot: "SHELL_SLOT",
         policyLayer: "DECORATION",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
