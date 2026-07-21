@@ -276,7 +276,7 @@ public class ResolvedFrameDistributor {
         List<int[]> paraRanges = new ArrayList<>();
         for (ASTParagraph paragraph : paragraphs) {
             int start = storyTextBuilder.length();
-            String text = ParagraphTextHelpers.getParaPlainText(paragraph);
+            String text = ParagraphTextHelpers.getParaStoryFlowText(paragraph);
             storyTextBuilder.append(text != null ? text : "");
             paraRanges.add(new int[] { start, storyTextBuilder.length() });
         }
@@ -364,7 +364,7 @@ public class ResolvedFrameDistributor {
 
     private static ASTParagraph sliceParagraph(ASTParagraph original, int start, int end) {
         if (original == null) return null;
-        String text = ParagraphTextHelpers.getParaPlainText(original);
+        String text = ParagraphTextHelpers.getParaStoryFlowText(original);
         if (text == null) text = "";
         start = clamp(start, 0, text.length());
         end = clamp(end, start, text.length());

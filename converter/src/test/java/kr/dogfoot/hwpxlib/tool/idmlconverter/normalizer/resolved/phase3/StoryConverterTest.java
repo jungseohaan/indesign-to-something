@@ -315,6 +315,36 @@ public class StoryConverterTest {
         Assert.assertEquals("(가) 성취기준 해설•[12문학01-02] 본문", blockText(secondBlock));
     }
 
+    @Test
+    public void singleExtractedFrameStopsAtFrameBreakAfterInlineShell() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame first = linkedTextFrame("15275", "15278", 12,
+                null, null, 0, 7, "\uFFFC\t성취기준\n\u0016\n");
+        data.addTextFrame(first);
+
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = data;
+
+        ASTParagraph title = paragraphWithText("\uFFFC\t성취기준");
+        ASTParagraph shell = paragraphWithInlineObject("inline-shell child text that must not shift story range");
+        ASTParagraph heading = paragraphWithText("(가) 성취기준 해설");
+        ASTParagraph body = paragraphWithText("•[12문학01-02] 본문");
+        java.util.List<ASTParagraph> paragraphs = new java.util.ArrayList<>();
+        paragraphs.add(title);
+        paragraphs.add(shell);
+        paragraphs.add(heading);
+        paragraphs.add(body);
+
+        ASTTextFrameBlock firstBlock = linkedBlock("15275", "15278", "\uFFFC\t성취기준\n\u0016\n");
+        java.util.List<ASTTextFrameBlock> blocks = new java.util.ArrayList<>();
+        blocks.add(firstBlock);
+
+        ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, "15278");
+
+        Assert.assertEquals(2, firstBlock.paragraphs().size());
+        Assert.assertEquals("\uFFFC\t성취기준", blockText(firstBlock));
+    }
+
     private static ResolvedTextFrame textFrameWithVisibleBodyText() {
         ResolvedTextFrame tf = new ResolvedTextFrame();
         tf.id("13913");
@@ -462,6 +492,15 @@ public class StoryConverterTest {
         ASTTextRun run = new ASTTextRun();
         run.text(text);
         paragraph.addItem(run);
+        return paragraph;
+    }
+
+    private static ASTParagraph paragraphWithInlineObject(String childText) {
+        ASTParagraph paragraph = new ASTParagraph();
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.addParagraph(paragraphWithText(childText));
+        paragraph.addItem(obj);
         return paragraph;
     }
 
