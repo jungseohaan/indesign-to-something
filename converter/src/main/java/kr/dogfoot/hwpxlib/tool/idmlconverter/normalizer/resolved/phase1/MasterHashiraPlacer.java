@@ -2,6 +2,10 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import org.w3c.dom.*;
 import javax.xml.parsers.*;
@@ -57,15 +61,16 @@ public final class MasterHashiraPlacer {
 
     private static Map<Integer, Map<String, String>> collectPageTextVariableValues(ResolvedBuildContext ctx)
             throws Exception {
+        Map<Integer, Map<String, String>> resolvedValues = collectResolvedPageTextVariableValues(ctx);
         DocumentBuilder db = newDocumentBuilder();
         File designmap = new File(ctx.idmlDir, "designmap.xml");
         Document dmDoc = safeParseXml(db, designmap);
-        if (dmDoc == null) return Collections.emptyMap();
+        if (dmDoc == null) return resolvedValues;
         Map<String, String> varToCharStyle = readMatchCharacterStyleVariables(dmDoc);
-        if (varToCharStyle.isEmpty()) return Collections.emptyMap();
+        if (varToCharStyle.isEmpty()) return resolvedValues;
 
         List<String> spreadOrder = readSpreadOrder(ctx.idmlDir, dmDoc);
-        if (spreadOrder.isEmpty()) return Collections.emptyMap();
+        if (spreadOrder.isEmpty()) return resolvedValues;
 
         Map<Integer, List<String>> pageToStoryIds = new HashMap<>();
         int pageCount = 0;
@@ -97,7 +102,75 @@ public final class MasterHashiraPlacer {
             }
             pageCount += pagesInSpread;
         }
-        return collectPageTextVariableValues(ctx.idmlDir, db, varToCharStyle, pageCount, pageToStoryIds);
+        Map<Integer, Map<String, String>> idmlValues =
+                collectPageTextVariableValues(ctx.idmlDir, db, varToCharStyle, pageCount, pageToStoryIds);
+        return mergePageValues(idmlValues, resolvedValues);
+    }
+
+    private static Map<Integer, Map<String, String>> collectResolvedPageTextVariableValues(
+            ResolvedBuildContext ctx) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.textFrames() == null) {
+            return Collections.emptyMap();
+        }
+        Map<Integer, Map<String, String>> found = new HashMap<>();
+        int maxPageIndex = -1;
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.pageIndex() < 0 || !tf.nonprinting()) continue;
+            String visible = tf.frameVisibleText();
+            if (visible == null || !visible.contains("##삭제금지##")) continue;
+            ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+            if (story == null || story.paragraphs() == null) continue;
+            Map<String, String> values = new HashMap<>();
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null) continue;
+                    String charStyle = run.charStyle();
+                    String text = run.text();
+                    if (charStyle == null || !charStyle.startsWith("#")) continue;
+                    if (text == null || text.trim().isEmpty()) continue;
+                    values.put(charStyle, text);
+                    values.put("CharacterStyle/" + charStyle, text);
+                }
+            }
+            if (!values.isEmpty()) {
+                found.put(tf.pageIndex(), values);
+                maxPageIndex = Math.max(maxPageIndex, tf.pageIndex());
+            }
+        }
+        if (found.isEmpty()) return Collections.emptyMap();
+        int pageCount = ctx.resolvedData.pages() != null && !ctx.resolvedData.pages().isEmpty()
+                ? ctx.resolvedData.pages().size()
+                : maxPageIndex + 1;
+        Map<Integer, Map<String, String>> carried = new HashMap<>();
+        Map<String, String> carry = new HashMap<>();
+        for (int pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+            Map<String, String> onPage = found.get(pageIndex);
+            if (onPage != null) carry.putAll(onPage);
+            if (!carry.isEmpty()) carried.put(pageIndex, new HashMap<>(carry));
+        }
+        return carried;
+    }
+
+    private static Map<Integer, Map<String, String>> mergePageValues(
+            Map<Integer, Map<String, String>> base, Map<Integer, Map<String, String>> overlay) {
+        if (base == null || base.isEmpty()) {
+            return overlay == null ? Collections.emptyMap() : overlay;
+        }
+        if (overlay == null || overlay.isEmpty()) return base;
+        Map<Integer, Map<String, String>> merged = new HashMap<>();
+        Set<Integer> keys = new HashSet<>();
+        keys.addAll(base.keySet());
+        keys.addAll(overlay.keySet());
+        for (Integer key : keys) {
+            Map<String, String> values = new HashMap<>();
+            Map<String, String> b = base.get(key);
+            Map<String, String> o = overlay.get(key);
+            if (b != null) values.putAll(b);
+            if (o != null) values.putAll(o);
+            merged.put(key, values);
+        }
+        return merged;
     }
 
     private static Map<Integer, Map<String, String>> collectPageTextVariableValues(
@@ -241,31 +314,47 @@ public final class MasterHashiraPlacer {
         int count = 0;
         for (ASTParagraph paragraph : block.paragraphs()) {
             if (paragraph == null || paragraph.items() == null) continue;
-            count += replaceParagraphPlaceholders(paragraph, values);
-            for (ASTInlineItem item : paragraph.items()) {
-                if (!(item instanceof ASTTextRun)) continue;
-                ASTTextRun run = (ASTTextRun) item;
-                String text = run.text();
-                if (text == null || text.indexOf("<#") < 0) continue;
-                String replaced = replaceVariableTokens(text, values);
-                if (!text.equals(replaced)) {
-                    run.text(replaced);
-                    count++;
-                }
+            count += replaceRunLocalPlaceholders(paragraph, values);
+            count += replaceSplitParagraphPlaceholders(paragraph, values);
+        }
+        return count;
+    }
+
+    private static int replaceRunLocalPlaceholders(ASTParagraph paragraph, Map<String, String> values) {
+        int count = 0;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.indexOf("<#") < 0) continue;
+            String replaced = replaceVariableTokens(text, values);
+            if (!text.equals(replaced)) {
+                run.text(replaced);
+                count++;
             }
         }
         return count;
     }
 
-    private static int replaceParagraphPlaceholders(ASTParagraph paragraph, Map<String, String> values) {
+    private static int replaceSplitParagraphPlaceholders(ASTParagraph paragraph, Map<String, String> values) {
         StringBuilder allText = new StringBuilder();
         List<ASTTextRun> textRuns = new ArrayList<>();
+        List<Integer> charToRun = new ArrayList<>();
+        List<Integer> charToOffset = new ArrayList<>();
         boolean hasNonTextInline = false;
         for (ASTInlineItem item : paragraph.items()) {
             if (item instanceof ASTTextRun) {
                 ASTTextRun run = (ASTTextRun) item;
                 textRuns.add(run);
-                if (run.text() != null) allText.append(run.text());
+                String text = run.text();
+                if (text != null) {
+                    int runIndex = textRuns.size() - 1;
+                    for (int i = 0; i < text.length(); i++) {
+                        allText.append(text.charAt(i));
+                        charToRun.add(runIndex);
+                        charToOffset.add(i);
+                    }
+                }
             } else if (item != null) {
                 hasNonTextInline = true;
             }
@@ -273,13 +362,45 @@ public final class MasterHashiraPlacer {
         if (hasNonTextInline || textRuns.isEmpty()) return 0;
         String raw = allText.toString();
         if (raw.indexOf("<#") < 0) return 0;
-        String replaced = replaceVariableTokens(raw, values);
-        if (raw.equals(replaced)) return 0;
-        textRuns.get(0).text(replaced);
-        for (int i = 1; i < textRuns.size(); i++) {
-            textRuns.get(i).text("");
+        List<PlaceholderMatch> matches = findVariableTokenMatches(raw, values);
+        if (matches.isEmpty()) return 0;
+
+        int count = 0;
+        for (int mi = matches.size() - 1; mi >= 0; mi--) {
+            PlaceholderMatch match = matches.get(mi);
+            int start = match.start;
+            int endExclusive = match.endExclusive;
+            if (start < 0 || endExclusive <= start || endExclusive > charToRun.size()) continue;
+
+            int startRunIndex = charToRun.get(start);
+            int startOffset = charToOffset.get(start);
+            int endRunIndex = charToRun.get(endExclusive - 1);
+            int endOffset = charToOffset.get(endExclusive - 1);
+            if (startRunIndex < 0 || startRunIndex >= textRuns.size()
+                    || endRunIndex < startRunIndex || endRunIndex >= textRuns.size()) {
+                continue;
+            }
+
+            ASTTextRun startRun = textRuns.get(startRunIndex);
+            String startText = startRun.text() != null ? startRun.text() : "";
+            if (startRunIndex == endRunIndex) {
+                if (startOffset > startText.length() || endOffset >= startText.length()) continue;
+                startRun.text(startText.substring(0, startOffset)
+                        + match.value
+                        + startText.substring(endOffset + 1));
+            } else {
+                ASTTextRun endRun = textRuns.get(endRunIndex);
+                String endText = endRun.text() != null ? endRun.text() : "";
+                if (startOffset > startText.length() || endOffset >= endText.length()) continue;
+                startRun.text(startText.substring(0, startOffset) + match.value);
+                for (int ri = startRunIndex + 1; ri < endRunIndex; ri++) {
+                    textRuns.get(ri).text("");
+                }
+                endRun.text(endText.substring(endOffset + 1));
+            }
+            count++;
         }
-        return 1;
+        return count;
     }
 
     private static String replaceVariableTokens(String text, Map<String, String> values) {
@@ -288,10 +409,66 @@ public final class MasterHashiraPlacer {
             String key = entry.getKey();
             String value = entry.getValue();
             if (key == null || key.isEmpty() || value == null) continue;
-            out = out.replaceAll("<#\\s*" + java.util.regex.Pattern.quote(key) + "\\s*>",
+            String normalizedKey = normalizeVariableKey(key);
+            if (normalizedKey.isEmpty()) continue;
+            out = out.replaceAll("<#\\s*#?" + java.util.regex.Pattern.quote(normalizedKey) + "\\s*>",
                     java.util.regex.Matcher.quoteReplacement(value));
         }
         return out;
+    }
+
+    private static String normalizeVariableKey(String key) {
+        String out = key == null ? "" : key.trim();
+        if (out.startsWith("CharacterStyle/")) {
+            out = out.substring("CharacterStyle/".length()).trim();
+        }
+        if (out.startsWith("#")) out = out.substring(1).trim();
+        return out;
+    }
+
+    private static List<PlaceholderMatch> findVariableTokenMatches(
+            String text, Map<String, String> values) {
+        List<PlaceholderMatch> matches = new ArrayList<>();
+        int i = 0;
+        while (i < text.length()) {
+            int start = text.indexOf("<#", i);
+            if (start < 0) break;
+            int end = text.indexOf('>', start + 2);
+            if (end < 0) break;
+            String token = text.substring(start + 2, end).trim();
+            String value = valueForVariableToken(token, values);
+            if (value != null) {
+                matches.add(new PlaceholderMatch(start, end + 1, value));
+            }
+            i = end + 1;
+        }
+        return matches;
+    }
+
+    private static String valueForVariableToken(String token, Map<String, String> values) {
+        String normalizedToken = normalizeVariableKey(token);
+        if (normalizedToken.isEmpty()) return null;
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key == null || value == null) continue;
+            if (normalizedToken.equals(normalizeVariableKey(key))) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static final class PlaceholderMatch {
+        final int start;
+        final int endExclusive;
+        final String value;
+
+        PlaceholderMatch(int start, int endExclusive, String value) {
+            this.start = start;
+            this.endExclusive = endExclusive;
+            this.value = value;
+        }
     }
 
     private static DocumentBuilder newDocumentBuilder() throws Exception {

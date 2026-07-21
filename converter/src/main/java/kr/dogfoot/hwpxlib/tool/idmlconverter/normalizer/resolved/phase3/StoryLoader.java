@@ -62,6 +62,9 @@ public class StoryLoader {
      */
     static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId) {
         if (ctx.idmlDir == null) return null;
+        if (isResolvedSyntheticStoryClone(ctx, storyId)) {
+            return null;
+        }
         // storyId(DOM decimal) → IDML hex → Story_u{hex}.xml
         String sourceStoryId = sourceStoryId(storyId);
         String hexId;
@@ -1991,6 +1994,12 @@ public class StoryLoader {
         if (pi >= 0) cut = pi;
         if (oc >= 0) cut = cut < 0 ? oc : Math.min(cut, oc);
         return cut >= 0 ? storyId.substring(0, cut) : storyId;
+    }
+
+    private static boolean isResolvedSyntheticStoryClone(ResolvedBuildContext ctx, String storyId) {
+        if (ctx == null || ctx.resolvedData == null || storyId == null) return false;
+        if (!storyId.contains("_pi") && !storyId.contains("_oc")) return false;
+        return ctx.resolvedData.getStory(storyId) != null;
     }
 
     private static void applyTrailingPageNumberLeader(ResolvedBuildContext ctx,

@@ -170,6 +170,29 @@ function _sourceIndexLeadingStyledStoryRunRanges(textFrame) {
     return ranges;
 }
 
+function _sourceIndexMasterStoryDynamicInfo(story) {
+    var rawContents = "";
+    try { rawContents = String(story.contents || ""); } catch (eContents) {}
+    var textVariableCount = 0;
+    try { textVariableCount = story.textVariableInstances.length || 0; } catch (eTextVarCount) {}
+    var hasPageMarker = rawContents.indexOf("\u0018") >= 0
+            || rawContents.indexOf("<?ACE 18?>") >= 0;
+    var stripped = rawContents
+            .replace(/<\?ACE 18\?>/g, "")
+            .replace(/\uFEFF/g, "")
+            .replace(/\uFFFC/g, "")
+            .replace(/\u0016/g, "")
+            .replace(/\u0018/g, "")
+            .replace(/[\s\r\n]/g, "");
+    return {
+        hasPageMarker: hasPageMarker,
+        textVariableCount: textVariableCount,
+        hasTextVariables: textVariableCount > 0,
+        isTextVariableOnly: !hasPageMarker && textVariableCount > 0 && stripped.length === 0,
+        isDynamicOnly: (hasPageMarker || textVariableCount > 0) && stripped.length === 0
+    };
+}
+
 function _itemHasDirectStoryTextInlineSlot(item) {
     try {
         if (!item || !item.parent) return false;
@@ -1673,15 +1696,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 try { if (!mtf || mtf.constructor.name !== "TextFrame") continue; } catch (eKind) { continue; }
                 var cls = null;
                 try { cls = classifyTextFrameCached(mtf); } catch (eClass) {}
-                var rawContents = "";
-                try { rawContents = String(mtf.parentStory.contents || ""); } catch (eRawContents) {}
-                var textVariableCount = 0;
-                try { textVariableCount = mtf.parentStory.textVariableInstances.length || 0; } catch (eTextVarCount) {}
-                var isPageNumber = rawContents.indexOf("\u0018") >= 0 && textVariableCount === 0;
-                var isTextVariableOnly = textVariableCount > 0
-                        && rawContents.replace(/\uFEFF/g, "").replace(/\uFFFC/g, "")
-                                .replace(/\u0016/g, "").replace(/\u0018/g, "")
-                                .replace(/[\s\r\n]/g, "").length === 0;
+                var dynamicInfo = _sourceIndexMasterStoryDynamicInfo(mtf.parentStory);
+                var isPageNumber = dynamicInfo.hasPageMarker;
+                var isTextVariableOnly = dynamicInfo.isTextVariableOnly;
                 if (isTextVariableOnly) continue;
                 if (cls !== "editable" && !isPageNumber) continue;
 
@@ -1701,6 +1718,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                     bounds = [gb[0], gb[1], gb[2], gb[3]];
                 } catch (eBounds) {}
                 var textLength = _textLengthOfItem(mtf);
+                if ((textLength === null || textLength <= 0) && (isPageNumber || dynamicInfo.hasTextVariables)) {
+                    textLength = 1;
+                }
                 var zOrderBase = sourceItems.length;
                 var masterInlineItems = [];
                 try { masterInlineItems = mtf.allPageItems; } catch (eMasterInlineItems) {}
@@ -1736,8 +1756,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         contentType: _itemContentTypeName(mtf),
                         isGraphicContentFrame: false,
                         textLength: textLength,
-                        hasText: textLength !== null ? textLength > 0 : true,
-                        markerOnlyContents: isPageNumber,
+                        hasText: (isPageNumber || dynamicInfo.hasTextVariables) ? true : (textLength !== null ? textLength > 0 : true),
+                        markerOnlyContents: isPageNumber && dynamicInfo.isDynamicOnly,
                         simpleMarkerLabelContents: false,
                         storyId: cloneStoryId,
                         tableCountInStory: 0,
