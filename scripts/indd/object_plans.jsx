@@ -1324,6 +1324,7 @@ function _sourceBundleTextRangeShellBundle(group, sourceById, childrenByParentId
     if (!group || !sourceById || !childrenByParentId) return null;
     var children = childrenByParentId[String(group.id)] || [];
     if (!children || children.length < 2) return null;
+    if (!_sourceBundleTextRangeShellIsInlineFlow(group, children)) return null;
     var textFrames = [];
     var shells = [];
     var otherVisibleChildCount = 0;
@@ -1372,6 +1373,27 @@ function _sourceBundleTextRangeShellBundle(group, sourceById, childrenByParentId
         return Number(a.textFrame.zOrder || 0) - Number(b.textFrame.zOrder || 0);
     });
     return { shells: shells, ranges: ranges };
+}
+
+function _sourceBundleTextRangeShellIsInlineFlow(group, children) {
+    if (_sourceBundleTextRangeShellSourceIsInlineFlow(group)) return true;
+    for (var i = 0; children && i < children.length; i++) {
+        if (_sourceBundleTextRangeShellSourceIsInlineFlow(children[i])) return true;
+    }
+    return false;
+}
+
+function _sourceBundleTextRangeShellSourceIsInlineFlow(src) {
+    if (!src) return false;
+    if (src.storyTextInlineSlot === true || src.tableCellStoryTextInlineSlot === true
+            || src.isInline === true) {
+        return true;
+    }
+    var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+    var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+    return placement === "INLINE"
+            || anchoredPosition === "INLINE_POSITION"
+            || anchoredPosition === "INLINEPOSITION";
 }
 
 function _sourceBundleTextRangeShellEditableTextFrame(src) {
