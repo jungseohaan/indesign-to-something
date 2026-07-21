@@ -138,6 +138,57 @@ class RunPostProcessor {
         }
         items.clear();
         items.addAll(newItems);
+        mergeTriangleGeometryLabels(items);
+    }
+
+    /**
+     * A triangle marker is explicit source math structure.  Normalize the immediately following
+     * uppercase label as one equation even if an earlier generic parser split it into text A and
+     * equation BC.  This is structure-based and applies to every source-authored △ABC label.
+     */
+    private static void mergeTriangleGeometryLabels(List<ASTInlineItem> items) {
+        if (items == null || items.size() < 2) return;
+        List<ASTInlineItem> merged = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            merged.add(item);
+            if (!(item instanceof ASTTextRun)
+                    || !((ASTTextRun) item).text().endsWith("△")) continue;
+
+            int cursor = i + 1;
+            StringBuilder label = new StringBuilder();
+            ASTEquation styleSource = null;
+            while (cursor < items.size()) {
+                ASTInlineItem candidate = items.get(cursor);
+                String part = uppercaseLabelPart(candidate);
+                if (part == null) break;
+                label.append(part);
+                if (styleSource == null && candidate instanceof ASTEquation) {
+                    styleSource = (ASTEquation) candidate;
+                }
+                cursor++;
+            }
+            if (label.length() < 2 || cursor == i + 1) continue;
+
+            ASTEquation equation = new ASTEquation(label.toString(), "EH_FONT");
+            if (styleSource != null) {
+                equation.preferredBaseUnit(styleSource.preferredBaseUnit());
+                equation.preferredFontFamily(styleSource.preferredFontFamily());
+                equation.textColor(styleSource.textColor());
+            }
+            merged.add(equation);
+            i = cursor - 1;
+        }
+        items.clear();
+        items.addAll(merged);
+    }
+
+    private static String uppercaseLabelPart(ASTInlineItem item) {
+        String value;
+        if (item instanceof ASTTextRun) value = ((ASTTextRun) item).text();
+        else if (item instanceof ASTEquation) value = ((ASTEquation) item).hwpScript();
+        else return null;
+        return isAllAsciiUppercase(value) ? value : null;
     }
 
     /**
@@ -211,6 +262,8 @@ class RunPostProcessor {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
 
+        splitItalicUppercaseLabelsFromPunctuation(items);
+
         boolean hasTarget = false;
         for (ASTInlineItem it : items) {
             if (it instanceof ASTTextRun
@@ -221,7 +274,10 @@ class RunPostProcessor {
                 break;
             }
         }
-        if (!hasTarget) return;
+        if (!hasTarget) {
+            mergeTriangleGeometryLabels(items);
+            return;
+        }
 
         List<ASTInlineItem> newItems = new ArrayList<>();
         StringBuilder mathBuf = new StringBuilder();
@@ -242,9 +298,7 @@ class RunPostProcessor {
                 String[] varUnit = splitVariableBacktickLatin(tr.text());
                 if (varUnit != null) {
                     mathBuf.append(varUnit[0]);
-                    IDMLCharacterRun crv = new IDMLCharacterRun();
-                    crv.content(varUnit[0]);
-                    crv.fontFamily(tr.fontFamily());
+                    IDMLCharacterRun crv = sourceRunForItalicMath(tr, varUnit[0]);
                     mathRuns.add(crv);
                     flushItalicMathBuf(mathBuf, mathRuns, newItems);
                     ASTTextRun unitRun = new ASTTextRun();
@@ -252,9 +306,7 @@ class RunPostProcessor {
                     newItems.add(unitRun);
                 } else {
                     mathBuf.append(tr.text());
-                    IDMLCharacterRun cr = new IDMLCharacterRun();
-                    cr.content(tr.text());
-                    cr.fontFamily(tr.fontFamily());
+                    IDMLCharacterRun cr = sourceRunForItalicMath(tr, tr.text());
                     mathRuns.add(cr);
                 }
             } else if (item instanceof ASTTextRun && mathBuf.length() > 0) {
@@ -296,6 +348,61 @@ class RunPostProcessor {
 
         items.clear();
         items.addAll(newItems);
+    }
+
+    /**
+     * Source character ranges commonly keep sentence punctuation in the same EH italic run as
+     * a geometry label (for example {@code A,}).  Punctuation is prose, while the contiguous
+     * uppercase label is one math variable.  Split that source range before equation grouping so
+     * punctuation cannot change the label's materialization.
+     */
+    private static void splitItalicUppercaseLabelsFromPunctuation(List<ASTInlineItem> items) {
+        List<ASTInlineItem> expanded = new ArrayList<>();
+        boolean changed = false;
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTTextRun)) {
+                expanded.add(item);
+                continue;
+            }
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            String style = run.fontStyle();
+            if (text == null || style == null
+                    || !style.toLowerCase(java.util.Locale.ROOT).contains("italic")) {
+                expanded.add(item);
+                continue;
+            }
+
+            int start = 0;
+            while (start < text.length() && !isAsciiUpper(text.charAt(start))) start++;
+            int end = start;
+            while (end < text.length() && isAsciiUpper(text.charAt(end))) end++;
+            if (start == end || !onlyLabelPunctuation(text, 0, start)
+                    || !onlyLabelPunctuation(text, end, text.length())) {
+                expanded.add(item);
+                continue;
+            }
+            if (start > 0) expanded.add(run.copyWithText(text.substring(0, start)));
+            expanded.add(run.copyWithText(text.substring(start, end)));
+            if (end < text.length()) expanded.add(run.copyWithText(text.substring(end)));
+            changed = true;
+        }
+        if (changed) {
+            items.clear();
+            items.addAll(expanded);
+        }
+    }
+
+    private static boolean isAsciiUpper(char c) {
+        return c >= 'A' && c <= 'Z';
+    }
+
+    private static boolean onlyLabelPunctuation(String text, int start, int end) {
+        for (int i = start; i < end; i++) {
+            char c = text.charAt(i);
+            if (Character.isLetterOrDigit(c) || Character.isWhitespace(c)) return false;
+        }
+        return true;
     }
 
     private static boolean isSimplePositionedTextRun(ASTTextRun tr) {
@@ -379,7 +486,7 @@ class RunPostProcessor {
             }
             if (!script.isEmpty()) {
                 if (shouldEmitItalicEquation(script, mathRuns)) {
-                    out.add(new ASTEquation(script, "EH_FONT"));
+                    out.add(italicEquationWithSourceStyle(script, mathRuns));
                 } else {
                     emitItalicMathRunsAsText(mathRuns, out);
                 }
@@ -387,6 +494,46 @@ class RunPostProcessor {
         }
         mathBuf.setLength(0);
         mathRuns.clear();
+    }
+
+    /**
+     * Preserve the concrete source typography while an ASTTextRun temporarily travels through
+     * the italic-math classifier.  Keeping only content/fontFamily made the text fallback lose
+     * its 8.5pt size and made punctuation decide whether an otherwise identical label became
+     * 8.5pt text or a 10pt equation.
+     */
+    private static IDMLCharacterRun sourceRunForItalicMath(ASTTextRun source, String text) {
+        IDMLCharacterRun run = new IDMLCharacterRun();
+        run.content(text);
+        run.fontFamily(source.fontFamily());
+        run.fontStyle(source.fontStyle());
+        if (source.fontSizeHwpunits() != null) {
+            run.fontSize(source.fontSizeHwpunits() / 100.0);
+        }
+        run.fillColor(source.textColor());
+        run.appliedCharacterStyle(source.characterStyleRef());
+        if (source.subscript()) run.position("Subscript");
+        else if (source.superscript()) run.position("Superscript");
+        return run;
+    }
+
+    private static ASTEquation italicEquationWithSourceStyle(
+            String script, List<IDMLCharacterRun> sourceRuns) {
+        ASTEquation equation = new ASTEquation(script, "EH_FONT");
+        if (sourceRuns == null) return equation;
+        for (IDMLCharacterRun source : sourceRuns) {
+            if (source == null) continue;
+            if (equation.preferredBaseUnit() == null && source.fontSize() != null) {
+                equation.preferredBaseUnit((int) Math.round(source.fontSize() * 100.0));
+            }
+            if (equation.preferredFontFamily() == null && source.fontFamily() != null) {
+                equation.preferredFontFamily(source.fontFamily());
+            }
+            if (equation.textColor() == null && source.fillColor() != null) {
+                equation.textColor(source.fillColor());
+            }
+        }
+        return equation;
     }
 
     private static boolean shouldEmitItalicEquation(String script, List<IDMLCharacterRun> mathRuns) {
@@ -411,6 +558,18 @@ class RunPostProcessor {
         if (FormulaClassifier.containsEquationSyntax(trimmed)) return true;
         if (containsEHEncodedEvidence(mathRuns)) return true;
 
+        // A bare one-letter italic token is a source math variable.  Check this before the
+        // broad unit classifier (which also accepts "x"); tokens such as *C still continue to
+        // the unit path because they are not a bare letter.
+        if (trimmed.length() == 1) {
+            char only = trimmed.charAt(0);
+            if ((only >= 'A' && only <= 'Z') || (only >= 'a' && only <= 'z')) return true;
+        }
+
+        // A source-authored italic uppercase cluster (AB, ABC) is one geometry label.  It is not
+        // a prose word or unit, and punctuation has already been separated above.
+        if (isItalicUppercaseSourceLabel(trimmed, mathRuns)) return true;
+
         // Plain units/numbers/short latin tokens such as mL, 28, *C must remain text.
         if (FormulaClassifier.isPlainUnitOrNumber(trimmed)) return false;
         if (hasLongLatinWord(trimmed, 3)) return false;
@@ -423,6 +582,23 @@ class RunPostProcessor {
             if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) letters++;
         }
         return letters == 1;
+    }
+
+    private static boolean isItalicUppercaseSourceLabel(
+            String text, List<IDMLCharacterRun> sourceRuns) {
+        if (text == null || text.length() < 2 || sourceRuns == null || sourceRuns.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            if (!isAsciiUpper(text.charAt(i))) return false;
+        }
+        for (IDMLCharacterRun source : sourceRuns) {
+            if (source == null || source.fontStyle() == null
+                    || !source.fontStyle().toLowerCase(java.util.Locale.ROOT).contains("italic")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -562,6 +738,15 @@ class RunPostProcessor {
         boolean isEHFont = ff != null && EHFontGlyphMap.isEHFontFamily(ff);
         if (!isItalic && !isEHFont) return false;
 
+        // A punctuation fragment split from an EH range is prose punctuation, not a math run.
+        // Without this guard the EH font alone reabsorbs the comma into the equation buffer.
+        if (!containsLetterDigitOrMathEvidence(text)) return false;
+
+        // Multi-letter geometry labels are authored as one italic EH/GREP math range.  Admit the
+        // source math range before the generic long-word guard; ordinary italic acronyms in body
+        // fonts still remain prose.
+        if ((isEHFont || tr.grepMathFont()) && isAllAsciiUppercase(text)) return true;
+
         if (hasLongLatinWord(text, 3) && !hasMathSyntax(text)
                 && !EHFontGlyphMap.containsEHEncodedChars(text)
                 && !EHFontGlyphMap.containsEHFractionPattern(text)) {
@@ -581,6 +766,25 @@ class RunPostProcessor {
             return (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z');
         }
         return isShortLatinVariableCluster(text);
+    }
+
+    private static boolean isAllAsciiUppercase(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            if (!isAsciiUpper(text.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    private static boolean containsLetterDigitOrMathEvidence(String text) {
+        if (text == null) return false;
+        if (EHFontGlyphMap.containsEHEncodedChars(text)
+                || EHFontGlyphMap.containsEHFractionPattern(text)) return true;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isLetterOrDigit(c) || hasMathSyntax(String.valueOf(c))) return true;
+        }
+        return false;
     }
 
     private static boolean hasMathSyntax(String text) {

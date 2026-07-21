@@ -213,6 +213,12 @@ public class HwpxParagraphBuilder {
             }
             switch (item.itemType()) {
                 case TEXT_RUN:
+                    ASTEquation triangleLabel = triangleLabelEquationAt(astPara.items(), i);
+                    if (triangleLabel != null) {
+                        addEquationRun(para, triangleLabel);
+                        i++; // consume the following equation fragment (for example BC)
+                        break;
+                    }
                     ASTTextRun tr = coalescedTextRunAt(astPara.items(), i);
                     i = skipCoalescedTextRuns(astPara.items(), i);
                     if (replaceTabsInRuns && tr.text() != null && tr.text().indexOf('\t') >= 0) {
@@ -228,7 +234,13 @@ public class HwpxParagraphBuilder {
                     addBreak(para, (ASTBreak) item);
                     break;
                 case EQUATION:
-                    addEquationRun(para, (ASTEquation) item);
+                    ASTEquation mergedTriangleLabel = triangleLabelEquationAt(astPara.items(), i);
+                    if (mergedTriangleLabel != null) {
+                        addEquationRun(para, mergedTriangleLabel);
+                        i++;
+                    } else {
+                        addEquationRun(para, (ASTEquation) item);
+                    }
                     break;
             }
         }
@@ -242,6 +254,50 @@ public class HwpxParagraphBuilder {
 
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
+    }
+
+    /**
+     * Final text materialization guard for a source triangle label that reached the executor as
+     * text A + equation BC.  The preceding source △ is explicit geometry structure, so the two
+     * adjacent uppercase fragments are one equation label rather than unrelated prose/chemistry.
+     */
+    private static ASTEquation triangleLabelEquationAt(
+            java.util.List<ASTInlineItem> items, int index) {
+        if (items == null || index <= 0 || index + 1 >= items.size()) return null;
+        if (!(items.get(index + 1) instanceof ASTEquation)) return null;
+        String marker = inlineTextOrEquation(items.get(index - 1));
+        String head = inlineUppercaseLabel(items.get(index));
+        ASTEquation tailEquation = (ASTEquation) items.get(index + 1);
+        String tail = tailEquation.hwpScript();
+        if (marker == null || !marker.endsWith("△")
+                || !isUppercaseLabelFragment(head) || !isUppercaseLabelFragment(tail)) return null;
+
+        ASTEquation merged = new ASTEquation(head + tail, "EH_FONT");
+        merged.preferredBaseUnit(tailEquation.preferredBaseUnit());
+        merged.preferredFontFamily(tailEquation.preferredFontFamily());
+        merged.textColor(tailEquation.textColor());
+        return merged;
+    }
+
+    private static String inlineUppercaseLabel(ASTInlineItem item) {
+        if (item instanceof ASTTextRun) return ((ASTTextRun) item).text();
+        if (item instanceof ASTEquation) return ((ASTEquation) item).hwpScript();
+        return null;
+    }
+
+    private static String inlineTextOrEquation(ASTInlineItem item) {
+        if (item instanceof ASTTextRun) return ((ASTTextRun) item).text();
+        if (item instanceof ASTEquation) return ((ASTEquation) item).hwpScript();
+        return null;
+    }
+
+    private static boolean isUppercaseLabelFragment(String value) {
+        if (value == null || value.isEmpty()) return false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c < 'A' || c > 'Z') return false;
+        }
+        return true;
     }
 
     private static String inferObjectOnlyCarrierAlignment(ASTParagraph para) {

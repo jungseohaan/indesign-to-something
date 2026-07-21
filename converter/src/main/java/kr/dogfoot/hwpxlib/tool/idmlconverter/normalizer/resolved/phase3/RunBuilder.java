@@ -789,6 +789,15 @@ class RunBuilder {
             return;
         }
 
+        // Italic all-capital runs from math typography are geometry/variable labels (AB, ABC),
+        // not chemical formula evidence.  Parsing ABC as A + the element pair B/C changes its
+        // materialization and typography even though the source owns one consistently styled run.
+        // Real chemical notation in these sources is upright or has explicit formula structure.
+        if (isItalicUppercaseLabel(originalRun)) {
+            splitLatinVarsInMixedText(ctx, originalRun, para);
+            return;
+        }
+
         // SPEC-050: overline(선분) 마커 ... 로 이미 감싼 텍스트는 기하
         // 수식(overline{PA}=overline{PB})이지 화학식이 아니다. 화학식 파서가 마커
         // 사이의 "PB"(P+B)를 화학식으로 오인하면 마커쌍이 쪼개져 두 번째 overline 이
@@ -824,6 +833,24 @@ class RunBuilder {
             ASTTextRun after = cloneRunWithText(ctx, originalRun, text.substring(cursor));
             splitLatinVarsInMixedText(ctx, after, para);
         }
+    }
+
+    private static boolean isItalicUppercaseLabel(ASTTextRun run) {
+        if (run == null || run.text() == null || run.text().length() < 2) return false;
+        String style = run.fontStyle();
+        String font = run.fontFamily();
+        boolean sourceMathLabel = (style != null
+                && style.toLowerCase(java.util.Locale.ROOT).contains("italic"))
+                || (font != null && EHFontGlyphMap.isEHFontFamily(font))
+                || run.grepMathFont();
+        if (!sourceMathLabel) {
+            return false;
+        }
+        for (int i = 0; i < run.text().length(); i++) {
+            char c = run.text().charAt(i);
+            if (c < 'A' || c > 'Z') return false;
+        }
+        return true;
     }
 
     private static void emitChemicalFormulaToken(ResolvedBuildContext ctx,
