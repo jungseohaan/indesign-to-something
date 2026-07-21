@@ -639,8 +639,15 @@ public class EHFontGlyphMap {
             out.append(text, segStart, wrapStart);
             if (wrapStart < i) {
                 out.append('\uE000').append(text, wrapStart, i).append('\uE001');
+            } else {
+                // SPEC-052: 감쌀 문자가 이 런에 없다(Ó 단독 런). InDesign DOM 이
+                // AM|Ó|BM|Ó 처럼 overline 마커를 별도 런으로 분리한 경우다. 그냥
+                // 버리면 overline 이 유실되므로(실측: u5 p168 AM·BM 선분 사라짐),
+                // "앞 런 끝 대문자에 overline 을 씌우라"는 경계 마커(\uE002)를 남긴다.
+                // splitOverlineRuns 가 이 마커를 보고 직전 TextRun 끝 연속 대문자를
+                // overline{…} 수식으로 끌어온다.
+                out.append('\uE002');
             }
-            // 감쌀 문자가 없으면(Ó 단독) marker 를 그냥 버린다.
             segStart = i + 1;
         }
         out.append(text, segStart, text.length());
