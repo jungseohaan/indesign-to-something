@@ -772,6 +772,16 @@ class RunBuilder {
             return;
         }
 
+        // SPEC-050: overline(선분) 마커 ... 로 이미 감싼 텍스트는 기하
+        // 수식(overline{PA}=overline{PB})이지 화학식이 아니다. 화학식 파서가 마커
+        // 사이의 "PB"(P+B)를 화학식으로 오인하면 마커쌍이 쪼개져 두 번째 overline 이
+        // 파괴된다(u5 p166: overline{PA} 는 A 가 원소 아니라 생존, overline{PB} 는
+        // 파괴). 마커가 있으면 화학식 분리를 건너뛰고 latin var 분리만 수행한다.
+        if (text.indexOf('\uE000') >= 0 || text.indexOf('\uE001') >= 0) {
+            splitLatinVarsInMixedText(ctx, originalRun, para);
+            return;
+        }
+
         int cursor = 0;
         boolean emitted = false;
         while (cursor < text.length()) {
