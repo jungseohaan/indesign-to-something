@@ -1934,6 +1934,23 @@ public class InlineFrameHandler {
                 return Double.compare(ax, bx);
             }
         });
+        if (!compositeInlineShellChildrenOccupySingleRow(ordered)) {
+            boolean addedStructured = false;
+            for (ResolvedTextFrame childTf : ordered) {
+                if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+                if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
+                List<ASTParagraph> paragraphs = buildSourceStructuredShellTextParagraphs(ctx, childTf);
+                if (paragraphs == null || paragraphs.isEmpty()) {
+                    paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
+                }
+                for (ASTParagraph paragraph : paragraphs) {
+                    if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) continue;
+                    obj.addParagraph(paragraph);
+                    addedStructured = true;
+                }
+            }
+            if (addedStructured) return;
+        }
         ASTParagraph para = new ASTParagraph();
         para.alignment("LEFT_JUSTIFIED");
         boolean added = false;
@@ -1951,6 +1968,24 @@ public class InlineFrameHandler {
         }
         applyCompositeInlineShellLineMetrics(ctx, para, ordered);
         if (added) obj.addParagraph(para);
+    }
+
+    private static boolean compositeInlineShellChildrenOccupySingleRow(
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (childTfs == null || childTfs.isEmpty()) return true;
+        java.util.List<double[]> sourceLineBounds = new ArrayList<>();
+        int visibleCount = 0;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
+            visibleCount++;
+            double[] lineBounds = primaryComposedLineBounds(childTf);
+            if (!validBounds(lineBounds)) return false;
+            sourceLineBounds.add(lineBounds);
+        }
+        return visibleCount <= 1
+                || (sourceLineBounds.size() == visibleCount
+                && sourceLinesOccupySingleRow(sourceLineBounds));
     }
 
     private static void applyCompositeInlineShellLineMetrics(
@@ -2152,7 +2187,7 @@ public class InlineFrameHandler {
                 shellPageBounds = normalizeShellBoundsToTextFramePageLocal(ctx, pageIndex, shellBounds, childTf);
                 if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
             }
-            double[] b = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
+            double[] b = normalizeTextFrameContentBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
             if (!validBounds(b)) continue;
             if (textUnion == null) {
                 textUnion = new double[] { b[0], b[1], b[2], b[3] };
@@ -2182,6 +2217,44 @@ public class InlineFrameHandler {
         obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top * scale));
         obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right * scale));
         obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom * scale));
+    }
+
+    private static double[] normalizeTextFrameContentBoundsToShellPage(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            ResolvedTextFrame tf,
+            double[] shellBounds) {
+        double[] b = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, tf, shellBounds);
+        if (!validBounds(b) || tf == null) return b;
+        double[] inset = tf.insetSpacing();
+        if (inset == null || inset.length < 4) return b;
+        double unitScale = textFrameBoundsUseUnscaledPageRelativeUnits(ctx, tf, b)
+                ? 1.0 / Math.max(0.000001, ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0)
+                : 1.0;
+        double top = Math.max(0.0, inset[0]) * unitScale;
+        double left = Math.max(0.0, inset[1]) * unitScale;
+        double bottom = Math.max(0.0, inset[2]) * unitScale;
+        double right = Math.max(0.0, inset[3]) * unitScale;
+        double contentTop = b[0] + top;
+        double contentLeft = b[1] + left;
+        double contentBottom = b[2] - bottom;
+        double contentRight = b[3] - right;
+        if (contentBottom <= contentTop || contentRight <= contentLeft) return b;
+        return new double[] { contentTop, contentLeft, contentBottom, contentRight };
+    }
+
+    private static boolean textFrameBoundsUseUnscaledPageRelativeUnits(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            double[] bounds) {
+        if (ctx == null || ctx.scaleFactor <= 0 || tf == null || !validBounds(bounds)) return false;
+        double[] pageRel = tf.pageRelativeBounds();
+        if (!validBounds(pageRel)) return false;
+        double tolerance = 0.5;
+        return Math.abs(bounds[0] - pageRel[0]) <= tolerance
+                && Math.abs(bounds[1] - pageRel[1]) <= tolerance
+                && Math.abs(bounds[2] - pageRel[2]) <= tolerance
+                && Math.abs(bounds[3] - pageRel[3]) <= tolerance;
     }
 
     private static double[] scaleBounds(double[] bounds, double scale) {
@@ -3553,9 +3626,23 @@ public class InlineFrameHandler {
                                 .replace("\r", "")
                                 .replace("\n", ""))
                         .defaultAlignment("CENTER")
+                        .copyTabStops(true)
                         .truncateAtParagraphBreak(false)
                         .skipBlankRuns(true)
                         .skipEmptyParagraphs(true));
+    }
+
+    private static List<ASTParagraph> buildSourceStructuredShellTextParagraphs(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame childTf) {
+        if (ctx == null || ctx.resolvedData == null || childTf == null || childTf.storyId() == null) {
+            return new ArrayList<>();
+        }
+        ResolvedStory story = ctx.resolvedData.getStory(childTf.storyId());
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) {
+            return new ArrayList<>();
+        }
+        return convertShellTextParagraphs(ctx, story);
     }
 
     private static List<ASTParagraph> buildSyntheticShellTextParagraphs(
