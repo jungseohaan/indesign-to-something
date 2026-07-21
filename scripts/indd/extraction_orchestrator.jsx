@@ -1129,6 +1129,25 @@ function _globalSourceBundleTextRangeShellInlineHideCandidates(sourceItems) {
                 && src.leadingStyledTextRanges
                 && src.leadingStyledTextRanges.length > 0);
     }
+    function sourceIsInlineFlow(src) {
+        if (!src) return false;
+        if (src.storyTextInlineSlot === true || src.tableCellStoryTextInlineSlot === true
+                || src.isInline === true) {
+            return true;
+        }
+        var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+        var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+        return placement === "INLINE"
+                || anchoredPosition === "INLINE_POSITION"
+                || anchoredPosition === "INLINEPOSITION";
+    }
+    function bundleIsInlineFlow(group, children) {
+        if (sourceIsInlineFlow(group)) return true;
+        for (var i = 0; children && i < children.length; i++) {
+            if (sourceIsInlineFlow(children[i])) return true;
+        }
+        return false;
+    }
     function center(bounds, axis) {
         if (!bounds || bounds.length < 4) return 0;
         return axis === 0 ? (Number(bounds[0]) + Number(bounds[2])) / 2
@@ -1139,6 +1158,7 @@ function _globalSourceBundleTextRangeShellInlineHideCandidates(sourceItems) {
         var group = sourceItems[gi];
         if (!group || String(group.kind || group.type || "") !== "Group") continue;
         var children = childrenByParentId[String(group.id)] || [];
+        if (!bundleIsInlineFlow(group, children)) continue;
         var textFrames = [];
         var shells = [];
         var otherVisible = 0;

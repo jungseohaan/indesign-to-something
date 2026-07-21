@@ -667,6 +667,7 @@ public final class OwnershipPlanner {
 
     private TextRangeShellBundle textRangeShellBundle(ResolvedPageItem group) {
         if (group == null || group.childIds() == null || group.childIds().length < 2) return null;
+        if (!isSourceBundleTextRangeShellInlineFlow(group)) return null;
         List<ResolvedTextFrame> childTextFrames = new ArrayList<>();
         List<ResolvedPageItem> childShells = new ArrayList<>();
         int otherVisibleChildCount = 0;
@@ -713,6 +714,28 @@ public final class OwnershipPlanner {
             return Integer.compare(a.range.runIndex, b.range.runIndex);
         });
         return new TextRangeShellBundle(childShells, ranges);
+    }
+
+    private boolean isSourceBundleTextRangeShellInlineFlow(ResolvedPageItem group) {
+        if (hasSourceBundleTextRangeShellInlineSignal(group)) return true;
+        if (group == null || group.childIds() == null) return false;
+        for (int childId : group.childIds()) {
+            ResolvedPageItem item = data != null ? data.getPageItem(String.valueOf(childId)) : null;
+            if (hasSourceBundleTextRangeShellInlineSignal(item)) return true;
+            ResolvedTextFrame tf = data != null ? data.getTextFrame(String.valueOf(childId)) : null;
+            if (tf != null && tf.isInline()) return true;
+        }
+        return false;
+    }
+
+    private boolean hasSourceBundleTextRangeShellInlineSignal(ResolvedPageItem item) {
+        if (item == null) return false;
+        if (item.storyTextInlineSlot() || item.isInline()) return true;
+        String placement = safe(item.storyAnchorPlacement()).toUpperCase(Locale.ROOT);
+        String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(Locale.ROOT);
+        return "INLINE".equals(placement)
+                || "INLINE_POSITION".equals(anchoredPosition)
+                || "INLINEPOSITION".equals(anchoredPosition);
     }
 
     private List<TextRangeCandidate> leadingStyledStoryRunRanges(ResolvedTextFrame tf, ResolvedStory story) {
