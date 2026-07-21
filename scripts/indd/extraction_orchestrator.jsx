@@ -722,6 +722,10 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
             summary.reason = "source_bundle_text_range_shell_hide_requires_fresh_page_plane";
             return summary;
         }
+        if (ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0) {
+            summary.reason = "mixed_bundle_placed_visual_hide_requires_fresh_page_plane";
+            return summary;
+        }
         var cacheDir = Folder(ctx.pagePlaneCacheDir);
         if (!cacheDir.exists) {
             summary.reason = "cache_dir_missing";
@@ -822,6 +826,10 @@ function _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult) {
         }
         if (ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount > 0) {
             summary.reason = "source_bundle_text_range_shell_hide_not_cached";
+            return summary;
+        }
+        if (ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0) {
+            summary.reason = "mixed_bundle_placed_visual_hide_not_cached";
             return summary;
         }
         var cacheDir = _ensureFolder(ctx.pagePlaneCacheDir);
@@ -1390,6 +1398,16 @@ function _runRenderPhases(doc, ctx, allItems) {
     for (var dri = 0; decorationResult.items && dri < decorationResult.items.length; dri++) {
         renderedFloatingItems.push(decorationResult.items[dri]);
     }
+    _requireExtractionPass(ctx, "pass.image_placed_frames");
+    var imagePlacedPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.image_placed_frames");
+    ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount = imagePlacedPngCandidates.length || 0;
+    var imagePlacedResult = exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+            allItems, extractionItemById,
+            imagePlacedPngCandidates);
+    _addRenderMeta(imagePlacedResult.items, null, "pass.image_placed_frames");
+    for (var ipi = 0; imagePlacedResult.items && ipi < imagePlacedResult.items.length; ipi++) {
+        renderedFloatingItems.push(imagePlacedResult.items[ipi]);
+    }
     try { $.gc(); } catch (e) {}
     // exportInlineObjects의 finally 블록이 true로 복원하지만, 예외 전파 등 만일의 경우를 대비한 안전망.
     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
@@ -1408,9 +1426,14 @@ function _runRenderPhases(doc, ctx, allItems) {
         hiddenTableStyleSourceObjectIdsByPage:
                 ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {}
     };
-    if (ctx.globalSingleTextlessPagePlanesByPageIndex) {
+    if (ctx.globalSingleTextlessPagePlanesByPageIndex
+            && !(ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount > 0)) {
         pagePlaneExportOptions.precomputedPagePlanesByPageIndex =
                 ctx.globalSingleTextlessPagePlanesByPageIndex;
+    }
+    var pagePlaneHideCandidates = inlinePngCandidates;
+    if (imagePlacedPngCandidates && imagePlacedPngCandidates.length > 0) {
+        pagePlaneHideCandidates = inlinePngCandidates.concat(imagePlacedPngCandidates);
     }
     pageTextlessGroupResult = exportSingleTextlessPagePlanes(
             doc,
@@ -1419,7 +1442,7 @@ function _runRenderPhases(doc, ctx, allItems) {
             ctx.endPage,
             allItems,
             extractionItemById,
-            inlinePngCandidates,
+            pagePlaneHideCandidates,
             pagePlaneExportOptions);
     _marker(ctx.outputDir, "06b1_pageTextlessGroups_exportDone");
     _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult);

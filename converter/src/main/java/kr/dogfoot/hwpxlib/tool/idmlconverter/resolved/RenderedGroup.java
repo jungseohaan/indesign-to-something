@@ -28,6 +28,17 @@ public class RenderedGroup {
     private String slotRole;
     private String placementRole;
     private String visualLayer;   // Stage 1 visual layer contract (PAGE_BACKGROUND, ...)
+    private int textWrapSourceObjectId;
+    private String textWrapMode;
+    private String textWrapSide;
+    private double textWrapTopPt;
+    private double textWrapLeftPt;
+    private double textWrapBottomPt;
+    private double textWrapRightPt;
+    private long textWrapTop;
+    private long textWrapLeft;
+    private long textWrapBottom;
+    private long textWrapRight;
     private boolean textHiddenBeforeExport; // true: PNG 내보내기 전 TF 텍스트를 숨겼음 → PNG는 텍스트 없음
     private String imageFormat;   // "jpg", "jpeg", "png" 등 (소스 파일 직접 복사 시 설정)
     private String visualOwner;   // "indesign_png" | "hwpx_shape" | ...
@@ -121,6 +132,39 @@ public class RenderedGroup {
 
     public String visualLayer() { return visualLayer; }
     public void visualLayer(String v) { this.visualLayer = v; }
+
+    public int textWrapSourceObjectId() { return textWrapSourceObjectId; }
+    public void textWrapSourceObjectId(int v) { this.textWrapSourceObjectId = v; }
+
+    public String textWrapMode() { return textWrapMode; }
+    public void textWrapMode(String v) { this.textWrapMode = v; }
+
+    public String textWrapSide() { return textWrapSide; }
+    public void textWrapSide(String v) { this.textWrapSide = v; }
+
+    public double textWrapTopPt() { return textWrapTopPt; }
+    public void textWrapTopPt(double v) { this.textWrapTopPt = v; }
+
+    public double textWrapLeftPt() { return textWrapLeftPt; }
+    public void textWrapLeftPt(double v) { this.textWrapLeftPt = v; }
+
+    public double textWrapBottomPt() { return textWrapBottomPt; }
+    public void textWrapBottomPt(double v) { this.textWrapBottomPt = v; }
+
+    public double textWrapRightPt() { return textWrapRightPt; }
+    public void textWrapRightPt(double v) { this.textWrapRightPt = v; }
+
+    public long textWrapTop() { return textWrapTop; }
+    public void textWrapTop(long v) { this.textWrapTop = v; }
+
+    public long textWrapLeft() { return textWrapLeft; }
+    public void textWrapLeft(long v) { this.textWrapLeft = v; }
+
+    public long textWrapBottom() { return textWrapBottom; }
+    public void textWrapBottom(long v) { this.textWrapBottom = v; }
+
+    public long textWrapRight() { return textWrapRight; }
+    public void textWrapRight(long v) { this.textWrapRight = v; }
 
     private String pdfFile;      // PDF 배경 파일 상대 경로 (page_background 타입)
     private int pdfPageIndex;    // PDF 파일 내 페이지 인덱스 (0-based)

@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 
 import java.io.*;
 import java.util.Set;
@@ -663,6 +664,21 @@ public class ResolvedDataReader {
             visualLayer = "PAGE_BACKGROUND";
         }
         group.visualLayer(visualLayer);
+        group.textWrapSourceObjectId(getInt(o, "textWrapSourceObjectId", 0));
+        group.textWrapMode(getString(o, "textWrapMode"));
+        group.textWrapSide(getString(o, "textWrapSide"));
+        double textWrapTop = getDouble(o, "textWrapTop", 0);
+        double textWrapLeft = getDouble(o, "textWrapLeft", 0);
+        double textWrapBottom = getDouble(o, "textWrapBottom", 0);
+        double textWrapRight = getDouble(o, "textWrapRight", 0);
+        group.textWrapTopPt(textWrapTop);
+        group.textWrapLeftPt(textWrapLeft);
+        group.textWrapBottomPt(textWrapBottom);
+        group.textWrapRightPt(textWrapRight);
+        group.textWrapTop(CoordinateConverter.pointsToHwpunits(textWrapTop));
+        group.textWrapLeft(CoordinateConverter.pointsToHwpunits(textWrapLeft));
+        group.textWrapBottom(CoordinateConverter.pointsToHwpunits(textWrapBottom));
+        group.textWrapRight(CoordinateConverter.pointsToHwpunits(textWrapRight));
         group.imageFormat(getString(o, "imageFormat"));
         group.whiteStroke(getBool(o, "whiteStroke", false));
         // badge_group: PNG 내보내기 전 TF 텍스트를 숨겼는지 여부

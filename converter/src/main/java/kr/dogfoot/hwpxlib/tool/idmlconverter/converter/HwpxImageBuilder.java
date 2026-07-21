@@ -689,9 +689,17 @@ public class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
 
-        TextWrapMethod figWrap = isBehindTextVisualLayer(figure.visualLayer())
-                ? TextWrapMethod.BEHIND_TEXT
-                : TextWrapMethod.IN_FRONT_OF_TEXT;
+        boolean explicitTextWrap = figure.textWrapMode() != null
+                && !figure.textWrapMode().isEmpty()
+                && !"None".equals(figure.textWrapMode());
+        TextWrapMethod figWrap = explicitTextWrap
+                ? mapTextWrapMethod(figure.textWrapMode())
+                : (isBehindTextVisualLayer(figure.visualLayer())
+                        ? TextWrapMethod.BEHIND_TEXT
+                        : TextWrapMethod.IN_FRONT_OF_TEXT);
+        TextFlowSide figFlowSide = explicitTextWrap
+                ? mapTextFlowSide(figure.textWrapSide())
+                : TextFlowSide.BOTH_SIDES;
         int outputZOrder = ctx.outputZOrder(figure);
 
         // ShapeObject
@@ -699,7 +707,7 @@ public class HwpxImageBuilder {
                 .zOrderAnd(outputZOrder)
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(figWrap)
-                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .textFlowAnd(figFlowSide)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None)
                 .reverseAnd(false);
@@ -729,7 +737,11 @@ public class HwpxImageBuilder {
 
         // OutMargin
         pic.createOutMargin();
-        pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        pic.outMargin()
+                .leftAnd(explicitTextWrap ? figure.textWrapLeft() : 0L)
+                .rightAnd(explicitTextWrap ? figure.textWrapRight() : 0L)
+                .topAnd(explicitTextWrap ? figure.textWrapTop() : 0L)
+                .bottomAnd(explicitTextWrap ? figure.textWrapBottom() : 0L);
 
         // ImageRect — 표시 영역 (HWPUNIT)
         pic.createImgRect();
