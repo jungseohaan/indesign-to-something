@@ -687,6 +687,7 @@ public class StoryLoader {
                                             InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId,
                                                     partText, nextPartText);
                                     if (plannedItems != null) {
+                                        applyPositionedInlineTextFrameAdvance(ctx, storyId, para, domId);
                                         InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, para);
                                         for (ASTInlineItem item : plannedItems) para.addItem(item);
                                         anchorIdx++;
@@ -807,6 +808,7 @@ public class StoryLoader {
             List<ASTInlineItem> plannedItems =
                     InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, previousText, nextText);
             if (plannedItems != null) {
+                applyPositionedInlineTextFrameAdvance(ctx, storyId, para, domId);
                 InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, para);
                 for (ASTInlineItem item : plannedItems) {
                     if (item instanceof ASTInlineObject) {
@@ -905,6 +907,141 @@ public class StoryLoader {
             offset++;
         }
         return " " + text.substring(offset);
+    }
+
+    private static void applyPositionedInlineTextFrameAdvance(
+            ResolvedBuildContext ctx,
+            String carrierStoryId,
+            ASTParagraph paragraph,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || paragraph == null || anchoredObjectId <= 0) return;
+        if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)) return;
+        if (!paragraphPrefixIsLayoutOnly(paragraph)) return;
+
+        ResolvedTextFrame anchor = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
+        if (anchor == null || !anchor.isInline()) return;
+
+        ResolvedTextFrame owner = ownerTextFrameForInlineAnchor(ctx, carrierStoryId, anchor);
+        if (owner == null) return;
+
+        double[] anchorBounds = preferredBounds(anchor);
+        double[] ownerBounds = preferredBounds(owner);
+        if (!validBounds(anchorBounds) || !validBounds(ownerBounds)) return;
+
+        double ownerLeft = ownerBounds[1];
+        double ownerRight = ownerBounds[3];
+        double anchorLeft = anchorBounds[1];
+        double anchorCenterY = (anchorBounds[0] + anchorBounds[2]) * 0.5;
+        if (anchorLeft < ownerLeft - 0.5 || anchorLeft > ownerRight + 0.5) return;
+        if (anchorCenterY < ownerBounds[0] - 1.0 || anchorCenterY > ownerBounds[2] + 1.0) return;
+
+        double sourceAdvancePt = anchorLeft - ownerLeft - estimatedVisiblePrefixWidthPt(paragraph);
+        double ownerWidth = Math.max(0.0, ownerRight - ownerLeft);
+        if (sourceAdvancePt < 2.0 || sourceAdvancePt > ownerWidth - 1.0) return;
+
+        long sourceAdvance = CoordinateConverter.pointsToHwpunits(sourceAdvancePt);
+        Long existing = paragraph.leftMargin();
+        if (existing == null || sourceAdvance > existing + CoordinateConverter.pointsToHwpunits(1.0)) {
+            paragraph.leftMargin(sourceAdvance);
+        }
+    }
+
+    private static ResolvedTextFrame ownerTextFrameForInlineAnchor(
+            ResolvedBuildContext ctx,
+            String carrierStoryId,
+            ResolvedTextFrame anchor) {
+        if (ctx == null || ctx.resolvedData == null || anchor == null || carrierStoryId == null) {
+            return null;
+        }
+        double[] anchorBounds = preferredBounds(anchor);
+        double anchorCenterX = validBounds(anchorBounds) ? (anchorBounds[1] + anchorBounds[3]) * 0.5 : Double.NaN;
+        double anchorCenterY = validBounds(anchorBounds) ? (anchorBounds[0] + anchorBounds[2]) * 0.5 : Double.NaN;
+
+        ResolvedTextFrame best = null;
+        double bestArea = Double.POSITIVE_INFINITY;
+        for (ResolvedTextFrame candidate : ctx.resolvedData.getTextFramesForStory(carrierStoryId)) {
+            if (candidate == null || candidate.isInline()) continue;
+            if (anchor.pageIndex() >= 0 && candidate.pageIndex() >= 0
+                    && anchor.pageIndex() != candidate.pageIndex()) {
+                continue;
+            }
+            double[] b = preferredBounds(candidate);
+            if (!validBounds(b)) continue;
+            if (Double.isFinite(anchorCenterX) && Double.isFinite(anchorCenterY)
+                    && (anchorCenterX < b[1] - 0.5 || anchorCenterX > b[3] + 0.5
+                    || anchorCenterY < b[0] - 1.0 || anchorCenterY > b[2] + 1.0)) {
+                continue;
+            }
+            double area = Math.max(0.0, b[2] - b[0]) * Math.max(0.0, b[3] - b[1]);
+            if (area < bestArea) {
+                best = candidate;
+                bestArea = area;
+            }
+        }
+        return best;
+    }
+
+    private static double[] preferredBounds(ResolvedTextFrame tf) {
+        if (tf == null) return null;
+        double[] pageBounds = tf.pageRelativeBounds();
+        if (validBounds(pageBounds)) return pageBounds;
+        return tf.geometricBounds();
+    }
+
+    private static boolean validBounds(double[] bounds) {
+        return bounds != null && bounds.length >= 4
+                && Double.isFinite(bounds[0]) && Double.isFinite(bounds[1])
+                && Double.isFinite(bounds[2]) && Double.isFinite(bounds[3])
+                && bounds[2] >= bounds[0] && bounds[3] >= bounds[1];
+    }
+
+    private static boolean paragraphPrefixIsLayoutOnly(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return true;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) return false;
+            if (hasSubstantiveText(((ASTTextRun) item).text())) return false;
+        }
+        return true;
+    }
+
+    private static boolean hasSubstantiveText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008'
+                    || ch == '\t' || ch == '\r' || ch == '\n'
+                    || Character.isWhitespace(ch)) {
+                continue;
+            }
+            if (Character.isLetterOrDigit(ch)) return true;
+        }
+        return false;
+    }
+
+    private static double estimatedVisiblePrefixWidthPt(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return 0.0;
+        double width = 0.0;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.isEmpty()) continue;
+            double fontPt = run.fontSizeHwpunits() != null && run.fontSizeHwpunits() > 0
+                    ? run.fontSizeHwpunits() / 100.0
+                    : 10.0;
+            double scale = run.horizontalScale() != null && run.horizontalScale() > 0
+                    ? run.horizontalScale() / 100.0
+                    : 1.0;
+            for (int i = 0; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008'
+                        || ch == '\t' || ch == '\r' || ch == '\n') {
+                    continue;
+                }
+                width += Character.isWhitespace(ch) ? fontPt * 0.25 * scale : fontPt * 0.5 * scale;
+            }
+        }
+        return width;
     }
 
     private static void warnUnplannedInlineAnchorSkipped(
