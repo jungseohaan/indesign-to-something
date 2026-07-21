@@ -17,6 +17,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-037](SPEC-037-issue-debug-cycle-acceleration.md) | Active support | Faster page issue loop, ObjectPlan tracing, regression audit workflow |
 | [SPEC-038](SPEC-038-extract-indd-modularization-map.md) | Active support | `extract_indd.jsx` modularization map and removal of legacy extraction paths |
 | [SPEC-041](SPEC-041-anchored-edge-label-floating.md) | Active | 앵커 가장자리 라벨(구절 풀이 배지) 테이블 셀 흡수 — 컨버터 오버레이 채널 보존으로 수정 (구현 완료, 육안 확인 대기) |
+| [SPEC-048](SPEC-048-floating-anchored-gauge-inline-misplacement.md) | Active | FLOATING_ANCHORED 게이지(눈금+100%+연필)의 인라인 오배치 — 원인 규명 완료·수정 미완결(추출기 다중 seed 통일 필요) |
 | [SPEC-044](SPEC-044-blank-paren-spacer.md) | Active | 괄호 빈칸 스페이서(빈 답란 Rectangle) → NBSP 고정폭 공백 치환 (구현 완료, 육안 확인 대기) |
 | [SPEC-045](SPEC-045-coefficient-subscript-bleed.md) | Active | 화학 반응식 계수 첨자 오염(resolved 첨자 위치 흘림) — IDML 비첨자 증거 우선 (구현 완료, 육안 확인 대기) |
 | [SPEC-046](SPEC-046-formula-textrange-shell-misfire.md) | Active | 화학식 첫 글자의 text-range-shell 오분리 — 화학식 문단 range 분리 제외 (구현 완료, 육안 확인 대기) |
