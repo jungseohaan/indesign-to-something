@@ -50,6 +50,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -221,14 +222,22 @@ public final class TableBuilder {
             report.storyTableSetupNanos += System.nanoTime() - tableSetupStart;
 
             long tableYOffset = 0;
+            Map<Integer, Long> markerTableYOffsetByPage = new HashMap<>();
+            MarkerTableFlow markerTableFlow = markerTableFlowForFrame(ctx, idmlStory, tf);
+            boolean markerOnlyTableFlow = markerTableFlow.active;
+            boolean markerTableSequence = topLevelStoryTables(idmlStory).size() > 1;
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : allTables) {
                 if (ctx.isAnchoredTableSource(idmlTable.selfId())) continue;
                 if (isNestedTableInSameStory(idmlStory, idmlTable)) continue;
+                if (!markerTableFlow.owns(idmlStory, idmlTable)) continue;
                 // 같은 Table이 TF 연결 체인에서 중복 배치되는 것을 방지
                 if (!processedTableIds.add(idmlTable.selfId())) continue;
 
-                int tablePageIdx = tablePlacementPageIndex(ctx, idmlTable, pageIdx);
+                int tablePageIdx = tablePlacementPageIndex(ctx, idmlTable, pageIdx, markerOnlyTableFlow);
                 if (tablePageIdx < 0 || tablePageIdx >= sections.size()) continue;
+                long markerTableYOffset = markerTableSequence
+                        ? markerTableYOffsetByPage.getOrDefault(tablePageIdx, 0L)
+                        : 0L;
 
                 long thisX = hx;
                 long thisY = hy;
@@ -247,8 +256,12 @@ public final class TableBuilder {
                 boolean isNested = parentTable != null;
 
                 if (placedFromResolvedTableBounds) {
-                    // InDesign DOM already gave the table's page-relative bounds.
-                    // Prefer that over story-flow estimates so tables stay below their preceding text.
+                    if (markerTableSequence) {
+                        thisY += markerTableYOffset;
+                    } else {
+                        // InDesign DOM already gave the table's page-relative bounds.
+                        // Prefer that over story-flow estimates so tables stay below their preceding text.
+                    }
                 } else if (isNested) {
                     String parentId = parentTable.selfId();
                     String remainder = idmlTable.selfId().substring(parentId.length());
@@ -289,6 +302,10 @@ public final class TableBuilder {
                         if (fig != null) {
                             section.addBlock(fig);
                             report.wholeTablePngRendered++;
+                            if (markerTableSequence) {
+                                addMarkerTableYOffset(markerTableYOffsetByPage,
+                                        tablePageIdx, tableHeightHwpunits(idmlTable, null));
+                            }
                             continue;
                         }
                         report.pngMissingFallback++;
@@ -301,6 +318,9 @@ public final class TableBuilder {
                 long buildStart = System.nanoTime();
                 ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
                 report.buildAstTableNanos += System.nanoTime() - buildStart;
+                if (markerTableSequence && markerTableYOffset > 0) {
+                    astTable.y(thisY);
+                }
                 if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
                     astTable.flowWithText(true);
                 }
@@ -345,6 +365,10 @@ public final class TableBuilder {
                 } else {
                     report.asTableCleanCount++;
                 }
+                if (markerTableSequence) {
+                    addMarkerTableYOffset(markerTableYOffsetByPage,
+                            tablePageIdx, tableHeightHwpunits(idmlTable, astTable));
+                }
             }
         }
 
@@ -386,6 +410,10 @@ public final class TableBuilder {
             long[] origin = tableOwnerOrigin(ctx, tf, pageIdx);
             long hx = origin[0];
             long hy = origin[1];
+            Map<Integer, Long> markerTableYOffsetByPage = new HashMap<>();
+            MarkerTableFlow markerTableFlow = markerTableFlowForFrame(ctx, idmlStory, tf);
+            boolean markerOnlyTableFlow = markerTableFlow.active;
+            boolean markerTableSequence = topLevelStoryTables(idmlStory).size() > 1;
 
             for (IDMLTable idmlTable : idmlStory.tables()) {
                 if (idmlTable == null || idmlTable.selfId() == null) continue;
@@ -395,10 +423,14 @@ public final class TableBuilder {
                 if (ctx.isAnchoredWrapperTableSource(idmlTable.selfId())) {
                     continue;
                 }
+                if (!markerTableFlow.owns(idmlStory, idmlTable)) continue;
                 if (!processedTableIds.add(idmlTable.selfId())) continue;
 
-                int tablePageIdx = tablePlacementPageIndex(ctx, idmlTable, pageIdx);
+                int tablePageIdx = tablePlacementPageIndex(ctx, idmlTable, pageIdx, markerOnlyTableFlow);
                 if (tablePageIdx < 0 || tablePageIdx >= sections.size()) continue;
+                long markerTableYOffset = markerTableSequence
+                        ? markerTableYOffsetByPage.getOrDefault(tablePageIdx, 0L)
+                        : 0L;
 
                 long thisX = hx;
                 long thisY = hy;
@@ -407,11 +439,17 @@ public final class TableBuilder {
                     double scale = ctx.resolvedData.scaleFactor();
                     thisX = CoordinateConverter.pointsToHwpunits(resolvedTableBounds[1] * scale);
                     thisY = CoordinateConverter.pointsToHwpunits(resolvedTableBounds[0] * scale);
+                    if (markerTableSequence) {
+                        thisY += markerTableYOffset;
+                    }
                 }
 
                 long buildStart = System.nanoTime();
                 ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
                 report.buildAstTableNanos += System.nanoTime() - buildStart;
+                if (markerTableSequence && markerTableYOffset > 0) {
+                    astTable.y(thisY);
+                }
                 if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
                     astTable.flowWithText(true);
                 }
@@ -435,6 +473,10 @@ public final class TableBuilder {
                 report.asTableCleanCount++;
                 report.tableOnlyPlansPlaced++;
                 report.total++;
+                if (markerTableSequence) {
+                    addMarkerTableYOffset(markerTableYOffsetByPage,
+                            tablePageIdx, tableHeightHwpunits(idmlTable, astTable));
+                }
             }
         }
     }
@@ -574,11 +616,152 @@ public final class TableBuilder {
     private static int tablePlacementPageIndex(
             ResolvedBuildContext ctx,
             kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable,
-            int fallbackPageIdx) {
+            int fallbackPageIdx,
+            boolean markerOnlyTableFlow) {
         if (ctx == null || ctx.resolvedData == null || idmlTable == null) return fallbackPageIdx;
+        if (markerOnlyTableFlow) {
+            return fallbackPageIdx;
+        }
         Integer placementPageIndex = ctx.resolvedData.getTablePlacementPageIndex(idmlTable.selfId());
         if (placementPageIndex == null) return fallbackPageIdx;
         return ctx.toSectionIndex.applyAsInt(placementPageIndex);
+    }
+
+    private static final class MarkerTableFlow {
+        static final MarkerTableFlow INACTIVE = new MarkerTableFlow(false, 0, 0);
+
+        final boolean active;
+        final int startOrdinal;
+        final int endOrdinal;
+
+        MarkerTableFlow(boolean active, int startOrdinal, int endOrdinal) {
+            this.active = active;
+            this.startOrdinal = startOrdinal;
+            this.endOrdinal = endOrdinal;
+        }
+
+        boolean owns(IDMLStory story, IDMLTable table) {
+            if (!active) return true;
+            int ordinal = topLevelStoryTableIndex(story, table);
+            return ordinal >= startOrdinal && ordinal < endOrdinal;
+        }
+    }
+
+    private static MarkerTableFlow markerTableFlowForFrame(
+            ResolvedBuildContext ctx,
+            IDMLStory idmlStory,
+            ResolvedTextFrame ownerFrame) {
+        if (ctx == null || ctx.resolvedData == null || idmlStory == null || ownerFrame == null) {
+            return MarkerTableFlow.INACTIVE;
+        }
+        List<IDMLTable> sourceTables = topLevelStoryTables(idmlStory);
+        int ownerMarkerCount = countTableMarkers(ownerFrame.frameVisibleText());
+        if (sourceTables.size() < 2 || ownerMarkerCount <= 0) {
+            return MarkerTableFlow.INACTIVE;
+        }
+        List<ResolvedTextFrame> frames = markerFlowFramesForStory(ctx, ownerFrame.storyId());
+        if (frames.isEmpty()) {
+            return MarkerTableFlow.INACTIVE;
+        }
+        int totalMarkers = 0;
+        for (ResolvedTextFrame frame : frames) {
+            totalMarkers += countTableMarkers(frame.frameVisibleText());
+        }
+        if (totalMarkers < sourceTables.size()) {
+            return MarkerTableFlow.INACTIVE;
+        }
+
+        int startOrdinal = 0;
+        for (ResolvedTextFrame frame : frames) {
+            int markerCount = countTableMarkers(frame.frameVisibleText());
+            if (sameTextFrame(frame, ownerFrame)) {
+                return new MarkerTableFlow(true, startOrdinal, startOrdinal + markerCount);
+            }
+            startOrdinal += markerCount;
+        }
+        return MarkerTableFlow.INACTIVE;
+    }
+
+    private static List<IDMLTable> topLevelStoryTables(IDMLStory story) {
+        List<IDMLTable> result = new ArrayList<>();
+        if (story == null || story.tables() == null) return result;
+        for (IDMLTable table : story.tables()) {
+            if (table == null || isNestedTableInSameStory(story, table)) continue;
+            result.add(table);
+        }
+        return result;
+    }
+
+    private static int topLevelStoryTableIndex(IDMLStory story, IDMLTable target) {
+        if (story == null || target == null || target.selfId() == null || story.tables() == null) return -1;
+        int index = 0;
+        for (IDMLTable table : story.tables()) {
+            if (table == null || isNestedTableInSameStory(story, table)) continue;
+            if (target.selfId().equals(table.selfId())) return index;
+            index++;
+        }
+        return -1;
+    }
+
+    private static List<ResolvedTextFrame> markerFlowFramesForStory(
+            ResolvedBuildContext ctx,
+            String storyId) {
+        List<ResolvedTextFrame> markerFrames = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || storyId == null) return markerFrames;
+        for (ResolvedTextFrame frame : ctx.resolvedData.textFrames()) {
+            if (frame == null || !storyId.equals(frame.storyId())) continue;
+            if (frame != null && countTableMarkers(frame.frameVisibleText()) > 0) {
+                markerFrames.add(frame);
+            }
+        }
+        markerFrames.sort(new Comparator<ResolvedTextFrame>() {
+            @Override
+            public int compare(ResolvedTextFrame a, ResolvedTextFrame b) {
+                int byPara = Integer.compare(a.paragraphStart(), b.paragraphStart());
+                if (byPara != 0) return byPara;
+                int byPage = Integer.compare(a.pageIndex(), b.pageIndex());
+                if (byPage != 0) return byPage;
+                String aid = a.id();
+                String bid = b.id();
+                if (aid == null && bid == null) return 0;
+                if (aid == null) return -1;
+                if (bid == null) return 1;
+                return aid.compareTo(bid);
+            }
+        });
+        return markerFrames;
+    }
+
+    private static boolean sameTextFrame(ResolvedTextFrame a, ResolvedTextFrame b) {
+        if (a == b) return true;
+        if (a == null || b == null || a.id() == null || b.id() == null) return false;
+        return a.id().equals(b.id());
+    }
+
+    private static int countTableMarkers(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int count = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\u0016' || c == '\uFFFC') count++;
+        }
+        return count;
+    }
+
+    private static long tableHeightHwpunits(IDMLTable sourceTable, ASTTable astTable) {
+        if (astTable != null && astTable.height() > 0) {
+            return astTable.height();
+        }
+        if (sourceTable == null) return 0;
+        double height = sourceTable.totalHeight();
+        height += Math.max(0, sourceTable.spaceBefore());
+        height += Math.max(0, sourceTable.spaceAfter());
+        return CoordinateConverter.pointsToHwpunits(height);
+    }
+
+    private static void addMarkerTableYOffset(Map<Integer, Long> offsets, int pageIdx, long height) {
+        if (offsets == null || pageIdx < 0 || height <= 0) return;
+        offsets.put(pageIdx, offsets.getOrDefault(pageIdx, 0L) + height);
     }
 
     private static boolean allStoryTablesProcessedOrAnchored(
