@@ -142,14 +142,16 @@ public class HwpxTableBuilder {
         for (ASTTable flowChunk : inlineFlowChunks(astTable)) {
             Para tablePara = subList.addNewPara();
             tablePara.idAnd(HwpxUtil.nextParaId())
-                    .paraPrIDRefAnd(inlineTableCarrierParaPrId(flowChunk.height()))
+                    .paraPrIDRefAnd(inlineTableCarrierParaPrId(
+                            flowChunk.height(),
+                            Math.max(0L, flowChunk.inlineOffsetX())))
                     .styleIDRefAnd("0")
                     .pageBreakAnd(false)
                     .columnBreakAnd(false)
                     .merged(false);
 
             addInlineTableCarrierLineSeg(tablePara, flowChunk);
-            addInlineTableToPara(tablePara, flowChunk, true, VertAlign.TOP);
+            addInlineTableToPara(tablePara, flowChunk, true, VertAlign.TOP, false);
         }
     }
 
@@ -169,9 +171,11 @@ public class HwpxTableBuilder {
                 .flagsAnd(393216);
     }
 
-    private String inlineTableCarrierParaPrId(long tableHeight) {
+    private String inlineTableCarrierParaPrId(long tableHeight, long leftMargin) {
         long lineHeight = Math.max(1, tableHeight);
-        String cached = inlineTableCarrierParaPrIds.get(lineHeight);
+        long margin = Math.max(0L, leftMargin);
+        long cacheKey = (lineHeight << 32) ^ margin;
+        String cached = inlineTableCarrierParaPrIds.get(cacheKey);
         if (cached != null) {
             return cached;
         }
@@ -188,14 +192,14 @@ public class HwpxTableBuilder {
         paraPr.margin().createIntent();
         paraPr.margin().intent().valueAnd(0).unit(ValueUnit2.HWPUNIT);
         paraPr.margin().createLeft();
-        paraPr.margin().left().valueAnd(0).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().left().valueAnd((int) Math.min(Integer.MAX_VALUE, margin)).unit(ValueUnit2.HWPUNIT);
         paraPr.margin().createRight();
         paraPr.margin().right().valueAnd(0).unit(ValueUnit2.HWPUNIT);
         paraPr.margin().createPrev();
         paraPr.margin().prev().valueAnd(0).unit(ValueUnit2.HWPUNIT);
         paraPr.margin().createNext();
         paraPr.margin().next().valueAnd(0).unit(ValueUnit2.HWPUNIT);
-        inlineTableCarrierParaPrIds.put(lineHeight, paraPrId);
+        inlineTableCarrierParaPrIds.put(cacheKey, paraPrId);
         return paraPrId;
     }
 
@@ -204,10 +208,19 @@ public class HwpxTableBuilder {
      * table-only inline TextFrame을 hp:rect로 한 번 더 감싸면 HWP에서 셀/텍스트가 중복 표시될 수 있다.
      */
     void addInlineTableToPara(Para para, ASTTable astTable) {
-        addInlineTableToPara(para, astTable, true, VertAlign.BOTTOM);
+        addInlineTableToPara(para, astTable, true, VertAlign.BOTTOM, true);
     }
 
     private void addInlineTableToPara(Para para, ASTTable astTable, boolean affectLineSpacing, VertAlign vertAlign) {
+        addInlineTableToPara(para, astTable, affectLineSpacing, vertAlign, true);
+    }
+
+    private void addInlineTableToPara(
+            Para para,
+            ASTTable astTable,
+            boolean affectLineSpacing,
+            VertAlign vertAlign,
+            boolean applyInlineOffset) {
         long totalWidth = astTable.width();
 
         Run run = para.addNewRun();
@@ -250,8 +263,8 @@ public class HwpxTableBuilder {
                 .horzRelToAnd(HorzRelTo.COLUMN)
                 .vertAlignAnd(vertAlign)
                 .horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(0L)
-                .horzOffset(0L);
+                .vertOffsetAnd(applyInlineOffset ? astTable.inlineOffsetY() : 0L)
+                .horzOffset(applyInlineOffset ? astTable.inlineOffsetX() : 0L);
 
         table.createOutMargin();
         table.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
@@ -314,6 +327,8 @@ public class HwpxTableBuilder {
         chunk.flowWithText(source.flowWithText());
         chunk.anchoredFlowWithText(source.anchoredFlowWithText());
         chunk.fixedOuterBounds(source.fixedOuterBounds());
+        chunk.inlineOffsetX(source.inlineOffsetX());
+        chunk.inlineOffsetY(source.inlineOffsetY());
         chunk.rowCount(1);
         chunk.colCount(source.colCount());
         chunk.appliedTableStyle(source.appliedTableStyle());

@@ -23,6 +23,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryFlowAssembler;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
@@ -37,6 +38,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryCon
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -846,6 +849,7 @@ public final class TableBuilder {
             applyDeclaredTableStyleSources(ctx, idmlTable, result);
             ResolvedTextFrame owner = anchoredNestedTableTextFrame(ctx, idmlTable);
             absorbTextFrameOutlineIntoTable(ctx, owner, result);
+            absorbInlineTextShellStylesIntoTableCells(ctx, result);
             suppressRenderedVisualsOwnedByAnchoredNestedTable(ctx, owner, idmlTable, result);
         } else {
             stripTableCellDecoration(result);
@@ -1126,6 +1130,10 @@ public final class TableBuilder {
                 out.addProperty("hasBottomBorder", cell.bottomBorder() != null);
                 out.addProperty("hasLeftBorder", cell.leftBorder() != null);
                 out.addProperty("hasRightBorder", cell.rightBorder() != null);
+                out.add("topBorder", traceCellBorder(cell.topBorder()));
+                out.add("bottomBorder", traceCellBorder(cell.bottomBorder()));
+                out.add("leftBorder", traceCellBorder(cell.leftBorder()));
+                out.add("rightBorder", traceCellBorder(cell.rightBorder()));
                 JsonArray inlineObjects = new JsonArray();
                 collectCellInlineObjects(cell, inlineObjects);
                 out.add("inlineObjects", inlineObjects);
@@ -1133,6 +1141,16 @@ public final class TableBuilder {
                 ctx.astProductionLines.add(out.toString());
             }
         }
+    }
+
+    private static JsonObject traceCellBorder(ASTTableCell.CellBorder border) {
+        JsonObject out = new JsonObject();
+        if (border == null) return out;
+        out.addProperty("color", border.color());
+        out.addProperty("weight", border.weight());
+        out.addProperty("strokeType", border.strokeType());
+        out.addProperty("tint", border.tint());
+        return out;
     }
 
     private static void collectCellInlineObjects(ASTTableCell cell, JsonArray out) {
@@ -2108,6 +2126,367 @@ public final class TableBuilder {
         }
         if (ctx.debugAst) {
             table.debugOrNew().note("text frame outline absorbed into table: page_item " + outline.id());
+        }
+    }
+
+    private static void absorbInlineTextShellStylesIntoTableCells(
+            ResolvedBuildContext ctx,
+            ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || table == null || table.rows() == null) return;
+        boolean singleCellTable = singleCell(table) != null;
+        int applied = 0;
+        int removed = 0;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                InlineTextShellStyleSources sources = inlineTextShellStyleSourcesInCell(ctx, cell);
+                if (sources.isEmpty()) continue;
+                boolean cellApplied = false;
+                for (Integer sourceId : sources.styleSourceIds) {
+                    if (sourceId == null || sourceId < 0) continue;
+                    ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+                    if (!isTableStyleMaterialSource(item)) continue;
+                    String fill = resolvedFillHex(ctx, item);
+                    if (fill != null) {
+                        cell.fillColor(fill);
+                        cellApplied = true;
+                    }
+                    ASTTableCell.CellBorder border = pageItemStrokeBorder(ctx, item);
+                    if (border != null) {
+                        if (singleCellTable) {
+                            applyOuterBorder(table, border);
+                        } else {
+                            applyCellBoxBorder(cell, border);
+                        }
+                        cellApplied = true;
+                    }
+                    markPageItemHandled(ctx, sourceId);
+                }
+                if (cellApplied) {
+                    applied++;
+                    if (singleCellTable) {
+                        applyInlineTextShellPlacementToTable(ctx, table, sources);
+                    }
+                    applyOwnedTextFrameInsetsToCell(ctx, cell, sources.ownedTextFrameIds);
+                    removed += replaceInlineTextShellCarriersWithOwnedText(
+                            ctx, cell.paragraphs(), sources.ownerSourceIds, sources.ownedTextFrameIds);
+                    removed += removeEmptyInlineTextShellObjects(cell.paragraphs(), sources.ownerSourceIds);
+                }
+            }
+        }
+        if (ctx.debugAst && applied > 0) {
+            table.debugOrNew().note("inline text shell style absorbed into table cells: cells=" + applied
+                    + ", carriersRemoved=" + removed);
+        }
+    }
+
+    private static InlineTextShellStyleSources inlineTextShellStyleSourcesInCell(
+            ResolvedBuildContext ctx,
+            ASTTableCell cell) {
+        InlineTextShellStyleSources sources = new InlineTextShellStyleSources();
+        if (ctx == null || cell == null) return sources;
+        collectInlineTextShellStyleSources(ctx, cell.paragraphs(), sources);
+        return sources;
+    }
+
+    private static void collectInlineTextShellStyleSources(
+            ResolvedBuildContext ctx,
+            List<ASTParagraph> paragraphs,
+            InlineTextShellStyleSources sources) {
+        if (ctx == null || paragraphs == null || sources == null) return;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                Integer domId = parseSourceObjectId(obj.sourceId());
+                if (domId != null) {
+                    for (ObjectPlan plan : ctx.ownershipPlansForObjectId(domId)) {
+                        if (!isAbsorbableInlineTextShellPlan(plan)) continue;
+                        sources.ownerSourceIds.add(domId);
+                        sources.ownerSourceIds.add(plan.domId);
+                        addAll(sources.ownerSourceIds, plan.sourceObjectIds);
+                        sources.shellPlans.add(plan);
+                        addAll(sources.styleSourceIds, plan.visualSourceObjectIds);
+                        addAll(sources.ownedTextFrameIds, plan.ownedTextFrameIds);
+                        if (sources.styleSourceIds.isEmpty()) {
+                            addAll(sources.styleSourceIds, plan.sourceObjectIds);
+                        }
+                    }
+                }
+                collectInlineTextShellStyleSources(ctx, obj.paragraphs(), sources);
+            }
+        }
+    }
+
+    private static boolean isAbsorbableInlineTextShellPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0
+                && ShellRole.isTextShell(plan);
+    }
+
+    private static void applyInlineTextShellPlacementToTable(
+            ResolvedBuildContext ctx,
+            ASTTable table,
+            InlineTextShellStyleSources sources) {
+        if (ctx == null || ctx.resolvedData == null || table == null || sources == null
+                || sources.shellPlans == null || sources.shellPlans.isEmpty()) {
+            return;
+        }
+        ObjectPlan shellPlan = firstPlanWithBounds(sources.shellPlans);
+        if (shellPlan == null || !validStyleSourceBounds(shellPlan.bounds)) return;
+        ResolvedTextFrame owner = ctx.resolvedData.getTableOwnerTextFrame(table.sourceId());
+        double[] ownerBounds = owner != null ? owner.pageRelativeBounds() : null;
+        if (!validStyleSourceBounds(ownerBounds)) return;
+        double[] inset = owner.insetSpacing();
+        double ownerLeft = ownerBounds[1]
+                + (inset != null && inset.length >= 4 ? Math.max(0.0, inset[1]) : 0.0);
+        double scale = ctx.resolvedData.scaleFactor();
+        if (scale <= 0.0) scale = 1.0;
+        long offsetX = CoordinateConverter.pointsToHwpunits(
+                Math.max(0.0, shellPlan.bounds[1] - ownerLeft) * scale);
+        if (offsetX <= 0) return;
+        table.inlineOffsetX(offsetX);
+        double ownerRight = ownerBounds[3]
+                - (inset != null && inset.length >= 4 ? Math.max(0.0, inset[3]) : 0.0);
+        long availableWidth = CoordinateConverter.pointsToHwpunits(
+                Math.max(0.0, ownerRight - shellPlan.bounds[1]) * scale);
+        long fitWidth = availableWidth - inlineTextShellTableClipGuard(table);
+        if (fitWidth > 0 && fitWidth < table.width()) {
+            fitSingleCellTableWidth(table, fitWidth);
+        }
+        if (ctx.debugAst) {
+            table.debugOrNew().note("inline text shell table x offset preserved from source shell: "
+                    + offsetX + " hwp");
+        }
+    }
+
+    private static long inlineTextShellTableClipGuard(ASTTable table) {
+        long fallback = CoordinateConverter.pointsToHwpunits(0.5);
+        if (table == null) return fallback;
+        long borderGuard = table.borderWidth() > 0
+                ? CoordinateConverter.pointsToHwpunits(table.borderWidth())
+                : 0L;
+        return Math.max(fallback, borderGuard);
+    }
+
+    private static void fitSingleCellTableWidth(ASTTable table, long width) {
+        if (table == null || width <= 0 || singleCell(table) == null) return;
+        table.width(width);
+        if (table.columnWidths() != null && !table.columnWidths().isEmpty()) {
+            table.columnWidths().clear();
+            table.addColumnWidth(width);
+        }
+        ASTTableCell cell = singleCell(table);
+        if (cell != null) {
+            cell.width(width);
+        }
+    }
+
+    private static ObjectPlan firstPlanWithBounds(List<ObjectPlan> plans) {
+        if (plans == null) return null;
+        for (ObjectPlan plan : plans) {
+            if (plan != null && validStyleSourceBounds(plan.bounds)) return plan;
+        }
+        return null;
+    }
+
+    private static int replaceInlineTextShellCarriersWithOwnedText(
+            ResolvedBuildContext ctx,
+            List<ASTParagraph> paragraphs,
+            Set<Integer> ownerSourceIds,
+            Set<Integer> ownedTextFrameIds) {
+        if (ctx == null || paragraphs == null || ownerSourceIds == null || ownerSourceIds.isEmpty()
+                || ownedTextFrameIds == null || ownedTextFrameIds.isEmpty()) {
+            return 0;
+        }
+        List<ASTParagraph> ownedParagraphs = ownedTextFrameParagraphs(ctx, ownedTextFrameIds);
+        if (ownedParagraphs.isEmpty()) return 0;
+
+        int replaced = 0;
+        for (int i = 0; i < paragraphs.size(); i++) {
+            ASTParagraph paragraph = paragraphs.get(i);
+            if (!isOnlyInlineTextShellCarrierParagraph(paragraph, ownerSourceIds)) continue;
+            paragraphs.remove(i);
+            paragraphs.addAll(i, ownedParagraphs);
+            replaced++;
+            i += ownedParagraphs.size() - 1;
+        }
+        return replaced;
+    }
+
+    private static List<ASTParagraph> ownedTextFrameParagraphs(
+            ResolvedBuildContext ctx,
+            Set<Integer> ownedTextFrameIds) {
+        List<ASTParagraph> out = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || ownedTextFrameIds == null) return out;
+        Set<String> seenStories = new LinkedHashSet<>();
+        for (Integer textFrameId : ownedTextFrameIds) {
+            if (textFrameId == null || textFrameId < 0) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
+            if (tf == null || tf.storyId() == null || tf.storyId().isEmpty()) continue;
+            if (!seenStories.add(tf.storyId())) continue;
+
+            List<ASTParagraph> paragraphs = StoryLoader.convertStoryFromIDML(ctx, tf.storyId());
+            if (paragraphs == null || paragraphs.isEmpty()) {
+                ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+                if (story != null) {
+                    paragraphs = StoryConverter.convertStoryParagraphs(ctx, story);
+                }
+            }
+            if (paragraphs != null) {
+                applyOwnedTextFrameRunColor(ctx, tf, paragraphs);
+                out.addAll(paragraphs);
+            }
+        }
+        return out;
+    }
+
+    private static void applyOwnedTextFrameInsetsToCell(
+            ResolvedBuildContext ctx,
+            ASTTableCell cell,
+            Set<Integer> ownedTextFrameIds) {
+        if (ctx == null || ctx.resolvedData == null || cell == null
+                || ownedTextFrameIds == null || ownedTextFrameIds.isEmpty()) {
+            return;
+        }
+        for (Integer textFrameId : ownedTextFrameIds) {
+            if (textFrameId == null || textFrameId < 0) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
+            double[] inset = tf != null ? tf.insetSpacing() : null;
+            if (inset == null || inset.length < 4) continue;
+            cell.marginTop(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[0])));
+            cell.marginLeft(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[1])));
+            cell.marginBottom(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[2])));
+            cell.marginRight(CoordinateConverter.pointsToHwpunits(Math.max(0.0, inset[3])));
+            return;
+        }
+    }
+
+    private static void applyOwnedTextFrameRunColor(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            List<ASTParagraph> paragraphs) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || paragraphs == null || paragraphs.isEmpty()) {
+            return;
+        }
+        ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return;
+        int paraCount = Math.min(paragraphs.size(), story.paragraphs().size());
+        for (int p = 0; p < paraCount; p++) {
+            ASTParagraph paragraph = paragraphs.get(p);
+            ResolvedParagraph resolvedParagraph = story.paragraphs().get(p);
+            if (paragraph == null || paragraph.items() == null
+                    || resolvedParagraph == null || resolvedParagraph.runs() == null) {
+                continue;
+            }
+            List<String> colors = resolvedParagraphRunColors(ctx, resolvedParagraph.runs());
+            if (colors.isEmpty()) continue;
+            int textRunIndex = 0;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (!(item instanceof ASTTextRun)) continue;
+                ASTTextRun run = (ASTTextRun) item;
+                String color = colors.get(Math.min(textRunIndex, colors.size() - 1));
+                if (color != null && !color.isEmpty()) {
+                    run.textColor(color);
+                }
+                textRunIndex++;
+            }
+        }
+    }
+
+    private static List<String> resolvedParagraphRunColors(
+            ResolvedBuildContext ctx,
+            List<ResolvedRun> runs) {
+        List<String> colors = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || runs == null) return colors;
+        for (ResolvedRun run : runs) {
+            if (run == null || run.fillColor() == null || run.fillColor().isEmpty()) continue;
+            String color = ctx.resolvedData.resolveColorHex(run.fillColor());
+            if (color != null && !color.isEmpty()) {
+                colors.add(color);
+            }
+        }
+        return colors;
+    }
+
+    private static boolean isOnlyInlineTextShellCarrierParagraph(
+            ASTParagraph paragraph,
+            Set<Integer> ownerSourceIds) {
+        if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) return false;
+        boolean sawCarrier = false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !isMarkerOnlyInlineShellText(text)) return false;
+                continue;
+            }
+            if (!(item instanceof ASTInlineObject)) return false;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            Integer domId = parseSourceObjectId(obj.sourceId());
+            if (domId == null || !ownerSourceIds.contains(domId)) return false;
+            sawCarrier = true;
+        }
+        return sawCarrier;
+    }
+
+    private static boolean isMarkerOnlyInlineShellText(String text) {
+        if (text == null || text.isEmpty()) return true;
+        String cleaned = text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+        return cleaned.isEmpty();
+    }
+
+    private static int removeEmptyInlineTextShellObjects(
+            List<ASTParagraph> paragraphs,
+            Set<Integer> ownerSourceIds) {
+        if (paragraphs == null || ownerSourceIds == null || ownerSourceIds.isEmpty()) return 0;
+        int removed = 0;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            Iterator<ASTInlineItem> it = paragraph.items().iterator();
+            while (it.hasNext()) {
+                ASTInlineItem item = it.next();
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                removed += removeEmptyInlineTextShellObjects(obj.paragraphs(), ownerSourceIds);
+                Integer domId = parseSourceObjectId(obj.sourceId());
+                if (domId != null
+                        && ownerSourceIds.contains(domId)
+                        && isStyleOnlyInlineTextShellCarrier(obj)) {
+                    it.remove();
+                    removed++;
+                }
+            }
+        }
+        return removed;
+    }
+
+    private static boolean isStyleOnlyInlineTextShellCarrier(ASTInlineObject obj) {
+        if (obj == null) return true;
+        if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) return false;
+        if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
+        if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) return false;
+        return true;
+    }
+
+    private static final class InlineTextShellStyleSources {
+        final Set<Integer> ownerSourceIds = new LinkedHashSet<>();
+        final Set<Integer> styleSourceIds = new LinkedHashSet<>();
+        final Set<Integer> ownedTextFrameIds = new LinkedHashSet<>();
+        final List<ObjectPlan> shellPlans = new ArrayList<>();
+
+        boolean isEmpty() {
+            return ownerSourceIds.isEmpty() || styleSourceIds.isEmpty();
         }
     }
 

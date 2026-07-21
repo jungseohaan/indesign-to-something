@@ -60,7 +60,7 @@ public class StoryLoader {
      * IDML의 단락 구조는 정확 (중복 없음, <Br/> 기반 분리).
      * 단락 속성(leading, indent)은 resolved에서 보강.
      */
-    static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId) {
+    public static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId) {
         if (ctx.idmlDir == null) return null;
         if (isResolvedSyntheticStoryClone(ctx, storyId)) {
             return null;

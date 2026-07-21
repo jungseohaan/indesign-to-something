@@ -1973,7 +1973,7 @@ public class InlineFrameHandler {
                 return Double.compare(ax, bx);
             }
         });
-        if (!compositeInlineShellChildrenOccupySingleRow(ordered)) {
+        if (!compositeInlineShellChildrenOccupySingleRow(ctx, ordered)) {
             boolean addedStructured = false;
             for (ResolvedTextFrame childTf : ordered) {
                 if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
@@ -2010,6 +2010,7 @@ public class InlineFrameHandler {
     }
 
     private static boolean compositeInlineShellChildrenOccupySingleRow(
+            ResolvedBuildContext ctx,
             java.util.List<ResolvedTextFrame> childTfs) {
         if (childTfs == null || childTfs.isEmpty()) return true;
         java.util.List<double[]> sourceLineBounds = new ArrayList<>();
@@ -2017,6 +2018,7 @@ public class InlineFrameHandler {
         for (ResolvedTextFrame childTf : childTfs) {
             if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
             if (normalizeInlineShellText(childTf.frameVisibleText()).isEmpty()) continue;
+            if (sourceTextFrameHasMultipleVisibleRows(ctx, childTf)) return false;
             visibleCount++;
             double[] lineBounds = primaryComposedLineBounds(childTf);
             if (!validBounds(lineBounds)) return false;
@@ -2025,6 +2027,40 @@ public class InlineFrameHandler {
         return visibleCount <= 1
                 || (sourceLineBounds.size() == visibleCount
                 && sourceLinesOccupySingleRow(sourceLineBounds));
+    }
+
+    private static boolean sourceTextFrameHasMultipleVisibleRows(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame textFrame) {
+        if (textFrame == null) return false;
+        if (textFrame.lineCount() > 1) return true;
+        if (textFrame.frameParaTexts() != null) {
+            int visibleParagraphs = 0;
+            for (String text : textFrame.frameParaTexts()) {
+                if (normalizeInlineShellText(text).isEmpty()) continue;
+                visibleParagraphs++;
+                if (visibleParagraphs > 1) return true;
+            }
+        }
+        if (ctx == null || ctx.resolvedData == null || textFrame.storyId() == null) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(textFrame.storyId());
+        if (story == null || story.paragraphs() == null) return false;
+        int visibleParagraphs = 0;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            boolean hasText = false;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+                if (!normalizeInlineShellText(run.text()).isEmpty()) {
+                    hasText = true;
+                    break;
+                }
+            }
+            if (!hasText) continue;
+            visibleParagraphs++;
+            if (visibleParagraphs > 1) return true;
+        }
+        return false;
     }
 
     private static void applyCompositeInlineShellLineMetrics(
@@ -3472,6 +3508,7 @@ public class InlineFrameHandler {
                 && obj.kind() != ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
             return;
         }
+        if (sourceTextFrameHasMultipleVisibleRows(ctx, childTf)) return;
         long frameHeight = obj.height();
         if (frameHeight <= 0) return;
         long contentHeight = frameHeight

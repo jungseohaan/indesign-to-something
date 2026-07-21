@@ -1097,9 +1097,9 @@ public final class StoryConverter {
                 if (table == null) continue;
                 boolean wrapperFlowTable = isWrapperFlowTable(table, plan);
                 if (!wrapperFlowTable && hasInlineTable(block.paragraphs(), plan.nestedTableId)) continue;
-                removeAnchoredTableShellInlineObjects(block.paragraphs(), ctx, plan);
                 ASTTable astTable = TableBuilder.buildPreparedAstTable(ctx, table, 0, 0, 0);
                 if (astTable == null) continue;
+                removeAnchoredTableShellInlineObjects(block.paragraphs(), ctx, plan, table);
                 applyAnchoredTableBounds(ctx, plan, astTable);
                 int insertAt = Math.max(0, Math.min(block.paragraphs().size(), plan.afterParagraphIndex + 1));
                 consumeMarkerOnlyParagraphAt(block.paragraphs(), insertAt);
@@ -1128,9 +1128,10 @@ public final class StoryConverter {
     private static void removeAnchoredTableShellInlineObjects(
             List<ASTParagraph> paragraphs,
             ResolvedBuildContext ctx,
-            AnchoredTablePlan anchoredPlan) {
+            AnchoredTablePlan anchoredPlan,
+            IDMLTable wrapperTable) {
         if (paragraphs == null || paragraphs.isEmpty() || ctx == null || anchoredPlan == null) return;
-        Set<String> shellSourceIds = anchoredTableShellSourceIds(ctx, anchoredPlan);
+        Set<String> shellSourceIds = anchoredTableShellSourceIds(ctx, anchoredPlan, wrapperTable);
         if (shellSourceIds.isEmpty()) return;
         Iterator<ASTParagraph> paragraphIterator = paragraphs.iterator();
         while (paragraphIterator.hasNext()) {
@@ -1153,10 +1154,13 @@ public final class StoryConverter {
 
     private static Set<String> anchoredTableShellSourceIds(
             ResolvedBuildContext ctx,
-            AnchoredTablePlan anchoredPlan) {
+            AnchoredTablePlan anchoredPlan,
+            IDMLTable wrapperTable) {
         Set<String> ids = new HashSet<>();
         if (anchoredPlan == null) return ids;
-        ids.add(String.valueOf(anchoredPlan.anchoredTextFrameDomId));
+        if (anchoredPlan.anchoredTextFrameDomId >= 0) {
+            ids.add(String.valueOf(anchoredPlan.anchoredTextFrameDomId));
+        }
         if (ctx == null || ctx.resolvedData == null) return ids;
         ResolvedPageItem textFrameItem =
                 ctx.resolvedData.getPageItem(String.valueOf(anchoredPlan.anchoredTextFrameDomId));
@@ -1170,7 +1174,92 @@ public final class StoryConverter {
             addIds(ids, objectPlan.sourceObjectIds);
             addIds(ids, objectPlan.visualSourceObjectIds);
         }
+        addWrapperInlineTextShellSourceIds(ctx, wrapperTable, ids);
         return ids;
+    }
+
+    private static void addWrapperInlineTextShellSourceIds(
+            ResolvedBuildContext ctx,
+            IDMLTable wrapperTable,
+            Set<String> ids) {
+        if (ctx == null || wrapperTable == null || wrapperTable.rows() == null || ids == null) return;
+        for (IDMLTableRow row : wrapperTable.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (IDMLTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                for (IDMLParagraph paragraph : cell.paragraphs()) {
+                    if (paragraph == null || paragraph.characterRuns() == null) continue;
+                    for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                        if (run == null) continue;
+                        addWrapperInlineTextShellSourceIds(ctx, run.inlineGraphics(), ids);
+                        addWrapperInlineTextFrameSourceIds(ctx, run.inlineFrames(), ids);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void addWrapperInlineTextShellSourceIds(
+            ResolvedBuildContext ctx,
+            List<IDMLCharacterRun.InlineGraphic> graphics,
+            Set<String> ids) {
+        if (graphics == null || graphics.isEmpty()) return;
+        for (IDMLCharacterRun.InlineGraphic graphic : graphics) {
+            if (graphic == null) continue;
+            addOwnedInlineTextShellSourceIds(ctx, parseSourceDomId(graphic.selfId()), ids);
+            addWrapperInlineTextShellSourceIds(ctx, graphic.childGraphics(), ids);
+            addWrapperInlineTextFrameSourceIds(ctx, graphic.childTextFrames(), ids);
+        }
+    }
+
+    private static void addWrapperInlineTextFrameSourceIds(
+            ResolvedBuildContext ctx,
+            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame> frames,
+            Set<String> ids) {
+        if (frames == null || frames.isEmpty()) return;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame : frames) {
+            if (frame == null) continue;
+            addOwnedInlineTextShellSourceIds(ctx, parseSourceDomId(frame.selfId()), ids);
+        }
+    }
+
+    private static void addOwnedInlineTextShellSourceIds(
+            ResolvedBuildContext ctx,
+            int sourceId,
+            Set<String> ids) {
+        if (ctx == null || ids == null || sourceId < 0) return;
+        ObjectPlan plan = ctx.findOwnershipPlanForDomId(sourceId);
+        if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return;
+        if (!ctx.ownershipPlanPlacesInlineHwpxText(sourceId)) return;
+        ids.add(String.valueOf(sourceId));
+        addIds(ids, plan.sourceObjectIds);
+        addIds(ids, plan.visualSourceObjectIds);
+        addIds(ids, plan.ownedTextFrameIds);
+    }
+
+    private static int parseSourceDomId(String sourceId) {
+        if (sourceId == null || sourceId.isEmpty()) return -1;
+        String value = sourceId;
+        if (value.startsWith("child_")) value = value.substring("child_".length());
+        boolean hex = value.startsWith("u") || value.startsWith("U");
+        if (hex) value = value.substring(1);
+        int end = 0;
+        while (end < value.length()) {
+            char c = value.charAt(end);
+            boolean valid = hex
+                    ? ((c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F'))
+                    : (c >= '0' && c <= '9');
+            if (!valid) break;
+            end++;
+        }
+        if (end == 0) return -1;
+        try {
+            return Integer.parseInt(value.substring(0, end), hex ? 16 : 10);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private static boolean inlineObjectSourceMatches(ASTInlineObject obj, Set<String> sourceIds) {

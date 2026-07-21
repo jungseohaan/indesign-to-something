@@ -108,6 +108,15 @@ source objects as the table's `TABLE_STYLE_SLOT`.
   excludes the table structure sources.
 - A separate source shape must not be absorbed into table style unless Stage 1
   declares it in a table plan's `styleSourceObjectIds`.
+- If an editable table cell contains a planned inline text shell
+  (`placement=INLINE`, `PLACE_TEXT_SHELL`, `OWNED_BY_HWPX_TEXT`) whose shell
+  visual is declared as table/cell style material, the containing HWPX cell may
+  absorb that shell's fill/stroke as `TABLE_STYLE_SLOT`. The inline carrier is
+  then removed from cell flow, and the shell's `ownedTextFrameIds` are emitted
+  as editable HWPX cell text in the same cell. The owned TextFrame's source
+  inset becomes the HWPX cell margin, and its resolved run color remains the
+  HWPX run text color. This is execution of a Stage 1 source relationship, not
+  a bounds, text, page, or color heuristic.
 - A `PLACE_TABLE_STYLE` plan describes table structure, geometry, and declared
   source-authored table appearance. It must not project undeclared page shapes,
   row bands, cell plates, borders, or fills into HWPX cell style.
