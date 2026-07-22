@@ -81,6 +81,8 @@ public final class OwnershipPlanner {
         timed("ensureEmptyInlineTextFrameVisualCarrierPlans",
                 this::ensureEmptyInlineTextFrameVisualCarrierPlans);
         timed("ensurePngOwnedChildMarkerTextFramePlans", this::ensurePngOwnedChildMarkerTextFramePlans);
+        timed("ensureSiblingTextShellBoundsTextFramePlans",
+                this::ensureSiblingTextShellBoundsTextFramePlans);
         timed("planRenderedItems", this::planRenderedItems);
         timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
         timed("planNativeParentTextShells", this::planNativeParentTextShells);
@@ -781,6 +783,107 @@ public final class OwnershipPlanner {
             }
         }
         return false;
+    }
+
+    private void ensureSiblingTextShellBoundsTextFramePlans() {
+        if (data == null) return;
+        int added = 0;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            int domId = parseInt(tf.id(), -1);
+            if (domId < 0) continue;
+            if (hasTextSlotDecisionForTextFrame(domId)) continue;
+            ResolvedPageItem shell = directSiblingTextShellForTextFrame(tf);
+            if (shell == null) continue;
+            double[] bounds = pageRelativeBoundsOf(shell);
+            if (bounds == null || bounds.length < 4) continue;
+            int shellId = parseInt(shell.id(), -1);
+            if (shellId < 0) continue;
+            Placement placement = placementOfTextFrame(tf, domId,
+                    TextAction.OWNED_BY_HWPX_TEXT, VisualAction.DROP_VISUAL);
+            CoordinateSpace coordinateSpace = placement == Placement.INLINE
+                    ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE;
+            plans.add(new ObjectPlan(
+                    domId,
+                    "text_frame:sibling_text_shell_bounds",
+                    tf.pageIndex(),
+                    TextAction.OWNED_BY_HWPX_TEXT,
+                    VisualAction.DROP_VISUAL,
+                    VisualLayer.CONTENT_VISUAL,
+                    placement,
+                    null,
+                    new int[] { shellId, domId },
+                    new int[0],
+                    new int[] { shellId },
+                    new int[] { domId },
+                    new int[0],
+                    "p" + tf.pageIndex() + ":tf-shell-bounds:" + shellId + ":t_" + domId,
+                    Materialization.HWPX_TEXT,
+                    coordinateSpace,
+                    null,
+                    textFrameSourceZOrder(tf),
+                    "source_sibling_text_shell_bounds",
+                    null,
+                    bounds,
+                    tf.layerId(),
+                    tf.layerName(),
+                    tf.layerIndex()));
+            added++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.siblingTextShellBoundsTextFrames.added", added);
+    }
+
+    private ResolvedPageItem directSiblingTextShellForTextFrame(ResolvedTextFrame tf) {
+        if (tf == null || tf.id() == null || data == null) return null;
+        ResolvedPageItem textItem = data.getPageItem(tf.id());
+        if (textItem == null || textItem.parentId() == null || textItem.parentId().isBlank()) {
+            return null;
+        }
+        double[] textBounds = boundsOf(textItem);
+        if (textBounds == null || textBounds.length < 4 || area(textBounds) <= 0.0) {
+            return null;
+        }
+        ResolvedPageItem best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        boolean ambiguous = false;
+        for (ResolvedPageItem sibling : data.pageItems()) {
+            if (sibling == null || sibling.id() == null) continue;
+            if (sibling.id().equals(textItem.id())) continue;
+            if (!safe(textItem.parentId()).equals(safe(sibling.parentId()))) continue;
+            if (!isNativeTextShellShape(sibling)) continue;
+            double[] shellBounds = boundsOf(sibling);
+            if (!textFrameFitsShell(shellBounds, textBounds)) continue;
+            double score = siblingTextShellBoundsScore(shellBounds, textBounds, sibling.zOrder(), tf.zOrder());
+            if (score > bestScore + 0.001) {
+                best = sibling;
+                bestScore = score;
+                ambiguous = false;
+            } else if (Math.abs(score - bestScore) <= 0.001) {
+                ambiguous = true;
+            }
+        }
+        return ambiguous ? null : best;
+    }
+
+    private static double siblingTextShellBoundsScore(
+            double[] shellBounds,
+            double[] textBounds,
+            int shellZOrder,
+            int textZOrder) {
+        double shellArea = area(shellBounds);
+        double textArea = area(textBounds);
+        if (shellArea <= 0.0 || textArea <= 0.0) return Double.NEGATIVE_INFINITY;
+        double shellW = Math.abs(shellBounds[3] - shellBounds[1]);
+        double shellH = Math.abs(shellBounds[2] - shellBounds[0]);
+        double textW = Math.abs(textBounds[3] - textBounds[1]);
+        double textH = Math.abs(textBounds[2] - textBounds[0]);
+        double areaRatio = Math.min(shellArea, textArea) / Math.max(shellArea, textArea);
+        double centerScore = boundsContainCenter(shellBounds, textBounds) ? 2.0 : 0.0;
+        double containmentScore = boundsContains(shellBounds, textBounds, 3.0) ? 4.0 : 0.0;
+        double sizeScore = Math.min(shellW / Math.max(0.01, textW), 4.0)
+                + Math.min(shellH / Math.max(0.01, textH), 4.0);
+        double depthScore = shellZOrder <= textZOrder ? 1.0 : 0.0;
+        return containmentScore + centerScore + sizeScore + areaRatio + depthScore;
     }
 
     private static boolean textFrameHasVisibleSemanticText(ResolvedTextFrame tf) {
