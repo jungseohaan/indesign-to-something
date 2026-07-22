@@ -703,20 +703,43 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
             while (p) {
                 var pn = "";
                 try { pn = p.constructor.name; } catch (eName) { break; }
-                if (pn === "Group") return false;
                 if (pn === "Page" || pn === "Spread" || pn === "MasterSpread" || pn === "Document") return true;
-                try { p = p.parent; } catch (eParent) { break; }
+                return false;
             }
         } catch (e) {}
         return false;
     }
 
-    function masterItemBelongsToMasterSideForPlan(item, masterPage) {
+    function sameMasterPageForPlan(a, b) {
+        try {
+            if (!a || !b) return false;
+            if (a === b) return true;
+        } catch (eSame) {}
+        try { return a.id === b.id; } catch (eId) {}
+        return false;
+    }
+
+    function itemOverspansMasterPageForPlan(itemBounds, masterPageBounds) {
+        try {
+            if (!itemBounds || !masterPageBounds || itemBounds.length < 4 || masterPageBounds.length < 4) return false;
+            var pageH = Math.abs(Number(masterPageBounds[2]) - Number(masterPageBounds[0]));
+            var pageW = Math.abs(Number(masterPageBounds[3]) - Number(masterPageBounds[1]));
+            var h = Math.abs(Number(itemBounds[2]) - Number(itemBounds[0]));
+            var w = Math.abs(Number(itemBounds[3]) - Number(itemBounds[1]));
+            return pageH > 0.01 && pageW > 0.01 && (h > pageH * 1.25 || w > pageW * 1.25);
+        } catch (eOverspan) {}
+        return false;
+    }
+
+    function masterItemBelongsToMasterSideForPlan(item, masterPage, itemBounds, masterPageBounds, allowMasterSpreadFragment) {
         try {
             if (!item || !masterPage) return false;
             try {
                 var parentPage = item.parentPage;
-                if (parentPage && parentPage.id === masterPage.id) return true;
+                if (parentPage && sameMasterPageForPlan(parentPage, masterPage)
+                        && !itemOverspansMasterPageForPlan(itemBounds, masterPageBounds)) {
+                    return true;
+                }
             } catch (eParentPage) {}
             var cur = item.parent;
             var hop = 0;
@@ -724,11 +747,14 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                 var kind = "";
                 try { kind = cur.constructor.name; } catch (eKind) { break; }
                 if (kind === "Page") {
-                    try { return cur.id === masterPage.id; } catch (ePageId) { return false; }
+                    return sameMasterPageForPlan(cur, masterPage);
                 }
-                if (kind === "MasterSpread" || kind === "Document") return false;
+                if (kind === "MasterSpread" || kind === "Document") break;
                 try { cur = cur.parent; } catch (eParent) { break; }
                 hop++;
+            }
+            if (allowMasterSpreadFragment && itemBounds && masterPageBounds) {
+                return boundsIntersectForPlan(itemBounds, masterPageBounds, 0.5);
             }
         } catch (e) {}
         return false;
@@ -845,8 +871,8 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
             for (var ci = 0; ci < children.length; ci++) {
                 try {
                     var cb = _itemBounds(children[ci]);
-                    var childOnMasterSide = masterItemBelongsToMasterSideForPlan(children[ci], masterPage);
-                    if (!cb || (!childOnMasterSide && !boundsIntersectForPlan(cb, pageBounds, 5))) continue;
+                    var childOnMasterSide = masterItemBelongsToMasterSideForPlan(children[ci], masterPage, cb, pageBounds, true);
+                    if (!cb || !childOnMasterSide) continue;
                     if (isPaperFillOnlyMasterMaskForPlan(children[ci], cb, pageBounds)) continue;
                     entries.push({ item: children[ci], bounds: cb });
                 } catch (eChildEntry) {}
@@ -992,8 +1018,12 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                         var item = items[ii];
                         if (!isTopLevelMasterItemForPlan(item)) continue;
                         var b = _itemBounds(item);
-                        var itemOnMasterSide = masterItemBelongsToMasterSideForPlan(item, masterPage);
-                        if (!b || (!itemOnMasterSide && !boundsIntersectForPlan(b, masterPageBounds, 5))) continue;
+                        if (!b) continue;
+                        var itemOnMasterSide = masterItemBelongsToMasterSideForPlan(
+                                item, masterPage, b, masterPageBounds,
+                                itemOverspansMasterPageForPlan(b, masterPageBounds)
+                                        || masterGroupShouldUseChildEntriesForPlan(item, b, masterPageBounds));
+                        if (!itemOnMasterSide) continue;
                         appendPlanMasterEntries(entries, item, b, masterPageBounds, masterPage);
                     } catch (eItem) {}
                 }
