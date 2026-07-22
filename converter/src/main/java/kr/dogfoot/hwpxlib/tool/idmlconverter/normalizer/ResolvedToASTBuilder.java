@@ -29,6 +29,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFl
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDiagnosticsWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocumentBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowIndex;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.table.TableOwnershipPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.table.TableSourceDiagnosticsWriter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.table.TableSourceIndexBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
@@ -164,6 +167,9 @@ public class ResolvedToASTBuilder {
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare")) {
             sections = prepareInput(doc);
         }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.tableSourceIndex")) {
+            prepareTableSourceIndex();
+        }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage1.textFlowIndex")) {
             prepareTextFlowIndex();
         }
@@ -230,6 +236,18 @@ public class ResolvedToASTBuilder {
         return sections;
     }
 
+    private void prepareTableSourceIndex() {
+        this.ctx.tableSourceIndex = TableSourceIndexBuilder.build(this.ctx);
+        TableSourceDiagnosticsWriter.write(this.basePath, this.ctx.tableSourceIndex);
+        if (this.ctx.tableSourceIndex != null) {
+            int executable = this.ctx.tableSourceIndex.executableRecords().size();
+            System.err.println("[ResolvedToASTBuilder] table source records="
+                    + this.ctx.tableSourceIndex.records().size()
+                    + " executable=" + executable
+                    + " warnings=" + this.ctx.tableSourceIndex.warnings().size());
+        }
+    }
+
     /**
      * Stage 1: source ownership policy ObjectPlan bridge.
      *
@@ -240,6 +258,7 @@ public class ResolvedToASTBuilder {
      */
     private void planOwnership() {
         importPlannerDeclaredObjectPlans();
+        TableOwnershipPlanner.plan(this.ctx);
         AnchoredTablePlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
         OwnershipPlanner.runObservation(this.ctx);
@@ -269,6 +288,11 @@ public class ResolvedToASTBuilder {
             for (JsonElement element : plans) {
                 if (element == null || !element.isJsonObject()) continue;
                 JsonObject planJson = element.getAsJsonObject();
+                if (shouldSuppressPlannerDeclaredTablePlan(planJson)) {
+                    warnPlannerDeclaredImportSkipped(planJson,
+                            "superseded_by_stage0_table_source_contract");
+                    continue;
+                }
                 String importContractIssue = plannerDeclaredImportContractIssue(planJson);
                 if (importContractIssue != null) {
                     warnPlannerDeclaredImportSkipped(planJson, importContractIssue);
@@ -316,6 +340,17 @@ public class ResolvedToASTBuilder {
             System.err.println("[ResolvedToASTBuilder] object-plans import skipped: "
                     + e.getMessage());
         }
+    }
+
+    private boolean shouldSuppressPlannerDeclaredTablePlan(JsonObject planJson) {
+        if (planJson == null || ctx == null || ctx.tableSourceIndex == null
+                || ctx.tableSourceIndex.isEmpty()) {
+            return false;
+        }
+        String passId = jsonString(planJson, "passId");
+        if ("pass.table_only_text_frames".equals(passId)) return true;
+        return "PLACE_TABLE_STYLE".equals(jsonString(planJson, "visualAction"))
+                || "HWPX_TABLE_STYLE".equals(jsonString(planJson, "materialization"));
     }
 
     private void applyResolvedTextWrapContracts() {

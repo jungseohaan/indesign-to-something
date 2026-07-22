@@ -44,6 +44,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.table.TableSourceRecord;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -133,6 +134,7 @@ public final class TableBuilder {
         Set<String> pageLevelTableSourceIds = new HashSet<>();
 
         long tableOnlyStart = System.nanoTime();
+        placeTableSourceContracts(ctx, sections, processedTableIds, report);
         placeTableOnlyPlans(ctx, sections, processedTableIds, report);
         report.tableOnlyPlansNanos += System.nanoTime() - tableOnlyStart;
 
@@ -380,6 +382,83 @@ public final class TableBuilder {
         report.nestedTableBlocksAbsorbed = absorbNestedTableBlocksIntoEmptyCells(ctx, sections);
         recordTiming(report);
         printReport(report);
+    }
+
+    private static void placeTableSourceContracts(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections,
+            Set<String> processedTableIds,
+            Phase4Report report) {
+        if (ctx == null || ctx.tableSourceIndex == null || ctx.loadIDMLStory == null
+                || sections == null || processedTableIds == null) {
+            return;
+        }
+        for (TableSourceRecord record : ctx.tableSourceIndex.records()) {
+            if (record == null || !record.executable()) continue;
+            if (!record.tableOnlyStory) {
+                ctx.ownershipWarningLines.add("{\"code\":\"TABLE_SOURCE_CONTRACT_SKIPPED_NON_TABLE_ONLY_STORY\""
+                        + ",\"stage\":\"stage2.tableBuilder\",\"detail\":\"carrier="
+                        + escapeJson(record.carrierTextFrameId)
+                        + " table=" + escapeJson(record.tableId) + "\"}");
+                continue;
+            }
+            int pageIdx = ctx.toSectionIndex.applyAsInt(record.pageIndex);
+            if (pageIdx < 0 || pageIdx >= sections.size()) {
+                ctx.ownershipWarningLines.add("{\"code\":\"TABLE_SOURCE_CONTRACT_PAGE_UNAVAILABLE\""
+                        + ",\"stage\":\"stage2.tableBuilder\",\"detail\":\"carrier="
+                        + escapeJson(record.carrierTextFrameId)
+                        + " pageIndex=" + record.pageIndex + "\"}");
+                continue;
+            }
+            IDMLStory story = ctx.loadIDMLStory.apply(record.storyId);
+            IDMLTable table = findTable(story, record.tableId);
+            if (table == null) {
+                ctx.ownershipWarningLines.add("{\"code\":\"TABLE_SOURCE_CONTRACT_TABLE_MISSING\""
+                        + ",\"stage\":\"stage2.tableBuilder\",\"detail\":\"carrier="
+                        + escapeJson(record.carrierTextFrameId)
+                        + " table=" + escapeJson(record.tableId) + "\"}");
+                continue;
+            }
+            if (!processedTableIds.add(table.selfId())) continue;
+            long x = CoordinateConverter.pointsToHwpunits(record.bounds[1]);
+            long y = CoordinateConverter.pointsToHwpunits(record.bounds[0]);
+            long buildStart = System.nanoTime();
+            ASTTable astTable = buildPreparedAstTable(ctx, table, x, y, 0, false, true);
+            report.buildAstTableNanos += System.nanoTime() - buildStart;
+            if (astTable == null) {
+                ctx.ownershipWarningLines.add("{\"code\":\"TABLE_SOURCE_CONTRACT_BUILD_FAILED\""
+                        + ",\"stage\":\"stage2.tableBuilder\",\"detail\":\"carrier="
+                        + escapeJson(record.carrierTextFrameId)
+                        + " table=" + escapeJson(record.tableId) + "\"}");
+                continue;
+            }
+            long splitStart = System.nanoTime();
+            List<TablePlacement> tablePlacements = splitSpreadWideTable(
+                    ctx, astTable, pageIdx, record.bounds, sections.size());
+            report.splitTableNanos += System.nanoTime() - splitStart;
+            for (TablePlacement placement : tablePlacements) {
+                if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
+                int sourcePageIndex = record.pageIndex + (placement.pageIdx - pageIdx);
+                applyDeclaredTableStyleSources(ctx, table, placement.table, sourcePageIndex);
+                sections.get(placement.pageIdx).addBlock(placement.table);
+            }
+            report.asTableCleanCount++;
+            report.tableOnlyPlansPlaced++;
+            report.total++;
+        }
+    }
+
+    private static IDMLTable findTable(IDMLStory story, String tableId) {
+        if (story == null || story.tables() == null || tableId == null) return null;
+        for (IDMLTable table : story.tables()) {
+            if (table != null && tableId.equals(table.selfId())) return table;
+        }
+        return null;
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static void placeTableOnlyPlans(
@@ -830,6 +909,17 @@ public final class TableBuilder {
             long y,
             int zOrder,
             boolean preserveNestedTableStyleSlot) {
+        return buildPreparedAstTable(ctx, idmlTable, x, y, zOrder, preserveNestedTableStyleSlot, false);
+    }
+
+    private static ASTTable buildPreparedAstTable(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            long x,
+            long y,
+            int zOrder,
+            boolean preserveNestedTableStyleSlot,
+            boolean preserveSourceContractPlacement) {
         final ResolvedBuildContext cellCtx = ctx;
         ASTTable astTable = ASTTableConverter.convertTableSimple(
                 idmlTable, x, y, zOrder,
@@ -837,6 +927,10 @@ public final class TableBuilder {
                 ctx != null ? ctx.resolvedData : null,
                 ctx != null ? ctx.styleResolver : null,
                 cellCtx == null ? null : ((table, idmlCell) -> StoryFlowAssembler.buildCellFlow(cellCtx, table, idmlCell)));
+        if (preserveSourceContractPlacement && astTable != null) {
+            astTable.x(x);
+            astTable.y(y);
+        }
         traceTableCells(ctx, "TableBuilder.afterConvertTableSimple", idmlTable, astTable);
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
         inlineNestedTextFrameParagraphsInCells(ctx, astTable);
@@ -1392,6 +1486,14 @@ public final class TableBuilder {
             ResolvedBuildContext ctx,
             IDMLTable idmlTable,
             ASTTable table) {
+        applyDeclaredTableStyleSources(ctx, idmlTable, table, null);
+    }
+
+    private static void applyDeclaredTableStyleSources(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            ASTTable table,
+            Integer sourcePageIndex) {
         if (ctx == null || ctx.resolvedData == null || idmlTable == null || table == null) return;
         int tableId = parseFlexibleId(idmlTable.selfId());
         if (tableId < 0) return;
@@ -1405,6 +1507,10 @@ public final class TableBuilder {
         for (Integer sourceId : styleSourceIds) {
             if (sourceId == null || sourceId < 0) continue;
             ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (sourcePageIndex != null && item != null && item.pageIndex() >= 0
+                    && item.pageIndex() != sourcePageIndex) {
+                continue;
+            }
             if (applyDeclaredTableStyleSource(ctx, table, item)) {
                 markPageItemHandled(ctx, sourceId);
                 applied++;
@@ -1468,8 +1574,8 @@ public final class TableBuilder {
             ASTTable table,
             ResolvedPageItem item,
             String fill) {
-        double[] sourceBounds = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
-        List<ASTTableCell> cells = cellsCoveredBySource(table, sourceBounds);
+        double[] sourceBounds = sourceBoundsForTable(ctx, table, item);
+        List<ASTTableCell> cells = cellsCoveredByFillSource(table, sourceBounds);
         if (cells.isEmpty() && singleCell(table) != null) {
             cells.add(singleCell(table));
         }
@@ -1482,13 +1588,40 @@ public final class TableBuilder {
         return applied;
     }
 
+    private static List<ASTTableCell> cellsCoveredByFillSource(ASTTable table, double[] sourceBounds) {
+        List<ASTTableCell> cells = cellsCoveredBySource(table, sourceBounds);
+        if (!cells.isEmpty()) return cells;
+        return cellsInSourceFillBand(table, sourceBounds);
+    }
+
+    private static List<ASTTableCell> cellsInSourceFillBand(ASTTable table, double[] sourceBounds) {
+        List<ASTTableCell> cells = new ArrayList<>();
+        if (!validStyleSourceBounds(sourceBounds)) return cells;
+        double centerY = (sourceBounds[0] + sourceBounds[2]) / 2.0;
+        double sourceLeft = Math.min(sourceBounds[1], sourceBounds[3]);
+        double sourceRight = Math.max(sourceBounds[1], sourceBounds[3]);
+        for (CellPlacement placement : cellPlacements(table)) {
+            if (placement == null || placement.cell == null) continue;
+            if (centerY < placement.top - 0.75 || centerY > placement.bottom + 0.75) continue;
+            double overlap = overlapLength(sourceLeft, sourceRight, placement.left, placement.right);
+            if (overlap <= 0.75) continue;
+            double cellWidth = Math.max(0.0, placement.right - placement.left);
+            double sourceWidth = Math.max(0.0, sourceRight - sourceLeft);
+            double required = Math.min(cellWidth, sourceWidth) * 0.35;
+            if (overlap >= Math.max(0.75, required)) {
+                cells.add(placement.cell);
+            }
+        }
+        return cells;
+    }
+
     private static boolean shouldApplyFillFromStyleSource(
             ResolvedBuildContext ctx,
             ASTTable table,
             ResolvedPageItem item) {
         if (table == null || item == null) return false;
         if (singleCell(table) != null) return true;
-        double[] sourceBounds = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
+        double[] sourceBounds = sourceBoundsForTable(ctx, table, item);
         if ("Rectangle".equals(item.type())
                 && boundsCover(sourceBounds, tableBoundsPoints(table), 0.75)) {
             return false;
@@ -1501,7 +1634,7 @@ public final class TableBuilder {
             ASTTable table,
             ResolvedPageItem item,
             ASTTableCell.CellBorder border) {
-        double[] sourceBounds = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
+        double[] sourceBounds = sourceBoundsForTable(ctx, table, item);
         if (boundsCover(tableBoundsPoints(table), sourceBounds, 0.75)) {
             applyOuterBorder(table, border);
             return true;
@@ -1524,7 +1657,7 @@ public final class TableBuilder {
             ASTTable table,
             ResolvedPageItem item,
             ASTTableCell.CellBorder border) {
-        double[] line = normalizeSourceBoundsForTable(ctx, table, boundsOf(ctx, item));
+        double[] line = sourceBoundsForTable(ctx, table, item);
         if (line == null || line.length < 4) return false;
         double height = Math.abs(line[2] - line[0]);
         double width = Math.abs(line[3] - line[1]);
@@ -1574,6 +1707,113 @@ public final class TableBuilder {
             }
         }
         return cells;
+    }
+
+    private static double[] sourceBoundsForTable(
+            ResolvedBuildContext ctx,
+            ASTTable table,
+            ResolvedPageItem item) {
+        List<double[]> candidates = sourceBoundsCandidatesForTable(ctx, table, item);
+        double[] best = null;
+        double bestScore = -1.0;
+        for (double[] candidate : candidates) {
+            if (!validStyleSourceBounds(candidate)) continue;
+            double[] normalized = normalizeSourceBoundsForTable(ctx, table, candidate);
+            double score = tableOverlapScore(tableBoundsPoints(table), normalized);
+            if (best == null || score > bestScore + 0.0001) {
+                best = normalized;
+                bestScore = score;
+            }
+        }
+        return best != null ? best : boundsOf(ctx, item);
+    }
+
+    private static List<double[]> sourceBoundsCandidatesForTable(
+            ResolvedBuildContext ctx,
+            ASTTable table,
+            ResolvedPageItem item) {
+        List<double[]> candidates = new ArrayList<>();
+        if (item == null) return candidates;
+        boolean spreadWide = tableUsesSpreadCoordinateSpace(ctx, table);
+        if (spreadWide) {
+            addBoundsCandidate(candidates, spreadBoundsFromPageRelative(ctx, item, item.geometricBounds()));
+            addBoundsCandidate(candidates, spreadBoundsFromPageRelative(ctx, item, item.visibleBounds()));
+            addBoundsCandidate(candidates, spreadBoundsFromPageRelative(ctx, item, item.pageRelativeBounds()));
+            addBoundsCandidate(candidates, item.geometricBounds());
+            addBoundsCandidate(candidates, item.visibleBounds());
+            addBoundsCandidate(candidates, item.pageRelativeBounds());
+            addBoundsCandidate(candidates, normalizePageItemBounds(ctx, item, item.geometricBounds()));
+            addBoundsCandidate(candidates, normalizePageItemBounds(ctx, item, item.visibleBounds()));
+        } else {
+            addBoundsCandidate(candidates, item.pageRelativeBounds());
+            addBoundsCandidate(candidates, normalizePageItemBounds(ctx, item, item.visibleBounds()));
+            addBoundsCandidate(candidates, normalizePageItemBounds(ctx, item, item.geometricBounds()));
+            addBoundsCandidate(candidates, item.visibleBounds());
+            addBoundsCandidate(candidates, item.geometricBounds());
+        }
+        return candidates;
+    }
+
+    private static double[] spreadBoundsFromPageRelative(
+            ResolvedBuildContext ctx,
+            ResolvedPageItem item,
+            double[] bounds) {
+        if (!validStyleSourceBounds(bounds) || ctx == null || ctx.resolvedData == null || item == null
+                || item.pageIndex() < 0) {
+            return null;
+        }
+        ResolvedPage page = resolvedPageByIndex(ctx, item.pageIndex());
+        double[] pageBounds = page != null ? page.bounds() : null;
+        if (!validBounds(pageBounds)) return null;
+        double pageTop = pageBounds[0];
+        double pageLeft = pageBounds[1];
+        if (Math.abs(pageTop) < 0.0001 && Math.abs(pageLeft) < 0.0001) {
+            return bounds;
+        }
+        return new double[] {
+                bounds[0] + pageTop,
+                bounds[1] + pageLeft,
+                bounds[2] + pageTop,
+                bounds[3] + pageLeft
+        };
+    }
+
+    private static void addBoundsCandidate(List<double[]> candidates, double[] bounds) {
+        if (candidates == null || !validStyleSourceBounds(bounds)) return;
+        for (double[] existing : candidates) {
+            if (sameBounds(existing, bounds, 0.0001)) return;
+        }
+        candidates.add(bounds);
+    }
+
+    private static boolean sameBounds(double[] a, double[] b, double tolerance) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        double t = Math.max(0.0, tolerance);
+        return Math.abs(a[0] - b[0]) <= t
+                && Math.abs(a[1] - b[1]) <= t
+                && Math.abs(a[2] - b[2]) <= t
+                && Math.abs(a[3] - b[3]) <= t;
+    }
+
+    private static boolean tableUsesSpreadCoordinateSpace(ResolvedBuildContext ctx, ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || table == null) return false;
+        double pageWidth = 0.0;
+        if (ctx.resolvedData.pages() != null && !ctx.resolvedData.pages().isEmpty()) {
+            ResolvedPage page = ctx.resolvedData.pages().get(0);
+            double rawPageWidth = page != null ? page.width() : 0.0;
+            double[] pageBounds = page != null ? page.bounds() : null;
+            if (rawPageWidth <= 0.0 && validBounds(pageBounds)) {
+                rawPageWidth = pageBounds[3] - pageBounds[1];
+            }
+            if (rawPageWidth > 0.0) {
+                double scale = ctx.resolvedData.scaleFactor() > 0.0 ? ctx.resolvedData.scaleFactor() : 1.0;
+                pageWidth = rawPageWidth * scale;
+            }
+        }
+        if (pageWidth <= 0.0) return false;
+        double tableLeft = CoordinateConverter.hwpunitsToPoints(table.x());
+        double tableWidth = CoordinateConverter.hwpunitsToPoints(tableWidth(table));
+        return tableWidth > pageWidth * 1.05 || tableLeft + tableWidth > pageWidth + 1.0;
     }
 
     private static double[] normalizeSourceBoundsForTable(
@@ -1718,6 +1958,14 @@ public final class TableBuilder {
         return Math.max(minA, minB) <= Math.min(maxA, maxB) + Math.max(0.0, tolerance);
     }
 
+    private static double overlapLength(double a0, double a1, double b0, double b1) {
+        double minA = Math.min(a0, a1);
+        double maxA = Math.max(a0, a1);
+        double minB = Math.min(b0, b1);
+        double maxB = Math.max(b0, b1);
+        return Math.max(0.0, Math.min(maxA, maxB) - Math.max(minA, minB));
+    }
+
     private static ASTTableCell singleCell(ASTTable table) {
         if (table == null || table.rows() == null || table.rows().size() != 1) return null;
         ASTTableRow row = table.rows().get(0);
@@ -1803,7 +2051,7 @@ public final class TableBuilder {
         List<TablePlacement> result = new ArrayList<>();
         if (ctx == null || ctx.resolvedData == null || table == null
                 || table.columnWidths() == null || table.columnWidths().size() < 2
-                || pageIdx + 1 >= sectionCount) {
+                || pageIdx < 0 || pageIdx >= sectionCount) {
             result.add(new TablePlacement(table, pageIdx));
             return result;
         }
@@ -1842,19 +2090,28 @@ public final class TableBuilder {
         }
 
         int rightStartCol = skipLeadingEmptySplitColumns(table, splitCol, table.columnWidths().size());
+        long sourcePageX = Math.max(0L, table.x());
         ASTTable left = sliceTableColumns(table, 0, splitCol);
         ASTTable right = sliceTableColumns(table, rightStartCol, table.columnWidths().size());
         long rightSourceX = table.x() + columnWidthSum(table.columnWidths(), 0, rightStartCol) - pageWidth;
-        right.x(Math.max(0L, rightSourceX));
-        fitTableToPage(left, pageWidth);
-        fitTableToPage(right, pageWidth);
+        fitTableSliceToPage(left, pageWidth, sourcePageX);
+        fitTableSliceToPage(right, pageWidth, Math.max(0L, rightSourceX));
         if (ctx.debugAst) {
             left.debugOrNew().note("spread-wide table slice: columns 0-" + (splitCol - 1));
             right.debugOrNew().note("spread-wide table slice: columns " + splitCol
                     + "-" + (table.columnWidths().size() - 1));
         }
         result.add(new TablePlacement(left, pageIdx));
-        result.add(new TablePlacement(right, pageIdx + 1));
+        if (pageIdx + 1 < sectionCount) {
+            result.add(new TablePlacement(right, pageIdx + 1));
+        } else {
+            ctx.ownershipWarningLines.add("{\"code\":\"TABLE_SPREAD_WIDE_SLICE_PAGE_UNAVAILABLE\""
+                    + ",\"stage\":\"stage2.tableBuilder\",\"detail\":\"source="
+                    + escapeJson(table.sourceId())
+                    + " pageIdx=" + pageIdx
+                    + " droppedColumns=" + rightStartCol + "-" + (table.columnWidths().size() - 1)
+                    + "\"}");
+        }
         return result;
     }
 
@@ -2012,6 +2269,49 @@ public final class TableBuilder {
         table.width(scaledTotal);
     }
 
+    private static void fitTableSliceToPage(ASTTable table, long pageWidth, long fixedX) {
+        if (table == null) return;
+        long pageX = Math.max(0L, fixedX);
+        table.x(pageX);
+        if (table.columnWidths() == null || table.columnWidths().isEmpty()) return;
+        long width = tableWidth(table);
+        table.width(width);
+        long available = pageWidth - pageX;
+        if (available <= 0 || width <= available) return;
+        scaleTableColumns(table, available);
+    }
+
+    private static void scaleTableColumns(ASTTable table, long targetWidth) {
+        if (table == null || table.columnWidths() == null || table.columnWidths().isEmpty()
+                || targetWidth <= 0) {
+            return;
+        }
+        long width = tableWidth(table);
+        if (width <= 0 || width <= targetWidth) {
+            table.width(width);
+            return;
+        }
+        double scale = (double) targetWidth / (double) width;
+        long scaledTotal = 0;
+        for (int i = 0; i < table.columnWidths().size(); i++) {
+            long oldWidth = table.columnWidths().get(i);
+            long newWidth = Math.max(1L, Math.round(oldWidth * scale));
+            table.columnWidths().set(i, newWidth);
+            scaledTotal += newWidth;
+        }
+        if (table.rows() != null) {
+            for (ASTTableRow row : table.rows()) {
+                if (row == null || row.cells() == null) continue;
+                for (ASTTableCell cell : row.cells()) {
+                    int start = Math.max(0, cell.columnIndex());
+                    int end = Math.min(table.columnWidths().size(), start + Math.max(1, cell.columnSpan()));
+                    cell.width(columnWidthSum(table.columnWidths(), start, end));
+                }
+            }
+        }
+        table.width(scaledTotal);
+    }
+
     private static long tableWidth(ASTTable table) {
         return table != null ? columnWidthSum(table.columnWidths(), 0,
                 table.columnWidths() != null ? table.columnWidths().size() : 0) : 0;
@@ -2134,6 +2434,7 @@ public final class TableBuilder {
             ASTTable table) {
         if (ctx == null || ctx.resolvedData == null || table == null || table.rows() == null) return;
         boolean singleCellTable = singleCell(table) != null;
+        if (!singleCellTable) return;
         int applied = 0;
         int removed = 0;
         for (ASTTableRow row : table.rows()) {

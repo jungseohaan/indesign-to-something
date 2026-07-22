@@ -172,6 +172,30 @@ source objects as the table's `TABLE_STYLE_SLOT`.
   has one or more IDML tables and whose own contents are marker-only after
   removing InDesign control characters by character code. Story-level contents
   may include cell text and must not be used as the sole emptiness test.
+- Table execution is plan-only. A visible HWPX table may be emitted only from a
+  Stage 1 `ObjectPlan` with `TABLE_STYLE_SLOT`, `PLACE_TABLE_STYLE`, and
+  `HWPX_TABLE_STYLE`. Later executors must not rediscover, reposition, or rescue
+  tables by scanning IDML stories, bounds, page overlap, text contents, or
+  nearby graphics. If the plan is missing or not executable, the table is
+  omitted with a table ownership warning.
+- Stage 0 must expose table source facts before ownership planning: IDML story
+  id, IDML table id, decimal table id, carrier TextFrame id, carrier parent
+  chain, source visibility through that chain, page index, carrier bounds, table
+  content bounds, cell grid, row/column geometry, and declared table appearance
+  sources. These facts are not ownership decisions.
+- A table carrier is executable only when the carrier and its source parent
+  chain are visible. Child visibility is not enough. A table-only TextFrame under
+  a hidden group must not become a visible HWPX table; it may only produce a
+  diagnostic or `DROP_VISUAL` plan.
+- Cross-page tables are represented by explicit page-local table fragment
+  ObjectPlans. Executors must not infer previous/next page fragments from
+  negative x, page width, carrier width, table width, or row/column geometry.
+  Each fragment must carry its own `pageIndex`, `bounds`, and fragment source
+  range from Stage 1.
+- Missing table facts are not repaired. The allowed outcome for missing story,
+  table, carrier, style source, or fragment facts is a warning and omission, not
+  a synthetic table, fallback placement, borrowed border/fill, or PNG
+  replacement.
 - IDML table/cell layout metadata includes `TextTopInset`,
   `FirstBaselineOffset`, `MinimumFirstBaselineOffset`, and
   `VerticalJustification`. These are source table layout properties and must

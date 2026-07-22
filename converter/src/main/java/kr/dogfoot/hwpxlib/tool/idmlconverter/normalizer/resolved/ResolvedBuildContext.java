@@ -20,6 +20,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Visua
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDiagnostics;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowIndex;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.table.TableSourceIndex;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
@@ -98,6 +99,9 @@ public final class ResolvedBuildContext {
      * ResolvedToASTBuilder의 idmlStoryCache 인스턴스 상태에 위임.
      */
     public Function<String, IDMLStory> loadIDMLStory;
+
+    /** Stage 0 table source facts. Later stages execute or warn from this index only. */
+    public TableSourceIndex tableSourceIndex;
 
     /**
      * SPEC-016 Phase 2: 매칭 신뢰도 누적 카운터.
