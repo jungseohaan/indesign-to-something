@@ -4988,6 +4988,11 @@ public class InlineFrameHandler {
         // 배치 여부는 Stage 1 ObjectPlan의 PLACE_INLINE_PNG만 따른다.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            ObjectPlan directAnchorPlan = findDirectInlineVisualPlanForRenderedAnchor(
+                    ctx, anchoredObjectId, rg);
+            if (directAnchorPlan != null) {
+                plan = directAnchorPlan;
+            }
             boolean plannedAnchorMaterial = plan != null
                     && plan.placement == Placement.INLINE
                     && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
@@ -5105,6 +5110,39 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static ObjectPlan findDirectInlineVisualPlanForRenderedAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            RenderedGroup rg) {
+        if (ctx == null || rg == null || anchoredObjectId < 0) return null;
+        ObjectPlan best = null;
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectId(anchoredObjectId)) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+                continue;
+            }
+            if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
+            if (plan.file == null || !plan.file.equals(rg.file())) continue;
+            if (best == null || directInlineVisualPlanPriority(plan) > directInlineVisualPlanPriority(best)) {
+                best = plan;
+            }
+        }
+        return best;
+    }
+
+    private static int directInlineVisualPlanPriority(ObjectPlan plan) {
+        if (plan == null) return 0;
+        int score = 0;
+        if (plan.domId >= 0) score += 4;
+        if (plan.renderId != null) score += 2;
+        if (plan.inlineSourceTreeClosed) score += 2;
+        if (plan.bounds != null && plan.bounds.length >= 4) score += 1;
+        return score;
     }
 
     private static void applyInlineGraphicAnchorAndWrapMetadata(
