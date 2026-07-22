@@ -609,6 +609,82 @@ public class ASTMathGrouper {
     }
 
     /**
+     * EH 첨자 런 직전의 본문 base 런이 EH 수식 그룹을 시작할 수 있는지 확인한다.
+     *
+     * <p>InDesign은 x²를 "x" 본문 런 + "Û`" EH상부자 런으로 쪼개기도 한다.
+     * 숫자 base(1², 11², 23.0², 1/2²)도 같은 방식으로 갈라질 수 있다.
+     * 이때 앞의 단일 base가 먼저 일반 텍스트로 확정되면 뒤 첨자만 수식이 되어
+     * base가 수식에서 빠진다. source run의 인접성과 EH 첨자 스타일/인코딩 증거가
+     * 모두 있을 때만 base를 EH 그룹 시작으로 편입한다.
+     */
+    public static boolean isPreEHMathRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+        if (run == null || runs == null || idx < 0 || idx >= runs.size()) return false;
+        if (run.isEHFont() || run.isBTFont() || run.isNPFont()) return false;
+        if (hasInlineContent(run)) return false;
+
+        String text = run.content();
+        if (!isMathBaseText(text)) return false;
+
+        IDMLCharacterRun next = nextAdjacentVisibleRun(runs, idx + 1);
+        return isTrueEHScriptRun(next);
+    }
+
+    private static boolean isMathBaseText(String text) {
+        if (text == null) return false;
+        String t = text.trim();
+        if (t.isEmpty()) return false;
+        if (isNumericMathBaseText(t)) return true;
+        if (t.length() != 1) return false;
+        char c = t.charAt(0);
+        if (c >= 0xAC00 && c <= 0xD7AF) return false;
+        if (c >= 0x3131 && c <= 0x318E) return false;
+        if (c == '\t') return false;
+        return (c >= 'A' && c <= 'Z')
+                || (c >= 'a' && c <= 'z');
+    }
+
+    private static boolean isNumericMathBaseText(String text) {
+        return text.matches("[0-9]+")
+                || text.matches("[0-9]+\\.[0-9]+")
+                || text.matches("[0-9]+/[0-9]+");
+    }
+
+    private static IDMLCharacterRun nextAdjacentVisibleRun(List<IDMLCharacterRun> runs, int start) {
+        for (int i = start; i < runs.size(); i++) {
+            IDMLCharacterRun next = runs.get(i);
+            if (next == null) continue;
+            String text = next.content();
+            if (text == null || text.isEmpty()) continue;
+            if (text.trim().isEmpty()) return null;
+            return next;
+        }
+        return null;
+    }
+
+    private static boolean isTrueEHScriptRun(IDMLCharacterRun run) {
+        if (run == null) return false;
+        if (hasInlineContent(run)) return false;
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+
+        boolean hasEncodedScript = EHFontGlyphMap.containsEHEncodedChars(text);
+        boolean hasBacktick = text.indexOf('`') >= 0;
+        boolean scriptFont = EHFontGlyphMap.isSuperscriptFont(run.fontFamily())
+                || EHFontGlyphMap.isSubscriptFont(run.fontFamily())
+                || run.isSuperscript()
+                || run.isSubscript();
+        if (!scriptFont && !(run.isEHFont() && hasBacktick) && !hasEncodedScript) return false;
+
+        return hasEncodedScript || hasBacktick;
+    }
+
+    private static boolean hasInlineContent(IDMLCharacterRun run) {
+        return (run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                || (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty())
+                || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty());
+    }
+
+    /**
      * EH 수식 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
@@ -1572,6 +1648,9 @@ public class ASTMathGrouper {
         if (mathRuns == null) return false;
         for (IDMLCharacterRun run : mathRuns) {
             if (run == null || run.content() == null) continue;
+            if (run.grepMathFont()) {
+                return true;
+            }
             String text = run.content();
             if (EHFontGlyphMap.containsEHEncodedChars(text)
                     || EHFontGlyphMap.containsEHFractionPattern(text)) {

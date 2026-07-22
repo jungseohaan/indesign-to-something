@@ -78,20 +78,19 @@ public class StoryLoader {
             return null;
         }
 
-        // 캐시 확인
         IDMLStory idmlStory = null;
-        if (ctx.idmlStoryCache != null) {
-            idmlStory = ctx.idmlStoryCache.get(storyId);
-            if (idmlStory == null) idmlStory = ctx.idmlStoryCache.get(sourceStoryId);
-            if (idmlStory == null) idmlStory = ctx.idmlStoryCache.get(hexId);
-        }
-        if (idmlStory != null) {
-            ConversionTiming.addCounter("phase3.storyLoader.cacheHits", 1);
-        }
-        if (idmlStory == null && ctx.loadIDMLStory != null) {
+        if (ctx.loadIDMLStory != null) {
             idmlStory = ctx.loadIDMLStory.apply(storyId);
             if (idmlStory != null) {
                 ConversionTiming.addCounter("phase3.storyLoader.sharedLoaderHits", 1);
+            }
+        }
+        if (idmlStory == null && ctx.idmlStoryCache != null) {
+            idmlStory = ctx.idmlStoryCache.get(storyId);
+            if (idmlStory == null) idmlStory = ctx.idmlStoryCache.get(sourceStoryId);
+            if (idmlStory == null) idmlStory = ctx.idmlStoryCache.get(hexId);
+            if (idmlStory != null) {
+                ConversionTiming.addCounter("phase3.storyLoader.cacheHits", 1);
             }
         }
         if (idmlStory == null) {
@@ -417,6 +416,7 @@ public class StoryLoader {
                         && (run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
+                        || (ehMathGroup.isEmpty() && ASTMathGrouper.isPreEHMathRun(run, runs, idx))
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
                         || (!ehMathGroup.isEmpty() && MathProcessor.isEHSqrtContent(run, ehMathGroup)));
 
@@ -462,6 +462,7 @@ public class StoryLoader {
                             && ((run.isBTFont()
                                     && !btBodyTextWithoutFormulaStructure
                                     && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
+                            || run.grepMathFont()
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
                             || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()))
                             || formulaClusterRun);

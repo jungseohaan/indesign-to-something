@@ -36,9 +36,14 @@ public final class FormulaClassifier {
         String trimmed = script.trim();
         if (trimmed.isEmpty()) return false;
         if (containsKorean(trimmed)) return false;
-        if (isPlainUnitOrNumber(trimmed)) return false;
+        if (isPlainUnitOrNumber(trimmed)
+                && !(hasEncodedMathEvidence && isSingleAsciiLetter(trimmed))) {
+            return false;
+        }
         if (trimmed.matches("[:;]?\\d+[:;]?")) return false;
-        if (trimmed.matches("\\d*[A-Za-z]+\\d*") && !containsEquationSyntax(trimmed)) {
+        if (trimmed.matches("\\d*[A-Za-z]+\\d*")
+                && !containsEquationSyntax(trimmed)
+                && !(hasEncodedMathEvidence && isSingleAsciiLetter(trimmed))) {
             return false;
         }
         // =/연산자로 시작·끝나는 조각은 보통 수식이 아니지만, 위첨자(^{)·분수(over)·
@@ -374,6 +379,10 @@ public final class FormulaClassifier {
 
     private static boolean isAsciiLetter(char c) {
         return isUpperAscii(c) || isLowerAscii(c);
+    }
+
+    private static boolean isSingleAsciiLetter(String text) {
+        return text != null && text.length() == 1 && isAsciiLetter(text.charAt(0));
     }
 
     private static boolean isUpperAscii(char c) {

@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.idml;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 
 import org.w3c.dom.*;
@@ -1666,21 +1667,20 @@ public class IDMLStoryParser {
     // ===== GREP 스타일 해석 =====
 
     /**
-     * GREP 스타일에서 BT수식M 폰트가 동적 적용되는 CharacterRun을 해석한다.
+     * GREP 스타일에서 수식 폰트가 동적 적용되는 CharacterRun을 해석한다.
      */
     static void resolveGrepMathStyles(IDMLDocument doc) {
-        // 1. BT수식M AppliedFont를 가진 문자 스타일 ID 셋 구축
-        Set<String> btMathCharStyleRefs = new HashSet<>();
+        // 1. 수식 AppliedFont(BT/EH)를 가진 문자 스타일 ID 셋 구축
+        Set<String> mathCharStyleRefs = new HashSet<>();
         for (Map.Entry<String, IDMLStyleDef> entry : doc.charStyles().entrySet()) {
             IDMLStyleDef charStyle = entry.getValue();
-            String font = charStyle.fontFamily();
-            if (font != null && (font.contains("BT수식") || font.contains("BTM"))) {
-                btMathCharStyleRefs.add(entry.getKey());
+            if (isGrepMathCharacterStyle(charStyle)) {
+                mathCharStyleRefs.add(entry.getKey());
             }
         }
-        if (btMathCharStyleRefs.isEmpty()) return;
+        if (mathCharStyleRefs.isEmpty()) return;
 
-        // 2. 단락 스타일별 BT수식M GREP 규칙의 Java Pattern 캐시 구축
+        // 2. 단락 스타일별 수식 GREP 규칙의 Java Pattern 캐시 구축
         Map<String, List<java.util.regex.Pattern>> paraStyleGrepPatterns = new HashMap<>();
 
         for (Map.Entry<String, IDMLStyleDef> entry : doc.paraStyles().entrySet()) {
@@ -1689,8 +1689,8 @@ public class IDMLStoryParser {
 
             List<java.util.regex.Pattern> patterns = new ArrayList<>();
             for (IDMLStyleDef.GrepStyleRule rule : paraStyle.grepStyles()) {
-                // GREP 규칙이 BT수식M 문자 스타일을 적용하는지 확인
-                if (!btMathCharStyleRefs.contains(rule.appliedCharacterStyle())) continue;
+                // GREP 규칙이 수식 문자 스타일을 적용하는지 확인
+                if (!mathCharStyleRefs.contains(rule.appliedCharacterStyle())) continue;
 
                 java.util.regex.Pattern pat = convertIdGrepToJavaPattern(rule.grepExpression());
                 if (pat != null) {
@@ -1702,21 +1702,6 @@ public class IDMLStoryParser {
             }
         }
         if (paraStyleGrepPatterns.isEmpty()) return;
-
-        // 2-1. 기본 패턴: 모든 스타일의 BT수식M GREP 패턴 합집합
-        // GREP 규칙이 없는 단락 스타일에도 수식폰트 적용하기 위한 폴백
-        Set<String> allPatternStrings = new LinkedHashSet<>();
-        List<java.util.regex.Pattern> defaultPatterns = new ArrayList<>();
-        for (List<java.util.regex.Pattern> pats : paraStyleGrepPatterns.values()) {
-            for (java.util.regex.Pattern pat : pats) {
-                if (allPatternStrings.add(pat.pattern())) {
-                    defaultPatterns.add(pat);
-                }
-            }
-        }
-        if (!defaultPatterns.isEmpty()) {
-            paraStyleGrepPatterns.put("__default__", defaultPatterns);
-        }
 
         // 3. 모든 Story의 CharacterRun을 순회하여 GREP 매칭 수행
         int[] counts = {0, 0}; // [resolvedCount, splitCount]
@@ -1738,11 +1723,18 @@ public class IDMLStoryParser {
         }
 
         if (counts[0] > 0 || counts[1] > 0) {
-            System.err.println("[IDMLLoader] GREP->BT math resolved: " + counts[0] + " runs"
+            System.err.println("[IDMLLoader] GREP math resolved: " + counts[0] + " runs"
                     + ", split: " + counts[1] + " mixed runs"
-                    + " (BT charStyles: " + btMathCharStyleRefs.size()
+                    + " (math charStyles: " + mathCharStyleRefs.size()
                     + ", paraStyles with GREP: " + paraStyleGrepPatterns.size() + ")");
         }
+    }
+
+    private static boolean isGrepMathCharacterStyle(IDMLStyleDef charStyle) {
+        if (charStyle == null) return false;
+        String font = charStyle.fontFamily();
+        if (font == null) return false;
+        return BTFontGlyphMap.isBTFontFamily(font) || EHFontGlyphMap.isEHFontFamily(font);
     }
 
     /**
@@ -1972,9 +1964,10 @@ public class IDMLStoryParser {
     static void resolveGrepForParagraph(IDMLParagraph para,
                                         Map<String, List<java.util.regex.Pattern>> paraStyleGrepPatterns,
                                         int[] counts) {
-        // 모든 단락에 전체 BT수식M GREP 패턴 합집합(default) 적용
-        // 스타일별 고유 패턴만으로는 일부 매칭이 누락되므로 (예: 01 개념열기-지문의 2\3=6)
-        List<java.util.regex.Pattern> patterns = paraStyleGrepPatterns.get("__default__");
+        String paraStyleRef = para.appliedParagraphStyle();
+        List<java.util.regex.Pattern> patterns = paraStyleRef != null
+                ? paraStyleGrepPatterns.get(paraStyleRef)
+                : null;
         if (patterns == null || patterns.isEmpty()) return;
 
         List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
