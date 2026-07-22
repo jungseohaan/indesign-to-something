@@ -90,7 +90,15 @@ public class ResolvedToASTBuilder {
         if (idmlDocument != null || idmlDir == null) return;
         try {
             try (ConversionTiming.Scope ignored = ConversionTiming.time("infra.idmlDocumentLoad")) {
-                idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.loadFromDirectory(idmlDir);
+                File designmap = new File(idmlDir, "designmap.xml");
+                File outputIdml = new File(idmlDir, "output.idml");
+                if (designmap.exists()) {
+                    idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.loadFromDirectory(idmlDir);
+                } else if (outputIdml.exists()) {
+                    idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.load(outputIdml);
+                } else {
+                    idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.loadFromDirectory(idmlDir);
+                }
             }
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] IDML document load failed: " + e.getMessage());
@@ -2004,8 +2012,6 @@ public class ResolvedToASTBuilder {
      * IDML Story XML을 로드하고 캐시한다. ctx.loadIDMLStory로 phase에 노출.
      */
     private IDMLStory loadIDMLStory(String storyId) {
-        if (idmlStoryCache.containsKey(storyId)) return idmlStoryCache.get(storyId);
-
         String sourceStoryId = sourceStoryId(storyId);
         String hexId;
         try {
@@ -2017,13 +2023,25 @@ public class ResolvedToASTBuilder {
                 hexId = Integer.toHexString(Integer.parseInt(sourceStoryId));
             }
         } catch (NumberFormatException e) {
+            if (idmlStoryCache.containsKey(storyId)) return idmlStoryCache.get(storyId);
             return null;
         }
+
+        ensureIdmlDocument();
+        IDMLStory loadedStory = loadedIDMLStory(storyId, sourceStoryId, "u" + hexId);
+        if (loadedStory != null) {
+            idmlStoryCache.put(storyId, loadedStory);
+            if (!sourceStoryId.equals(storyId)) idmlStoryCache.put(sourceStoryId, loadedStory);
+            idmlStoryCache.put("u" + hexId, loadedStory);
+            return loadedStory;
+        }
+
+        if (idmlStoryCache.containsKey(storyId)) return idmlStoryCache.get(storyId);
+
         java.io.File storyFile = new java.io.File(idmlDir, "Stories/Story_u" + hexId + ".xml");
         if (!storyFile.exists()) return null;
 
         try {
-            ensureIdmlDocument();
             javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
             factory.setNamespaceAware(true);
             org.w3c.dom.Document xmlDoc = factory.newDocumentBuilder().parse(storyFile);
@@ -2035,6 +2053,33 @@ public class ResolvedToASTBuilder {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private IDMLStory loadedIDMLStory(String... refs) {
+        if (idmlDocument == null || refs == null) return null;
+        for (String ref : refs) {
+            if (ref == null || ref.isEmpty()) continue;
+            IDMLStory story = idmlDocument.getStory(ref);
+            if (story != null) return story;
+            if (ref.startsWith("u") || ref.startsWith("U")) {
+                try {
+                    String decimal = String.valueOf(Integer.parseInt(ref.substring(1), 16));
+                    story = idmlDocument.getStory(decimal);
+                    if (story != null) return story;
+                } catch (NumberFormatException ignored) {
+                    // ref was not a hexadecimal story id.
+                }
+            } else {
+                try {
+                    String hex = "u" + Integer.toHexString(Integer.parseInt(ref));
+                    story = idmlDocument.getStory(hex);
+                    if (story != null) return story;
+                } catch (NumberFormatException ignored) {
+                    // ref was not a decimal story id.
+                }
+            }
+        }
+        return null;
     }
 
     private static String sourceStoryId(String storyId) {

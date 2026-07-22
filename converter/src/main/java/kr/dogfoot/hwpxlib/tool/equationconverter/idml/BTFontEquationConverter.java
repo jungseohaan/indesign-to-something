@@ -135,9 +135,10 @@ public class BTFontEquationConverter {
             }
         }
 
-        // 문자/숫자/콤마/공백만으로 구성된 단순 텍스트는 수식이 아님 (폰트 여부 무관)
-        // 예: "A", "B", "m,", "400" → 수식폰트 텍스트 런으로 폴백
-        if (isPlainText(raw)) return null;
+        // 문자/숫자/콤마/공백만으로 구성된 단순 텍스트는 수식이 아님.
+        // 단, 원본 ParagraphStyle GREP이 단일 라틴 문자를 수식 문자스타일로 분리한
+        // 경우는 변수 소유권 증거가 있으므로 수식으로 유지한다.
+        if (isPlainText(raw) && !isSingleGrepLatinVariable(raw, runs)) return null;
 
         // 영문 단어 필터링 (이름, 영단어 등 — 변환 전 원본 텍스트 기준, 폰트 무관)
         // 예: "Permutation(", "Combination(", "Shakespeare, W., 1564~1616)"
@@ -165,6 +166,18 @@ public class BTFontEquationConverter {
         if (!hasLetterOrDigit) return null;
 
         return trimmed;
+    }
+
+    private static boolean isSingleGrepLatinVariable(String raw, List<IDMLCharacterRun> runs) {
+        if (runs == null || runs.size() != 1) return false;
+        IDMLCharacterRun run = runs.get(0);
+        if (run == null || !run.grepMathFont()) return false;
+        String stripped = stripLeadingThinSpaceMarkers(raw).trim();
+        return stripped.length() == 1 && isAsciiLetter(stripped.charAt(0));
+    }
+
+    private static boolean isAsciiLetter(char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
     }
 
     /**

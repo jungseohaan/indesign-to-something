@@ -194,11 +194,14 @@ public class ASTStoryConverter {
 
         for (int idx = 0; idx < runs.size(); idx++) {
             IDMLCharacterRun run = runs.get(idx);
-            // 명시적으로 비BT 폰트가 지정된 순수 알파벳/숫자 런만 GREP 플래그 해제
-            // 예: "1" (Helvetica Neue) → 해제, "y" (폰트 미지정, GREP으로 BT수식M 적용) → 유지
+            // GREP 수식 리셋: source GREP으로 분리된 단일 라틴 변수는 유지하고,
+            // 그 밖의 명시적 비BT 순수 알파벳/숫자 런은 일반 텍스트로 되돌린다.
             if (run.grepMathFont() && ASTMathGrouper.isPlainAlphanumericRun(run)) {
+                String ct = run.content();
+                boolean singleLatinVar = ct != null && ct.trim().length() == 1
+                        && Character.isLetter(ct.trim().charAt(0));
                 String ff = run.fontFamily();
-                if (ff != null && !ff.contains("BT수식")) {
+                if (!singleLatinVar && ff != null && !ff.contains("BT수식")) {
                     run.grepMathFont(false);
                 }
             }
@@ -275,7 +278,7 @@ public class ASTStoryConverter {
                 boolean formulaBoundaryOnly = ASTMathGrouper.isChemicalFormulaBoundaryRun(run);
                 if (!formulaBoundaryOnly && (run.isBTFont() || run.grepMathFont())
                         && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
-                        && !ASTMathGrouper.isPlainAlphanumericRun(run)) {
+                        && (!ASTMathGrouper.isPlainAlphanumericRun(run) || run.grepMathFont())) {
                     enterMathGroup = true;
                 } else if (!formulaBoundaryOnly && ASTMathGrouper.isChemicalFormulaTextRun(run)) {
                     enterMathGroup = true;
