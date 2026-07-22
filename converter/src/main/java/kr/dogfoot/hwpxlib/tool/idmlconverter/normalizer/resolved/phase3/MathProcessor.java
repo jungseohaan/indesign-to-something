@@ -98,10 +98,37 @@ class MathProcessor {
 
             FormulaCluster formulaCluster = currentType == null ? collectFormulaEquationCluster(items, i) : null;
             if (formulaCluster != null) {
-                flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
-                mathGroup.clear();
-                mathGroupSrc.clear();
-                mathType = null;
+                // 화살표(→ 정규화로 폰트가 벗겨진 런)에서 시작한 클러스터는 좌변을 안
+                // 담는다. 대기 중인 수식 폰트 그룹(좌변, 예: "2H₂+O₂")이 있으면 별도
+                // flush(텍스트 폴백 위험) 대신 클러스터 스크립트 앞에 흡수한다
+                // (실측: 반응식 보기가 "좌변 텍스트 + '~ rarrow ~ 우변' 수식"으로 갈라짐).
+                String absorbedLhs = null;
+                int absorbedTailCount = 0;
+                if (clusterScriptStartsWithArrow(formulaCluster.equation)) {
+                    List<ASTTextRun> lhsRuns = new ArrayList<>();
+                    absorbedTailCount = collectTrailingEquationFontRuns(newItems, lhsRuns);
+                    lhsRuns.addAll(mathGroupSrc);
+                    if (!lhsRuns.isEmpty()) {
+                        absorbedLhs = buildFormulaScriptFromEquationFontRuns(lhsRuns);
+                    }
+                    if (absorbedLhs == null) absorbedTailCount = 0;
+                }
+                if (absorbedLhs != null && !absorbedLhs.isEmpty()) {
+                    for (int r = 0; r < absorbedTailCount; r++) {
+                        newItems.remove(newItems.size() - 1);
+                    }
+                    formulaCluster.equation.hwpScript(
+                            normalizeFormulaScript(absorbedLhs + " "
+                                    + formulaCluster.equation.hwpScript()));
+                    mathGroup.clear();
+                    mathGroupSrc.clear();
+                    mathType = null;
+                } else {
+                    flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
+                    mathGroup.clear();
+                    mathGroupSrc.clear();
+                    mathType = null;
+                }
                 newItems.add(formulaCluster.equation);
                 i = formulaCluster.endExclusive - 1;
                 continue;
@@ -1041,6 +1068,81 @@ class MathProcessor {
             this.equation = equation;
             this.endExclusive = endExclusive;
         }
+    }
+
+    /**
+     * newItems 꼬리에서 좌변 후보(수식 폰트 또는 첨자 런, 클러스터 문법 텍스트)를
+     * 역방향 수집한다. 반환값은 흡수 시 제거해야 할 꼬리 아이템 수, 수집 결과는
+     * out 에 원문 순서로 담긴다. 좌변은 isSimplePositionedTextRun flush 등으로
+     * 이미 방출돼 있을 수 있다 (실측: "CH₄" 가 [CH][₄] 로 선방출).
+     */
+    private static int collectTrailingEquationFontRuns(
+            List<ASTInlineItem> newItems,
+            List<ASTTextRun> out) {
+        if (newItems == null || out == null) return 0;
+        int count = 0;
+        for (int j = newItems.size() - 1; j >= 0 && count < 24; j--) {
+            ASTInlineItem it = newItems.get(j);
+            if (!(it instanceof ASTTextRun)) break;
+            ASTTextRun tr = (ASTTextRun) it;
+            String text = tr.text();
+            if (text == null || text.isEmpty()) break;
+            if (text.trim().isEmpty()) {
+                // 공백 런: 좌변 진행 중일 때만 통과 (선두 공백은 아래에서 잘림)
+                out.add(0, tr);
+                count++;
+                continue;
+            }
+            boolean equationFont = mathTypeOf(tr) != null;
+            boolean positioned = tr.subscript() || tr.superscript();
+            if (!equationFont && !positioned) break;
+            if (!isFormulaClusterText(text) || isFormulaBoundaryText(text)) break;
+            out.add(0, tr);
+            count++;
+        }
+        // 선두 공백 런 제거 (본문과 좌변 사이 공백은 본문에 남긴다)
+        while (!out.isEmpty()) {
+            String t = out.get(0).text();
+            if (t != null && t.trim().isEmpty()) {
+                out.remove(0);
+                count--;
+            } else {
+                break;
+            }
+        }
+        return Math.max(0, count);
+    }
+
+    /** 클러스터 스크립트가 화살표로 시작하는가 (좌변 미포함 신호). */
+    private static boolean clusterScriptStartsWithArrow(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation equation) {
+        if (equation == null || equation.hwpScript() == null) return false;
+        String script = equation.hwpScript().trim();
+        if (script.startsWith("~")) script = script.substring(1).trim();
+        return script.startsWith("rarrow");
+    }
+
+    /**
+     * 대기 중인 수식 폰트 그룹(원본 ASTTextRun)을 클러스터 흡수용 스크립트로 만든다.
+     * 그룹 구성원은 mathTypeOf 통과(BT/EH/NP 폰트)로 이미 폰트 증거가 있다.
+     * 텍스트가 클러스터 문법에 안 맞거나 경계 텍스트면 null (기존 flush 로 폴백).
+     */
+    private static String buildFormulaScriptFromEquationFontRuns(List<ASTTextRun> runs) {
+        if (runs == null || runs.isEmpty()) return null;
+        StringBuilder script = new StringBuilder();
+        char previousVisible = 0;
+        for (ASTTextRun tr : runs) {
+            if (tr == null) return null;
+            String text = tr.text();
+            if (text == null || text.isEmpty()) continue;
+            if (!isFormulaClusterText(text)) return null;
+            if (isFormulaBoundaryText(text)) return null;
+            ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
+            if (!result.accepted) return null;
+            previousVisible = result.previousVisible;
+        }
+        String out = normalizeFormulaScript(script.toString());
+        return out.isEmpty() ? null : out;
     }
 
     private static FormulaCluster collectFormulaEquationCluster(List<ASTInlineItem> items, int start) {

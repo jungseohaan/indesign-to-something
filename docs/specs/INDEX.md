@@ -25,6 +25,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-045](SPEC-045-coefficient-subscript-bleed.md) | Active | 화학 반응식 계수 첨자 오염(resolved 첨자 위치 흘림) — IDML 비첨자 증거 우선 (구현 완료, 육안 확인 대기) |
 | [SPEC-046](SPEC-046-formula-textrange-shell-misfire.md) | Active | 화학식 첫 글자의 text-range-shell 오분리 — 화학식 문단 range 분리 제외 (구현 완료, 육안 확인 대기) |
 | [SPEC-047](SPEC-047-inline-formula-body-textrange-split.md) | Active | 문장 중 화학식 진입이 앞 한글 본문을 text-range-shell 로 오분리(말풍선 배경 누락) — 추출기 화학식 폰트 진입 경계 제외 (구현 완료, 육안 확인 대기) |
+| [SPEC-059](SPEC-059-reaction-equation-lhs-truncation.md) | Done | 반응식 좌변 잘림(#107 소유 전환으로 노출) — 화살표 시작 클러스터의 좌변 흡수 (2026-07-23 기준선 대조 검증) |
 
 For V2 ownership changes, start from the canonical policies above. Historical
 ownership SPECs have been removed so they cannot be reused as implementation
