@@ -161,8 +161,8 @@ public class EHFontEquationConverterTest {
     @Test
     public void sentinel_separates_adjacent_terms() {
         // '1[8C]5␜- 'Ä0.81␜ — 항 사이 투명 스페이서(␜)가 radicand 를 끝내고
-        // EM 간격이 된다. √15 의 radicand 가 다음 항의 - 를 삼키면 안 됨 (실측: p22).
-        Assert.assertEquals("sqrt{15} -sqrt{0.81}",
+        // HWP 수식 간격이 된다. √15 의 radicand 가 다음 항의 - 를 삼키면 안 됨 (실측: p22).
+        Assert.assertEquals("sqrt{15}~-sqrt{0.81}",
                 convert(fracUpper("'"), body("1"), fracUpper(""), body("5␜-"),
                         fracUpper("'"), fracUpper("Ä"), body("0.81␜")));
     }
@@ -171,9 +171,17 @@ public class EHFontEquationConverterTest {
     public void numeric_radicand_stops_at_sign() {
         // '7-2␜3+ '1[8C]6 — 폭 선택자 없는 hook 근호는 숫자 하나만 덮는다:
         // √7−2, 3+√16 (√(7−2)·√(2 3+…) 아님. 실측: p22).
-        Assert.assertEquals("sqrt{7}-2 3+sqrt{16}",
+        Assert.assertEquals("sqrt{7}-2~3+sqrt{16}",
                 convert(fracUpper("'"), body("7-2␜3+"),
                         fracUpper("'"), body("1"), fracUpper(""), body("6")));
+    }
+
+    @Test
+    public void space_run_between_adjacent_roots_emits_formula_spacing() {
+        // 수식 런 사이의 원본 공백 런은 HWP 수식 엔진에서 무시되는 ASCII 공백이 아니라
+        // 수식 간격 명령으로 보존한다.
+        Assert.assertEquals("sqrt{15}~sqrt{16}",
+                convert(fracUpper("'"), body("15"), body(" "), fracUpper("'"), body("16")));
     }
 
     @Test

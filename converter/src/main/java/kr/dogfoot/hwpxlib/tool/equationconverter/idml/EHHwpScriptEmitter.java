@@ -82,6 +82,12 @@ public class EHHwpScriptEmitter {
     private static void emitChildren(List<EHNode> children, StringBuilder sb) {
         for (int i = 0; i < children.size(); i++) {
             EHNode child = children.get(i);
+            if (isEquationSpacingNode(child)) {
+                if (shouldEmitEquationSpacing(children, i, sb)) {
+                    sb.append("~");
+                }
+                continue;
+            }
             boolean nextIsSuper = i + 1 < children.size()
                     && children.get(i + 1) instanceof EHNode.Superscript;
             // 빈 근호(√ 뒤 radicand 없음) + Superscript: 그 위첨자는 지수가 아니라
@@ -104,6 +110,62 @@ public class EHHwpScriptEmitter {
             emitNode(child, sb);
             if (wrapSqrt) sb.append("}");
         }
+    }
+
+    private static boolean isEquationSpacingNode(EHNode node) {
+        if (!(node instanceof EHNode.Text)) return false;
+        String text = ((EHNode.Text) node).text();
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\t' || c == '\n' || c == '\r' || c == '\u2028') return false;
+            if (!isEquationSpacingChar(c)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isEquationSpacingChar(char c) {
+        return c == ' '
+                || c == '\u00A0'
+                || c == '\u2000'
+                || c == '\u2001'
+                || c == '\u2002'
+                || c == '\u2003'
+                || c == '\u2004'
+                || c == '\u2005'
+                || c == '\u2006'
+                || c == '\u2007'
+                || c == '\u2008'
+                || c == '\u2009'
+                || c == '\u200A'
+                || c == '\u202F';
+    }
+
+    private static boolean shouldEmitEquationSpacing(List<EHNode> children, int index, StringBuilder sb) {
+        if (sb == null || sb.length() == 0) return false;
+        EHNode next = nextNonSpacingNode(children, index + 1);
+        if (next == null) return false;
+        if (startsWithClosingDelimiter(next)) return false;
+        char prev = sb.charAt(sb.length() - 1);
+        if (prev == '~' || prev == '(' || prev == '{') return false;
+        return true;
+    }
+
+    private static EHNode nextNonSpacingNode(List<EHNode> children, int start) {
+        if (children == null) return null;
+        for (int i = start; i < children.size(); i++) {
+            EHNode node = children.get(i);
+            if (isEquationSpacingNode(node)) continue;
+            return node;
+        }
+        return null;
+    }
+
+    private static boolean startsWithClosingDelimiter(EHNode node) {
+        if (!(node instanceof EHNode.Text)) return false;
+        String text = ((EHNode.Text) node).text();
+        if (text == null || text.isEmpty()) return false;
+        return text.charAt(0) == ')' || text.charAt(0) == ']' || text.charAt(0) == '}';
     }
 
     /**
@@ -136,7 +198,7 @@ public class EHHwpScriptEmitter {
         // 얇은 공백(U+2009 등)을 넣지만, HWP 수식은 자체 여백을 그리므로 그대로 두면
         // 쓸데없는 틈이 된다(실측: p17 (√5 )²). left/right 확대 전에 지워야
         // " right)" 앞 이중 공백도 안 생긴다.
-        result = result.replaceAll("[ \\u2000-\\u200B\\u202F]+\\)", ")");
+        result = result.replaceAll("[~ \\u2000-\\u200B\\u202F]+\\)", ")");
         // 닫는 중괄호 앞 유니코드 공백(EM/thin)도 제거: 근호 종료 센티넬(U+241C→EM)이
         // radicand 끝에 남으면 sqrt{3 } 처럼 가로줄이 늘어진다. ASCII 공백은 보존
         // (빈 근호 sqrt{ } 의 자리 공백).
