@@ -7712,8 +7712,7 @@ function _canonicalPagePlaneShouldOwnExistingPlan(plan) {
             || plan.materialization === "HWPX_TABLE_STYLE"
             || plan.ownershipSlot === "TABLE_STYLE_SLOT"
             || plan.slotRole === "table_textless_shell_slot"
-            || plan.compositeRole === "table_carrier_textless_shell"
-            || plan.compositeRole === "table_carrier_sibling_decoration") {
+            || plan.compositeRole === "table_carrier_textless_shell") {
         return false;
     }
     if (plan.textWrapMode || plan.textWrapSourceObjectId !== null
