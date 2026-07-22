@@ -771,6 +771,12 @@ public class StoryLoader {
             // 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리
             RunPostProcessor.convertItalicRunsToEquations(para);
 
+            // SPEC-055(text-attribute): resolved 가 문단 전체를 단일 유채색으로
+            // 보고하면, 매칭 실패(LOW)로 색을 잃은 런에도 그 색을 채운다
+            // (p26 실측: 수식이 낀 줄의 조각들이 검정으로 빵꾸).
+            // 불릿 리셋보다 먼저 — 불릿 문단의 의도적 검정 리셋이 이긴다.
+            RunBuilder.applyUniformResolvedParagraphColor(ctx, resolvedRuns, para);
+
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             RunBuilder.resetBulletParagraphColors(ctx, para);
 
