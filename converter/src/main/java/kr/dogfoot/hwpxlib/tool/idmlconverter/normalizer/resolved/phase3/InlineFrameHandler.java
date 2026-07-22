@@ -1741,9 +1741,28 @@ public class InlineFrameHandler {
             ResolvedTextFrame childTf,
             ASTInlineObject shellObj) {
         if (ctx == null || childTf == null || shellObj == null || !validBounds(shellBounds)) return false;
-        double[] shellPageBounds = normalizeShellBoundsToTextFramePageLocal(ctx, pageIndex, shellBounds, childTf);
-        if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
-        double[] tb = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
+        // 단위 정합 우선: plan bounds 는 추출기 원단위(mm), TF geometricBounds 는
+        // normalizeToPoints 로 pt 다. plan bounds 를 pt 로 환산해 TF geometric 과
+        // 같은 공간에서 직접 차분한다. 기존 page-local 정규화는 pt/mm 를 섞어
+        // 셀보다 큰 유령 여백(62mm cellMargin)을 만든다 (SPEC-057, p47 라벨).
+        double unitScale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double[] shellPageBounds;
+        double[] tb;
+        boolean boundsInPoints = false;
+        double[] tfGeometric = childTf.geometricBounds();
+        double[] shellBoundsPt = new double[] {
+                shellBounds[0] * unitScale, shellBounds[1] * unitScale,
+                shellBounds[2] * unitScale, shellBounds[3] * unitScale
+        };
+        if (validBounds(tfGeometric) && containsBounds(shellBoundsPt, tfGeometric)) {
+            shellPageBounds = shellBoundsPt;
+            tb = tfGeometric;
+            boundsInPoints = true;
+        } else {
+            shellPageBounds = normalizeShellBoundsToTextFramePageLocal(ctx, pageIndex, shellBounds, childTf);
+            if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
+            tb = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
+        }
         if (!validBounds(tb) || !validBounds(shellPageBounds)) return false;
 
         double shellW = Math.abs(shellPageBounds[3] - shellPageBounds[1]);
@@ -1753,7 +1772,7 @@ public class InlineFrameHandler {
         if (shellW <= 0.0 || shellH <= 0.0 || textW <= 0.0 || textH <= 0.0) return false;
         if (textW > shellW * 1.25 || textH > shellH * 1.25) return false;
 
-        double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double scale = boundsInPoints ? 1.0 : (ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0);
         double left = Math.max(0.0, tb[1] - shellPageBounds[1]);
         double top = Math.max(0.0, tb[0] - shellPageBounds[0]);
         double right = Math.max(0.0, shellPageBounds[3] - tb[3]);
@@ -2384,6 +2403,13 @@ public class InlineFrameHandler {
             ResolvedTextFrame childTf) {
         double[] visualBounds = inlineShellVisualLeafBounds(ctx, shellPlan, childTf);
         if (validBounds(visualBounds)) return visualBounds;
+        // 셸 plan 자체 bounds 가 라벨 텍스트를 포함하면 그것이 여백 기준이다.
+        // anchor(조상 그룹)를 먼저 쓰면 라벨 크기 셸에 그룹 기준 오프셋(수십 mm)이
+        // 여백으로 들어가 셀보다 큰 cellMargin 이 생긴다 (SPEC-057, p47 라벨 회색 바).
+        if (shellPlan != null && validBounds(shellPlan.bounds)
+                && containsBounds(shellPlan.bounds, childTf.geometricBounds())) {
+            return shellPlan.bounds;
+        }
         if (anchorItem != null && validBounds(anchorItem.geometricBounds())
                 && containsBounds(anchorItem.geometricBounds(), childTf.geometricBounds())) {
             return anchorItem.geometricBounds();
@@ -5057,7 +5083,13 @@ public class InlineFrameHandler {
                         double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor; // right - left
                         double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor; // bottom - top
                         if (bw <= 0 || bh <= 0) return null;
+                        // 알파 가시영역 재스케일은 작은 배지/마커 전용이다. 라벨 달린
+                        // 삽화 같은 큰 통짜 PNG 는 plan bounds 크기가 원본 그대로라
+                        // 재스케일하면 오히려 축소·왜곡된다 (SPEC-057, p47 실측:
+                        // 210×113pt 그림이 192×128pt 로 어긋남).
+                        boolean smallMarkerCanvas = bh <= 50.0 && bw <= 100.0;
                         if (isInlineCompletePngTextOwnerPlan(plan)
+                                && smallMarkerCanvas
                                 && img.getWidth() > 0 && img.getHeight() > 0) {
                             // Keep the source pixels intact. Transparent carrier
                             // padding must not reduce the visible marker height:
