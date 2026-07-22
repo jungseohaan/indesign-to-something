@@ -88,13 +88,28 @@ CHEM_FORMULA 의 hwpScript 는 이미 HWP 수식 문법(`_`/`^`/`rarrow`)으로 
 4. `phase3/RunBuilder.java` — 첨자 화학식 세그먼트 → ASTEquation 방출 (Phase B)
 5. (필요 시) `converter/HwpxParagraphBuilder.java` — 첨자 수식 height 보정
 
+## 구현 노트 (2026-07-22)
+
+- Phase A 만으로는 부족했다: 수식 그룹핑이 본문 폰트 선두 원소("CH₄"의 CH)·
+  계수·생성물을 못 잡아 수식이 조각났다 → `stitchChemicalFormulaFragments`
+  (MathProcessor)로 인접 조각 봉합 + `inferChemicalSubscriptScript`
+  (FormulaClassifier)로 평문화 첨자("N2") 재추론.
+- **수식 개체 폰트는 반드시 HYhwpEQ**: 텍스트 강등 시절의 본문 폰트 특례가
+  hp:equation 에 들어가면 한글 수식 렌더러가 글리프를 겹쳐 그려 깨진 한글처럼
+  보인다 (p20 실측) → FormulaStyleResolver 특례 제거.
+- Phase B 는 수식 그룹핑 **이후의 폴백**이므로 BT/EH 폰트 가드가 불필요하다
+  (그 시점에 텍스트로 남은 수식 폰트 런 = 수식 경로가 포기한 것). 표 셀의
+  BT 폰트 화학식 38건이 이 가드에 막혀 있었다. 대신 이탤릭 라틴(수학 변수
+  라벨 B₁ 등) 가드 추가.
+
 ## 검증
 
-- [ ] 빌드 성공
-- [ ] Phase A: 과학 u1 p47(2H₂O 반응식 표), p25, p17, p20, p26/28 — 기존
-      CHEM_FORMULA 가 hp:equation 으로 나오고 크기·색·줄흐름 정상
-- [ ] Phase A 회귀: u5 p166 (SPEC-050/051 — 각·도(°) 조각이 수식화되지 않음),
-      수학 수식 페이지 무변화
-- [ ] Phase B: 본문 속 일반폰트 H₂O/CO₂ 등이 hp:equation 으로 방출
-- [ ] Phase B 회귀: 이탤릭 대문자 라벨(AB), 영단어 대문자, SPEC-045 계수 케이스
-- [ ] 전체 u1 text-only 추출/변환 → 화학식 페이지 육안 + 텍스트 카운트 비교
+- [x] 빌드 성공
+- [x] Phase A: 반응식 12개 전부 완전한 스크립트로 hp:equation 방출
+      (2Mg+O_{2} rarrow 2MgO, CaCO_{3}+2HCl rarrow … 등), p20 폰트 깨짐 수정
+- [x] Phase B: 본문·표 셀 화학식 46개 추가 방출 (H₂O/H₂/O₂/CO₂/CH₄/CaCO₃/
+      Cu₂O …) — 잔여 원소+첨자 텍스트 쌍 0 (전량 변환)
+- [x] 회귀: 한글 텍스트 baseline 과 완전 동일, 경고 0 (text-only 전체 u1)
+- [x] 한글 육안 확인 (p20 등)
+- [ ] 타 교과서 회귀: 수학 u5 p166 (SPEC-050/051 각·도 조각), 이탤릭 라벨 AB
+      — 수학 교과서 재추출 필요 시점에 확인
