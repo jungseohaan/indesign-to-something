@@ -2009,7 +2009,10 @@ public class InlineFrameHandler {
             added = true;
         }
         applyCompositeInlineShellLineMetrics(ctx, para, ordered);
-        if (added) obj.addParagraph(para);
+        if (added) {
+            postprocessShellTextParagraph(ctx, para);
+            obj.addParagraph(para);
+        }
     }
 
     private static boolean compositeInlineShellChildrenOccupySingleRow(
@@ -2177,8 +2180,16 @@ public class InlineFrameHandler {
         ResolvedTextFrame childTf = childTfs.get(0);
         if (childTf == null) return false;
         if (shellPlan.visualLayer != VisualLayer.LABEL_BACKDROP) return false;
-        double[] groupBounds = inlineShellMarginReferenceBounds(ctx, shellPlan, anchorItem, childTf);
-        double[] textBounds = childTf.geometricBounds();
+        double[] groupBounds = inlineShellMarginReferenceBoundsInTextFramePageLocal(
+                ctx, shellPlan, anchorItem, childTf);
+        double[] textBounds = childTf.pageRelativeBounds();
+        if (!validBounds(textBounds)) {
+            textBounds = normalizeTextFrameBoundsToShellPage(
+                    ctx,
+                    shellPlan != null ? shellPlan.pageIndex : childTf.pageIndex(),
+                    childTf,
+                    groupBounds);
+        }
         if (!validBounds(groupBounds) || !validBounds(textBounds)) return false;
         if (!containsBounds(groupBounds, textBounds)) return false;
         double groupH = Math.abs(groupBounds[2] - groupBounds[0]);
@@ -2199,8 +2210,13 @@ public class InlineFrameHandler {
         if (obj == null || childTfs == null || childTfs.size() != 1) return;
         ResolvedTextFrame childTf = childTfs.get(0);
         if (childTf == null) return;
-        double[] groupBounds = inlineShellMarginReferenceBounds(ctx, shellPlan, anchorItem, childTf);
-        double[] textBounds = childTf.geometricBounds();
+        double[] groupBounds = inlineShellMarginReferenceBoundsInTextFramePageLocal(
+                ctx, shellPlan, anchorItem, childTf);
+        double[] textBounds = normalizeTextFrameContentBoundsToShellPage(
+                ctx,
+                shellPlan != null ? shellPlan.pageIndex : childTf.pageIndex(),
+                childTf,
+                groupBounds);
         if (groupBounds == null || textBounds == null || groupBounds.length < 4 || textBounds.length < 4) {
             return;
         }
@@ -2233,10 +2249,11 @@ public class InlineFrameHandler {
         double bottom = Math.max(0, groupBounds[2] - textBounds[2]);
         if (left + top + right + bottom < 0.1) return;
 
-        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left));
-        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top));
-        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right));
-        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom));
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left * scale));
+        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top * scale));
+        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right * scale));
+        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom * scale));
     }
 
     private static boolean shellPlanTextFrameOwnsItsShell(ObjectPlan shellPlan, ResolvedTextFrame childTf) {
@@ -2375,6 +2392,45 @@ public class InlineFrameHandler {
             return shellPlan.bounds;
         }
         return null;
+    }
+
+    private static double[] inlineShellMarginReferenceBoundsInTextFramePageLocal(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            ResolvedPageItem anchorItem,
+            ResolvedTextFrame childTf) {
+        double[] bounds = inlineShellMarginReferenceBounds(ctx, shellPlan, anchorItem, childTf);
+        if (!validBounds(bounds)) return bounds;
+        int pageIndex = shellPlan != null ? shellPlan.pageIndex : childTf.pageIndex();
+        return normalizeBoundsToTextFramePageLocal(ctx, pageIndex, bounds, childTf);
+    }
+
+    private static double[] normalizeBoundsToTextFramePageLocal(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            double[] bounds,
+            ResolvedTextFrame tf) {
+        if (!validBounds(bounds) || tf == null) return bounds;
+        if (boundsAreAlreadyPageLocal(ctx, pageIndex, bounds)) return bounds;
+        double[] pageRelative = tf.pageRelativeBounds();
+        if (!validBounds(pageRelative)) return bounds;
+        if (containsBounds(bounds, pageRelative)) return bounds;
+
+        double[] geometric = tf.geometricBounds();
+        if (!validBounds(geometric)) return bounds;
+        double dx = geometric[1] - pageRelative[1];
+        double dy = geometric[0] - pageRelative[0];
+        if (!Double.isFinite(dx) || !Double.isFinite(dy)) return bounds;
+        if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return bounds;
+
+        double[] shifted = new double[] {
+                bounds[0] - dy,
+                bounds[1] - dx,
+                bounds[2] - dy,
+                bounds[3] - dx
+        };
+        if (containsBounds(shifted, pageRelative)) return shifted;
+        return bounds;
     }
 
     private static double[] inlineShellVisualLeafBounds(
@@ -3784,7 +3840,7 @@ public class InlineFrameHandler {
     private static List<ASTParagraph> convertShellTextParagraphs(
             ResolvedBuildContext ctx,
             TextFlowDocument.TextFlowUnit unit) {
-        return TextFlowAstMaterializer.convertUnit(
+        return postprocessShellTextParagraphs(ctx, TextFlowAstMaterializer.convertUnit(
                 ctx,
                 unit,
                 text -> text
@@ -3796,13 +3852,13 @@ public class InlineFrameHandler {
                 atom -> {
                     if (atom == null || atom.anchoredObjectId == null) return null;
                     return loadPlannedInlineAnchorItems(ctx, atom.anchoredObjectId, null, null);
-                });
+                }));
     }
 
     private static List<ASTParagraph> convertShellTextParagraphs(
             ResolvedBuildContext ctx,
             ResolvedStory story) {
-        return ResolvedTextFlowAstConverter.convertStory(
+        return postprocessShellTextParagraphs(ctx, ResolvedTextFlowAstConverter.convertStory(
                 story,
                 ResolvedTextFlowAstConverter.options()
                         .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
@@ -3814,7 +3870,7 @@ public class InlineFrameHandler {
                         .copyTabStops(true)
                         .truncateAtParagraphBreak(false)
                         .skipBlankRuns(true)
-                        .skipEmptyParagraphs(true));
+                        .skipEmptyParagraphs(true)));
     }
 
     private static List<ASTParagraph> buildSourceStructuredShellTextParagraphs(
@@ -3851,7 +3907,23 @@ public class InlineFrameHandler {
                 paragraphs.add(paragraph);
             }
         }
+        return postprocessShellTextParagraphs(ctx, paragraphs);
+    }
+
+    private static List<ASTParagraph> postprocessShellTextParagraphs(
+            ResolvedBuildContext ctx,
+            List<ASTParagraph> paragraphs) {
+        if (paragraphs == null) return paragraphs;
+        for (ASTParagraph paragraph : paragraphs) {
+            postprocessShellTextParagraph(ctx, paragraph);
+        }
         return paragraphs;
+    }
+
+    private static void postprocessShellTextParagraph(ResolvedBuildContext ctx, ASTParagraph paragraph) {
+        if (paragraph == null) return;
+        MathProcessor.convertMathRunsInParagraph(ctx, paragraph);
+        RunPostProcessor.splitOverlineRuns(paragraph);
     }
 
     private static boolean shouldUseResolvedParagraphsForInlineShell(ResolvedStory story) {
@@ -6689,12 +6761,12 @@ public class InlineFrameHandler {
             double[] shellBounds,
             ResolvedTextFrame tf) {
         if (!validBounds(shellBounds)) return shellBounds;
+        if (boundsAreAlreadyPageLocal(ctx, pageIndex, shellBounds)) return shellBounds;
         double[] pageRel = tf != null ? tf.pageRelativeBounds() : null;
         double[] geom = tf != null ? tf.geometricBounds() : null;
         if (validBounds(pageRel) && validBounds(geom)) {
-            double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
-            double geomLeft = scale != 0.0 ? geom[1] / scale : geom[1];
-            double geomTop = scale != 0.0 ? geom[0] / scale : geom[0];
+            double geomLeft = geom[1];
+            double geomTop = geom[0];
             double dx = geomLeft - pageRel[1];
             double dy = geomTop - pageRel[0];
             if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
@@ -6707,6 +6779,18 @@ public class InlineFrameHandler {
             }
         }
         return normalizeSpreadBoundsToPageLocal(ctx, pageIndex, shellBounds);
+    }
+
+    private static boolean boundsAreAlreadyPageLocal(ResolvedBuildContext ctx, int pageIndex, double[] bounds) {
+        if (!validBounds(bounds)) return false;
+        double pageWidth = localPageWidth(ctx, pageIndex);
+        double pageHeight = localPageHeight(ctx, pageIndex);
+        if (pageWidth <= 0.0 || pageHeight <= 0.0) return false;
+        double tolerance = 1.5;
+        return bounds[1] >= -tolerance
+                && bounds[3] <= pageWidth + tolerance
+                && bounds[0] >= -tolerance
+                && bounds[2] <= pageHeight + tolerance;
     }
 
     public static boolean hasInlineTextShellForAnchor(

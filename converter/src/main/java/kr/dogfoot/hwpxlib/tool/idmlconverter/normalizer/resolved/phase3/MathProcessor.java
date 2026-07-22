@@ -361,7 +361,7 @@ class MathProcessor {
 
     private static boolean isEquationBoundaryChar(char c) {
         return c == '(' || c == ')' || c == '[' || c == ']'
-                || c == '{' || c == '}' || c == ',' || c == '.';
+                || c == '{' || c == '}' || c == ',' || c == '.' || c == ':';
     }
 
     /** HWP 수식 구문 중괄호 { } 짝이 맞는지. sqrt/분수 구문 보호용. */
@@ -2028,6 +2028,7 @@ class MathProcessor {
         }
         backfillFlushedTextRunStyles(tempPara.items(), sources);
         backfillChemicalEquationStyleHints(tempPara.items(), sources);
+        splitBoundaryWrappedFormulaEquations(tempPara.items());
         out.addAll(tempPara.items());
     }
 
