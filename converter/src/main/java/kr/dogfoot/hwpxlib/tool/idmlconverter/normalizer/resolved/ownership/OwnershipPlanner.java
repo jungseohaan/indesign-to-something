@@ -78,6 +78,8 @@ public final class OwnershipPlanner {
     private void run() {
         timed("importPreplannedObjectPlans", this::importPreplannedObjectPlans);
         timed("ensureImportedInlineTextFramePlans", this::ensureImportedInlineTextFramePlans);
+        timed("ensureEmptyInlineTextFrameVisualCarrierPlans",
+                this::ensureEmptyInlineTextFrameVisualCarrierPlans);
         timed("ensurePngOwnedChildMarkerTextFramePlans", this::ensurePngOwnedChildMarkerTextFramePlans);
         timed("planRenderedItems", this::planRenderedItems);
         timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
@@ -493,6 +495,242 @@ public final class OwnershipPlanner {
                 tf.layerName(),
                 tf.layerIndex()));
         return true;
+    }
+
+    private void ensureEmptyInlineTextFrameVisualCarrierPlans() {
+        if (data == null || data.stories() == null) return;
+        int added = 0;
+        int suppressedNestedPlans = 0;
+        LinkedHashSet<Integer> anchors = new LinkedHashSet<>();
+        for (ResolvedStory story : data.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
+                    anchors.add(run.anchoredObjectId());
+                }
+            }
+        }
+        for (Integer anchoredId : anchors) {
+            if (anchoredId == null) continue;
+            ResolvedTextFrame carrier = data.getTextFrame(String.valueOf(anchoredId));
+            if (!isEmptyInlineTextFrameVisualCarrier(carrier)) continue;
+            ObjectPlan visualPlan = nestedStoryInlineVisualPlan(carrier);
+            if (visualPlan == null) continue;
+            if (hasDirectInlineVisualCarrierPlan(anchoredId, visualPlan.file)) continue;
+
+            int[] visualIds = visualIdsForCarrierPlan(visualPlan);
+            int[] sourceIds = prependUnique(anchoredId, visualPlan.sourceObjectIds);
+            ObjectPlan carrierPlan = new ObjectPlan(
+                    anchoredId,
+                    "text_frame:inline_visual_carrier",
+                    carrier.pageIndex(),
+                    TextAction.DROP_TEXT,
+                    VisualAction.PLACE_INLINE_PNG,
+                    VisualLayer.CONTENT_VISUAL,
+                    Placement.INLINE,
+                    visualPlan.renderId != null ? visualPlan.renderId : visualPlan.domId,
+                    sourceIds,
+                    visualIds,
+                    new int[0],
+                    new int[0],
+                    visualIds,
+                    "p" + carrier.pageIndex() + ":inline_visual_carrier:" + anchoredId,
+                    Materialization.EXTRACTED_PNG_VECTOR,
+                    CoordinateSpace.STORY_FLOW,
+                    null,
+                    textFrameSourceZOrder(carrier),
+                    "empty_inline_text_frame_visual_carrier",
+                    visualPlan.file,
+                    visualPlan.bounds,
+                    carrier.layerId(),
+                    carrier.layerName(),
+                    carrier.layerIndex())
+                    .withExtractionSourceObjectIds(visualPlan.exportSourceObjectIds,
+                            visualPlan.hiddenVisualSourceObjectIds)
+                    .withInlineFlowContract(true, sourceIds);
+            plans.add(carrierPlan);
+            added++;
+            suppressedNestedPlans += suppressNestedStoryInlineVisualPlans(carrier, carrierPlan);
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.emptyInlineTextFrameVisualCarriers.added", added);
+        ConversionTiming.metric("stage1.ownershipPlanner.emptyInlineTextFrameVisualCarriers.suppressedNestedPlans",
+                suppressedNestedPlans);
+    }
+
+    private boolean isEmptyInlineTextFrameVisualCarrier(ResolvedTextFrame tf) {
+        if (tf == null || !tf.isInline() || tf.sourceHidden()) return false;
+        if (tf.storyId() == null || tf.storyId().isEmpty()) return false;
+        if (textFrameHasVisibleSemanticText(tf)) return false;
+        return !inlineAnchorIdsInCarrierStory(tf).isEmpty();
+    }
+
+    private ObjectPlan nestedStoryInlineVisualPlan(ResolvedTextFrame carrier) {
+        for (Integer anchoredId : inlineAnchorIdsInCarrierStory(carrier)) {
+            if (anchoredId == null) continue;
+            ObjectPlan plan = executableInlineVisualPlanForAnchor(anchoredId);
+            if (plan != null) return plan;
+        }
+        return null;
+    }
+
+    private LinkedHashSet<Integer> inlineAnchorIdsInCarrierStory(ResolvedTextFrame carrier) {
+        LinkedHashSet<Integer> out = new LinkedHashSet<>();
+        if (carrier == null || carrier.storyId() == null || carrier.storyId().isEmpty()) return out;
+        ResolvedStory story = data.getStory(carrier.storyId());
+        if (story != null && story.paragraphs() != null) {
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run != null && run.isInlineAnchor() && run.anchoredObjectId() != null) {
+                        out.add(run.anchoredObjectId());
+                    }
+                }
+            }
+        }
+        IDMLStory idmlStory = loadStory(carrier.storyId());
+        if (idmlStory != null && idmlStory.paragraphs() != null) {
+            for (IDMLParagraph paragraph : idmlStory.paragraphs()) {
+                collectIdmlParagraphInlineAnchorIds(paragraph, out);
+            }
+        }
+        if (idmlStory != null && idmlStory.tables() != null) {
+            for (IDMLTable table : idmlStory.tables()) {
+                if (table == null || table.rows() == null) continue;
+                for (IDMLTableRow row : table.rows()) {
+                    if (row == null || row.cells() == null) continue;
+                    for (IDMLTableCell cell : row.cells()) {
+                        if (cell == null || cell.paragraphs() == null) continue;
+                        for (IDMLParagraph paragraph : cell.paragraphs()) {
+                            collectIdmlParagraphInlineAnchorIds(paragraph, out);
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void collectIdmlParagraphInlineAnchorIds(
+            IDMLParagraph paragraph,
+            Set<Integer> out) {
+        if (paragraph == null || paragraph.characterRuns() == null || out == null) return;
+        for (IDMLCharacterRun run : paragraph.characterRuns()) {
+            if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) continue;
+            for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                int id = idmlInlineAnchorDomId(run, anchor);
+                if (id >= 0) out.add(id);
+            }
+        }
+    }
+
+    private ObjectPlan executableInlineVisualPlanForAnchor(int anchoredId) {
+        ObjectPlan best = null;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) continue;
+            if (plan.textAction != TextAction.DROP_TEXT) continue;
+            if (plan.file == null || plan.file.isEmpty()) continue;
+            if (plan.domId != anchoredId
+                    && (plan.renderId == null || plan.renderId != anchoredId)
+                    && !containsInt(plan.sourceObjectIds, anchoredId)
+                    && !containsInt(plan.visualSourceObjectIds, anchoredId)
+                    && !containsInt(plan.exportSourceObjectIds, anchoredId)) {
+                continue;
+            }
+            if (best == null || inlineVisualPlanPriority(plan) > inlineVisualPlanPriority(best)) {
+                best = plan;
+            }
+        }
+        return best;
+    }
+
+    private static int inlineVisualPlanPriority(ObjectPlan plan) {
+        int score = 0;
+        if (plan == null) return score;
+        if (plan.renderId != null && plan.renderId == plan.domId) score += 8;
+        if (plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0) score += 4;
+        if (plan.exportSourceObjectIds != null && plan.exportSourceObjectIds.length > 0) score += 2;
+        if (plan.bounds != null && plan.bounds.length >= 4) score += 1;
+        return score;
+    }
+
+    private boolean hasDirectInlineVisualCarrierPlan(int anchoredId, String file) {
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.domId != anchoredId) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) continue;
+            if (file == null || file.isEmpty() || file.equals(plan.file)) return true;
+        }
+        return false;
+    }
+
+    private int suppressNestedStoryInlineVisualPlans(ResolvedTextFrame carrier, ObjectPlan carrierPlan) {
+        if (carrier == null || carrier.storyId() == null || carrierPlan == null) return 0;
+        LinkedHashSet<Integer> nestedAnchors = inlineAnchorIdsInCarrierStory(carrier);
+        int changed = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan == carrierPlan) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) continue;
+            if (plan.file == null || !plan.file.equals(carrierPlan.file)) continue;
+            if (!planOwnsAnyNestedAnchor(plan, nestedAnchors)) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
+                    appendReason(plan.reason, "owned_by_inline_text_frame_visual_carrier")));
+            changed++;
+        }
+        return changed;
+    }
+
+    private static boolean planOwnsAnyNestedAnchor(ObjectPlan plan, Set<Integer> nestedAnchors) {
+        if (plan == null || nestedAnchors == null || nestedAnchors.isEmpty()) return false;
+        for (Integer id : nestedAnchors) {
+            if (id == null) continue;
+            if (plan.domId == id) return true;
+            if (plan.renderId != null && plan.renderId == id) return true;
+            if (containsInt(plan.sourceObjectIds, id)) return true;
+            if (containsInt(plan.visualSourceObjectIds, id)) return true;
+            if (containsInt(plan.exportSourceObjectIds, id)) return true;
+        }
+        return false;
+    }
+
+    private static int[] visualIdsForCarrierPlan(ObjectPlan visualPlan) {
+        if (visualPlan == null) return new int[0];
+        if (visualPlan.visualSourceObjectIds != null && visualPlan.visualSourceObjectIds.length > 0) {
+            return visualPlan.visualSourceObjectIds;
+        }
+        if (visualPlan.exportSourceObjectIds != null && visualPlan.exportSourceObjectIds.length > 0) {
+            return visualPlan.exportSourceObjectIds;
+        }
+        return visualPlan.sourceObjectIds != null ? visualPlan.sourceObjectIds : new int[0];
+    }
+
+    private static int[] prependUnique(int first, int[] rest) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        ids.add(first);
+        if (rest != null) {
+            for (int id : rest) ids.add(id);
+        }
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) out[i++] = id != null ? id : -1;
+        return out;
+    }
+
+    private static boolean containsInt(int[] values, int target) {
+        if (values == null || values.length == 0) return false;
+        for (int value : values) {
+            if (value == target) return true;
+        }
+        return false;
     }
 
     private void ensurePngOwnedChildMarkerTextFramePlans() {
