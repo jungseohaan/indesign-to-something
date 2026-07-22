@@ -741,6 +741,57 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
         return fallbackBounds;
     }
 
+    function _duplicateNestedCompletePngForExport(item, candidate, doc) {
+        if (!item || !candidate || !doc) return null;
+        if (candidate.materialization !== "COMPLETE_PNG"
+                || candidate.placement !== "INLINE"
+                || candidate.coordinateSpace !== "STORY_FLOW") {
+            return null;
+        }
+        var copies = [];
+        try {
+            var page = _resolveParentPage(item, doc);
+            if (!page && candidate.pageIndex !== null && candidate.pageIndex !== undefined
+                    && candidate.pageIndex >= 0 && candidate.pageIndex < doc.pages.length) {
+                page = doc.pages[candidate.pageIndex];
+            }
+            var spread = page && page.parent ? page.parent : null;
+            if (!spread) return null;
+            var sourceIds = candidate.exportSourceObjectIds || [];
+            for (var si = 0; si < sourceIds.length; si++) {
+                if (String(sourceIds[si]) === String(item.id)) continue;
+                var source = itemById ? itemById[String(sourceIds[si])] : null;
+                if (!source) continue;
+                try {
+                    var copy = source.duplicate(spread);
+                    try {
+                        if (copy && copy.constructor && copy.constructor.name === "TextFrame") {
+                            for (var ci = copy.characters.length - 1; ci >= 0; ci--) {
+                                var ch = copy.characters[ci];
+                                var anchoredCharacter = false;
+                                try { anchoredCharacter = String(ch.contents) === "\uFFFC"; } catch (eCharContents) {}
+                                try {
+                                    anchoredCharacter = anchoredCharacter
+                                            || ch.contents === SpecialCharacters.ANCHORED_OBJECT;
+                                } catch (eAnchoredSpecialCharacter) {}
+                                if (anchoredCharacter) ch.remove();
+                            }
+                        }
+                    } catch (eRemoveCopiedAnchor) {}
+                    copies.push(copy);
+                } catch (eDuplicateChild) {}
+            }
+            if (copies.length === 1) return copies[0];
+            if (copies.length > 1) return spread.groups.add(copies);
+            return item.duplicate(spread) || null;
+        } catch (eDuplicateNestedCompletePng) {
+            for (var ci = copies.length - 1; ci >= 0; ci--) {
+                try { copies[ci].remove(); } catch (eRemoveFailedCopy) {}
+            }
+        }
+        return null;
+    }
+
     try {
 
     // 인라인 객체 추출: ExtractionPlan의 inline 후보만 개별 PNG로 렌더
@@ -877,6 +928,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                     }
                 } catch (eWalk) {}
                 var _inlineExportOk = false;
+                var _inlineExportDuplicate = null;
                 try {
                     // 인라인 객체는 배경 위에 얹히므로 투명 배경 필요
                     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
@@ -892,7 +944,10 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         }
                     } catch (eInlineOutOfScope) {}
                     try {
-                        inItem.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
+                        _inlineExportDuplicate = _duplicateNestedCompletePngForExport(
+                                inItem, inlineCandidate, doc);
+                        var _inlineExportTarget = _inlineExportDuplicate || inItem;
+                        _inlineExportTarget.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
                         _inlineExportOk = true;
                     } catch (eInlineExport) {
                         try { _inlineExportOk = File(renderDir + "/" + inFileName).exists; } catch (eExists) {}
@@ -973,7 +1028,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 fileBytes: _inlineWrittenFile.exists ? _inlineWrittenFile.length : 0,
                                 exportOk: _inlineExportOk ? true : false,
                                 guarded: false,
-                                duplicatedForExport: false,
+                                duplicatedForExport: _inlineExportDuplicate !== null,
                                 textHiddenBeforeExport: _inlineHasHiddenText,
                                 exportTargetType: inItem && inItem.constructor ? inItem.constructor.name : null,
                                 sourceBounds: _inlineSourceBounds,
@@ -1013,6 +1068,9 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         }
                     }
                 } catch (eRender) {}
+                try {
+                    if (_inlineExportDuplicate) _inlineExportDuplicate.remove();
+                } catch (eRemoveInlineExportDuplicate) {}
                 try {
                     if (savedInlineOutOfScopeItems && savedInlineOutOfScopeItems.length > 0) {
                         _restoreItemsForExport(savedInlineOutOfScopeItems);

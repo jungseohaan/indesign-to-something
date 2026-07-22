@@ -5801,6 +5801,7 @@ public class InlineFrameHandler {
         boolean imageAdded = false;
         boolean textAdded = false;
         boolean previousWasText = false;
+        ObjectPlan previousImagePlan = null;
         for (int sourceId : flowIds) {
             ObjectPlan completePngPlan = !imageAdded
                     ? directInlineCompletePngPlan(ctx, sourceId)
@@ -5812,6 +5813,7 @@ public class InlineFrameHandler {
                 if (!out.isEmpty()) appendLineBreak(out);
                 out.add(completePng);
                 imageAdded = true;
+                previousImagePlan = completePngPlan;
                 previousWasText = false;
                 continue;
             }
@@ -5840,6 +5842,7 @@ public class InlineFrameHandler {
                 if (!out.isEmpty()) appendLineBreak(out);
                 out.add(image);
                 imageAdded = true;
+                previousImagePlan = carrier.plan;
                 previousWasText = false;
             }
         }
@@ -5850,13 +5853,67 @@ public class InlineFrameHandler {
                 if (tf != null && !tf.sourceHidden()) remainingTextFrames.add(tf);
             }
             if (!remainingTextFrames.isEmpty()) {
-                if (!out.isEmpty()) appendLineBreak(out);
+                if (!out.isEmpty()) {
+                    if (sharesSourceRow(ctx, previousImagePlan, remainingTextFrames)) {
+                        markLastInlineVisualLineNeutral(out);
+                    } else {
+                        appendLineBreak(out);
+                    }
+                }
                 appendClosedCarrierTextItems(ctx, out, remainingTextFrames);
                 textAdded = true;
             }
         }
         if (!textAdded || !imageAdded) return null;
         return out;
+    }
+
+    /**
+     * Preserve the source row when a closed inline carrier owns a visual child and
+     * editable sibling text. Bounds only execute the already-decided inline plan;
+     * they never change text or visual ownership.
+     */
+    private static boolean sharesSourceRow(
+            ResolvedBuildContext ctx,
+            ObjectPlan visualPlan,
+            List<ResolvedTextFrame> textFrames) {
+        if (visualPlan == null || visualPlan.bounds == null
+                || visualPlan.bounds.length < 4
+                || textFrames == null || textFrames.isEmpty()) {
+            return false;
+        }
+        double[] visualBounds = renderedBoundsPoints(ctx, visualPlan.bounds);
+        if (visualBounds == null) return false;
+        double visualTop = Math.min(visualBounds[0], visualBounds[2]);
+        double visualBottom = Math.max(visualBounds[0], visualBounds[2]);
+        double visualHeight = visualBottom - visualTop;
+        if (visualHeight <= 0) return false;
+
+        for (ResolvedTextFrame tf : textFrames) {
+            double[] textBounds = textFrameBoundsPoints(ctx, tf);
+            if (textBounds == null || textBounds.length < 4) return false;
+            double textTop = Math.min(textBounds[0], textBounds[2]);
+            double textBottom = Math.max(textBounds[0], textBounds[2]);
+            double textHeight = textBottom - textTop;
+            if (textHeight <= 0) return false;
+            double overlap = Math.min(visualBottom, textBottom)
+                    - Math.max(visualTop, textTop);
+            if (overlap <= 0
+                    || overlap / Math.min(visualHeight, textHeight) < 0.5) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void markLastInlineVisualLineNeutral(List<ASTInlineItem> items) {
+        for (int i = items.size() - 1; i >= 0; i--) {
+            ASTInlineItem item = items.get(i);
+            if (item instanceof ASTInlineObject) {
+                ((ASTInlineObject) item).sourceRowLineNeutral(true);
+                return;
+            }
+        }
     }
 
     private static ObjectPlan directInlineCompletePngPlan(
