@@ -2800,7 +2800,9 @@ public final class TableBuilder {
         table.y(0);
         table.flowWithText(true);
         table.anchoredFlowWithText(true);
-        table.fixedOuterBounds(false);
+        // fixedOuterBounds 는 보존한다. resolved 가 외곽 경계를 아는 고정 디자인
+        // 테이블(source-page-local)을 false 로 되돌리면 HWPX 인라인 흐름 빌드가
+        // 다행 테이블을 행별 1xN 조각으로 쪼갠다 (p47 2x5 데이터 표 사례).
     }
 
     private static int removeInlineTablesFromBlock(ASTBlock block, Set<String> sourceIds) {
