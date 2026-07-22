@@ -161,8 +161,8 @@ public class EHFontEquationConverterTest {
     @Test
     public void sentinel_separates_adjacent_terms() {
         // '1[8C]5␜- 'Ä0.81␜ — 항 사이 투명 스페이서(␜)가 radicand 를 끝내고
-        // EM 간격이 된다. √15 의 radicand 가 다음 항의 - 를 삼키면 안 됨 (실측: p22).
-        Assert.assertEquals("sqrt{15} -sqrt{0.81}",
+        // HWP 수식 간격이 된다. √15 의 radicand 가 다음 항의 - 를 삼키면 안 됨 (실측: p22).
+        Assert.assertEquals("sqrt{15}~-sqrt{0.81}",
                 convert(fracUpper("'"), body("1"), fracUpper(""), body("5␜-"),
                         fracUpper("'"), fracUpper("Ä"), body("0.81␜")));
     }
@@ -171,9 +171,17 @@ public class EHFontEquationConverterTest {
     public void numeric_radicand_stops_at_sign() {
         // '7-2␜3+ '1[8C]6 — 폭 선택자 없는 hook 근호는 숫자 하나만 덮는다:
         // √7−2, 3+√16 (√(7−2)·√(2 3+…) 아님. 실측: p22).
-        Assert.assertEquals("sqrt{7}-2 3+sqrt{16}",
+        Assert.assertEquals("sqrt{7}-2~3+sqrt{16}",
                 convert(fracUpper("'"), body("7-2␜3+"),
                         fracUpper("'"), body("1"), fracUpper(""), body("6")));
+    }
+
+    @Test
+    public void space_run_between_adjacent_roots_emits_formula_spacing() {
+        // 수식 런 사이의 원본 공백 런은 HWP 수식 엔진에서 무시되는 ASCII 공백이 아니라
+        // 수식 간격 명령으로 보존한다.
+        Assert.assertEquals("sqrt{15}~sqrt{16}",
+                convert(fracUpper("'"), body("15"), body(" "), fracUpper("'"), body("16")));
     }
 
     @Test
@@ -199,6 +207,22 @@ public class EHFontEquationConverterTest {
         // (실측: p17 탐구2 √(-3)²=√□=□).
         Assert.assertEquals("sqrt{(-3)^{2}}=",
                 convert(fracUpper("\""), fracUpper("Ã"), body("(-3 )Û`=")));
+    }
+
+    @Test
+    public void superscript_font_mixed_paren_exponent_keeps_structure() {
+        // 실제 p12 run 형태: EH상부자 안에 ")" + 확장 위첨자(Û) + "="가 함께 있음.
+        // 전체 run을 위첨자로 만들면 left(sqrt{5}^{right)2=})처럼 구조가 무너진다.
+        Assert.assertEquals("left(sqrt{5} right)^{2}=",
+                convert(sup("("), fracUpper("'"), sup("5"), body(" "), sup(")Û`=")));
+    }
+
+    @Test
+    public void tall_hook_superscript_font_radicand_absorbs_exponent() {
+        // 실제 p12 run 형태: tall hook + 폭선택자 + EH상부자 "3Û`".
+        // tall hook은 지수를 루트 안 피연산자로 포함한다.
+        Assert.assertEquals("left(sqrt{3^{2}} right)=",
+                convert(sup("("), fracUpper("\""), fracUpper("Å"), sup("3Û`"), body(" "), sup(")=")));
     }
 
     @Test

@@ -451,10 +451,11 @@ class RunPostProcessor {
                                             List<ASTInlineItem> out) {
         if (mathBuf.length() == 0) return;
 
-        // EH 폰트 런이 있으면 EH 변환 파이프라인 사용
+        // EH 폰트/문자스타일 런이 있으면 EH 변환 파이프라인 사용.
+        // resolved 경로에서는 fontFamily가 비고 CharacterStyle만 남는 경우가 있다.
         boolean hasEH = false;
         for (IDMLCharacterRun cr : mathRuns) {
-            if (cr.fontFamily() != null && EHFontGlyphMap.isEHFontFamily(cr.fontFamily())) {
+            if (cr.isEHFont()) {
                 hasEH = true;
                 break;
             }
@@ -557,6 +558,7 @@ class RunPostProcessor {
 
         if (FormulaClassifier.containsEquationSyntax(trimmed)) return true;
         if (containsEHEncodedEvidence(mathRuns)) return true;
+        if (containsEHMathKeyword(trimmed, mathRuns)) return true;
 
         // A bare one-letter italic token is a source math variable.  Check this before the
         // broad unit classifier (which also accepts "x"); tokens such as *C still continue to
@@ -643,6 +645,20 @@ class RunPostProcessor {
             }
         }
         return false;
+    }
+
+    private static boolean containsEHMathKeyword(String script, List<IDMLCharacterRun> mathRuns) {
+        if (script == null || mathRuns == null) return false;
+        boolean fromEH = false;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run != null && run.isEHFont()) {
+                fromEH = true;
+                break;
+            }
+        }
+        if (!fromEH) return false;
+        String padded = " " + script.trim() + " ";
+        return padded.contains(" pi ") || padded.contains(" CDOTS ");
     }
 
     private static void emitItalicMathRunsAsText(List<IDMLCharacterRun> mathRuns, List<ASTInlineItem> out) {
@@ -734,8 +750,7 @@ class RunPostProcessor {
         String fs = tr.fontStyle();
         boolean isItalic = fs != null && fs.toLowerCase().contains("italic");
         // EH 수식 폰트 (이탤릭 여부와 무관하게 수식으로 변환)
-        String ff = tr.fontFamily();
-        boolean isEHFont = ff != null && EHFontGlyphMap.isEHFontFamily(ff);
+        boolean isEHFont = isEHTextRun(tr);
         if (!isItalic && !isEHFont) return false;
 
         // A punctuation fragment split from an EH range is prose punctuation, not a math run.
@@ -774,6 +789,13 @@ class RunPostProcessor {
             if (!isAsciiUpper(text.charAt(i))) return false;
         }
         return true;
+    }
+
+    private static boolean isEHTextRun(ASTTextRun tr) {
+        if (tr == null) return false;
+        String ff = tr.fontFamily();
+        if (ff != null && EHFontGlyphMap.isEHFontFamily(ff)) return true;
+        return EHFontGlyphMap.isEHFontStyle(tr.characterStyleRef());
     }
 
     private static boolean containsLetterDigitOrMathEvidence(String text) {

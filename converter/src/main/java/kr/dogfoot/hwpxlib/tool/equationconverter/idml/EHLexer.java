@@ -239,36 +239,45 @@ public class EHLexer {
      * 닫히는 글리프다. 백틱 종료가 있으면 위첨자 위치가 확실.
      */
     private static void lexSubSup(String content, boolean isSuper, List<EHLexeme> out) {
-        boolean hasBacktick = content.indexOf('`') >= 0;   // 위첨자 닫기 마커 존재
-        boolean hasExtended = false;                        // 0x80+ 위첨자 글리프 존재
-        StringBuilder buf = new StringBuilder();
+        StringBuilder atom = new StringBuilder();
         for (int i = 0; i < content.length(); i++) {
             char c = content.charAt(i);
             if (c == '`') continue;
-            char decoded = EHFontGlyphMap.decodeSubSupGlyph(c);
-            if (c >= 0x80) {
-                if (decoded == c) continue; // 미매핑 확장문자 스킵
-                hasExtended = true;
+            if (c < 0x80) {
+                if (i + 1 < content.length() && content.charAt(i + 1) == '`'
+                        && isAsciiScriptCandidate(c)) {
+                    flushAtom(atom, out);
+                    if (isSuper) out.add(EHLexeme.superscript(String.valueOf(c)));
+                    else out.add(EHLexeme.subscript(String.valueOf(c)));
+                    i++; // consume backtick
+                } else {
+                    atom.append(c);
+                }
+                continue;
             }
-            buf.append(decoded);
+
+            char decoded = EHFontGlyphMap.decodeSubSupGlyph(c);
+            if (decoded == c) continue; // 미매핑 확장문자 스킵
+            if ("÷×±°".indexOf(decoded) >= 0) {
+                flushAtom(atom, out);
+                emitAtom(String.valueOf(decoded), out);
+            } else {
+                flushAtom(atom, out);
+                if (isSuper) out.add(EHLexeme.superscript(String.valueOf(decoded)));
+                else out.add(EHLexeme.subscript(String.valueOf(decoded)));
+            }
         }
-        String s = buf.toString();
-        if (s.isEmpty()) return;
-        // 연산자(÷×±°)는 항상 ATOM.
-        if (s.length() == 1 && "÷×±°".indexOf(s.charAt(0)) >= 0) {
-            emitAtom(s, out);
-            return;
-        }
-        // 위첨자 위치 확실(확장범위 글리프 또는 백틱 종료) → 진짜 첨자.
-        // 그 외(기본범위 숫자·문자, 백틱 없음) → 작은 크기 radicand/본문 = ATOM.
-        boolean isTrueScript = hasExtended || hasBacktick;
-        if (!isTrueScript) {
-            emitAtom(s, out);
-        } else if (isSuper) {
-            out.add(EHLexeme.superscript(s));
-        } else {
-            out.add(EHLexeme.subscript(s));
-        }
+        flushAtom(atom, out);
+    }
+
+    private static boolean isAsciiScriptCandidate(char c) {
+        return Character.isLetterOrDigit(c) || c == '+' || c == '-' || c == '=';
+    }
+
+    private static void flushAtom(StringBuilder atom, List<EHLexeme> out) {
+        if (atom.length() == 0) return;
+        emitAtom(atom.toString(), out);
+        atom.setLength(0);
     }
 
     /**

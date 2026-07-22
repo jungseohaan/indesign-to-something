@@ -54,8 +54,7 @@ class MathProcessor {
         for (ASTInlineItem it : items) {
             if (it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) hasEquation = true;
             if (it instanceof ASTTextRun) {
-                String ff = ((ASTTextRun) it).fontFamily();
-                if (ff != null && EHFontGlyphMap.isEHFontFamily(ff)) hasEHRun = true;
+                if (isEHTextRun((ASTTextRun) it)) hasEHRun = true;
             }
         }
         if (hasEquation) {
@@ -95,14 +94,9 @@ class MathProcessor {
             ASTTextRun tr = (ASTTextRun) item;
             applyPositionFromCharacterStyle(tr);
             String ff = tr.fontFamily();
-            String currentType = null;
-            if (ff != null) {
-                if (EHFontGlyphMap.isEHFontFamily(ff)) currentType = "EH";
-                else if (BTFontGlyphMap.isBTFontFamily(ff)) currentType = "BT";
-                else if (NPFontGlyphMap.isNPFont(ff)) currentType = "NP";
-            }
+            String currentType = mathTypeOf(tr);
 
-            FormulaCluster formulaCluster = collectFormulaEquationCluster(items, i);
+            FormulaCluster formulaCluster = currentType == null ? collectFormulaEquationCluster(items, i) : null;
             if (formulaCluster != null) {
                 flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
                 mathGroup.clear();
@@ -187,8 +181,7 @@ class MathProcessor {
                             for (int ni = i + 1; ni < items.size(); ni++) {
                                 ASTInlineItem next = items.get(ni);
                                 if (next instanceof ASTTextRun) {
-                                    String nff = ((ASTTextRun) next).fontFamily();
-                                    if (nff != null && EHFontGlyphMap.isEHFontFamily(nff)) {
+                                    if (isEHTextRun((ASTTextRun) next)) {
                                         bridge = true;
                                         break;
                                     }
@@ -225,7 +218,7 @@ class MathProcessor {
     private static boolean isDiscardableEHStructureResidue(ASTTextRun run) {
         if (run == null) return false;
         String ff = run.fontFamily();
-        if (ff == null || !EHFontGlyphMap.isEHFontFamily(ff)) return false;
+        if (!isEHTextRun(run)) return false;
         String text = run.text();
         if (text == null || text.isEmpty()) return true;
         String decoded = EHFontGlyphMap.decodeStrayGlyphText(text, ff);
@@ -1225,6 +1218,7 @@ class MathProcessor {
         if (tr == null) return false;
         String ff = tr.fontFamily();
         return tr.grepMathFont()
+                || isEHTextRun(tr)
                 || (ff != null && (EHFontGlyphMap.isEHFontFamily(ff)
                 || BTFontGlyphMap.isBTFontFamily(ff)
                 || NPFontGlyphMap.isNPFont(ff)));
@@ -1941,12 +1935,34 @@ class MathProcessor {
         IDMLCharacterRun cr = new IDMLCharacterRun();
         cr.content(tr.text());
         cr.fontFamily(fontFamily);
+        cr.appliedCharacterStyle(tr.characterStyleRef());
+        cr.fontStyle(tr.fontStyle());
+        if (tr.fontSizeHwpunits() != null) {
+            cr.fontSize(tr.fontSizeHwpunits() / 100.0);
+        }
+        cr.fillColor(tr.textColor());
         if (tr.subscript()) {
             cr.position("Subscript");
         } else if (tr.superscript()) {
             cr.position("Superscript");
         }
         return cr;
+    }
+
+    private static String mathTypeOf(ASTTextRun tr) {
+        if (tr == null) return null;
+        String ff = tr.fontFamily();
+        if (isEHTextRun(tr)) return "EH";
+        if (ff != null && BTFontGlyphMap.isBTFontFamily(ff)) return "BT";
+        if (ff != null && NPFontGlyphMap.isNPFont(ff)) return "NP";
+        return null;
+    }
+
+    private static boolean isEHTextRun(ASTTextRun tr) {
+        if (tr == null) return false;
+        String ff = tr.fontFamily();
+        if (ff != null && EHFontGlyphMap.isEHFontFamily(ff)) return true;
+        return EHFontGlyphMap.isEHFontStyle(tr.characterStyleRef());
     }
 
     private static void applyPositionFromCharacterStyle(ASTTextRun tr) {

@@ -136,4 +136,69 @@ public class RunPostProcessorTest {
         Assert.assertEquals(Integer.valueOf(850),
                 ((ASTEquation) para.items().get(1)).preferredBaseUnit());
     }
+
+    @Test
+    public void ehYakmulPiAndEllipsisSurviveItalicMathGroupingWithCharacterStyleOnly() {
+        ASTParagraph para = new ASTParagraph();
+
+        ASTTextRun pi = new ASTTextRun();
+        pi.text("p");
+        pi.characterStyleRef("CharacterStyle/약물");
+        pi.fontStyle("Plain");
+        pi.fontSizeHwpunits(1000);
+        para.addItem(pi);
+
+        ASTTextRun digits = new ASTTextRun();
+        digits.text("=3.14159265");
+        digits.characterStyleRef("CharacterStyle/$ID/[No character style]");
+        digits.fontFamily("EH상부자");
+        digits.fontStyle("Italic");
+        digits.fontSizeHwpunits(1000);
+        para.addItem(digits);
+
+        ASTTextRun ellipsis = new ASTTextRun();
+        ellipsis.text("y");
+        ellipsis.characterStyleRef("CharacterStyle/약물");
+        ellipsis.fontStyle("Plain");
+        ellipsis.fontSizeHwpunits(1000);
+        para.addItem(ellipsis);
+
+        RunPostProcessor.convertItalicRunsToEquations(para);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals("pi=3.14159265 CDOTS",
+                ((ASTEquation) para.items().get(0)).hwpScript());
+    }
+
+    @Test
+    public void mathProcessorRoutesYakmulPiThroughEHBeforeChemicalFormulaCluster() {
+        ASTParagraph para = new ASTParagraph();
+
+        ASTTextRun pi = new ASTTextRun();
+        pi.text("p");
+        pi.characterStyleRef("CharacterStyle/약물");
+        pi.fontSizeHwpunits(1000);
+        para.addItem(pi);
+
+        ASTTextRun digits = new ASTTextRun();
+        digits.text("=3.14159265");
+        digits.fontFamily("EH상부자");
+        digits.fontStyle("Italic");
+        digits.fontSizeHwpunits(1000);
+        para.addItem(digits);
+
+        ASTTextRun ellipsis = new ASTTextRun();
+        ellipsis.text("y");
+        ellipsis.characterStyleRef("CharacterStyle/약물");
+        ellipsis.fontSizeHwpunits(1000);
+        para.addItem(ellipsis);
+
+        MathProcessor.convertMathRunsInParagraph(null, para);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals("pi=3.14159265 CDOTS",
+                ((ASTEquation) para.items().get(0)).hwpScript());
+    }
 }

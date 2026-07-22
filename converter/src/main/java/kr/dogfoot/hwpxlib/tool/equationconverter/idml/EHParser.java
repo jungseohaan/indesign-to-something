@@ -106,11 +106,11 @@ public class EHParser {
 
     /** Sqrt := HOOK WidthSel? Radicand */
     private EHNode parseSqrt() {
-        next(); // consume HOOK
+        EHLexeme hook = next(); // consume HOOK
         // hook 직후 WIDTH_SELECTOR 는 여기서 스킵하지 않는다 — parseRadicand 가
         // "뒤에 radicand 가 더 오는가"로 폭 마커/진짜 변수(√121 vs √u)를 판정한다.
         EHNode.Sqrt sqrt = new EHNode.Sqrt();
-        parseRadicand(sqrt.radicand());
+        parseRadicand(sqrt.radicand(), hook != null && hook.hookGlyph() == '"');
         return sqrt;
     }
 
@@ -147,6 +147,10 @@ public class EHParser {
 
     /** Radicand := RadAtom Trailing? — 하나의 원자 + 선택 지수. */
     private void parseRadicand(List<EHNode> out) {
+        parseRadicand(out, false);
+    }
+
+    private void parseRadicand(List<EHNode> out, boolean absorbTrailingSuperscript) {
         if (!has()) return;
         EHLexeme t = peek();
         switch (t.kind()) {
@@ -174,7 +178,7 @@ public class EHParser {
                 // 뒤에 radicand 가 없으면(√u, √l) 이 코드포인트는 폭 선택자가 아니라 진짜
                 // 변수다 — 디코딩해 radicand 로 넣는다(실측: 1단원 p16 √121 vs √u 구분).
                 if (radicandFollows()) {
-                    parseRadicand(out);
+                    parseRadicand(out, absorbTrailingSuperscript);
                 } else {
                     String var = EHFontGlyphMap.decodeText(
                             String.valueOf((char) t.rawCodepoint()), "EH분수대문자");
@@ -187,10 +191,14 @@ public class EHParser {
                 // (앞 숫자가 없으므로). 스킵하고 radicand 재시도 → √a 가 sqrt{ }a 로
                 // 새는 것 방지.
                 next();
-                parseRadicand(out);
+                parseRadicand(out, absorbTrailingSuperscript);
                 return;
             default:
                 return; // radicand 없음(빈 근호)
+        }
+        if (absorbTrailingSuperscript && has()
+                && peek().kind() == EHLexeme.Kind.SUPERSCRIPT) {
+            out.add(superNode(next().value()));
         }
         // radicand 직후 SUPERSCRIPT 는 근호 안에 넣지 않는다 — (√3)² 처럼 근호 밖 지수다.
         // SUPERSCRIPT 를 소비하지 않고 남기면 parseItems 가 Sqrt 의 형제로 emit 하고,
