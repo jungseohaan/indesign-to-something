@@ -541,7 +541,7 @@ public class ASTRunConverter {
         }
     }
 
-    private static kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext inlineBridgeContext(
+    static kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext inlineBridgeContext(
             ResolvedData resolvedData) {
         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
                 new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();

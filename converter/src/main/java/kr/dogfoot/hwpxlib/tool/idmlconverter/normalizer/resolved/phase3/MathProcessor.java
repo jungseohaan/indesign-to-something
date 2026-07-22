@@ -867,7 +867,7 @@ class MathProcessor {
         return isFormulaAnswerPlaceholderSource(ctx, sourceId);
     }
 
-    static boolean isFormulaAnswerPlaceholderRun(ResolvedBuildContext ctx, IDMLCharacterRun run) {
+    public static boolean isFormulaAnswerPlaceholderRun(ResolvedBuildContext ctx, IDMLCharacterRun run) {
         if (run == null) return false;
         boolean sawAnchor = false;
         if (run.inlineAnchors() != null) {

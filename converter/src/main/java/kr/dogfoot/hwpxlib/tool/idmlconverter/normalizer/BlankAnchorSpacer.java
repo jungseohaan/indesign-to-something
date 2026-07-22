@@ -41,6 +41,9 @@ public final class BlankAnchorSpacer {
         if (graphic == null || !"rectangle".equals(graphic.type())) return false;
         if (graphic.hasImage()) return false;
         if (graphic.childTextFrames() != null && !graphic.childTextFrames().isEmpty()) return false;
+        // 자식 도형(밑줄 Polygon 등)이 있으면 시각물이다 — 투명 스페이서가 아니다.
+        // (실측: 과학 u1 p19 답란 밑줄 rect 가 NBSP 로 치환되어 밑줄 유실)
+        if (graphic.childGraphics() != null && !graphic.childGraphics().isEmpty()) return false;
         double w = graphic.widthPoints();
         double h = graphic.heightPoints();
         if (w < MIN_WIDTH_PT || w > MAX_WIDTH_PT) return false;
