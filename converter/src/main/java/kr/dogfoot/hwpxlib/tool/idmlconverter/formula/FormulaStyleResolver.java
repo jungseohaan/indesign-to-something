@@ -39,13 +39,11 @@ public final class FormulaStyleResolver {
     }
 
     private static String resolveFont(ASTEquation eq, String templateFont, FontMapper fontMapper) {
-        if (usesBodyTextEquationStyle(eq)) {
-            String sourceFont = eq != null ? eq.preferredFontFamily() : null;
-            if (sourceFont != null && !sourceFont.isEmpty()) {
-                return fontMapper != null ? fontMapper.map(sourceFont) : sourceFont;
-            }
-            return "함초롬바탕";
-        }
+        // SPEC-055: 화학식(CHEM_FORMULA)도 hp:equation 으로 방출되므로 본문 폰트
+        // 특례를 두지 않는다. 수식 개체에 본문 폰트(함초롬바탕)를 지정하면 한글
+        // 수식 렌더러가 글리프를 겹쳐 그려 깨진 한글처럼 보인다 (p20 실측) —
+        // 수식 개체는 항상 템플릿 폰트(HYhwpEQ)를 우선한다. 텍스트런 경로
+        // (로마숫자 등, template=null)는 아래 폴백으로 기존과 동일하게 동작한다.
         if (templateFont != null && !templateFont.isEmpty()) {
             return templateFont;
         }

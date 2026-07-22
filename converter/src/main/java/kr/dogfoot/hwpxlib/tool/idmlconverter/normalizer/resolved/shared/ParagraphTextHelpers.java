@@ -210,6 +210,7 @@ public final class ParagraphTextHelpers {
         copy.shadeColor(source.shadeColor());
         copy.letterSpacing(source.letterSpacing());
         copy.subscript(source.subscript());
+        copy.droppedResolvedScriptPosition(source.droppedResolvedScriptPosition());
         copy.superscript(source.superscript());
         copy.grepMathFont(source.grepMathFont());
         copy.underline(source.underline());

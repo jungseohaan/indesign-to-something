@@ -40,6 +40,7 @@ when touching the related subsystem.
 | [SPEC-018](SPEC-018-semantic-extraction.md) | semantic/PPTX | semantic layer and PPTX output |
 | [SPEC-030](SPEC-030-indesign-extraction-performance.md) | performance | extraction timing and caching direction |
 | [SPEC-054](SPEC-054-dev-content-extract-modes.md) | dev workflow | 개발용 content-mode (graphic-only/text-only) + issue.py 96dpi 기본 (Active) |
+| [SPEC-055](SPEC-055-chem-formula-hancom-equation.md) | equations | 화학식 전면 한컴 수식(hp:equation) 변환 — 출력 강등 제거 + 첨자 문자속성 커버리지 (Active, 계획) |
 | [SPEC-032](SPEC-032-windows-cross-platform.md) | desktop platform | Windows support |
 | [SPEC-034](SPEC-034-llm-semantic-extraction.md) | semantic/LLM | LLM assisted content extraction |
 | [SPEC-desktop-app](SPEC-desktop-app.md) | desktop app | Tauri app architecture |

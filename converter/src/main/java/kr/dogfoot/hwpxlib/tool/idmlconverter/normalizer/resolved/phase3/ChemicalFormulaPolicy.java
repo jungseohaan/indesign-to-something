@@ -219,6 +219,41 @@ public final class ChemicalFormulaPolicy {
         return false;
     }
 
+    /** SPEC-055 stitch 용: 텍스트에 알려진 원소기호가 있는가 (패키지 공개). */
+    static boolean containsElementText(String text) {
+        return containsKnownChemicalElement(text);
+    }
+
+    /**
+     * SPEC-055 stitch 용: 조각의 모든 라틴 문자열이 원소기호로만 해석되는가.
+     * ("CH"=C+H 허용, "and" 같은 소문자 시작·비원소 문자열 거부. 문자가 없으면 거부.)
+     */
+    static boolean lettersAreKnownElements(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean sawElement = false;
+        for (int i = 0; i < text.length(); ) {
+            char c = text.charAt(i);
+            if (c >= 'A' && c <= 'Z') {
+                if (i + 1 < text.length()) {
+                    char n = text.charAt(i + 1);
+                    if (n >= 'a' && n <= 'z') {
+                        if (!isKnownChemicalElementSymbol(text.substring(i, i + 2))) return false;
+                        sawElement = true;
+                        i += 2;
+                        continue;
+                    }
+                }
+                if (!isKnownChemicalElementSymbol(String.valueOf(c))) return false;
+                sawElement = true;
+                i++;
+                continue;
+            }
+            if (c >= 'a' && c <= 'z') return false;
+            i++;
+        }
+        return sawElement;
+    }
+
     private static boolean containsKnownChemicalElement(String text) {
         if (text == null) return false;
         for (int i = 0; i < text.length(); i++) {

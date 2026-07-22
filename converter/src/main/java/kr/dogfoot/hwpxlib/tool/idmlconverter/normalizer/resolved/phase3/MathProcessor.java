@@ -66,6 +66,8 @@ class MathProcessor {
                         && ((ASTTextRun) it).fontFamily() != null
                         && EHFontGlyphMap.isEHFontFamily(((ASTTextRun) it).fontFamily()));
             }
+            convertSubscriptChemicalSegments(para);
+            stitchChemicalFormulaFragments(para);
             return;
         }
 
@@ -216,6 +218,8 @@ class MathProcessor {
             items.addAll(newItems);
         }
         collapseMixedFormulaEquationClusters(ctx, para);
+        convertSubscriptChemicalSegments(para);
+        stitchChemicalFormulaFragments(para);
     }
 
     /**
@@ -1329,6 +1333,395 @@ class MathProcessor {
             "LEQ", "GEQ", "INF", "rarrow", "equiv", "notin", "SUBSET"
     };
 
+    /**
+     * SPEC-055 Phase B: 일반 본문 폰트 + 첨자 문자속성으로 조판된 화학식 세그먼트를
+     * ASTEquation("CHEM_FORMULA")으로 변환한다.
+     *
+     * <p>수식 폰트(BT/EH/NP) 증거가 없는 본문 속 H₂O·CO₂ 는 수식 그룹핑에 진입하지
+     * 못하고 첨자 텍스트런으로 남는다. 여기서는 <b>아래첨자 숫자 런</b>을 앵커로,
+     * 직전 런 꼬리의 원소기호와 후속 조각을 묶어 수식화한다. 보수 가드:
+     * <ul>
+     *   <li>앵커는 1~2자리 숫자 아래첨자 + 직전 문자가 원소기호일 때만</li>
+     *   <li>세그먼트의 모든 라틴 문자열이 원소기호 화이트리스트에 있어야 함</li>
+     *   <li>원소 직전 문자가 라틴 소문자면 제외 (pH2 같은 영문 꼬리 보호)</li>
+     *   <li>수식 폰트(BT/EH/NP) 런은 기존 수식 파이프라인 소관 — 건드리지 않음</li>
+     * </ul>
+     */
+    static void convertSubscriptChemicalSegments(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.size() < 2) return;
+        for (int i = 1; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun sub = (ASTTextRun) item;
+            if (!isSubscriptEvidence(sub)) continue;
+            String subText = sub.text();
+            if (subText == null) continue;
+            // 첨자 런 꼬리의 공백(어절 간 hairspace 등)은 수식 뒤로 보존한다.
+            String subTrailing = "";
+            java.util.regex.Matcher wsm = TRAILING_WHITESPACE.matcher(subText);
+            if (wsm.find()) {
+                subTrailing = wsm.group();
+                subText = subText.substring(0, subText.length() - subTrailing.length());
+            }
+            if (!subText.matches("[0-9]{1,2}")) continue;
+            // 직전의 빈 텍스트런(첨자 잔여물)은 건너뛰고 실제 base 를 찾는다.
+            int baseIdx = i - 1;
+            while (baseIdx >= 0 && items.get(baseIdx) instanceof ASTTextRun) {
+                String bt = ((ASTTextRun) items.get(baseIdx)).text();
+                if (bt != null && !bt.isEmpty()) break;
+                baseIdx--;
+            }
+            if (baseIdx < 0 || !(items.get(baseIdx) instanceof ASTTextRun)) continue;
+            ASTTextRun base = (ASTTextRun) items.get(baseIdx);
+            if (base.subscript() || base.superscript()) continue;
+            // 이탤릭 라틴은 수학 변수/기하 라벨(B_1 등) — 화학식으로 보지 않는다.
+            if (base.fontStyle() != null && base.fontStyle().toLowerCase(java.util.Locale.ROOT).contains("italic")) continue;
+            String baseText = base.text();
+            if (baseText == null || baseText.isEmpty()) continue;
+
+            // 직전 런 꼬리에서 원소 머리를 뗀다 ("물(H" → "H", "2H" → "2H").
+            java.util.regex.Matcher m = TRAILING_CHEM_FRAGMENT.matcher(baseText);
+            if (!m.find() || m.group().isEmpty()) continue;
+            String head = m.group();
+            if (head.endsWith("(")) head = head.substring(0, head.length() - 1);
+            if (head.isEmpty() || !ChemicalFormulaPolicy.lettersAreKnownElements(head)) continue;
+            String rest = baseText.substring(0, baseText.length() - m.group().length()
+                    + (m.group().endsWith("(") ? 1 : 0));
+            // 영문 단어 꼬리 보호: 원소 머리 직전이 라틴 문자면 화학식이 아니다.
+            if (!rest.isEmpty()) {
+                char before = rest.charAt(rest.length() - 1);
+                if ((before >= 'a' && before <= 'z') || (before >= 'A' && before <= 'Z')) continue;
+            }
+
+            // 후속 조각 확장: 첨자 숫자 / 이온 전하 위첨자 / 원소·숫자 접두 일반 런.
+            StringBuilder script = new StringBuilder(head);
+            script.append("_{").append(subText).append('}');
+            int end = i; // 마지막으로 흡수한 items 인덱스
+            ASTTextRun tailPartialRun = null;
+            String tailPartialRest = null;
+            for (int j = i + 1; j < items.size(); j++) {
+                if (!(items.get(j) instanceof ASTTextRun)) break;
+                ASTTextRun r = (ASTTextRun) items.get(j);
+                String t = r.text();
+                if (t == null || t.isEmpty()) {
+                    end = j;
+                    continue;
+                }
+                if (isSubscriptEvidence(r)) {
+                    java.util.regex.Matcher tw = TRAILING_WHITESPACE.matcher(t);
+                    String tTrail = tw.find() ? tw.group() : "";
+                    String tCore = t.substring(0, t.length() - tTrail.length());
+                    if (tCore.matches("[0-9]{1,2}")) {
+                        script.append("_{").append(tCore).append('}');
+                        end = j;
+                        if (!tTrail.isEmpty()) {
+                            subTrailing = tTrail;
+                            break;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+                if (isSuperscriptEvidence(r) && t.matches("[0-9]{0,2}[+−-]")) {
+                    script.append("^{").append(t.replace('−', '-')).append('}');
+                    end = j;
+                    continue;
+                }
+                if (r.subscript() || r.superscript()) break;
+                // 일반 런: 원소/숫자 접두만 흡수 (괄호·화살표·+ 는 Phase B 범위 밖)
+                java.util.regex.Matcher p = LEADING_CHEM_CONTINUATION.matcher(t);
+                if (!p.find() || p.group().isEmpty()) break;
+                String prefix = p.group();
+                if (!ChemicalFormulaPolicy.lettersAreKnownElements(prefix)
+                        && !prefix.matches("[0-9]{1,2}")) {
+                    break;
+                }
+                if (prefix.length() == t.length()) {
+                    script.append(prefix);
+                    end = j;
+                    continue;
+                }
+                script.append(prefix);
+                tailPartialRun = r;
+                tailPartialRest = t.substring(prefix.length());
+                end = j;
+                break;
+            }
+
+            String rebuilt = kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier
+                    .inferChemicalSubscriptScript(script.toString());
+            if (rebuilt == null || rebuilt.isEmpty()) continue;
+
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(rebuilt, "CHEM_FORMULA");
+            if (base.fontSizeHwpunits() != null && base.fontSizeHwpunits() > 0) {
+                eq.preferredBaseUnit(base.fontSizeHwpunits());
+            }
+            if (base.textColor() != null && !base.textColor().isEmpty()) {
+                eq.textColor(base.textColor());
+            }
+
+            // items 반영: [base(rest)] [EQ] [tailPartial(rest)] — 흡수분 제거.
+            if (tailPartialRun != null) tailPartialRun.text(tailPartialRest);
+            int removeTo = (tailPartialRun != null) ? end - 1 : end;
+            for (int k = removeTo; k >= baseIdx + 1; k--) items.remove(k);
+            int eqIdx;
+            if (rest.isEmpty()) {
+                items.set(baseIdx, eq);
+                eqIdx = baseIdx;
+            } else {
+                base.text(rest);
+                items.add(baseIdx + 1, eq);
+                eqIdx = baseIdx + 1;
+            }
+            if (!subTrailing.isEmpty()) {
+                ASTTextRun ws = base.copyWithText(subTrailing);
+                ws.subscript(false);
+                ws.superscript(false);
+                ws.droppedResolvedScriptPosition(null);
+                items.add(eqIdx + 1, ws);
+            }
+            i = eqIdx;
+        }
+    }
+
+    /**
+     * 아래첨자 증거: 문자속성 첨자, SPEC-045 가드로 폐기된 resolved 첨자 힌트,
+     * 또는 첨자 charStyle 이름(하부자). 이름 증거는 SPEC-053 가드(도형 라벨)에
+     * 막힌 진짜 화학식 첨자를 살린다 — 앵커의 "1~2자리 숫자 + 직전 원소기호"
+     * 조건이 도형 라벨·계수 케이스를 차단하므로 여기선 이름만 본다.
+     */
+    private static boolean isSubscriptEvidence(ASTTextRun r) {
+        if (r == null || r.superscript()) return false;
+        return r.subscript()
+                || "subscript".equals(r.droppedResolvedScriptPosition())
+                || charStyleNameScript(r, false);
+    }
+
+    private static boolean isSuperscriptEvidence(ASTTextRun r) {
+        if (r == null || r.subscript()) return false;
+        return r.superscript()
+                || "superscript".equals(r.droppedResolvedScriptPosition())
+                || charStyleNameScript(r, true);
+    }
+
+    private static boolean charStyleNameScript(ASTTextRun r, boolean superscript) {
+        String s = r.characterStyleRef();
+        if (s == null) return false;
+        s = s.toLowerCase(Locale.ROOT).replace("%3a", ":").replace("%25", "%");
+        if (s.contains("정체") || s.contains("정자")) return false;
+        if (superscript) {
+            return s.contains("superscript") || s.contains("상부자") || s.contains("위첨자");
+        }
+        return s.contains("subscript") || s.contains("하부자") || s.contains("아래첨자");
+    }
+
+    private static final java.util.regex.Pattern TRAILING_WHITESPACE =
+            java.util.regex.Pattern.compile("[\\s\u200A\u2028\u00A0]+$");
+
+    private static final java.util.regex.Pattern LEADING_CHEM_CONTINUATION =
+            java.util.regex.Pattern.compile("^(?:[0-9]{0,2}(?:[A-Z][a-z]?)+|[0-9]{1,2})");
+
+    /** 스크립트가 화학식 연속부(첨자·계수·괄호)로 시작하는가 — 선행 원소가 잘려나간 표지. */
+    private static boolean startsAsChemicalContinuation(String script) {
+        if (script == null || script.isEmpty()) return false;
+        char c = script.charAt(0);
+        return Character.isDigit(c) || c == '_' || c == '(';
+    }
+
+    private static final java.util.regex.Pattern TRAILING_CHEM_FRAGMENT =
+            java.util.regex.Pattern.compile(
+                    "[0-9]{0,2}(?:[A-Z][a-z]?)+\\(?(?:\\+[0-9]{0,2}(?:[A-Z][a-z]?)+\\(?)*$");
+
+    /** 직전 텍스트런 꼬리에서 화학식 선두 조각("H", "CH", "2Ca(")을 뗀다. 없으면 null. */
+    private static String trailingChemicalFragment(String text) {
+        if (text == null || text.isEmpty()) return null;
+        java.util.regex.Matcher m = TRAILING_CHEM_FRAGMENT.matcher(text);
+        if (!m.find()) return null;
+        String frag = m.group();
+        if (frag.isEmpty()) return null;
+        if (!ChemicalFormulaPolicy.lettersAreKnownElements(frag)) return null;
+        return frag;
+    }
+
+    /** 후행 런이 화학식 조각 문자만으로 이루어졌는가 (공백/숫자/연산/괄호/원소/화살표). */
+    private static boolean isChemicalFragmentText(String text) {
+        if (text == null) return false;
+        // 빈/공백 런은 조각 사이 커넥터로 통과시킨다 (탭 정렬 반응식의 잔여 런).
+        if (text.trim().isEmpty()) return true;
+        boolean hasLetter = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c) || Character.isDigit(c)
+                    || c == '+' || c == '(' || c == ')' || c == '·' || c == '→') {
+                continue;
+            }
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                hasLetter = true;
+                continue;
+            }
+            return false;
+        }
+        if (hasLetter && !ChemicalFormulaPolicy.lettersAreKnownElements(text)) return false;
+        return true;
+    }
+
+    /** 이 조각이 흡수를 확정(commit)할 근거(원소기호 또는 화살표)를 갖는가. */
+    private static boolean chemicalFragmentCommits(String text) {
+        if (text == null) return false;
+        return text.indexOf('→') >= 0 || ChemicalFormulaPolicy.containsElementText(text);
+    }
+
+    /** 화살표 치환 + 공백 정리("rarrow" 양쪽만 공백 유지) + 첨자 재추론. */
+    private static String finalizeChemicalScript(String script) {
+        if (script == null) return null;
+        String s = script.replace("→", " rarrow ").replaceAll("\\s+", " ").trim();
+        String[] parts = s.split("\\s*rarrow\\s*", -1);
+        StringBuilder joined = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) joined.append(" rarrow ");
+            joined.append(parts[i].replace(" ", ""));
+        }
+        return kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier
+                .inferChemicalSubscriptScript(joined.toString());
+    }
+
+    /**
+     * SPEC-055: 화학식 수식 조각 봉합 + 스크립트 정규화.
+     *
+     * <p>수식 그룹핑은 수식 폰트/첨자 증거가 있는 런만 모으므로, 본문 폰트로 조판된
+     * 화학식 선두 원소("CH₄"의 CH)나 화살표 뒤 조각이 텍스트런으로 남아 수식이
+     * 쪼개진다("CH" + EQ["4+2O2 rarrow CO2+2H2O"]). 텍스트런 강등 시절에는 출력이
+     * 이어 붙어 가려졌지만 hp:equation 방출(SPEC-055)에서는 조각이 그대로 보인다.
+     * 인접 조각을 수식 스크립트로 흡수하고, 평문화된 첨자("N2")를 명시 토큰으로
+     * 재추론한다. 흡수는 원소기호/화살표 근거가 있는 지점까지만 커밋한다
+     * (화학식 뒤 무관한 숫자·괄호를 삼키지 않도록).
+     */
+    static void stitchChemicalFormulaFragments(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item;
+            if (!"CHEM_FORMULA".equals(eq.sourceType())) continue;
+            String script = eq.hwpScript() == null ? "" : eq.hwpScript();
+
+            // (b) 후행 조각 — 원소/화살표 근거가 나오는 마지막 지점까지 수집
+            int commitEnd = -1;
+            java.util.List<String> tailTexts = new java.util.ArrayList<>();
+            for (int j = i + 1; j < items.size(); j++) {
+                ASTInlineItem cand = items.get(j);
+                String candText;
+                boolean commits;
+                if (cand instanceof ASTTextRun) {
+                    candText = ((ASTTextRun) cand).text();
+                    if (!isChemicalFragmentText(candText)) break;
+                    commits = chemicalFragmentCommits(candText);
+                } else if (cand instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation
+                        && "CHEM_FORMULA".equals(
+                        ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).sourceType())) {
+                    candText = ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).hwpScript();
+                    commits = true;
+                } else {
+                    break;
+                }
+                tailTexts.add(candText == null ? "" : candText);
+                if (commits) commitEnd = j;
+            }
+
+            // (a) 선행 조각 체인 — 빈/공백 런은 건너뛰고 [원소 조각] → [계수] 순으로 흡수.
+            //     "2" | "Cu+O" | EQ["2 rarrow 2CuO"] → "2Cu+O" 까지 복원한다.
+            boolean arrowEvidence =
+                    (script + " " + String.join(" ", tailTexts)).contains("rarrow")
+                    || (script + String.join("", tailTexts)).indexOf('→') >= 0;
+            String prevFragment = null;
+            ASTTextRun prevPartialRun = null;
+            String prevPartialRest = null;
+            java.util.List<Integer> prevRemoveIdx = new java.util.ArrayList<>();
+            int p = i - 1;
+            while (p >= 0 && items.get(p) instanceof ASTTextRun) {
+                String t = ((ASTTextRun) items.get(p)).text();
+                if (t != null && !t.trim().isEmpty()) break;
+                p--;
+            }
+            if (p >= 0 && items.get(p) instanceof ASTTextRun) {
+                ASTTextRun r1 = (ASTTextRun) items.get(p);
+                String t1 = r1.text();
+                String head = script;
+                int coefficientProbe = -1;
+                if (startsAsChemicalContinuation(script)) {
+                    // 스크립트가 숫자/첨자/괄호로 시작 = 선행 원소가 잘렸다 ("CH"+"4+…").
+                    String frag = trailingChemicalFragment(t1);
+                    if (frag != null) {
+                        prevFragment = frag;
+                        head = frag;
+                        String rest = t1.substring(0, t1.length() - frag.length());
+                        if (rest.trim().isEmpty()) {
+                            prevRemoveIdx.add(p);
+                            coefficientProbe = p - 1;
+                        } else {
+                            prevPartialRun = r1;
+                            prevPartialRest = rest;
+                        }
+                    }
+                } else {
+                    coefficientProbe = p;
+                }
+                // 계수 흡수: 머리가 원소로 시작하는 반응식 앞의 단독 숫자 런.
+                // 런 전체가 숫자일 때만 — "실험 2" 같은 서술 꼬리는 흡수하지 않는다.
+                if (arrowEvidence && coefficientProbe >= 0
+                        && !head.isEmpty() && head.charAt(0) >= 'A' && head.charAt(0) <= 'Z') {
+                    int p2 = coefficientProbe;
+                    while (p2 >= 0 && items.get(p2) instanceof ASTTextRun) {
+                        String t2 = ((ASTTextRun) items.get(p2)).text();
+                        if (t2 != null && !t2.trim().isEmpty()) break;
+                        p2--;
+                    }
+                    if (p2 >= 0 && items.get(p2) instanceof ASTTextRun) {
+                        String t2 = ((ASTTextRun) items.get(p2)).text();
+                        if (t2 != null && t2.matches("[0-9]{1,2}")) {
+                            prevFragment = t2 + (prevFragment == null ? "" : prevFragment);
+                            prevRemoveIdx.add(p2);
+                        }
+                    }
+                }
+            }
+
+            // 최종 스크립트를 먼저 만들고 검증 통과 시에만 items 를 변경한다.
+            StringBuilder merged = new StringBuilder();
+            if (prevFragment != null) merged.append(prevFragment);
+            merged.append(script);
+            int tailCount = commitEnd - i;
+            for (int t = 0; t < tailCount; t++) merged.append(' ').append(tailTexts.get(t));
+            String rebuilt = finalizeChemicalScript(merged.toString());
+            if (rebuilt == null || rebuilt.isEmpty()
+                    || containsNonChemicalFormulaKeyword(stripRarrowKeyword(rebuilt))) {
+                continue;
+            }
+
+            // 후행 제거를 먼저 (i 이후 인덱스는 선행 제거의 영향을 받지 않도록)
+            for (int t = 0; t < tailCount; t++) {
+                items.remove(i + 1);
+            }
+            if (prevPartialRun != null && prevPartialRest != null) {
+                prevPartialRun.text(prevPartialRest);
+            }
+            java.util.Collections.sort(prevRemoveIdx, java.util.Collections.reverseOrder());
+            for (int idx : prevRemoveIdx) {
+                items.remove(idx);
+                i--;
+            }
+            eq.hwpScript(rebuilt);
+        }
+    }
+
+    private static String stripRarrowKeyword(String script) {
+        return script == null ? null : script.replace("rarrow", " ");
+    }
+
     private static boolean containsNonChemicalFormulaKeyword(String script) {
         if (script == null || script.isEmpty()) return false;
         for (String kw : NON_CHEMICAL_FORMULA_KEYWORDS) {
@@ -1703,7 +2096,13 @@ class MathProcessor {
             // 유실된다 (SPEC-042 실패 기록 3·4·5 — 계수만 백필해도 같은 문단의
             // 첨자가 깨지는 양방향 상호작용 실측). 숫자 런은 전부 제외한다.
             String outText = outRun.text() == null ? "" : outRun.text().trim();
-            if (outText.matches("\\d{1,2}")) continue;
+            if (outText.matches("\\d{1,2}")) {
+                // SPEC-042: 첨자 속성 백필은 재그룹핑 회귀를 낳아 금지. 대신
+                // SPEC-055 화학식 세그먼트 앵커용 힌트만 남긴다 (스타일·그룹핑 불변).
+                if (src.subscript()) outRun.droppedResolvedScriptPosition("subscript");
+                else if (src.superscript()) outRun.droppedResolvedScriptPosition("superscript");
+                continue;
+            }
             if (outRun.fontSizeHwpunits() == null && src.fontSizeHwpunits() != null) {
                 outRun.fontSizeHwpunits(src.fontSizeHwpunits());
             }
