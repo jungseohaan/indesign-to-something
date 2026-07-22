@@ -1577,11 +1577,13 @@ class MathProcessor {
     private static String finalizeChemicalScript(String script) {
         if (script == null) return null;
         String s = script.replace("→", " rarrow ").replaceAll("\\s+", " ").trim();
-        String[] parts = s.split("\\s*rarrow\\s*", -1);
+        String[] parts = s.split("\\s*(?:~\\s*)?rarrow(?:\\s*~)?\\s*", -1);
         StringBuilder joined = new StringBuilder();
         for (int i = 0; i < parts.length; i++) {
-            if (i > 0) joined.append(" rarrow ");
-            joined.append(parts[i].replace(" ", ""));
+            // HWP 수식 문법에서 일반 공백은 토큰 구분자일 뿐 렌더되지 않는다.
+            // 화살표 양쪽의 가시 공백은 '~'(스페이스 토큰)로 표기해야 한다 (p20 실측).
+            if (i > 0) joined.append(" ~ rarrow ~ ");
+            joined.append(parts[i].replace(" ", "").replace("~", ""));
         }
         return kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier
                 .inferChemicalSubscriptScript(joined.toString());

@@ -2715,7 +2715,17 @@ function _isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourc
     }
     var kind = _objectPlanSourceKind(item);
     if (kind === "TextFrame" || kind === "Image" || kind === "PDF" || kind === "EPS") return false;
-    if (kind !== "Rectangle" && kind !== "GraphicLine") return false;
+    // 표 괘선을 Polygon 으로 그리는 조판이 있다 (p28: 가로/세로 선 전부 Polygon).
+    // 한 축 두께가 1.5pt 이하인 선형 Polygon 은 GraphicLine 과 동일하게 취급한다.
+    if (kind === "Polygon") {
+        var pb = _objectPlanSourceBounds(item);
+        if (!pb || pb.length < 4) return false;
+        var pw = Math.abs(Number(pb[3]) - Number(pb[1]));
+        var ph = Math.abs(Number(pb[2]) - Number(pb[0]));
+        if (Math.min(pw, ph) > 1.5) return false;
+    } else if (kind !== "Rectangle" && kind !== "GraphicLine") {
+        return false;
+    }
     if (_objectPlanSourceChildIds(item, sourceById).length > 0) {
         var childIds = _objectPlanSourceChildIds(item, sourceById);
         var directOwnerChild = childIds.length === 1 && Number(childIds[0]) === Number(textFrameId);
@@ -2736,7 +2746,9 @@ function _isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourc
     if (!_objectPlanSourceHasVisibleFillOrStroke(item)) return false;
     if (tableOwnerBounds) {
         var itemBounds = _objectPlanSourceBounds(item);
-        if (!_objectPlanBoundsNearOrInside(tableOwnerBounds, itemBounds, 2.0)) return false;
+        // 표 외곽 배경/아웃라인 rect 는 텍스트 프레임보다 몇 pt 크게 그려진다
+        // (p28 실측: 좌 2.6pt 초과). 4pt 까지 표 소속으로 본다.
+        if (!_objectPlanBoundsNearOrInside(tableOwnerBounds, itemBounds, 4.0)) return false;
     }
     return true;
 }

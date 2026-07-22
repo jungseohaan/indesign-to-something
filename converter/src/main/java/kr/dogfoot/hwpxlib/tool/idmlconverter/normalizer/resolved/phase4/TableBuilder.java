@@ -1547,7 +1547,7 @@ public final class TableBuilder {
             applied |= applyFillFromStyleSource(ctx, table, item, fill);
         }
         if (border != null) {
-            if ("GraphicLine".equals(item.type())) {
+            if ("GraphicLine".equals(item.type()) || isLineLikePolygon(item)) {
                 applied |= applyLineBorderFromStyleSource(ctx, table, item, border);
             } else {
                 applied |= applyRectangleBorderFromStyleSource(ctx, table, item, border);
@@ -1559,14 +1559,32 @@ public final class TableBuilder {
     private static boolean isTableStyleMaterialSource(ResolvedPageItem item) {
         if (item == null || item.sourceHidden()) return false;
         String type = item.type();
-        if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)) return false;
-        if ("GraphicLine".equals(type)) {
+        if (!"Rectangle".equals(type) && !"GraphicLine".equals(type)
+                && !isLineLikePolygon(item)) {
+            return false;
+        }
+        if ("GraphicLine".equals(type) || isLineLikePolygon(item)) {
             return hasVisibleStroke(item);
         }
         if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
         if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
         if (item.hasDropShadow() || item.gradientFeatherApplied()) return false;
         return resolvedHasFill(item) || hasVisibleStroke(item);
+    }
+
+    /**
+     * SPEC(table-style-absorb): 표 괘선을 Polygon 으로 그리는 조판 대응 (p28 실측:
+     * 행/열 구분선 전부 Polygon). 한 축 두께 1.5pt 이하의 선형 Polygon 은
+     * GraphicLine 과 동일하게 괘선으로 취급한다.
+     */
+    private static boolean isLineLikePolygon(ResolvedPageItem item) {
+        if (item == null || !"Polygon".equals(item.type())) return false;
+        double[] b = item.geometricBounds();
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        // p28 실측: 세로 괘선 두께 1.64pt — 2pt 까지 선으로 본다.
+        return Math.min(w, h) <= 2.0;
     }
 
     private static boolean applyFillFromStyleSource(
@@ -1621,11 +1639,10 @@ public final class TableBuilder {
             ResolvedPageItem item) {
         if (table == null || item == null) return false;
         if (singleCell(table) != null) return true;
-        double[] sourceBounds = sourceBoundsForTable(ctx, table, item);
-        if ("Rectangle".equals(item.type())
-                && boundsCover(sourceBounds, tableBoundsPoints(table), 0.75)) {
-            return false;
-        }
+        // SPEC(table-style-absorb): 표 전체를 덮는 배경 rect 도 style source 로
+        // 선언된 것이면 소유가 확정된 표 배경이다 — 전 셀 fill 로 적용한다
+        // (p28 크림그린 배경 실측). 이전의 whole-cover 거부는 배경 rect 를
+        // 통째로 버려 표 배경이 소실됐다.
         return true;
     }
 
@@ -1667,19 +1684,19 @@ public final class TableBuilder {
             if (placement == null || placement.cell == null) continue;
             if (horizontal && overlapsRange(line[1], line[3], placement.left, placement.right, 0.75)) {
                 double mid = (line[0] + line[2]) / 2.0;
-                if (Math.abs(mid - placement.top) <= 1.0) {
+                if (Math.abs(mid - placement.top) <= 2.5) {
                     placement.cell.topBorder(preferOuterBorder(placement.cell.topBorder(), border));
                     applied = true;
-                } else if (Math.abs(mid - placement.bottom) <= 1.0) {
+                } else if (Math.abs(mid - placement.bottom) <= 2.5) {
                     placement.cell.bottomBorder(preferOuterBorder(placement.cell.bottomBorder(), border));
                     applied = true;
                 }
             } else if (!horizontal && overlapsRange(line[0], line[2], placement.top, placement.bottom, 0.75)) {
                 double mid = (line[1] + line[3]) / 2.0;
-                if (Math.abs(mid - placement.left) <= 1.0) {
+                if (Math.abs(mid - placement.left) <= 2.5) {
                     placement.cell.leftBorder(preferOuterBorder(placement.cell.leftBorder(), border));
                     applied = true;
-                } else if (Math.abs(mid - placement.right) <= 1.0) {
+                } else if (Math.abs(mid - placement.right) <= 2.5) {
                     placement.cell.rightBorder(preferOuterBorder(placement.cell.rightBorder(), border));
                     applied = true;
                 }
