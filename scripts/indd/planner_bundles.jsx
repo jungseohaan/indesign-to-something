@@ -2191,6 +2191,7 @@ function _plannerBundleIsDirectChildShellSlot(candidate) {
 function _plannerBundlePolicyLayer(candidate, slot, clusterIndex) {
     if (!candidate) return "DECORATION";
     if (candidate.passId === "pass.page_backgrounds") return "BACKGROUND";
+    if (candidate.passId === "pass.master_page_graphics") return "BACKGROUND";
     if (candidate.compositeRole === "background_vector_source") return "BACKGROUND";
     if (candidate.passId === "pass.vector_shape_frames"
             && _plannerBundleVectorShapeIsBackgroundLayer(candidate, clusterIndex)) {

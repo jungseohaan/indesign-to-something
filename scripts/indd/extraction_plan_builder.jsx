@@ -608,7 +608,7 @@ function _candidateIsProtectedDecorationSlot(candidate) {
             || candidate.reason === "table_carrier_sibling_decoration";
 }
 
-function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, planCache) {
+function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, planCache, sourceIndex) {
     var masterCompositeClusterCache = {};
 
     function boundsIntersectForPlan(a, b, pad) {
@@ -652,6 +652,31 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
             var r = Math.min(Number(a[3]), Number(b[3]));
             if (bt <= t || r <= l) return null;
             return [t, l, bt, r];
+        } catch (e) {}
+        return null;
+    }
+
+    function boundsDifferForPlan(a, b, eps) {
+        try {
+            if (!a || !b || a.length < 4 || b.length < 4) return true;
+            eps = eps || 0.01;
+            return Math.abs(Number(a[0]) - Number(b[0])) > eps
+                    || Math.abs(Number(a[1]) - Number(b[1])) > eps
+                    || Math.abs(Number(a[2]) - Number(b[2])) > eps
+                    || Math.abs(Number(a[3]) - Number(b[3])) > eps;
+        } catch (e) {}
+        return true;
+    }
+
+    function boundsRelativeToPageBoundsForPlan(bounds, pageBounds) {
+        try {
+            if (!bounds || !pageBounds || bounds.length < 4 || pageBounds.length < 4) return null;
+            return [
+                Number(bounds[0]) - Number(pageBounds[0]),
+                Number(bounds[1]) - Number(pageBounds[1]),
+                Number(bounds[2]) - Number(pageBounds[0]),
+                Number(bounds[3]) - Number(pageBounds[1])
+            ];
         } catch (e) {}
         return null;
     }
@@ -898,6 +923,40 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
         return sourceIds;
     }
 
+    function collectPlanEntryTextFrameIds(entries) {
+        var ids = [], seen = {};
+        function addTextFrame(tf) {
+            try {
+                if (!tf || _itemKind(tf) !== "TextFrame") return;
+                if (tf.id === undefined || tf.id === null) return;
+                _pushUniqueId(ids, seen, tf.id);
+            } catch (eAddTf) {}
+        }
+        for (var i = 0; i < entries.length; i++) {
+            try {
+                var item = entries[i].item;
+                addTextFrame(item);
+                var nested = item.allPageItems;
+                for (var ni = 0; nested && ni < nested.length; ni++) {
+                    addTextFrame(nested[ni]);
+                }
+            } catch (eEntryTextFrames) {}
+        }
+        ids.sort(function(a, b) { return Number(a) - Number(b); });
+        return ids;
+    }
+
+    function firstPlanEntryNonTextEntry(entries) {
+        for (var i = 0; i < entries.length; i++) {
+            try {
+                var item = entries[i].item;
+                if (!item || _itemKind(item) === "TextFrame") continue;
+                if (item.id !== undefined && item.id !== null) return entries[i];
+            } catch (eEntryPrimary) {}
+        }
+        return null;
+    }
+
     try {
         for (var pp = ctx.startPage - 1; pp < ctx.endPage && pp < doc.pages.length; pp++) {
             var page = doc.pages[pp];
@@ -914,7 +973,13 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
             var masterPageBounds = null;
             var masterPage = null;
             try { masterPage = master.pages[side]; } catch (eMasterPage) {}
-            try { masterPageBounds = masterPage ? masterPage.bounds : null; } catch (eBounds) {}
+            try {
+                masterPageBounds = sourceIndex && sourceIndex.pageBounds
+                        ? sourceIndex.pageBounds(pp)
+                        : null;
+            } catch (eSourcePageBounds) {
+                masterPageBounds = null;
+            }
             if (!masterPage || !masterPageBounds) continue;
             var cacheKey = String(master.id) + "|" + String(side);
             var cachedClusters = masterCompositeClusterCache[cacheKey];
@@ -925,7 +990,6 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                 for (var ii = 0; ii < items.length; ii++) {
                     try {
                         var item = items[ii];
-                        if (_itemKind(item) === "TextFrame") continue;
                         if (!isTopLevelMasterItemForPlan(item)) continue;
                         var b = _itemBounds(item);
                         var itemOnMasterSide = masterItemBelongsToMasterSideForPlan(item, masterPage);
@@ -939,11 +1003,33 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                     for (var ci = 0; ci < clusters.length; ci++) {
                         var sourceIds = collectPlanEntrySourceIds(clusters[ci]);
                         if (sourceIds.length === 0) continue;
+                        var hiddenTextFrameIds = collectPlanEntryTextFrameIds(clusters[ci]);
+                        var primaryEntry = firstPlanEntryNonTextEntry(clusters[ci]);
+                        var primarySourceObjectId = primaryEntry && primaryEntry.item
+                                ? primaryEntry.item.id
+                                : null;
+                        if (primarySourceObjectId === null || primarySourceObjectId === undefined) continue;
                         var clusterBounds = unionPlanEntryBounds(clusters[ci]) || masterPageBounds;
-                        var visibleClusterBounds = boundsIntersectionForPlan(clusterBounds, masterPageBounds) || clusterBounds;
+                        var visualSourceBounds = primaryEntry && primaryEntry.bounds
+                                ? primaryEntry.bounds
+                                : clusterBounds;
+                        var absoluteVisibleBounds = boundsIntersectionForPlan(visualSourceBounds, masterPageBounds)
+                                || visualSourceBounds;
+                        var visibleClusterBounds = boundsRelativeToPageBoundsForPlan(
+                                absoluteVisibleBounds, masterPageBounds) || absoluteVisibleBounds;
+                        var renderSourceBounds = boundsRelativeToPageBoundsForPlan(
+                                visualSourceBounds, masterPageBounds) || visualSourceBounds;
+                        var cropSourceBounds = boundsDifferForPlan(visualSourceBounds, absoluteVisibleBounds, 0.01)
+                                ? renderSourceBounds
+                                : null;
                         cachedClusters.push({
                             sourceIds: sourceIds,
+                            hiddenTextFrameIds: hiddenTextFrameIds,
+                            primarySourceObjectId: primarySourceObjectId,
                             bounds: visibleClusterBounds,
+                            sourceBounds: visualSourceBounds,
+                            renderSourceBounds: renderSourceBounds,
+                            cropSourceBounds: cropSourceBounds,
                             clusterIndex: ci
                         });
                     }
@@ -956,12 +1042,21 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                 _pushExtractionCandidate(candidates, seen, "pass.master_page_graphics", null, {
                     sourceId: null,
                     sourceObjectIds: cached.sourceIds,
+                    hiddenTextFrameIds: cached.hiddenTextFrameIds || [],
+                    editableTextFrameIds: [],
+                    requiresTextHidden: cached.hiddenTextFrameIds
+                            && cached.hiddenTextFrameIds.length > 0,
+                    primarySourceObjectId: cached.primarySourceObjectId,
+                    exportTargetObjectId: cached.primarySourceObjectId,
                     pageIndex: pp,
                     kind: "MasterPageComposite",
                     unit: "MASTER_ITEM",
                     mode: "TEXTLESS_CANDIDATE",
                     candidatePurpose: "MASTER_CANDIDATE",
                     bounds: cached.bounds,
+                    sourceBounds: cached.sourceBounds || null,
+                    renderSourceBounds: cached.renderSourceBounds || null,
+                    cropSourceBounds: cached.cropSourceBounds || null,
                     composite: true,
                     compositeRole: "applied_master_page_cluster",
                     suffix: "master_" + master.id + "_side_" + side + "_cluster_" + cached.clusterIndex
@@ -5477,6 +5572,32 @@ function _normalizePageCoordinateCandidateBounds(candidates, sourceIndex) {
         ];
     }
 
+    function pageRelativeBounds(bounds, pageBounds) {
+        if (!hasArea(bounds) || !hasArea(pageBounds)) return null;
+        return [
+            Number(bounds[0]) - Number(pageBounds[0]),
+            Number(bounds[1]) - Number(pageBounds[1]),
+            Number(bounds[2]) - Number(pageBounds[0]),
+            Number(bounds[3]) - Number(pageBounds[1])
+        ];
+    }
+
+    function containsBounds(outer, inner, eps) {
+        if (!hasArea(outer) || !hasArea(inner)) return false;
+        eps = eps || 0;
+        return Number(outer[0]) <= Number(inner[0]) + eps
+                && Number(outer[1]) <= Number(inner[1]) + eps
+                && Number(outer[2]) >= Number(inner[2]) - eps
+                && Number(outer[3]) >= Number(inner[3]) - eps;
+    }
+
+    function materiallyLargerBounds(outer, inner, eps) {
+        if (!hasArea(outer) || !hasArea(inner)) return false;
+        eps = eps || 0;
+        return Number(outer[3]) - Number(outer[1]) > Number(inner[3]) - Number(inner[1]) + eps
+                || Number(outer[2]) - Number(outer[0]) > Number(inner[2]) - Number(inner[0]) + eps;
+    }
+
     for (var i = 0; i < candidates.length; i++) {
         var candidate = candidates[i];
         if (!candidate || !hasArea(candidate.bounds)) continue;
@@ -5633,6 +5754,7 @@ function _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex) {
             try { pb = sourceIndex.pageBounds(pageIndex); } catch (ePageBounds) { pb = null; }
             var rel = pageRelativeIntersection(sourceBounds, pb);
             if (!rel) continue;
+            var sourcePageRelative = pageRelativeBounds(sourceBounds, pb);
 
             var clone = copyCandidate(candidate);
             clone.pageIndex = pageIndex;
@@ -5641,6 +5763,14 @@ function _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex) {
             clone.crossPageCloneOfCandidateId = candidate.candidateId || null;
             clone.sourceBounds = sourceBounds.slice(0);
             clone.bounds = rel;
+            if (sourcePageRelative && containsBounds(sourcePageRelative, rel, 0.05)
+                    && materiallyLargerBounds(sourcePageRelative, rel, 0.5)) {
+                clone.renderSourceBounds = sourcePageRelative;
+                clone.cropSourceBounds = sourcePageRelative;
+            } else {
+                clone.renderSourceBounds = clone.renderSourceBounds || rel;
+                clone.cropSourceBounds = null;
+            }
             clone.coordinateSpace = candidate.coordinateSpace || "PAGE";
             clone.placement = candidate.placement || "FLOATING";
 
@@ -7808,6 +7938,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     }
     _marker(ctx.outputDir, "03d08i_plan_inlineFlowVisualRoots");
 
+    _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, candidateSeen, planCache, sourceIndex);
     _marker(ctx.outputDir, "03d09_plan_masterComposite");
     candidates = _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems);
     try {

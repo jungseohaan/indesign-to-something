@@ -498,6 +498,7 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     }
     if (objectPlan.textAction === "DROP_TEXT") {
         candidate.ownedTextFrameIds = [];
+        var dropTextHiddenFrameIds = _sortedNumericIds(objectPlan.hiddenTextFrameIds || []);
         if (objectPlan.visualAction === "PLACE_TEXT_SHELL"
                 && objectPlan.textAction !== "OWNED_BY_PNG"
                 && objectPlan.ownedTextFrameIds
@@ -509,6 +510,11 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
             candidate.editableTextFrameIds = candidate.hiddenTextFrameIds.slice(0);
             candidate.requiresTextHidden = candidate.hiddenTextFrameIds.length > 0;
             if (candidate.requiresTextHidden) candidate.textOwner = "hwpx_tf";
+        } else if (dropTextHiddenFrameIds.length > 0) {
+            candidate.hiddenTextFrameIds = dropTextHiddenFrameIds;
+            candidate.editableTextFrameIds = [];
+            candidate.requiresTextHidden = true;
+            candidate.textOwner = "none";
         } else {
             candidate.editableTextFrameIds = [];
             candidate.hiddenTextFrameIds = [];
@@ -562,6 +568,8 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
         candidate.requiredSlotReason = objectPlan.requiredSlotReason;
     }
     if (objectPlan.bounds) candidate.bounds = objectPlan.bounds;
+    if (objectPlan.renderSourceBounds) candidate.renderSourceBounds = objectPlan.renderSourceBounds;
+    if (objectPlan.cropSourceBounds) candidate.cropSourceBounds = objectPlan.cropSourceBounds;
     if (objectPlan.zOrder !== undefined) candidate.zOrder = objectPlan.zOrder;
     _applyDroppedObjectPlanExecutionShape(candidate, objectPlan);
     candidate.composite = candidate.sourceObjectIds && candidate.sourceObjectIds.length > 1;
@@ -578,6 +586,7 @@ function _shouldPreserveObjectPlanCandidateId(objectPlan) {
     if (!objectPlan || !objectPlan.candidateId) return false;
     return objectPlan.materialization === "PAGE_PLANE_PNG"
             || objectPlan.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
+            || objectPlan.passId === "pass.master_page_graphics"
             || objectPlan.slotRole === "page_background_plane"
             || objectPlan.compositeRole === "page_background_plane";
 }

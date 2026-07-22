@@ -611,6 +611,34 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                              allItems, itemById, inlineCandidates) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
+    itemById = itemById || {};
+
+    function addSourceLookupItems(items) {
+        if (!items) return;
+        for (var sli = 0; sli < items.length; sli++) {
+            try {
+                var sourceItem = items[sli];
+                if (sourceItem && sourceItem.id !== undefined && sourceItem.id !== null) {
+                    itemById[String(sourceItem.id)] = sourceItem;
+                }
+            } catch (eSourceLookupItem) {}
+        }
+    }
+
+    try { addSourceLookupItems(allItems); } catch (eSourceLookupAll) {}
+    try { addSourceLookupItems(doc.allPageItems); } catch (eSourceLookupDocItems) {}
+    try {
+        var sourceLookupSpreads = doc.spreads.everyItem().getElements();
+        for (var sls = 0; sourceLookupSpreads && sls < sourceLookupSpreads.length; sls++) {
+            try { addSourceLookupItems(sourceLookupSpreads[sls].allPageItems); } catch (eSourceLookupSpreadItems) {}
+        }
+    } catch (eSourceLookupSpreads) {}
+    try {
+        var sourceLookupMasters = doc.masterSpreads.everyItem().getElements();
+        for (var slm = 0; sourceLookupMasters && slm < sourceLookupMasters.length; slm++) {
+            try { addSourceLookupItems(sourceLookupMasters[slm].allPageItems); } catch (eSourceLookupMasterItems) {}
+        }
+    } catch (eSourceLookupMasters) {}
 
     app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
     app.pngExportPreferences.antiAlias = true;
@@ -739,6 +767,41 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
             return arrCopy(candidate.pageRelativeBounds);
         }
         return fallbackBounds;
+    }
+
+    function _hideCandidateTextFrames(renderTarget, textFrameIds) {
+        var saved = [];
+        var seen = {};
+        function remember(state) {
+            if (!state) return;
+            saved.push(state);
+            try {
+                if (state.tf && state.tf.id !== undefined && state.tf.id !== null) {
+                    seen[String(state.tf.id)] = true;
+                }
+            } catch (eRemember) {}
+        }
+        try {
+            var nestedSaved = hideTextFrames(renderTarget, {
+                textFrameIds: textFrameIds,
+                preserveFrameVisual: true
+            });
+            for (var ni = 0; nestedSaved && ni < nestedSaved.length; ni++) {
+                remember(nestedSaved[ni]);
+            }
+        } catch (eNestedHide) {}
+        for (var ti = 0; textFrameIds && ti < textFrameIds.length; ti++) {
+            try {
+                var id = String(textFrameIds[ti]);
+                if (seen[id]) continue;
+                var tf = itemById ? itemById[id] : null;
+                if (!tf || !tf.constructor || tf.constructor.name !== "TextFrame") continue;
+                remember(hideOneTextFrameContent(tf, {
+                    preserveFrameVisual: true
+                }));
+            } catch (eLookupHide) {}
+        }
+        return saved;
     }
 
     function _duplicateNestedCompletePngForExport(item, candidate, doc) {
@@ -921,9 +984,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 ? inlineCandidate.hiddenTextFrameIds.slice(0)
                                 : (inlineCandidate.editableTextFrameIds || []).slice(0);
                         if (inlineHiddenTextFrameIds.length > 0) {
-                            savedInlineTextFrames = hideTextFrames(inItem, {
-                                textFrameIds: inlineHiddenTextFrameIds
-                            });
+                            savedInlineTextFrames = _hideCandidateTextFrames(
+                                    inItem, inlineHiddenTextFrameIds);
                         }
                     }
                 } catch (eWalk) {}
@@ -982,6 +1044,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
 
                         var _inlineHasHiddenText = inlineHiddenTextFrameIds && inlineHiddenTextFrameIds.length > 0;
                         var _inlineOwnsCompletePngText = plannedInlineCompletePng;
+                        var _inlineDropsText = inlineCandidate.textAction === "DROP_TEXT";
                         var _inlineRenderedBounds = _plannedCandidateRenderedBounds(inlineCandidate, inBounds);
                         var _inlineCandidatePassId = inlineCandidate.passId || "pass.inline_objects";
                         var _inlinePlannedPageVisual = inlineCandidate.placement === "FLOATING"
@@ -1015,13 +1078,15 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             textWrapSourceObjectId: inlineCandidate.textWrapSourceObjectId || null,
                             visualOwner: "indesign_png",
                             textOwner: _inlineOwnsCompletePngText ? "indesign_png"
-                                    : (_inlineHasHiddenText ? "hwpx_tf" : "none"),
+                                    : (_inlineDropsText ? "none"
+                                    : (_inlineHasHiddenText ? "hwpx_tf" : "none")),
                             containsText: _inlineOwnsCompletePngText,
                             containsEditableText: _inlineOwnsCompletePngText,
                             placementAllowed: true,
                             reason: _inlineOwnsCompletePngText ? "inline_graphic_only"
+                                    : (_inlineDropsText && _inlineHasHiddenText ? "textless_png_hidden_drop_text"
                                     : (_inlineHasHiddenText ? "inline_text_hidden"
-                                    : (_inlinePlannedPageVisual ? "planned_page_content_visual" : "inline_graphic_only")),
+                                    : (_inlinePlannedPageVisual ? "planned_page_content_visual" : "inline_graphic_only"))),
                             sourceObjectIds: _inlineEntrySourceIds,
                             childIds: inlineHiddenTextFrameIds,
                             exportSanity: {
@@ -1046,7 +1111,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 placementAllowed: true,
                                 editableTextFrameIds: _inlineOwnsCompletePngText
                                         ? (inlineCandidate.editableTextFrameIds || [])
-                                        : inlineHiddenTextFrameIds,
+                                        : (_inlineDropsText ? [] : inlineHiddenTextFrameIds),
                                 sourceObjectIds: _inlineEntrySourceIds,
                                 exportSourceObjectIds: inlineCandidate.exportSourceObjectIds || [],
                                 hiddenVisualSourceObjectIds: inlineCandidate.hiddenVisualSourceObjectIds || [],
