@@ -2560,10 +2560,17 @@ function _collectTableOnlyIntrinsicTableStyleSources(src, ids) {
     }
 }
 
+function _tableOwnerInlineFlowForStyle(src) {
+    if (!src) return false;
+    return src.isInline === true
+            || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE";
+}
+
 function _collectTableOnlyDirectStyleOwner(src, textFrameId, sourceById, ids) {
     if (!src || !sourceById || !ids || !src.parentId) return;
+    var allowInlineFlow = _tableOwnerInlineFlowForStyle(src);
     var parent = sourceById[String(src.parentId)];
-    if (_isTableAttributeStyleSource(parent, textFrameId)) {
+    if (_isTableAttributeStyleSource(parent, textFrameId, null, null, false, allowInlineFlow)) {
         ids[String(parent.id)] = true;
     }
 }
@@ -2577,17 +2584,21 @@ function _collectTableOnlyCarrierStyleSiblings(src, textFrameId, sourceById, ids
         var grandparent = sourceById[String(parent.parentId)];
         if (grandparent) carrier = grandparent;
     }
+    // 인라인 앵커 그룹(TF+배경 rect)이 통째로 스토리에 흐르는 경우, 형제 rect 도
+    // 같은 INLINE 플래그를 갖는다. 표 소유 TF 자신이 인라인이면 같은 캐리어
+    // 서브트리의 인라인 형제를 style 소스로 허용한다.
+    var allowInlineFlow = _tableOwnerInlineFlowForStyle(src);
     var tableOwnerBounds = _objectPlanSourceBounds(src);
     var seenChildIds = {};
     if (carrier) {
-        if (_isTableAttributeStyleSource(carrier, textFrameId, tableOwnerBounds, sourceById, true)) {
+        if (_isTableAttributeStyleSource(carrier, textFrameId, tableOwnerBounds, sourceById, true, allowInlineFlow)) {
             ids[String(carrier.id)] = true;
         }
         var carrierChildIds = _objectPlanSourceChildIds(carrier, sourceById);
         for (var i = 0; i < carrierChildIds.length; i++) {
             seenChildIds[String(carrierChildIds[i])] = true;
             _collectTableOnlyCarrierStyleSourceId(
-                    carrierChildIds[i], textFrameId, tableOwnerBounds, sourceById, ids);
+                    carrierChildIds[i], textFrameId, tableOwnerBounds, sourceById, ids, allowInlineFlow);
         }
     }
     var siblingParentId = carrier && carrier.id !== undefined && carrier.id !== null
@@ -2607,39 +2618,101 @@ function _collectTableOnlyCarrierStyleSiblings(src, textFrameId, sourceById, ids
                 && Number(src.pageIndex) !== Number(item.pageIndex)) continue;
         if (seenChildIds[String(item.id)]) continue;
         _collectTableOnlyCarrierStyleSourceId(
-                item.id, textFrameId, tableOwnerBounds, sourceById, ids);
+                item.id, textFrameId, tableOwnerBounds, sourceById, ids, allowInlineFlow);
     }
 }
 
-function _collectTableOnlyCarrierStyleSourceId(sourceId, textFrameId, tableOwnerBounds, sourceById, ids) {
+function _collectTableOnlyCarrierStyleSourceId(sourceId, textFrameId, tableOwnerBounds, sourceById, ids, allowInlineFlow) {
     var numericId = Number(sourceId);
     if (isNaN(numericId) || numericId === Number(textFrameId)) return;
     var item = sourceById ? sourceById[String(numericId)] : null;
     if (!item) return;
     if (item.visible === false || item.hiddenLayer === true || item.nonprinting === true) return;
     if (item.sourceHidden === true || item.hiddenByParent === true) return;
-    if (item.isInline === true || item.storyAnchorPlacement === "INLINE") return;
+    if (allowInlineFlow !== true
+            && (item.isInline === true || item.storyAnchorPlacement === "INLINE")) {
+        return;
+    }
     if (_objectPlanSourceSubtreeContainsOtherTextFrame(item, textFrameId, sourceById)) return;
     if (_objectPlanSourceKind(item) === "Group") {
         var childIds = _objectPlanSourceChildIds(item, sourceById);
         for (var i = 0; i < childIds.length; i++) {
             _collectTableOnlyCarrierStyleSourceId(
-                    childIds[i], textFrameId, tableOwnerBounds, sourceById, ids);
+                    childIds[i], textFrameId, tableOwnerBounds, sourceById, ids, allowInlineFlow);
         }
         return;
     }
-    if (_isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourceById, false)) {
+    if (_isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourceById, false, allowInlineFlow)) {
         ids[String(numericId)] = true;
     }
 }
 
-function _isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourceById, allowOwnerSubtreeContainer) {
+// 인라인 앵커 그룹이 "표 전용 TF + 표 속성 rect/line"만으로 이루어졌는지 판정.
+// 참이면 그룹 PNG 후보가 필요 없다: 표 텍스트는 table_only_text_frame plan 이,
+// 배경 rect 는 같은 plan 의 styleSourceObjectIds(셀 fill 흡수)가 소유한다.
+function _inlineTableShellFullyAbsorbedByTableStyle(rootId, sourceById, childIdsByParentId) {
+    if (rootId === null || rootId === undefined || !sourceById || !childIdsByParentId) return false;
+    var tableTextFrames = [];
+    var visualItems = [];
+    var queue = (childIdsByParentId[String(rootId)] || []).slice(0);
+    var guard = 0;
+    while (queue.length > 0 && guard < 500) {
+        guard++;
+        var id = queue.shift();
+        var src = sourceById[String(id)];
+        if (!src) continue;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        if (src.sourceHidden === true || src.hiddenByParent === true) continue;
+        var kind = String(src.kind || "");
+        if (kind === "TextFrame") {
+            if (src.hasTablesInStory === true
+                    && src.storyHasVisibleTableCellText === true
+                    && src.markerOnlyContents !== false
+                    && src.hasText !== true) {
+                tableTextFrames.push(src);
+                continue;
+            }
+            if (src.hasText === true) return false;
+            continue;
+        }
+        if (kind === "Story" || kind === "Character" || kind === "InsertionPoint" || kind === "Cell") continue;
+        if (kind === "Group") {
+            var childIds = childIdsByParentId[String(id)] || [];
+            for (var ci = 0; ci < childIds.length; ci++) queue.push(childIds[ci]);
+            continue;
+        }
+        visualItems.push(src);
+    }
+    if (tableTextFrames.length === 0 || visualItems.length === 0) return false;
+    for (var vi = 0; vi < visualItems.length; vi++) {
+        var absorbed = false;
+        for (var ti = 0; ti < tableTextFrames.length; ti++) {
+            if (_isTableAttributeStyleSource(
+                    visualItems[vi],
+                    tableTextFrames[ti].id,
+                    _objectPlanSourceBounds(tableTextFrames[ti]),
+                    sourceById,
+                    false,
+                    true)) {
+                absorbed = true;
+                break;
+            }
+        }
+        if (!absorbed) return false;
+    }
+    return true;
+}
+
+function _isTableAttributeStyleSource(item, textFrameId, tableOwnerBounds, sourceById, allowOwnerSubtreeContainer, allowInlineFlow) {
     if (!item) return false;
     var id = Number(item.id);
     if (isNaN(id) || id === Number(textFrameId)) return false;
     if (item.visible === false || item.hiddenLayer === true || item.nonprinting === true) return false;
     if (item.sourceHidden === true || item.hiddenByParent === true) return false;
-    if (item.isInline === true || item.storyAnchorPlacement === "INLINE") return false;
+    if (allowInlineFlow !== true
+            && (item.isInline === true || item.storyAnchorPlacement === "INLINE")) {
+        return false;
+    }
     var kind = _objectPlanSourceKind(item);
     if (kind === "TextFrame" || kind === "Image" || kind === "PDF" || kind === "EPS") return false;
     if (kind !== "Rectangle" && kind !== "GraphicLine") return false;

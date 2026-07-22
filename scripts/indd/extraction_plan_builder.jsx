@@ -971,6 +971,39 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
     } catch (eMasterCompositeCandidates) {}
 }
 
+function _unionTableCellTextFrameDescendantIds(rootId, textFrameIds, sourceById, childIdsByParentId) {
+    var out = (textFrameIds || []).slice(0);
+    if (rootId === null || rootId === undefined || !sourceById || !childIdsByParentId) return out;
+    var seen = {};
+    for (var i = 0; i < out.length; i++) seen[String(out[i])] = true;
+    var queue = (childIdsByParentId[String(rootId)] || []).slice(0);
+    var guard = 0;
+    while (queue.length > 0 && guard < 500) {
+        guard++;
+        var id = queue.shift();
+        var src = sourceById[String(id)];
+        if (!src) continue;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        if (src.sourceHidden === true || src.hiddenByParent === true) continue;
+        var kind = String(src.kind || "");
+        if (kind === "Group") {
+            var childIds = childIdsByParentId[String(id)] || [];
+            for (var ci = 0; ci < childIds.length; ci++) queue.push(childIds[ci]);
+            continue;
+        }
+        if (kind !== "TextFrame") continue;
+        if (src.hasTablesInStory === true
+                && src.storyHasVisibleTableCellText === true
+                && src.markerOnlyContents !== false
+                && src.hasText !== true
+                && !seen[String(src.id)]) {
+            seen[String(src.id)] = true;
+            out.push(src.id);
+        }
+    }
+    return _sortedNumericIds(out);
+}
+
 function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems, candidates, seen, planCache) {
     // Inline ownership is Stage 0 metadata. Do not rescan Story.allPageItems here:
     // that path is slow on large documents and can reinterpret anchored/floating
@@ -1054,6 +1087,12 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
             stats.skippedPageRange++;
             continue;
         }
+        if (_inlineTableShellFullyAbsorbedByTableStyle(sourceInfo.id, sourceInfoById, childIdsByParentId)) {
+            // 표 전용 TF + 표 속성 rect 그룹: table_only_text_frame plan 이
+            // 텍스트/스타일을 소유하므로 인라인 시각 후보를 만들지 않는다.
+            stats.skippedTableShellStyleAbsorbed = (stats.skippedTableShellStyleAbsorbed || 0) + 1;
+            continue;
+        }
         var inlineItem = planCache && planCache.domItem ? planCache.domItem(sourceInfo.id) : null;
         if (!inlineItem) {
             stats.skippedNoDomItem++;
@@ -1070,6 +1109,10 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
                     ? planCache.textFrameIds(inlineItem, true, true)
                     : _collectTextFrameIds(inlineItem, true, true);
         } catch (eInlineEditableIds) {}
+        // 표 전용 TF 자손은 DOM contents 가 표 앵커 문자뿐이라 위 수집에서
+        // 빠진다. 셀 텍스트 소유자로 합류시켜 PNG 텍스트 굽기를 막는다.
+        inlineEditableTextFrameIds = _unionTableCellTextFrameDescendantIds(
+                sourceInfo.id, inlineEditableTextFrameIds, sourceInfoById, childIdsByParentId);
 
         var ownsTextByCompletePng = String(sourceInfo.kind || "") === "Group"
                 && directEditableTextChildIds(sourceInfo.id).length > 1;
@@ -6934,13 +6977,21 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             var src = source(ids[i]);
             if (src && String(src.kind || "") === "TextFrame"
                     && src.textFrameClass === "editable"
-                    && src.hasText === true) {
+                    && (src.hasText === true || sourceOwnsTableCellText(src))) {
                 _pushUniqueId(out, seen, ids[i]);
             }
         }
         out = _sortedNumericIds(out);
         editableTextIdsCache[key] = out.slice(0);
         return out;
+    }
+    // 표 전용 TF(콘텐츠가 표 앵커 문자뿐)는 hasText=false 지만 셀 텍스트를
+    // 소유한다. PNG 가 표 텍스트를 굽지 않도록 편집 텍스트로 취급한다.
+    function sourceOwnsTableCellText(src) {
+        return src
+                && src.hasTablesInStory === true
+                && src.storyHasVisibleTableCellText === true
+                && src.markerOnlyContents !== false;
     }
     function visibleIds(ids) {
         var out = [];
@@ -7054,6 +7105,13 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
         }
         if (!subtreeHasVisibleMaterial(root.id)) {
             noteSkip("no_visible_material", item, root, null);
+            continue;
+        }
+        if (_inlineTableShellFullyAbsorbedByTableStyle(root.id, sourceInfoById, childIdsByParentId)) {
+            // 표 전용 TF + 표 속성 rect 만으로 이루어진 인라인 그룹.
+            // 표 텍스트/스타일은 table_only_text_frame plan 이 소유하므로
+            // PNG 후보를 만들면 표가 이미지로 중복된다.
+            noteSkip("inline_table_shell_style_absorbed", item, root, null);
             continue;
         }
         diagnostics.inlineVisibleMaterialSourceCount++;
