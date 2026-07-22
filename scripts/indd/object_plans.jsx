@@ -2491,6 +2491,7 @@ function _tableOnlyTextFrameObjectPlan(src, id, sourceById, pageIndex, zOrder, t
     var styleSourceObjectIds = _tableOnlyTextFrameStyleSourceObjectIds(src, id, sourceById);
     var ownsTableStyle = styleSourceObjectIds.length > 0;
     var textAction = textActionOverride || "OWNED_BY_HWPX_TEXT";
+    var sourceInlineFlow = _objectPlanTextFrameSourceInlineFlow(src);
     return {
         objectPlanId: "objectPlan.table_only_text_frame." + String(id),
         bundleId: "textFrame.tableOnly." + String(id),
@@ -2503,7 +2504,7 @@ function _tableOnlyTextFrameObjectPlan(src, id, sourceById, pageIndex, zOrder, t
         compositeRole: null,
         slotRole: ownsTableStyle ? "TABLE_STYLE_SLOT" : "TEXT_SLOT",
         layoutOnlyInlineSlot: false,
-        sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
+        sourceInlineFlow: sourceInlineFlow,
         inlineCompositeLayoutDescendant: false,
         connectorDecorationVisual: false,
         primarySourceObjectId: id,
@@ -2526,8 +2527,8 @@ function _tableOnlyTextFrameObjectPlan(src, id, sourceById, pageIndex, zOrder, t
         materialization: ownsTableStyle ? "HWPX_TABLE_STYLE" : "HWPX_TEXT",
         textAction: textAction,
         visualAction: ownsTableStyle ? "PLACE_TABLE_STYLE" : "DROP_VISUAL",
-        placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
-        coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
+        placement: sourceInlineFlow ? "INLINE" : "FLOATING",
+        coordinateSpace: sourceInlineFlow ? "STORY_FLOW" : "PAGE",
         visualLayer: "CONTENT_VISUAL",
         zOrder: zOrder,
         reason: reasonOverride || "table_only_text_frame",
@@ -2541,6 +2542,31 @@ function _tableOnlyTextFrameObjectPlan(src, id, sourceById, pageIndex, zOrder, t
         executable: true,
         required: true
     };
+}
+
+function _objectPlanTextFrameSourceInlineFlow(src) {
+    if (!src || String(src.kind || "") !== "TextFrame") return false;
+    if (src.visible === false) return false;
+    if (src.hiddenLayer === true || src.nonprinting === true) return false;
+    var parentKind = String(src.parentKind || "").toUpperCase();
+    if ((parentKind === "CHARACTER" || parentKind === "INSERTIONPOINT")
+            && src.hasText === true) {
+        return true;
+    }
+    if (src.storyTextInlineSlot === true || src.tableCellStoryTextInlineSlot === true) {
+        return true;
+    }
+    var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+    var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+    if (placement === "INLINE"
+            || anchoredPosition === "INLINE_POSITION"
+            || anchoredPosition === "INLINEPOSITION") {
+        return true;
+    }
+    if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
+        return false;
+    }
+    return src.isInline === true && src.hasText === true;
 }
 
 function _tableOnlyTextFrameStyleSourceObjectIds(src, textFrameId, sourceById) {
@@ -2978,6 +3004,7 @@ function _objectPlanSetKeysAsNumbers(set) {
 
 function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
     var idIsNumeric = typeof id === "number" && !isNaN(id);
+    var sourceInlineFlow = _objectPlanTextFrameSourceInlineFlow(src);
     var masterSourceId = null;
     try {
         if (!idIsNumeric && src && src.masterSourceId !== undefined && src.masterSourceId !== null) {
@@ -2999,7 +3026,7 @@ function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
         compositeRole: null,
         slotRole: "TEXT_SLOT",
         layoutOnlyInlineSlot: false,
-        sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
+        sourceInlineFlow: sourceInlineFlow,
         inlineCompositeLayoutDescendant: false,
         connectorDecorationVisual: false,
         primarySourceObjectId: idIsNumeric ? id : masterSourceId,
@@ -3027,8 +3054,8 @@ function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
         materialization: "HWPX_TEXT",
         textAction: "OWNED_BY_HWPX_TEXT",
         visualAction: "DROP_VISUAL",
-        placement: src.storyAnchorPlacement === "INLINE" ? "INLINE" : "FLOATING",
-        coordinateSpace: src.storyAnchorPlacement === "INLINE" ? "STORY_FLOW" : "PAGE",
+        placement: sourceInlineFlow ? "INLINE" : "FLOATING",
+        coordinateSpace: sourceInlineFlow ? "STORY_FLOW" : "PAGE",
         visualLayer: "CONTENT_VISUAL",
         zOrder: zOrder,
         reason: reason,

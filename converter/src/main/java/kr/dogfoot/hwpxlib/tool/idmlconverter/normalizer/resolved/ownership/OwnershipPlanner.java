@@ -460,6 +460,28 @@ public final class OwnershipPlanner {
                 }
             }
         }
+        if (data.tables() != null) {
+            for (ResolvedTable table : data.tables()) {
+                if (table == null || table.cells() == null) continue;
+                for (ResolvedTable.Cell cell : table.cells()) {
+                    if (cell == null || cell.paragraphs() == null) continue;
+                    for (ResolvedParagraph paragraph : cell.paragraphs()) {
+                        if (paragraph == null || paragraph.runs() == null) continue;
+                        for (ResolvedRun run : paragraph.runs()) {
+                            if (run == null || !run.isInlineAnchor()
+                                    || run.anchoredObjectId() == null) {
+                                continue;
+                            }
+                            int anchoredId = run.anchoredObjectId();
+                            if (!seen.add(anchoredId)) continue;
+                            if (ensureImportedInlineTextFramePlan(anchoredId)) {
+                                added++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         ConversionTiming.metric("stage1.ownershipPlanner.ensureImportedInlineTextFramePlans.added", added);
     }
 

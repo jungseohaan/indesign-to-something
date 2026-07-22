@@ -1161,7 +1161,7 @@ public class StoryLoader {
             ConversionTiming.addCounter("phase3.storyLoader.cell.paragraphs", 1);
             paraIndex++;
         }
-        applyResolvedCellInlineGraphicRescueAnchors(ctx, idmlCell, resolvedCell, result);
+        applyResolvedCellPlannedInlineAnchors(ctx, idmlCell, resolvedCell, result);
         removeDuplicateInlineObjectsFromCellFlow(ctx, result);
         for (ASTParagraph para : result) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
@@ -1572,7 +1572,7 @@ public class StoryLoader {
         if (idmlParagraph != null && !paragraphContainsInlineAnchor(idmlParagraph, anchoredId)) {
             return;
         }
-        if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
+        if (!isResolvedCellPlannedInlineAnchor(ctx, anchoredId)) {
             return;
         }
         String previousText = nearestResolvedText(runs, runIndex - 1, -1);
@@ -1715,7 +1715,7 @@ public class StoryLoader {
             if (run.isInlineAnchor()) {
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
-                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
+                if (!isResolvedCellPlannedInlineAnchor(ctx, anchoredId)) {
                     continue;
                 }
                 String previousText = nearestResolvedText(runs, i - 1, -1);
@@ -1817,7 +1817,14 @@ public class StoryLoader {
         return arrow;
     }
 
-    private static boolean isResolvedCellInlineGraphicRescueAnchor(
+    private static boolean isResolvedCellPlannedInlineAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredId) {
+        if (ctx != null && ctx.ownershipPlanPlacesInlineHwpxText(anchoredId)) return true;
+        return isResolvedCellPlannedInlineVisualAnchor(ctx, anchoredId);
+    }
+
+    private static boolean isResolvedCellPlannedInlineVisualAnchor(
             ResolvedBuildContext ctx,
             int anchoredId) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return false;
@@ -1833,7 +1840,7 @@ public class StoryLoader {
         return false;
     }
 
-    private static void applyResolvedCellInlineGraphicRescueAnchors(
+    private static void applyResolvedCellPlannedInlineAnchors(
             ResolvedBuildContext ctx,
             kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
             ResolvedTable.Cell resolvedCell,
@@ -1854,7 +1861,7 @@ public class StoryLoader {
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
                 if (!cellContainsInlineAnchor(idmlCell, anchoredId)) continue;
-                if (!isResolvedCellInlineGraphicRescueAnchor(ctx, anchoredId)) {
+                if (!isResolvedCellPlannedInlineAnchor(ctx, anchoredId)) {
                     continue;
                 }
                 int targetIndex = paraIndex;
