@@ -37,6 +37,7 @@ final class InlineFlowPolicy {
     static boolean isLineNeutralInlineMarker(ASTInlineObject obj) {
         if (obj == null || !obj.keepInline()) return false;
         if (obj.layoutOnlyInlineSlot()) return false;
+        if (obj.sourceRowLineNeutral()) return true;
         ASTInlineObject.ObjectKind kind = obj.kind();
         if (kind != ASTInlineObject.ObjectKind.IMAGE
                 && kind != ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP

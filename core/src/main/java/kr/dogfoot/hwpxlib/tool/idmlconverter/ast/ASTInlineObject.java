@@ -83,6 +83,9 @@ public class ASTInlineObject extends ASTInlineItem {
     // 작은 배지/표식은 글자처럼 줄높이에 참여하지만, 닫힌 inline visual carrier
     // (도표/삽화 PNG)는 story 흐름에는 남아도 문단 leading을 이미지 높이로 키우지 않는다.
     private boolean affectsLineSpacing = true;
+    // 원본에서 editable sibling text와 같은 행을 이루는 시각물은 표시 크기를
+    // 유지하되 투명 canvas 높이로 문단 leading을 키우지 않는다.
+    private boolean sourceRowLineNeutral;
 
     // true이면 Stage 1에서 visual/text를 모두 page plane 등에 양보한 inline source의
     // 흐름 예약용 객체다. HWPX 출력은 visible graphic이 아니라 layout-only carrier로만 실행한다.
@@ -260,6 +263,9 @@ public class ASTInlineObject extends ASTInlineItem {
     public void layoutOnlyInlineSlot(boolean v) { this.layoutOnlyInlineSlot = v; }
     public boolean suppressInlineTrailingGap() { return suppressInlineTrailingGap; }
     public void suppressInlineTrailingGap(boolean v) { this.suppressInlineTrailingGap = v; }
+
+    public boolean sourceRowLineNeutral() { return sourceRowLineNeutral; }
+    public void sourceRowLineNeutral(boolean v) { this.sourceRowLineNeutral = v; }
 
     public int plannedZOrder() { return plannedZOrder; }
     public void plannedZOrder(int v) { this.plannedZOrder = v; }
