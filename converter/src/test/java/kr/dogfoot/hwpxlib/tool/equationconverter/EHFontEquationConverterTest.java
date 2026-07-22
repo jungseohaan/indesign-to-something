@@ -202,6 +202,22 @@ public class EHFontEquationConverterTest {
     }
 
     @Test
+    public void superscript_font_mixed_paren_exponent_keeps_structure() {
+        // 실제 p12 run 형태: EH상부자 안에 ")" + 확장 위첨자(Û) + "="가 함께 있음.
+        // 전체 run을 위첨자로 만들면 left(sqrt{5}^{right)2=})처럼 구조가 무너진다.
+        Assert.assertEquals("left(sqrt{5} right)^{2}=",
+                convert(sup("("), fracUpper("'"), sup("5"), body(" "), sup(")Û`=")));
+    }
+
+    @Test
+    public void tall_hook_superscript_font_radicand_absorbs_exponent() {
+        // 실제 p12 run 형태: tall hook + 폭선택자 + EH상부자 "3Û`".
+        // tall hook은 지수를 루트 안 피연산자로 포함한다.
+        Assert.assertEquals("left(sqrt{3^{2}} right)=",
+                convert(sup("("), fracUpper("\""), fracUpper("Å"), sup("3Û`"), body(" "), sup(")=")));
+    }
+
+    @Test
     public void no_space_before_closing_paren() {
         // ('5␣)Û` — 원문이 근호 가로줄과 ')' 겹침을 피하려고 넣은 U+2009 thin space 는
         // HWP 수식에서 쓸데없는 틈이 되므로 제거 (실측: p17 (√5 )²=5).

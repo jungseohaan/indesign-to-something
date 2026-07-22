@@ -703,7 +703,8 @@ public class ASTMathGrouper {
         //   ";2!;" 원문이 그대로 노출된다(실측: 1단원 p23 "정수가 아닌 유리수").
         // 두 경우 모두 EHFontEquationConverter 가 온전히 처리하므로 그대로 넘긴다.
         boolean hasEHEquationStructure = containsEHSqrtMarker(ehRuns)
-                || containsEHGrepFraction(ehRuns);
+                || containsEHGrepFraction(ehRuns)
+                || containsEHYakmulMathSymbol(ehRuns);
         if (!hasEHEquationStructure) {
             if (emitPositionedFormulaEquation(ehRuns, para, "CHEM_FORMULA")) {
                 return;
@@ -786,11 +787,27 @@ public class ASTMathGrouper {
         if (ehRuns == null) return false;
         for (IDMLCharacterRun run : ehRuns) {
             if (run == null) continue;
-            String ff = run.fontFamily();
+            String ff = ehFontRole(run);
             if (EHFontGlyphMap.isRootFont(ff)) return true;
             if (EHFontGlyphMap.isFractionNumeratorFont(ff)
                     && EHFontGlyphMap.isFractionBarDecoration(run.content())) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsEHYakmulMathSymbol(List<IDMLCharacterRun> ehRuns) {
+        if (ehRuns == null) return false;
+        for (IDMLCharacterRun run : ehRuns) {
+            if (run == null || run.content() == null) continue;
+            if (!EHFontGlyphMap.isChemicalFont(ehFontRole(run))) continue;
+            String text = run.content();
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                if (c == 'p' || c == 'y' || c == 'H' || c == 'Ñ') {
+                    return true;
+                }
             }
         }
         return false;
@@ -1716,11 +1733,23 @@ public class ASTMathGrouper {
             }
             String text = run.content();
             if (EHFontGlyphMap.containsEHEncodedChars(text)
-                    || EHFontGlyphMap.containsEHFractionPattern(text)) {
+                    || EHFontGlyphMap.containsEHFractionPattern(text)
+                    || containsEHYakmulMathSymbol(java.util.Collections.singletonList(run))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static String ehFontRole(IDMLCharacterRun run) {
+        if (run == null) return null;
+        String ff = run.fontFamily();
+        if (ff != null && EHFontGlyphMap.isEHFontFamily(ff)) return ff;
+        String cs = run.appliedCharacterStyle();
+        if (EHFontGlyphMap.isEHFontStyle(cs)) {
+            return EHFontGlyphMap.extractFontFromStyle(cs);
+        }
+        return ff;
     }
 
 }
