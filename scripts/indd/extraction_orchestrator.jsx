@@ -1489,6 +1489,17 @@ function _runRenderPhases(doc, ctx, allItems) {
     for (var dri = 0; decorationResult.items && dri < decorationResult.items.length; dri++) {
         renderedFloatingItems.push(decorationResult.items[dri]);
     }
+    _requireExtractionPass(ctx, "pass.master_page_graphics");
+    var masterGraphicPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.master_page_graphics");
+    var masterGraphicResult = _contentTextOnly
+            ? { items: [] }
+            : exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+                    allItems, extractionItemById,
+                    masterGraphicPngCandidates);
+    _addRenderMeta(masterGraphicResult.items, null, "pass.master_page_graphics");
+    for (var mgi = 0; masterGraphicResult.items && mgi < masterGraphicResult.items.length; mgi++) {
+        renderedFloatingItems.push(masterGraphicResult.items[mgi]);
+    }
     _requireExtractionPass(ctx, "pass.image_placed_frames");
     var imagePlacedPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.image_placed_frames");
     ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount = imagePlacedPngCandidates.length || 0;

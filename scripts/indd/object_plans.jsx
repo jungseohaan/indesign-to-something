@@ -6078,6 +6078,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
                 ? bundle.textWrapSourceObjectId
                 : null,
         hiddenVisualSourceObjectIds: _internSourceSetIds(bundle.hiddenVisualSourceObjectIds || []),
+        hiddenTextFrameIds: _internSourceSetIds(bundle.hiddenTextFrameIds || []),
         excludedInlineSourceObjectIds: _internSourceSetIds(bundle.excludedInlineSourceObjectIds || []),
         materialization: materialization,
         textAction: textAction,
