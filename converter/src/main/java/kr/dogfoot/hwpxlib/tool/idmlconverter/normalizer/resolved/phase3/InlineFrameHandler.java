@@ -1442,9 +1442,12 @@ public class InlineFrameHandler {
             boolean useCroppedExecutionBounds = splitCanvasCrop != null
                     && splitCanvasCrop.sourceBounds != null
                     && !isDirectChildInlineTextShellSlot(shellPlan);
-            double[] executionBounds = useCroppedExecutionBounds
+            double[] visualExecutionBounds = useCroppedExecutionBounds
                     ? splitCanvasCrop.sourceBounds
                     : shellBounds;
+            double[] executionBounds = plannedInlineTextShellLayoutBounds(
+                    shellPlan,
+                    visualExecutionBounds);
             double w = 0;
             double h = 0;
             if (executionBounds != null && executionBounds.length >= 4) {
@@ -2686,6 +2689,18 @@ public class InlineFrameHandler {
             return validBounds(shellPlan.bounds) ? shellPlan.bounds : renderBounds;
         }
         return crop;
+    }
+
+    private static double[] plannedInlineTextShellLayoutBounds(ObjectPlan shellPlan, double[] visualBounds) {
+        if (shellPlan != null
+                && shellPlan.placement == Placement.INLINE
+                && shellPlan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && shellPlan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && shellPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && validBounds(shellPlan.bounds)) {
+            return shellPlan.bounds;
+        }
+        return visualBounds;
     }
 
     private static BufferedImage cropImageByPlannedSourceBounds(
