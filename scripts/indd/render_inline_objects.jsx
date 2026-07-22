@@ -688,6 +688,24 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
         resultItems: 0
     };
 
+    function renderFileSafeToken(value) {
+        var s = String(value || "");
+        s = s.replace(/[^A-Za-z0-9_]+/g, "_");
+        s = s.replace(/^_+|_+$/g, "");
+        return s || "fragment";
+    }
+
+    function renderFileHash(value) {
+        var h = 2166136261;
+        var s = String(value || "");
+        for (var hi = 0; hi < s.length; hi++) {
+            h ^= s.charCodeAt(hi);
+            h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+        }
+        if (h < 0) h = h * -1;
+        return String(h);
+    }
+
     function _parentStoryIdForInlineItem(item) {
         try {
             if (item.parentStory && item.parentStory.id !== undefined) {
@@ -964,6 +982,15 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 } catch (eInlineEntrySourceIds) {}
                 if (!_inlineEntrySourceIds || _inlineEntrySourceIds.length === 0) _inlineEntrySourceIds = [inItem.id];
                 var inFileName = "inline_" + inId + ".png";
+                var _inlinePlannedPageVisual = inlineCandidate.placement === "FLOATING"
+                        || inlineCandidate.coordinateSpace === "PAGE";
+                if (_inlinePlannedPageVisual && inlineCandidate.candidateId) {
+                    inFileName = "inline_" + inId
+                            + "_p" + String((_inlinePlanPageIdx || 0) + 1)
+                            + "_" + renderFileSafeToken(inlineCandidate.passId || "page")
+                            + "_h" + renderFileHash(inlineCandidate.candidateId)
+                            + ".png";
+                }
                 var inOutFile = File(renderDir + "/" + inFileName);
                 // Group 내부의 TextFrame 텍스트는 HWPX 텍스트로 별도 배치되므로
                 // 렌더링 PNG에는 텍스트를 제외한다. fillColor=None 방식은 일부
@@ -1047,7 +1074,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         var _inlineDropsText = inlineCandidate.textAction === "DROP_TEXT";
                         var _inlineRenderedBounds = _plannedCandidateRenderedBounds(inlineCandidate, inBounds);
                         var _inlineCandidatePassId = inlineCandidate.passId || "pass.inline_objects";
-                        var _inlinePlannedPageVisual = inlineCandidate.placement === "FLOATING"
+                        _inlinePlannedPageVisual = inlineCandidate.placement === "FLOATING"
                                 || inlineCandidate.coordinateSpace === "PAGE";
                         var _inlineBaseEntry = {
                             id: inId,
