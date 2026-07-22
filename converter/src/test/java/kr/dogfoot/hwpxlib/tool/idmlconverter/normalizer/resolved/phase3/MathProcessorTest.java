@@ -62,6 +62,21 @@ public class MathProcessorTest {
         Assert.assertEquals("×100", ((ASTTextRun) para.items().get(5)).text());
     }
 
+    @Test
+    public void ehPlainDecimalSurvivesWhenParagraphAlsoHasEquation() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(text("⑶ ", "Yoon가변 윤명조100Std_OTF"));
+        para.addItem(text("0.36", "EH상부자"));
+        para.addItem(text("\t\t⑷ ", "Yoon가변 윤명조100Std_OTF"));
+        para.addItem(new ASTEquation("{4} over {81}", "EH_FONT"));
+
+        MathProcessor.convertMathRunsInParagraph(null, para);
+
+        Assert.assertEquals(4, para.items().size());
+        Assert.assertEquals("0.36", ((ASTTextRun) para.items().get(1)).text());
+        Assert.assertTrue(para.items().get(3) instanceof ASTEquation);
+    }
+
     private static ASTTextRun text(String text, String fontFamily) {
         ASTTextRun run = new ASTTextRun();
         run.text(text);

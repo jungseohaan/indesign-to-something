@@ -61,10 +61,10 @@ class MathProcessor {
         if (hasEquation) {
             collapseMixedFormulaEquationClusters(ctx, para);
             if (hasEHRun) {
-                // 수식과 EH TextRun이 공존: EH TextRun은 수식 변환 잔여물 → 제거
+                // 수식과 EH TextRun이 공존하더라도 의미 있는 원문 텍스트는 보존한다.
+                // 제거 대상은 근호/분수선처럼 수식 구조를 그리던 장식 글리프뿐이다.
                 items.removeIf(it -> it instanceof ASTTextRun
-                        && ((ASTTextRun) it).fontFamily() != null
-                        && EHFontGlyphMap.isEHFontFamily(((ASTTextRun) it).fontFamily()));
+                        && isDiscardableEHStructureResidue((ASTTextRun) it));
             }
             convertSubscriptChemicalSegments(para);
             stitchChemicalFormulaFragments(para);
@@ -220,6 +220,17 @@ class MathProcessor {
         collapseMixedFormulaEquationClusters(ctx, para);
         convertSubscriptChemicalSegments(para);
         stitchChemicalFormulaFragments(para);
+    }
+
+    private static boolean isDiscardableEHStructureResidue(ASTTextRun run) {
+        if (run == null) return false;
+        String ff = run.fontFamily();
+        if (ff == null || !EHFontGlyphMap.isEHFontFamily(ff)) return false;
+        String text = run.text();
+        if (text == null || text.isEmpty()) return true;
+        String decoded = EHFontGlyphMap.decodeStrayGlyphText(text, ff);
+        if (decoded == null || decoded.trim().isEmpty()) return true;
+        return EHFontGlyphMap.isFractionBarDecoration(text);
     }
 
     /**
