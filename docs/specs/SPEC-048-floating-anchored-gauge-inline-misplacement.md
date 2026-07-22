@@ -1,6 +1,10 @@
 # SPEC-048: FLOATING_ANCHORED 게이지의 인라인 오배치 (100% 유출 + 위치 어긋남)
 
-> 상태: **원인 규명 완료, 수정 미완결** (추출기 다중 seed 통일 필요). 2026-07-21.
+> 상태: **완료** — 구현·산출물 검증·한글 육안 확인 통과. 2026-07-22.
+> 구현: 추출기 3-seed 게이지 통짜PNG 통일 + bundle 페이지배치 판정 예외 (Java 무변경).
+> 검증: p19 재추출 → 게이지 plan `COMPLETE_PNG + OWNED_BY_PNG + PLACE_FLOATING_PNG +
+> FLOATING/PAGE`, PNG 에 눈금+100%+연필 통짜, HWPX "100%" 본문 유출 0건,
+> 픽처 treatAsChar=0 + PAPER 상대 페이지 좌표 배치 확인.
 
 ## 문제
 
@@ -65,7 +69,34 @@
    가드 추가 → 여전히 textOwner=none (게이지 판정이 이 지점에서 미발동 또는
    후단 정규화가 덮어씀 — 미확정).
 
-## 완결에 필요한 작업 (다음 세션)
+## 구현 결과 (2026-07-22, spec-048-gauge-complete-png 브랜치)
+
+게이지 판정 `_isGaugeLikeFloatingAnchoredInlineGroupByMaps` (Group +
+storyTextInlineSlot=true + FLOATING_ANCHORED + GraphicLine 자손 ≥ 8,
+`_gaugeLikeGraphicLineMin()`) 를 `ownership_candidates.jsx` 에 정의하고:
+
+1. `extraction_plan_builder.jsx` `_appendInlineObjectExtractionCandidates` —
+   게이지면 `ownsTextByCompletePng=true` (34소스 seed).
+2. `ownership_candidates.jsx` `_appendSourceDeclaredInlineShellCandidates` —
+   게이지면 `completeMarkerOwnsText=true` (2소스 seed). 통짜PNG 시 소스집합이
+   34소스와 같아져 dedup 키 일치로 **중복 seed 자동 통합**.
+3. `extraction_plan_builder.jsx` `_appendInlineFlowVisualRootCandidates` —
+   **조사에 없던 제3 seed** (`_pushExtractionCandidate` 우회 직접 push).
+   게이지면 통짜PNG + `hiddenTextFrameIds=[]` (숨기면 100% 유실).
+4. `planner_bundles.jsx` `_plannerBundleSourceSetHasPagePositionedAnchor` —
+   게이지는 storyTextInlineSlot=true 여도 페이지배치 판정 포함
+   (`_plannerBundleSourceIsGaugeLikePagePositionedAnchor`) →
+   `pagePositionedAnchoredSource=true` → `_objectPlanPlacement` 가 FLOATING/PAGE.
+
+Java 는 무변경: 기존 `InlineFrameHandler.findPagePositionedStoryAnchorOwnerPlan` 이
+FLOATING+PAGE+PLACE_FLOATING_PNG plan 을 앵커 소유자로 인식해 인라인 자리를
+비우고, Stage 3 `shouldPlaceFloatingVisualByOwnershipPlan` 이 페이지 좌표 배치.
+
+추가 발견 트랩: **jsx eval 모듈 로드에서 파일 간 전역 `var` 는 공유 안 됨(함수만
+공유)** — 공유 상수는 `function _foo(){return v;}` 로 정의할 것 (1차 재추출이
+ReferenceError 로 실패했던 원인).
+
+## 완결에 필요한 작업 (원래 계획, 참고용)
 
 **여러 seed 경로를 게이지에 대해 통일**해야 한다:
 - 게이지(GraphicLine 다수 + FLOATING_ANCHORED + 편집텍스트 자식)는 **단일
