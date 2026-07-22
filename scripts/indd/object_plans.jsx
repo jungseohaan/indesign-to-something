@@ -3318,6 +3318,167 @@ function _summarizeObjectPlans(objectPlans, validation) {
     return summary;
 }
 
+// SPEC-057: 텍스트 중복 강등 시, canonical 셸들이 가져가지 않은 시각 소스
+// (예: 라벨 달린 삽화 그룹의 placed Image)가 남아 있으면 그 루트들을 돌려준다.
+// 루트 조건: uncovered 이고 부모가 uncovered 가 아니며, 서브트리 전체가
+// canonical 셸에 안 잡혀 있어야(claimed 자손 없음) 단독 export 가 안전하다.
+function _objectPlanRescuedVisualRootsAfterTextDemotion(
+        candidate, droppedTextFrameIds, canonicalByTextFrameId, sourceById) {
+    if (!candidate || !sourceById) return [];
+    var claimed = {};
+    for (var d = 0; droppedTextFrameIds && d < droppedTextFrameIds.length; d++) {
+        var canonical = canonicalByTextFrameId[String(droppedTextFrameIds[d])];
+        if (!canonical) continue;
+        var claimedIds = canonical.sourceObjectIds || [];
+        for (var c = 0; c < claimedIds.length; c++) claimed[String(claimedIds[c])] = true;
+    }
+    var visualIds = candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0
+            ? candidate.visualSourceObjectIds
+            : (candidate.exportSourceObjectIds || []);
+    if (!visualIds || visualIds.length === 0) return [];
+    var uncovered = {};
+    for (var v = 0; v < visualIds.length; v++) {
+        var key = String(visualIds[v]);
+        if (!claimed[key] && sourceById[key]) uncovered[key] = true;
+    }
+    var childrenByParent = {};
+    for (var sk in sourceById) {
+        if (!sourceById.hasOwnProperty(sk)) continue;
+        var src = sourceById[sk];
+        if (!src || src.parentId === null || src.parentId === undefined) continue;
+        var pk = String(src.parentId);
+        if (!childrenByParent[pk]) childrenByParent[pk] = [];
+        childrenByParent[pk].push(String(src.id));
+    }
+    function subtreeCleanAndVisual(rootKey) {
+        // 서브트리에 claimed 노드가 있으면 export 시 라벨이 중복 렌더된다 → 부적격.
+        var stack = [rootKey];
+        var seen = {};
+        var hasVisualMaterial = false;
+        while (stack.length > 0) {
+            var cur = stack.pop();
+            if (seen[cur]) continue;
+            seen[cur] = true;
+            if (claimed[cur]) return false;
+            var node = sourceById[cur];
+            if (node) {
+                var kind = String(node.kind || "");
+                if (kind === "Image" || kind === "PDF" || kind === "EPS"
+                        || node.hasPlacedVisual === true
+                        || node.hasPlacedVisualInSubtree === true
+                        || node.hasVisibleFill === true
+                        || node.hasVisibleStroke === true
+                        || node.hasCandidateVectorPaint === true) {
+                    hasVisualMaterial = true;
+                }
+            }
+            var kids = childrenByParent[cur] || [];
+            for (var ki = 0; ki < kids.length; ki++) stack.push(kids[ki]);
+        }
+        return hasVisualMaterial;
+    }
+    var roots = [];
+    function addMaximalCleanRoots(key, depth) {
+        if (depth > 30) return;
+        if (subtreeCleanAndVisual(key)) {
+            roots.push(Number(key));
+            return;
+        }
+        // 서브트리에 claimed(라벨 셸 소유) 노드가 섞임 → 자식으로 내려가
+        // claimed 를 피한 clean 루트(예: 삽화 Rectangle)를 찾는다.
+        var kids = childrenByParent[key] || [];
+        for (var ki = 0; ki < kids.length; ki++) {
+            var kidKey = String(kids[ki]);
+            if (claimed[kidKey]) continue;
+            addMaximalCleanRoots(kidKey, depth + 1);
+        }
+    }
+    for (var uk in uncovered) {
+        if (!uncovered.hasOwnProperty(uk)) continue;
+        var node2 = sourceById[uk];
+        var parentKey = node2 && node2.parentId !== null && node2.parentId !== undefined
+                ? String(node2.parentId) : null;
+        if (parentKey && uncovered[parentKey]) continue; // 최상위 uncovered 부터 하강
+        addMaximalCleanRoots(uk, 0);
+    }
+    return _sortedNumericIds(roots);
+}
+
+function _objectPlanRescuedVisualBounds(roots, sourceById, fallbackBounds) {
+    var out = null;
+    for (var i = 0; i < roots.length; i++) {
+        var src = sourceById[String(roots[i])];
+        var b = src && src.bounds && src.bounds.length >= 4 ? src.bounds : null;
+        if (!b) continue;
+        if (!out) {
+            out = b.slice(0);
+        } else {
+            out = [Math.min(out[0], b[0]), Math.min(out[1], b[1]),
+                   Math.max(out[2], b[2]), Math.max(out[3], b[3])];
+        }
+    }
+    return out || fallbackBounds || null;
+}
+
+// SPEC-057: 라벨 달린 삽화 그룹 — 라벨 셸 분해 대신 그룹 전체를 통짜 PNG 로
+// 소유한다 (인라인 배치이므로 라벨을 PNG 에 함께 굽는 편이 원본 배치에 충실).
+// 이 plan 을 OWNED_BY_PNG 통짜 PNG 소유자로 승격하고, 텍스트를 가져갔던
+// canonical 라벨 셸 plan 들은 강등해 중복 렌더를 막는다.
+function _objectPlanReclaimInlineCompletePngAfterTextDemotion(
+        candidate, droppedTextFrameIds, canonicalByTextFrameId) {
+    var restoredTextIds = _sortedNumericIds(droppedTextFrameIds || []);
+    candidate.ownedTextFrameIds = restoredTextIds;
+    candidate.hiddenTextFrameIds = [];
+    candidate.textAction = "OWNED_BY_PNG";
+    candidate.visualAction = "PLACE_INLINE_PNG";
+    candidate.materialization = "COMPLETE_PNG";
+    candidate.completePngTextAllowed = true;
+    candidate.containsEditableText = true;
+    candidate.ownershipSlot = "CONTENT_VISUAL_SLOT";
+    candidate.visualLayer = "CONTENT_VISUAL";
+    candidate.inlineSourceTreeClosed = true;
+    var allIds = _sortedNumericIds(candidate.sourceObjectIds || []);
+    candidate.visualSourceObjectIds = allIds;
+    // export 는 그룹 루트 하나만 — 자식 개별 복제·재그룹은 캔버스를 부풀려
+    // 그림이 작게 앉는다. 루트 단독이면 그룹 통째 복제 export 경로(검증됨)를
+    // 타서 캔버스 == 그룹 bounds 가 된다.
+    var rootExportIds = candidate.primarySourceObjectId !== null
+            && candidate.primarySourceObjectId !== undefined
+            ? _internSourceSetIds([candidate.primarySourceObjectId])
+            : allIds;
+    candidate.exportSourceObjectIds = rootExportIds;
+    candidate.visualSourceSetId = _sourceSetId(allIds);
+    candidate.exportSourceSetId = _sourceSetId(rootExportIds);
+    if (candidate.primarySourceObjectId !== null && candidate.primarySourceObjectId !== undefined) {
+        candidate.exportTargetObjectId = candidate.primarySourceObjectId;
+    }
+    candidate.textOwnershipResolution = "RECLAIMED_AS_INLINE_COMPLETE_PNG_GROUP";
+    candidate.textOwnershipResolutionReason =
+            "labeled_figure_group_owns_text_and_visual_as_one_png";
+    candidate.reason = String(candidate.reason || "")
+            + ":inline_labeled_figure_reclaimed_complete_png";
+
+    // canonical 라벨 셸 plan 강등 (텍스트/시각 모두 PNG 로 흡수됨)
+    var demotedShells = {};
+    for (var d = 0; droppedTextFrameIds && d < droppedTextFrameIds.length; d++) {
+        var canonical = canonicalByTextFrameId[String(droppedTextFrameIds[d])];
+        if (!canonical || canonical === candidate) continue;
+        var shellKey = String(canonical.objectPlanId || canonical.candidateId || d);
+        if (demotedShells[shellKey]) continue;
+        demotedShells[shellKey] = true;
+        canonical.textAction = "DROP_TEXT";
+        canonical.visualAction = "DROP_VISUAL";
+        canonical.materialization = "HWPX_TEXT";
+        canonical.ownedTextFrameIds = [];
+        canonical.hiddenTextFrameIds = [];
+        canonical.visualSourceObjectIds = [];
+        canonical.exportSourceObjectIds = [];
+        canonical.textOwnershipResolution = "SUPERSEDED_BY_INLINE_COMPLETE_PNG_GROUP";
+        canonical.reason = String(canonical.reason || "")
+                + ":superseded_by_inline_complete_png_group";
+    }
+}
+
 function _resolveObjectPlanDuplicateTextOwners(objectPlans, sourceById) {
     var plans = objectPlans || [];
     var ownersByTextFrameId = {};
@@ -3394,6 +3555,16 @@ function _resolveObjectPlanDuplicateTextOwners(objectPlans, sourceById) {
                             "kept_only_inline_text_frames_for_which_this_shell_plan_is_canonical";
                     candidate.reason = String(candidate.reason || "")
                             + ":partial_inline_text_shell_owner_duplicate_resolved";
+                    continue;
+                }
+                // SPEC-057: canonical 셸이 가져가지 않은 시각 소스(라벨 달린 삽화의
+                // placed Image 등)가 남으면 — 인라인 배치이므로 그룹 전체를 통짜
+                // PNG(라벨 포함)로 승격하고 라벨 셸들은 강등한다.
+                var inlineRescuedRoots = _objectPlanRescuedVisualRootsAfterTextDemotion(
+                        candidate, inlineDroppedTextFrameIds, canonicalByTextFrameId, sourceById);
+                if (inlineRescuedRoots.length > 0 && candidate.placement === "INLINE") {
+                    _objectPlanReclaimInlineCompletePngAfterTextDemotion(
+                            candidate, inlineDroppedTextFrameIds, canonicalByTextFrameId);
                     continue;
                 }
                 candidate.textAction = "DROP_TEXT";

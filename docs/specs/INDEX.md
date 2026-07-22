@@ -19,6 +19,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-041](SPEC-041-anchored-edge-label-floating.md) | Active | 앵커 가장자리 라벨(구절 풀이 배지) 테이블 셀 흡수 — 컨버터 오버레이 채널 보존으로 수정 (구현 완료, 육안 확인 대기) |
 | [SPEC-048](SPEC-048-floating-anchored-gauge-inline-misplacement.md) | Done | FLOATING_ANCHORED 게이지(눈금+100%+연필)의 인라인 오배치 — 추출기 3-seed 통짜PNG 통일 + FLOATING/PAGE 배치 (2026-07-22 한글 육안 확인 완료) |
 | [SPEC-056](SPEC-056-cell-answer-blank-inline-loss.md) | Done | 표 셀 답란(연필+밑줄) 인라인 객체 유실 — 스페이서 오판·□ 삼킴·fallback 순서 손실 3중 수정 (2026-07-22 한글 육안 확인 완료) |
+| [SPEC-057](SPEC-057-labeled-figure-inline-complete-png.md) | Done | 라벨 달린 삽화 그룹 시각 유실·라벨 유령 여백 — 인라인 통짜 PNG 승격 + 셸 여백 단위 정합 (2026-07-23 한글 육안 확인 완료) |
 | [SPEC-044](SPEC-044-blank-paren-spacer.md) | Active | 괄호 빈칸 스페이서(빈 답란 Rectangle) → NBSP 고정폭 공백 치환 (구현 완료, 육안 확인 대기) |
 | [SPEC-045](SPEC-045-coefficient-subscript-bleed.md) | Active | 화학 반응식 계수 첨자 오염(resolved 첨자 위치 흘림) — IDML 비첨자 증거 우선 (구현 완료, 육안 확인 대기) |
 | [SPEC-046](SPEC-046-formula-textrange-shell-misfire.md) | Active | 화학식 첫 글자의 text-range-shell 오분리 — 화학식 문단 range 분리 제외 (구현 완료, 육안 확인 대기) |
