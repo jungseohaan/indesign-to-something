@@ -6302,6 +6302,14 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
         if (ctx == null || anchoredObjectId < 0) return null;
+        // FLOATING_ANCHORED 소스는 박스가 줄 밖(페이지 좌표)에 있어 원본에서
+        // 앵커 줄 높이에 기여하지 않는다 — 슬롯 예약이 줄간격만 밀어올린다
+        // (실측: 과학 u1 p19 답안영역 rect 6mm 높이가 질문 줄에 17pt 유령
+        // 테이블로 들어가 마커 줄과의 간격이 벌어짐).
+        if (ctx.resolvedData != null && isFloatingAnchoredInlineSource(
+                ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId)))) {
+            return null;
+        }
         ObjectPlan plan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
         if (plan == null || plan.bounds == null || plan.bounds.length < 4) return null;
         double[] boundsPt = renderedBoundsPoints(ctx, plan.bounds);
