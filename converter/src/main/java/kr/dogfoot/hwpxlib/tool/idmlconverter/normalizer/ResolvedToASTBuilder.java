@@ -1680,6 +1680,12 @@ public class ResolvedToASTBuilder {
         traceAstProduction("Stage2.TextBuilder.legacyFramePlacer", sections, before);
         tagPhase(sections, "Stage2.TextBuilder.legacyFramePlacer");
 
+        // SPEC-054 graphic-only: 스토리 텍스트·테이블 변환을 생략하고 시각물만 배치한다.
+        if (this.ctx.resolvedData != null && this.ctx.resolvedData.isGraphicOnlyContentMode()) {
+            System.err.println("[ResolvedToASTBuilder] content-mode=graphic-only: story/table text phases skipped");
+            return;
+        }
+
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.storyConverter")) {
             before = snapshotBlocks(sections);
             StoryConverter.convertStories(this.ctx, sections);
@@ -1702,6 +1708,10 @@ public class ResolvedToASTBuilder {
      * 새 visible 객체를 만들거나 ownership을 뒤집는 로직을 추가하지 않는다.</p>
      */
     private void postprocessLayout(List<ASTSection> sections) {
+        // SPEC-054 graphic-only: 불릿은 텍스트 산출물이므로 생략.
+        if (this.ctx.resolvedData != null && this.ctx.resolvedData.isGraphicOnlyContentMode()) {
+            return;
+        }
         Set<ASTBlock> before;
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.bulletInserter")) {
             before = snapshotBlocks(sections);

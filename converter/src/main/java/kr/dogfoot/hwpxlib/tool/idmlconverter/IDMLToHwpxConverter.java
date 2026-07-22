@@ -131,7 +131,10 @@ public class IDMLToHwpxConverter {
             // Phase 2: AST 빌드
             reporter.reportProgress(5, 100, "AST 빌드 중...");
             ASTDocument astDoc;
-            boolean isNewPipeline = resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty();
+            boolean isNewPipeline = resolvedData != null
+                    && (!resolvedData.allRenderedFloatingItems().isEmpty()
+                    // SPEC-054: text-only 추출은 렌더 PNG 가 없어도 신 파이프라인 유지
+                    || resolvedData.hasReducedContentMode());
             try (ConversionTiming.Scope ignored = ConversionTiming.time("phase2.astBuild.total")) {
                 if (isNewPipeline) {
                     astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution())
@@ -504,7 +507,10 @@ public class IDMLToHwpxConverter {
                 resolvedData.buildRenderedIdSet();
             }
 
-            boolean isNewPipeline = resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty();
+            boolean isNewPipeline = resolvedData != null
+                    && (!resolvedData.allRenderedFloatingItems().isEmpty()
+                    // SPEC-054: text-only 추출은 렌더 PNG 가 없어도 신 파이프라인 유지
+                    || resolvedData.hasReducedContentMode());
             ASTDocument astDoc;
             if (isNewPipeline) {
                 astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(

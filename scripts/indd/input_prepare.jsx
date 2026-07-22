@@ -5,6 +5,15 @@
  * It must not decide ownership, placement, layer, or materialization.
  */
 
+// SPEC-054: InDesign ExtendScript 에는 JSON.parse 가 없다 (readJson 과 동일한
+// eval 폴백). 이 폴백이 없으면 config 파일이 조용히 무시되고 defaults 로 돈다.
+function _parseJsonText(text) {
+    if (typeof JSON !== "undefined" && JSON && typeof JSON.parse === "function") {
+        return JSON.parse(text);
+    }
+    return eval("(" + text + ")");
+}
+
 function loadConversionConfig(configPath) {
     var defaults = {
         rendering: {
@@ -51,12 +60,15 @@ function loadConversionConfig(configPath) {
         f.open("r");
         var raw = f.read();
         f.close();
-        var parsed = JSON.parse(raw);
+        var parsed = _parseJsonText(raw);
         // 얕은 병합: 각 섹션 키를 _mergeKeys로 일괄 복사
         if (parsed.rendering) {
             var r = parsed.rendering;
             if (r.pngExportResolution !== undefined)
                 defaults.rendering.pngExportResolution = r.pngExportResolution;
+            // SPEC-054: 파생 config 가 dpi 를 명시적으로 고정하면 perfMode override 무시
+            if (r.pngExportResolutionLocked !== undefined)
+                defaults.rendering.pngExportResolutionLocked = r.pngExportResolutionLocked;
             _mergeKeys(defaults.rendering.textFrame, r.textFrame,
                 ["maxTextLength"]);
             _mergeKeys(defaults.rendering.textFrame.decorativeLargeText,
@@ -81,9 +93,11 @@ function loadConversionConfig(configPath) {
                 ["collectFonts", "measureFontMetrics", "collectFontStatus"]);
         }
         $.writeln("[Config] conversion-config.json loaded: " + configPath);
+        defaults._loadStatus = "ok:" + configPath;
         return defaults;
     } catch (e) {
         $.writeln("[Config] load failed: " + e + " → defaults");
+        defaults._loadStatus = "error:" + e;
         return defaults;
     }
 }
@@ -254,6 +268,8 @@ function _parseArgs(args) {
         skipRenderPagesMap: {},
         extractScriptPath:   args[16] || null,
         pagePlaneCacheDir:   args[17] || null,
+        // SPEC-054: full | text-only | graphic-only. text-only 는 PNG 렌더 전부 생략.
+        contentMode:        (args[18] || "full").toLowerCase(),
         graphicsMode:        graphicsMode,
         // SPEC-030 B.2: "pre_scan" 모드 — 해시만 계산하고 렌더링 없이 종료
         extractMode:        (args[10] || "full").toLowerCase(),
@@ -285,15 +301,18 @@ function _parseArgs(args) {
     var skipRenderPagesRaw = args[9] || "";
     if (skipRenderPagesRaw) {
         try {
-            var _srp = JSON.parse(skipRenderPagesRaw);
+            var _srp = _parseJsonText(skipRenderPagesRaw);
             for (var _si = 0; _si < _srp.length; _si++) ctx.skipRenderPagesMap[_srp[_si]] = true;
         } catch (e) {}
     }
 
     CONFIG = loadConversionConfig(ctx.configPath);
     // SPEC-030: perfMode 가 pngExportResolution 을 override (config 값 < CLI 값)
-    if (ctx.perfMode === "fast")       CONFIG.rendering.pngExportResolution = 150;
-    else if (ctx.perfMode === "high")  CONFIG.rendering.pngExportResolution = 300;
+    // SPEC-054: 단, 파생 config 가 dpi 를 명시적으로 잠갔으면 config 값이 이긴다.
+    if (CONFIG.rendering.pngExportResolutionLocked !== true) {
+        if (ctx.perfMode === "fast")       CONFIG.rendering.pngExportResolution = 150;
+        else if (ctx.perfMode === "high")  CONFIG.rendering.pngExportResolution = 300;
+    }
 
     try {
         var cfgLog = File(ctx.outputDir + "/_config_jsx_debug.log");
@@ -307,6 +326,8 @@ function _parseArgs(args) {
         cfgLog.writeln("pagePlaneCacheDir=" + ctx.pagePlaneCacheDir);
         cfgLog.writeln("graphicsMode=" + ctx.graphicsMode);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
+        cfgLog.writeln("pngExportResolutionLocked=" + CONFIG.rendering.pngExportResolutionLocked);
+        cfgLog.writeln("configLoadStatus=" + CONFIG._loadStatus);
         try { cfgLog.writeln("moduleLoadDebug=" + _EXTRACT_MODULE_LOAD_DEBUG); } catch (eModuleDebugLog) {}
         cfgLog.close();
     } catch (e) {}

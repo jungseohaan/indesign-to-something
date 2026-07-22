@@ -1291,7 +1291,9 @@ function _runRenderPhases(doc, ctx, allItems) {
         ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount =
                 ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount || 0;
     }
-    if (ctx.deferPagePlaneCacheRestoreUntilAfterPlan === true) {
+    // SPEC-054: text-only 는 PNG 렌더를 만들지 않으므로 페이지 평면 캐시도 불필요.
+    var _contentTextOnly = ctx.contentMode === "text-only";
+    if (ctx.deferPagePlaneCacheRestoreUntilAfterPlan === true && !_contentTextOnly) {
         _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_afterPlan_start");
         _restoreCachedSingleTextlessPagePlanes(doc, ctx);
         _marker(ctx.outputDir, "03b1_pagePlaneCacheRestore_afterPlan_done");
@@ -1429,10 +1431,17 @@ function _runRenderPhases(doc, ctx, allItems) {
     writeProgress(ctx.outputDir, "rendered_frames", 0, ctx.rangePageCount);
 
     // 2.12. page background + inline object 후보 추출
+    // SPEC-054 text-only: PNG 렌더 5단계(배경/인라인/데코/이미지프레임/페이지평면)
+    // 전부 생략. 플랜·object-plans·resolved 수집은 그대로 유지한다.
+    if (_contentTextOnly) {
+        _marker(ctx.outputDir, "04x_contentMode_textOnly_renderSkipped");
+    }
     _requireExtractionPass(ctx, "pass.page_backgrounds");
-    var pageBackgroundResult = exportPageBackgrounds(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-            _extractionCandidatesForPass(ctx.extractionPlan, "pass.page_backgrounds"),
-            ctx.skipRenderPagesMap);
+    var pageBackgroundResult = _contentTextOnly
+            ? { items: [] }
+            : exportPageBackgrounds(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+                    _extractionCandidatesForPass(ctx.extractionPlan, "pass.page_backgrounds"),
+                    ctx.skipRenderPagesMap);
     var renderedFloatingItems = pageBackgroundResult.items || [];
     _addRenderMeta(renderedFloatingItems, null, "pass.page_backgrounds");
     _marker(ctx.outputDir, "04a_pageBackgrounds");
@@ -1455,9 +1464,11 @@ function _runRenderPhases(doc, ctx, allItems) {
         skippedCandidates: inlineNonPngCandidates,
         reason: "non_png_materialization_uses_object_plan_source_item"
     });
-    var inlineResult = exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-            allItems, extractionItemById,
-            inlinePngCandidates);
+    var inlineResult = _contentTextOnly
+            ? { items: [] }
+            : exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+                    allItems, extractionItemById,
+                    inlinePngCandidates);
     _addRenderMeta(inlineResult.items, null, "pass.inline_objects");
     for (var inri = 0; inlineResult.items && inri < inlineResult.items.length; inri++) {
         renderedFloatingItems.push(inlineResult.items[inri]);
@@ -1469,9 +1480,11 @@ function _runRenderPhases(doc, ctx, allItems) {
     }
     _requireExtractionPass(ctx, "pass.decoration_groups");
     var decorationPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.decoration_groups");
-    var decorationResult = exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-            allItems, extractionItemById,
-            decorationPngCandidates);
+    var decorationResult = _contentTextOnly
+            ? { items: [] }
+            : exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+                    allItems, extractionItemById,
+                    decorationPngCandidates);
     _addRenderMeta(decorationResult.items, null, "pass.decoration_groups");
     for (var dri = 0; decorationResult.items && dri < decorationResult.items.length; dri++) {
         renderedFloatingItems.push(decorationResult.items[dri]);
@@ -1479,9 +1492,11 @@ function _runRenderPhases(doc, ctx, allItems) {
     _requireExtractionPass(ctx, "pass.image_placed_frames");
     var imagePlacedPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.image_placed_frames");
     ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount = imagePlacedPngCandidates.length || 0;
-    var imagePlacedResult = exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
-            allItems, extractionItemById,
-            imagePlacedPngCandidates);
+    var imagePlacedResult = _contentTextOnly
+            ? { items: [] }
+            : exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+                    allItems, extractionItemById,
+                    imagePlacedPngCandidates);
     _addRenderMeta(imagePlacedResult.items, null, "pass.image_placed_frames");
     for (var ipi = 0; imagePlacedResult.items && ipi < imagePlacedResult.items.length; ipi++) {
         renderedFloatingItems.push(imagePlacedResult.items[ipi]);
@@ -1518,18 +1533,20 @@ function _runRenderPhases(doc, ctx, allItems) {
     if (imagePlacedPngCandidates && imagePlacedPngCandidates.length > 0) {
         pagePlaneHideCandidates = inlinePngCandidates.concat(imagePlacedPngCandidates);
     }
-    pageTextlessGroupResult = exportSingleTextlessPagePlanes(
-            doc,
-            ctx.outputDir,
-            ctx.startPage,
-            ctx.endPage,
-            allItems,
-            extractionItemById,
-            pagePlaneHideCandidates,
-            pagePlaneExportOptions);
-    _marker(ctx.outputDir, "06b1_pageTextlessGroups_exportDone");
-    _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult);
-    _marker(ctx.outputDir, "06b1a_pageTextlessGroups_cacheStoreDone");
+    if (!_contentTextOnly) {
+        pageTextlessGroupResult = exportSingleTextlessPagePlanes(
+                doc,
+                ctx.outputDir,
+                ctx.startPage,
+                ctx.endPage,
+                allItems,
+                extractionItemById,
+                pagePlaneHideCandidates,
+                pagePlaneExportOptions);
+        _marker(ctx.outputDir, "06b1_pageTextlessGroups_exportDone");
+        _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult);
+        _marker(ctx.outputDir, "06b1a_pageTextlessGroups_cacheStoreDone");
+    }
     _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
     _marker(ctx.outputDir, "06b2_pageTextlessGroups_metaDone");
     for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
@@ -1630,6 +1647,11 @@ function _runRenderPhases(doc, ctx, allItems) {
         renderedFloatingItems: renderedFloatingItems
     };
     var resolved = collectResolved(doc, ctx.outputDir, ctx.rangePageCount, ctx.startPage, ctx.endPage, editableFrameIds, ctx.skipRenderPagesMap, allItems, resolvedOptions);
+    // SPEC-054: full 이 아닌 콘텐츠 모드는 Java 파이프라인 분기·phase 게이트가
+    // 읽을 수 있게 documentInfo 에 마커를 남긴다.
+    if (ctx.contentMode && ctx.contentMode !== "full" && resolved.documentInfo) {
+        resolved.documentInfo.contentMode = ctx.contentMode;
+    }
     resolved.renderedTextFrames    = [];
     resolved.renderedPdfFrames     = [];
     resolved.renderedGraphicFrames = renderedGraphicFrames;
@@ -1793,15 +1815,20 @@ function main(args) {
         });
 
         // 1.5. 링크 업데이트 (PNG 렌더링 전 — 원본 이미지 연결)
-        writeProgress(ctx.outputDir, "fix_links", 0, 0);
-        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
-            event: "before_fix_links"
-        });
-        _fixLinks(doc, ctx.inddPath, ctx.outputDir, "render_links");
-        _marker(ctx.outputDir, "01i_fix_links_done");
-        appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
-            event: "after_fix_links"
-        });
+        // SPEC-054 text-only: PNG 렌더가 없으므로 링크 수복(수십 초) 생략.
+        if (ctx.contentMode === "text-only") {
+            _marker(ctx.outputDir, "01i_fix_links_skipped_textOnly");
+        } else {
+            writeProgress(ctx.outputDir, "fix_links", 0, 0);
+            appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+                event: "before_fix_links"
+            });
+            _fixLinks(doc, ctx.inddPath, ctx.outputDir, "render_links");
+            _marker(ctx.outputDir, "01i_fix_links_done");
+            appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
+                event: "after_fix_links"
+            });
+        }
 
         appendDiag(ctx.outputDir, "_open_diagnostics.jsonl", {
             event: "before_compute_page_range"
