@@ -239,6 +239,18 @@ public final class RunPropertyResolver {
                     colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
+        // 승인 없는 resolved 색: Paper(흰색) 누출 차단이 목적이므로, 유채색 스와치는
+        // HIGH/MEDIUM 신뢰도에서 허용한다. IDML 에 FillColor 가 없는 색 오버라이드
+        // 조판(배지 제목 "정리해 볼까", 용어 정의 문장)이 검정으로 강등되던 문제.
+        // 줄바꿈 이후 조각은 MEDIUM 으로 매칭되므로 HIGH 만 허용하면 문단이
+        // 부분 착색된다 (p26 "않고 가라앉는" 실측).
+        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
+                && rr != null && rr.fillColor() != null
+                && !isPaperLikeFill(rr.fillColor())) {
+            String hex = resolveColor(rr.fillColor(), null,
+                    colorResolver, tintedColorResolver);
+            if (hex != null && !isWhiteHex(hex)) return hex;
+        }
         if (effectiveIdmlColor != null && effectiveIdmlTint != null) {
             String hex = resolveColor(effectiveIdmlColor, effectiveIdmlTint,
                     colorResolver, tintedColorResolver);
@@ -253,6 +265,23 @@ public final class RunPropertyResolver {
             return paragraphStyleColorHex;
         }
         return null;
+    }
+
+    /** DOM 이 인접 라벨에서 흘리는 배경성 fill 이름 (Paper/None 계열). */
+    private static boolean isPaperLikeFill(String fillColor) {
+        if (fillColor == null) return true;
+        String f = fillColor.trim();
+        return f.isEmpty()
+                || "Paper".equalsIgnoreCase(f)
+                || "None".equalsIgnoreCase(f)
+                || "[None]".equals(f)
+                || "White".equalsIgnoreCase(f);
+    }
+
+    private static boolean isWhiteHex(String hex) {
+        if (hex == null) return false;
+        String h = hex.trim().toUpperCase(java.util.Locale.ROOT);
+        return "#FFFFFF".equals(h) || "#FFF".equals(h);
     }
 
     private static String resolveColor(String color,

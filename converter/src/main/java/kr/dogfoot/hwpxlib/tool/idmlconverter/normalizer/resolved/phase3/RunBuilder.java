@@ -1087,6 +1087,53 @@ class RunBuilder {
      * resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 선택.
      * 불릿(●, ▪ 등 1~2자)이나 특수문자 런이 아닌 본문 런을 우선 선택.
      */
+    /**
+     * SPEC-055(text-attribute): 문단 단색 폴백.
+     *
+     * <p>resolved 가 문단의 모든 텍스트 런을 <b>동일한 유채색</b>으로 보고하면,
+     * per-run 매칭 실패(인라인 수식으로 텍스트가 갈라진 줄 등)로 색을 잃고
+     * 검정으로 떨어진 런에도 그 색을 채운다. 혼색 문단·색 정보가 없는 런이
+     * 하나라도 있으면 아무것도 하지 않는다 (보수적). Paper/흰색/검정은 폴백
+     * 대상이 아니다 (Paper 누출 가드 유지).
+     */
+    static void applyUniformResolvedParagraphColor(ResolvedBuildContext ctx,
+                                                   List<ResolvedRun> resolvedRuns,
+                                                   ASTParagraph para) {
+        if (ctx == null || resolvedRuns == null || para == null || para.items() == null) return;
+        String fill = null;
+        int textRunCount = 0;
+        for (ResolvedRun r : resolvedRuns) {
+            if (r == null || r.isInlineAnchor()) continue;
+            String t = r.text();
+            if (t == null || t.trim().isEmpty()) continue;
+            String f = r.fillColor();
+            if (f == null || f.trim().isEmpty()) return;
+            if (fill == null) fill = f;
+            else if (!fill.equals(f)) return;
+            textRunCount++;
+        }
+        if (fill == null || textRunCount < 2) return;
+        String hex = resolveColorToHex(ctx, fill);
+        if (hex == null) return;
+        String up = hex.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("#FFFFFF".equals(up) || "#000000".equals(up)) return;
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTTextRun) {
+                ASTTextRun tr = (ASTTextRun) item;
+                String c = tr.textColor();
+                if (c == null || "#000000".equalsIgnoreCase(c.trim())) {
+                    tr.textColor(hex);
+                }
+            } else if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                        (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item;
+                if (eq.textColor() == null || eq.textColor().isEmpty()) {
+                    eq.textColor(hex);
+                }
+            }
+        }
+    }
+
     static ResolvedRun findDefaultResolvedRun(ResolvedBuildContext ctx, List<ResolvedRun> runs) {
         if (runs == null || runs.isEmpty()) return null;
         ResolvedRun longest = null;
