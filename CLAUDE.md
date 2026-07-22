@@ -280,7 +280,8 @@ packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 ## 알려진 이슈 & 주의사항
 
 ### 데이터 파이프라인
-- **ExtendScript JSON**: 제어 문자를 이스케이프하지 못함 → Gson lenient 모드 필수
+- **ExtendScript JSON**: 제어 문자를 이스케이프하지 못함 → Gson lenient 모드 필수. 그리고 **`JSON.parse` 자체가 없다** — raw `JSON.parse` 호출은 조용히 예외→defaults 폴백된다 (conversion-config.json 이 추출기에서 무시되던 잠복 버그, SPEC-054 에서 `_parseJsonText` eval 폴백으로 수정). jsx 에서 JSON 읽기는 `readJson`/`_parseJsonText` 를 쓸 것
+- **dev 루프 실효 dpi 는 150 이었다**: perf-mode=fast 가 `pngExportResolution` 을 150 으로 강제 override (SPEC-030). SPEC-054 부터 issue.py 가 `--dpi`(기본 96) + `pngExportResolutionLocked` 로 명시 dpi 를 우선시킴. 페이지 평면 캐시는 dpi 별 디렉토리로 분리
 - **resolved 좌표 단위 불일치**: InDesign DOM은 문서 측정 단위(mm/in/pt)로 반환, IDML은 항상 pt → `ResolvedData.normalizeToPoints(idmlPageWidthPt)`로 scaleFactor 자동 계산. ExtendScript `viewPreferences` 변경은 효과 없음
 - **resolved Group bounds 과대**: DOM의 Group `geometricBounds`는 비가시 자식까지 포함 → 벡터 그룹은 IDML 폴백, 개별 도형만 resolved 사용
 - **문단 인덱스 불일치**: IDML(AST)과 InDesign DOM(resolved)의 문단 수가 다름 → 텍스트 기반 매핑 사용

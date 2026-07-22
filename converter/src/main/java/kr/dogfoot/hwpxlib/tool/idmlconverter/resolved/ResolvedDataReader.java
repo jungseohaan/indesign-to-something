@@ -58,6 +58,14 @@ public class ResolvedDataReader {
         ResolvedData data = new ResolvedData();
         data.preserveRenderedFloatingItemsForObjectPlans(preserveRenderedMaterialForObjectPlans);
 
+        // SPEC-054: 추출 콘텐츠 모드 마커 (full 이 아닐 때만 기록됨)
+        if (root.has("documentInfo") && root.get("documentInfo").isJsonObject()) {
+            String contentMode = getString(root.getAsJsonObject("documentInfo"), "contentMode");
+            if (contentMode != null && !contentMode.isEmpty()) {
+                data.contentMode(contentMode.toLowerCase());
+            }
+        }
+
         // colors → colorHexMap.
         // CMYK 스와치는 추출 시점의 naive 수식 hex 대신 ICC 프로파일 변환으로 재계산한다
         // (InDesign 표시색에 근접 — 예: 질문하기 #40FF75(naive) → #12AE8C(ICC)). 전역 적용.

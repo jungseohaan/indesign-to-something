@@ -38,6 +38,9 @@ public class ResolvedData {
     private Set<Integer> inlineObjectDomIds;                     // inline_object로 등록된 DOM id 집합 (Stage 3 조상 검사용)
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
     private double scaleFactor = 2.8346;  // resolved 좌표 → pt 변환 스케일
+    // SPEC-054: 추출 콘텐츠 모드 (documentInfo.contentMode). null 이면 full.
+    // text-only 는 렌더 PNG 없이 추출되므로 신 파이프라인 분기가 이 마커를 봐야 한다.
+    private String contentMode;
     private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
     private final Set<String> consumedRenderedGraphicIds = new HashSet<>();  // 인라인 처리로 소비된 deco DOM id
     private final List<RenderedGroup> renderedFloatingItems = new ArrayList<>();  // 통합 플로팅 그래픽
@@ -674,6 +677,15 @@ public class ResolvedData {
 
     public List<FontMetricEntry> fontMetrics() { return fontMetrics; }
     public double scaleFactor() { return scaleFactor; }
+
+    // SPEC-054: 추출 콘텐츠 모드. null/"full" = 전체.
+    public String contentMode() { return contentMode; }
+    public void contentMode(String v) { this.contentMode = v; }
+    public boolean hasReducedContentMode() {
+        return contentMode != null && !contentMode.isEmpty() && !"full".equals(contentMode);
+    }
+    public boolean isTextOnlyContentMode() { return "text-only".equals(contentMode); }
+    public boolean isGraphicOnlyContentMode() { return "graphic-only".equals(contentMode); }
 
     // --- RenderedFloatingItem (통합 플로팅 그래픽) ---
 

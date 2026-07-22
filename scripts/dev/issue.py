@@ -250,6 +250,7 @@ def write_applescript(
     extract_mode: str,
     reuse_existing_idml: bool,
     page_plane_cache_dir_path: Path,
+    content_mode: str = "full",
 ) -> None:
     args = [
         str(indd_path),
@@ -270,6 +271,7 @@ def write_applescript(
         "1" if reuse_existing_idml else "0",
         str(EXTRACT_JSX),
         str(page_plane_cache_dir_path),
+        content_mode,
     ]
     quoted_args = ", ".join(json.dumps(a, ensure_ascii=False) for a in args)
     script = f'''using terms from application "{app_name}"
@@ -436,10 +438,32 @@ def idml_cache_dir(indd_path: Path) -> Path:
     return IDML_CACHE_ROOT / idml_cache_key(indd_path)
 
 
-def page_plane_cache_dir(indd_path: Path, perf_mode: str) -> Path:
+def page_plane_cache_dir(indd_path: Path, perf_mode: str, dpi: int = 220) -> Path:
     version = extract_script_version()
     mode = (perf_mode or "standard").lower()
-    return PAGE_PLANE_CACHE_ROOT / idml_cache_key(indd_path) / f"extract-v{version}" / f"single-textless-plane-{mode}"
+    # SPEC-054: dpi 를 캐시 키에 포함해 해상도가 다른 페이지 평면 PNG 가 섞이지
+    # 않게 한다. (기존 무접미사 캐시는 perfMode override 로 사실상 150dpi 산출물)
+    return PAGE_PLANE_CACHE_ROOT / idml_cache_key(indd_path) / f"extract-v{version}" / f"single-textless-plane-{mode}-{int(dpi)}dpi"
+
+
+def write_derived_extract_config(base_config_path: Path, issue_dir: Path, dpi: int) -> Path:
+    """rendering.pngExportResolution 을 dpi 로 고정한 파생 config 를 issue 디렉토리에 쓴다 (SPEC-054).
+
+    pngExportResolutionLocked 로 추출기의 perfMode override(fast=150/high=300)를
+    무시하고 명시 dpi 가 항상 이기게 한다.
+    """
+    with base_config_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+    rendering = config.setdefault("rendering", {})
+    rendering["pngExportResolution"] = int(dpi)
+    rendering["pngExportResolutionLocked"] = True
+    # 케이스명(한글)이 포함된 issue 디렉토리 경로는 ExtendScript File() 로딩이
+    # 실패할 수 있어 ASCII 경로(output/cache)에 dpi 별로 쓴다 (SPEC-054).
+    derived_path = REPO_ROOT / "output" / "cache" / f"extract-config-{int(dpi)}dpi.json"
+    derived_path.parent.mkdir(parents=True, exist_ok=True)
+    with derived_path.open("w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+    return derived_path
 
 
 def restore_cached_idml(indd_path: Path, extract_dir: Path, enabled: bool) -> Dict[str, Any]:
@@ -844,6 +868,18 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     )
     parser.add_argument("--extract-mode", default="full", help="Extractor mode, e.g. full or spread_chunks.")
     parser.add_argument(
+        "--content-mode",
+        default="full",
+        choices=["full", "text-only", "graphic-only"],
+        help="SPEC-054: text-only skips all PNG rendering; graphic-only converts visuals without text.",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=96,
+        help="SPEC-054: PNG export resolution for the dev loop (default 96; production uses 220).",
+    )
+    parser.add_argument(
         "--reuse-idml",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -884,12 +920,14 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     issue_dir = output_root / args.case / f"{page_label(args.page, args.end_page)}-{stamp}"
     extract_dir = issue_dir / "extract"
     converted_dir = issue_dir / "converted"
-    page_plane_cache = page_plane_cache_dir(indd_path, args.perf_mode)
+    page_plane_cache = page_plane_cache_dir(indd_path, args.perf_mode, args.dpi)
 
     script_path = issue_dir / "run_extract.scpt"
     if not args.dry_run:
         extract_dir.mkdir(parents=True, exist_ok=True)
         converted_dir.mkdir(parents=True, exist_ok=True)
+        extract_config_path = write_derived_extract_config(
+            Path(args.extract_config), issue_dir, args.dpi)
         idml_cache_restore = restore_cached_idml(indd_path, extract_dir, args.reuse_idml)
         write_applescript(
             script_path,
@@ -900,10 +938,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             int(extract_range["extractEndPage"]),
             args.perf_mode,
             True,
-            args.extract_config,
+            str(extract_config_path),
             args.extract_mode,
             bool(idml_cache_restore.get("hit")),
             page_plane_cache,
+            args.content_mode,
         )
     else:
         idml_cache_restore = {
@@ -916,6 +955,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     print(f"[issue] case={args.case} book={book_key} unit={unit_key} page={args.page}..{end_page}")
     print(f"[issue] extract-local-page={extract_range['extractStartPage']}..{extract_range['extractEndPage']} mode={extract_range['pageRangeMode']}")
+    print(f"[issue] content-mode={args.content_mode} dpi={args.dpi}")
     print(f"[issue] extract-mode={args.extract_mode} graphics-mode=single-textless-plane")
     print(f"[issue] idml-cache={idml_cache_restore.get('reason')} hit={idml_cache_restore.get('hit')} dir={idml_cache_restore.get('cacheDir')}")
     print(f"[issue] page-plane-cache=enabled dir={page_plane_cache}")

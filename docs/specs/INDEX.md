@@ -39,6 +39,7 @@ when touching the related subsystem.
 | [SPEC-015](SPEC-015-ast-debug-visibility.md) | debugging UI | AST provenance and page visualization |
 | [SPEC-018](SPEC-018-semantic-extraction.md) | semantic/PPTX | semantic layer and PPTX output |
 | [SPEC-030](SPEC-030-indesign-extraction-performance.md) | performance | extraction timing and caching direction |
+| [SPEC-054](SPEC-054-dev-content-extract-modes.md) | dev workflow | 개발용 content-mode (graphic-only/text-only) + issue.py 96dpi 기본 (Active) |
 | [SPEC-032](SPEC-032-windows-cross-platform.md) | desktop platform | Windows support |
 | [SPEC-034](SPEC-034-llm-semantic-extraction.md) | semantic/LLM | LLM assisted content extraction |
 | [SPEC-desktop-app](SPEC-desktop-app.md) | desktop app | Tauri app architecture |
