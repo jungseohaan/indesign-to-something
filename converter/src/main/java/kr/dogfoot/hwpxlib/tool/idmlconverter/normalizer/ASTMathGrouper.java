@@ -716,6 +716,10 @@ public class ASTMathGrouper {
             }
         }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
+        if (isStandaloneSqrtSymbolScript(hwpScript, ehRuns)) {
+            para.addItem(textRunFromMathSource("√", ehRuns, colorToHex));
+            return;
+        }
         if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, ehRuns)) {
             int beforeCount = para.items().size();
             // 선행 번호 "(숫자) " 분리
@@ -1636,6 +1640,63 @@ public class ASTMathGrouper {
         ASTTextRun textRun = new ASTTextRun();
         textRun.text(FormulaClassifier.hwpScriptFallbackText(script));
         para.addItem(textRun);
+    }
+
+    private static boolean isStandaloneSqrtSymbolScript(String script, List<IDMLCharacterRun> mathRuns) {
+        if (script == null || !"sqrt{ }".equals(script.trim())) {
+            return false;
+        }
+        if (mathRuns == null || mathRuns.isEmpty()) {
+            return false;
+        }
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null) {
+                continue;
+            }
+            String text = run.content();
+            if (text == null || text.isEmpty()) {
+                continue;
+            }
+            if (!EHFontGlyphMap.isFractionBarDecoration(text)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static ASTTextRun textRunFromMathSource(String text, List<IDMLCharacterRun> mathRuns,
+                                                    java.util.function.Function<String, String> colorToHex) {
+        ASTTextRun textRun = new ASTTextRun();
+        textRun.text(text);
+        IDMLCharacterRun source = firstNonEmptyRun(mathRuns);
+        if (source != null) {
+            if (source.fontSize() != null) {
+                textRun.fontSizeHwpunits((int) (source.fontSize() * 100));
+            }
+            String fillRef = source.fillColor();
+            if (fillRef != null) {
+                String hex = colorToHex != null ? colorToHex.apply(fillRef) : null;
+                if (hex == null || hex.isEmpty()) {
+                    hex = ColorResolver.resolveBasicColor(fillRef);
+                }
+                if (hex != null && !hex.isEmpty()) {
+                    textRun.textColor(hex);
+                }
+            }
+        }
+        return textRun;
+    }
+
+    private static IDMLCharacterRun firstNonEmptyRun(List<IDMLCharacterRun> runs) {
+        if (runs == null) {
+            return null;
+        }
+        for (IDMLCharacterRun run : runs) {
+            if (run != null && run.content() != null && !run.content().isEmpty()) {
+                return run;
+            }
+        }
+        return null;
     }
 
     private static boolean shouldEmitConvertedEquation(String script, List<IDMLCharacterRun> mathRuns) {

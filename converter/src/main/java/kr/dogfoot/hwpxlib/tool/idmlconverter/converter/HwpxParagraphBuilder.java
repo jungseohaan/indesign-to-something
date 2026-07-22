@@ -171,14 +171,14 @@ public class HwpxParagraphBuilder {
             paraCharPrId = getOrCreateTinyCharPr();
         }
 
-        // 인라인 객체 또는 혼합 폰트 크기가 있으면 BETWEEN_LINES(여백만) 줄간격 적용
-        // → 큰 인라인 객체/큰 폰트 런이 줄간격을 자연스럽게 확장.
-        // 단, source-composed line bounds로 복원한 문단은 원본 조판 간격이 이미
-        // lineSpacing/spaceAfter에 반영되어 있으므로 후속 자동 보정으로 덮지 않는다.
+        // 인라인 객체 또는 혼합 폰트 크기가 있으면 BETWEEN_LINES(여백만) 줄간격 적용.
+        // source fixed leading은 원본 조판 간격이므로 후속 자동 보정으로 덮지 않는다.
         long maxInlineH = lineSpacingResolver.maxInlineObjectHeight(astPara);
         boolean hasMixedFontSizes = lineSpacingResolver.hasMixedFontSizeRuns(astPara);
         boolean inlineObjectOnlyCarrier = lineSpacingResolver.isInlineObjectOnlyCarrier(astPara);
+        boolean sourceFixedLeading = lineSpacingResolver.hasSourceFixedLeading(astPara, paraPrId);
         if (!inlineObjectOnlyCarrier
+                && !sourceFixedLeading
                 && !astPara.sourceTextWrapSpacing()
                 && (maxInlineH > 0 || hasMixedFontSizes)) {
             paraPrId = lineSpacingResolver.applyBetweenLinesSpacing(paraPrId, astPara);

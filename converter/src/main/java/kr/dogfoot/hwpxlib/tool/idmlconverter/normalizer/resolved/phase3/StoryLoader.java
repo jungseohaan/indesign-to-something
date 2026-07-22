@@ -234,6 +234,7 @@ public class StoryLoader {
             List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(ip.characterRuns());
             runs = ASTMathGrouper.splitChemicalFormulaMixedRuns(runs);
             ASTRunConverter.convertCircledNumberRuns(runs);
+            enrichMathFontsFromResolvedRuns(ctx, runs, resolvedRuns);
             addUnderlineBlankTabStop(ctx, storyId, paraIndex, para, runs);
             sc.hasTabStops = para.hasTabStops();
             ConversionTiming.addCounter("phase3.storyLoader.runPrepNanos",
@@ -253,8 +254,8 @@ public class StoryLoader {
             boolean paraHasNPStructuralRuns = false;
             boolean paraHasMathSymbols = false;
             long runLoopStart = System.nanoTime();
-            // IDML 원본 CharacterRun에서 수식 기호 유무 확인 (GREP 분리 전 기준)
-            for (IDMLCharacterRun r : ip.characterRuns()) {
+            // resolved font authority를 반영한 CharacterRun에서 수식 기호 유무 확인
+            for (IDMLCharacterRun r : runs) {
                 if (r.isBTFont() || r.isNPFont() || r.isEHFont()) { paraHasMathSymbols = true; break; }
                 String rt = r.content();
                 if (rt != null) {
@@ -410,7 +411,8 @@ public class StoryLoader {
                 // 이미 열린 그룹은 건드리지 않는다(ehMathGroup.isEmpty() 조건).
                 // 진행 중인 수식 흐름을 끊으면 ":3:" 같은 비율 표기가 ":" 로 분해된다.
                 boolean bodyTextGlyphRun = ehMathGroup.isEmpty()
-                        && BTFontGlyphMap.isBodyTextGlyphStyle(run.appliedCharacterStyle());
+                        && BTFontGlyphMap.isBodyTextGlyphStyle(run.appliedCharacterStyle())
+                        && !hasResolvedStructuralMathFont(run.fontFamily());
 
                 boolean enterEH = !_orcOnly && !bodyTextGlyphRun
                         && (run.isEHFont()
@@ -2856,6 +2858,72 @@ public class StoryLoader {
             }
         }
         return false;
+    }
+
+    static void enrichMathFontsFromResolvedRuns(ResolvedBuildContext ctx,
+            List<IDMLCharacterRun> runs, List<ResolvedRun> resolvedRuns) {
+        if (runs == null || runs.isEmpty() || resolvedRuns == null || resolvedRuns.isEmpty()) {
+            return;
+        }
+        int resolvedRunIdx = 0;
+        int savedMatchCursor = ctx != null && ctx.lastMatchResult != null
+                ? ctx.lastMatchResult[0] : -1;
+        for (IDMLCharacterRun run : runs) {
+            if (run == null || run.content() == null || run.content().isEmpty()) {
+                continue;
+            }
+            ResolvedRun matched = RunBuilder.findResolvedRun(ctx, resolvedRuns, resolvedRunIdx, run.content());
+            if (matched == null) {
+                continue;
+            }
+            MatchConfidence confidence = RunBuilder.confidenceForResolvedRunMatch(matched, run.content());
+            if (confidence == MatchConfidence.HIGH) {
+                applyResolvedMathFontForClassification(run, matched);
+                if (ctx != null && ctx.lastMatchResult != null) {
+                    resolvedRunIdx = ctx.lastMatchResult[0] + 1;
+                }
+            }
+        }
+        if (ctx != null && ctx.lastMatchResult != null) {
+            ctx.lastMatchResult[0] = savedMatchCursor;
+        }
+    }
+
+    static void applyResolvedMathFontForClassification(IDMLCharacterRun run, ResolvedRun resolvedRun) {
+        if (run == null || resolvedRun == null) {
+            return;
+        }
+        String fontFamily = resolvedRun.fontFamily();
+        boolean runMathFont = isMathFontFamily(run.fontFamily());
+        boolean resolvedMathFont = isMathFontFamily(fontFamily);
+        if (!runMathFont && !resolvedMathFont) {
+            return;
+        }
+        if (run.fontFamily() == null && resolvedMathFont) {
+            run.fontFamily(fontFamily);
+        }
+        if (run.fontStyle() == null && resolvedRun.fontStyle() != null) {
+            run.fontStyle(resolvedRun.fontStyle());
+        }
+        if (run.fontSize() == null && resolvedRun.fontSize() != null && resolvedRun.fontSize() > 0) {
+            run.fontSize(resolvedRun.fontSize());
+        }
+        if (resolvedRun.fillColor() != null) {
+            run.fillColor(resolvedRun.fillColor());
+        }
+    }
+
+    private static boolean isMathFontFamily(String fontFamily) {
+        return EHFontGlyphMap.isEHFontFamily(fontFamily)
+                || BTFontGlyphMap.isBTFontFamily(fontFamily)
+                || NPFontGlyphMap.isNPFont(fontFamily);
+    }
+
+    static boolean hasResolvedStructuralMathFont(String fontFamily) {
+        return EHFontGlyphMap.isEHFontFamily(fontFamily)
+                || NPFontGlyphMap.isNPFont(fontFamily)
+                || (BTFontGlyphMap.isBTFontFamily(fontFamily)
+                        && !BTFontGlyphMap.isBTBodyTextFont(fontFamily));
     }
 
     private static void applyCharacterStylePosition(ResolvedBuildContext ctx, IDMLCharacterRun run) {
