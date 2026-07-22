@@ -306,9 +306,10 @@ final class InlineItemDispatcher {
         if (addStandaloneRomanNumeralAsTextRun(para, eq)) {
             return;
         }
-        if (usesBodyTextEquationStyle(eq) && addChemicalFormulaAsTextRuns(para, eq)) {
-            return;
-        }
+        // SPEC-055 Phase A: 화학식(CHEM_FORMULA)도 수학 수식과 동일하게
+        // hp:equation(한컴 수식)으로 방출한다. 첨자 텍스트런 강등
+        // (addChemicalFormulaAsTextRuns)은 정책 전환으로 비활성.
+        // 크기·색은 아래 resolveFormulaStyle 이 SPEC-042 본문 힌트를 소비한다.
         // 다행 수식 (예: 분배법칙 전개)에 포함된 U+2028(LINE SEPARATOR) 또는 \n 을
         // HwpScript 의 줄바꿈 토큰 '#' 으로 변환. (탭은 공백으로 정규화)
         String rawScript = eq.hwpScript();
@@ -424,10 +425,14 @@ final class InlineItemDispatcher {
         return Math.max(1, count);
     }
 
+    // SPEC-055 Phase A: 아래 두 메서드는 화학식 텍스트런 강등 경로 — 정책 전환으로
+    // 미사용이지만 회귀 시 즉시 되돌릴 수 있도록 유지한다.
+    @SuppressWarnings("unused")
     private boolean usesBodyTextEquationStyle(ASTEquation eq) {
         return FormulaStyleResolver.usesBodyTextEquationStyle(eq);
     }
 
+    @SuppressWarnings("unused")
     private boolean addChemicalFormulaAsTextRuns(Para para, ASTEquation eq) {
         FormulaStyle style = resolveFormulaStyle(para, eq, null);
         java.util.List<ASTTextRun> runs = FormulaRenderer.toChemicalTextRuns(

@@ -137,6 +137,73 @@ public final class FormulaClassifier {
         return isUpperAscii(last) && isChemicalElement(String.valueOf(last));
     }
 
+    /**
+     * SPEC-055: 화학식 스크립트의 첨자를 명시 토큰으로 재추론한다.
+     *
+     * <p>수식 그룹이 첨자 위치 정보 없이 평문화된 조각("N2+H2 rarrow NH3")을
+     * 만들 수 있다. 텍스트런 강등 경로는 출력 시 같은 추론(원소 뒤 숫자 = 아래첨자)
+     * 으로 첨자를 복원했는데, hp:equation 방출에서는 스크립트 자체에 {@code _{n}}
+     * 이 있어야 한다. 규칙:
+     * <ul>
+     *   <li>원소기호([A-Z][a-z]?) 또는 닫는 괄호 ')' 뒤의 숫자열 → {@code _{n}}</li>
+     *   <li>그 외 위치(선두, '+', 화살표, 공백 뒤)의 숫자열 = 계수 → 그대로</li>
+     *   <li>기존 {@code _}/{@code ^} 명시 토큰과 {@code rarrow} 키워드는 보존</li>
+     * </ul>
+     */
+    public static String inferChemicalSubscriptScript(String script) {
+        if (script == null || script.isEmpty()) return script;
+        String src = normalizeChemicalTextScript(script);
+        StringBuilder out = new StringBuilder(src.length() + 8);
+        boolean lastElement = false;
+        for (int i = 0; i < src.length(); ) {
+            char c = src.charAt(i);
+            if (src.regionMatches(true, i, "rarrow", 0, 6)) {
+                out.append(src, i, i + 6);
+                i += 6;
+                lastElement = false;
+                continue;
+            }
+            if (c == '_' || c == '^') {
+                // 명시 토큰: normalizeChemicalTextScript 가 이미 {..} 로 감쌌다.
+                out.append(c);
+                i++;
+                if (i < src.length() && src.charAt(i) == '{') {
+                    int close = src.indexOf('}', i);
+                    if (close < 0) close = src.length() - 1;
+                    out.append(src, i, close + 1);
+                    i = close + 1;
+                }
+                lastElement = false;
+                continue;
+            }
+            if (isUpperAscii(c)) {
+                out.append(c);
+                i++;
+                if (i < src.length() && isLowerAscii(src.charAt(i))) {
+                    out.append(src.charAt(i));
+                    i++;
+                }
+                lastElement = true;
+                continue;
+            }
+            if (Character.isDigit(c)) {
+                int start = i;
+                while (i < src.length() && Character.isDigit(src.charAt(i))) i++;
+                if (lastElement) {
+                    out.append("_{").append(src, start, i).append('}');
+                } else {
+                    out.append(src, start, i);
+                }
+                lastElement = false;
+                continue;
+            }
+            out.append(c);
+            lastElement = (c == ')');
+            i++;
+        }
+        return out.toString();
+    }
+
     public static String normalizeChemicalTextScript(String script) {
         if (script == null || script.isEmpty()) return script;
         StringBuilder out = new StringBuilder(script.length());

@@ -66,6 +66,7 @@ class MathProcessor {
                         && ((ASTTextRun) it).fontFamily() != null
                         && EHFontGlyphMap.isEHFontFamily(((ASTTextRun) it).fontFamily()));
             }
+            stitchChemicalFormulaFragments(para);
             return;
         }
 
@@ -216,6 +217,7 @@ class MathProcessor {
             items.addAll(newItems);
         }
         collapseMixedFormulaEquationClusters(ctx, para);
+        stitchChemicalFormulaFragments(para);
     }
 
     /**
@@ -1328,6 +1330,205 @@ class MathProcessor {
             "angle", "DEG", "TIMES", "div", "sqrt", "over",
             "LEQ", "GEQ", "INF", "rarrow", "equiv", "notin", "SUBSET"
     };
+
+    /** 스크립트가 화학식 연속부(첨자·계수·괄호)로 시작하는가 — 선행 원소가 잘려나간 표지. */
+    private static boolean startsAsChemicalContinuation(String script) {
+        if (script == null || script.isEmpty()) return false;
+        char c = script.charAt(0);
+        return Character.isDigit(c) || c == '_' || c == '(';
+    }
+
+    private static final java.util.regex.Pattern TRAILING_CHEM_FRAGMENT =
+            java.util.regex.Pattern.compile(
+                    "[0-9]{0,2}(?:[A-Z][a-z]?)+\\(?(?:\\+[0-9]{0,2}(?:[A-Z][a-z]?)+\\(?)*$");
+
+    /** 직전 텍스트런 꼬리에서 화학식 선두 조각("H", "CH", "2Ca(")을 뗀다. 없으면 null. */
+    private static String trailingChemicalFragment(String text) {
+        if (text == null || text.isEmpty()) return null;
+        java.util.regex.Matcher m = TRAILING_CHEM_FRAGMENT.matcher(text);
+        if (!m.find()) return null;
+        String frag = m.group();
+        if (frag.isEmpty()) return null;
+        if (!ChemicalFormulaPolicy.lettersAreKnownElements(frag)) return null;
+        return frag;
+    }
+
+    /** 후행 런이 화학식 조각 문자만으로 이루어졌는가 (공백/숫자/연산/괄호/원소/화살표). */
+    private static boolean isChemicalFragmentText(String text) {
+        if (text == null) return false;
+        // 빈/공백 런은 조각 사이 커넥터로 통과시킨다 (탭 정렬 반응식의 잔여 런).
+        if (text.trim().isEmpty()) return true;
+        boolean hasLetter = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c) || Character.isDigit(c)
+                    || c == '+' || c == '(' || c == ')' || c == '·' || c == '→') {
+                continue;
+            }
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                hasLetter = true;
+                continue;
+            }
+            return false;
+        }
+        if (hasLetter && !ChemicalFormulaPolicy.lettersAreKnownElements(text)) return false;
+        return true;
+    }
+
+    /** 이 조각이 흡수를 확정(commit)할 근거(원소기호 또는 화살표)를 갖는가. */
+    private static boolean chemicalFragmentCommits(String text) {
+        if (text == null) return false;
+        return text.indexOf('→') >= 0 || ChemicalFormulaPolicy.containsElementText(text);
+    }
+
+    /** 화살표 치환 + 공백 정리("rarrow" 양쪽만 공백 유지) + 첨자 재추론. */
+    private static String finalizeChemicalScript(String script) {
+        if (script == null) return null;
+        String s = script.replace("→", " rarrow ").replaceAll("\\s+", " ").trim();
+        String[] parts = s.split("\\s*rarrow\\s*", -1);
+        StringBuilder joined = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) joined.append(" rarrow ");
+            joined.append(parts[i].replace(" ", ""));
+        }
+        return kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier
+                .inferChemicalSubscriptScript(joined.toString());
+    }
+
+    /**
+     * SPEC-055: 화학식 수식 조각 봉합 + 스크립트 정규화.
+     *
+     * <p>수식 그룹핑은 수식 폰트/첨자 증거가 있는 런만 모으므로, 본문 폰트로 조판된
+     * 화학식 선두 원소("CH₄"의 CH)나 화살표 뒤 조각이 텍스트런으로 남아 수식이
+     * 쪼개진다("CH" + EQ["4+2O2 rarrow CO2+2H2O"]). 텍스트런 강등 시절에는 출력이
+     * 이어 붙어 가려졌지만 hp:equation 방출(SPEC-055)에서는 조각이 그대로 보인다.
+     * 인접 조각을 수식 스크립트로 흡수하고, 평문화된 첨자("N2")를 명시 토큰으로
+     * 재추론한다. 흡수는 원소기호/화살표 근거가 있는 지점까지만 커밋한다
+     * (화학식 뒤 무관한 숫자·괄호를 삼키지 않도록).
+     */
+    static void stitchChemicalFormulaFragments(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item;
+            if (!"CHEM_FORMULA".equals(eq.sourceType())) continue;
+            String script = eq.hwpScript() == null ? "" : eq.hwpScript();
+
+            // (b) 후행 조각 — 원소/화살표 근거가 나오는 마지막 지점까지 수집
+            int commitEnd = -1;
+            java.util.List<String> tailTexts = new java.util.ArrayList<>();
+            for (int j = i + 1; j < items.size(); j++) {
+                ASTInlineItem cand = items.get(j);
+                String candText;
+                boolean commits;
+                if (cand instanceof ASTTextRun) {
+                    candText = ((ASTTextRun) cand).text();
+                    if (!isChemicalFragmentText(candText)) break;
+                    commits = chemicalFragmentCommits(candText);
+                } else if (cand instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation
+                        && "CHEM_FORMULA".equals(
+                        ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).sourceType())) {
+                    candText = ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).hwpScript();
+                    commits = true;
+                } else {
+                    break;
+                }
+                tailTexts.add(candText == null ? "" : candText);
+                if (commits) commitEnd = j;
+            }
+
+            // (a) 선행 조각 체인 — 빈/공백 런은 건너뛰고 [원소 조각] → [계수] 순으로 흡수.
+            //     "2" | "Cu+O" | EQ["2 rarrow 2CuO"] → "2Cu+O" 까지 복원한다.
+            boolean arrowEvidence =
+                    (script + " " + String.join(" ", tailTexts)).contains("rarrow")
+                    || (script + String.join("", tailTexts)).indexOf('→') >= 0;
+            String prevFragment = null;
+            ASTTextRun prevPartialRun = null;
+            String prevPartialRest = null;
+            java.util.List<Integer> prevRemoveIdx = new java.util.ArrayList<>();
+            int p = i - 1;
+            while (p >= 0 && items.get(p) instanceof ASTTextRun) {
+                String t = ((ASTTextRun) items.get(p)).text();
+                if (t != null && !t.trim().isEmpty()) break;
+                p--;
+            }
+            if (p >= 0 && items.get(p) instanceof ASTTextRun) {
+                ASTTextRun r1 = (ASTTextRun) items.get(p);
+                String t1 = r1.text();
+                String head = script;
+                int coefficientProbe = -1;
+                if (startsAsChemicalContinuation(script)) {
+                    // 스크립트가 숫자/첨자/괄호로 시작 = 선행 원소가 잘렸다 ("CH"+"4+…").
+                    String frag = trailingChemicalFragment(t1);
+                    if (frag != null) {
+                        prevFragment = frag;
+                        head = frag;
+                        String rest = t1.substring(0, t1.length() - frag.length());
+                        if (rest.trim().isEmpty()) {
+                            prevRemoveIdx.add(p);
+                            coefficientProbe = p - 1;
+                        } else {
+                            prevPartialRun = r1;
+                            prevPartialRest = rest;
+                        }
+                    }
+                } else {
+                    coefficientProbe = p;
+                }
+                // 계수 흡수: 머리가 원소로 시작하는 반응식 앞의 단독 숫자 런.
+                // 런 전체가 숫자일 때만 — "실험 2" 같은 서술 꼬리는 흡수하지 않는다.
+                if (arrowEvidence && coefficientProbe >= 0
+                        && !head.isEmpty() && head.charAt(0) >= 'A' && head.charAt(0) <= 'Z') {
+                    int p2 = coefficientProbe;
+                    while (p2 >= 0 && items.get(p2) instanceof ASTTextRun) {
+                        String t2 = ((ASTTextRun) items.get(p2)).text();
+                        if (t2 != null && !t2.trim().isEmpty()) break;
+                        p2--;
+                    }
+                    if (p2 >= 0 && items.get(p2) instanceof ASTTextRun) {
+                        String t2 = ((ASTTextRun) items.get(p2)).text();
+                        if (t2 != null && t2.matches("[0-9]{1,2}")) {
+                            prevFragment = t2 + (prevFragment == null ? "" : prevFragment);
+                            prevRemoveIdx.add(p2);
+                        }
+                    }
+                }
+            }
+
+            // 최종 스크립트를 먼저 만들고 검증 통과 시에만 items 를 변경한다.
+            StringBuilder merged = new StringBuilder();
+            if (prevFragment != null) merged.append(prevFragment);
+            merged.append(script);
+            int tailCount = commitEnd - i;
+            for (int t = 0; t < tailCount; t++) merged.append(' ').append(tailTexts.get(t));
+            String rebuilt = finalizeChemicalScript(merged.toString());
+            if (rebuilt == null || rebuilt.isEmpty()
+                    || containsNonChemicalFormulaKeyword(stripRarrowKeyword(rebuilt))) {
+                continue;
+            }
+
+            // 후행 제거를 먼저 (i 이후 인덱스는 선행 제거의 영향을 받지 않도록)
+            for (int t = 0; t < tailCount; t++) {
+                items.remove(i + 1);
+            }
+            if (prevPartialRun != null && prevPartialRest != null) {
+                prevPartialRun.text(prevPartialRest);
+            }
+            java.util.Collections.sort(prevRemoveIdx, java.util.Collections.reverseOrder());
+            for (int idx : prevRemoveIdx) {
+                items.remove(idx);
+                i--;
+            }
+            eq.hwpScript(rebuilt);
+        }
+    }
+
+    private static String stripRarrowKeyword(String script) {
+        return script == null ? null : script.replace("rarrow", " ");
+    }
 
     private static boolean containsNonChemicalFormulaKeyword(String script) {
         if (script == null || script.isEmpty()) return false;
