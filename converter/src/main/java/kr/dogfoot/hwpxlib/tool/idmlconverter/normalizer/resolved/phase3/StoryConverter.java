@@ -4434,6 +4434,7 @@ public final class StoryConverter {
             // truncated=true이면 이후 run 처리에서도 \r에서 잘라서 현재 단락 경계에 맞춤
             boolean truncateAtCR = truncated;
             ASTParagraph para = new ASTParagraph();
+            List<ASTParagraph> trailingCarrierParagraphs = new ArrayList<>();
 
             // 단락 스타일
             if (rp.styleName() != null) {
@@ -4531,8 +4532,18 @@ public final class StoryConverter {
                                     InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId,
                                             prevRunText, nextRunText);
                             if (plannedItems != null) {
-                                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, para);
-                                for (ASTInlineItem item : plannedItems) para.addItem(item);
+                                boolean splitTerminalCarrier =
+                                        shouldSplitTerminalCustomAnchoredCarrier(
+                                                ctx, run, runs, runIndex, para, plannedItems);
+                                ASTParagraph targetPara = splitTerminalCarrier
+                                        ? newInlineAnchorCarrierParagraph(para)
+                                        : para;
+                                InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, targetPara);
+                                for (ASTInlineItem item : plannedItems) targetPara.addItem(item);
+                                if (splitTerminalCarrier) {
+                                    applyInlineCarrierLineHeight(targetPara);
+                                    trailingCarrierParagraphs.add(targetPara);
+                                }
                                 continue;
                             }
                             if (InlineFrameHandler.hasOwnershipPlanForAnchorBundle(ctx, anchoredId)) {
@@ -4604,6 +4615,7 @@ public final class StoryConverter {
 
             applyTrailingPageNumberLeader(para, rp);
             paragraphs.add(para);
+            paragraphs.addAll(trailingCarrierParagraphs);
         }
 
         postprocessResolvedStoryParagraphs(ctx, story.id(), paragraphs);
@@ -4874,6 +4886,91 @@ public final class StoryConverter {
             if (text != null && !text.trim().isEmpty()) return true;
         }
         return false;
+    }
+
+    private static boolean shouldSplitTerminalCustomAnchoredCarrier(
+            ResolvedBuildContext ctx,
+            ResolvedRun run,
+            List<ResolvedRun> runs,
+            int runIndex,
+            ASTParagraph currentPara,
+            List<ASTInlineItem> plannedItems) {
+        if (ctx == null || ctx.resolvedData == null || run == null || plannedItems == null) return false;
+        if (!hasVisibleText(currentPara)) return false;
+        if (!"FLOATING_ANCHORED".equalsIgnoreCase(nullToEmpty(run.storyAnchorPlacement()))) return false;
+        Integer anchoredId = run.anchoredObjectId();
+        if (anchoredId == null) return false;
+        ResolvedPageItem source = ctx.resolvedData.getPageItem(String.valueOf(anchoredId));
+        if (source == null || !"ANCHORED".equalsIgnoreCase(nullToEmpty(source.anchoredPosition()))) {
+            return false;
+        }
+        if (!remainingRunsAreOnlyParagraphBoundary(runs, runIndex + 1)) return false;
+        return containsEditableInlineTextShell(plannedItems);
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static boolean remainingRunsAreOnlyParagraphBoundary(List<ResolvedRun> runs, int startIndex) {
+        if (runs == null) return true;
+        for (int i = Math.max(0, startIndex); i < runs.size(); i++) {
+            ResolvedRun r = runs.get(i);
+            if (r == null) continue;
+            if (isInlineAnchorRun(r)) return false;
+            String text = r.text();
+            if (text == null || text.isEmpty()) continue;
+            for (int j = 0; j < text.length(); j++) {
+                char ch = text.charAt(j);
+                if (ch == '\r' || ch == '\n' || ch == '\u2028'
+                        || Character.isWhitespace(ch) || ch == '\uFEFF') {
+                    continue;
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean containsEditableInlineTextShell(List<ASTInlineItem> plannedItems) {
+        if (plannedItems == null) return false;
+        for (ASTInlineItem item : plannedItems) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) continue;
+            if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) return true;
+            if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static ASTParagraph newInlineAnchorCarrierParagraph(ASTParagraph sourcePara) {
+        ASTParagraph carrier = new ASTParagraph();
+        if (sourcePara == null) return carrier;
+        carrier.paragraphStyleRef(sourcePara.paragraphStyleRef());
+        carrier.alignment(sourcePara.alignment());
+        carrier.leftMargin(sourcePara.leftMargin());
+        carrier.rightMargin(sourcePara.rightMargin());
+        carrier.firstLineIndent(0L);
+        carrier.spaceBefore(0L);
+        carrier.spaceAfter(0L);
+        carrier.keepWithNext(sourcePara.keepWithNext());
+        carrier.keepLinesTogether(sourcePara.keepLinesTogether());
+        return carrier;
+    }
+
+    private static void applyInlineCarrierLineHeight(ASTParagraph carrier) {
+        if (carrier == null || carrier.items() == null) return;
+        long maxHeight = 0;
+        for (ASTInlineItem item : carrier.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            maxHeight = Math.max(maxHeight, obj.height());
+            maxHeight = Math.max(maxHeight, obj.resolvedHeight());
+        }
+        if (maxHeight <= 0) return;
+        carrier.lineSpacing((int) Math.min(Integer.MAX_VALUE, maxHeight));
+        carrier.lineSpacingType("fixed");
     }
 
     private static boolean isInlineAnchorRun(ResolvedRun run) {

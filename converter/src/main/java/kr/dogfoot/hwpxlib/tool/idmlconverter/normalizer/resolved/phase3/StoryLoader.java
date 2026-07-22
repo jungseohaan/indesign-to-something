@@ -27,6 +27,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Objec
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 
@@ -151,6 +153,7 @@ public class StoryLoader {
             // 단락 속성(정렬/줄간격/간격/들여쓰기/탭): 셀 안/밖 공용 루틴 사용
             ParagraphPropertyResolver.apply(para, ip, resolvedParagraph, ctx, styleAlignCache);
             applyComposedLinePitchFallback(para, ctx, resolvedStory, i);
+            String sourceParagraphAlignment = para.alignment();
 
             // resolved 런 (스타일 상속 보강용)
             List<ResolvedRun> resolvedRuns = null;
@@ -196,6 +199,7 @@ public class StoryLoader {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
 
             paragraphs.add(para);
+            paragraphs.addAll(splitTerminalCustomAnchoredCarriers(ctx, para, sourceParagraphAlignment));
             ConversionTiming.addCounter("phase3.storyLoader.paragraphs", 1);
         }
 
@@ -2255,6 +2259,104 @@ public class StoryLoader {
             if (text != null && !text.trim().isEmpty()) return true;
         }
         return false;
+    }
+
+    private static List<ASTParagraph> splitTerminalCustomAnchoredCarriers(
+            ResolvedBuildContext ctx,
+            ASTParagraph para,
+            String sourceParagraphAlignment) {
+        List<ASTParagraph> out = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || para == null || para.items() == null) return out;
+        if (!hasVisibleText(para)) return out;
+
+        List<ASTInlineItem> items = para.items();
+        int lastContentIndex = lastNonBlankItemIndex(items);
+        if (lastContentIndex < 0 || !(items.get(lastContentIndex) instanceof ASTInlineObject)) return out;
+        ASTInlineObject obj = (ASTInlineObject) items.get(lastContentIndex);
+        if (!isTerminalCustomAnchoredEditableShell(ctx, obj)) return out;
+        if (!hasVisibleTextBefore(items, lastContentIndex)) return out;
+
+        ASTParagraph carrier = newInlineAnchorCarrierParagraph(para);
+        carrier.addItem(obj);
+        applyInlineCarrierLineHeight(carrier);
+
+        for (int i = items.size() - 1; i >= lastContentIndex; i--) {
+            items.remove(i);
+        }
+        para.alignment(sourceParagraphAlignment);
+        out.add(carrier);
+        return out;
+    }
+
+    private static int lastNonBlankItemIndex(List<ASTInlineItem> items) {
+        if (items == null) return -1;
+        for (int i = items.size() - 1; i >= 0; i--) {
+            ASTInlineItem item = items.get(i);
+            if (item == null) continue;
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text == null || text.trim().isEmpty()) continue;
+            }
+            return i;
+        }
+        return -1;
+    }
+
+    private static boolean hasVisibleTextBefore(List<ASTInlineItem> items, int endExclusive) {
+        if (items == null) return false;
+        for (int i = 0; i < Math.min(endExclusive, items.size()); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text != null && !text.trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static boolean isTerminalCustomAnchoredEditableShell(ResolvedBuildContext ctx, ASTInlineObject obj) {
+        if (obj == null || obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return false;
+        if ((obj.paragraphs() == null || obj.paragraphs().isEmpty())
+                && (obj.inlineTables() == null || obj.inlineTables().isEmpty())) {
+            return false;
+        }
+        String domId = ParagraphTextHelpers.domIdFromSourceId(obj.sourceId());
+        if (domId == null) return false;
+        ResolvedPageItem source = ctx.resolvedData.getPageItem(domId);
+        if (source == null) return false;
+        return "FLOATING_ANCHORED".equalsIgnoreCase(nullToEmpty(source.storyAnchorPlacement()))
+                && "ANCHORED".equalsIgnoreCase(nullToEmpty(source.anchoredPosition()));
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static ASTParagraph newInlineAnchorCarrierParagraph(ASTParagraph sourcePara) {
+        ASTParagraph carrier = new ASTParagraph();
+        carrier.paragraphStyleRef(sourcePara.paragraphStyleRef());
+        carrier.alignment(sourcePara.alignment());
+        carrier.leftMargin(sourcePara.leftMargin());
+        carrier.rightMargin(sourcePara.rightMargin());
+        carrier.firstLineIndent(0L);
+        carrier.spaceBefore(0L);
+        carrier.spaceAfter(0L);
+        carrier.keepWithNext(sourcePara.keepWithNext());
+        carrier.keepLinesTogether(sourcePara.keepLinesTogether());
+        return carrier;
+    }
+
+    private static void applyInlineCarrierLineHeight(ASTParagraph carrier) {
+        if (carrier == null || carrier.items() == null) return;
+        long maxHeight = 0;
+        for (ASTInlineItem item : carrier.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            maxHeight = Math.max(maxHeight, obj.height());
+            maxHeight = Math.max(maxHeight, obj.resolvedHeight());
+        }
+        if (maxHeight <= 0) return;
+        carrier.lineSpacing((int) Math.min(Integer.MAX_VALUE, maxHeight));
+        carrier.lineSpacingType("fixed");
     }
 
     private static boolean hasDecorativeParagraphRule(ResolvedBuildContext ctx, IDMLParagraph paragraph) {

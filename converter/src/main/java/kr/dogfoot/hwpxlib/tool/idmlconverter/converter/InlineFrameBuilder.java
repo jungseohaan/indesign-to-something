@@ -202,16 +202,25 @@ final class InlineFrameBuilder {
         tc.createCellSz();
         tc.cellSz().widthAnd(w).heightAnd(h);
         tc.createCellMargin();
+        long cellTopMargin = obj.textMarginTop();
+        long cellBottomMargin = obj.textMarginBottom();
+        if (isEditableImageFillShellTable(obj)) {
+            long symmetricVerticalInset = Math.min(
+                    Math.max(0L, cellTopMargin),
+                    Math.max(0L, cellBottomMargin));
+            cellTopMargin = symmetricVerticalInset;
+            cellBottomMargin = symmetricVerticalInset;
+        }
         tc.cellMargin().leftAnd(obj.textMarginLeft())
                 .rightAnd(obj.textMarginRight())
-                .topAnd(obj.textMarginTop())
-                .bottomAnd(obj.textMarginBottom());
+                .topAnd(cellTopMargin)
+                .bottomAnd(cellBottomMargin);
 
         tc.createSubList();
         SubList subList = tc.subList();
         subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
                 .lineWrapAnd(HwpxTextBoxBuilder.inlineTextFrameLineWrap(obj))
-                .vertAlignAnd(HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification()))
+                .vertAlignAnd(inlineShellCellVerticalAlign(obj))
                 .linkListIDRefAnd("0").linkListNextIDRefAnd("0");
         if (obj.paragraphs() != null) {
             for (ASTParagraph paragraph : obj.paragraphs()) {
@@ -222,6 +231,22 @@ final class InlineFrameBuilder {
             paragraphBuilder.addEmptySubListPara(subList);
         }
         ctx.currentContainerWidth = savedContainerWidth;
+    }
+
+    private static boolean isEditableImageFillShellTable(ASTInlineObject obj) {
+        return obj != null
+                && obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                && obj.imageFillData() != null
+                && obj.imageFillData().length > 0
+                && obj.paragraphs() != null
+                && !obj.paragraphs().isEmpty();
+    }
+
+    private static VerticalAlign2 inlineShellCellVerticalAlign(ASTInlineObject obj) {
+        if (isEditableImageFillShellTable(obj)) {
+            return VerticalAlign2.CENTER;
+        }
+        return HwpxEnumMapper.mapVerticalJustification(obj != null ? obj.verticalJustification() : null);
     }
 
     private void queueInlineTextShellOverlays(ASTInlineObject obj) {
@@ -253,7 +278,9 @@ final class InlineFrameBuilder {
 
     private boolean shouldUseInlineDrawTextShell(ASTInlineObject obj) {
         if (obj != null && obj.imageFillData() != null && obj.imageFillData().length > 0) {
-            return true;
+            boolean hasEditableParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
+            boolean hasOverlayText = obj.overlayFrames() != null && !obj.overlayFrames().isEmpty();
+            return !hasEditableParagraphs || hasOverlayText;
         }
         if (obj != null && obj.nativeGraphicsAllowed()) {
             return obj.fillColor() != null

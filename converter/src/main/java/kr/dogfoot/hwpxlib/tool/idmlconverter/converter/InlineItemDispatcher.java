@@ -328,6 +328,9 @@ final class InlineItemDispatcher {
         }
         String hwpScript = EquationBuilder.sanitizeHwpScript(eq.hwpScript());
         eq.hwpScript(hwpScript);
+        if (emitTextBoundaryWrappedEquation(para, eq, hwpScript)) {
+            return;
+        }
         Run run = para.addNewRun();
         run.charPrIDRef("0");
         try {
@@ -393,6 +396,47 @@ final class InlineItemDispatcher {
             ctx.addWarning("Equation", "수식 변환 실패: " + hwpScript);
             run.addNewT().addText("[수식: " + hwpScript + "]");
         }
+    }
+
+    private boolean emitTextBoundaryWrappedEquation(Para para, ASTEquation eq, String hwpScript) {
+        if (hwpScript == null || hwpScript.length() < 2 || hwpScript.charAt(0) != ':') {
+            return false;
+        }
+        String core = hwpScript.substring(1).trim();
+        if (core.isEmpty() || !isEquationCore(core)) {
+            return false;
+        }
+        ASTTextRun prefix = new ASTTextRun();
+        prefix.text(":");
+        prefix.textColor(eq.textColor());
+        prefix.fontSizeHwpunits(eq.preferredBaseUnit());
+        paragraphBuilder.addTextRun(para, prefix, "0");
+
+        ASTEquation coreEq = new ASTEquation(core, eq.sourceType());
+        coreEq.textColor(eq.textColor());
+        coreEq.preferredBaseUnit(eq.preferredBaseUnit());
+        coreEq.preferredFontFamily(eq.preferredFontFamily());
+        addEquationRun(para, coreEq);
+        return true;
+    }
+
+    private static boolean isEquationCore(String script) {
+        if (script == null || script.isEmpty()) return false;
+        boolean hasFormulaToken = false;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (Character.isWhitespace(c) || c == '_' || c == '^' || c == '{' || c == '}') continue;
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || Character.isDigit(c)) {
+                hasFormulaToken = true;
+                continue;
+            }
+            if (c == '+' || c == '-' || c == '=' || c == '(' || c == ')') {
+                hasFormulaToken = true;
+                continue;
+            }
+            return false;
+        }
+        return hasFormulaToken;
     }
 
     /**
