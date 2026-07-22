@@ -1583,23 +1583,40 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                 // 셀에 직접 앵커된 객체만 수집: cell.characters 를 순회하며
                                 // 각 문자의 pageItems 에서 직접 앵커 조회. cell.allPageItems 는
                                 // 후보 존재 여부 gate 로만 쓰고, 재귀 결과를 visible anchor 로 쓰지 않는다.
-                                var missedAnchors = [];
+                                // SPEC-056: fallback 앵커도 문자 위치 기반으로 문단 런 사이에
+                                // interleave 한다. 끝에 몰아넣으면 "= [연필] : [밑줄] : [밑줄]" 이
+                                // "= : : [연필][밑줄][밑줄]" 로 깨진다 (과학 u1 p19 답란).
+                                var missedAnchors = []; // {id, paraIdx, textOffset}
                                 try {
                                     var cellChars = cell.characters.everyItem().getElements();
+                                    var faParaIdx = 0;
+                                    var faTextOffset = 0;
                                     for (var cchi = 0; cchi < cellChars.length; cchi++) {
+                                        var faContents = null;
+                                        try { faContents = cellChars[cchi].contents; } catch (eFaC) {}
+                                        var faIsAnchorChar = false;
                                         try {
-	                                            var directAnch = cellChars[cchi].pageItems;
-	                                            for (var dai = 0; dai < directAnch.length; dai++) {
-	                                                var daId = directAnch[dai].id;
-	                                                if (_storyAnchorPlacementForItem(doc, directAnch[dai], story) === "FLOATING_ANCHORED") {
-	                                                    continue;
-	                                                }
-	                                                if (!capturedIds[daId]) {
-	                                                    missedAnchors.push(daId);
-	                                                    capturedIds[daId] = true;
+                                            var directAnch = cellChars[cchi].pageItems;
+                                            for (var dai = 0; dai < directAnch.length; dai++) {
+                                                faIsAnchorChar = true;
+                                                var daId = directAnch[dai].id;
+                                                if (_storyAnchorPlacementForItem(doc, directAnch[dai], story) === "FLOATING_ANCHORED") {
+                                                    continue;
+                                                }
+                                                if (!capturedIds[daId]) {
+                                                    missedAnchors.push({
+                                                        id: daId,
+                                                        paraIdx: faParaIdx,
+                                                        textOffset: faTextOffset
+                                                    });
+                                                    capturedIds[daId] = true;
                                                 }
                                             }
                                         } catch (edc) {}
+                                        if (faContents === "\r") { faParaIdx++; faTextOffset = 0; continue; }
+                                        if (faIsAnchorChar || faContents === "\uFFFC" || faContents === "\u0016") continue;
+                                        faTextOffset += faContents !== null && faContents !== undefined
+                                                ? String(faContents).length : 1;
                                     }
                                 } catch (ecc) {}
                                 if (missedAnchors.length > 0) {
@@ -1607,12 +1624,13 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                     if (cellData.paragraphs.length === 0) {
                                         cellData.paragraphs.push({ runs: [] });
                                     }
-                                    var lastP = cellData.paragraphs[cellData.paragraphs.length - 1];
                                     for (var ma = 0; ma < missedAnchors.length; ma++) {
-                                        lastP.runs.push({
-                                            type: "inline_anchor",
-                                            anchoredObjectId: missedAnchors[ma]
-                                        });
+                                        var faSlot = missedAnchors[ma];
+                                        var faPIdx = faSlot.paraIdx < cellData.paragraphs.length
+                                                ? faSlot.paraIdx
+                                                : cellData.paragraphs.length - 1;
+                                        _insertCellInlineAnchorRunAtTextOffset(
+                                                cellData.paragraphs[faPIdx].runs, faSlot.id, faSlot.textOffset);
                                     }
                                 }
                             }
@@ -1638,6 +1656,39 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
         statsFile.close();
     } catch (eStats) {}
     return stories;
+}
+
+// SPEC-056: 셀 fallback 앵커를 텍스트 오프셋 위치에 interleave 삽입.
+// 오프셋이 런 중간이면 텍스트 런을 분할해 앵커를 사이에 넣는다.
+function _insertCellInlineAnchorRunAtTextOffset(runs, anchorId, textOffset) {
+    var anchorRun = { type: "inline_anchor", anchoredObjectId: anchorId };
+    if (!runs) return;
+    var acc = 0;
+    for (var i = 0; i < runs.length; i++) {
+        var run = runs[i];
+        if (!run || run.type === "inline_anchor") continue;
+        var t = run.text !== null && run.text !== undefined ? String(run.text) : "";
+        if (acc + t.length > textOffset) {
+            var cut = textOffset - acc;
+            if (cut <= 0) {
+                runs.splice(i, 0, anchorRun);
+                return;
+            }
+            var head = {};
+            for (var k in run) head[k] = run[k];
+            head.text = t.substring(0, cut);
+            run.text = t.substring(cut);
+            runs.splice(i, 0, head);
+            runs.splice(i + 1, 0, anchorRun);
+            return;
+        }
+        acc += t.length;
+        if (acc === textOffset) {
+            runs.splice(i + 1, 0, anchorRun);
+            return;
+        }
+    }
+    runs.push(anchorRun);
 }
 
 function tableCellPositionFromSourceName(cell, fallbackIndex, columnCount) {

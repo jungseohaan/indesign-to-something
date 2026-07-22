@@ -5298,6 +5298,17 @@ public class InlineFrameHandler {
      *   another materialization for the same source slot.
      * - non-empty list: the planned inline material.
      */
+    /**
+     * ORC-only 앵커 런이 수식 답란 상자(□) 플레이스홀더인가 — 패키지 밖(공유 스토리
+     * 컨버터)에서 MathProcessor 판정을 쓰기 위한 위임. 실체 시각물(콘텐츠 인라인
+     * PNG plan)을 가진 앵커면 false 를 반환해 □ 삼킴을 막는다.
+     */
+    public static boolean isFormulaAnswerPlaceholderAnchorRun(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run) {
+        return MathProcessor.isFormulaAnswerPlaceholderRun(ctx, run);
+    }
+
     public static List<ASTInlineItem> loadPlannedInlineAnchorItems(
             ResolvedBuildContext ctx,
             int anchoredObjectId,
