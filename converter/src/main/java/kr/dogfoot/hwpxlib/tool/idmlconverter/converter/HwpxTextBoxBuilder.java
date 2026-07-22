@@ -385,22 +385,29 @@ public class HwpxTextBoxBuilder {
                     && !isPlannedShellCarrier(block)) {
                 convertRoundedWrapperDrawText(framePara, block, w, h);
             } else {
-                // 단락 하나 + inlineTable만 있는 경우: 1x1 외곽 래퍼 없이 표를 직접 배치
+                // inlineTable만 있는 경우: 1x1 외곽 래퍼 없이 표를 직접 배치
                 // (SingleColumnTableConverter가 만드는 외곽 1x1 표가 불필요한 표-안-표 구조 생성)
                 java.util.List<ASTParagraph> _paras = block.paragraphs();
-                ASTTable _singleInnerTable = null;
-                if (!hasWrapper && ctx.tableBuilderRef != null
-                        && _paras != null && _paras.size() == 1
-                        && (_paras.get(0).items() == null || _paras.get(0).items().isEmpty())
-                        && _paras.get(0).inlineTable() != null) {
-                    _singleInnerTable = _paras.get(0).inlineTable();
+                java.util.List<ASTTable> _directInnerTables = null;
+                if (!hasWrapper && ctx.tableBuilderRef != null && _paras != null && !_paras.isEmpty()) {
+                    _directInnerTables = directInlineTablesWithoutCarrier(_paras);
                 }
-                if (_singleInnerTable != null) {
-                    _singleInnerTable.x(block.effectiveX());
-                    _singleInnerTable.y(block.y());
-                    _singleInnerTable.width(w);
-                    _singleInnerTable.zOrder(block.zOrder());
-                    ctx.tableBuilderRef.convertTable(framePara, _singleInnerTable);
+                if (_directInnerTables != null && !_directInnerTables.isEmpty()) {
+                    long cursorY = block.y();
+                    for (ASTTable innerTable : _directInnerTables) {
+                        long tableHeight = tableHeight(innerTable);
+                        innerTable.x(block.effectiveX());
+                        innerTable.y(cursorY);
+                        innerTable.width(w);
+                        if (innerTable.height() <= 0 && tableHeight > 0) {
+                            innerTable.height(tableHeight);
+                        }
+                        innerTable.zOrder(block.zOrder());
+                        innerTable.flowWithText(false);
+                        innerTable.anchoredFlowWithText(false);
+                        ctx.tableBuilderRef.convertTable(framePara, innerTable);
+                        cursorY += Math.max(1L, tableHeight);
+                    }
                 } else {
                     // Native source shell은 TEXT_SLOT의 carrier fill로 흡수하지 않는다.
                     // carrier fill은 HWPX 테이블/DrawText 내부 객체가 되어 planned shell/text
@@ -444,6 +451,31 @@ public class HwpxTextBoxBuilder {
                 xCursor += colWidths[c] + gutter;
             }
         }
+    }
+
+    private static java.util.List<ASTTable> directInlineTablesWithoutCarrier(java.util.List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return null;
+        java.util.List<ASTTable> tables = new java.util.ArrayList<>();
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) return null;
+            if (paragraph.items() != null && !paragraph.items().isEmpty()) return null;
+            ASTTable table = paragraph.inlineTable();
+            if (table == null) return null;
+            tables.add(table);
+        }
+        return tables;
+    }
+
+    private static long tableHeight(ASTTable table) {
+        if (table == null) return 0L;
+        if (table.height() > 0) return table.height();
+        long height = 0L;
+        if (table.rows() != null) {
+            for (ASTTableRow row : table.rows()) {
+                if (row != null) height += Math.max(0L, row.rowHeight());
+            }
+        }
+        return height;
     }
 
     private boolean shouldUseFloatingDrawTextBox(ASTTextFrameBlock block) {

@@ -56,11 +56,23 @@ public final class StoryFlowAssembler {
         }
         List<ASTParagraph> cellFlow = StoryLoader.astParagraphsForCell(ctx, idmlTable, idmlCell, null);
         if (hasMeaningfulFlowContent(cellFlow)) {
+            List<ASTParagraph> nestedTextFrameTableFlow = buildNestedTextFrameTableFlow(ctx, idmlCell);
+            if (nestedTextFrameTableFlow != null && !nestedTextFrameTableFlow.isEmpty()) {
+                if (hasVisibleTextFlowContent(cellFlow)) {
+                    cellFlow.addAll(nestedTextFrameTableFlow);
+                    return cellFlow;
+                }
+                return nestedTextFrameTableFlow;
+            }
             return cellFlow;
         }
         List<ASTParagraph> directNestedTableFlow = buildDirectNestedTableFlow(ctx, idmlCell);
         if (directNestedTableFlow != null && !directNestedTableFlow.isEmpty()) {
             return directNestedTableFlow;
+        }
+        List<ASTParagraph> nestedTextFrameTableFlow = buildNestedTextFrameTableFlow(ctx, idmlCell);
+        if (nestedTextFrameTableFlow != null && !nestedTextFrameTableFlow.isEmpty()) {
+            return nestedTextFrameTableFlow;
         }
         List<ASTParagraph> nestedTextFrameFlow = buildNestedTextFrameStoryFlow(ctx, idmlCell);
         if (nestedTextFrameFlow != null && !nestedTextFrameFlow.isEmpty()) {
@@ -121,6 +133,24 @@ public final class StoryFlowAssembler {
         return !normalized.isEmpty();
     }
 
+    private static boolean hasVisibleTextFlowContent(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return false;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun
+                        && hasMeaningfulText(((ASTTextRun) item).text())) {
+                    return true;
+                }
+                if (item instanceof ASTInlineObject
+                        && hasVisibleTextFlowContent(((ASTInlineObject) item).paragraphs())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static List<ASTParagraph> buildDirectNestedTableFlow(
             ResolvedBuildContext ctx,
             IDMLTableCell idmlCell) {
@@ -144,6 +174,42 @@ public final class StoryFlowAssembler {
             paragraphs.add(paragraph);
         }
         return paragraphs;
+    }
+
+    private static List<ASTParagraph> buildNestedTextFrameTableFlow(
+            ResolvedBuildContext ctx,
+            IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || ctx.styleResolver == null
+                || ctx.loadIDMLStory == null || idmlCell == null
+                || idmlCell.textFrameStoryRefs() == null
+                || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return null;
+        }
+        List<ASTParagraph> paragraphs = new ArrayList<>();
+        for (String storyRef : orderedTextFrameStoryRefsForCellFlow(ctx, idmlCell)) {
+            if (storyRef == null) continue;
+            if (!shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef)
+                    && isStoryOwnedByPlacedTextFrame(ctx, storyRef)) {
+                continue;
+            }
+            IDMLStory nestedStory = ctx.loadIDMLStory.apply(storyRef);
+            if (nestedStory == null || !nestedStory.hasTables() || nestedStory.tables() == null) continue;
+            for (IDMLTable nestedTable : nestedStory.tables()) {
+                if (nestedTable == null) continue;
+                ASTTable nestedAst = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter.convertTableSimple(
+                        nestedTable,
+                        0, 0, 0,
+                        null, null, null,
+                        ctx.resolvedData,
+                        ctx.styleResolver,
+                        (table, nestedCell) -> buildCellFlow(ctx, table, nestedCell));
+                if (nestedAst == null) continue;
+                ASTParagraph paragraph = new ASTParagraph();
+                paragraph.inlineTable(nestedAst);
+                paragraphs.add(paragraph);
+            }
+        }
+        return paragraphs.isEmpty() ? null : paragraphs;
     }
 
     private static List<ASTParagraph> buildOwnedInlineShellFlow(

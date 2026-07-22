@@ -1091,17 +1091,21 @@ public final class StoryConverter {
             List<AnchoredTablePlan> plans = ctx.anchoredTablePlansForOwnerTextFrame(domId);
             if (plans == null || plans.isEmpty()) continue;
             plans = new ArrayList<>(plans);
-            plans.sort(Comparator.comparingInt((AnchoredTablePlan p) -> p.afterParagraphIndex).reversed());
+            boolean carrierOnlyBlock = isAnchoredTableCarrierOnlyBlock(block);
+            plans.sort(carrierOnlyBlock
+                    ? Comparator.comparingInt((AnchoredTablePlan p) -> p.afterParagraphIndex)
+                    : Comparator.comparingInt((AnchoredTablePlan p) -> p.afterParagraphIndex).reversed());
             for (AnchoredTablePlan plan : plans) {
                 IDMLTable table = loadPlannedTable(ctx, plan);
-                if (table == null) continue;
-                boolean wrapperFlowTable = isWrapperFlowTable(table, plan);
-                if (!wrapperFlowTable && hasInlineTable(block.paragraphs(), plan.nestedTableId)) continue;
-                ASTTable astTable = TableBuilder.buildPreparedAstTable(ctx, table, 0, 0, 0);
+                boolean wrapperFlowTable = table != null && isWrapperFlowTable(table, plan);
+                ASTTable astTable = table != null
+                        ? TableBuilder.buildPreparedAstTable(ctx, table, 0, 0, 0)
+                        : buildResolvedPlannedTable(ctx, plan, 0);
                 if (astTable == null) continue;
+                if (!wrapperFlowTable && hasInlineTable(block.paragraphs(), astTable.sourceId())) continue;
                 removeAnchoredTableShellInlineObjects(block.paragraphs(), ctx, plan, table);
                 applyAnchoredTableBounds(ctx, plan, astTable);
-                int insertAt = Math.max(0, Math.min(block.paragraphs().size(), plan.afterParagraphIndex + 1));
+                int insertAt = anchoredTableInsertIndex(block.paragraphs(), plan, carrierOnlyBlock);
                 consumeMarkerOnlyParagraphAt(block.paragraphs(), insertAt);
                 // wrapper flow(실제 nested table을 감싼 표)만 셀 단위로 평탄화한다.
                 // 데이터/레이아웃 표는 인라인 표(else 분기)로 통째 삽입해 셀 구조를 보존한다.
@@ -1113,7 +1117,7 @@ public final class StoryConverter {
                         continue;
                     }
                     removeInlineTables(block.paragraphs(), plan.wrapperTableId, plan.nestedTableId);
-                    insertAt = Math.max(0, Math.min(block.paragraphs().size(), plan.afterParagraphIndex + 1));
+                    insertAt = anchoredTableInsertIndex(block.paragraphs(), plan, carrierOnlyBlock);
                     consumeMarkerOnlyParagraphAt(block.paragraphs(), insertAt);
                     block.paragraphs().addAll(insertAt, wrapperFlow);
                 } else {
@@ -1123,6 +1127,28 @@ public final class StoryConverter {
                 }
             }
         }
+    }
+
+    private static int anchoredTableInsertIndex(
+            List<ASTParagraph> paragraphs,
+            AnchoredTablePlan plan,
+            boolean carrierOnlyBlock) {
+        int size = paragraphs != null ? paragraphs.size() : 0;
+        if (carrierOnlyBlock) return size;
+        int storyIndex = plan != null ? plan.afterParagraphIndex + 1 : size;
+        return Math.max(0, Math.min(size, storyIndex));
+    }
+
+    private static boolean isAnchoredTableCarrierOnlyBlock(ASTTextFrameBlock block) {
+        if (block == null) return false;
+        String visibleText = block.frameVisibleText();
+        if (!isMarkerOnlyText(visibleText)) return false;
+        List<ASTParagraph> paragraphs = block.paragraphs();
+        if (paragraphs == null || paragraphs.isEmpty()) return true;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (!isMarkerOnlyParagraph(paragraph)) return false;
+        }
+        return true;
     }
 
     private static void removeAnchoredTableShellInlineObjects(
@@ -1501,8 +1527,9 @@ public final class StoryConverter {
     private static ASTParagraph nestedTableParagraph(ResolvedBuildContext ctx, AnchoredTablePlan plan) {
         if (ctx == null || plan == null) return null;
         IDMLTable nestedTable = findTable(loadStoryByAnyId(ctx, plan.nestedStoryId), plan.nestedTableId);
-        if (nestedTable == null) return null;
-        ASTTable nestedAst = TableBuilder.buildPreparedAstTable(ctx, nestedTable, 0, 0, 0);
+        ASTTable nestedAst = nestedTable != null
+                ? TableBuilder.buildPreparedAstTable(ctx, nestedTable, 0, 0, 0)
+                : buildResolvedPlannedTable(ctx, plan, 0);
         if (nestedAst == null) return null;
         ResolvedTextFrame owner = ctx.resolvedData != null
                 ? ctx.resolvedData.getTextFrame(String.valueOf(plan.anchoredTextFrameDomId))
@@ -1511,6 +1538,40 @@ public final class StoryConverter {
         ASTParagraph paragraph = new ASTParagraph();
         paragraph.inlineTable(nestedAst);
         return paragraph;
+    }
+
+    private static ASTTable buildResolvedPlannedTable(
+            ResolvedBuildContext ctx,
+            AnchoredTablePlan plan,
+            int zOrder) {
+        ResolvedTable resolvedTable = findResolvedPlannedTable(ctx, plan);
+        if (resolvedTable == null) return null;
+        ASTTable astTable = ASTTableConverter.convertResolvedTableSimple(
+                resolvedTable, 0, 0, zOrder, ctx != null ? ctx.resolvedData : null);
+        if (astTable == null) return null;
+        astTable.flowWithText(true);
+        return astTable;
+    }
+
+    private static ResolvedTable findResolvedPlannedTable(
+            ResolvedBuildContext ctx,
+            AnchoredTablePlan plan) {
+        if (ctx == null || ctx.resolvedData == null || plan == null) return null;
+        ResolvedTable direct = ctx.resolvedData.getTableByIdOrSourceId(plan.nestedTableId);
+        if (direct != null) return direct;
+        ResolvedStory story = plan.nestedStoryId != null
+                ? ctx.resolvedData.getStory(plan.nestedStoryId)
+                : null;
+        if (story == null) return null;
+        ResolvedTable only = null;
+        for (ResolvedTable table : ctx.resolvedData.tables()) {
+            if (table == null) continue;
+            if (plan.nestedStoryId != null && plan.nestedStoryId.equals(table.storyId())) {
+                if (only != null) return null;
+                only = table;
+            }
+        }
+        return only;
     }
 
     private static boolean isVisibleWrapperFlowParagraph(ASTParagraph paragraph) {

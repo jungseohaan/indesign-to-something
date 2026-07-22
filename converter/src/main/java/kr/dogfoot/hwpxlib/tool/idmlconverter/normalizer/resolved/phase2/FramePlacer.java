@@ -72,6 +72,7 @@ public final class FramePlacer {
 
         for (ResolvedTextFrame tf : frames) {
             int tfDomId = parseDomIdOrNeg(tf.id());
+            boolean anchoredTableOwner = hasAnchoredTablePlan(ctx, tfDomId);
             if (ctx.isTextFrameOwnedByTextShellPlan(tfDomId)) {
                 continue;
             }
@@ -80,7 +81,8 @@ public final class FramePlacer {
             boolean ownedByFloatingTextShell = ctx.isTextFrameOwnedByFloatingTextShellPlan(tfDomId);
             if (planKnown
                     && (textPlan.materialization == Materialization.HWPX_TABLE_STYLE
-                    || textPlan.visualAction == VisualAction.PLACE_TABLE_STYLE)) {
+                    || textPlan.visualAction == VisualAction.PLACE_TABLE_STYLE)
+                    && !anchoredTableOwner) {
                 continue;
             }
             if (planKnown && textPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT
@@ -179,11 +181,11 @@ public final class FramePlacer {
                 w = planBounds.w;
                 h = planBounds.h;
                 usingObjectPlanBounds = true;
-            } else if (plannedFloatingHwpxText) {
+            } else if (plannedFloatingHwpxText && !anchoredTableOwner) {
                 warnTextPlanMissingExecutableBounds(ctx, hwpxTextPlan, tf);
                 continue;
             }
-            if (!usingObjectPlanBounds && hasAnchoredTablePlan(ctx, tfDomId)) {
+            if (!usingObjectPlanBounds && anchoredTableOwner) {
                 LocalFrameBounds pageRelativeBounds = computeScaledPageRelativeFrameBounds(ctx, tf);
                 if (pageRelativeBounds != null) {
                     x = pageRelativeBounds.x;
@@ -220,7 +222,7 @@ public final class FramePlacer {
                 continue;
             }
 
-            if (!hasVisibleText) {
+            if (!hasVisibleText && !anchoredTableOwner) {
                 double[] clipped = clipEmptyTextFrameToPage(x, y, w, h, rPage);
                 if (clipped == null) {
                     continue;
@@ -231,7 +233,7 @@ public final class FramePlacer {
                 h = clipped[3];
             }
 
-            if (!usingObjectPlanBounds && hasAnchoredTablePlan(ctx, tfDomId)) {
+            if (!usingObjectPlanBounds && anchoredTableOwner) {
                 LocalFrameBounds pageRelativeBounds = computeScaledPageRelativeFrameBounds(ctx, tf);
                 if (pageRelativeBounds != null) {
                     x = pageRelativeBounds.x;

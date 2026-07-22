@@ -195,6 +195,13 @@ public final class AnchoredTablePlanner {
         String nestedStoryId = nested != null ? nested.storyId : null;
         String nestedTableId = nested != null ? nested.tableId : wrapperTable.selfId();
         int anchoredTfDomId = nested != null ? nested.textFrameDomId : -1;
+        if (nestedStoryId != null && anchoredTfDomId < 0) {
+            ctx.suppressAnchoredTableSource(wrapperTable.selfId(), nestedTableId);
+            ctx.ownershipPlanLines.add(suppressedAnchoredTableJson(
+                    ownerTf, ownerStory, wrapperTable, nestedStoryId, nestedTableId,
+                    "nested_story_without_resolved_text_frame_owner"));
+            return null;
+        }
         int ownerTfDomId = parseDecimal(ownerTf.id(), -1);
         if (ownerTfDomId < 0 || nestedTableId == null) return null;
         int afterParagraphIndex = Math.max(0, wrapperTable.paragraphIndexBefore() - 1);
@@ -208,6 +215,48 @@ public final class AnchoredTablePlanner {
                 nestedTableId,
                 ownerTf.pageIndex(),
                 "story_table_marker_after_paragraph");
+    }
+
+    private static String suppressedAnchoredTableJson(
+            ResolvedTextFrame ownerTf,
+            IDMLStory ownerStory,
+            IDMLTable wrapperTable,
+            String nestedStoryId,
+            String nestedTableId,
+            String reason) {
+        int ownerTfDomId = parseDecimal(ownerTf != null ? ownerTf.id() : null, -1);
+        int afterParagraphIndex = Math.max(0,
+                wrapperTable != null ? wrapperTable.paragraphIndexBefore() - 1 : 0);
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        appendJson(sb, "kind", "anchored_table_suppressed");
+        appendJson(sb, "textAction", TextAction.DROP_TEXT.name());
+        appendJson(sb, "visualAction", VisualAction.DROP_VISUAL.name());
+        appendJson(sb, "ownerTextFrameDomId", ownerTfDomId);
+        appendJson(sb, "ownerStoryId", ownerTf != null ? ownerTf.storyId() : null);
+        appendJson(sb, "ownerStorySelfId", ownerStory != null ? ownerStory.selfId() : null);
+        appendJson(sb, "afterParagraphIndex", afterParagraphIndex);
+        appendJson(sb, "wrapperTableId", wrapperTable != null ? wrapperTable.selfId() : null);
+        appendJson(sb, "nestedStoryId", nestedStoryId);
+        appendJson(sb, "nestedTableId", nestedTableId);
+        appendJson(sb, "reason", reason);
+        if (sb.charAt(sb.length() - 1) == ',') sb.setLength(sb.length() - 1);
+        sb.append('}');
+        return sb.toString();
+    }
+
+    private static void appendJson(StringBuilder sb, String key, String value) {
+        if (value == null) return;
+        sb.append('"').append(escapeJson(key)).append("\":\"")
+                .append(escapeJson(value)).append("\",");
+    }
+
+    private static void appendJson(StringBuilder sb, String key, int value) {
+        sb.append('"').append(escapeJson(key)).append("\":").append(value).append(',');
+    }
+
+    private static String escapeJson(String value) {
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /**
