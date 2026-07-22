@@ -286,6 +286,7 @@ public class EHFontGlyphMap {
      * <pre>
      *   µ (0xB5, 39회)  →  ⌒ (호)      문맥: µAB = 호 AB
      *   ª (0xAA,  3회)  →  ≡ (합동)     문맥: △OAM ª △OBM = △OAM ≡ △OBM
+     *   Ñ (0xD1)        →  ±             문맥: Ñ + EH분수대문자 root hook = ±√a
      * </pre>
      * 매핑 없는 확장 문자(공백/장식/마커)는 제거한다.
      */
@@ -297,6 +298,7 @@ public class EHFontGlyphMap {
             switch (c) {
                 case 'µ': sb.append('⌒'); break;   // ⌒ 호(arc)
                 case 'ª': sb.append('≡'); break;   // ≡ 합동(equiv)
+                case 'Ñ': sb.append('±'); break;   // ± 플러스마이너스
                 case 'p': sb.append('π'); break;   // π 원주율(실측: 1단원 -π, π+1, 2<π)
                 case 'y': sb.append('…'); break;   // … 말줄임(실측: 1단원 p21 √2=1.414…)
                 case '`': break;                        // 위첨자 마커 → 제거
@@ -838,9 +840,9 @@ public class EHFontGlyphMap {
         if (isChemicalFont(fontFamily)) {
             // EH약물 전용 글리프: p(0x70) → π. 약물 폰트에서만 π 이며(실측: 1단원
             // -π, π+1, 2<π 등 모두 원주율), 다른 EH 폰트의 p 는 변수이므로 여기서만
-            // 치환한다. decodeSubSupText 는 매핑 없는 0x80+ 문자를 버리므로, π(U+03C0)
-            // 는 디코딩 이후에 넣는다. 나머지 글리프는 공용 상부자/하부자 매핑을 따른다.
-            return decodeSubSupText(text).replace('p', 'π');
+            // 치환한다. 약물 폰트의 0x80+ 기호는 상부자 글자 매핑과 의미가 다르므로
+            // 약물 전용 매핑을 먼저 적용한다.
+            return decodeChemicalGlyphText(text);
         }
         if (isSuperscriptFont(fontFamily) || isSubscriptFont(fontFamily)) {
             return decodeSubSupText(text);

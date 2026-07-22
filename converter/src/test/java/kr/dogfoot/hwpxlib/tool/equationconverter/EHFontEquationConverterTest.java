@@ -275,4 +275,12 @@ public class EHFontEquationConverterTest {
                 convert(fracUpper("'"), body("2=1.414213562373"),
                         run("y", "EH약물", CS_YAKMUL)));
     }
+
+    @Test
+    public void yakmul_plusMinus_sqrt() {
+        // 약물 Ñ = ±, 뒤의 EH분수대문자 hook + 피근호를 보존한다.
+        Assert.assertEquals("+-sqrt{a}",
+                convert(run("Ñ", "EH약물", CS_YAKMUL),
+                        fracUpper("'§"), sup("a")));
+    }
 }

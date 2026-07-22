@@ -717,7 +717,9 @@ public class ASTMathGrouper {
         }
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (isStandaloneSqrtSymbolScript(hwpScript, ehRuns)) {
-            para.addItem(textRunFromMathSource("√", ehRuns, colorToHex));
+            ASTEquation eq = new ASTEquation("sqrt{ }", "EH_FONT");
+            applyTextDerivedEquationHints(eq, ehRuns);
+            para.addItem(eq);
             return;
         }
         if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, ehRuns)) {
