@@ -47,8 +47,7 @@ public final class MasterHashiraPlacer {
                 Map<String, String> values = pageValues.get(docIdx);
                 if (values == null || values.isEmpty()) continue;
                 for (ASTBlock block : section.blocks()) {
-                    if (!(block instanceof ASTTextFrameBlock)) continue;
-                    replaced += replacePlaceholders((ASTTextFrameBlock) block, values);
+                    replaced += replacePlaceholders(block, values);
                 }
             }
             if (replaced > 0) {
@@ -68,6 +67,7 @@ public final class MasterHashiraPlacer {
         if (dmDoc == null) return resolvedValues;
         Map<String, String> varToCharStyle = readMatchCharacterStyleVariables(dmDoc);
         if (varToCharStyle.isEmpty()) return resolvedValues;
+        resolvedValues = addVariableNameAliases(resolvedValues, varToCharStyle);
 
         List<String> spreadOrder = readSpreadOrder(ctx.idmlDir, dmDoc);
         if (spreadOrder.isEmpty()) return resolvedValues;
@@ -107,6 +107,32 @@ public final class MasterHashiraPlacer {
         return mergePageValues(idmlValues, resolvedValues);
     }
 
+    private static Map<Integer, Map<String, String>> addVariableNameAliases(
+            Map<Integer, Map<String, String>> pageValues, Map<String, String> varToCharStyle) {
+        if (pageValues == null || pageValues.isEmpty()
+                || varToCharStyle == null || varToCharStyle.isEmpty()) {
+            return pageValues == null ? Collections.emptyMap() : pageValues;
+        }
+        Map<Integer, Map<String, String>> out = new HashMap<>();
+        for (Map.Entry<Integer, Map<String, String>> pageEntry : pageValues.entrySet()) {
+            Map<String, String> values = new HashMap<>();
+            if (pageEntry.getValue() != null) values.putAll(pageEntry.getValue());
+            for (Map.Entry<String, String> varEntry : varToCharStyle.entrySet()) {
+                String varName = varEntry.getKey();
+                String charStyle = varEntry.getValue();
+                if (varName == null || varName.isEmpty() || charStyle == null || charStyle.isEmpty()) {
+                    continue;
+                }
+                String value = values.get(charStyle);
+                if (value == null) value = values.get(normalizeVariableKey(charStyle));
+                if (value == null) continue;
+                values.put(varName, value);
+            }
+            out.put(pageEntry.getKey(), values);
+        }
+        return out;
+    }
+
     private static Map<Integer, Map<String, String>> collectResolvedPageTextVariableValues(
             ResolvedBuildContext ctx) {
         if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.textFrames() == null) {
@@ -139,9 +165,12 @@ public final class MasterHashiraPlacer {
             }
         }
         if (found.isEmpty()) return Collections.emptyMap();
-        int pageCount = ctx.resolvedData.pages() != null && !ctx.resolvedData.pages().isEmpty()
-                ? ctx.resolvedData.pages().size()
-                : maxPageIndex + 1;
+        if (ctx.resolvedData.pages() != null) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage page : ctx.resolvedData.pages()) {
+                if (page != null) maxPageIndex = Math.max(maxPageIndex, page.index());
+            }
+        }
+        int pageCount = maxPageIndex + 1;
         Map<Integer, Map<String, String>> carried = new HashMap<>();
         Map<String, String> carry = new HashMap<>();
         for (int pageIndex = 0; pageIndex < pageCount; pageIndex++) {
@@ -309,6 +338,16 @@ public final class MasterHashiraPlacer {
         return sectionIndex;
     }
 
+    private static int replacePlaceholders(ASTBlock block, Map<String, String> values) {
+        if (block instanceof ASTTextFrameBlock) {
+            return replacePlaceholders((ASTTextFrameBlock) block, values);
+        }
+        if (block instanceof ASTTable) {
+            return replacePlaceholders((ASTTable) block, values);
+        }
+        return 0;
+    }
+
     private static int replacePlaceholders(ASTTextFrameBlock block, Map<String, String> values) {
         if (block == null || block.paragraphs() == null || values == null || values.isEmpty()) return 0;
         int count = 0;
@@ -320,13 +359,30 @@ public final class MasterHashiraPlacer {
         return count;
     }
 
+    private static int replacePlaceholders(ASTTable table, Map<String, String> values) {
+        if (table == null || table.rows() == null || values == null || values.isEmpty()) return 0;
+        int count = 0;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                for (ASTParagraph paragraph : cell.paragraphs()) {
+                    if (paragraph == null || paragraph.items() == null) continue;
+                    count += replaceRunLocalPlaceholders(paragraph, values);
+                    count += replaceSplitParagraphPlaceholders(paragraph, values);
+                }
+            }
+        }
+        return count;
+    }
+
     private static int replaceRunLocalPlaceholders(ASTParagraph paragraph, Map<String, String> values) {
         int count = 0;
         for (ASTInlineItem item : paragraph.items()) {
             if (!(item instanceof ASTTextRun)) continue;
             ASTTextRun run = (ASTTextRun) item;
             String text = run.text();
-            if (text == null || text.indexOf("<#") < 0) continue;
+            if (text == null || text.indexOf('<') < 0) continue;
             String replaced = replaceVariableTokens(text, values);
             if (!text.equals(replaced)) {
                 run.text(replaced);
@@ -361,7 +417,7 @@ public final class MasterHashiraPlacer {
         }
         if (hasNonTextInline || textRuns.isEmpty()) return 0;
         String raw = allText.toString();
-        if (raw.indexOf("<#") < 0) return 0;
+        if (raw.indexOf('<') < 0) return 0;
         List<PlaceholderMatch> matches = findVariableTokenMatches(raw, values);
         if (matches.isEmpty()) return 0;
 
@@ -411,7 +467,7 @@ public final class MasterHashiraPlacer {
             if (key == null || key.isEmpty() || value == null) continue;
             String normalizedKey = normalizeVariableKey(key);
             if (normalizedKey.isEmpty()) continue;
-            out = out.replaceAll("<#\\s*#?" + java.util.regex.Pattern.quote(normalizedKey) + "\\s*>",
+            out = out.replaceAll("<\\s*#?" + java.util.regex.Pattern.quote(normalizedKey) + "\\s*>",
                     java.util.regex.Matcher.quoteReplacement(value));
         }
         return out;
@@ -431,11 +487,11 @@ public final class MasterHashiraPlacer {
         List<PlaceholderMatch> matches = new ArrayList<>();
         int i = 0;
         while (i < text.length()) {
-            int start = text.indexOf("<#", i);
+            int start = text.indexOf('<', i);
             if (start < 0) break;
-            int end = text.indexOf('>', start + 2);
+            int end = text.indexOf('>', start + 1);
             if (end < 0) break;
-            String token = text.substring(start + 2, end).trim();
+            String token = text.substring(start + 1, end).trim();
             String value = valueForVariableToken(token, values);
             if (value != null) {
                 matches.add(new PlaceholderMatch(start, end + 1, value));

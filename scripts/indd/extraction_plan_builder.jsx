@@ -933,16 +933,27 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
         return union;
     }
 
-    function collectPlanEntrySourceIds(entries) {
+    function collectPlanEntrySourceIds(entries, includeTextFrames) {
         var sourceIds = [], seenIds = {};
+        function addItemSource(item) {
+            try {
+                if (!item || item.id === undefined || item.id === null) return;
+                if (!includeTextFrames && _itemKind(item) === "TextFrame") return;
+                _pushUniqueId(sourceIds, seenIds, item.id);
+            } catch (eAddItemSource) {}
+        }
         for (var i = 0; i < entries.length; i++) {
             try {
                 // Master composites are page-applied source clusters, not page-local
                 // source-index bundles. Use the full InDesign source tree here so
                 // Stage 1 candidate ownership and the export executor share exactly
                 // the same slot source set.
-                var ids = _collectSourceObjectIds(entries[i].item);
-                for (var si = 0; si < ids.length; si++) _pushUniqueId(sourceIds, seenIds, ids[si]);
+                addItemSource(entries[i].item);
+                var nested = null;
+                try { nested = entries[i].item.allPageItems; } catch (eNestedItems) {}
+                for (var ni = 0; nested && ni < nested.length; ni++) {
+                    addItemSource(nested[ni]);
+                }
             } catch (e) {}
         }
         sourceIds.sort(function(a, b) { return Number(a) - Number(b); });
@@ -1031,7 +1042,7 @@ function _appendMasterCompositeExtractionCandidates(doc, ctx, candidates, seen, 
                 if (entries.length > 0) {
                     var clusters = clusterPlanMasterEntries(entries);
                     for (var ci = 0; ci < clusters.length; ci++) {
-                        var sourceIds = collectPlanEntrySourceIds(clusters[ci]);
+                        var sourceIds = collectPlanEntrySourceIds(clusters[ci], false);
                         if (sourceIds.length === 0) continue;
                         var hiddenTextFrameIds = collectPlanEntryTextFrameIds(clusters[ci]);
                         var primaryEntry = firstPlanEntryNonTextEntry(clusters[ci]);

@@ -2966,7 +2966,14 @@ function _objectPlanSetKeysAsNumbers(set) {
 
 function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
     var idIsNumeric = typeof id === "number" && !isNaN(id);
-    var sourceIds = idIsNumeric ? [id] : [];
+    var masterSourceId = null;
+    try {
+        if (!idIsNumeric && src && src.masterSourceId !== undefined && src.masterSourceId !== null) {
+            var parsedMasterSourceId = Number(src.masterSourceId);
+            if (!isNaN(parsedMasterSourceId)) masterSourceId = parsedMasterSourceId;
+        }
+    } catch (eMasterSourceId) {}
+    var sourceIds = idIsNumeric ? [id] : (masterSourceId !== null ? [masterSourceId] : []);
     var textFrameIdKeys = idIsNumeric ? [] : [String(id)];
     return {
         objectPlanId: "objectPlan." + String(passId).replace(/^pass\./, "") + "." + String(id),
@@ -2983,8 +2990,8 @@ function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
         sourceInlineFlow: src.storyAnchorPlacement === "INLINE",
         inlineCompositeLayoutDescendant: false,
         connectorDecorationVisual: false,
-        primarySourceObjectId: idIsNumeric ? id : null,
-        primarySourceObjectIdKey: idIsNumeric ? null : String(id),
+        primarySourceObjectId: idIsNumeric ? id : masterSourceId,
+        primarySourceObjectIdKey: idIsNumeric || masterSourceId !== null ? null : String(id),
         ownedByNativeShellSourceObjectIds: [],
         sourceObjectIds: sourceIds,
         sourceObjectIdKeys: textFrameIdKeys,
