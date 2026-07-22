@@ -65,6 +65,21 @@ final class LineSpacingResolver {
         return bodyFs > 0 && maxFs > bodyFs * 1.5;
     }
 
+    boolean hasSourceFixedLeading(ASTParagraph astPara, String paraPrId) {
+        if (astPara != null
+                && astPara.lineSpacing() != null
+                && astPara.lineSpacing() > 0
+                && "fixed".equals(astPara.lineSpacingType())) {
+            return true;
+        }
+        ParaPr basePr = paragraphBuilder.findParaPrById(paraPrId);
+        return basePr != null
+                && basePr.lineSpacing() != null
+                && basePr.lineSpacing().type() == LineSpacingType.FIXED
+                && basePr.lineSpacing().value() != null
+                && basePr.lineSpacing().value() > 0;
+    }
+
     long maxInlineObjectHeight(ASTParagraph astPara) {
         long max = 0;
         for (ASTInlineItem item : astPara.items()) {

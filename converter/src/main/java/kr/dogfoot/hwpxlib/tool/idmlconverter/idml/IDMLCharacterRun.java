@@ -267,7 +267,8 @@ public class IDMLCharacterRun {
      * NP 폰트인지 확인.
      */
     public boolean isNPFont() {
-        return NPFontGlyphMap.extractNPFontName(appliedCharacterStyle) != null;
+        return NPFontGlyphMap.extractNPFontName(appliedCharacterStyle) != null
+                || NPFontGlyphMap.isNPFont(fontFamily);
     }
 
     /**
