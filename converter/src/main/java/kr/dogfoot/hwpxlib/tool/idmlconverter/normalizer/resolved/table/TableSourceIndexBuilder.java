@@ -156,6 +156,7 @@ public final class TableSourceIndexBuilder {
             collectDirectTableStyleSources(data, parent, carrierDomId, ids);
         }
         collectAncestryTableStyleSources(data, carrier, ids);
+        collectSiblingTableStyleSources(data, carrier, ids);
         int[] out = new int[ids.size()];
         int i = 0;
         for (Integer id : ids) out[i++] = id;
@@ -208,6 +209,79 @@ public final class TableSourceIndexBuilder {
             childOnPathId = parent.id();
             parentId = parent.parentId();
         }
+    }
+
+    /**
+     * SPEC(table-style-absorb): 캐리어와 부모를 공유하지 않는 표 스타일 시각물 대응.
+     *
+     * <p>p28 실측: 표 배경 rect·둥근 외곽·행/열 괘선(Polygon)이 캐리어 TF 와 나란한
+     * <b>최상위 형제 그룹들</b>로 조판돼 부모/조상 스캔에 잡히지 않고 페이지 평면
+     * 전용으로 남았다. 같은 페이지의 형제(부모 없음) 중 캐리어 경계 근처
+     * (허용 오차 4pt — 외곽 rect 는 캐리어보다 몇 pt 크다)의 시각물을 style
+     * 소스로 수집한다. 그룹은 재귀하되, 다른 TextFrame 을 품은 서브트리(라벨
+     * pill 등)는 텍스트 소유 충돌을 피해 통째로 제외한다.
+     */
+    private static void collectSiblingTableStyleSources(
+            ResolvedData data,
+            ResolvedPageItem carrier,
+            LinkedHashSet<Integer> ids) {
+        if (data == null || carrier == null || ids == null) return;
+        double[] carrierBounds = carrier.geometricBounds();
+        if (!validBounds(carrierBounds)) return;
+        int carrierPage = carrier.pageIndex();
+        for (ResolvedPageItem item : data.pageItems()) {
+            if (item == null || !blank(item.parentId())) continue;
+            if (item.pageIndex() != carrierPage) continue;
+            if (sameId(item.id(), carrier.id())) continue;
+            collectSiblingTableStyleSourceItem(data, carrier, carrierBounds, item, ids, 0);
+        }
+    }
+
+    private static void collectSiblingTableStyleSourceItem(
+            ResolvedData data,
+            ResolvedPageItem carrier,
+            double[] carrierBounds,
+            ResolvedPageItem item,
+            LinkedHashSet<Integer> ids,
+            int depth) {
+        if (item == null || depth > 6) return;
+        if (!isTableStyleSource(item)) return;
+        if (subtreeContainsTextFrame(data, item, 0)) return;
+        if ("Group".equals(item.type())) {
+            // 그룹 래퍼는 리프보다 몇 pt 크게 잡히므로(둥근 외곽 등) bounds
+            // 게이트 없이 재귀하고, 소속 판정은 리프에서만 한다.
+            if (item.childIds() == null) return;
+            for (int childId : item.childIds()) {
+                ResolvedPageItem child = data.getPageItem(String.valueOf(childId));
+                if (child == null || !sameId(item.id(), child.parentId())) continue;
+                collectSiblingTableStyleSourceItem(data, carrier, carrierBounds, child, ids, depth + 1);
+            }
+            return;
+        }
+        // 좌표는 pt 단위 spread 좌표 — 외곽 배경 rect 는 캐리어보다 최대 ~8pt
+        // 크게 그려진다 (p28 실측 7.5pt). 10pt 까지 표 소속으로 본다.
+        if (!boundsNearOrInside(carrierBounds, item.geometricBounds(), 10.0)) return;
+        add(ids, parseInt(item.id()));
+    }
+
+    private static boolean subtreeContainsTextFrame(ResolvedData data, ResolvedPageItem item, int depth) {
+        if (item == null || depth > 6) return false;
+        if ("TextFrame".equals(item.type())) return true;
+        if (item.childIds() == null) return false;
+        for (int childId : item.childIds()) {
+            ResolvedPageItem child = data.getPageItem(String.valueOf(childId));
+            if (child == null) continue;
+            if (subtreeContainsTextFrame(data, child, depth + 1)) return true;
+        }
+        return false;
+    }
+
+    private static boolean boundsNearOrInside(double[] container, double[] child, double tolerance) {
+        if (!validBounds(container) || !validBounds(child)) return false;
+        return child[0] >= container[0] - tolerance
+                && child[1] >= container[1] - tolerance
+                && child[2] <= container[2] + tolerance
+                && child[3] <= container[3] + tolerance;
     }
 
     private static boolean isTableStyleSource(ResolvedPageItem item) {
