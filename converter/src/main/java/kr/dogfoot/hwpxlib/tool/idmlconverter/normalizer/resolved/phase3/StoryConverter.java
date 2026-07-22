@@ -318,7 +318,12 @@ public final class StoryConverter {
             if (storyTextLen > 20) {
                 boolean allBlocksEmpty = true;
                 for (ASTTextFrameBlock b : blocks) {
-                    if (b.frameVisibleTextLength() > 1) { allBlocksEmpty = false; break; }
+                    String blockDomId = ParagraphTextHelpers.domIdFromSourceId(b.sourceId());
+                    if (b.frameVisibleTextLength() > 1
+                            || hasAnchoredTablePlanForTextFrame(ctx, blockDomId)) {
+                        allBlocksEmpty = false;
+                        break;
+                    }
                 }
                 if (allBlocksEmpty) {
                     continue;
