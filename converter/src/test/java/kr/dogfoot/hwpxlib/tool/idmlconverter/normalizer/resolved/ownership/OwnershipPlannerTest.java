@@ -72,6 +72,40 @@ public class OwnershipPlannerTest {
     }
 
     @Test
+    public void inlineCompletePngDoesNotOwnNonMarkerEditableText() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "보기");
+        label.isInline(true);
+        data.addTextFrame(label);
+        ResolvedTextFrame math = textFrame(102, "√16 √29 0.2\u03078 4-√2");
+        math.isInline(true);
+        data.addTextFrame(math);
+        RenderedGroup inline = rendered(
+                100,
+                "inline_object",
+                "inline_object",
+                "inline_flow_visual_root",
+                "indesign_png",
+                "indesign_png",
+                new String[] { "101", "102" },
+                new int[] { 100, 101, 102 });
+        inline.atomicObjectKind("COMPLETE_PNG");
+        inline.atomicOwnedTextFrameIds(new int[] { 101, 102 });
+        inline.atomicSourceObjectIds(new int[] { 100, 101, 102 });
+        inline.atomicVisualSourceObjectIds(new int[] { 100 });
+        data.addRenderedFloatingItem(inline);
+        addInlineAnchor(data, 100);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 100, "inline_flow_visual_root");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, plan.textAction);
+        Assert.assertNotEquals(Materialization.COMPLETE_PNG, plan.materialization);
+        Assert.assertArrayEquals(new int[] { 101, 102 }, plan.ownedTextFrameIds);
+    }
+
+    @Test
     public void tableCarrierContainingAtomicLabelDoesNotBecomeCompleteMarkerPng() {
         ResolvedData data = new ResolvedData();
         ResolvedTextFrame label = textFrame(101, "가");
