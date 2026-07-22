@@ -622,6 +622,12 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
     for (var i = 0; i < sourceIds.length; i++) {
         var src = clusterIndex.sourceInfo(sourceIds[i]);
         if (!src) continue;
+        var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+        var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+        if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
+            cache[cacheKey] = false;
+            return false;
+        }
         if (src.storyTextInlineSlot === true) {
             sawInline = true;
             continue;
@@ -636,8 +642,8 @@ function _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex) {
             continue;
         }
         if (src.isInline === true || src.inline === true || src.anchored === true
-                || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
-                || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE") {
+                || anchoredPosition === "INLINE_POSITION"
+                || placement === "INLINE") {
             sawInline = true;
             continue;
         }
@@ -658,10 +664,7 @@ function _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex)
     for (var i = 0; i < sourceIds.length; i++) {
         var src = clusterIndex.sourceInfo(sourceIds[i]);
         if (!src) continue;
-        // SPEC-048: 게이지형(FLOATING_ANCHORED + GraphicLine 다수) Group 은
-        // storyTextInlineSlot=true 여도 페이지 좌표 배치 대상이다.
-        if (_plannerBundleSourceIsStoryFlowInline(src)
-                && !_plannerBundleSourceIsGaugeLikePagePositionedAnchor(src, clusterIndex)) {
+        if (_plannerBundleSourceIsStoryFlowInline(src)) {
             continue;
         }
         if (String(src.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED"
@@ -696,9 +699,12 @@ function _plannerBundleSourceIsGaugeLikePagePositionedAnchor(src, clusterIndex) 
 
 function _plannerBundleSourceIsStoryFlowInline(src) {
     if (!src) return false;
-    if (src.storyTextInlineSlot === true) return true;
     var placement = String(src.storyAnchorPlacement || "").toUpperCase();
     var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+    if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
+        return false;
+    }
+    if (src.storyTextInlineSlot === true) return true;
     return placement === "INLINE"
             || anchoredPosition === "INLINE_POSITION"
             || anchoredPosition === "INLINEPOSITION";

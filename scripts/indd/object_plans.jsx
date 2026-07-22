@@ -6711,6 +6711,14 @@ function _objectPlanBundleIsInlineTextWithoutVisibleVisual(bundle) {
 }
 
 function _objectPlanPlacement(bundle) {
+    if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
+    if (bundle) {
+        var anchoredPositionForPlacement = String(bundle.anchoredPosition || "").toUpperCase();
+        if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED"
+                || anchoredPositionForPlacement === "ANCHORED") {
+            return "FLOATING";
+        }
+    }
     if (_objectPlanBundleHasExecutableInlineStoryContract(bundle)) return "INLINE";
     if (bundle && bundle.inlineTextStyleMarkerSource === true) return "INLINE";
     if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
@@ -6718,7 +6726,6 @@ function _objectPlanPlacement(bundle) {
     if (_objectPlanBundleIsTextShellWithoutInlineStoryContract(bundle)) return "FLOATING";
     if (_objectPlanBundleIsInlineFlowShell(bundle)) return "INLINE";
     if (_objectPlanBundleIsInlineTextOwningShell(bundle)) return "INLINE";
-    if (bundle && bundle.pagePositionedAnchoredSource === true) return "FLOATING";
     if (bundle && bundle.passId === "pass.inline_objects") {
         var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
         if (_objectPlanBundleIsDirectCompactStoryInlineVisual(bundle)) return "INLINE";
@@ -6739,16 +6746,16 @@ function _objectPlanPlacement(bundle) {
 
 function _objectPlanBundleHasExecutableInlineStoryContract(bundle) {
     if (!bundle || !bundle.inlineAnchorSourceObjectId) return false;
-    if (bundle.tableCellInlineAnchorSource === true && bundle.sourceInlineFlow === true) return true;
-    if (bundle.tableCellStoryTextInlineSlot === true) return true;
-    if (bundle.storyTextInlineSlot === true) return true;
-    if (bundle.sourceInlineFlow === true || bundle.storyAnchorPlacement === "INLINE") return true;
     var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
     if (bundle.pagePositionedAnchoredSource === true
             || bundle.storyAnchorPlacement === "FLOATING_ANCHORED"
             || anchoredPosition === "ANCHORED") {
         return false;
     }
+    if (bundle.tableCellInlineAnchorSource === true && bundle.sourceInlineFlow === true) return true;
+    if (bundle.tableCellStoryTextInlineSlot === true) return true;
+    if (bundle.storyTextInlineSlot === true) return true;
+    if (bundle.sourceInlineFlow === true || bundle.storyAnchorPlacement === "INLINE") return true;
     return bundle.sourceInlineFlow === true;
 }
 

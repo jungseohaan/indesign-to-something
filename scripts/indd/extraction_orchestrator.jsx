@@ -1131,12 +1131,13 @@ function _globalSourceBundleTextRangeShellInlineHideCandidates(sourceItems) {
     }
     function sourceIsInlineFlow(src) {
         if (!src) return false;
+        var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+        var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+        if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") return false;
         if (src.storyTextInlineSlot === true || src.tableCellStoryTextInlineSlot === true
                 || src.isInline === true) {
             return true;
         }
-        var placement = String(src.storyAnchorPlacement || "").toUpperCase();
-        var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
         return placement === "INLINE"
                 || anchoredPosition === "INLINE_POSITION"
                 || anchoredPosition === "INLINEPOSITION";

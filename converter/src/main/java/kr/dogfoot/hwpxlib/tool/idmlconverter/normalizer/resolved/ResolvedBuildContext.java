@@ -23,6 +23,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFl
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.table.TableSourceIndex;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import java.io.File;
@@ -1723,7 +1724,7 @@ public final class ResolvedBuildContext {
                 && plan.kind.startsWith("planner_declared_rendered:");
     }
 
-    private static String renderedPlanCacheKey(RenderedGroup rg) {
+    private String renderedPlanCacheKey(RenderedGroup rg) {
         Placement placement = placementOf(rg);
         return rg.pageIndex() + "|" + placement + "|" + rg.id() + "|"
                 + nullSafe(rg.file()) + "|" + roundedBoundsKey(rg.bounds());
@@ -1817,11 +1818,16 @@ public final class ResolvedBuildContext {
         return value != null ? value : "";
     }
 
-    private static Placement placementOf(RenderedGroup rg) {
+    private Placement placementOf(RenderedGroup rg) {
         String placement = nullSafe(rg != null ? rg.placementRole() : null)
                 .toUpperCase(java.util.Locale.ROOT);
         if ("INLINE".equals(placement)) return Placement.INLINE;
         if ("FLOATING".equals(placement)) return Placement.FLOATING;
+        if (rg != null
+                && ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType()))
+                && hasAnchoredPagePositionSource(rg)) {
+            return Placement.FLOATING;
+        }
         String renderUnitId = nullSafe(rg != null ? rg.renderUnitId() : null)
                 .toUpperCase(java.util.Locale.ROOT);
         if (renderUnitId.contains("_INLINE_")) return Placement.INLINE;
@@ -1830,6 +1836,35 @@ public final class ResolvedBuildContext {
             return Placement.INLINE;
         }
         return Placement.FLOATING;
+    }
+
+    private boolean hasAnchoredPagePositionSource(RenderedGroup rg) {
+        if (rg == null || resolvedData == null) return false;
+        if (hasResolvedAnchoredPagePosition(rg.id())) return true;
+        if (hasAnyResolvedAnchoredPagePosition(rg.sourceObjectIds())) return true;
+        if (hasAnyResolvedAnchoredPagePosition(rg.exportSourceObjectIds())) return true;
+        if (hasAnyResolvedAnchoredPagePosition(rg.atomicSourceObjectIds())) return true;
+        return hasAnyResolvedAnchoredPagePosition(rg.atomicVisualSourceObjectIds());
+    }
+
+    private boolean hasAnyResolvedAnchoredPagePosition(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0) return false;
+        for (int sourceId : sourceIds) {
+            if (hasResolvedAnchoredPagePosition(sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasResolvedAnchoredPagePosition(int domId) {
+        if (resolvedData == null || domId < 0) return false;
+        ResolvedPageItem item = resolvedData.getPageItem(String.valueOf(domId));
+        if (item == null) return false;
+        String storyAnchorPlacement = nullSafe(item.storyAnchorPlacement())
+                .toUpperCase(java.util.Locale.ROOT);
+        String anchoredPosition = nullSafe(item.anchoredPosition())
+                .toUpperCase(java.util.Locale.ROOT);
+        return "FLOATING_ANCHORED".equals(storyAnchorPlacement)
+                || "ANCHORED".equals(anchoredPosition);
     }
 
     public void recordRenderedDecision(RenderedGroup rg, String phase, String decision, String detail) {
