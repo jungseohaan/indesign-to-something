@@ -6039,11 +6039,13 @@ public final class OwnershipPlanner {
 
     private int[] editableTextFrameIdsOf(RenderedGroup rg) {
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        boolean rejectCompletePngTextOwner = shouldRejectRenderedCompletePngTextOwner(rg);
         if (rg != null && rg.editableTextFrameIds() != null) {
             for (String id : rg.editableTextFrameIds()) {
                 int parsed = parseFlexibleId(id);
                 if (parsed < 0) continue;
-                if (data != null && !isVisibleEditableTextFrameSourceId(parsed)) continue;
+                if (!rejectCompletePngTextOwner
+                        && data != null && !isVisibleEditableTextFrameSourceId(parsed)) continue;
                 ids.add(parsed);
             }
         }
@@ -6896,6 +6898,9 @@ public final class OwnershipPlanner {
         if (data.shouldKeepVisualLabelTextEditable(rg)) {
             return TextAction.OWNED_BY_HWPX_TEXT;
         }
+        if (shouldRejectRenderedCompletePngTextOwner(rg)) {
+            return TextAction.OWNED_BY_HWPX_TEXT;
+        }
         if ("indesign_png".equals(rg.textOwner())) {
             return TextAction.OWNED_BY_PNG;
         }
@@ -6909,6 +6914,42 @@ public final class OwnershipPlanner {
             return TextAction.OWNED_BY_HWPX_TEXT;
         }
         return TextAction.DROP_TEXT;
+    }
+
+    private boolean shouldRejectRenderedCompletePngTextOwner(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"indesign_png".equals(rg.textOwner())) return false;
+        if (data.shouldUseCompletePngForSimpleButtonLabel(rg)) return false;
+        int[] textFrameIds = rawEditableTextFrameIdsOf(rg);
+        if (textFrameIds.length == 0) return false;
+        for (int textFrameId : textFrameIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+            if (tf == null || tf.sourceHidden()) continue;
+            if (!textFrameHasVisibleSemanticText(tf)) continue;
+            if (!data.isSimpleButtonLabelTextFrame(tf.id())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int[] rawEditableTextFrameIdsOf(RenderedGroup rg) {
+        if (rg == null || data == null) return new int[0];
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (rg.editableTextFrameIds() != null) {
+            for (String id : rg.editableTextFrameIds()) {
+                int parsed = parseFlexibleId(id);
+                if (parsed >= 0) ids.add(parsed);
+            }
+        }
+        if (rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                if (data.getTextFrame(String.valueOf(sourceId)) != null) {
+                    ids.add(sourceId);
+                }
+            }
+        }
+        return toIntArray(ids);
     }
 
     private VisualAction visualActionOf(RenderedGroup rg, Placement placement, TextAction textAction) {
@@ -10732,28 +10773,11 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isInlineGraphicOnlyTextShellWithoutTextlessCarrier(plan)) continue;
-            if (isAtomicMultiTextInlineCompletePngOwner(plan)) {
-                plans.set(i, plan
-                        .withTextAction(TextAction.OWNED_BY_PNG)
-                        .withPlacement(Placement.FLOATING)
-                        .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
-                                "floating_atomic_multi_text_complete_png")
-                        .withMaterialization(Materialization.COMPLETE_PNG));
-                continue;
-            }
             plans.set(i, plan
                     .withTextAction(TextAction.DROP_TEXT)
                     .withVisualAction(VisualAction.DROP_VISUAL,
                             "inline_complete_png_text_owned_by_child_frames"));
         }
-    }
-
-    private boolean isAtomicMultiTextInlineCompletePngOwner(ObjectPlan plan) {
-        return plan != null
-                && plan.placement == Placement.INLINE
-                && plan.ownedTextFrameIds != null
-                && plan.ownedTextFrameIds.length > 1
-                && !hasExplicitTextlessShellCoverageForOwnedText(plan);
     }
 
     private boolean hasExplicitTextlessShellCoverageForOwnedText(ObjectPlan ownerPlan) {

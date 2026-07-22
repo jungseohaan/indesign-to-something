@@ -1250,11 +1250,10 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
         inlineEditableTextFrameIds = _unionTableCellTextFrameDescendantIds(
                 sourceInfo.id, inlineEditableTextFrameIds, sourceInfoById, childIdsByParentId);
 
-        var ownsTextByCompletePng = (String(sourceInfo.kind || "") === "Group"
-                && directEditableTextChildIds(sourceInfo.id).length > 1)
+        var ownsTextByCompletePng =
                 // SPEC-048: 게이지형 FLOATING_ANCHORED Group 은 편집 텍스트("100%")를
                 // 분리하지 않고 통짜 PNG 로 소유한다 (bundle 단계에서 FLOATING/PAGE 배치).
-                || (inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0
+                (inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0
                         && _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
                                 sourceInfo, sourceInfoById, childIdsByParentId));
         var inlineRequiresTextHidden = inlineEditableTextFrameIds
@@ -7315,10 +7314,10 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             continue;
         }
         if (candidateSeen) candidateSeen[candidateId] = true;
-        var ownsTextByCompletePng = hiddenTextIds.length > 1
+        var ownsTextByCompletePng =
                 // SPEC-048: 게이지형 FLOATING_ANCHORED Group 은 편집 텍스트("100%")를
                 // 분리하지 않고 통짜 PNG 로 소유한다.
-                || (hiddenTextIds.length > 0
+                (hiddenTextIds.length > 0
                         && _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
                                 root, sourceInfoById, childIdsByParentId));
         appended.push({
