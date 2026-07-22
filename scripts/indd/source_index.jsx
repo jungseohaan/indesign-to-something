@@ -399,12 +399,12 @@ function _storyAnchorPlacementForItem(doc, item, parentStory) {
 
 function _isInlineFlowItemBySourceInfo(sourceInfo) {
     if (!sourceInfo) return false;
-    if (sourceInfo.storyTextInlineSlot === true) return true;
     var placement = String(sourceInfo.storyAnchorPlacement || "").toUpperCase();
     var anchoredPosition = String(sourceInfo.anchoredPosition || "").toUpperCase();
     if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") {
         return false;
     }
+    if (sourceInfo.storyTextInlineSlot === true) return true;
     return placement === "INLINE"
             || anchoredPosition === "INLINE_POSITION"
             || anchoredPosition === "INLINEPOSITION";

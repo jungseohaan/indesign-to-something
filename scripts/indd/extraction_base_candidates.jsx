@@ -473,9 +473,10 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
 
     function sourceInfoIsInlineFlowForBase(itemInfo) {
         if (!itemInfo) return false;
-        if (itemInfo.storyTextInlineSlot === true || itemInfo.isInline === true) return true;
         var placement = String(itemInfo.storyAnchorPlacement || "").toUpperCase();
         var anchoredPosition = String(itemInfo.anchoredPosition || "").toUpperCase();
+        if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") return false;
+        if (itemInfo.storyTextInlineSlot === true || itemInfo.isInline === true) return true;
         return placement === "INLINE"
                 || anchoredPosition === "INLINE_POSITION"
                 || anchoredPosition === "INLINEPOSITION";
@@ -1885,9 +1886,10 @@ function _appendEditableTextFrameStyleShellCandidatesFromSourceItems(sourceItems
     }
     function itemInfoIsInlineFlow(itemInfo) {
         if (!itemInfo) return false;
-        if (itemInfo.storyTextInlineSlot === true || itemInfo.isInline === true) return true;
         var placement = String(itemInfo.storyAnchorPlacement || "").toUpperCase();
         var anchoredPosition = String(itemInfo.anchoredPosition || "").toUpperCase();
+        if (placement === "FLOATING_ANCHORED" || anchoredPosition === "ANCHORED") return false;
+        if (itemInfo.storyTextInlineSlot === true || itemInfo.isInline === true) return true;
         return placement === "INLINE"
                 || anchoredPosition === "INLINE_POSITION"
                 || anchoredPosition === "INLINEPOSITION";

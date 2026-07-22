@@ -968,9 +968,12 @@ public final class OwnershipPlanner {
 
     private boolean hasSourceBundleTextRangeShellInlineSignal(ResolvedPageItem item) {
         if (item == null) return false;
-        if (item.storyTextInlineSlot() || item.isInline()) return true;
         String placement = safe(item.storyAnchorPlacement()).toUpperCase(Locale.ROOT);
         String anchoredPosition = safe(item.anchoredPosition()).toUpperCase(Locale.ROOT);
+        if ("FLOATING_ANCHORED".equals(placement) || "ANCHORED".equals(anchoredPosition)) {
+            return false;
+        }
+        if (item.storyTextInlineSlot() || item.isInline()) return true;
         return "INLINE".equals(placement)
                 || "INLINE_POSITION".equals(anchoredPosition)
                 || "INLINEPOSITION".equals(anchoredPosition);
@@ -3209,7 +3212,7 @@ public final class OwnershipPlanner {
                 && visualLayer != VisualLayer.CONTAINER_BACKDROP
                 && visualLayer != VisualLayer.LABEL_BACKDROP
                 && visualLayer != VisualLayer.FOREGROUND_MASK) {
-            return null;
+            return Materialization.EXTRACTED_PNG_VECTOR;
         }
         if (hasCrossPageVisualSourceIntersectingPlanPage(rg.pageIndex(), visualSourceIds)) {
             return Materialization.TEXTLESS_VISUAL_FRAGMENT;
@@ -7201,7 +7204,9 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (isStandaloneGraphicOnlyInlineObject(rg)) {
-            return VisualAction.PLACE_INLINE_PNG;
+            return placement == Placement.INLINE
+                    ? VisualAction.PLACE_INLINE_PNG
+                    : VisualAction.PLACE_FLOATING_PNG;
         }
         if (isInlineCompleteRenderOfTextBearingSourceGroup(rg, placement, textAction)) {
             return VisualAction.DROP_VISUAL;
@@ -8506,11 +8511,11 @@ public final class OwnershipPlanner {
             return Placement.INLINE;
         }
         if ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType())) {
-            if (isDirectStoryFlowInlineGraphicOwner(rg)) {
-                return Placement.INLINE;
-            }
             if (hasAnchoredPagePositionSource(rg)) {
                 return Placement.FLOATING;
+            }
+            if (isDirectStoryFlowInlineGraphicOwner(rg)) {
+                return Placement.INLINE;
             }
             if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(data, rg)) {
                 return Placement.FLOATING;
@@ -8573,6 +8578,10 @@ public final class OwnershipPlanner {
         if (anchorSourceId <= 0) return false;
         ResolvedPageItem item = data.getPageItem(String.valueOf(anchorSourceId));
         if (item == null || item.sourceHidden()) return false;
+        if (hasResolvedAnchoredPagePosition(anchorSourceId)
+                || hasIdmlAnchoredPagePosition(anchorSourceId)) {
+            return false;
+        }
         if (!item.storyTextInlineSlot() && !hasIdmlStoryInlineAnchor(anchorSourceId)) return false;
         if (!idmlInlineAnchorParagraphHasVisibleText(anchorSourceId)
                 && !hasResolvedInlineAnchorForSourceId(anchorSourceId)) {
