@@ -1354,11 +1354,26 @@ class MathProcessor {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) continue;
             ASTTextRun sub = (ASTTextRun) item;
-            if (!sub.subscript() || sub.superscript()) continue;
+            if (!isSubscriptEvidence(sub)) continue;
             String subText = sub.text();
-            if (subText == null || !subText.matches("[0-9]{1,2}")) continue;
-            if (!(items.get(i - 1) instanceof ASTTextRun)) continue;
-            ASTTextRun base = (ASTTextRun) items.get(i - 1);
+            if (subText == null) continue;
+            // 첨자 런 꼬리의 공백(어절 간 hairspace 등)은 수식 뒤로 보존한다.
+            String subTrailing = "";
+            java.util.regex.Matcher wsm = TRAILING_WHITESPACE.matcher(subText);
+            if (wsm.find()) {
+                subTrailing = wsm.group();
+                subText = subText.substring(0, subText.length() - subTrailing.length());
+            }
+            if (!subText.matches("[0-9]{1,2}")) continue;
+            // 직전의 빈 텍스트런(첨자 잔여물)은 건너뛰고 실제 base 를 찾는다.
+            int baseIdx = i - 1;
+            while (baseIdx >= 0 && items.get(baseIdx) instanceof ASTTextRun) {
+                String bt = ((ASTTextRun) items.get(baseIdx)).text();
+                if (bt != null && !bt.isEmpty()) break;
+                baseIdx--;
+            }
+            if (baseIdx < 0 || !(items.get(baseIdx) instanceof ASTTextRun)) continue;
+            ASTTextRun base = (ASTTextRun) items.get(baseIdx);
             if (base.subscript() || base.superscript()) continue;
             // 이탤릭 라틴은 수학 변수/기하 라벨(B_1 등) — 화학식으로 보지 않는다.
             if (base.fontStyle() != null && base.fontStyle().toLowerCase(java.util.Locale.ROOT).contains("italic")) continue;
@@ -1389,13 +1404,26 @@ class MathProcessor {
                 if (!(items.get(j) instanceof ASTTextRun)) break;
                 ASTTextRun r = (ASTTextRun) items.get(j);
                 String t = r.text();
-                if (t == null || t.isEmpty()) break;
-                if (r.subscript() && t.matches("[0-9]{1,2}")) {
-                    script.append("_{").append(t).append('}');
+                if (t == null || t.isEmpty()) {
                     end = j;
                     continue;
                 }
-                if (r.superscript() && t.matches("[0-9]{0,2}[+−-]")) {
+                if (isSubscriptEvidence(r)) {
+                    java.util.regex.Matcher tw = TRAILING_WHITESPACE.matcher(t);
+                    String tTrail = tw.find() ? tw.group() : "";
+                    String tCore = t.substring(0, t.length() - tTrail.length());
+                    if (tCore.matches("[0-9]{1,2}")) {
+                        script.append("_{").append(tCore).append('}');
+                        end = j;
+                        if (!tTrail.isEmpty()) {
+                            subTrailing = tTrail;
+                            break;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+                if (isSuperscriptEvidence(r) && t.matches("[0-9]{0,2}[+−-]")) {
                     script.append("^{").append(t.replace('−', '-')).append('}');
                     end = j;
                     continue;
@@ -1436,17 +1464,61 @@ class MathProcessor {
 
             // items 반영: [base(rest)] [EQ] [tailPartial(rest)] — 흡수분 제거.
             if (tailPartialRun != null) tailPartialRun.text(tailPartialRest);
-            int removeFrom = i;
             int removeTo = (tailPartialRun != null) ? end - 1 : end;
-            for (int k = removeTo; k >= removeFrom; k--) items.remove(k);
+            for (int k = removeTo; k >= baseIdx + 1; k--) items.remove(k);
+            int eqIdx;
             if (rest.isEmpty()) {
-                items.set(i - 1, eq);
+                items.set(baseIdx, eq);
+                eqIdx = baseIdx;
             } else {
                 base.text(rest);
-                items.add(i, eq);
+                items.add(baseIdx + 1, eq);
+                eqIdx = baseIdx + 1;
             }
+            if (!subTrailing.isEmpty()) {
+                ASTTextRun ws = base.copyWithText(subTrailing);
+                ws.subscript(false);
+                ws.superscript(false);
+                ws.droppedResolvedScriptPosition(null);
+                items.add(eqIdx + 1, ws);
+            }
+            i = eqIdx;
         }
     }
+
+    /**
+     * 아래첨자 증거: 문자속성 첨자, SPEC-045 가드로 폐기된 resolved 첨자 힌트,
+     * 또는 첨자 charStyle 이름(하부자). 이름 증거는 SPEC-053 가드(도형 라벨)에
+     * 막힌 진짜 화학식 첨자를 살린다 — 앵커의 "1~2자리 숫자 + 직전 원소기호"
+     * 조건이 도형 라벨·계수 케이스를 차단하므로 여기선 이름만 본다.
+     */
+    private static boolean isSubscriptEvidence(ASTTextRun r) {
+        if (r == null || r.superscript()) return false;
+        return r.subscript()
+                || "subscript".equals(r.droppedResolvedScriptPosition())
+                || charStyleNameScript(r, false);
+    }
+
+    private static boolean isSuperscriptEvidence(ASTTextRun r) {
+        if (r == null || r.subscript()) return false;
+        return r.superscript()
+                || "superscript".equals(r.droppedResolvedScriptPosition())
+                || charStyleNameScript(r, true);
+    }
+
+    private static boolean charStyleNameScript(ASTTextRun r, boolean superscript) {
+        String s = r.characterStyleRef();
+        if (s == null) return false;
+        s = s.toLowerCase(Locale.ROOT).replace("%3a", ":").replace("%25", "%");
+        if (s.contains("정체") || s.contains("정자")) return false;
+        if (superscript) {
+            return s.contains("superscript") || s.contains("상부자") || s.contains("위첨자");
+        }
+        return s.contains("subscript") || s.contains("하부자") || s.contains("아래첨자");
+    }
+
+    private static final java.util.regex.Pattern TRAILING_WHITESPACE =
+            java.util.regex.Pattern.compile("[\\s\u200A\u2028\u00A0]+$");
 
     private static final java.util.regex.Pattern LEADING_CHEM_CONTINUATION =
             java.util.regex.Pattern.compile("^(?:[0-9]{0,2}(?:[A-Z][a-z]?)+|[0-9]{1,2})");
@@ -2024,7 +2096,13 @@ class MathProcessor {
             // 유실된다 (SPEC-042 실패 기록 3·4·5 — 계수만 백필해도 같은 문단의
             // 첨자가 깨지는 양방향 상호작용 실측). 숫자 런은 전부 제외한다.
             String outText = outRun.text() == null ? "" : outRun.text().trim();
-            if (outText.matches("\\d{1,2}")) continue;
+            if (outText.matches("\\d{1,2}")) {
+                // SPEC-042: 첨자 속성 백필은 재그룹핑 회귀를 낳아 금지. 대신
+                // SPEC-055 화학식 세그먼트 앵커용 힌트만 남긴다 (스타일·그룹핑 불변).
+                if (src.subscript()) outRun.droppedResolvedScriptPosition("subscript");
+                else if (src.superscript()) outRun.droppedResolvedScriptPosition("superscript");
+                continue;
+            }
             if (outRun.fontSizeHwpunits() == null && src.fontSizeHwpunits() != null) {
                 outRun.fontSizeHwpunits(src.fontSizeHwpunits());
             }

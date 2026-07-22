@@ -113,3 +113,24 @@ CHEM_FORMULA 의 hwpScript 는 이미 HWP 수식 문법(`_`/`^`/`rarrow`)으로 
 - [x] 한글 육안 확인 (p20 등)
 - [ ] 타 교과서 회귀: 수학 u5 p166 (SPEC-050/051 각·도 조각), 이탤릭 라벨 AB
       — 수학 교과서 재추출 필요 시점에 확인
+
+## 잔여 (미해결, ~10건 — p18 계열)
+
+일부 N₂/H₂/H₂O 가 여전히 평문으로 남는다 (u1 기준 원소+숫자 인접 10쌍:
+"화학식은 N₂H₄이다", "물(H₂O)", "수소(H₂)", 모형 라벨 N2H2 등).
+
+**진단 기록 (반복 금지)**: 이 런들은 resolved 에 완전한 증거(position=SUBSCRIPT,
+charStyle=첨자-하부자, BT 폰트)가 있는데 AST 도착 시 전부 소실
+(sub=false/hint=null/cs=null). BT 폰트라 수식 그룹핑에 진입 → materialization
+거절 → 재방출 경로에서 증거가 벗겨지는 것으로 추정. 아래 4개 지점의 힌트
+보관/전파를 시도했으나 **모두 실제 경로에 닿지 않음** (equations 58 불변):
+1. `applyPositionStyle` 폐기 분기 힌트 (SPEC-045 가드)
+2. `isSubscriptEvidence` 에 charStyle 이름 증거 추가
+3. `cloneRunWithText`/`copyRun` 계열 힌트 전파 (4곳)
+4. `backfillFlushedTextRunStyles` 숫자 런 분기 힌트 (SPEC-042 인접)
+
+다음 세션: seg-debug(문단 아이템 덤프)를 flush 직전·직후에 넣어 어느 재방출
+경로가 증거를 벗기는지 확정할 것. 후보: `flushResolvedMathGroupWithBackfill`
+의 어댑터 재해석 산출물, `splitEHKoreanMixedTextRuns`, StoryLoader 의
+resolved-split 재구성. 힌트 배관(ASTTextRun.droppedResolvedScriptPosition,
+hasSameStyle 비교 포함)은 이미 깔려 있고 회귀 0 검증됨.

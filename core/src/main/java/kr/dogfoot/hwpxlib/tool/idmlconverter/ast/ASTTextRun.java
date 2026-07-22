@@ -24,6 +24,10 @@ public class ASTTextRun extends ASTInlineItem {
     private Short horizontalScale; // 장평 (%, 100 = normal)
     private Short verticalScale;   // 세로 비율 (%, 100 = normal)
     private Short baselineShift;   // 기준선 이동 (%, 양수=위)
+    // SPEC-055: resolved 가 첨자 위치를 보고했지만 SPEC-045 가드(IDML 비첨자 증거)로
+    // 폐기된 경우의 힌트 ("subscript"/"superscript"). 화학식 세그먼트 수식화가
+    // 앵커 판정에만 사용하며 HWPX 문자속성으로는 나가지 않는다.
+    private String droppedResolvedScriptPosition;
     private boolean grepStyleApplied; // GREP 스타일에서 색상/폰트가 동적 적용됨 (resolved 보강 시 보호)
     private boolean explicitNormalPosition; // SPEC-053: IDML/resolved position 이 명시적 NORMAL(첨자 아님)
 
@@ -86,6 +90,9 @@ public class ASTTextRun extends ASTInlineItem {
     public Short baselineShift() { return baselineShift; }
     public void baselineShift(Short v) { this.baselineShift = v; }
 
+    public String droppedResolvedScriptPosition() { return droppedResolvedScriptPosition; }
+    public void droppedResolvedScriptPosition(String v) { this.droppedResolvedScriptPosition = v; }
+
     public boolean grepStyleApplied() { return grepStyleApplied; }
     public void grepStyleApplied(boolean v) { this.grepStyleApplied = v; }
 
@@ -108,6 +115,9 @@ public class ASTTextRun extends ASTInlineItem {
                 && Objects.equals(horizontalScale, other.horizontalScale)
                 && Objects.equals(verticalScale, other.verticalScale)
                 && Objects.equals(baselineShift, other.baselineShift)
+                // SPEC-055: 폐기된 resolved 첨자 힌트가 다른 런과 병합되면 화학식
+                // 세그먼트 앵커 증거가 소실된다 ("N"+"2"→"N2" 병합 실측).
+                && Objects.equals(droppedResolvedScriptPosition, other.droppedResolvedScriptPosition)
                 && grepStyleApplied == other.grepStyleApplied;
     }
 
@@ -131,6 +141,7 @@ public class ASTTextRun extends ASTInlineItem {
         copy.horizontalScale(horizontalScale);
         copy.verticalScale(verticalScale);
         copy.baselineShift(baselineShift);
+        copy.droppedResolvedScriptPosition(droppedResolvedScriptPosition);
         copy.grepStyleApplied(grepStyleApplied);
         copy.explicitNormalPosition(explicitNormalPosition);
         return copy;

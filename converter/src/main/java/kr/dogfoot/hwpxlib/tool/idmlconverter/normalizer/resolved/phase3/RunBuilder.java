@@ -197,6 +197,23 @@ class RunBuilder {
         // sources encode this as Position=SUBSCRIPT without a baselineShift,
         // so the baselineShift heuristic below is not sufficient on its own.
         applyPositionStyle(tr, rr, cr);
+        // SPEC-055: 첨자 증거가 IDML charStyle 이름(첨자-하부자 등)에만 있는 런.
+        // resolved 가 reliable+charStyle 없음이면 resolvedCharacterStyleRef 가 IDML
+        // charStyle 을 폐기해 AST 에 아무 증거도 안 남는다 (실측: N₂H₄ 문장).
+        // 문자속성은 바꾸지 않고 화학식 세그먼트 앵커용 힌트만 남긴다.
+        if (!tr.subscript() && !tr.superscript()
+                && tr.droppedResolvedScriptPosition() == null
+                && cr != null && isScriptCharacterStyle(cr.appliedCharacterStyle())) {
+            String cs = cr.appliedCharacterStyle().toLowerCase(Locale.ROOT)
+                    .replace("%3a", ":").replace("%25", "%");
+            if (!cs.contains("정체") && !cs.contains("정자")) {
+                if (cs.contains("하부자") || cs.contains("아래첨자") || cs.contains("subscript")) {
+                    tr.droppedResolvedScriptPosition("subscript");
+                } else if (cs.contains("상부자") || cs.contains("위첨자") || cs.contains("superscript")) {
+                    tr.droppedResolvedScriptPosition("superscript");
+                }
+            }
+        }
         // baselineShift: InDesign에서 작은 글자 + 양수 baselineShift = 위첨자,
         // 작은 글자 + 음수 baselineShift = 아래첨자 패턴을 감지하여 sup/subscript로 변환
         // resolved 우선, IDML CR fallback
@@ -333,6 +350,13 @@ class RunBuilder {
         // 첨자 계열 charStyle 아님)인데 resolved 만 script 를 주장하면 무시한다.
         if (resolvedPosition != null && idmlPosition == null
                 && cr != null && !isScriptCharacterStyle(cr.appliedCharacterStyle())) {
+            // SPEC-055: 폐기하되 힌트로 남긴다. Position 속성만으로 조판된 화학식
+            // 첨자(p18 캡션의 N₂/H₂ — IDML charStyle 없음)는 이 가드에 걸리지만,
+            // 화학식 세그먼트 수식화(convertSubscriptChemicalSegments)의 "직전
+            // 원소기호" 앵커가 SPEC-045 계수 케이스와 구분해 안전하게 살릴 수 있다.
+            String rp = resolvedPosition.toLowerCase(Locale.ROOT);
+            if (rp.contains("subscript")) target.droppedResolvedScriptPosition("subscript");
+            else if (rp.contains("superscript")) target.droppedResolvedScriptPosition("superscript");
             resolvedPosition = null;
         }
 
@@ -926,6 +950,7 @@ class RunBuilder {
         tr.grepMathFont(src.grepMathFont());
         tr.subscript(src.subscript());
         tr.superscript(src.superscript());
+        tr.droppedResolvedScriptPosition(src.droppedResolvedScriptPosition());
         tr.underline(src.underline());
         tr.underlineShape(src.underlineShape());
         tr.underlineColor(src.underlineColor());
