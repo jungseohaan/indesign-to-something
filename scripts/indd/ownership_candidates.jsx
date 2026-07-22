@@ -44,6 +44,40 @@ function _isSimpleMarkerLabelTextForOwnership(text) {
     return false;
 }
 
+// SPEC-048: 게이지형 벡터 그래픽 판정.
+// storyTextInlineSlot=true + FLOATING_ANCHORED 인 Group 이 GraphicLine(눈금선·화살표)
+// 다수를 품으면 게이지다. 라벨(배경도형+텍스트)은 GraphicLine 0개라 구분된다.
+// 게이지는 편집 텍스트("100%")를 분리하지 않고 통짜 PNG + 페이지 좌표 floating 배치한다.
+// (eval 모듈 로드에서 파일 간 전역 var 는 공유되지 않아 함수로 정의)
+function _gaugeLikeGraphicLineMin() { return 8; }
+
+function _gaugeGraphicLineDescendantCountFromMaps(sourceId, sourceInfoById, childIdsByParentId) {
+    var count = 0;
+    var stack = [sourceId];
+    var seen = {};
+    while (stack.length > 0) {
+        var id = stack.pop();
+        var key = String(id);
+        if (seen[key]) continue;
+        seen[key] = true;
+        var children = (childIdsByParentId && childIdsByParentId[key]) || [];
+        for (var i = 0; i < children.length; i++) {
+            var child = sourceInfoById ? sourceInfoById[String(children[i])] : null;
+            if (child && String(child.kind || "") === "GraphicLine") count++;
+            stack.push(children[i]);
+        }
+    }
+    return count;
+}
+
+function _isGaugeLikeFloatingAnchoredInlineGroupByMaps(sourceInfo, sourceInfoById, childIdsByParentId) {
+    if (!sourceInfo || String(sourceInfo.kind || "") !== "Group") return false;
+    if (sourceInfo.storyTextInlineSlot !== true) return false;
+    if (String(sourceInfo.storyAnchorPlacement || "").toUpperCase() !== "FLOATING_ANCHORED") return false;
+    return _gaugeGraphicLineDescendantCountFromMaps(sourceInfo.id, sourceInfoById, childIdsByParentId)
+            >= _gaugeLikeGraphicLineMin();
+}
+
 function _candidateId(passId, sourceId, pageIndex) {
     var safePass = String(passId || "pass.unknown").replace(/[^A-Za-z0-9_.-]/g, "_");
     if (sourceId !== null && sourceId !== undefined) return "cand." + safePass + ".page." + pageIndex + ".src." + sourceId;
@@ -438,7 +472,10 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
         var editableTextFrameIds = directEditableTextChildren(sourceEntry.id);
         if (!editableTextFrameIds || editableTextFrameIds.length === 0) continue;
         var completeMarkerOwnsText = _inlineCompositeCompletePngDecisionForOwnership(
-                shellItem, editableTextFrameIds);
+                shellItem, editableTextFrameIds)
+                // SPEC-048: 게이지는 "100%" 가 simple marker 가 아니어도 통짜 PNG 로 소유
+                || _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
+                        sourceEntry, sourceInfoById, childIdsByParentId);
         var sourceObjectIds = completeMarkerOwnsText
                 ? closedSourceSubtree(sourceEntry.id)
                 : _sortedNumericIds([sourceEntry.id].concat(editableTextFrameIds));

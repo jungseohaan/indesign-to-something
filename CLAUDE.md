@@ -299,6 +299,9 @@ packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 - **표 전용 TF 는 hasText=false — 인라인 그룹의 표가 통PNG 로 구워짐**: 콘텐츠가 표 앵커 제어문자(U+0016)뿐인 TextFrame 은 `_textFrameHasContent`/`hasText` 판정이 거짓 → 인라인 앵커 그룹(표 TF + 배경 rect)이 편집 텍스트 없음으로 오분류돼 표 텍스트째 PNG 렌더 + Java 편집 테이블과 중복. 표 소유 여부는 `storyHasVisibleTableCellText` 로 판정할 것. 배경 rect 셀 fill 흡수는 `PLACE_TABLE_STYLE` plan 의 styleSourceObjectIds 경유인데, style 소스 수집의 `isInline` 무조건 배제가 같은 앵커 그룹 형제 rect 를 누락시킴 → 표 소유 TF 가 인라인이면 허용 (`_isTableAttributeStyleSource` allowInlineFlow, p47 사례, PR #85)
 - **캐리어 셀 흡수 테이블의 fixedOuterBounds 리셋 금지**: `normalizeNestedInlineTable` 이 `fixedOuterBounds(false)` 로 되돌리면 `HwpxTableBuilder.inlineFlowChunks` 가 다행 인라인 테이블을 행별 1×N 조각으로 분리한다 (p47 2×5 → 1×5 두 개 사례). resolved 가 외곽 경계를 아는 테이블은 흡수 후에도 플래그 보존
 
+- **jsx eval 모듈 로드는 함수만 공유, 전역 `var` 는 공유 안 됨**: `extract_indd.jsx` 가 `scripts/indd/*.jsx` 를 eval 로드할 때 파일 간 공유되는 것은 **함수 선언뿐**이다. 한 파일의 top-level `var` 상수를 다른 파일에서 참조하면 런타임 ReferenceError 로 추출 전체가 실패한다 → 공유 상수는 `function _foo() { return v; }` 로 정의 (SPEC-048 사례)
+- **인라인 시각물 seed 는 3곳 — 하나만 고치면 안 바뀐다**: `pass.inline_objects` candidate 는 `_appendInlineObjectExtractionCandidates`(34소스), `_appendSourceDeclaredInlineShellCandidates`(2소스), `_appendInlineFlowVisualRootCandidates`(root 기반, `_pushExtractionCandidate` **우회** 직접 push) 3경로에서 중복 생성된다. 소유권 분류를 바꿀 땐 3곳 모두 같은 판정을 넣어야 한다. 또한 `_pushExtractionCandidate` 는 attrs 중 **정해진 필드만 복사** — `placement`/`ownershipSlot`/`textAction`/`materialization` 등은 조용히 버려지고 bundle/object_plans 가 재계산한다. placement 를 바꾸려면 `_objectPlanPlacement` 의 입력(예: `pagePositionedAnchoredSource`)을 바꿀 것 (SPEC-048 사례)
+
 ### 환경
 - **Java 경로**: macOS Homebrew `/opt/homebrew/opt/openjdk/bin/java`
 - **데스크탑 추출 경로**: `/var/folders/.../T/indd-extract-{timestamp}/`

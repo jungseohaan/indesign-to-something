@@ -658,7 +658,12 @@ function _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex)
     for (var i = 0; i < sourceIds.length; i++) {
         var src = clusterIndex.sourceInfo(sourceIds[i]);
         if (!src) continue;
-        if (_plannerBundleSourceIsStoryFlowInline(src)) continue;
+        // SPEC-048: 게이지형(FLOATING_ANCHORED + GraphicLine 다수) Group 은
+        // storyTextInlineSlot=true 여도 페이지 좌표 배치 대상이다.
+        if (_plannerBundleSourceIsStoryFlowInline(src)
+                && !_plannerBundleSourceIsGaugeLikePagePositionedAnchor(src, clusterIndex)) {
+            continue;
+        }
         if (String(src.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED"
                 || String(src.anchoredPosition || "").toUpperCase() === "ANCHORED") {
             cache[cacheKey] = true;
@@ -667,6 +672,26 @@ function _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex)
     }
     cache[cacheKey] = false;
     return false;
+}
+
+function _plannerBundleSourceIsGaugeLikePagePositionedAnchor(src, clusterIndex) {
+    if (!src || String(src.kind || "") !== "Group") return false;
+    if (src.storyTextInlineSlot !== true) return false;
+    if (String(src.storyAnchorPlacement || "").toUpperCase() !== "FLOATING_ANCHORED") return false;
+    var cache = _plannerBundleCache(clusterIndex, "gaugeLikePagePositionedAnchorBySource");
+    var cacheKey = String(src.id);
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
+    var descendants = _plannerBundleDescendantSourceObjectIds(clusterIndex, src.id);
+    var count = 0;
+    for (var i = 0; i < descendants.length; i++) {
+        if (String(descendants[i]) === String(src.id)) continue;
+        var child = clusterIndex && clusterIndex.sourceInfo
+                ? clusterIndex.sourceInfo(descendants[i])
+                : null;
+        if (child && String(child.kind || "") === "GraphicLine") count++;
+    }
+    cache[cacheKey] = count >= _gaugeLikeGraphicLineMin();
+    return cache[cacheKey];
 }
 
 function _plannerBundleSourceIsStoryFlowInline(src) {
