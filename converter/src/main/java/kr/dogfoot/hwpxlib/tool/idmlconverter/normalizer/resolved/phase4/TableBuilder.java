@@ -3199,6 +3199,9 @@ public final class TableBuilder {
                 ASTTableCell astCell = findAstCell(astRow, idmlCell.columnIndex());
                 if (astCell == null) continue;
                 for (String storyRef : idmlCell.textFrameStoryRefs()) {
+                    if (StoryFlowAssembler.isStoryOwnedByInlineTextShellPlan(ctx, storyRef)) {
+                        continue;
+                    }
                     if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)
                             && !StoryFlowAssembler.shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef)) {
                         continue;

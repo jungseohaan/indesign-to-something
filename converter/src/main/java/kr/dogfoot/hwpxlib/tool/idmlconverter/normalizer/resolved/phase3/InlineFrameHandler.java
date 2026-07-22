@@ -5430,9 +5430,12 @@ public class InlineFrameHandler {
                 item = buildNativeInlineShellObject(ctx, plan, anchoredObjectId, childTfs);
             } else {
                 RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, anchoredObjectId);
-                int shellId = shell != null ? shell.id() : plan.domId;
-                ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shellId));
-                item = buildInlineShellObject(ctx, shellId, anchorItem, childTfs, shell, plan);
+                if (shell == null) {
+                    item = buildSourceNativeInlineShellObject(ctx, plan, anchoredObjectId, childTfs);
+                } else {
+                    ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
+                    item = buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell, plan);
+                }
             }
             if (item == null) continue;
             item.keepInline(true);
@@ -5498,11 +5501,11 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.resolvedData == null) return null;
         String anchorId = String.valueOf(anchoredObjectId);
         Set<String> descendants = ctx.descendantSet(anchorId, 8);
-        if (descendants == null || descendants.isEmpty()) return null;
+        if (descendants == null) descendants = new HashSet<>();
 
         List<InlineLayoutChildText> candidates = new ArrayList<>();
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
-            if (!isExecutableInlineLayoutChildText(ctx, tf, descendants)) continue;
+            if (!isExecutableInlineLayoutChildText(ctx, tf, anchoredObjectId, descendants)) continue;
             List<ASTInlineItem> items = materializeInlineLayoutChildText(ctx, anchoredObjectId, tf);
             if (items == null || items.isEmpty()) continue;
             double[] bounds = bestTextFrameBounds(tf);
@@ -5533,22 +5536,34 @@ public class InlineFrameHandler {
                 && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
                 && plan.visualAction == VisualAction.DROP_VISUAL
                 && plan.textAction == TextAction.DROP_TEXT
-                && ("layout_only_inline_slot".equals(plan.slotRole)
+                && ((plan.kind != null && plan.kind.startsWith("layout_only_inline_slot:"))
+                || "layout_only_inline_slot".equals(plan.slotRole)
+                || "planner_declared_layout_only_inline_slot".equals(plan.reason)
                 || "page_plane_absorbed_inline_anchor_layout_slot".equals(plan.reason));
     }
 
     private static boolean isExecutableInlineLayoutChildText(
             ResolvedBuildContext ctx,
             ResolvedTextFrame tf,
+            int anchoredObjectId,
             Set<String> descendants) {
         if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return false;
-        ResolvedPageItem item = ctx.resolvedData.getPageItem(tf.id());
-        if (item == null || item.parentId() == null) return false;
-        if (!descendants.contains(tf.id()) && !descendants.contains(item.parentId())) return false;
-        if (!tf.isInline()) return false;
         int tfDomId = parseDecimalId(tf.id());
         if (tfDomId < 0) return false;
-        if (!ctx.ownershipPlanPlacesInlineHwpxText(tfDomId)) return false;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(tf.id());
+        if (item == null) return false;
+        boolean isAnchorTextFrame = tfDomId == anchoredObjectId;
+        String parentId = item.parentId();
+        if (!isAnchorTextFrame
+                && (parentId == null
+                || (!descendants.contains(tf.id()) && !descendants.contains(parentId)))) {
+            return false;
+        }
+        if (!tf.isInline()) return false;
+        if (!ctx.ownershipPlanPlacesInlineHwpxText(tfDomId)
+                && !isSingleOwnerTextFlow(ctx, tf)) {
+            return false;
+        }
         if (ctx.isTextDisposed(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED)) return false;
         if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return false;
         String visible = normalizeInlineShellText(tf.frameVisibleText());
@@ -5566,6 +5581,14 @@ public class InlineFrameHandler {
         if (plannedShell != null) {
             List<ASTInlineItem> out = new ArrayList<>();
             out.add(plannedShell);
+            return out;
+        }
+
+        ResolvedPageItem textFrameItem = ctx.resolvedData.getPageItem(tf.id());
+        ASTInlineObject sourceNativeShell = buildNativeInlineShellObjectFromSourceItem(ctx, textFrameItem, tf);
+        if (sourceNativeShell != null) {
+            List<ASTInlineItem> out = new ArrayList<>();
+            out.add(sourceNativeShell);
             return out;
         }
 
@@ -6311,9 +6334,11 @@ public class InlineFrameHandler {
         }
 
         RenderedGroup shell = findRenderedGroupForDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
-        int shellId = shell != null ? shell.id() : plan.domId;
-        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shellId));
-        return buildInlineShellObject(ctx, shellId, anchorItem, childTfs, shell, plan);
+        if (shell == null) {
+            return buildSourceNativeInlineShellObject(ctx, plan, anchoredObjectId, childTfs);
+        }
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
+        return buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell, plan);
     }
 
     public static List<ASTInlineObject> loadPlannedInlineTextShellsForAnchor(
@@ -6342,9 +6367,12 @@ public class InlineFrameHandler {
                 item = buildNativeInlineShellObject(ctx, plan, anchoredObjectId, childTfs);
             } else {
                 RenderedGroup shell = findRenderedGroupForDirectInlineAnchorPlan(ctx, plan, anchoredObjectId);
-                int shellId = shell != null ? shell.id() : plan.domId;
-                ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shellId));
-                item = buildInlineShellObject(ctx, shellId, anchorItem, childTfs, shell, plan);
+                if (shell == null) {
+                    item = buildSourceNativeInlineShellObject(ctx, plan, anchoredObjectId, childTfs);
+                } else {
+                    ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
+                    item = buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell, plan);
+                }
             }
             if (item == null) return null;
             item.keepInline(true);
@@ -6410,6 +6438,105 @@ public class InlineFrameHandler {
         }
         if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return null;
         return obj;
+    }
+
+    private static ASTInlineObject buildSourceNativeInlineShellObject(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            int anchoredObjectId,
+            List<ResolvedTextFrame> childTfs) {
+        if (!canExecuteSourceNativeInlineShellPlan(ctx, shellPlan, anchoredObjectId, childTfs)) {
+            return null;
+        }
+        ResolvedPageItem shellItem = findSourceNativeInlineShellStyleItem(ctx, shellPlan, anchoredObjectId);
+        if (shellItem == null) return null;
+        double[] shellBounds = validBounds(shellPlan.bounds) ? shellPlan.bounds : shellItem.geometricBounds();
+        if (!validBounds(shellBounds)) return null;
+        double w = Math.abs(shellBounds[3] - shellBounds[1]) * ctx.scaleFactor;
+        double h = Math.abs(shellBounds[2] - shellBounds[0]) * ctx.scaleFactor;
+        if (w <= 0 || h <= 0) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        int sourceId = anchoredObjectId >= 0 ? anchoredObjectId : shellPlan.domId;
+        if (sourceId < 0 && childTfs.size() == 1) {
+            sourceId = parseDecimalId(childTfs.get(0).id());
+        }
+        if (sourceId >= 0) {
+            obj.sourceId("u" + Integer.toHexString(sourceId));
+        }
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.keepInline(true);
+        obj.nativeGraphicsAllowed(true);
+        applyInlineShellShapeStyle(ctx, shellItem, obj);
+        applyOwnedTextFrameShellShapeStyle(ctx, childTfs, obj);
+        applyPlannedInlineExecutionHints(obj, shellPlan);
+        obj.noAutoLineWrap(childTfs.size() == 1 && shouldUseNoAutoLineWrap(childTfs.get(0), true));
+        obj.verticalJustification(inlineTextShellVerticalJustification(ctx, shellPlan, shellItem, childTfs));
+        applyInlineShellTextMargins(ctx, obj, shellPlan, shellItem, childTfs);
+        if (visibleShellTextFrameCount(childTfs) > 1) {
+            buildCompositeInlineShellParagraph(ctx, childTfs, obj);
+        } else {
+            for (ResolvedTextFrame childTf : childTfs) {
+                if (isOrcCarrierTextFrame(childTf)) continue;
+                buildBadgeParagraph(ctx, childTf, obj);
+            }
+        }
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return null;
+        for (ResolvedTextFrame childTf : childTfs) {
+            markInlineShellChildTextPlaced(ctx, childTf);
+        }
+        return obj;
+    }
+
+    private static boolean canExecuteSourceNativeInlineShellPlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            int anchoredObjectId,
+            List<ResolvedTextFrame> childTfs) {
+        if (ctx == null || ctx.resolvedData == null || shellPlan == null
+                || childTfs == null || childTfs.isEmpty()) {
+            return false;
+        }
+        if (shellPlan.placement != Placement.INLINE
+                || shellPlan.coordinateSpace != CoordinateSpace.STORY_FLOW
+                || shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                || shellPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                || !ShellRole.isTextShell(shellPlan)
+                || !hasHwpxTextOwnershipForChildren(ctx, shellPlan, childTfs)) {
+            return false;
+        }
+        return findSourceNativeInlineShellStyleItem(ctx, shellPlan, anchoredObjectId) != null;
+    }
+
+    private static ResolvedPageItem findSourceNativeInlineShellStyleItem(
+            ResolvedBuildContext ctx,
+            ObjectPlan shellPlan,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || shellPlan == null) return null;
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
+        if (isSourceNativeInlineShellStyleSource(shellPlan, anchorItem)) return anchorItem;
+        int[] styleIds = shellPlan.styleSourceObjectIds != null && shellPlan.styleSourceObjectIds.length > 0
+                ? shellPlan.styleSourceObjectIds
+                : shellPlan.visualSourceObjectIds;
+        if (styleIds != null) {
+            for (int styleId : styleIds) {
+                ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(styleId));
+                if (isSourceNativeInlineShellStyleSource(shellPlan, item)) return item;
+            }
+        }
+        ResolvedPageItem planItem = ctx.resolvedData.getPageItem(String.valueOf(shellPlan.domId));
+        return isSourceNativeInlineShellStyleSource(shellPlan, planItem) ? planItem : null;
+    }
+
+    private static boolean isSourceNativeInlineShellStyleSource(ObjectPlan shellPlan, ResolvedPageItem item) {
+        if (shellPlan == null || item == null || !hasVisibleFillOrStroke(item)) return false;
+        int itemId = parseIntOrDefault(item.id(), -1);
+        return containsInt(shellPlan.sourceObjectIds, itemId)
+                || containsInt(shellPlan.visualSourceObjectIds, itemId)
+                || containsInt(shellPlan.styleSourceObjectIds, itemId)
+                || shellPlan.domId == itemId;
     }
 
     private static boolean isExecutableNativeInlineShellPlan(ObjectPlan shellPlan) {
@@ -6582,7 +6709,10 @@ public class InlineFrameHandler {
         }
 
         RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, plan.domId);
-        if (shell == null) return null;
+        if (shell == null) {
+            int anchorId = plan.domId >= 0 ? plan.domId : textFrameDomId;
+            return buildSourceNativeInlineShellObject(ctx, plan, anchorId, childTfs);
+        }
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
         return buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell);
     }
