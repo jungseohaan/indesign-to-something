@@ -221,8 +221,88 @@ public class ASTTableConverter {
         // 마지막 빈 단락 제거
         ASTPageProcessor.removeTrailingEmptyParagraphs(cell.paragraphs());
         replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
+        appendNestedTextFrameTablesFromStoryRefs(
+                cell, idmlCell, idmlDoc, colorResolver, imageLoader, resolvedData);
 
         return cell;
+    }
+
+    private static void appendNestedTextFrameTablesFromStoryRefs(
+            ASTTableCell cell,
+            IDMLTableCell idmlCell,
+            IDMLDocument idmlDoc,
+            ColorResolver colorResolver,
+            ASTImageLoader imageLoader,
+            ResolvedData resolvedData) {
+        if (cell == null || idmlCell == null || idmlDoc == null
+                || idmlCell.textFrameStoryRefs() == null
+                || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return;
+        }
+        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            IDMLStory nestedStory = storyRef != null ? idmlDoc.getStory(storyRef) : null;
+            if (nestedStory == null || !nestedStory.hasTables() || nestedStory.tables() == null) continue;
+            for (IDMLTable nestedTable : nestedStory.tables()) {
+                if (nestedTable == null || inlineTableAlreadyPresent(cell, nestedTable.selfId())) continue;
+                ASTTable nestedAst = convertTableSimple(
+                        nestedTable,
+                        0, 0, 0,
+                        idmlDoc,
+                        colorResolver,
+                        imageLoader,
+                        resolvedData);
+                if (nestedAst == null) continue;
+                if (cellHasOnlyObjectPlaceholder(cell)) {
+                    cell.paragraphs().clear();
+                }
+                ASTParagraph paragraph = new ASTParagraph();
+                paragraph.inlineTable(nestedAst);
+                cell.addParagraph(paragraph);
+            }
+        }
+    }
+
+    private static boolean inlineTableAlreadyPresent(ASTTableCell cell, String sourceId) {
+        if (cell == null || sourceId == null || cell.paragraphs() == null) return false;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null) continue;
+            if (sourceId.equals(paragraph.inlineTable() != null ? paragraph.inlineTable().sourceId() : null)) {
+                return true;
+            }
+            if (paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.inlineTables() == null) continue;
+                for (ASTTable table : obj.inlineTables()) {
+                    if (table != null && sourceId.equals(table.sourceId())) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean cellHasOnlyObjectPlaceholder(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null || cell.paragraphs().isEmpty()) return false;
+        boolean sawObject = false;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null) return false;
+            if (paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null && !text.replace("\uFFFC", "").trim().isEmpty()) return false;
+                    continue;
+                }
+                if (item instanceof ASTInlineObject) {
+                    sawObject = true;
+                    continue;
+                }
+                return false;
+            }
+        }
+        return sawObject;
     }
 
     /**
@@ -387,6 +467,128 @@ public class ASTTableConverter {
             ensureRowsFitVisibleCellContent(table);
         }
         return table;
+    }
+
+    public static ASTTable convertResolvedTableSimple(
+            ResolvedTable resolvedTable,
+            long x,
+            long y,
+            int zOrder,
+            ResolvedData resolvedData) {
+        if (resolvedTable == null) return null;
+        ASTTable table = new ASTTable();
+        table.sourceId(resolvedTable.id());
+        table.zOrder(zOrder);
+        table.x(x);
+        table.y(y);
+
+        double scale = resolvedData != null ? resolvedData.scaleFactor() : 2.8346;
+        int colCount = Math.max(0, resolvedTable.columnCount());
+        double[] columnWidths = resolvedTable.columnWidths();
+        if (columnWidths != null && columnWidths.length > 0) {
+            for (double cw : columnWidths) {
+                table.addColumnWidth(CoordinateConverter.pointsToHwpunits(cw));
+            }
+            colCount = columnWidths.length;
+        } else if (colCount > 0 && hasValidBounds(resolvedTable.bounds())) {
+            double totalWidthPt = Math.max(0, resolvedTable.bounds()[3] - resolvedTable.bounds()[1]) * scale;
+            long each = CoordinateConverter.pointsToHwpunits(totalWidthPt / colCount);
+            for (int c = 0; c < colCount; c++) table.addColumnWidth(each);
+        }
+        table.colCount(colCount);
+
+        int rowCount = Math.max(0, resolvedTable.rowCount());
+        double[] rowHeights = resolvedTable.rowHeights();
+        if (rowHeights != null && rowHeights.length > 0) {
+            rowCount = rowHeights.length;
+        }
+
+        long totalHeight = 0;
+        for (int r = 0; r < rowCount; r++) {
+            ASTTableRow row = new ASTTableRow();
+            row.rowIndex(r);
+            long rowHeight = resolvedRowHeight(resolvedTable, rowHeights, r, rowCount, scale);
+            row.rowHeight(rowHeight);
+            row.autoGrow(false);
+            totalHeight += rowHeight;
+
+            if (resolvedTable.cells() != null) {
+                for (ResolvedTable.Cell resolvedCell : resolvedTable.cells()) {
+                    if (resolvedCell == null || resolvedCell.row() != r) continue;
+                    ASTTableCell cell = convertResolvedCell(resolvedCell, resolvedData);
+                    applyResolvedCellSize(table, row, cell);
+                    row.addCell(cell);
+                }
+            }
+            table.addRow(row);
+        }
+        table.rowCount(rowCount);
+
+        long totalWidth = 0;
+        for (long cw : table.columnWidths()) totalWidth += cw;
+        table.width(totalWidth);
+        table.height(totalHeight);
+
+        if (hasValidBounds(resolvedTable.bounds())) {
+            applyPlacementBounds(table, resolvedTable.bounds(), scale);
+            table.fixedOuterBounds(true);
+            lockFixedOuterBoundsRows(table);
+        } else {
+            ensureRowsFitVisibleCellContent(table);
+        }
+        return table;
+    }
+
+    private static long resolvedRowHeight(
+            ResolvedTable resolvedTable,
+            double[] rowHeights,
+            int row,
+            int rowCount,
+            double scale) {
+        if (rowHeights != null && row >= 0 && row < rowHeights.length) {
+            return CoordinateConverter.pointsToHwpunits(rowHeights[row]);
+        }
+        if (rowCount > 0 && hasValidBounds(resolvedTable.bounds())) {
+            double totalHeightPt = Math.max(0, resolvedTable.bounds()[2] - resolvedTable.bounds()[0]) * scale;
+            return CoordinateConverter.pointsToHwpunits(totalHeightPt / rowCount);
+        }
+        return CoordinateConverter.pointsToHwpunits(12);
+    }
+
+    private static ASTTableCell convertResolvedCell(
+            ResolvedTable.Cell resolvedCell,
+            ResolvedData resolvedData) {
+        ASTTableCell cell = new ASTTableCell();
+        cell.rowIndex(resolvedCell.row());
+        cell.columnIndex(resolvedCell.col());
+        cell.rowSpan(resolvedCell.rowSpan());
+        cell.columnSpan(resolvedCell.colSpan());
+        if (!isNoneColor(resolvedCell.fillColor())) {
+            cell.fillColor(resolveTableColor(resolvedData, resolvedCell.fillColor(), resolvedCell.fillTint()));
+        }
+        ResolvedStory cellStory = new ResolvedStory();
+        if (resolvedCell.paragraphs() != null) {
+            for (ResolvedParagraph paragraph : resolvedCell.paragraphs()) {
+                cellStory.addParagraph(paragraph);
+            }
+        }
+        List<ASTParagraph> paragraphs = convertResolvedStoryForCell(cellStory, resolvedData);
+        if (paragraphs != null) {
+            for (ASTParagraph paragraph : paragraphs) {
+                if (paragraph != null) cell.addParagraph(paragraph);
+            }
+        }
+        return cell;
+    }
+
+    private static void applyResolvedCellSize(ASTTable table, ASTTableRow row, ASTTableCell cell) {
+        if (table == null || row == null || cell == null) return;
+        long width = 0;
+        int startCol = Math.max(0, cell.columnIndex());
+        int endCol = Math.min(table.columnWidths().size(), startCol + Math.max(1, cell.columnSpan()));
+        for (int c = startCol; c < endCol; c++) width += table.columnWidths().get(c);
+        cell.width(width);
+        cell.height(row.rowHeight() * Math.max(1, cell.rowSpan()));
     }
 
     private static boolean[][] tableCellOccupancy(IDMLTable table) {

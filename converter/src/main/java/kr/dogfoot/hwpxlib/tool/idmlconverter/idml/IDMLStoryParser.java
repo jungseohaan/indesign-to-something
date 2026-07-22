@@ -1457,8 +1457,20 @@ public class IDMLStoryParser {
         for (IDMLTable table : story.tables()) {
             for (IDMLTableRow row : table.rows()) {
                 for (IDMLTableCell cell : row.cells()) {
+                    collectInlineStoryIdsFromCellStoryRefs(cell, loaded, queue);
                     collectInlineStoryIdsFromParagraphs(cell.paragraphs(), loaded, queue);
                 }
+            }
+        }
+    }
+
+    static void collectInlineStoryIdsFromCellStoryRefs(IDMLTableCell cell,
+                                                       Set<String> loaded,
+                                                       Queue<String> queue) {
+        if (cell == null || cell.textFrameStoryRefs() == null) return;
+        for (String sid : cell.textFrameStoryRefs()) {
+            if (sid != null && !sid.isEmpty() && !loaded.contains(sid)) {
+                queue.add(sid);
             }
         }
     }

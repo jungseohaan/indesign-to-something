@@ -521,6 +521,13 @@ public final class ResolvedBuildContext {
         addAnchoredNestedTableSourceId(plan.nestedTableId);
     }
 
+    public void suppressAnchoredTableSource(String wrapperTableId, String nestedTableId) {
+        addAnchoredTableSourceId(wrapperTableId);
+        addAnchoredTableSourceId(nestedTableId);
+        addAnchoredWrapperTableSourceId(wrapperTableId);
+        addAnchoredNestedTableSourceId(nestedTableId);
+    }
+
     public java.util.List<AnchoredTablePlan> anchoredTablePlansForOwnerTextFrame(int domId) {
         java.util.List<AnchoredTablePlan> plans = anchoredTablePlansByOwnerTextFrameId.get(domId);
         if (plans == null || plans.isEmpty()) return java.util.Collections.emptyList();

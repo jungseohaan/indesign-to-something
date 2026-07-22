@@ -2879,13 +2879,17 @@ public final class TableBuilder {
                 ASTTableCell astCell = findAstCell(astRow, idmlCell.columnIndex());
                 if (astCell == null) continue;
                 for (String storyRef : idmlCell.textFrameStoryRefs()) {
-                    if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)) continue;
+                    if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)
+                            && !StoryFlowAssembler.shouldCellConsumeNestedStoryRef(ctx, idmlCell, storyRef)) {
+                        continue;
+                    }
                     kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory nestedStory =
                             ctx.loadIDMLStory.apply(storyRef);
                     if (nestedStory == null) continue;
                     if (!nestedStory.hasTables()) continue;
                     ResolvedTextFrame nestedOwner = nestedTextFrameOwnerForStory(ctx, storyRef);
                     for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable nestedTable : nestedStory.tables()) {
+                        if (astCellContainsInlineTable(astCell, nestedTable.selfId())) continue;
                         ASTTable nestedAst = buildPreparedAstTable(ctx, nestedTable, 0, 0, 0, true);
                         if (nestedAst == null) continue;
                         absorbTextFrameOutlineIntoTable(ctx, nestedOwner, nestedAst);
@@ -2896,6 +2900,31 @@ public final class TableBuilder {
                 }
             }
         }
+    }
+
+    private static boolean astCellContainsInlineTable(ASTTableCell cell, String sourceId) {
+        if (cell == null || sourceId == null || sourceId.isEmpty()
+                || cell.paragraphs() == null || cell.paragraphs().isEmpty()) {
+            return false;
+        }
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null) continue;
+            if (tableMatchesSource(paragraph.inlineTable(), sourceId)) return true;
+            if (paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.inlineTables() == null) continue;
+                for (ASTTable table : obj.inlineTables()) {
+                    if (tableMatchesSource(table, sourceId)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean tableMatchesSource(ASTTable table, String sourceId) {
+        return table != null && sourceId.equals(table.sourceId());
     }
 
     private static ResolvedTextFrame nestedTextFrameOwnerForStory(

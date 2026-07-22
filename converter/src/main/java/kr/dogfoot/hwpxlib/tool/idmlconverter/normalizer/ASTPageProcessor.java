@@ -1678,6 +1678,7 @@ public class ASTPageProcessor {
     }
 
     private static boolean isEffectivelyEmpty(ASTParagraph para) {
+        if (para.inlineTable() != null) return false;
         if (para.items().isEmpty()) return true;
         for (ASTInlineItem item : para.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {

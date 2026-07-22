@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -15,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.StylePropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
@@ -36,6 +38,7 @@ import org.w3c.dom.Document;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Collections;
@@ -251,6 +254,95 @@ public class StoryConverterTest {
     }
 
     @Test
+    public void tableCellTextFrameStoryRefWithTableBecomesInlineTableFlow() {
+        IDMLTableCell carrierCell = new IDMLTableCell();
+        carrierCell.rowIndex(0);
+        carrierCell.columnIndex(0);
+        carrierCell.addTextFrameStoryRef("u6c6c");
+
+        ResolvedTextFrame nestedFrame = new ResolvedTextFrame();
+        nestedFrame.id("27753");
+        nestedFrame.storyId("27756");
+        nestedFrame.isInline(true);
+        nestedFrame.pageIndex(9);
+        nestedFrame.pageRelativeBounds(new double[] { 100, 100, 200, 300 });
+
+        ResolvedData data = new ResolvedData();
+        data.addTextFrame(nestedFrame);
+
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = data;
+        ctx.styleResolver = new StylePropertyResolver(null, null);
+        ctx.spec016Counts = new int[3];
+        ctx.loadIDMLStory = storyId -> inlineTableStory();
+
+        java.util.List<ASTParagraph> flow = StoryFlowAssembler.buildCellFlow(ctx, carrierCell);
+
+        Assert.assertEquals(1, flow.size());
+        ASTTable table = flow.get(0).inlineTable();
+        Assert.assertNotNull(table);
+        Assert.assertEquals(3, table.rowCount());
+        String text = table.rows().get(0).cells().get(0)
+                .paragraphs().get(0).items().stream()
+                .filter(item -> item instanceof ASTTextRun)
+                .map(item -> ((ASTTextRun) item).text())
+                .reduce("", String::concat);
+        Assert.assertTrue(text.contains("디지털 전환"));
+    }
+
+    @Test
+    public void anchoredTablesInMarkerOnlyCarrierKeepStoryOrder() throws Exception {
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.spec016Counts = new int[3];
+        ctx.loadIDMLStory = storyId -> {
+            if ("firstStory".equals(storyId)) {
+                return singleCellTableStory("firstStory", "table-first", "첫 번째 표");
+            }
+            if ("secondStory".equals(storyId)) {
+                return singleCellTableStory("secondStory", "table-second", "두 번째 표");
+            }
+            return new IDMLStory();
+        };
+        ctx.addAnchoredTablePlan(new AnchoredTablePlan(
+                14162,
+                "ownerStory",
+                1,
+                "wrapper-first",
+                -1,
+                "firstStory",
+                "table-first",
+                9,
+                "test_first"));
+        ctx.addAnchoredTablePlan(new AnchoredTablePlan(
+                14162,
+                "ownerStory",
+                3,
+                "wrapper-second",
+                -1,
+                "secondStory",
+                "table-second",
+                9,
+                "test_second"));
+
+        ASTTextFrameBlock block = new ASTTextFrameBlock();
+        block.sourceId(ParagraphTextHelpers.domIdToSourceId("14162"));
+        block.storyId("ownerStory");
+        block.frameVisibleText("\u0016");
+        block.frameVisibleTextLength(1);
+
+        Method insert = StoryConverter.class.getDeclaredMethod(
+                "insertAnchoredTables", ResolvedBuildContext.class, java.util.List.class);
+        insert.setAccessible(true);
+        insert.invoke(null, ctx, Collections.singletonList(block));
+
+        Assert.assertEquals(2, block.paragraphs().size());
+        Assert.assertEquals("table-first", block.paragraphs().get(0).inlineTable().sourceId());
+        Assert.assertEquals("table-second", block.paragraphs().get(1).inlineTable().sourceId());
+        Assert.assertTrue(tableText(block.paragraphs().get(0).inlineTable()).contains("첫 번째 표"));
+        Assert.assertTrue(tableText(block.paragraphs().get(1).inlineTable()).contains("두 번째 표"));
+    }
+
+    @Test
     public void linkedFrameRangeMatchingIgnoresNonStoryControlSentinels() {
         ResolvedData data = new ResolvedData();
         ResolvedTextFrame first = linkedTextFrame("15275", "15278", 12,
@@ -423,6 +515,33 @@ public class StoryConverterTest {
         return story;
     }
 
+    private static IDMLStory singleCellTableStory(String storyId, String tableId, String text) {
+        IDMLStory story = new IDMLStory();
+        story.selfId(storyId);
+
+        IDMLTable table = new IDMLTable();
+        table.selfId(tableId);
+        table.columnCount(1);
+        table.addColumnWidth(100);
+
+        IDMLTableRow row = new IDMLTableRow();
+        row.rowIndex(0);
+        row.rowHeight(20);
+
+        IDMLTableCell cell = new IDMLTableCell();
+        cell.rowIndex(0);
+        cell.columnIndex(0);
+        cell.rowSpan(1);
+        cell.columnSpan(1);
+        cell.addParagraph(paragraph(text));
+        row.addCell(cell);
+
+        table.addRow(row);
+        table.rowCount(1);
+        story.addTable(table);
+        return story;
+    }
+
     private static void addInlineTableSourcePlan(ResolvedBuildContext ctx, int textFrameDomId) {
         ctx.addOwnershipPlan(ObjectPlan.legacyDefaulted(
                 textFrameDomId,
@@ -511,6 +630,26 @@ public class StoryConverterTest {
                 if (item instanceof ASTTextRun) {
                     String text = ((ASTTextRun) item).text();
                     if (text != null) sb.append(text);
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String tableText(ASTTable table) {
+        StringBuilder sb = new StringBuilder();
+        if (table == null || table.rows() == null) return "";
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                for (ASTParagraph paragraph : cell.paragraphs()) {
+                    for (ASTInlineItem item : paragraph.items()) {
+                        if (item instanceof ASTTextRun) {
+                            String text = ((ASTTextRun) item).text();
+                            if (text != null) sb.append(text);
+                        }
+                    }
                 }
             }
         }
