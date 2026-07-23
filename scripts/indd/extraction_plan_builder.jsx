@@ -7834,6 +7834,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     var objectPlans = objectPlanDiagnostics.objectPlans;
     var claimedVisibleSourceIds = {};
     var completePngTextOwnerSourceIds = {};
+    var completePngTextOwnerSourceIdsByPage = {};
     var tableStyleHiddenSourceIdsByPage = {};
     var absorbableExistingPlanSourceIdsByPage = {};
     function markIds(ids) {
@@ -7879,7 +7880,10 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         if (plan.materialization !== "COMPLETE_PNG") return;
         if (plan.visualAction !== "PLACE_INLINE_PNG"
                 && plan.visualAction !== "PLACE_FLOATING_PNG") return;
-        if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return;
+        if ((!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0)
+                && (!plan.ownedTextPathStoryIds || plan.ownedTextPathStoryIds.length === 0)) {
+            return;
+        }
         var ids = [];
         ids = ids.concat(plan.sourceObjectIds || []);
         ids = ids.concat(plan.visualSourceObjectIds || []);
@@ -7889,6 +7893,15 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         for (var ci = 0; ci < ids.length; ci++) {
             if (ids[ci] === null || ids[ci] === undefined) continue;
             completePngTextOwnerSourceIds[String(ids[ci])] = true;
+        }
+        if (plan.pageIndex !== null && plan.pageIndex !== undefined
+                && Number(plan.pageIndex) >= 0) {
+            var completePageKey = String(Number(plan.pageIndex));
+            if (!completePngTextOwnerSourceIdsByPage[completePageKey]) {
+                completePngTextOwnerSourceIdsByPage[completePageKey] = [];
+            }
+            completePngTextOwnerSourceIdsByPage[completePageKey] =
+                    _sortedNumericIds(completePngTextOwnerSourceIdsByPage[completePageKey].concat(ids));
         }
         markIds(ids);
     }
@@ -7992,6 +8005,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         var excludedInlineSourceObjectIds = _sortedNumericIds(excludedInlineByPage[pageKey] || []);
         var hiddenTableStyleSourceObjectIds =
                 _sortedNumericIds(tableStyleHiddenSourceIdsByPage[pageKey] || []);
+        var hiddenCompletePngTextOwnerSourceObjectIds =
+                _sortedNumericIds(completePngTextOwnerSourceIdsByPage[pageKey] || []);
         var syntheticSourceId = _canonicalPagePlaneSyntheticSourceId(pageIndex);
         var plan = {
             objectPlanId: _canonicalPagePlaneObjectPlanId(pageIndex),
@@ -8013,6 +8028,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             exportSourceObjectIds: [syntheticSourceId],
             coverageSourceObjectIds: coverageIds,
             hiddenTableStyleSourceObjectIds: hiddenTableStyleSourceObjectIds,
+            hiddenCompletePngTextOwnerSourceObjectIds: hiddenCompletePngTextOwnerSourceObjectIds,
             excludedInlineSourceObjectIds: excludedInlineSourceObjectIds,
             materialization: "PAGE_PLANE_PNG",
             textAction: "DROP_TEXT",
@@ -8033,6 +8049,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             requiredSlot: "CONTENT_VISUAL_SLOT",
             requiredSlotReason: "page_plane_canonical_visual_owner",
             excludedInlineSourceCount: excludedInlineSourceObjectIds.length,
+            hiddenCompletePngTextOwnerSourceCount: hiddenCompletePngTextOwnerSourceObjectIds.length,
             hiddenTableStyleSourceCount: hiddenTableStyleSourceObjectIds.length
         };
         objectPlans.push(plan);
@@ -8043,6 +8060,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             syntheticSourceObjectId: syntheticSourceId,
             coverageSourceCount: coverageIds.length,
             excludedInlineSourceCount: excludedInlineSourceObjectIds.length,
+            hiddenCompletePngTextOwnerSourceCount: hiddenCompletePngTextOwnerSourceObjectIds.length,
             hiddenTableStyleSourceCount: hiddenTableStyleSourceObjectIds.length
         });
     }
@@ -8065,6 +8083,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             appended: appended,
             completePngTextOwnerExcludedSourceCount:
                     _objectPlanMapKeyCount(completePngTextOwnerSourceIds),
+            completePngTextOwnerSourceIdsByPage:
+                    completePngTextOwnerSourceIdsByPage,
             hiddenTableStyleSourcePageCount:
                     _objectPlanMapKeyCount(tableStyleHiddenSourceIdsByPage)
         };
@@ -8074,6 +8094,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         appended: appended,
         completePngTextOwnerExcludedSourceCount:
                 _objectPlanMapKeyCount(completePngTextOwnerSourceIds),
+        completePngTextOwnerSourceIdsByPage:
+                completePngTextOwnerSourceIdsByPage,
         hiddenTableStyleSourcePageCount:
                 _objectPlanMapKeyCount(tableStyleHiddenSourceIdsByPage),
         hiddenTableStyleSourceIdsByPage: tableStyleHiddenSourceIdsByPage
@@ -8105,6 +8127,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     } catch (ePagePlaneTableStyleHideFromPlan) {
         ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage =
                 ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {};
+        ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage =
+                ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage || {};
         ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount =
                 ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount || 0;
         try { _marker(ctx.outputDir, "03d01i_pagePlaneTableStyleHide_fallback"); } catch (ePagePlaneTableStyleHideMarker) {}
@@ -8280,6 +8304,19 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d14b_plan_objectPlans_built");
     var canonicalPagePlaneObjectPlanDiagnostics =
             _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagnostics);
+    if (canonicalPagePlaneObjectPlanDiagnostics
+            && canonicalPagePlaneObjectPlanDiagnostics.completePngTextOwnerSourceIdsByPage) {
+        var completeByPage = canonicalPagePlaneObjectPlanDiagnostics.completePngTextOwnerSourceIdsByPage;
+        ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage =
+                ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage || {};
+        for (var completePageKey in completeByPage) {
+            if (!completeByPage.hasOwnProperty(completePageKey)) continue;
+            ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage[completePageKey] =
+                    _sortedNumericIds(
+                            (ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage[completePageKey] || [])
+                                    .concat(completeByPage[completePageKey] || []));
+        }
+    }
     var canonicalPagePlaneAbsorptionDiagnostics =
             _canonicalPagePlaneAbsorbExistingObjectPlans(objectPlanDiagnostics);
     _marker(ctx.outputDir, "03d15_plan_objectPlans");

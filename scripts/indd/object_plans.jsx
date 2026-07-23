@@ -128,6 +128,13 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var textPathBundlePlans = _appendTextPathBundleObjectPlans(
+            objectPlans, sourceItems, sourceById, childrenByParentId);
+    _recordObjectPlanTiming("appendTextPathBundlePlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        createdPlanCount: textPathBundlePlans.summary.createdPlanCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var sourceBundleTextRangeShells = _appendSourceBundleTextRangeShellObjectPlans(
             objectPlans, sourceItems, sourceById, childrenByParentId);
     _recordObjectPlanTiming("appendSourceBundleTextRangeShellPlans", _timingStartedAt, {
@@ -691,6 +698,265 @@ function _appendVisibleTextFrameObjectPlans(objectPlans, sourceItems) {
         objectPlans.push(_textFrameObjectPlan(src, id, pageIndex, zOrder,
                 "pass.visible_text_frames", "visible_text_frame"));
     }
+}
+
+function _appendTextPathBundleObjectPlans(objectPlans, sourceItems, sourceById, childrenByParentId) {
+    var summary = {
+        createdPlanCount: 0,
+        skippedInvalidSourceCount: 0,
+        createdObjectPlanIds: []
+    };
+    if (!objectPlans || !sourceItems) return { summary: summary };
+    var bundlesByRootId = {};
+    var rootOrder = [];
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!_objectPlanSourceHasTextPath(src)) continue;
+        var id = Number(src.id);
+        if (isNaN(id)) {
+            summary.skippedInvalidSourceCount++;
+            continue;
+        }
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        if (pageIndex < 0) {
+            summary.skippedInvalidSourceCount++;
+            continue;
+        }
+        var root = _textPathBundleRootSource(src, sourceById, childrenByParentId);
+        var rootId = root && root.id !== undefined && root.id !== null ? Number(root.id) : id;
+        if (isNaN(rootId)) rootId = id;
+        var rootKey = String(rootId);
+        if (!bundlesByRootId[rootKey]) {
+            bundlesByRootId[rootKey] = {
+                root: root || src,
+                sources: [],
+                sourceObjectIds: _textPathBundleOwnedSourceIds(root || src, sourceById, childrenByParentId)
+            };
+            rootOrder.push(rootKey);
+        }
+        bundlesByRootId[rootKey].sources.push(src);
+    }
+    for (var oi = 0; oi < rootOrder.length; oi++) {
+        var bundle = bundlesByRootId[rootOrder[oi]];
+        var plan = _textPathBundleObjectPlan(bundle.root, bundle.sources, bundle.sourceObjectIds);
+        objectPlans.push(plan);
+        summary.createdPlanCount++;
+        summary.createdObjectPlanIds.push(plan.objectPlanId);
+    }
+    return { summary: summary };
+}
+
+function _objectPlanSourceHasTextPath(src) {
+    if (!src || src.hasTextPath !== true) return false;
+    if (src.visible === false) return false;
+    if (src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (!src.bounds || src.bounds.length < 4) return false;
+    var kind = String(src.kind || "");
+    return kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "GraphicLine";
+}
+
+function _textPathBundleRootSource(src, sourceById, childrenByParentId) {
+    if (!src || !sourceById || !childrenByParentId) return src;
+    var pageIndex = src.pageIndex;
+    var current = src;
+    while (current && current.parentId !== null && current.parentId !== undefined) {
+        var parent = sourceById[String(current.parentId)];
+        if (!parent || String(parent.kind || "") !== "Group") break;
+        if (parent.pageIndex !== pageIndex) break;
+        var textPathSources = _collectTextPathBundleSources(parent, sourceById, childrenByParentId);
+        if (!textPathSources || textPathSources.length < 2) break;
+        return parent;
+    }
+    return src;
+}
+
+function _collectTextPathBundleSources(root, sourceById, childrenByParentId) {
+    var out = [];
+    var seen = {};
+    function visit(sourceId) {
+        if (sourceId === null || sourceId === undefined) return;
+        var key = String(sourceId);
+        if (seen[key]) return;
+        seen[key] = true;
+        var item = sourceById ? sourceById[key] : null;
+        if (!item) return;
+        if (_objectPlanSourceHasTextPath(item)) out.push(item);
+        var children = childrenByParentId ? (childrenByParentId[key] || []) : [];
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            visit(child && child.id !== undefined ? child.id : child);
+        }
+    }
+    if (root) visit(root.id);
+    return out;
+}
+
+function _textPathBundleOwnedSourceIds(root, sourceById, childrenByParentId) {
+    var ids = [];
+    var seen = {};
+    function visit(sourceId) {
+        if (sourceId === null || sourceId === undefined) return;
+        var key = String(sourceId);
+        if (seen[key]) return;
+        seen[key] = true;
+        ids.push(sourceId);
+        var children = childrenByParentId ? (childrenByParentId[key] || []) : [];
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            visit(child && child.id !== undefined ? child.id : child);
+        }
+    }
+    if (root) visit(root.id);
+    return _sortedNumericIds(ids);
+}
+
+function _objectPlanSourceInlineFlow(src) {
+    if (!src) return false;
+    if (src.visible === false) return false;
+    if (src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.storyTextInlineSlot === true || src.tableCellStoryTextInlineSlot === true) return true;
+    var parentKind = String(src.parentKind || "").toUpperCase();
+    if (parentKind === "CHARACTER" || parentKind === "INSERTIONPOINT") return true;
+    var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+    var anchoredPosition = String(src.anchoredPosition || "").toUpperCase();
+    return placement === "INLINE"
+            || anchoredPosition === "INLINE_POSITION"
+            || anchoredPosition === "INLINEPOSITION";
+}
+
+function _textPathBundleObjectPlan(root, textPathSources, ownedSourceIds) {
+    var id = Number(root && root.id);
+    var pageIndex = root && root.pageIndex !== undefined && root.pageIndex !== null ? root.pageIndex : -1;
+    var zOrder = root && root.zOrder !== undefined && root.zOrder !== null ? root.zOrder : 0;
+    var sourceIds = _internSourceSetIds(ownedSourceIds && ownedSourceIds.length
+            ? ownedSourceIds
+            : _textPathBundleSourceIds(root, textPathSources));
+    var sourceSetId = _sourceSetId(sourceIds);
+    var exportIds = _internSourceSetIds([id]);
+    var sourceInlineFlow = _textPathBundleIsInlineFlow(root, textPathSources);
+    var passId = "pass.page_textless_graphic_groups";
+    var storyIds = _textPathBundleStoryIds(textPathSources);
+    var textPathText = _textPathBundleText(textPathSources);
+    return {
+        objectPlanId: "objectPlan.text_path_bundle." + String(id),
+        bundleId: "textPath.bundle." + String(id),
+        candidateId: _candidateId(passId, id, pageIndex) + ".text_path_page_plane_text_owner",
+        passId: passId,
+        pageIndex: pageIndex,
+        kind: "PAGE_BACKGROUND_TEXT_OWNER",
+        unit: "PAGE",
+        mode: "TEXT_OWNER_MARKER",
+        candidatePurpose: "PAGE_PLANE_TEXT_OWNER",
+        compositeRole: "text_path_page_plane_text_owner",
+        slotRole: "text_path_page_plane_text_owner",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: sourceInlineFlow,
+        tableCellInlineAnchorSource: _textPathBundleHasTableCellInlineAnchor(textPathSources),
+        pagePositionedAnchoredSource: false,
+        inlineCompositeLayoutDescendant: false,
+        inlineAnchorSourceObjectId: sourceInlineFlow ? id : null,
+        inlineSourceTreeClosed: sourceInlineFlow,
+        inlineFlowSourceObjectIds: sourceInlineFlow ? sourceIds : [],
+        inlineTextStyleMarkerSource: false,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: id,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: _sourceSetId(exportIds),
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: sourceSetId,
+        exportSourceSetId: _sourceSetId(exportIds),
+        hiddenSourceSetId: _sourceSetId([]),
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: exportIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: {},
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: false,
+        clusterHasTextFrame: false,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: true,
+        visualSourceObjectIds: sourceIds,
+        styleSourceObjectIds: [],
+        ownedTextFrameIds: [],
+        ownedTextPathStoryIds: storyIds,
+        textPathText: textPathText,
+        exportSourceObjectIds: exportIds,
+        exportTargetObjectId: id,
+        atomicExportTargetObjectId: id,
+        atomicExportTargetObjectIds: exportIds,
+        atomicTextlessVectorContent: true,
+        atomicContentVisualSlot: true,
+        hiddenVisualSourceObjectIds: [],
+        hiddenTextFrameIds: [],
+        excludedInlineSourceObjectIds: [],
+        materialization: "PAGE_PLANE_PNG",
+        textAction: "OWNED_BY_PNG",
+        visualAction: "DROP_VISUAL",
+        placement: "FLOATING",
+        coordinateSpace: "PAGE",
+        visualLayer: "PAGE_BACKGROUND",
+        zOrder: zOrder,
+        reason: "text_path_owned_by_page_plane_png",
+        bounds: root.bounds || null,
+        renderSourceBounds: root.bounds || null,
+        cropSourceBounds: root.bounds || null,
+        ownershipSlot: "CONTENT_VISUAL_SLOT",
+        policyLayer: "CONTENT",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_TEXT_PATH_PAGE_PLANE_TEXT_OWNER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
+        executable: false,
+        required: true,
+        completePngTextAllowed: false,
+        pagePlaneTextOwner: true
+    };
+}
+
+function _textPathBundleSourceIds(root, textPathSources) {
+    var ids = [];
+    if (root && root.id !== null && root.id !== undefined) ids.push(root.id);
+    for (var i = 0; textPathSources && i < textPathSources.length; i++) {
+        if (textPathSources[i] && textPathSources[i].id !== null && textPathSources[i].id !== undefined) {
+            ids.push(textPathSources[i].id);
+        }
+    }
+    return _sortedNumericIds(ids);
+}
+
+function _textPathBundleStoryIds(textPathSources) {
+    var ids = [];
+    for (var i = 0; textPathSources && i < textPathSources.length; i++) {
+        ids = ids.concat(textPathSources[i].textPathStoryIds || []);
+    }
+    return _sortedNumericIds(ids);
+}
+
+function _textPathBundleText(textPathSources) {
+    var parts = [];
+    for (var i = 0; textPathSources && i < textPathSources.length; i++) {
+        var text = textPathSources[i] ? String(textPathSources[i].textPathText || "") : "";
+        if (text.replace(/[\s\r\n\t\uFEFF]/g, "").length > 0) parts.push(text);
+    }
+    return parts.join("\n");
+}
+
+function _textPathBundleIsInlineFlow(root, textPathSources) {
+    if (_objectPlanSourceInlineFlow(root)) return true;
+    for (var i = 0; textPathSources && i < textPathSources.length; i++) {
+        if (_objectPlanSourceInlineFlow(textPathSources[i])) return true;
+    }
+    return false;
+}
+
+function _textPathBundleHasTableCellInlineAnchor(textPathSources) {
+    for (var i = 0; textPathSources && i < textPathSources.length; i++) {
+        if (textPathSources[i] && textPathSources[i].tableCellStoryTextInlineSlot === true) return true;
+    }
+    return false;
 }
 
 function _objectPlanTextFrameIdValue(src) {
@@ -1820,11 +2086,29 @@ function _shouldKeepObjectPlanAfterExecutionCandidateSync(plan, activeObjectPlan
     if (plan.visualAction === "PLACE_TABLE_STYLE"
             || plan.materialization === "HWPX_TABLE_STYLE"
             || plan.ownershipSlot === "TABLE_STYLE_SLOT") return true;
+    if (_objectPlanIsPagePlaneTextOwner(plan)) return true;
+    if (_objectPlanIsCompletePngTextOwner(plan)) return true;
     if (_objectPlanIsInlineVisibleTextFrameShellVisualOwner(plan)) return true;
     if (plan.objectPlanId && activeObjectPlanIds[String(plan.objectPlanId)]) return true;
     if (plan.candidateId && activeCandidateIds[String(plan.candidateId)]) return true;
     if (!plan.objectPlanId && !plan.candidateId) return true;
     return false;
+}
+
+function _objectPlanIsCompletePngTextOwner(plan) {
+    if (!plan) return false;
+    if (plan.textAction !== "OWNED_BY_PNG") return false;
+    if (plan.materialization !== "COMPLETE_PNG") return false;
+    return plan.visualAction === "PLACE_INLINE_PNG"
+            || plan.visualAction === "PLACE_FLOATING_PNG";
+}
+
+function _objectPlanIsPagePlaneTextOwner(plan) {
+    if (!plan) return false;
+    return plan.textAction === "OWNED_BY_PNG"
+            && plan.visualAction === "DROP_VISUAL"
+            && plan.materialization === "PAGE_PLANE_PNG"
+            && plan.pagePlaneTextOwner === true;
 }
 
 function _slimObjectPlanDiagnosticsForWrite(diagnostics, options) {
@@ -1965,6 +2249,8 @@ function _slimObjectPlanForWrite(plan) {
         "ownedTextFrameIds",
         "ownedTextFrameIdKeys",
         "ownedTextFrameSetId",
+        "ownedTextPathStoryIds",
+        "textPathText",
         "ownedTextRanges",
         "exportSourceObjectIds",
         "exportSourceSetId",
@@ -7266,6 +7552,7 @@ function _objectPlanMigrationStatusIsImportReady(status) {
             || status === "READY_PAGE_TEXTLESS_GRAPHIC_GROUP"
             || status === "READY_TEXTLESS_CONNECTOR_FRAGMENT"
             || status === "READY_INLINE_COMPLETE_PNG_TEXT_OWNER"
+            || status === "READY_TEXT_PATH_PAGE_PLANE_TEXT_OWNER"
             || status === "READY_LAYOUT_ONLY_INLINE_SLOT"
             || status === "READY_TEXT_CLEANUP";
 }
@@ -7533,6 +7820,13 @@ function _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, is
 function _validateInlineCompletePngTextOwnerContract(
         plan, issues, issueCodeCounts, issuePlanIds, sourceById) {
     if (!plan || plan.textAction !== "OWNED_BY_PNG") return;
+    if (_objectPlanIsPagePlaneTextOwner(plan)) {
+        if (!plan.ownedTextPathStoryIds || plan.ownedTextPathStoryIds.length === 0) {
+            _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                    "page_plane_text_owner_without_owned_text_path_story", [plan], {});
+        }
+        return;
+    }
     if (plan.materialization !== "COMPLETE_PNG") {
         _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
                 "png_text_owner_without_complete_png", [plan],
@@ -7545,7 +7839,8 @@ function _validateInlineCompletePngTextOwnerContract(
                 "complete_png_text_owner_without_png_visual_action", [plan],
                 { actualVisualAction: plan.visualAction });
     }
-    if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) {
+    if ((!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0)
+            && (!plan.ownedTextPathStoryIds || plan.ownedTextPathStoryIds.length === 0)) {
         _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
                 "complete_png_text_owner_without_owned_text_frame", [plan], {});
     }

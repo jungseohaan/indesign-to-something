@@ -25,6 +25,7 @@ public final class ObjectPlan {
     public final int[] exportSourceObjectIds;
     public final int[] hiddenVisualSourceObjectIds;
     public final int[] ownedTextFrameIds;
+    public int[] ownedTextPathStoryIds;
     public TextRangeRef[] ownedTextRanges;
     public String[] ownedTextFrameIdKeys;
     public final int[] descendantVisualObjectIds;
@@ -276,6 +277,7 @@ public final class ObjectPlan {
         this.ownedTextFrameIds = ownedTextFrameIds != null
                 ? Arrays.copyOf(ownedTextFrameIds, ownedTextFrameIds.length)
                 : new int[0];
+        this.ownedTextPathStoryIds = new int[0];
         this.ownedTextRanges = new TextRangeRef[0];
         this.ownedTextFrameIdKeys = new String[0];
         this.descendantVisualObjectIds = descendantVisualObjectIds != null
@@ -332,6 +334,9 @@ public final class ObjectPlan {
                 base.hiddenVisualSourceObjectIds,
                 base.hiddenVisualSourceObjectIds.length);
         this.ownedTextFrameIds = Arrays.copyOf(base.ownedTextFrameIds, base.ownedTextFrameIds.length);
+        this.ownedTextPathStoryIds = Arrays.copyOf(
+                base.ownedTextPathStoryIds,
+                base.ownedTextPathStoryIds.length);
         this.ownedTextRanges = copyTextRanges(base.ownedTextRanges);
         this.ownedTextFrameIdKeys = copyStringArray(base.ownedTextFrameIdKeys);
         this.descendantVisualObjectIds = Arrays.copyOf(
@@ -1229,6 +1234,7 @@ public final class ObjectPlan {
     private ObjectPlan withCurrentInlineFlow(ObjectPlan plan) {
         return plan.withObjectPlanId(objectPlanId)
                 .withOwnedTextFrameIdKeys(ownedTextFrameIdKeys)
+                .withOwnedTextPathStoryIds(ownedTextPathStoryIds)
                 .withOwnedTextRanges(ownedTextRanges)
                 .withInlineFlowContract(inlineSourceTreeClosed, inlineFlowSourceObjectIds)
                 .withTextLayoutContract(textLayoutContract);
@@ -1241,6 +1247,11 @@ public final class ObjectPlan {
 
     public ObjectPlan withOwnedTextFrameIdKeys(String[] keys) {
         this.ownedTextFrameIdKeys = copyStringArray(keys);
+        return this;
+    }
+
+    public ObjectPlan withOwnedTextPathStoryIds(int[] ids) {
+        this.ownedTextPathStoryIds = ids != null ? Arrays.copyOf(ids, ids.length) : new int[0];
         return this;
     }
 
@@ -1431,6 +1442,7 @@ public final class ObjectPlan {
                 .append("\"inlineSourceTreeClosed\":").append(inlineSourceTreeClosed).append(',')
                 .append("\"inlineFlowSourceObjectIds\":").append(intArrayJson(inlineFlowSourceObjectIds)).append(',')
                 .append("\"ownedTextFrameIds\":").append(intArrayJson(ownedTextFrameIds)).append(',')
+                .append("\"ownedTextPathStoryIds\":").append(intArrayJson(ownedTextPathStoryIds)).append(',')
                 .append("\"ownedTextRanges\":").append(textRangeArrayJson(ownedTextRanges)).append(',')
                 .append("\"ownedTextFrameIdKeys\":").append(stringArrayJson(ownedTextFrameIdKeys)).append(',')
                 .append("\"descendantVisualObjectIds\":").append(intArrayJson(descendantVisualObjectIds)).append(',')

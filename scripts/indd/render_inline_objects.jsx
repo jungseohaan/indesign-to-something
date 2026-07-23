@@ -145,6 +145,27 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         return items;
     }
 
+    function collectCompletePngTextOwnerSourceItemsToHide() {
+        var items = [];
+        var seen = {};
+        var idsByPage = opts.hiddenCompletePngTextOwnerSourceObjectIdsByPage || {};
+        for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
+            var pageIndex = pageNumber - 1;
+            var ids = idsByPage[String(pageIndex)] || [];
+            for (var i = 0; i < ids.length; i++) {
+                var id = ids[i];
+                if (id === null || id === undefined) continue;
+                var key = String(id);
+                if (seen[key]) continue;
+                var item = itemById ? itemById[key] : null;
+                if (!item) continue;
+                seen[key] = true;
+                items.push(item);
+            }
+        }
+        return items;
+    }
+
     function isPagePlaneInlineTextFrameItem(item) {
         if (!item) return false;
         try {
@@ -334,6 +355,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     }
 
     var savedInlineItems = [];
+    var savedCompletePngTextOwnerItems = [];
     var savedTableStyleItems = [];
     var savedDocumentTextFrames = [];
     // SPEC-030 계측 변수 (예외 경로에서도 정의되도록 미리 선언)
@@ -461,6 +483,9 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         savedInlineItems = _hideItemsForExport(_inlineToHide);
         _tHideInline = nowMs() - _t0;
 
+        savedCompletePngTextOwnerItems =
+                _hideItemsForExport(collectCompletePngTextOwnerSourceItemsToHide());
+
         savedTableStyleItems = _hideItemsForExport(collectTableStyleSourceItemsToHide());
 
         _t0 = nowMs();
@@ -539,6 +564,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                     fileBytes: outFile.exists ? outFile.length : 0,
                     pageRelativeBounds: bounds,
                     hiddenInlineItemCount: savedInlineItems.length,
+                    hiddenCompletePngTextOwnerItemCount: savedCompletePngTextOwnerItems.length,
                     hiddenTextFrameCount: savedDocumentTextFrames.length,
                     hiddenTableStyleItemCount: savedTableStyleItems.length,
                     globalPreExport: opts.globalPreExport === true
@@ -549,6 +575,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     } finally {
         var _restoreStart = nowMs();
         try { restoreTextFrames(savedDocumentTextFrames); } catch (eRestoreTextFrames) {}
+        try { _restoreItemsForExport(savedCompletePngTextOwnerItems); } catch (eRestoreCompletePngTextOwner) {}
         try { _restoreItemsForExport(savedTableStyleItems); } catch (eRestoreTableStyle) {}
         try { _restoreItemsForExport(savedInlineItems); } catch (eRestoreInline) {}
         try { if (savedRes !== null) app.pngExportPreferences.exportResolution = savedRes; } catch (eRestoreRes) {}
@@ -571,6 +598,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             restoreMs: _tRestore,
             hiddenTextItemCount: savedDocumentTextFrames.length,
             hiddenInlineItemCount: savedInlineItems.length,
+            hiddenCompletePngTextOwnerItemCount: savedCompletePngTextOwnerItems.length,
             hiddenTableStyleItemCount: savedTableStyleItems.length,
             textHideScope: _textHideScope
         };
@@ -746,6 +774,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
 
     function _plannedInlineCandidateHasVisibleCarrierContent(candidate, itemId) {
         if (!candidate) return false;
+        if (candidate.textAction === "OWNED_BY_PNG") return true;
         var sourceIds = candidate.sourceObjectIds || [];
         var visualIds = candidate.visualSourceObjectIds || [];
         var exportIds = candidate.exportSourceObjectIds || [];
@@ -1025,7 +1054,9 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                     try {
                         _inlineExportDuplicate = _duplicateNestedCompletePngForExport(
                                 inItem, inlineCandidate, doc);
-                        var _inlineExportTarget = _inlineExportDuplicate || inItem;
+                        var _inlineExportTarget =
+                                _inlineExportDuplicate
+                                || inItem;
                         _inlineExportTarget.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
                         _inlineExportOk = true;
                     } catch (eInlineExport) {
@@ -1060,7 +1091,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         }
 
                         var _inlineHasHiddenText = inlineHiddenTextFrameIds && inlineHiddenTextFrameIds.length > 0;
-                        var _inlineOwnsCompletePngText = plannedInlineCompletePng;
+                        var _inlineOwnsCompletePngText = inlineCandidate.materialization === "COMPLETE_PNG"
+                                && inlineCandidate.textAction === "OWNED_BY_PNG";
                         var _inlineDropsText = inlineCandidate.textAction === "DROP_TEXT";
                         var _inlineRenderedBounds = _plannedCandidateRenderedBounds(inlineCandidate, inBounds);
                         var _inlineCandidatePassId = inlineCandidate.passId || "pass.inline_objects";

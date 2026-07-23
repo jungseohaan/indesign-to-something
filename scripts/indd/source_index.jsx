@@ -624,6 +624,63 @@ function _storyHasVisibleTableCellText(story) {
     return false;
 }
 
+function _itemTextPathInfoForSourceIndex(item) {
+    var info = {
+        hasTextPath: false,
+        textPathCount: 0,
+        textPathStoryIds: [],
+        textPathTexts: [],
+        textPathText: ""
+    };
+    if (!item) return info;
+
+    var seenStories = {};
+    function addTextPath(textPath) {
+        if (!textPath) return;
+        info.textPathCount++;
+        var story = null;
+        try { story = textPath.parentStory; } catch (eParentStory) {}
+        var storyId = null;
+        try {
+            if (story && story.id !== undefined && story.id !== null) storyId = Number(story.id);
+        } catch (eStoryId) {}
+        var text = "";
+        try {
+            if (story) text = String(story.contents || "");
+        } catch (eStoryContents) {
+            text = "";
+        }
+        text = _sourceIndexVisibleText(text);
+        if (storyId !== null && !isNaN(storyId) && !seenStories[String(storyId)]) {
+            seenStories[String(storyId)] = true;
+            info.textPathStoryIds.push(storyId);
+        }
+        if (text && text.replace(/[\s\r\n\t\uFEFF]/g, "").length > 0) {
+            info.textPathTexts.push(text);
+        }
+    }
+
+    try {
+        if (item.textPaths) {
+            var paths = null;
+            try { paths = item.textPaths.everyItem().getElements(); } catch (eEveryTextPaths) {
+                paths = null;
+            }
+            if (paths && paths.length !== undefined) {
+                for (var i = 0; i < paths.length; i++) addTextPath(paths[i]);
+            } else {
+                try {
+                    for (var p = 0; p < item.textPaths.length; p++) addTextPath(item.textPaths[p]);
+                } catch (eTextPathLoop) {}
+            }
+        }
+    } catch (eTextPaths) {}
+
+    info.hasTextPath = info.textPathCount > 0;
+    info.textPathText = info.textPathTexts.join("\n");
+    return info;
+}
+
 function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var sourceItems = [];
     var sourceInfoById = {};
@@ -1031,6 +1088,20 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         cachedInfo.textWrapRight = cachedTw.right;
                     }
                 } catch (eCachedTextWrapInfo) {}
+                try {
+                    var cachedTextPathInfo = _itemTextPathInfoForSourceIndex(item);
+                    cachedInfo.hasTextPath = cachedTextPathInfo.hasTextPath === true;
+                    cachedInfo.textPathCount = cachedTextPathInfo.textPathCount || 0;
+                    cachedInfo.textPathStoryIds = cachedTextPathInfo.textPathStoryIds || [];
+                    cachedInfo.textPathTexts = cachedTextPathInfo.textPathTexts || [];
+                    cachedInfo.textPathText = cachedTextPathInfo.textPathText || "";
+                } catch (eCachedTextPathInfo) {
+                    if (cachedInfo.hasTextPath === undefined) cachedInfo.hasTextPath = false;
+                    if (cachedInfo.textPathCount === undefined) cachedInfo.textPathCount = 0;
+                    if (cachedInfo.textPathStoryIds === undefined) cachedInfo.textPathStoryIds = [];
+                    if (cachedInfo.textPathTexts === undefined) cachedInfo.textPathTexts = [];
+                    if (cachedInfo.textPathText === undefined) cachedInfo.textPathText = "";
+                }
                 var cachedKind = cachedInfo.kind || "Unknown";
                 stats.kindCounts[cachedKind] = (stats.kindCounts[cachedKind] || 0) + 1;
                 stats.sourceInfoCacheHits++;
@@ -1056,6 +1127,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var tableSourceObjectIds = [];
         var storyHasVisibleTableCellText = null;
         var parentStory = null;
+        var textPathInfo = _itemTextPathInfoForSourceIndex(item);
         sourceIndexCursor("readItemInfo.parentStory.before", itemIndex, id, kind);
         try { parentStory = parentStoryOfItem(item); } catch (eParentStoryLookup) {}
         sourceIndexCursor("readItemInfo.parentStory.after", itemIndex, id, kind);
@@ -1138,6 +1210,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             hasText: textLength !== null ? textLength > 0 : null,
             markerOnlyContents: markerOnlyContents,
             simpleMarkerLabelContents: simpleMarkerLabelContents,
+            hasTextPath: textPathInfo.hasTextPath === true,
+            textPathCount: textPathInfo.textPathCount || 0,
+            textPathStoryIds: textPathInfo.textPathStoryIds || [],
+            textPathTexts: textPathInfo.textPathTexts || [],
+            textPathText: textPathInfo.textPathText || "",
             storyId: storyId,
             leadingStyledTextRanges: leadingStyledTextRanges,
             tableCountInStory: tableCountInStory,

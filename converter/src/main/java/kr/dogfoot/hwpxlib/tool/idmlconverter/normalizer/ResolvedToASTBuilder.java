@@ -1231,6 +1231,7 @@ public class ResolvedToASTBuilder {
                 .withExtractionSourceObjectIds(
                         jsonIntArray(o, "exportSourceObjectIds"),
                         jsonIntArray(o, "hiddenVisualSourceObjectIds"))
+                .withOwnedTextPathStoryIds(jsonIntArray(o, "ownedTextPathStoryIds"))
                 .withOwnedTextRanges(jsonTextRangeRefs(o, "ownedTextRanges"))
                 .withSourceTreeDiagnostics(
                         jsonSourceSetArray(o, "sourceRootObjectIds", "sourceRootSetId", sourceSetRefs),
