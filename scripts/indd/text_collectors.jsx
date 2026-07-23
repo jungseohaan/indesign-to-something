@@ -451,8 +451,21 @@ function correctionProbeTextForDescriptor(descriptor, para, runText) {
 function cellMayHaveAnchoredPageItems(cell) {
     try {
         var items = cell.allPageItems;
-        return items && items.length > 0;
+        if (items && items.length > 0) return true;
     } catch (e) {}
+    try {
+        var chars = cell.characters.everyItem().getElements();
+        for (var i = 0; i < chars.length; i++) {
+            try {
+                var directItems = chars[i].pageItems;
+                if (directItems && directItems.length > 0) return true;
+            } catch (ec) {}
+            try {
+                var directAllItems = chars[i].allPageItems;
+                if (directAllItems && directAllItems.length > 0) return true;
+            } catch (eca) {}
+        }
+    } catch (echars) {}
     return false;
 }
 
@@ -1566,9 +1579,9 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                 cellData.paragraphs.push(cpData);
                             }
                         } catch (ec3) {}
-                        // inline anchor source policy: 셀 텍스트에 anchor 마커가 없어도 (IDML에 <Content>가 없고
-                        // Group이 CharacterStyleRange에 직접 임베드된 경우) cell.allPageItems
-                        // 로 fallback. 이미 paragraphs 에서 잡힌 anchor ID는 건너뛴다.
+                        // inline anchor source policy: 셀 텍스트에 anchor 마커가 없어도
+                        // TextFrame/Group이 CharacterStyleRange에 직접 임베드된 경우가 있다.
+                        // cell.characters.pageItems 는 그 source character slot의 직접 앵커 목록이다.
                         try {
                             if (cellMayHaveAnchoredPageItems(cell)) {
                                 var capturedIds = {};
@@ -1583,7 +1596,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                 // 셀에 직접 앵커된 객체만 수집: cell.characters 를 순회하며
                                 // 각 문자의 pageItems 에서 직접 앵커 조회. cell.allPageItems 는
                                 // 후보 존재 여부 gate 로만 쓰고, 재귀 결과를 visible anchor 로 쓰지 않는다.
-                                // SPEC-056: fallback 앵커도 문자 위치 기반으로 문단 런 사이에
+                                // SPEC-056: 직접 셀 앵커도 문자 위치 기반으로 문단 런 사이에
                                 // interleave 한다. 끝에 몰아넣으면 "= [연필] : [밑줄] : [밑줄]" 이
                                 // "= : : [연필][밑줄][밑줄]" 로 깨진다 (과학 u1 p19 답란).
                                 var missedAnchors = []; // {id, paraIdx, textOffset}
@@ -1596,13 +1609,22 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                         try { faContents = cellChars[cchi].contents; } catch (eFaC) {}
                                         var faIsAnchorChar = false;
                                         try {
-                                            var directAnch = cellChars[cchi].pageItems;
+                                            var directAnch = [];
+                                            try {
+                                                var directPageItems = cellChars[cchi].pageItems;
+                                                for (var dpi = 0; dpi < directPageItems.length; dpi++) {
+                                                    directAnch.push(directPageItems[dpi]);
+                                                }
+                                            } catch (edpi) {}
+                                            try {
+                                                var directAllPageItems = cellChars[cchi].allPageItems;
+                                                for (var dapi = 0; dapi < directAllPageItems.length; dapi++) {
+                                                    directAnch.push(directAllPageItems[dapi]);
+                                                }
+                                            } catch (edapi) {}
                                             for (var dai = 0; dai < directAnch.length; dai++) {
                                                 faIsAnchorChar = true;
                                                 var daId = directAnch[dai].id;
-                                                if (_storyAnchorPlacementForItem(doc, directAnch[dai], story) === "FLOATING_ANCHORED") {
-                                                    continue;
-                                                }
                                                 if (!capturedIds[daId]) {
                                                     missedAnchors.push({
                                                         id: daId,
@@ -1658,7 +1680,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
     return stories;
 }
 
-// SPEC-056: 셀 fallback 앵커를 텍스트 오프셋 위치에 interleave 삽입.
+// SPEC-056: 셀 직접 앵커를 텍스트 오프셋 위치에 interleave 삽입.
 // 오프셋이 런 중간이면 텍스트 런을 분할해 앵커를 사이에 넣는다.
 function _insertCellInlineAnchorRunAtTextOffset(runs, anchorId, textOffset) {
     var anchorRun = { type: "inline_anchor", anchoredObjectId: anchorId };
