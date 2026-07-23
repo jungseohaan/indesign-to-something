@@ -158,7 +158,7 @@ function hideOneTextFrameContent(tf, opts) {
     }
     var preserveFrameVisual = opts.preserveFrameVisual === true
             && textFrameHasVisibleContainerVisual(tf);
-    var preferTextPaintOnly = opts.preferTextPaintOnly === true || preserveFrameVisual;
+    var preferTextPaintOnly = opts.preferTextPaintOnly === true;
     var doc = null;
     try { doc = app.activeDocument; } catch (eDoc) {}
     var noneSwatch = null;
