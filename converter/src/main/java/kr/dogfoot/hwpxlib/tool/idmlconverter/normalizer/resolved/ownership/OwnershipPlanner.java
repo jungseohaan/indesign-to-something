@@ -490,7 +490,14 @@ public final class OwnershipPlanner {
         ResolvedTextFrame tf = data.getTextFrame(String.valueOf(anchoredId));
         if (tf == null || !tf.isInline() || tf.sourceHidden()) return false;
         if (data.isTextOwnedByIndesignPng(tf.id())) return false;
-        if (!textFrameHasVisibleSemanticText(tf)) return false;
+        // SPEC-064: 공백뿐인 인라인 답란(문단 스타일이 답+선/밑줄 계열, RuleBelow 로
+        // 밑줄을 그리는 빈칸)은 가시 텍스트가 없어도 텍스트 plan 을 만들어야 한다 —
+        // plan 이 없으면 tryInlineTextFrameAsRun 의 인라인 게이트에서 탈락해 빈칸이
+        // 통째로 사라진다 (영어 u1 p22 "She wondered ___." 실측).
+        if (!textFrameHasVisibleSemanticText(tf)
+                && !isBlankRuleUnderlineInlineTextFrame(tf)) {
+            return false;
+        }
         if (hasTextSlotDecisionForTextFrame(anchoredId)) return false;
 
         plans.add(new ObjectPlan(
@@ -519,6 +526,26 @@ public final class OwnershipPlanner {
                 tf.layerName(),
                 tf.layerIndex()));
         return true;
+    }
+
+    /**
+     * SPEC-064: 공백뿐인 인라인 TF 가 답란 밑줄 빈칸인지 — 문단 스타일명이
+     * "선"(답+선 등) 또는 underline 계열이면 RuleBelow 밑줄 빈칸으로 본다
+     * (하류 tryInlineTextFrameAsRun 의 styleName 휴리스틱과 동일 기준).
+     */
+    private boolean isBlankRuleUnderlineInlineTextFrame(ResolvedTextFrame tf) {
+        if (tf == null || tf.storyId() == null || data == null) return false;
+        ResolvedStory story = data.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null) continue;
+            String styleName = paragraph.styleName();
+            if (styleName == null) continue;
+            if (styleName.contains("선") || styleName.toLowerCase().contains("underline")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void ensureEmptyInlineTextFrameVisualCarrierPlans() {
