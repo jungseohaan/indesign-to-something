@@ -28,6 +28,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-047](SPEC-047-inline-formula-body-textrange-split.md) | Active | 문장 중 화학식 진입이 앞 한글 본문을 text-range-shell 로 오분리(말풍선 배경 누락) — 추출기 화학식 폰트 진입 경계 제외 (구현 완료, 육안 확인 대기) |
 | [SPEC-059](SPEC-059-reaction-equation-lhs-truncation.md) | Done | 반응식 좌변 잘림(#107 소유 전환으로 노출) — 화살표 시작 클러스터의 좌변 흡수 (2026-07-23 기준선 대조 검증) |
 | [SPEC-060](SPEC-060-nested-table-style-supersede.md) | Done | 중첩 데이터 표 스타일 흡수 소실(#93 포괄 supersede) — stage0 대체 억제를 per-plan 커버리지 검사로 (2026-07-23 육안 확인 완료) |
+| [SPEC-062](SPEC-062-sibling-shell-bounds-multi-claim.md) | Done | p16-17 수식 토큰 겹침 — 형제 셸 bounds 치환을 단독 점유로 제한 + 셸 치환 블록 수직 중앙 정렬 (2026-07-23 육안 확인 완료) |
 
 For V2 ownership changes, start from the canonical policies above. Historical
 ownership SPECs have been removed so they cannot be reused as implementation

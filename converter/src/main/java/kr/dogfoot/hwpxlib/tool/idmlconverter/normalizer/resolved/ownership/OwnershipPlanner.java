@@ -810,6 +810,22 @@ public final class OwnershipPlanner {
     private void ensureSiblingTextShellBoundsTextFramePlans() {
         if (data == null) return;
         int added = 0;
+        // 셸 bounds 치환은 "1셸 = 1라벨" 배지 전제에서만 안전하다. 한 셸을 여러 TF 가
+        // 차지하면(반응식 단계 박스의 H₂/O₂ 토큰 TF 등) 전원이 같은 셸 bounds 를 받아
+        // 동일 좌표에 스택된다 (p16-17 수식 겹침 실측) → 셸별 후보 수를 먼저 세고
+        // 단독 점유일 때만 plan 을 만든다. 다중 점유 TF 는 자기 bounds 로 배치된다.
+        java.util.Map<Integer, Integer> shellClaimCounts = new java.util.HashMap<>();
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            int domId = parseInt(tf.id(), -1);
+            if (domId < 0) continue;
+            if (hasTextSlotDecisionForTextFrame(domId)) continue;
+            ResolvedPageItem shell = directSiblingTextShellForTextFrame(tf);
+            if (shell == null) continue;
+            int shellId = parseInt(shell.id(), -1);
+            if (shellId < 0) continue;
+            shellClaimCounts.merge(shellId, 1, Integer::sum);
+        }
         for (ResolvedTextFrame tf : data.textFrames()) {
             if (!isVisibleEditableTextFrameSource(tf)) continue;
             int domId = parseInt(tf.id(), -1);
@@ -821,6 +837,7 @@ public final class OwnershipPlanner {
             if (bounds == null || bounds.length < 4) continue;
             int shellId = parseInt(shell.id(), -1);
             if (shellId < 0) continue;
+            if (shellClaimCounts.getOrDefault(shellId, 0) > 1) continue;
             Placement placement = placementOfTextFrame(tf, domId,
                     TextAction.OWNED_BY_HWPX_TEXT, VisualAction.DROP_VISUAL);
             CoordinateSpace coordinateSpace = placement == Placement.INLINE
