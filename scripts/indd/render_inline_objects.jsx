@@ -198,7 +198,11 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             name = item.constructor && item.constructor.name
                     ? item.constructor.name : null;
         } catch (eCtor) {}
-        return name === "TextFrame" || name === "TextPath";
+        // TextPath(곡선 위 텍스트)는 숨기지 않는다: 수집기(text_collectors/resolved)가
+        // TextPath 텍스트를 추출하지 않아 숨기면 편집 텍스트 없이 그대로 유실되고,
+        // 곡선 조판은 HWPX 로 재현도 불가하다 → 장식 텍스트로 보고 PNG 에 구운다
+        // (p17 리본 배너: 흰 외곽선 벡터 글자만 남고 컬러 텍스트가 사라지던 문제).
+        return name === "TextFrame";
     }
 
     function collectDocumentTextItemsToHide() {
@@ -220,7 +224,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         }
 
         try { addFromItems(doc.textFrames.everyItem().getElements()); } catch (eDocTextFrames) {}
-        try { addFromItems(doc.textPaths.everyItem().getElements()); } catch (eDocTextPaths) {}
         try { addFromItems(doc.allPageItems); } catch (eDocAllPageItems) {}
         try {
             var spreads = doc.spreads.everyItem().getElements();
@@ -234,12 +237,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 try { addFromItems(masters[mi].allPageItems); } catch (eMasterItems) {}
             }
         } catch (eMasters) {}
-        try {
-            var pageItems = doc.allPageItems;
-            for (var pi = 0; pi < pageItems.length; pi++) {
-                try { addFromItems(pageItems[pi].textPaths.everyItem().getElements()); } catch (eItemTextPaths) {}
-            }
-        } catch (eAllItemTextPaths) {}
         return items;
     }
 
@@ -266,13 +263,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             add(root);
             try { addFromItems(root.allPageItems); } catch (eAllPageItems) {}
             try { addFromItems(root.textFrames.everyItem().getElements()); } catch (eTextFrames) {}
-            try { addFromItems(root.textPaths.everyItem().getElements()); } catch (eTextPaths) {}
-            try {
-                var nested = root.allPageItems;
-                for (var ni = 0; nested && ni < nested.length; ni++) {
-                    try { addFromItems(nested[ni].textPaths.everyItem().getElements()); } catch (eNestedTextPaths) {}
-                }
-            } catch (eNested) {}
         }
 
         for (var ai = 0; allItems && ai < allItems.length; ai++) {
