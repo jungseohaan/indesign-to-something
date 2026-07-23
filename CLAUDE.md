@@ -252,7 +252,11 @@ packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 2. **리뷰** → SPEC 검토 후 구현 시작
 3. **구현** → SPEC의 수정 파일 목록 순서대로
 4. **검증** → `mvn clean package -q -DskipTests` 빌드, CLI 테스트
-5. **결과** → SPEC에 완료 상태 기록
+5. **골든 게이트 (PR 전 필수)** → 기준 추출물로 전체 변환 후
+   `python3 scripts/dev/verify_hwpx.py <out.hwpx> --golden test-data/golden/과학u1-p008-049.json`
+   — diff 가 의도한 변화뿐인지 확인하고, 의도한 변화면 같은 PR 에서 골든 갱신
+   (수식 목록·표 스타일·이미지·유출 패턴 구조 비교, [SPEC-061](docs/specs/SPEC-061-hwpx-structural-golden-gate.md))
+6. **결과** → SPEC에 완료 상태 기록
 
 ### SPEC 템플릿
 
