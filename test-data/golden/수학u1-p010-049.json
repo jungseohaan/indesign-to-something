@@ -1,0 +1,6185 @@
+{
+ "meta": {
+  "source": "math-u1-base.hwpx",
+  "gitRev": "720460fd"
+ },
+ "signature": {
+  "sections": 1,
+  "equations": [
+   "a&gt;0",
+   "sqrt{a}",
+   "sqrt{3}+sqrt{5}",
+   "sqrt{3}+5",
+   "B",
+   "C",
+   "x",
+   "x^{2}",
+   "x",
+   "x^{2}=25",
+   "5^{2}=25,~(-5)^{2}=25",
+   "x",
+   "x^{2}=a",
+   "x",
+   "2^{2}=4,~(-2)^{2}=4",
+   "1",
+   "3^{2}=9,~(-3)^{2}=9",
+   "2",
+   "left({1} over {2} right)^{2}={1} over {4},~left(-{1} over {2} right)^{2}={1} over {4}",
+   "{1} over {4}",
+   "{2} over {11}",
+   "{4} over {81}",
+   "sqrt{ }",
+   "sqrt{ }",
+   "sqrt{a}",
+   "sqrt{a}",
+   "-sqrt{a}",
+   "+-sqrt{a}",
+   "+-sqrt{a}",
+   "sqrt{9}",
+   "-sqrt{121}",
+   "sqrt{0.16}",
+   "-sqrt{{25} over {49}}",
+   "sqrt{4}",
+   "-sqrt{4}",
+   "sqrt{4}=2,~-sqrt{4}=-2",
+   "C",
+   "r",
+   "2x+4",
+   "2x+4",
+   "R",
+   "sqrt{ }",
+   "(",
+   "(",
+   "),",
+   "sqrt{5}",
+   "-sqrt{5}",
+   "left(sqrt{5} right)^{2}=5,~left(-sqrt{5} right)^{2}=5",
+   "sqrt{a}",
+   "-sqrt{a}",
+   "left(sqrt{a} right)^{2}=a,~left(-sqrt{a} right)^{2}=a",
+   "3^{2}=9,~(-3)^{2}=9",
+   "sqrt{3^{2}}=sqrt{9}=3,~sqrt{(-3)^{2}}=sqrt{9}=3",
+   "sqrt{a^{2}}=a,~sqrt{(-a)^{2}}=a",
+   "1",
+   "left(sqrt{6} right)^{2}=",
+   ",~left(-sqrt{6} right)^{2}=",
+   "2",
+   "sqrt{left({1} over {2} right)^{2}}=",
+   ",~sqrt{left(-{1} over {2} right)^{2}}=",
+   "a&gt;0",
+   "left(sqrt{a} right)^{2}=a,~left(-sqrt{a} right)^{2}=a",
+   "sqrt{a^{2}}=a,~sqrt{(-a)^{2}}=a",
+   "left(sqrt{5} right)^{2}=",
+   ",~left(-sqrt{5} right)^{2}=",
+   "left(sqrt{3^{2}} right)=sqrt{9}=",
+   ",~sqrt{(-3)^{2}}=sqrt{box{~}}=",
+   "sqrt{6^{2}}=6,~left(-sqrt{2} right)^{2}=2",
+   "sqrt{6^{2}}+left(-sqrt{2} right)^{2}=6+2=8",
+   "sqrt{25}=sqrt{5^{2}}=5,~sqrt{(-7)^{2}}=7",
+   "sqrt{25} TIMES sqrt{(-7)^{2}}=5 TIMES 7=35",
+   "sqrt{6^{2}}+left(-sqrt{2} right)^{2}",
+   "sqrt{25} TIMES sqrt{(-7)^{2}}",
+   "sqrt{(-9)^{2}}+left(-{sqrt{13 right)}}^{2}",
+   "left({sqrt{17 right)}}^{2}-sqrt{144}",
+   "left(sqrt{{2} over {5}} right)^{2} TIMES sqrt{(-5)^{2}}",
+   "sqrt{0.36 div left(-} sqrt{{1} over {10}} right)^{2}",
+   "left(sqrt{10} right)^{2}",
+   "left(-sqrt{{3} over {4}} right)^{2}",
+   "sqrt{23^{2}}",
+   "sqrt{(-1.4)^{2}}",
+   "sqrt{(-11)^{2}}",
+   "a&gt;0,~b&gt;0",
+   "a&lt;b",
+   "sqrt{a}&lt;sqrt{b}",
+   "sqrt{a}&lt;sqrt{b}",
+   "a&lt;b",
+   "^{2}",
+   "^{2}",
+   "^{2},",
+   "^{2}",
+   "sqrt{3cm},~sqrt{5}",
+   "3&lt;5",
+   "sqrt{3}",
+   "&lt;sqrt{5}",
+   "sqrt{3}",
+   "&lt;sqrt{5}",
+   "3&lt;5",
+   "1",
+   "sqrt{2}",
+   "sqrt{3}",
+   "sqrt{2}",
+   "sqrt{3}",
+   "2",
+   "sqrt{{1} over {5}}",
+   "sqrt{{1} over {7}}",
+   "{1} over {5}",
+   "{1} over {7}",
+   "sqrt{{1} over {5}}",
+   "sqrt{{1} over {7}}",
+   "sqrt{19},~sqrt{33}",
+   "sqrt{{3} over {4}},~sqrt{{5} over {8}}",
+   "a",
+   "sqrt{a}",
+   "sqrt{a}",
+   "4=sqrt{4^{2}}=sqrt{16}",
+   "16&gt;15",
+   "sqrt{16}&gt;sqrt{15}",
+   "4&gt;sqrt{15}",
+   "{1} over {3}=sqrt{left({1} over {3} right)^{2}}=sqrt{{1} over {9}}",
+   "{1} over {10}&lt;{1} over {9}",
+   "sqrt{{1} over {10}}&lt;sqrt{{1} over {9}}",
+   "sqrt{{1} over {10}}&lt;{1} over {3}",
+   "4&gt;sqrt{15}",
+   "sqrt{{1} over {10}}&lt;{1} over {3}",
+   "4,sqrt{15}",
+   "sqrt{{1} over {10}}",
+   "{1} over {3}",
+   "3,~sqrt{7}",
+   "sqrt{23},~5",
+   "0.6,~sqrt{0.4}",
+   "sqrt{{1} over {2}},",
+   "{2} over {3}",
+   "a&gt;0",
+   "sqrt{a}",
+   "sqrt{2}",
+   "sqrt{0.2}",
+   "sqrt{2}",
+   "1^{2}=1,~2^{2}=4",
+   "1^{2}&lt;2&lt;2^{2}",
+   "1&lt;sqrt{2}&lt;2",
+   "1.4^{2}=1.96,~1.5^{2}=2.25",
+   "1.4^{2}&lt;2&lt;1.5^{2}",
+   "1.4&lt;sqrt{2}&lt;1.5",
+   "1.41^{2}=1.9881,~1.42^{2}=2.0164",
+   "1.41^{2}&lt;2&lt;1.42^{2}",
+   "1.41&lt;sqrt{2}&lt;1.42",
+   "1.414^{2}=1.999396,~1.415^{2}=2.002225",
+   "1.414^{2}&lt;2&lt;1.415^{2}",
+   "1.414&lt;sqrt{2}&lt;1.415",
+   "sqrt{2}=1.414213562373 CDOTS",
+   "2,~sqrt{ }~,~=",
+   "sqrt{2}",
+   "sqrt{4}=sqrt{2^{2}}=2,~-sqrt{{9} over {16}}=-sqrt{left({3} over {4} right)^{2}}=-{3} over {4}",
+   "sqrt{5},~-sqrt{{3} over {7}}",
+   "sqrt{2},~pi",
+   "1",
+   "-sqrt{3}=-1.73205080 CDOTS",
+   "2",
+   "1+sqrt{2}=1+1.41421356 CDOTS =2.41421356 CDOTS",
+   "{1} over {2}=0.5,~{4} over {9}=0.dot{4}",
+   "sqrt{2}=1.41421356 CDOTS",
+   "pi=3.14159265 CDOTS",
+   "sqrt{15}~-sqrt{0.81}~sqrt{{9} over {144}}~sqrt{7}-2~3+sqrt{16}",
+   "sqrt{5}",
+   "pi",
+   "1.dot{3}",
+   "-sqrt{4}",
+   "1+sqrt{3}",
+   ":~{1} over {2},~-0.1,~-{5} over {3},~0.dot{4},~...",
+   ":~sqrt{2},~-sqrt{3},~pi,~...",
+   "^{1}:sqrt{2}",
+   "J",
+   "O",
+   "overline{OA}",
+   "P",
+   "Q",
+   "overline{OA}",
+   "P",
+   "sqrt{2},~-sqrt{2}",
+   "overline{OA}",
+   "P",
+   "A",
+   "overline{AP}",
+   "B",
+   "C",
+   "B",
+   "C",
+   "2+sqrt{13},~2-sqrt{13}",
+   "4-sqrt{3},~-2+sqrt{11}",
+   "sqrt{6},~-sqrt{6}",
+   "sqrt{3}",
+   "sqrt{2}",
+   "sqrt{2},",
+   "sqrt{3}",
+   "1+sqrt{2},~pi",
+   ",~-0.5,~-sqrt{3}",
+   "-sqrt{3}&lt;-0.5&lt;1+sqrt{2}&lt;pi",
+   "&lt;,&gt;",
+   "-sqrt{7}",
+   "sqrt{{1} over {2}}",
+   "-sqrt{2}",
+   "{5} over {2}",
+   "sqrt{8}",
+   "-sqrt{{2} over {3}}",
+   "8-sqrt{5},~3+sqrt{2}",
+   "{25} over {36}",
+   "a&gt;0",
+   "left(sqrt{a} right)^{2}=a,~left(-sqrt{a} right)^{2}=a",
+   "sqrt{a^{2}}=a,~sqrt{(-a)^{2}}=a",
+   "x^{2}=a",
+   "x",
+   "a&gt;0",
+   ":~+sqrt{a}",
+   ":~-sqrt{a}",
+   "a&gt;0,~b&gt;0",
+   "a&lt;b",
+   "sqrt{a}&lt;sqrt{b}",
+   "sqrt{a}&lt;sqrt{b}",
+   "a&lt;b",
+   "sqrt{16}~sqrt{29}~0.2dot{8}~4-sqrt{2}",
+   "left(sqrt{13} right)^{2}",
+   "left(-sqrt{10} right)^{2}",
+   "-sqrt{3.5^{2}}",
+   "sqrt{left(-{4} over {5} right)^{2}}",
+   "&lt;,&gt;",
+   "sqrt{15}",
+   "sqrt{22}",
+   "sqrt{{3} over {8}}",
+   "sqrt{{3} over {10}}",
+   "sqrt{30}",
+   "-sqrt{0.2}",
+   "(",
+   ")&lt;0&lt;(",
+   ")",
+   "à",
+   "sqrt{3},~-sqrt{5},~pi+1,~...",
+   ";4!;,~0,~-2,~1.dot{6},~...",
+   "A",
+   "overline{AB}",
+   "overline{AP}",
+   "P",
+   "sqrt{(-25)^{2}}",
+   "a,~left(-sqrt{9} right)^{2}",
+   "a-b",
+   "sqrt{45n}",
+   "sqrt{(-3a)^{2}}+sqrt{49b^{2}}+sqrt{(a-b)^{2}}",
+   "y=ax+b",
+   "sqrt{11^{2}}+left(-sqrt{8} right)^{2}",
+   "left(sqrt{7} right)^{2}-sqrt{169}",
+   "sqrt{(-0.1)^{2}} TIMES left(-{sqrt{14 right)}}^{2}",
+   "left(-sqrt{{1} over {6}} right)^{2} div sqrt{{4} over {81}}",
+   "sqrt{x}",
+   "x",
+   "sqrt{{1} over {2}}",
+   "-sqrt{8}",
+   "sqrt{10}",
+   "sqrt{5}",
+   "A0",
+   "A1",
+   "A2",
+   "A3",
+   "A4",
+   "A",
+   "A",
+   "^{1}:",
+   "A",
+   "A",
+   "A",
+   "A",
+   ";2(",
+   "A",
+   "A",
+   "x",
+   "A",
+   "A",
+   "x",
+   "sqrt{2}",
+   "(2x-3y)+(4x+5y)",
+   "(3x+y)-(7x-2y)",
+   "5(x-4y)+2(5x+3y)",
+   "3(x+6y)-(-3x+8y)",
+   "(-16) TIMES {3} over {4} div left(-{6} over {7} right)",
+   "[2-12 divleft(-{3} over {5} right)] TIMES {4} over {11}",
+   "=10(cm^{2})",
+   "sqrt{2} TIMES sqrt{3}",
+   "sqrt{2} TIMES sqrt{3}",
+   "left(sqrt{2} TIMES sqrt{3} right)^{2}=left(sqrt{2} TIMES sqrt{3} right) TIMES left(sqrt{2} TIMES sqrt{3} right)",
+   "=left(sqrt{2} TIMES sqrt{2} right) TIMES left(sqrt{3} TIMES sqrt{3} right)",
+   "=left(sqrt{2} right)^{2} TIMES left(sqrt{3} right)^{2}",
+   "=2 TIMES 3",
+   "sqrt{2} TIMES sqrt{3}",
+   "sqrt{2 TIMES 3}",
+   "sqrt{2} TIMES sqrt{3}=sqrt{2 TIMES 3}",
+   "sqrt{a} TIMES sqrt{b}",
+   "sqrt{a}~sqrt{b}",
+   "1",
+   "sqrt{2}~sqrt{5}=sqrt{2}",
+   "=sqrt{box{~}}",
+   "2",
+   "sqrt{{1} over {2}}~sqrt{{9} over {2}}=sqrt{box{~} TIMES {9} over {2}}=sqrt{box{~}}=",
+   "a&gt;0,~b&gt;0",
+   "sqrt{a}~sqrt{b}=sqrt{ab}",
+   ",~sqrt{9} TIMES sqrt{25}",
+   "sqrt{9 TIMES 25}",
+   "a sqrt{b}",
+   "sqrt{24}",
+   "sqrt{63}",
+   "sqrt{180}",
+   "sqrt{1000}",
+   "sqrt{7}~sqrt{11}",
+   "sqrt{2}~sqrt{13}",
+   "sqrt{{5} over {2}} sqrt{10}",
+   "sqrt{{1} over {3}} sqrt{l}",
+   "sqrt{a}",
+   "-sqrt{a}",
+   "4 sqrt{2}",
+   "-5 sqrt{10}",
+   "3 sqrt{{5} over {9}}",
+   "-{3} over {2} sqrt{7}",
+   "sqrt{12}=sqrt{2^{2}} TIMES 3=sqrt{2^{2}}~sqrt{3}=2 sqrt{3}",
+   "2 sqrt{3}=sqrt{2^{2}}~sqrt{3}=sqrt{2^{2}} TIMES 3=sqrt{12}",
+   "1",
+   "sqrt{45}=sqrt{3^{2}} TIMES 5={sqrt{box{~}}}^{2} sqrt{box{~}}=",
+   "sqrt{box{~}}",
+   "2",
+   "4 sqrt{3}={sqrt{box{~}}}^{2}~sqrt{3}={sqrt{box{~}}}^{2} TIMES 3=sqrt{box{~}}",
+   "2 TIMES sqrt{3}",
+   "2 sqrt{3}",
+   "a&gt;0",
+   "b&gt;0",
+   "sqrt{a^{2}}b=a sqrt{b}",
+   "a sqrt{b}",
+   "a&gt;0,~b&gt;0",
+   "=sqrt{{a} over {b}}",
+   "{sqrt{10}} over {sqrt{2}}",
+   "{sqrt{14}} over {sqrt{7}}",
+   "sqrt{60 div} sqrt{5}",
+   "sqrt{3 div left(-} sqrt{27} right)",
+   "{sqrt{3}} over {sqrt{2}}",
+   "{sqrt{3}} over {sqrt{2}}",
+   "^{2}=",
+   "{sqrt{3}} over {sqrt{2}}",
+   "{sqrt{3}} over {sqrt{2}}",
+   "={sqrt{3} TIMES sqrt{3}} over {sqrt{2} TIMES sqrt{2}}",
+   "={left({sqrt{3 right)}}^{2}} over {left({sqrt{2 right)}}^{2}}",
+   "={3} over {2}",
+   "{sqrt{3}} over {sqrt{2}}",
+   "{3} over {2}",
+   "{3} over {2}",
+   "sqrt{{3} over {2}}",
+   "{sqrt{3}} over {sqrt{2}}",
+   "sqrt{{3} over {2}}",
+   "sqrt{3 div} sqrt{2}=",
+   "1",
+   "=sqrt{r}",
+   "sqrt{box{~}}=",
+   "2",
+   "sqrt{30 div} sqrt{6}=",
+   "=sqrt{r}",
+   "sqrt{box{~}}",
+   "sqrt{p}",
+   "sqrt{6}",
+   "sqrt{a^{2}}b(a&gt;0,~b&gt;0)",
+   "a sqrt{b}",
+   "{sqrt{9}} over {sqrt{25}}",
+   "sqrt{u}",
+   "{9} over {25}",
+   "{2} over {sqrt{6}}",
+   "{sqrt{2}} over {sqrt{15}}",
+   "{9} over {4 sqrt{2}}",
+   "{1} over {sqrt{2}}",
+   "sqrt{2}",
+   "{1} over {sqrt{2}}",
+   "={1 TIMES sqrt{2}} over {sqrt{2} TIMES sqrt{2}}",
+   "{sqrt{2}} over {2}",
+   "{sqrt{2}} over {2}",
+   "{1} over {sqrt{2}}",
+   "{sqrt{3}} over {sqrt{7}}",
+   "{sqrt{3} TIMES sqrt{7}} over {sqrt{7} TIMES sqrt{7}}",
+   "{sqrt{21}} over {7}",
+   "{sqrt{2}} over {2 sqrt{5}}",
+   "{sqrt{2} TIMES sqrt{5}} over {2 sqrt{5} TIMES sqrt{5}}",
+   "{sqrt{3}} over {sqrt{7}}",
+   "{1} over {sqrt{2}}",
+   "sqrt{2}",
+   "sqrt{15 div} sqrt{3} TIMES sqrt{2}=",
+   "{sqrt{15}} over {sqrt{3}}",
+   "TIMES sqrt{2}=sqrt{5} TIMES sqrt{2}=sqrt{10}",
+   "2 sqrt{7}",
+   "{5} over {sqrt{2}}",
+   "{sqrt{7}} over {sqrt{3}}",
+   "=2 sqrt{7}",
+   "{5} over {sqrt{2}}",
+   "{sqrt{3}} over {sqrt{7}}",
+   "={10 sqrt{3}} over {sqrt{2}}",
+   "={10 sqrt{6}} over {2}",
+   "=5 sqrt{6}",
+   "sqrt{15 div} sqrt{3} TIMES sqrt{2}",
+   "2 sqrt{7}",
+   "{5} over {sqrt{2}}",
+   "sqrt{10}",
+   "5 sqrt{6}",
+   "sqrt{12} TIMES sqrt{7 div} sqrt{6}",
+   "5 sqrt{{1} over {10}}",
+   "{sqrt{3}} over {sqrt{2}}",
+   "TIMES sqrt{45}",
+   "sqrt{ }",
+   "sqrt{1.32}=1.149",
+   "sqrt{1.32}",
+   "sqrt{5.16}",
+   "sqrt{10.1}",
+   "sqrt{49.4}",
+   "sqrt{98.3}",
+   "sqrt{300}",
+   "sqrt{0.3}",
+   "sqrt{573}",
+   "sqrt{21000}",
+   "sqrt{0.45}",
+   "sqrt{0.00763}",
+   "sqrt{3}",
+   "sqrt{300}=sqrt{100 TIMES 3=} sqrt{10^{2}} TIMES 3=10 sqrt{3=10 TIMES 1.732=17.32}",
+   "sqrt{30}",
+   "sqrt{0.3}=sqrt{{30} over {100}}=sqrt{u}",
+   "===0.5477",
+   "5 sqrt{2}+3 sqrt{2}=8 sqrt{2}",
+   "sqrt{2}",
+   "sqrt{2}",
+   "1",
+   "4 sqrt{3}+5 sqrt{3}=(4+",
+   "sqrt{3}=",
+   "sqrt{3}",
+   "2",
+   "8 sqrt{2}-2 sqrt{2}=",
+   "-2) sqrt{2}=",
+   "sqrt{2}",
+   "3",
+   "3 sqrt{2}+7 sqrt{3}+sqrt{2}-4 sqrt{3}=(3+",
+   ") sqrt{2}+(7-",
+   "sqrt{3}=",
+   "sqrt{2}+",
+   "sqrt{3}",
+   "sqrt{a^{2}}b=a sqrt{b}(a&gt;0,~b&gt;0)",
+   "5 sqrt{5}",
+   "3 sqrt{5}+sqrt{20}=3 sqrt{5}+2 sqrt{5}=(3+2) sqrt{5}=5 sqrt{5}",
+   "sqrt{27}-",
+   "{2} over {sqrt{3}}",
+   "=3 sqrt{3}-",
+   "{2 sqrt{3}} over {3}",
+   "=left(3-{2} over {3} right) sqrt{3}=",
+   "3 sqrt{5}+sqrt{20}",
+   "sqrt{27}-",
+   "sqrt{63}-sqrt{28}",
+   "{sqrt{24}} over {3}",
+   "+{sqrt{2}} over {sqrt{27}}",
+   "sqrt{3}-5 sqrt{6}-sqrt{12}+2 sqrt{54}",
+   "{sqrt{18}} over {6}",
+   "{5} over {sqrt{75}}",
+   "{4} over {sqrt{3}}",
+   "7 sqrt{6}+2 sqrt{6}",
+   "4 sqrt{13}-9 sqrt{13}",
+   "sqrt{5}-3 sqrt{5}+5 sqrt{5}",
+   "6 sqrt{2}-8 sqrt{11}+sqrt{2}-5 sqrt{11}",
+   "h~m",
+   "sqrt{9.8h}",
+   "m",
+   "m",
+   "m",
+   "sqrt{3}+sqrt{5}",
+   "sqrt{3},~sqrt{5}",
+   "sqrt{3}+sqrt{5}",
+   "sqrt{3}+5",
+   "sqrt{3}+sqrt{5}",
+   "sqrt{3}+5",
+   "sqrt{2} TIMES sqrt{6}-9 div sqrt{3}=sqrt{12}-",
+   "{9} over {sqrt{3}}",
+   "sqrt{2} TIMES sqrt{6}-9 div sqrt{3}=2 sqrt{3}-",
+   "{9 sqrt{3}} over {3}",
+   "sqrt{2} TIMES sqrt{6}-9 div sqrt{3}=2 sqrt{3}-3 sqrt{3}=-sqrt{3}",
+   "sqrt{18}+sqrt{6}left(2 sqrt{3}-sqrt{8} right)=3 sqrt{2}+sqrt{6 TIMES 2} sqrt{3}-sqrt{6} TIMES sqrt{8}",
+   "sqrt{18}-sqrt{6}left(2 sqrt{3}-sqrt{2} right)=3 sqrt{2}+2 sqrt{18}-sqrt{48}",
+   "sqrt{18}-sqrt{6}left(2 sqrt{3}-sqrt{2} right)=3 sqrt{2}+6 sqrt{2}-4 sqrt{3}=9 sqrt{2}-4 sqrt{3}",
+   "sqrt{2} TIMES sqrt{6}-9 div sqrt{3}",
+   "sqrt{18}+sqrt{6}left(2 sqrt{3}-sqrt{8} right)",
+   "-sqrt{3}",
+   "9 sqrt{2}-4 sqrt{3}",
+   "sqrt{21 div} sqrt{3}+sqrt{14} TIMES sqrt{2}",
+   "sqrt{15}",
+   "{1} over {sqrt{3}}",
+   "-sqrt{10 div}",
+   "{1} over {sqrt{2}}",
+   "sqrt{3}left(sqrt{5}+sqrt{12} right)+sqrt{60}",
+   "5 sqrt{5}+left(2 sqrt{42}-sqrt{35 right) div} sqrt{7}",
+   "a-b&gt;0",
+   "a-b+b&gt;0+b",
+   "a&gt;b",
+   "a-b&lt;0",
+   "a-b+b&lt;0+b",
+   "a&lt;b",
+   "b",
+   "7+sqrt{11},~10",
+   "5,~sqrt{8}+3",
+   "-4+sqrt{2},~-sqrt{5}+sqrt{2}",
+   "-2+sqrt{3},~1-sqrt{3}",
+   "a-b&gt;0",
+   "a&gt;b",
+   "a-b=0",
+   "a=b",
+   "a-b&lt;0",
+   "a&lt;b",
+   "left(sqrt{7}+1 right)-4=sqrt{7}-3",
+   "sqrt{7}-3=sqrt{7}-sqrt{9}&lt;0",
+   "sqrt{7}+1&lt;4",
+   "left(sqrt{5}+2 right)-left(sqrt{5}+sqrt{3} right)=sqrt{5}+2-sqrt{5}-sqrt{3}=2-sqrt{3}",
+   "2-sqrt{3}=sqrt{4}-sqrt{3}&gt;0",
+   "sqrt{5}+2&gt;sqrt{5}+sqrt{3}",
+   "sqrt{7}+1,4",
+   "sqrt{5}+2,sqrt{5}+sqrt{3}",
+   "sqrt{7}+1&lt;4",
+   "sqrt{5}+2&gt;sqrt{5}+sqrt{3}",
+   "3 sqrt{2}+sqrt{3}",
+   "6-sqrt{5}",
+   "3 sqrt{5}",
+   "5 sqrt{2}+3 sqrt{5}",
+   "4-3 sqrt{6}",
+   "4 sqrt{3 TIMES 3}{sqrt{2}}^{N} sqrt{6}",
+   "{2} over {sqrt{6}}",
+   "12^{N}2{2} over {sqrt{6}}",
+   "sqrt{8}-sqrt{5}+sqrt{18}+sqrt{80}",
+   "62-75-+227{6} over {sqrt{2}}",
+   "sqrt{2} TIMES sqrt{10}+5^{N} sqrt{5}",
+   "{6} over {sqrt{3}}",
+   "{6} over {sqrt{3}}",
+   "{sqrt{8}+2 sqrt{3}} over {sqrt{2}}",
+   "{15} over {sqrt{5}}",
+   "3(215-12)+25{15} over {sqrt{5}}",
+   "sqrt{a}",
+   "-sqrt{a}",
+   "-2 sqrt{6}",
+   "5 sqrt{{2} over {5}}",
+   "2 sqrt{3}+6 sqrt{3}",
+   "sqrt{7}-4 sqrt{7}",
+   "sqrt{2}+sqrt{5}-sqrt{8}+3 sqrt{20}",
+   "&lt;,&gt;",
+   "sqrt{6}+1",
+   "3-sqrt{3}",
+   "sqrt{10}-sqrt{3}",
+   "a sqrt{b}",
+   "sqrt{44}",
+   "-sqrt{150}",
+   "n",
+   "a&gt;0",
+   "m sqrt{a+n} sqrt{a}=(m+n) sqrt{a}",
+   "m sqrt{a-n} sqrt{a}=(m-n) sqrt{a}",
+   "]",
+   "sqrt{2}~sqrt{7}",
+   "sqrt{{5} over {2}}~sqrt{{6} over {5}}",
+   "{sqrt{30}} over {sqrt{3}}",
+   "sqrt{42 div left(-} sqrt{6} right)",
+   "a&gt;0,~b&gt;0",
+   "{sqrt{a}} over {sqrt{b}}",
+   "=sqrt{ }",
+   "a-b&gt;0",
+   "a&gt;b",
+   "a-b=0",
+   "a=b",
+   "a-b&lt;0",
+   "a&lt;b",
+   "{sqrt{2}} over {sqrt{3}}",
+   "{sqrt{2} TIMES sqrt{3}} over {sqrt{3} TIMES sqrt{3}}",
+   "a&gt;0,~b&gt;0",
+   "sqrt{a}~sqrt{b}=sqrt{ab}",
+   "sqrt{a^{2}}b=a sqrt{b},~a sqrt{b}=sqrt{a^{2}}b",
+   "sqrt{32}=a sqrt{2},~2 sqrt{7}=sqrt{b}",
+   "sqrt{ab}",
+   "a+b sqrt{2}",
+   "a+b",
+   "72m^{2}",
+   "18m^{2}",
+   "12m^{2}",
+   "x",
+   "x",
+   "a&gt;0,~b&gt;0",
+   "ab=9",
+   "a sqrt{u}",
+   "+b sqrt{u}",
+   "2 sqrt{5}-2~sqrt{5}-1~7-2 sqrt{5}",
+   "A+B",
+   "A=sqrt{18}+2 sqrt{50}+sqrt{98}",
+   "B=",
+   "sqrt{{3} over {5}} div sqrt{{3} over {10}}+3 sqrt{2}-sqrt{128}",
+   "A",
+   "B",
+   "3 sqrt{2}+1",
+   "A",
+   "B",
+   "sqrt{{1} over {9}}",
+   "-{1} over {3}",
+   "sqrt{2}=x,~sqrt{5}=y",
+   ",~sqrt{90}",
+   "2x^{2}y",
+   "2xy^{2}",
+   "3x^{2}y^{2}",
+   "sqrt{3}",
+   "sqrt{{1} over {13}}",
+   "{1} over {3}",
+   "sqrt{6}",
+   "-sqrt{0.1}~sqrt{{9} over {121}}~pi~0.dot{7}~sqrt{(-4)^{2}}",
+   "left(sqrt{7} right)^{2}",
+   "sqrt{7^{2}}",
+   "left(-sqrt{7} right)^{2}",
+   "sqrt{(-7)^{2}}",
+   "-sqrt{(-7)^{2}}",
+   "left(sqrt{2} right)^{2}+sqrt{25}-sqrt{(-3)^{2}}-left(-sqrt{5} right)^{2}",
+   "A=sqrt{(x+1)^{2}}-sqrt{(1-x)^{2}}",
+   "-1&lt;x&lt;1",
+   "A=2x",
+   "x&lt;-1",
+   "A=-2",
+   "x&gt;1",
+   "A=0",
+   "+=",
+   "2 sqrt{6 TIMES 3} sqrt{2 div 3}=4 sqrt{3}",
+   "sqrt{28 div}",
+   "=sqrt{15}",
+   "sqrt{32}+2 sqrt{18}-sqrt{72}=4 sqrt{2}",
+   "sqrt{24 TIMES 3-9} sqrt{6 div 3} sqrt{2}=-sqrt{3}",
+   "2 sqrt{6}&lt;5",
+   "-3&lt;-sqrt{10}",
+   "sqrt{12}&lt;4-sqrt{3}",
+   "6 sqrt{6}-4 sqrt{5}&lt;2 sqrt{5}+3 sqrt{6}",
+   "5 sqrt{3}+sqrt{6}&lt;3 sqrt{5}+sqrt{6}",
+   "sqrt{a}=2.496,~sqrt{611}=b",
+   "100a+100b",
+   "sqrt{u}",
+   "a",
+   "a-b",
+   "sqrt{a-3b}",
+   "a&gt;b",
+   "sqrt{5}left(sqrt{2}-sqrt{5} right)-",
+   "5cm^{3}",
+   "overline{AB}",
+   "=overline{AP}",
+   "overline{DF}",
+   "=overline{DQ}",
+   "overline{PQ}",
+   "K",
+   "K",
+   "{sqrt{29}}^{0}:sqrt{295}",
+   "K",
+   "(84+84 sqrt{2}",
+   " m",
+   "K"
+  ],
+  "tables": [
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "&lt; 패턴 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()()",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()()",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "())()(())",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()=3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()=6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()와 의 대소 비교 2 3이므로 () 과 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()은 순환소수가 아닌 무한소수이므로 (유리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "()이므로 9의 제곱근은 이다.()이므로 의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ", 일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "-2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "-3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "-5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "-□",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "0",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "0",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "01",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "01",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "02",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "02",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1 2 3 4 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1 ×",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1 제곱근과 실수2 근호를 포함한 식의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "11",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "11",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "11",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "12",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "12",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "12",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "13",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "13",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "14",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "14",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "15",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "16",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "16",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "17",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "18",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 . 근호를 포함한 식의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 . 근호를 포함한 식의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 □=□",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "20",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "20쪽 25쪽 29쪽 36쪽 40쪽 42쪽 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "22",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "24",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "25",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "26",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "28",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2가 더 크지.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2와 중에서 어느 수가 더 클까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2의 양의 제곱근은 , 음의 제곱근은 이고 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3-3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "30",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "32",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "34",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "36",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "38",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4 용지는 3 용지의 긴 변을 반으로 잘라 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "40",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "42",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "44",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "46",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "47",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "48",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "49",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4의 제곱근을 근호를 사용하여 나타내면 양의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5 4 3 2 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5-5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5□+3□=(5+3)□=8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "81의 두 제곱근을 각각 a,~b라고 할 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "8을 제곱한 수의 제곱근은 8이야.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "=",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "=",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "==",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "== =□=",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR11",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR12",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR13",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR14",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR15",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR16",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR17",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR18",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR19",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR20",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR21",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR22",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR23",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "[13~17] 다음 문제의 풀이 과정과 답을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "[부석사 무량수전]",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "[석굴암]",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "a,~b가 실수일 때❶ 이면 ❷ 이면 ❸ 이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "m 이 유리수이고 일 때••",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "×",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "× =×=3×= ==□=",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "÷×",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "‘7의 제곱근’과 ‘제곱근 7’의 차이점을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "•일 때 는 a의 제곱근이다.•일 때 a의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑴==⑵==",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑴⑴⑴⑵⑵⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑴⑵÷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑴이고 이므로 따라서 ⑵ 이고 이므로 따라서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑴이때 이므로 ⑵이때 이므로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑴이므로 ⑵이므로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●근호를 포함한 식의 곱셈과 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●근호를 포함한 식의 덧셈과 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●무리수의 개념을 이해하고, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●제곱근의 뜻과 성질을 알고,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "□= 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▶ 1, 2, 3, 4, 5, 13▶ 6, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "❶ 음수양수❷ 양수끼리는 절댓값이 큰 수가 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가로의 길이가 세로의 길이가 1인직사각형을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념정리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "겨우 발자국이 날 만큼적게 내린 눈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계산 결과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계산 결과가 의 꼴이면 로 나타낸다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계산기에서 를 차례로 눌러 의 값을 구한다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고등",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고등복소수와 이차방정식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공감적 소통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "괄호 안의 알맞은 것에 표를 해 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "궁금한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "그럼 02와 중에는 어느 수가 더 클까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 밖으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 밖으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 안에 어떤 수의 제곱이 곱해져 있을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 안으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 안으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 안의 수가 같은 것끼리 모아서 계산한다",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 안의 수끼리 곱한다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호 안의 수끼리 나눈다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호가 없는 수와 근호가 있는 수의 대소는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 사용하여 나타낸 수 중에서과 같이 근",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 계산에서 계산 결과의 분",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 계산에서 곱셈과 나눗셈이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 계산에서 덧셈, 뺄셈, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 계산은 임을 이용하거나 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 곱셈과 나눗셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 곱셈과 나눗셈의 원리를 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 덧셈과 뺄셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "근호를 포함한 식의 덧셈과 뺄셈의 원리를 이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "글쎄….",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "글자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기본 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기본 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기초 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기초 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "꽃향기와 같은 기체가 주위로 퍼져 나갈 때,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "끝까지 말하기는 무리인데….",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나는 1.414213…",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나는 근호를 포함한 식의 계산 단원에서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나는 이번 단원에서 을/를 잘했고, 이/가 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나는 제곱근과 실수 단원에서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나만의 방법",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나만의 방법",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나은",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 학습 되돌아보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "내가 만드는 제곱근의 곱셈과 나눗셈 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "는 곱셈 기호 를 생략하여 로 나타내기도 한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "는 보다 그 값을 소수로 나타내기에 편리하다",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다양한 활동으로 수학 역량을 키워 보자. 일",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 6장의 카드에 적힌 수를 큰 것부터 차",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림과 같이 수직선 위의 점 (3)을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림은 전체 넓이가 인 정사각형 모양의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림은 한 눈금의 길이가 1인 모눈종이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림은 한 눈금의 길이가 1인 모눈종이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림은 한 눈금의 길이가 1인 모눈종이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림은 한 눈금의 길이가 1인 모눈종이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림의 삼각형과 직사각형의 넓이가 서로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 두 수의 대소를 비교하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 두 수의 대소를 비교하시오.⑴ ⑵ ,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 두 수의 대소를 비교하시오.⑴ ⑵ ⑶ ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 두 실수의 대소를 비교하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 두 실수의 대소를 비교하시오.⑴ ⑵ ⑶",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 문장이 옳으면 ◯ 표, 옳지 않으면 _",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 빈칸에 부등호 중 알맞은 것을 쓰시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 빈칸에 부등호 중 알맞은 것을 쓰시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 빈칸에 부등호 중 알맞은 것을 쓰시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 세 수 중 가장 큰 수를 구하시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수 중 무리수는 모두 몇 개인지 구하시",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수 중 무리수를 모두 찾으시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수를 근호를 사용하지 않고 나타내시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수를 근호를 사용하지 않고 나타내시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수를 근호를 사용하지 않고 나타내시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수를 또는 의 꼴로 나타내시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수를 또는 의 꼴로 나타내시오.⑴ ⑵ ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수를 의 꼴로 나타내시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수를 의 꼴로 나타내시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수의 분모를 유리화하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수의 분모를 유리화하시오.⑴ ⑵ -⑶ ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수의 분모를 유리화하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수의 제곱근을 구하시오. ⑴ 64⑵ 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수의 제곱근을 구하시오.⑴ 1⑵ 19⑶",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 수의 제곱근을 근호를 사용하여 나타내시",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 제곱근표에서 일 때,의 값을 구하시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 중 그 값이 나머지 넷과 다른 것은?①",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 중 두 번째로 작은 수는?① ② 0.2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 중 두 실수의 대소 관계가 옳은 것을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 중 옳은 것은?① 0의 제곱근은 없다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 중 옳은 것을 모두 고르면? (정답 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 중 옳지 않은 것은?① ② ③ ④ ⑤",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 직각삼각형에서 x의 값을 구하시오. ⑴",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 직각삼각형에서 x의 값을 구하시오.⑴ ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 직사각형은 가로의 길이가 각각 5,3이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음과 같이 곱셈과 나눗셈이 섞여 있는 근호",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음과 같이 배운 내용을 나만의 방법으로 정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음과 같이 배운 내용을 나만의 방법으로 정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음은 세 학생이 각각 x의 값의 범위에 따",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음은 에 대응하는 점을 수직선 위에 나타내",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음은 제곱과 제곱근 사이의 관계를 나타낸 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음은 찬우와 나은이가 제곱근에 대하여 설명",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ÷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷ +-+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 계산하시오.⑴ ⑵ ⑶ ⑷ ;;Á7°;",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 만족시키는 나만의 잠금 패턴을 만들고",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 보기에서 모두 찾으시오.보기⑴ 정수수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다항식의 덧셈과 뺄셈을 할 수 있나요?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답 ⑴ 8 ⑵ 35",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답 ⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답 ⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답 ⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답 ⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답 ⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "답 ⑴ ⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "데데킨트(Dedekind, W. R., 18",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "도전 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "도전 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "동양의 조화로운 비로 알려진 금강비는 이다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "두 수 A,~B가 다음과 같을 때의 값을 구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "라고 할 때 을 x,~y를 사용하여 나타내면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "를 ‘플러스 마이너스 루트 a’라고 읽는다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "를 로 계산할 수 없는 이유",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "를 사용하여 나타낸 수를 두 개 이상 써 보",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모둠별로 실수와 그 계산에 관련된 내용 중에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모둠별로 작사한 노래를 발표하고, 친구들과 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무리수, 실수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무리수, 실수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무리수는 무엇일까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무리수를 수직선 위에 나타내기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무리수를 수직선 위에 어떻게 나타낼까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무리수와 실수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무리수의 개념을 이해하고, 무리수의 유용성을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 만들기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "번호",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "복사 또는 인쇄용으로 많이 사용하는 4 용지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "부등식의 양변에 같은 수를 더해도 부등호의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "분모를 유리수로 고친다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "분모의 유리화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "분모의 유리화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "분모의 유리화는 무엇일까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 것을 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "뺄셈을 이용하여 실수의 대소는 어떻게 비교할",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "뺄셈을 이용한 실수의 대소 비교",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "뺄셈을 이용한 실수의 대소 비교",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "사고확산하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "사고확산하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "새로운 수의 발견고대 그리스의 수학자 피타고",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "새봄",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "서술형 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "소수유한소수순환소수유리수무한소수순환소수가 아",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "소수유한소수순환소수유리수무한소수순환소수가 아",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수직선 위에서 원점의 오른쪽에 있는 점에는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수직선을 이용하지 않고 실수의 대소를 비교하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학 기호는 복잡한 수학 개념을 명확하게 표",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학 내용이 잘 드러나도록 노래에 맞춰 작사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학 노래 작사하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학+자연 현상",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "순환소수가 아닌 무한소수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스마트폰 잠금 패턴의 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스마트폰 잠금 화면에서 가로, 세로 방향으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스마트폰 잠금 화면에서 가로, 세로 방향으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 복습해 보자! 수학 익힘책 236쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 복습해 보자! 수학 익힘책 237쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 정리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 정리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실생활 속에 숨겨진 무리수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수 유리수무리수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수와 그 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수의 대소 관계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수의 대소 관계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수의 대소 관계a,~b가 실수일 때❶ 이면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수의 대소 관계❶ 양수는 0보다 크고, 음",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수의 대소는 어떻게 비교할까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실수의 분류양의 정수(자연수): 1,2,3,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실습 하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실습 하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "아래의 문제를 계산하고, 그 계산 결과에 해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "아름다운 순우리말",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "양수 a의 제곱근 중에서 양수인 것을 양의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "에 어떤 수를 곱하면 유리수 2가 될까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "에서 그린 직사각형의 대각선을 이용하여 에 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 무리수를 수직선 위에 나",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 문제를 스스로 만드는 과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 타당한 근거에 따라 자신",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 타당한 근거에 따라 자신",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량활동",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예시",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 직각을 낀 두 변의 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 한 변의 길이가 1인 정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림은 가방을 만들기 위해 입지 않는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림은 넓이가 각각 3cm , 5cm",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림은 한 눈금의 길이가 1인 모눈종",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림은 한 변의 길이가 인 정사각형 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 빈칸에 알맞은 수를 쓰고 와 의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 빈칸에 알맞은 수를 쓰고와 의 계산 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 직육면체의 부피가 48 일 때, 이 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 표는 0 용지부터 4 용지까지의 규격",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 피아노 건반에서 ‘높은 도’ 음의 주",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원곡: 나비야",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "위와 같은 방법으로 다음 두 실수에 대응하는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "위의 함께 탐구 에서 5의 제곱근은 와 이므",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "위의 함께 탐구 에서 넓이가 3cm 5cm인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "위의 함께 탐구 에서 의 길이는 2 이므로 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "위의 함께 탐구 에서 의 분모와 분자에 각각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "유리수 무리수 실수 모두 모여라분수로 나타낼",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "유리수와 마찬가지로 실수에서도 곱셈의 교환법",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "유리수와 마찬가지로 실수에서도 덧셈의 교환법",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "유리수와 무리수를 통틀어 실수라 하고, 실수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "유리수와 순환소수의 관계를 설명할 수 있나요",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "은 -11이야.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "은 곱셈 기호 를 생략하여 으로 나타내기도 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "을 계산하시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "을 계산해 보자. 은 양수이고 이를 제곱하면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "을 분모가 유리수인 분수로 고쳐 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "음악",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "음은 높아지는 순서대로 ‘도’ ‘도#’ ‘레",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "의 꼴로 나타낼 때 일반적으로 근호 안의 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "의 분모를 유리화하면 가 된다. 유리수 a,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "의 양의 제곱근을 의 음의 제곱근을 b라고 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원에서는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원에서는 무리수를 탐구하여 수 체계를 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원의 학습 계획을 적어 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원의 학습 계획을 적어 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 자연수가 되도록 하는 가장 작은 자연수 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 자연수가 되도록 하는 자연수 n의 값 중",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 책의 284~287쪽에 제곱근표가 실려 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이고 일 때 의 값을 구하시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이므로 제곱하여 4가 되는 수는 2와 -2이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이하의 자연수가 5개일 때 의 값이 될 수 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일 때 a와 의 대소 관계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일 때 유리수 a,~b에 대하여 의 값을 구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일 때••",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일 때••",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일 때•이면 •이면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일반적으로 다음이 성립한다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일차함수 의 그래프가 오른쪽 그림과 같을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "자연수, 정수, 유리수, 무리수, 실수 중 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "작사는 단어나 문장을 음악에 맞춰 구성하여 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잠금 패턴",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잠금 패턴",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잠금 패턴은 스마트폰, 태블릿 등에서 사용하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "재활용을 넘어선 업사이클링버려지는 제품을 단",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 B에 대응하는 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 B에 대응하는 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 C에 대응하는 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 C에 대응하는 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정답 및 풀이 249쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정답 및 풀이 251쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정답 및 풀이 252쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정수가 아닌 유리수는 유한소수나 순환소수로 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정수와 유리수의 사칙계산을 할 수 있나요?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근 a",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근 기호는 독일의 수학자 루돌프(Rudo",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근 기호의 역사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근과 실수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근과 실수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근에는 어떤 성질이 있을까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근은 무엇일까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 곱셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 곱셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 곱셈과 나눗셈, 제곱근표를 이용하면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 곱셈은 어떻게 할까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 곱셈일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 나눗셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 나눗셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 나눗셈은 어떻게 할까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 나눗셈일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 대소 관계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 대소 관계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 대소 관계를 이용하여 를 소수로 나",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 대소 관계일 때❶ 이면 ❷ 이면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 대소는 어떻게 비교할까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 덧셈과 뺄셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 덧셈과 뺄셈",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 덧셈과 뺄셈은 어떻게 할까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 뜻과 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 뜻과 성질무리수와 실수근호를 포함한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 뜻과 성질을 알고, 제곱근의 대소 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 성질을 이용하면 주어진 수를 근호를",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근의 성질일 때❶ ❷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근표는 1.00부터 9.99까지의 수는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근표를 이용하여 다음 제곱근의 값을 구하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근표를 이용하여 다음 제곱근의 값을 구하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근표를 이용하여 제곱근의 값은 어떻게 구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근표에 있는 제곱근의 값은 대부분 어림한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱근표에서 의 값은 1.732이므로 제곱근",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "제곱하여 25가 되는 수를 x라고 하면이다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비 활동",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비 활동",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준영",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1 정수와 유리수의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1소인수분해,정수와 유리수중 2유리수와 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2 다항식의 계산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2 유리수와 순환소수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2 피타고라스 정리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지속가능발전",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지윤",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지진이 발생하면 지진파가 먼저 도착하고 그 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "찬우",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "참고 앞으로 수라고 하면 실수를 말한다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "창의적 설계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "총길이 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "총길이가 무리수가 되도록 만든다. 점과 점은",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "충분히 익어 저절로 떨어질 정도가 된 열매",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "카메라 렌즈로 들어오는 빛의 양을 조절하는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 1 ❶ 을 이용하여 빈칸에 알맞은 수를",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 1 색종이 ㈎, ㈏ 중 넓이가 더 넓은",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 1 피타고라스 정리를 이용하여 대각선 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 1 피타고라스 정리를 이용하여 의 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "틀린 문제는 오답 공책을 만들어 확인해 보자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "피타고라스 정리를 이해했나요?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습 결과물을 모아 나만의 포트폴리오를만들어",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습 내용",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습 태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습한 개념을 스스로 정리해 보자. 스스로 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "한 변의 길이가 1인 정사각형의 대각선을 이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 해요",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "항목별로 나의 점수를 색칠해 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "해가 처음 솟을 때의 빛",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "협력적 실행",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "확실히 이해한 문제의 번호에 □표를 해 보자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 2,
+    "head": "1.1401.145",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 1,
+    "cc": 2,
+    "head": "1다음 대화를 읽고 a&gt;0일 때 a가 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 1,
+    "cc": 2,
+    "head": "2의 값의 범위가 다음과 같을 때, a와 의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "1.0101.0581.105",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 4,
+    "cc": 6,
+    "head": "수012346.02.4492.4522.454",
+    "fills": [
+     "#D8E1EB",
+     "#EFEFEF"
+    ],
+    "filledCells": 9,
+    "borderedCells": 24
+   },
+   {
+    "rc": 6,
+    "cc": 5,
+    "head": "수01231.01.0001.0051.0151",
+    "fills": [
+     "#D0E1EF"
+    ],
+    "filledCells": 30,
+    "borderedCells": 30
+   },
+   {
+    "rc": 6,
+    "cc": 7,
+    "head": "7-자연수정수유리수무리수실수",
+    "fills": [
+     "#D8E1EB",
+     "#EFEFEF"
+    ],
+    "filledCells": 12,
+    "borderedCells": 42
+   },
+   {
+    "rc": 7,
+    "cc": 3,
+    "head": "1234563-27",
+    "fills": [
+     "#FAD486"
+    ],
+    "filledCells": 7,
+    "borderedCells": 7
+   },
+   {
+    "rc": 7,
+    "cc": 3,
+    "head": "람12햇눈자아2귀국",
+    "fills": [
+     "#FAD486"
+    ],
+    "filledCells": 7,
+    "borderedCells": 7
+   },
+   {
+    "rc": 7,
+    "cc": 4,
+    "head": "용지길이(mm)길이의 비짧은 변긴 변8411",
+    "fills": [
+     "#EBECEC",
+     "#F5C7A2"
+    ],
+    "filledCells": 7,
+    "borderedCells": 18
+   }
+  ],
+  "picCount": 240,
+  "picSizes": {
+   "0x0": 71,
+   "0x1": 3,
+   "10x4": 1,
+   "11x2": 3,
+   "11x5": 1,
+   "12x10": 1,
+   "14x5": 1,
+   "14x6": 1,
+   "18x7": 1,
+   "19x6": 1,
+   "19x7": 1,
+   "1x1": 79,
+   "1x2": 1,
+   "25x1": 2,
+   "25x5": 1,
+   "2x1": 1,
+   "2x2": 17,
+   "2x3": 1,
+   "30x1": 2,
+   "32x9": 1,
+   "35x4": 1,
+   "3x0": 2,
+   "3x1": 12,
+   "3x2": 2,
+   "3x4": 2,
+   "4x3": 1,
+   "4x4": 4,
+   "59x77": 40,
+   "5x5": 4,
+   "8x5": 1,
+   "9x1": 1
+  },
+  "ghostTables": 0,
+  "longNbspRuns": 3,
+  "whiteSquareCount": 13,
+  "visibleChars": 12168,
+  "paragraphs": 1329,
+  "binDataCount": 272
+ }
+}
