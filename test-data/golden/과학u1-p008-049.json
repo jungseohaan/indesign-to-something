@@ -1,7 +1,7 @@
 {
  "meta": {
-  "source": "u1-golden-base.hwpx",
-  "gitRev": "b4e4b5e0"
+  "source": "u1-058-restored.hwpx",
+  "gitRev": "daec54d5"
  },
  "signature": {
   "sections": 1,
@@ -72,6 +72,8 @@
    "H_{2}O_{2} ~ rarrow ~ 2H_{2}O+O_{2}",
    "CH_{4}+2O_{2} ~ rarrow ~ CO_{2}+2H_{2}O",
    "CaCO_{3}+2HCl ~ rarrow ~ CaCl_{2}+CO_{2}+2H_{2}O",
+   "N_{2}+3H_{2} ~ rarrow ~ 2NH_{3}",
+   "2H_{2}+O_{2} ~ rarrow ~ 2H_{2}O",
    "I"
   ],
   "tables": [
@@ -6938,7 +6940,7 @@
   "ghostTables": 0,
   "longNbspRuns": 16,
   "whiteSquareCount": 0,
-  "visibleChars": 23540,
+  "visibleChars": 23518,
   "paragraphs": 1583,
   "binDataCount": 397
  }

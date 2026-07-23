@@ -1,8 +1,48 @@
-# SPEC-058: 수식 폰트 박스 반응식의 hp:equation 미변환 (조사 완료, 구현 보류)
+# SPEC-058: 수식 폰트 박스 반응식의 hp:equation 미변환
 
-> 상태: **원인 규명 완료, 구현 보류**. 2026-07-23.
-> 시도한 프리패스는 부작용(하류 hasText 술어가 equation 을 못 봄)으로 전부 되돌림.
-> 본 문서는 재개용 진단 기록.
+> 상태: **구현 완료** (2차 시도, 브랜치 `spec-058-boxed-equation-v2`). 2026-07-23.
+> 1차 시도는 부작용(하류 hasText 술어가 equation 을 못 봄)으로 되돌렸었음 —
+> 2차에서 그 재주입 지점을 실측으로 특정해 함께 수정.
+
+## 구현 요약 (2차)
+
+- **`MathProcessor.promoteEquationFontReactionRanges`** (프리패스): 문단에서
+  {수식폰트 런(mathTypeOf≠null) / 화살표(→) 단독 런 / 공백 런}으로만 이어진 연속
+  구간을 찾아, **화살표 포함 + 화살표 양쪽에 수식폰트 런 ≥1** 게이트를 통과하면
+  구간 전체를 `appendFormulaScript` 로 통짜 ASTEquation("CHEM_FORMULA")으로 승격.
+  - 진짜 실패 원인은 (1차 진단의 "화살표에서 그룹이 끊김"보다 깊은) **BT/EH
+    타입 교차 배열**: 원소는 BT 폰트(mathType=BT), 첨자는 charStyle
+    `00_수식(첨자-하부자)`(mathType=EH), 화살표는 `00_수식(화살표)`(mathType=EH).
+    타입별 그룹핑이 매 런에서 flush → 전부 1런 조각 → 텍스트 폴백. 화살표가
+    mathType=EH 라 SPEC-059 클러스터(폰트 없는 런 시작)에도 진입 불가.
+  - 오발화 가드: 구간 직전/직후 텍스트 런이 공백 없이 영숫자로 이어지면(수식
+    본문 중간에서 구간이 시작/종료) 승격 금지 — 본문 폰트 LHS 의 첨자 숫자만
+    잡혀 반쪽 수식("2 rarrow 2NH3")이 되는 셀 문단 오발화 방지.
+  - ①~⑤ 문제 보기(우변 본문 폰트)는 게이트 미달로 기존 SPEC-059 경로 유지.
+    화살표 없는 토큰 TF 도 자연 배제.
+- **`ASTTableConverter.inlineObjectHasVisibleText`**: ASTEquation(비어있지 않은
+  hwpScript)을 가시 콘텐츠로 인정. 1차 시도의 "박스 소실"의 실체가 이것 —
+  `normalizeTextHiddenInlineShellCarriers` → `populateInlineShellOwnedText` 가
+  equation-only 셸을 "텍스트 없음"으로 오판하고 resolved 평문 문단으로 **재주입**
+  해 승격을 덮어쓰고 있었다 (박스가 사라진 게 아니라 수식이 사장된 것).
+
+## 검증
+
+- p47 `2H_{2}+O_{2} ~ rarrow ~ 2H_{2}O`, 표 안 `N_{2}+3H_{2} ~ rarrow ~ 2NH_{3}`
+  둥근 박스(native rect+drawText) 안에 hp:equation 생성. equations 67→69.
+- 골든 게이트: diff 가 의도한 수식 +2건뿐 (기존 수식 5종·표 스타일·이미지
+  무회귀). 같은 PR 에서 골든 갱신.
+- 한계: `N2+H2 → NH3` 박스 1개는 문단에 다른 인라인 객체가 끼어 있어 구간이
+  끊겨 미승격 (기존과 동일하게 텍스트) — 필요 시 후속.
+
+## 디버깅 방법론 메모 (재발 시)
+
+같은 sourceId 의 셸이 **여러 경로에서 중복 빌드**되고 최종 승자는 다른 경로일
+수 있다. 이번 실측: 승격이 되고도 출력이 안 바뀌면 (1) `ASTInlineObject.sourceId
+setter`/`addParagraph`/`paragraphs(List)` 에 대상 id 조건 스택 덤프를 심어
+생성·변이 지점을 잡고, (2) 변환기 입구(`InlineFrameBuilder.addInlineTextFrame`)에서
+최종 도달 문단을 덤프해 대조한다. 이번 범인은 phase4 테이블 셀 정규화의
+`populateInlineShellOwnedText` 재주입이었다.
 
 ## 문제
 

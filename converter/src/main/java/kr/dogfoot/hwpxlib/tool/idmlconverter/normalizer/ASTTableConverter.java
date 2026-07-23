@@ -1330,6 +1330,14 @@ public class ASTTableConverter {
         for (ASTParagraph paragraph : obj.paragraphs()) {
             if (paragraph == null || paragraph.items() == null) continue;
             for (ASTInlineItem item : paragraph.items()) {
+                // SPEC-058: 수식(ASTEquation)도 가시 콘텐츠 — 반응식 박스가 통짜
+                // 수식으로 승격되면 텍스트런이 없어져 "텍스트 없음"으로 오판되고,
+                // 여기서 resolved 평문으로 재주입돼 수식이 사장되던 회귀 지점.
+                if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
+                    String script = ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item).hwpScript();
+                    if (script != null && !script.trim().isEmpty()) return true;
+                    continue;
+                }
                 if (!(item instanceof ASTTextRun)) continue;
                 String text = ((ASTTextRun) item).text();
                 if (text != null && !text.trim().isEmpty()) return true;

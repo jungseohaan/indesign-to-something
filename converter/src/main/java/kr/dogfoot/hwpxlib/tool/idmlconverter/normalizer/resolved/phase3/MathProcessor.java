@@ -72,6 +72,8 @@ class MathProcessor {
 
         splitEHKoreanMixedTextRuns(items);
 
+        promoteEquationFontReactionRanges(items);
+
         List<ASTInlineItem> newItems = new ArrayList<>();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
         // SPEC-042: 그룹에 들어간 원본 ASTTextRun — flush 결과 텍스트런에 크기·굵기·
@@ -1076,6 +1078,157 @@ class MathProcessor {
      * out 에 원문 순서로 담긴다. 좌변은 isSimplePositionedTextRun flush 등으로
      * 이미 방출돼 있을 수 있다 (실측: "CH₄" 가 [CH][₄] 로 선방출).
      */
+    /**
+     * SPEC-058: 수식 전용 폰트 증거로만 조판된 반응식 구간을 통짜 ASTEquation 으로 승격.
+     *
+     * <p>박스 반응식(예: p47 "2H₂+O₂ → 2H₂O")은 전 런이 수식 증거(BT/EH/NP 폰트 또는
+     * 00_수식* 문자스타일)를 갖지만 mathTypeOf 가 BT/EH 로 교차 배열이라, 타입별 그룹핑이
+     * 매 런에서 flush 되어 전부 1런 조각 → 증거 부족 → 텍스트 폴백으로 떨어진다.
+     * 화살표조차 00_수식(화살표) 문자스타일로 mathType=EH 라 화살표 시작 클러스터
+     * (SPEC-059 경로)에 진입하지 못한다. 판정은 내용 휴리스틱이 아니라 폰트/문자스타일
+     * 증거 기반 (SPEC-058 방침).</p>
+     *
+     * <p>게이트: 구간이 화살표(→) 런을 포함하고 화살표 <b>양쪽</b>에 수식 폰트 런이
+     * 있어야 한다. 우변이 본문 폰트인 문제 보기 반응식(①~⑤)은 게이트에 걸리지 않아
+     * 기존 클러스터+좌변 흡수 경로(SPEC-059)가 그대로 처리한다. 화살표 없는 토큰별
+     * TF(p16-17 "2H2"/"+O2" 개별 프레임)도 자연 배제된다.</p>
+     */
+    private static void promoteEquationFontReactionRanges(List<ASTInlineItem> items) {
+        if (items == null || items.size() < 3) return;
+        for (int start = 0; start < items.size(); start++) {
+            if (!(items.get(start) instanceof ASTTextRun)) continue;
+
+            int end = start;
+            int eqFontBeforeArrow = 0;
+            int eqFontAfterArrow = 0;
+            boolean sawArrow = false;
+            while (end < items.size() && items.get(end) instanceof ASTTextRun) {
+                ASTTextRun tr = (ASTTextRun) items.get(end);
+                applyPositionFromCharacterStyle(tr);
+                String text = tr.text();
+                if (text == null || text.isEmpty()) break;
+                if (text.trim().isEmpty()) {
+                    // 공백 런은 중립 — 구간을 끊지 않는다
+                    end++;
+                    continue;
+                }
+                if ("→".equals(text.trim())) {
+                    // 화살표 단독 런: 정규화로 폰트가 벗겨질 수 있어 폰트 증거 요구 예외
+                    sawArrow = true;
+                    end++;
+                    continue;
+                }
+                if (mathTypeOf(tr) != null
+                        && isFormulaClusterText(text)
+                        && !isFormulaBoundaryText(text)) {
+                    if (sawArrow) eqFontAfterArrow++;
+                    else eqFontBeforeArrow++;
+                    end++;
+                    continue;
+                }
+                break;
+            }
+
+            if (!sawArrow || eqFontBeforeArrow < 1 || eqFontAfterArrow < 1) {
+                // 실패 구간의 부분집합은 게이트를 새로 만족할 수 없다 → 구간 끝으로 점프
+                start = Math.max(start, end - 1);
+                continue;
+            }
+
+            // 구간 경계가 수식 본문 중간이면 승격 금지 — 본문 폰트 LHS 의 첨자 숫자만
+            // eqfont 로 잡혀 반쪽 수식("2 rarrow 2NH3")이 만들어지는 오발화 방지.
+            // 직전/직후 텍스트 런이 공백/경계 없이 영숫자로 이어지면 같은 수식의 연속이다.
+            if (formulaContinuesBefore(items, start) || formulaContinuesAfter(items, end)) {
+                start = Math.max(start, end - 1);
+                continue;
+            }
+
+            // 양끝 공백 런은 승격 범위에서 제외 (본문에 남긴다)
+            int s = start;
+            int e = end;
+            while (s < e && isWhitespaceOnlyRun(items.get(s))) s++;
+            while (e > s && isWhitespaceOnlyRun(items.get(e - 1))) e--;
+
+            StringBuilder script = new StringBuilder();
+            char previousVisible = 0;
+            boolean hasLetter = false;
+            boolean hasDigit = false;
+            boolean hasOperator = false;
+            boolean hasPositioned = false;
+            boolean accepted = true;
+            String color = null;
+            Integer preferredBaseUnit = null;
+            String preferredFontFamily = null;
+            for (int k = s; k < e; k++) {
+                ASTTextRun tr = (ASTTextRun) items.get(k);
+                String text = tr.text();
+                if (text == null || text.trim().isEmpty()) continue;
+                ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
+                if (!result.accepted) {
+                    accepted = false;
+                    break;
+                }
+                previousVisible = result.previousVisible;
+                hasLetter |= result.hasLetter;
+                hasDigit |= result.hasDigit;
+                hasOperator |= result.hasOperator;
+                hasPositioned |= tr.subscript() || tr.superscript();
+                if (color == null) color = tr.textColor();
+                if (preferredBaseUnit == null && tr.fontSizeHwpunits() != null && tr.fontSizeHwpunits() > 0) {
+                    preferredBaseUnit = tr.fontSizeHwpunits();
+                }
+                if (preferredFontFamily == null && tr.fontFamily() != null && !tr.fontFamily().isEmpty()) {
+                    preferredFontFamily = tr.fontFamily();
+                }
+            }
+            String hwpScript = accepted ? normalizeFormulaScript(script.toString()) : "";
+            if (hwpScript.isEmpty() || hwpScript.length() > 128
+                    || !hasLetter || !(hasDigit || hasOperator || hasPositioned)) {
+                start = Math.max(start, end - 1);
+                continue;
+            }
+
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(hwpScript, "CHEM_FORMULA");
+            color = resolvedFormulaTextColor(items, s, e, color);
+            if (color != null) eq.textColor(color);
+            applyBodyTextEquationHints(eq, preferredBaseUnit, preferredFontFamily);
+            for (int k = e - 1; k >= s; k--) {
+                items.remove(k);
+            }
+            items.add(s, eq);
+            start = s;
+        }
+    }
+
+    private static boolean isWhitespaceOnlyRun(ASTInlineItem item) {
+        if (!(item instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) item).text();
+        return text != null && !text.isEmpty() && text.trim().isEmpty();
+    }
+
+    /** 구간 시작 직전 텍스트 런이 공백/경계 없이 영숫자로 끝나는가 (수식 연속 신호). */
+    private static boolean formulaContinuesBefore(List<ASTInlineItem> items, int start) {
+        if (start <= 0) return false;
+        ASTInlineItem prev = items.get(start - 1);
+        if (!(prev instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) prev).text();
+        if (text == null || text.isEmpty()) return false;
+        char last = text.charAt(text.length() - 1);
+        return Character.isLetterOrDigit(last) && last < 0x2100;
+    }
+
+    /** 구간 끝 직후 텍스트 런이 공백/경계 없이 영숫자로 시작하는가 (수식 연속 신호). */
+    private static boolean formulaContinuesAfter(List<ASTInlineItem> items, int endExclusive) {
+        if (endExclusive >= items.size()) return false;
+        ASTInlineItem next = items.get(endExclusive);
+        if (!(next instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) next).text();
+        if (text == null || text.isEmpty()) return false;
+        char first = text.charAt(0);
+        return Character.isLetterOrDigit(first) && first < 0x2100;
+    }
+
     private static int collectTrailingEquationFontRuns(
             List<ASTInlineItem> newItems,
             List<ASTTextRun> out) {
