@@ -4550,6 +4550,41 @@ public class InlineFrameHandler {
         return sb.toString();
     }
 
+    /**
+     * SPEC-064: 렌더 그룹이 빈칸 TF 를 실제로 소유하는가 — editable/atomic 소유 TF 목록에
+     * 있거나, 빈칸의 pageItems 조상 체인에 렌더 그룹 id 가 있으면 소유로 본다.
+     * (기하 포함만으로 밑줄 억제하면 이웃 삽화 PNG 오탐)
+     */
+    private static boolean renderedGroupOwnsBlankTextFrame(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg,
+            int blankTextFrameId) {
+        if (ctx == null || rg == null || blankTextFrameId < 0) return false;
+        String blankId = String.valueOf(blankTextFrameId);
+        String[] editableIds = rg.editableTextFrameIds();
+        if (editableIds != null) {
+            for (String id : editableIds) {
+                if (blankId.equals(id)) return true;
+            }
+        }
+        int[] atomicOwned = rg.atomicOwnedTextFrameIds();
+        if (atomicOwned != null) {
+            for (int id : atomicOwned) {
+                if (id == blankTextFrameId) return true;
+            }
+        }
+        // pageItems 부모 체인에서 조상 확인
+        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem cur =
+                ctx.resolvedData.getPageItem(blankId);
+        for (int depth = 0; depth < 16 && cur != null; depth++) {
+            String parentId = cur.parentId();
+            if (parentId == null || parentId.isEmpty()) return false;
+            if (parentId.equals(String.valueOf(rg.id()))) return true;
+            cur = ctx.resolvedData.getPageItem(parentId);
+        }
+        return false;
+    }
+
     static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId,
                                              String previousText, String nextText) {
         // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
@@ -4620,8 +4655,14 @@ public class InlineFrameHandler {
                                 double rb3 = rb[3] * ctx.scaleFactor;
                                 if (rb0 <= gb0[0] + 0.5 && rb1 <= gb0[1] + 0.5
                                         && rb2 >= gb0[2] - 0.5 && rb3 >= gb0[3] - 0.5) {
-                                    parentRenderedWithRule = true;
-                                    break;
+                                    // SPEC-064: 기하 포함만으로는 오탐 — 옆의 삽화 PNG 가
+                                    // 빈칸 rect 를 우연히 덮으면 밑줄이 지워진다 (영어 u1
+                                    // p22, 텍스트가 삽화를 감싸는 배치). 렌더 그룹이 빈칸을
+                                    // 실제 소유(조상 관계 또는 소유 TF 목록)할 때만 억제.
+                                    if (renderedGroupOwnsBlankTextFrame(ctx, rg, anchoredObjectId)) {
+                                        parentRenderedWithRule = true;
+                                        break;
+                                    }
                                 }
                             }
                         }

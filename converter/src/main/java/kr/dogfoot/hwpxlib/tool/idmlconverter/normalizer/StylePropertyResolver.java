@@ -192,6 +192,9 @@ public class StylePropertyResolver {
         if (child.ruleBelowLineWeight() != null) merged.ruleBelowLineWeight(child.ruleBelowLineWeight());
         if (child.ruleAboveColor() != null) merged.ruleAboveColor(child.ruleAboveColor());
         if (child.ruleBelowColor() != null) merged.ruleBelowColor(child.ruleBelowColor());
+        // SPEC-064: ruleBelowOn 이 merge 에서 빠지면 resolve 된 스타일이 RuleBelow=true 를
+        // 잃어 답란 밑줄 빈칸 변환이 침묵 실패한다 (영어 u1 p22 실측)
+        if (child.ruleBelowOn() != null) merged.ruleBelowOn(child.ruleBelowOn());
         if (child.textAlignment() != null) merged.textAlignment(child.textAlignment());
         if (child.leftIndent() != null) merged.leftIndent(child.leftIndent());
         if (child.firstLineIndent() != null) merged.firstLineIndent(child.firstLineIndent());
@@ -233,6 +236,7 @@ public class StylePropertyResolver {
         copy.ruleBelowLineWeight(src.ruleBelowLineWeight());
         copy.ruleAboveColor(src.ruleAboveColor());
         copy.ruleBelowColor(src.ruleBelowColor());
+        copy.ruleBelowOn(src.ruleBelowOn());
         copy.textAlignment(src.textAlignment());
         copy.leftIndent(src.leftIndent());
         copy.firstLineIndent(src.firstLineIndent());
