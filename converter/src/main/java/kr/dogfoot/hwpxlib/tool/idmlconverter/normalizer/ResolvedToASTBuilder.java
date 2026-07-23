@@ -356,9 +356,55 @@ public class ResolvedToASTBuilder {
             return false;
         }
         String passId = jsonString(planJson, "passId");
-        if ("pass.table_only_text_frames".equals(passId)) return true;
-        return "PLACE_TABLE_STYLE".equals(jsonString(planJson, "visualAction"))
+        boolean tableStylePlan = "pass.table_only_text_frames".equals(passId)
+                || "PLACE_TABLE_STYLE".equals(jsonString(planJson, "visualAction"))
                 || "HWPX_TABLE_STYLE".equals(jsonString(planJson, "materialization"));
+        if (!tableStylePlan) return false;
+        // SPEC-060: stage0 table_source_contract 가 이 plan 의 캐리어/표를 실제로
+        // 커버할 때만 대체한다. index 가 비어있지 않다는 이유만으로 전부 억제하면,
+        // stage0 이 계약을 만들지 않은 표(예: 문제 캐리어 안에 앵커된 중첩 데이터
+        // 표)의 추출기 선언 style plan 이 대체자 없이 소실되어 셀 fill·괘선 흡수가
+        // 사라진다 (실측: p47 구리 실험 데이터 표, 회귀 도입 PR #93).
+        java.util.Set<String> planIds = plannerDeclaredTablePlanSourceIds(planJson);
+        if (planIds.isEmpty()) return true; // 식별 불가 — 기존 동작 유지
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.table.TableSourceRecord record
+                : ctx.tableSourceIndex.records()) {
+            if (record == null) continue;
+            if (record.carrierTextFrameId != null && planIds.contains(record.carrierTextFrameId)) {
+                return true;
+            }
+            if (record.tableId != null && planIds.contains(record.tableId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static java.util.Set<String> plannerDeclaredTablePlanSourceIds(JsonObject planJson) {
+        java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+        if (planJson == null) return ids;
+        for (String key : new String[] {"primarySourceObjectId", "domId", "exportTargetObjectId"}) {
+            if (!planJson.has(key) || planJson.get(key).isJsonNull()) continue;
+            try {
+                ids.add(String.valueOf(planJson.get(key).getAsLong()));
+            } catch (Exception ignored) {
+                try {
+                    ids.add(planJson.get(key).getAsString());
+                } catch (Exception alsoIgnored) {
+                }
+            }
+        }
+        for (String key : new String[] {"sourceObjectIds", "styleSourceObjectIds", "ownedTextFrameIds"}) {
+            if (!planJson.has(key) || !planJson.get(key).isJsonArray()) continue;
+            for (JsonElement element : planJson.getAsJsonArray(key)) {
+                if (element == null || element.isJsonNull()) continue;
+                try {
+                    ids.add(String.valueOf(element.getAsLong()));
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return ids;
     }
 
     private void applyResolvedTextWrapContracts() {
