@@ -337,6 +337,16 @@ public final class FramePlacer {
             if (tf.verticalJustification() != null) {
                 block.verticalJustification(tf.verticalJustification());
             }
+            // 셸 bounds 치환 블록은 수직 중앙 정렬로 보정한다. TF 는 셸 안 정중앙에
+            // 놓인 라벨인데(자기 높이 = 텍스트 높이), 셸 bounds 로 키우면 원본
+            // TOP_ALIGN 이 셸 상단 기준이 되어 텍스트가 위로 붙는다 (p16-17 파랑
+            // H₂O 박스 실측 — TF 중심이 셸 중심과 일치).
+            if (usingObjectPlanBounds
+                    && hwpxTextPlan != null
+                    && hwpxTextPlan.kind != null
+                    && hwpxTextPlan.kind.startsWith("text_frame:sibling_text_shell_bounds")) {
+                block.verticalJustification("CENTER_ALIGN");
+            }
             if (tf.rotationAngle() != 0) {
                 block.rotationAngle(tf.rotationAngle());
             }
