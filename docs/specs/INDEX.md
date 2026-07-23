@@ -31,6 +31,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-062](SPEC-062-sibling-shell-bounds-multi-claim.md) | Done | p16-17 수식 토큰 겹침 — 형제 셸 bounds 치환을 단독 점유로 제한 + 셸 치환 블록 수직 중앙 정렬 (2026-07-23 육안 확인 완료) |
 | [SPEC-064](SPEC-064-blank-rule-underline-loss.md) | Done | 답란 밑줄 빈칸(RuleBelow) 3중 유실(plan 게이트·ruleBelowOn 상속·가드 오탐) — 영어 u1 p22, 빈칸 22곳 복구 (2026-07-23 육안 확인 완료) |
 | [SPEC-065](SPEC-065-char-style-color-authority.md) | Done | 문자 스타일 색이 resolved DOM 본문색 오보고에 덮임 — 영어 u1 p15 @색자, IDML 색 권위화 (2026-07-23 골든 PASS) |
+| [SPEC-066](SPEC-066-prose-blank-false-equation.md) | Done | 답란 빈칸(□)이 낀 영어 산문이 통째로 HWP 수식화 — 산문 판정 가드 추가 (2026-07-23 육안 확인 완료) |
 
 For V2 ownership changes, start from the canonical policies above. Historical
 ownership SPECs have been removed so they cannot be reused as implementation

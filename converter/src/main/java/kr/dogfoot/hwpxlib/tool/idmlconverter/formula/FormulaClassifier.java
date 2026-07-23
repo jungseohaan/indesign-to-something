@@ -76,6 +76,11 @@ public final class FormulaClassifier {
         if (hwpScript == null || hwpScript.isEmpty()) return false;
         if (!hasChemicalSymbol && !hasBox && !hasArrow) return false;
 
+        // SPEC-066: 답란 빈칸(□)만 있는 산문은 수식이 아니다. 영어 지문에 빈칸이
+        // 끼면 문장 전체가 이탤릭 수식으로 구워지고 단어 사이 공백까지 사라진다
+        // (영어 u3 p62 "□Marketing words can push people…^{1}" 실측).
+        if (looksLikeProseWithBlank(hwpScript)) return false;
+
         if (hasArrow || hasBox) return true;
         if (hasEquation && hasOperator && hasChemicalSymbol) return true;
 
@@ -85,6 +90,50 @@ public final class FormulaClassifier {
         if (chemicalElementSequence && !hasOperator) return false;
 
         return hasOperator && hasChemicalSymbol && (hasPositioned || hasFormulaFontEvidence);
+    }
+
+    /**
+     * SPEC-066: 자연어 산문에 답란 빈칸(□)이 끼어 수식 클러스터로 잡힌 경우인지.
+     *
+     * <p>화학 반응식은 원소기호 토큰이 짧게 이어지는 반면, 산문은 긴 라틴 단어가
+     * 여러 개 이어진다. 수식 구조 토큰(over/sqrt/rarrow/첨자 중괄호 등)이 전혀 없고
+     * 원소기호로 볼 수 없는 <b>4자 이상 라틴 낱말이 3개 이상</b>이면 산문으로 본다.</p>
+     */
+    private static boolean looksLikeProseWithBlank(String script) {
+        if (script == null || script.isEmpty()) return false;
+        // 수식 구조가 하나라도 있으면 산문 판정하지 않는다 (^{}/_{} 는 문제 번호
+        // 위첨자로도 쓰이므로 구조 근거에서 제외).
+        String lower = script.toLowerCase(Locale.ROOT);
+        if (lower.contains(" over ") || lower.contains("sqrt") || lower.contains("root")
+                || lower.contains("rarrow") || lower.contains("overline")
+                || script.contains(" TIMES ") || script.contains(" div ")) {
+            return false;
+        }
+        int longWordCount = 0;
+        int runLength = 0;
+        for (int i = 0; i <= script.length(); i++) {
+            char c = i < script.length() ? script.charAt(i) : ' ';
+            if (isAsciiLetter(c)) {
+                runLength++;
+                continue;
+            }
+            if (runLength >= 4 && !isChemicalElementToken(script, i - runLength, runLength)) {
+                longWordCount++;
+            }
+            runLength = 0;
+        }
+        return longWordCount >= 3;
+    }
+
+    /** 해당 구간이 원소기호 나열(예: NaCl, CaCO)로 볼 수 있는지 — 산문 판정 제외용. */
+    private static boolean isChemicalElementToken(String script, int start, int length) {
+        // 원소기호는 대문자로 시작하고 이어지는 소문자는 1자 이하다. 4자 이상
+        // 구간이라도 "NaCl" 처럼 대문자가 반복되면 원소 나열로 본다.
+        int upper = 0;
+        for (int i = start; i < start + length; i++) {
+            if (Character.isUpperCase(script.charAt(i))) upper++;
+        }
+        return upper >= 2;
     }
 
     /**
