@@ -96,7 +96,12 @@ class MathProcessor {
             String ff = tr.fontFamily();
             String currentType = mathTypeOf(tr);
 
-            FormulaCluster formulaCluster = currentType == null ? collectFormulaEquationCluster(items, i) : null;
+            FormulaCluster formulaCluster =
+                    (currentType == null
+                            || canStartExplicitBTFormulaCluster(currentType, tr)
+                            || canStartBodyTextChemicalReactionCluster(items, i, tr))
+                            ? collectFormulaEquationCluster(items, i)
+                            : null;
             if (formulaCluster != null) {
                 // 화살표(→ 정규화로 폰트가 벗겨진 런)에서 시작한 클러스터는 좌변을 안
                 // 담는다. 대기 중인 수식 폰트 그룹(좌변, 예: "2H₂+O₂")이 있으면 별도
@@ -533,7 +538,7 @@ class MathProcessor {
                 hasOperator |= result.hasOperator;
                 hasBox |= result.hasBox;
                 hasArrow |= result.hasArrow;
-                hasPositioned |= tr.subscript() || tr.superscript();
+                hasPositioned |= hasFormulaScriptPositionEvidence(tr);
                 hasChemicalSymbol |= result.hasChemicalSymbol;
                 hasFormulaFontEvidence |= isFormulaFontEvidence(tr);
                 end = i + 1;
@@ -588,7 +593,15 @@ class MathProcessor {
         if (!hasLetter) return null;
         if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
         if (!hasEquation && !hasBox && !chemicalElementSequence) return null;
-        if (hasBox && !hasEquation && !hasDigit && !hasOperator && !hasArrow && !hasPositioned) return null;
+        if (hasBox
+                && !hasEquation
+                && !hasFormulaFontEvidence
+                && !hasDigit
+                && !hasOperator
+                && !hasArrow
+                && !hasPositioned) {
+            return null;
+        }
         if (!hasEquation
                 && !hasBox
                 && !hasOperator
@@ -1190,7 +1203,7 @@ class MathProcessor {
             hasOperator |= result.hasOperator;
             hasBox |= result.hasBox;
             hasArrow |= result.hasArrow;
-            hasPositioned |= tr.subscript() || tr.superscript();
+            hasPositioned |= hasFormulaScriptPositionEvidence(tr);
             hasChemicalSymbol |= result.hasChemicalSymbol;
             hasFormulaFontEvidence |= isFormulaFontEvidence(tr);
             end = i + 1;
@@ -1222,7 +1235,14 @@ class MathProcessor {
         }
         if (!hasLetter) return null;
         if (!hasChemicalSymbol && !hasBox && !hasArrow) return null;
-        if (hasBox && !hasDigit && !hasOperator && !hasArrow && !hasPositioned) return null;
+        if (hasBox
+                && !hasFormulaFontEvidence
+                && !hasDigit
+                && !hasOperator
+                && !hasArrow
+                && !hasPositioned) {
+            return null;
+        }
         if (!chemicalElementSequence
                 && !hasDigit
                 && !hasOperator
@@ -1244,6 +1264,11 @@ class MathProcessor {
             return null;
         }
 
+        if (hasArrow && hasChemicalSymbol) {
+            String finalized = finalizeChemicalScript(hwpScript);
+            if (finalized != null && !finalized.isEmpty()) hwpScript = finalized;
+        }
+
         ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
         color = resolvedFormulaTextColor(items, start, end, color);
         if (color != null) eq.textColor(color);
@@ -1256,6 +1281,94 @@ class MathProcessor {
         Character before = previousVisibleChar(items, start - 1);
         Character after = nextVisibleChar(items, endExclusive);
         return isOpeningFormulaDelimiter(before) || isClosingFormulaDelimiter(after);
+    }
+
+    private static boolean canStartBodyTextChemicalReactionCluster(
+            List<ASTInlineItem> items,
+            int start,
+            ASTTextRun run) {
+        if (items == null || run == null || start < 0 || start >= items.size()) return false;
+        String font = run.fontFamily();
+        if (!BTFontGlyphMap.isBTBodyTextFont(font)) return false;
+        String text = run.text();
+        if (text == null || text.isEmpty() || !isFormulaClusterText(text) || isFormulaBoundaryText(text)) {
+            return false;
+        }
+
+        boolean hasBodyFormulaText = false;
+        boolean hasArrow = false;
+        boolean hasChargeStyle = false;
+        boolean hasOperator = false;
+        for (int i = start; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) break;
+            ASTTextRun tr = (ASTTextRun) item;
+            applyPositionFromCharacterStyle(tr);
+            String t = tr.text();
+            if (t == null || t.isEmpty()) break;
+            if (!isFormulaClusterText(t)) break;
+            if (isFormulaBoundaryText(t)) {
+                if (i == start) return false;
+                break;
+            }
+            if (BTFontGlyphMap.isBTBodyTextFont(tr.fontFamily()) && containsChemicalElementText(t)) {
+                hasBodyFormulaText = true;
+            }
+            if (t.indexOf('\u2192') >= 0) hasArrow = true;
+            if (containsFormulaOperatorChar(t)) hasOperator = true;
+            if ((tr.superscript() || charStyleNameScript(tr, true)) && containsIonChargeText(t)) {
+                hasChargeStyle = true;
+            }
+        }
+        return hasBodyFormulaText && hasArrow && hasOperator && hasChargeStyle;
+    }
+
+    private static boolean canStartExplicitBTFormulaCluster(String currentType, ASTTextRun run) {
+        if (!"BT".equals(currentType) || run == null) return false;
+        String font = run.fontFamily();
+        return font != null
+                && BTFontGlyphMap.isBTFontFamily(font)
+                && !BTFontGlyphMap.isBTBodyTextFont(font);
+    }
+
+    private static boolean containsChemicalElementText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < 'A' || c > 'Z') continue;
+            String one = String.valueOf(c);
+            String two = one;
+            if (i + 1 < text.length()) {
+                char next = text.charAt(i + 1);
+                if (next >= 'a' && next <= 'z') two = one + next;
+            }
+            if (isChemicalElement(one) || isChemicalElement(two)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsFormulaOperatorChar(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '+' || c == '-' || c == '=' || c == '\u2192') return true;
+        }
+        return false;
+    }
+
+    private static boolean containsIonChargeText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean hasCharge = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isDigit(c) || isFormulaSpace(c)) continue;
+            if (c == '+' || c == '-') {
+                hasCharge = true;
+                continue;
+            }
+            return false;
+        }
+        return hasCharge;
     }
 
     private static boolean isFormulaEquationMaterializationCandidate(
@@ -1375,8 +1488,21 @@ class MathProcessor {
             char previousVisible) {
         ScriptAppendResult result = new ScriptAppendResult();
         result.previousVisible = previousVisible;
-        boolean runSubscript = run.subscript();
-        boolean runSuperscript = run.superscript();
+        boolean runSubscript = run.subscript() || charStyleNameScript(run, false);
+        boolean runSuperscript = run.superscript() || charStyleNameScript(run, true);
+        if ((runSubscript || runSuperscript) && isWholeFormulaScriptRun(text)) {
+            String token = compactFormulaScriptRunText(text);
+            if (token.isEmpty()) return result;
+            if (runSubscript) {
+                out.append("_{").append(token).append("}");
+            } else {
+                out.append("^{").append(token).append("}");
+            }
+            collectFormulaTokenSignals(token, result);
+            result.hasImplicitSubscript = runSubscript;
+            result.previousVisible = lastVisibleFormulaChar(token, previousVisible);
+            return result;
+        }
 
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
@@ -1428,6 +1554,54 @@ class MathProcessor {
             return result;
         }
         return result;
+    }
+
+    private static boolean isWholeFormulaScriptRun(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean hasVisible = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isFormulaSpace(c)) continue;
+            hasVisible = true;
+            if (isAsciiLetter(c) || Character.isDigit(c)) continue;
+            if (c == '+' || c == '-') continue;
+            return false;
+        }
+        return hasVisible;
+    }
+
+    private static String compactFormulaScriptRunText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!isFormulaSpace(c)) out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static void collectFormulaTokenSignals(String token, ScriptAppendResult result) {
+        if (token == null || result == null) return;
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (isAsciiLetter(c)) {
+                result.hasLetter = true;
+                result.hasChemicalSymbol |= isLikelyChemicalElementAt(token, i);
+            } else if (Character.isDigit(c)) {
+                result.hasDigit = true;
+            } else if (c == '+' || c == '-' || c == '=') {
+                result.hasOperator = true;
+            }
+        }
+    }
+
+    private static char lastVisibleFormulaChar(String text, char defaultValue) {
+        if (text == null) return defaultValue;
+        for (int i = text.length() - 1; i >= 0; i--) {
+            char c = text.charAt(i);
+            if (!isFormulaSpace(c)) return c;
+        }
+        return defaultValue;
     }
 
     // toChemicalTextRuns 가 낱글자로 풀면 raw 노출되는 다글자 HWP 수식 키워드.
@@ -1610,6 +1784,16 @@ class MathProcessor {
         if (r == null || r.subscript()) return false;
         return r.superscript()
                 || "superscript".equals(r.droppedResolvedScriptPosition())
+                || charStyleNameScript(r, true);
+    }
+
+    private static boolean hasFormulaScriptPositionEvidence(ASTTextRun r) {
+        if (r == null) return false;
+        return r.subscript()
+                || r.superscript()
+                || "subscript".equals(r.droppedResolvedScriptPosition())
+                || "superscript".equals(r.droppedResolvedScriptPosition())
+                || charStyleNameScript(r, false)
                 || charStyleNameScript(r, true);
     }
 

@@ -3738,7 +3738,8 @@ public class InlineFrameHandler {
         StringBuilder regex = new StringBuilder();
         for (int i = 0; i < parts.length; i++) {
             // 실측된 화살표 원문 글리프 집합 (BTFontGlyphMap 주석 참조) + 정규화된 "→" 자신.
-            if (i > 0) regex.append("(?:@C|\\?C|@|C|→)");
+            // 일부 IDML은 CustomGlyph 화살표를 ACE 1a 제어 문자(U+001A) 조각으로 노출한다.
+            if (i > 0) regex.append("(?:@C|\\?C|@|C|\u001A+|→)");
             if (!parts[i].isEmpty()) regex.append(java.util.regex.Pattern.quote(parts[i]));
         }
         return frameText.matches(regex.toString());

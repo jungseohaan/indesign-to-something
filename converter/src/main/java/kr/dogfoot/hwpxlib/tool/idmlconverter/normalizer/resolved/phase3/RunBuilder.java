@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
@@ -94,6 +95,13 @@ class RunBuilder {
             }
         }
 
+        String characterStyleRef = resolvedCharacterStyleRef(rr, cr, confidence);
+
+        String arrowFont = rr != null ? rr.fontFamily() : null;
+        if (arrowFont == null && cr != null) arrowFont = cr.fontFamily();
+        if (arrowFont == null && grepCharStyle != null) arrowFont = grepCharStyle.fontFamily();
+        text = BTFontGlyphMap.normalizeArrowGlyphText(arrowFont, characterStyleRef, text);
+
         // EH상부자/하부자 GREP 적용 시 ASCII 글리프 매핑 (예: '_' → '×')
         // GREP으로 분리된 단일/짧은 ASCII 서브런만 영향을 받는다.
         if (text != null && grepCharStyle != null && grepCharStyle.fontFamily() != null
@@ -110,7 +118,6 @@ class RunBuilder {
         text = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter
                 .replaceEHThinSpaceBacktick(text);
         tr.text(text);
-        String characterStyleRef = resolvedCharacterStyleRef(rr, cr, confidence);
         if (characterStyleRef != null) {
             tr.characterStyleRef(characterStyleRef);
         }

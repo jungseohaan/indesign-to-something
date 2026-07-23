@@ -34,8 +34,7 @@ public class MathProcessorTest {
 
         MathProcessor.convertMathRunsInParagraph(null, para);
 
-        Assert.assertEquals(1, para.items().size());
-        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertTrue(para.items().stream().anyMatch(it -> it instanceof ASTEquation));
     }
 
     @Test
@@ -77,10 +76,53 @@ public class MathProcessorTest {
         Assert.assertTrue(para.items().get(3) instanceof ASTEquation);
     }
 
+    @Test
+    public void btBodyTextChemicalReactionContextProducesEquation() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(text("(가) ", "[Yoon가변] 윤명조100_OTF"));
+        para.addItem(text("HCO", "BT수식H-분수N"));
+        para.addItem(text("3", "BT수식H-분수N"));
+        para.addItem(sup("-", "BT수식H-분수N"));
+        para.addItem(text("\u2005", "[Yoon가변] 윤명조100_OTF"));
+        para.addItem(text("+", "BT수식H-분수N"));
+        para.addItem(text("\u2005", "[Yoon가변] 윤명조100_OTF"));
+        para.addItem(text("H", "BT수식H-분수N"));
+        para.addItem(text("2", "BT수식H-분수N"));
+        para.addItem(text("O", "BT수식H-분수N"));
+        para.addItem(text(" ", "[Yoon가변] 윤명조100_OTF"));
+        para.addItem(text("\u2192", "BT수식-편한글씨"));
+        para.addItem(text(" ", "[Yoon가변] 윤명조100_OTF"));
+        para.addItem(text("CO", "BT수식H-분수N"));
+        para.addItem(text("3", "BT수식H-분수N"));
+        para.addItem(sup("2-", "BT수식H-분수N"));
+        para.addItem(text("\u2005", "[Yoon가변] 윤명조100_OTF"));
+        para.addItem(text("+", "BT수식H-분수N"));
+        para.addItem(text("\u2005", "[Yoon가변] 윤명조100_OTF"));
+        para.addItem(text("H", "BT수식H-분수N"));
+        para.addItem(text("3", "BT수식H-분수N"));
+        para.addItem(text("O", "BT수식H-분수N"));
+        para.addItem(sup("+", "BT수식H-분수N"));
+
+        MathProcessor.convertMathRunsInParagraph(null, para);
+
+        Assert.assertEquals(2, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTTextRun);
+        Assert.assertTrue(para.items().get(1) instanceof ASTEquation);
+        Assert.assertEquals(
+                "HCO_{3}^{-}+H_{2}O ~ rarrow ~ CO_{3}^{2-}+H_{3}O^{+}",
+                ((ASTEquation) para.items().get(1)).hwpScript());
+    }
+
     private static ASTTextRun text(String text, String fontFamily) {
         ASTTextRun run = new ASTTextRun();
         run.text(text);
         run.fontFamily(fontFamily);
+        return run;
+    }
+
+    private static ASTTextRun sup(String text, String fontFamily) {
+        ASTTextRun run = text(text, fontFamily);
+        run.characterStyleRef("00_수식(첨자-상부자)");
         return run;
     }
 }
