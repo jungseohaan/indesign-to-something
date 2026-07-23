@@ -95,6 +95,44 @@ class RunBuilder {
             }
         }
 
+        // SPEC-065: 실제 문자 스타일(@색자 등)이 적용된 런의 IDML 색은 resolved DOM 보다
+        // 권위다. IDML 조판 의미상 로컬 오버라이드 없는 charStyle 색이 확정 렌더 색인데,
+        // DOM 은 이런 런의 색을 이웃/본문색으로 오보고할 수 있다 (영어 u1 p15
+        // "stay in shape": IDML=@색자 마젠타 #D7157E, DOM=본문 K=60 #757877 누출).
+        // GREP 재정의가 있으면 resolved 가 더 정확할 수 있으므로 제외.
+        boolean appliedCharStyleColorAuthoritative = false;
+        boolean hasRealCharStyle = cr.appliedCharacterStyle() != null
+                && !cr.appliedCharacterStyle().contains("[No character style]");
+        if (effectiveIdmlColor != null
+                && hasRealCharStyle
+                && grepCharStyle == null
+                && rr != null && rr.fillColor() != null) {
+            String idmlHex = resolveColorToHex(ctx, effectiveIdmlColor);
+            String rrHex = resolveColorToHex(ctx, rr.fillColor());
+            if (idmlHex != null && rrHex != null && !rrHex.equalsIgnoreCase(idmlHex)) {
+                appliedCharStyleColorAuthoritative = true;
+            }
+        }
+        // 로컬 FillColor 도 없고 파서가 스타일 색을 주입하지 못한 변형: 적용 문자
+        // 스타일 정의에서 직접 색을 가져온다.
+        if (effectiveIdmlColor == null
+                && hasRealCharStyle
+                && ctx.styleResolver != null) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef appliedCharStyle =
+                    ctx.styleResolver.getResolvedCharacterStyle(cr.appliedCharacterStyle());
+            if (appliedCharStyle == null) {
+                String shortRef = cr.appliedCharacterStyle();
+                if (shortRef.startsWith("CharacterStyle/")) {
+                    shortRef = shortRef.substring("CharacterStyle/".length());
+                }
+                appliedCharStyle = ctx.styleResolver.getResolvedCharacterStyle(shortRef);
+            }
+            if (appliedCharStyle != null && appliedCharStyle.fillColor() != null) {
+                effectiveIdmlColor = appliedCharStyle.fillColor();
+                appliedCharStyleColorAuthoritative = true;
+            }
+        }
+
         String characterStyleRef = resolvedCharacterStyleRef(rr, cr, confidence);
 
         String arrowFont = rr != null ? rr.fontFamily() : null;
@@ -148,14 +186,30 @@ class RunBuilder {
         if (resolvedFontSize != null) {
             tr.fontSizeHwpunits(resolvedFontSize);
         }
-        String resolvedColor = RunPropertyResolver.resolveTextColorHexWithConfidence(
-                rr,
-                effectiveIdmlColor,
-                effectiveIdmlTint,
-                sc.fillColor,
-                (_c) -> resolveColorToHex(ctx, _c),
-                (_c, _t) -> resolveColorToHex(ctx, _c, _t),
-                confidence);
+        String resolvedColor;
+        if (appliedCharStyleColorAuthoritative) {
+            // SPEC-065: 로컬 FillColor 없는 런의 적용 문자 스타일 색은 resolved 보다 권위 —
+            // resolved 는 이런 런에서 본문색을 흘려보낸다 (DOM 오보고).
+            resolvedColor = effectiveIdmlTint != null
+                    ? resolveColorToHex(ctx, effectiveIdmlColor, effectiveIdmlTint)
+                    : resolveColorToHex(ctx, effectiveIdmlColor);
+            if (resolvedColor == null) {
+                resolvedColor = RunPropertyResolver.resolveTextColorHexWithConfidence(
+                        rr, effectiveIdmlColor, effectiveIdmlTint, sc.fillColor,
+                        (_c) -> resolveColorToHex(ctx, _c),
+                        (_c, _t) -> resolveColorToHex(ctx, _c, _t),
+                        confidence);
+            }
+        } else {
+            resolvedColor = RunPropertyResolver.resolveTextColorHexWithConfidence(
+                    rr,
+                    effectiveIdmlColor,
+                    effectiveIdmlTint,
+                    sc.fillColor,
+                    (_c) -> resolveColorToHex(ctx, _c),
+                    (_c, _t) -> resolveColorToHex(ctx, _c, _t),
+                    confidence);
+        }
         if (resolvedColor != null) {
             tr.textColor(resolvedColor);
         }
