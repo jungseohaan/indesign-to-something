@@ -1,0 +1,6945 @@
+{
+ "meta": {
+  "source": "u1-golden-base.hwpx",
+  "gitRev": "b4e4b5e0"
+ },
+ "signature": {
+  "sections": 1,
+  "equations": [
+   "g",
+   "H",
+   "O",
+   "H_{2}O",
+   "H_{2}O",
+   "H_{2}O",
+   "H_{2}O",
+   "H_{2}",
+   "H_{2}",
+   "O_{2}",
+   "H_{2}",
+   "O_{2}",
+   "H_{2}",
+   "H_{2}O",
+   "O_{2}",
+   "O_{2}",
+   "H_{2}",
+   "O_{2}",
+   "N",
+   "NH_{3}",
+   "N",
+   "H",
+   "NH_{3}",
+   "N_{2}",
+   "H_{2}",
+   "NH_{3}",
+   "H_{2}O_{2} ~ rarrow ~",
+   "H_{2}O+O_{2}",
+   "N_{2}+3H_{2} ~ rarrow ~ 2NH_{3}",
+   "O",
+   "H",
+   "CaO+H_{2}O ~ rarrow ~ Ca(OH)_{2}",
+   "CH_{4}",
+   "O",
+   "CO_{2}",
+   "H",
+   "O",
+   "CO_{2}",
+   "H_{2}O",
+   "Cu_{2}",
+   "O",
+   "N",
+   "H_{2}O",
+   "H_{2}",
+   "O_{2}",
+   "N_{2}",
+   "H_{2}",
+   "NH_{3}",
+   "A.,                ",
+   "H_{2}",
+   "O_{2}",
+   "J",
+   "A",
+   "Gay-Lussac",
+   "J",
+   "L",
+   "H_{2}",
+   "O_{2}",
+   "g",
+   "g",
+   "g",
+   "H_{2}+O_{2} ~ rarrow ~ H_{2}O",
+   "Cu+O_{2} ~ rarrow ~ 2CuO",
+   "H_{2}O_{2} ~ rarrow ~ 2H_{2}O+O_{2}",
+   "CH_{4}+2O_{2} ~ rarrow ~ CO_{2}+2H_{2}O",
+   "CaCO_{3}+2HCl ~ rarrow ~ CaCl_{2}+CO_{2}+2H_{2}O",
+   "I"
+  ],
+  "tables": [
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 1
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "#",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "(가) 양초",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "(가)~(다)에서 볼 수 있는 물질의 변화를",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "(나) 얼음",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "(다) 사과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "+",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ", . ., 1778￣1850",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "01.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "010",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "011",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "012",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "013",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "014",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "015",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "016",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "017",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "018",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "019",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "02.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "020",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "021",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "022",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "023",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "024",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "025",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "026",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "027",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "028",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "029",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "03.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "030",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "031",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "032",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "033",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "034",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "035",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "036",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "037",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "038",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "039",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "04.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "040",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "041",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "042",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "043",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "044",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "045",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "046",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "047",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "048",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "049",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "05.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "06.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "07.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "08.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "09.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1 단계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.조사한 과학 기술 사례 중 한 가지를 선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.화학 변화와 화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.화학 변화와 화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.화학 변화와 화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.화학 변화와 화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.화학 변화와 화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1.화학 변화와 화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "10.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "100%",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "11.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "12 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "14 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "16 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 H2 O",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 H2 O",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 H2 O수증기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 HCl염산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 단계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 수소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2 암모니아",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2. 과 의 실험 결과를 공유 플랫폼에 올려",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2. 관찰 봉지를 손이나 팔에 대어 보고 봉",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2. 모형 이용 색이 다른 원형 자석에 원소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2. 색이 다른 원형 자석에 원소 기호 붙임",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2. 생성된 물 분자 수에 따라 반응에 참여",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2. 자료 변환·분석 실험 ￣ 에서 구리와 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2. 측정 유리병 2 개에 아이오딘화 칼륨 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.협력적 소통 조사한 내용을 모둠 구성원과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "24 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "28 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2Mg + 2 2MgO마그네슘산소산화 마그네",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3 단계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3 수소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3. 19 쪽 표에 화학 반응식과 화학 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3. 간단한 냉각 장치를 이용하여 우리 생활",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3. 관찰·예상 한 유리병 속 수용액을 다른",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3.화학 반응과 열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3.화학 반응과 열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3.화학 반응과 열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3.화학 반응과 열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "32 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "38 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4. 관찰 핀치 집게를 열어 삼각 플라스크에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4. 반응 전후에 각 원자의 수를 종류별로 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4. 표에 반응물의 모형을 그리고 각 입자 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "40 쪽 학습 목표를 달성했는지 다음 문제로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ":",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "= ::",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "Avogadro, ., 1776￣1856",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "C",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "CaCO3탄산 칼슘",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "CaCl2염화 칼슘",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "Dalton, ., 1766￣1844",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "H",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "H",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "H",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "H",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "I.화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "O",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "O",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "O",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "O",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 11",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 12",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 13",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 14",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 15",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 16",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 17",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 18",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 19",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 20",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR 9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-1 | 물리 변화와 화학 변화의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-10 | 산화 구리(Ⅱ)의 입자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-11 | 수증기가 생성될 때 기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-12 | 암모니아 기체가 생성될",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-13 | 온도와 압력이 같을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-14 | 수증기 생성 반응에서 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-15 | 발열 반응과 흡열 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-16 | 주변에서 볼 수 있는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-2 | 이산화 탄소와 반응했을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-3 | 물 생성 반응 모형",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-4 | 물 생성 반응을 화학 반",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-5 | 암모니아 생성 반응의 화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-6 | 탄산 칼슘과 염산의 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-7 | 강철 솜의 연소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-8 | 산화 구리(Ⅱ)를 구성하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 그림 1-9 | 물 생성 과정에서의 일정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 보기 |ㄱ. 물이 끓는다.ㄴ. 종이가 탄",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "| 보기 |ㄱ. 화학 반응식의 계수비는 부피",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "• 물이 생성될 때 수소나 산소 중 한 물질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "• 반응물 모형을 만든 원형 자석을 모두 사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "• 색이 다른 여러 종류의 원형 자석을 준비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "• 시약을 다룰 때 보안경을 착용하고, 피부",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "• 시약을 다룰 때 보안경을 착용하고, 피부",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "• 실험하는 동안 창문을 열어 환기가 되도록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "• 실험하는 동안 창문을 열어 환기가 되도록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "•일정 성분비 법칙 시뮬레이션•일정 성분비 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "→",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "→",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "→",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "→",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "→",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⑵ 흡열 반응: 화학 반응이 일어날 때 주변",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 강철 솜",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 금속 산화물과 알루미늄이 반응할 때 방출",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 김치가 익는다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 로켓에서 연료가 연소하면서 많은 양의 열",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 메테인 연소 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 물이 끓는다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 산화 철",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 쇠못이 녹슨다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 유리컵이 깨진다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 종이가 탄다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 철사가 구부러진다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 탄산수소 나트륨 분해 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▲ 화학 반응을 화학 반응식으로 표현하는 방",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●계수 화학 반응식에서 화학식 앞에 있는 숫",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●산화 구리 산화 구리는 산소와 구리의 결합",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●앙금 일반적으로 용매에 녹지 않고 가라앉는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●열 변색 붙임딱지 온도에 따라 색이 변하는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●염산 수소와 염소가 결합한 물질인 염화 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●요소 무색의 고체 물질로 물에 잘 녹는다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●화학식 물질을 이루는 원자의 종류와 수를 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "●화합물 두 종류 이상의 원소가 결합하여 생",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "❷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가지 달린 삼각 플라스크",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "가치·태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "각 모둠에서 작성한 과학 기술 안내서를 발표",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "각 모둠에서 조사한 내용을 공유 플랫폼에 올",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "각 실험에서 반응한 수소 기체와 산소 기체의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "각 화학 반응에서 열에너지 출입은 어떠한지 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "간편하게 음식을 데우거나 끓여 먹을 수 있습",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "강철 솜을 가열하면 철이 공기 중의 산소와 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "같은 온도와 압력에서 수증기가 생성되는 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 메테인 연소 반응은 ( 발열, 흡",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 물질의 성질은 변하지 않으면서 모",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 일정한 온도와 압력에서 기체가 반",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 탄산수소 나트륨과 식초가 반응하면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 화학 반응식에서 계수비는 반응물과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 화학 반응이 일어날 때 ( )을/",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 화학 반응이 일어날 때 물질을 구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념 확인 화합물을 구성하는 성분 원소 사이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "검색어",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "게이뤼삭",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계수는 간단한 정수로 나타내고, 1이면 생략",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계수비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계수비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계수비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "계수비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고려할 점",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고무관",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고무관",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고무마개",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공유하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공학",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능 과 의 탐구 활동으로 물질의 질량",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능 요소와 물의 화학 반응을 이용해 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능 자료를 그래프로 옳게 변환하고, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능 탄산수소 나트륨과 식초가 반응하면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과정·기능 화학 반응을 모형으로 옳게 나타내",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학 기술의 원리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학 역량 기르기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학사 극본 만들기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학적 증거에 기반하여 주장하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과학적이고 창의적인 질문 만들기 에서 이야기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "구리 가루",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "구리:산소=4:1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "구리를 가열하면 구리가 공기 중의 산소와 반",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "구리와 반응한 산소의 질량은 어떻게 구하는가",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "구리와 산화 구리(Ⅱ)의 질량 측정 결과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "그런데 더 많은 음식을 데우려면 열에너지가 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "그렇구나! 돌턴의 원자 개념 덕분에 질량 보",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "금속 산화물과 알루미늄 반응에서의열에너지 이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "금속 산화물과 알루미늄이 반응하면서 방출하는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "금속을 녹여 이어 붙이는 것을 용접이라고 하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기술",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체 반응 법칙은 모든 화학 반응에 적용될까",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체 반응에서 기체의 부피 관계 해석하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체 반응에서 기체의 부피 사이에는 어떤 규",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체 반응에서 기체의 부피비⑴ ❻ 법칙: 일",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체 반응에서기체의 부피비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체가 차지하는 부피",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체가 차지하는 부피",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기체의 부피비와 입자 수의 비는 어떤 관계가",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "깔때기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "꼭 포함해야 하는 용어화학 변화, 생성, 열",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 학습 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 학습 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 학습 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 학습에 대한 성취 수준을 평가하여 이 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 활동확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "내 생각에는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "냉각 팩",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "냉각수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "너무 더워.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다르게 해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다르게해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다르게해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다르게해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 활동으로 화학 반응에서 열에너지가 출입",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "단원을 학습하면서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "달걀 껍데기와 염산 반응에서 질량 변화 관찰",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "달걀껍데기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "더알아보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "더알아보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "더해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "돌턴",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "돌턴이 제안한 원자 개념에서부터 분자 개념이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "두 번째 블록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "두 번째 블록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "두 번째 블록 찾기 발열 팩에 붓는 물의 양",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "두 종류 이상의 원소들이 결합하여 화합물을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "디지털 탐구 도구 활용하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "뚜껑",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "로켓에는 ○○ kg의 연료와△△ kg의 산소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "맞아. 같은 부피에 같은 수의 원자가 들어 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "메테인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "메테인과 산소가 반응하면 반응물을 구성하는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "메테인이 주성분인 도시가스가 연소할 때 열에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "면장갑을 착용할 경우 화상의 위험이 있습니다",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모형 개발 및 이용하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모형 개발 및 이용하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 기체가 반응하여 새로운 기체",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 모형을 이용하여 화학 반응에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 실험 자료를 해석하여 화합물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 우리 주변에서 일어나는 물질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 화학 반응에서 열에너지가 출",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 화학 반응에서의 열에너지 출",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 화학 반응을 화학 반응식으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 화학 반응이 일어날 때 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 화학 반응이 일어날 때 열에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 화학 변화에서 새로운 물질이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "무엇을 알아볼까 화합물에서 성분 원소의 질량",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 해결에 적용 및 설명하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제를 인식하고 가설 설정하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제발견하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제해결하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물 분자를 구성하는 성분 원소의 질량비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물 생성 반응의 화학 반응식 완성!",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물리 변화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물에 들어가니 기포가 생기네?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물을 구성하는 수소와 산소의 질량비가 일정한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물을 부었을 때 발열 팩에서 일어나는 물질의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물을 부으면 뜨거워지는발열 팩 속에는 산화 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물이 금방 뜨거워집니다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물이 담긴 지퍼 백을 요소가 담긴 봉지에 넣",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물질의 변화 알아보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물질의 변화⑴ ❶ 변화: 물질의 성질은 변하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "물질의 변화에는 어떤 것이 있을까?장작이 타",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "묽은 수산화나트륨 용액+페놀프탈레인용액",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "묽은 염산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "묽은염산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "미래 에너지 전문가 되어 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응 전",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응 후",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응 후 용액",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응 후용액",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물 모두 수소 원자 4 개, 산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물로 화학 반응 나타내기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물로 화학 반응 나타내기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물로화학 반응 나타내기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물을 화학식으로 표현하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물을 화학식으로 표현하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물을 화학식으로 표현한다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물과 생성물을화학식으로 표현하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물은 의 왼쪽에 적고 생성물은 의 오른쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물의 산소 원자는 2 개이고, 생성물의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물의 수소 원자가 2 개이고, 생성물의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물인 수소와 산소는 의 왼쪽에 적고, 생",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응물인 수소의 화학식은 H2, 산소의 화학",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반응하는 질소와 수소, 생성되는 암모니아의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 도시락",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 도시락에 들어 있는 발열 팩을 이용하여",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 도시락에서 발생하는 열에너지의 양을 조",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 도시락에서 발생하는 열에너지의 양을 조",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 도시락은산화 칼슘과 물의 발열 반응을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 팩",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 팩",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 팩에 물을 부었을 때 발열 팩이 뜨거워",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 팩에 붓는 물의 양을 조절하는 까닭을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 팩을 그릇에 넣고 물을 부으니",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 팩을 이용한 실생활 도구 만들기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "발열 팩을 컵에 넣고 물을 부은 뒤 또 다른",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "볶음밥이 따뜻하게데워졌어.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "본문을 학습하면서 얻은 블록을 조합하여 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "부피비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "부피비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "부피비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "부피비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "분자 개념 덕분에 기체 반응 법칙도 설명할 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빵 반죽을 오븐에 넣어 가열하면 제빵 소다 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "뿌옇게흐려진다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산소 원자의 수를 맞췄더니 수소 원자의 수가",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산소 원자의 수를 비교하면 반응 전에 2 개",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 구리(Ⅱ)",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 구리(Ⅱ)의 질량이 구리의 질량보다 증",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 칼슘과 물의 반응은 기체 반응이 아니므",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 칼슘과 물이 반응하면 화학 변화가 일어",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 칼슘과 물이 반응할 때 열에너지를 방출",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 칼슘과 물이반응할 때 전체 질량은 변하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 칼슘과 물이반응해 수산화 칼슘을 생성하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "산화 칼슘이 모두 반응하는 데 필요한 물의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "살리실산과 아세트산의 화학 반응으로 최초의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "삼각 플라스크에 물 10mL를 넣은 다음, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "삼각 플라스크에 수산화 바륨 10과 염화 암",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "새로운 물질을생성하는 화학 변화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생성물의 수소 원자가 4 개이니 반응물의 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "생활에 적용해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "석회수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "석회수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "설탕",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "세 번째 블록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "세 번째 블록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "세 번째 블록 찾기 발열 팩에 물을 부으면 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "손난로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "손난로나 냉각 팩처럼 열에너지를 방출하거나 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "손난로를가져왔어야 했는데.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수산화 바륨+염화 암모늄",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소 : 산소 = 1 : 8(수소 : 산소 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소 기체와 산소 기체가 반응해 수증기를 생",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소 원자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 1
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소 원자와 산소 원자가 일정한 ( )(으)",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수소 원자의 수를 비교하면 반응 전에 4 개",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학적 사고력과 컴퓨팅 사고력 활용하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "식초",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "식초",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실험을 해 보니 일정한 온도와 압력에서 기체",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "아,그렇구나!",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "아보가드로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "아이오딘화 칼륨 수용액",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "아이오딘화 칼륨 수용액과 질산 은 수용액이 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "아이오딘화칼륨 수용액",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "암모니아 생성 반응에서 질소 분자 2 개와 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "암모니아 생성 반응의 화학 반응식을 나타낸 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "야외에 있어도 시원할 수는 없나?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "어떤 용도로 사용하는가? 안전하게 사용할 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "어떻게 따뜻해졌지?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "얼음이 녹아 물로 상태가 변해도 색, 끓는점",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "에듀넷(www.edunet.net)누리집의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "연소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열 변색 붙임딱지(저온용)",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열 변색 붙임딱지(체온용)",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열 봉합기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열 봉합기로 봉지 입구를 밀봉한다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열에너지가 출입하는 화학 반응 예 조사하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열에너지가 출입하는 화학 반응 예⑴ ❹ 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열에너지가 출입하는 화학 반응에는 무엇이 있",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "열에너지가 출입하는화학 반응 예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "염화 칼슘",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "염화 칼슘과 물이 반응할 때는 주변으로 열에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예 나무가 연소할 때 열에너지를 방출한다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예술",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오개념 바로잡기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "요소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "요소와 물의 반응, 메테인 연소 반응, 탄산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "우리 기체를 반응시키면저 통에 모두 넣을 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "우리 생활에서 활용하는 예",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "우리 주변에서는 | 그림 1-16 |과 같이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "우리 주변의 모든 물질은 원자로 이루어져 있",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "우리는 어디에서야 할까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "우아,신기하다!",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "윗부분에 음식을 넣으면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "유리 막대",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "유리관",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원과 관련해 이미 알고 있는 것에 표시",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원과 관련해 이미 알고 있는 것에 표시",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원과 관련해 이미 알고 있는 것에 표시",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원과 관련해서 더 알고 싶은 내용을 이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원에서 공부한 개념을 글과 그림으로 자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원에서 공부한 화학 반응의 규칙성에 대",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 마무리하며나의 학습 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 기체 반응에서 기체 부피 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 물리 변화와 화학 변화의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 화학 반응에서 열에너지가 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 화학 반응에서 질량이 보존",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 화학 반응에서의 열에너지 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 화학 반응의 의미를 알고,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 화학 변화에서 새로운 물질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면 화합물을 구성하는 성분 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원을 배우면화학 변화의 의미를 알고, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 반응에서 화학 반응 전후에 물질을 이루는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이산화 탄소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이산화 탄소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이제 발열 도시락에서 발생하는 열에너지의 양",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "인공지능(AI)을 활용한 신약 개발 현황 조",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "인공지능(AI)을 활용한신약 개발",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "인공지능을 활용한 신약 개발의 국내외 현황과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "인터넷 검색",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일정 성분비 법칙을 모형으로 설명하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일정 성분비 법칙이 성립하는 까닭은 무엇일까",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일정한 온도와 압력에서 수증기 30 mL를 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일정한 온도와 압력에서 수증기가 생성될 때 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "일정한 온도와 압력에서 질소 30 mL, 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "입구가 넓은 플라스틱 병을 사용하고, 병의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "입자 수의 비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "입자 수의 비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "자료 변환·비교·분석·해석하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "자료 수집하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정리해 볼까 1. 고안한 생활용품에서 화학 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정리해 볼까 1. 과 의 실험 결과를 각각 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정리해 볼까 1. 과정 1에서 완성한 화학 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정리해 볼까 1. 자료 해석 구리의 질량이 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정리해 볼까 1. 집기병에서 일어난 변화를 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정말?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "조합하면 문제를 해결할 수 있어.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "종이는 타면 가벼워진다는데.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "주변에서 일어나는물질의 변화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "주철관",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비물|아이오딘화 칼륨 수용액, 질산 은 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비물|연필, 지우개",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비물|요소, 물, 투명 봉지, 지퍼 백, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비물|원형 자석, 자석 칠판, 원소 기호 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비물|탄산수소 나트륨, 식초, 석회수, 가",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지식·이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지퍼 백을 손으로 눌러 물이 나오게 한 다음",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "직업, 주로 하는 일, 열에너지 활용 방법",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질량 보존 법칙을 모형으로 알아보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질량 보존 법칙이 성립하는 까닭은 무엇일까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질산 은 수용액",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질산 은수용액",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질소",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질소 : 수소 : 암모니아",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질소 기체와 수소 기체가 반응하여 암모니아 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질소 암모니아2 2 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "질소()와 수소()가 반응하면 암모니아()가",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "참고할 용어 화학 변화, 물리 변화, 화학 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "창의 융합",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "창의적으로해결하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "처음 답한 것과 지금 정리한 내용을 비교해서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "첫 번째 블록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "첫 번째 블록",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "첫 번째 블록 찾기 물을 부으면 발열 팩에서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "친구들과 함께 실험 자료를 해석하고 화학 반",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탄산수소 나트륨",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탄산수소 나트륨과 식초가 반응하면 기체가 발",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탄산수소나트륨",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 결과를 해석하여 결론 도출하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "평가 질문을 읽고 내 성취도를 점으로 표시한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "프로젝트",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "핀치 집게",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "핀치 집게",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "핀치 집게",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습 성취를 확인했다면 다음 활동을 해 보자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께발견하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "해 보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "협력적 소통하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응 전후에 원자의 종류와 수가 같은지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응 전후의 질량 변화 관찰하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응 후 새롭게 만들어진 물질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응과 열에너지",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응과 화학 반응식⑴ 화학 반응: ❺이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응식 해석하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응식으로 무엇을 알 수 있을까?다음 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응식의 계수 맞추기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응식의 계수 맞추기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응식의계수 맞추기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응에서 보존되는 질량⑴ ❶ 법칙: 화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응에서 열에너지 출입 확인하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응에서 질량은 보존될까?화학 반응이 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응에서보존되는 질량",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응에서의 열에너지 출입⑴ 발열 반응:",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응에서의 열에너지 출입을 이용한과학 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응에서의열에너지 출입",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응을 이용한 간단한 냉각 장치 만들기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응을 표현하는화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응을 화학 반응식으로 어떻게 표현할 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응의 규칙성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응의 규칙성을 찾아내기까지의 과정이 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응이 일어나기 전 물질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응이 일어날 때 열에너지는 어떻게 될",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응이 일어날 때 질량 보존 법칙이 성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 반응이란 무엇일까?수소 기체와 산소 기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화❸ 변화가 일어나면 처음 물질과 성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화가 일어나기 전후 물질은 어떤 차이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화를 알고 화학 반응을 화학 반응식으",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화에서 새로운 물질의 생성 관찰하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화에서 새로운 물질이 생성됨을 관찰하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화와 화학 반응식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화학 변화와 화학 반응식 • 11쪽 화학 반",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화합물은 성분 원소의 원자들이 일정한 개수비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화합물을 구성하는 성분 원소 사이의 질량 관",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화합물을 구성하는 원소의 질량 사이에는 어떤",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화합물을 구성하는 원소의 질량비⑴ ❸ 법칙:",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화합물을 구성하는원소의 질량비",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "환경, 생활, 미래 기술 등 관심 있는 분야",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "활동 도우미",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "활동 도우미",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "활동 도우미",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "활동 도우미",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "흡열 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "흡열 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 2,
+    "head": "을 모으면 화학 반응에서 열에너지가 출입함을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 1,
+    "cc": 2,
+    "head": "을 모으면 화학 반응에서의 규칙성을 알아내어",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 1,
+    "cc": 2,
+    "head": "을 모으면 화학 변화의 의미를 알고, 화학 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "다음은 화학 반응이 일어날 때의 질량 변화에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "발열 도시락은 산화 칼슘과 물의 ( 발열, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "발열 팩 속 산화 칼슘이 모두 반응하는 데 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "산화 칼슘(CaO)과 물(H2O)이 반응해 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "산화 칼슘과 물의 반응에서도 일정한 부피 관",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "산화 칼슘과 물이 반응하면 ( 물리, 화학 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "산화 칼슘과 물이 반응할 때 열에너지 출입은",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "산화 칼슘과 물이 반응할 때 전체 질량은 (",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 2,
+    "head": "다르게해 보기수산화 나트륨과 염산 반응에서 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 2,
+    "cc": 2,
+    "head": "더알아보기아보가드로아보가드로 (Avogadr",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 2,
+    "cc": 2,
+    "head": "더알아보기질량 보존 법칙을 발견한 라부아지에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 2,
+    "cc": 2,
+    "head": "더해 보기간단한 냉각 장치를 이용한 생활용품",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 2,
+    "cc": 2,
+    "head": "발열 반응흡열 반응",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 2,
+    "cc": 2,
+    "head": "아이오딘화 칼륨 수용액의 양(mL)질산 은 ",
+    "fills": [
+     "#DEE7EB"
+    ],
+    "filledCells": 2,
+    "borderedCells": 4
+   },
+   {
+    "rc": 2,
+    "cc": 5,
+    "head": "구리의 질량(g)2.04.06.08.0산화 ",
+    "fills": [
+     "#DEE7EB"
+    ],
+    "filledCells": 2,
+    "borderedCells": 10
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "나의 활동확인하기모형으로 질량 보존 법칙을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "나의 활동확인하기실험 자료를 해석하여 기체 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "나의 활동확인하기우리 생활에서 발열 반응과 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "나의 활동확인하기우리 주변에서 일어나는 물질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "나의 활동확인하기화학 반응이 일어날 때 열에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "나의 활동확인하기화합물에서 성분 원소의 질량",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "다음 ( ) 안에 알맞은 말을 쓰시오.화학 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "다음은 화학 반응에서의 열에너지 출입에 대한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 1,
+    "head": "화학 반응식을 옳게 나타낸 것은?① ② ③ ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 3
+   },
+   {
+    "rc": 3,
+    "cc": 2,
+    "head": "물품 이름예 냉각 모자필요한 준비물요소, 물",
+    "fills": [
+     "#FCF0F2"
+    ],
+    "filledCells": 6,
+    "borderedCells": 6
+   },
+   {
+    "rc": 3,
+    "cc": 4,
+    "head": "반응 전 전체 질량(g)반응 후 전체 질량(",
+    "fills": [
+     "#DEE7EB"
+    ],
+    "filledCells": 6,
+    "borderedCells": 10
+   },
+   {
+    "rc": 3,
+    "cc": 6,
+    "head": "원자원자의 질량비물 분자구성 원자의 개수원자",
+    "fills": [
+     "#FBF1EA"
+    ],
+    "filledCells": 15,
+    "borderedCells": 15
+   },
+   {
+    "rc": 4,
+    "cc": 1,
+    "head": "물질의 변화 중 처음 물질과 성질이 다른 새",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 4,
+    "cc": 2,
+    "head": "화학 반응식 질소 수소 암모니아계수비 1 :",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 7
+   },
+   {
+    "rc": 4,
+    "cc": 2,
+    "head": "화학 반응식N2+H2 → NH3계수비질소 :",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 8
+   },
+   {
+    "rc": 4,
+    "cc": 5,
+    "head": "원자의 종류수소탄소산소HCO원자의 수반응 전",
+    "fills": [
+     "#DEE7EB",
+     "#EBECEC"
+    ],
+    "filledCells": 10,
+    "borderedCells": 16
+   },
+   {
+    "rc": 5,
+    "cc": 1,
+    "head": "⑴ 서하의 실험에서 질량이 보존되는 것을 설",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 5
+   },
+   {
+    "rc": 5,
+    "cc": 1,
+    "head": "그림과 같이 장치하고 핀치 집게를 열어 식초",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 5
+   },
+   {
+    "rc": 5,
+    "cc": 1,
+    "head": "그림은 암모니아의 분자 모형이다.질소 28g",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 5
+   },
+   {
+    "rc": 5,
+    "cc": 1,
+    "head": "다음은 암모니아 생성 반응을 화학 반응식으로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 5
+   },
+   {
+    "rc": 5,
+    "cc": 1,
+    "head": "다음은 일상생활에서 볼 수 있는 화학 반응이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 5
+   },
+   {
+    "rc": 5,
+    "cc": 1,
+    "head": "표는 구리의 질량을 달리하여 충분히 가열했을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 5
+   },
+   {
+    "rc": 5,
+    "cc": 2,
+    "head": "수산화 나트륨과 염산의 반응과정 묽은 수산화",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 9
+   },
+   {
+    "rc": 6,
+    "cc": 1,
+    "head": "그릇에 발열 팩을 넣은 다음그 위에 물을 부",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 6
+   },
+   {
+    "rc": 6,
+    "cc": 1,
+    "head": "다음은 수소 기체와 산소 기체가 반응하여 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 6
+   },
+   {
+    "rc": 6,
+    "cc": 1,
+    "head": "발열 팩에 물을 부으면뜨거운 김이 나고 물이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 6
+   },
+   {
+    "rc": 6,
+    "cc": 1,
+    "head": "발열 팩의 크기에 따라 안에 들어 있는산화 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 6
+   },
+   {
+    "rc": 6,
+    "cc": 2,
+    "head": "다르게해 보기과산화 수소 분해 반응에서 계수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 11
+   },
+   {
+    "rc": 6,
+    "cc": 2,
+    "head": "다르게해 보기화합물을 구성하는 성분 원소 사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 11
+   },
+   {
+    "rc": 6,
+    "cc": 3,
+    "head": "실험구리의 질량( g)산소의 질량( g)11",
+    "fills": [
+     "#EEF4E9"
+    ],
+    "filledCells": 18,
+    "borderedCells": 18
+   },
+   {
+    "rc": 6,
+    "cc": 3,
+    "head": "실험구리의 질량( g)산화 구리(Ⅱ)의 질량",
+    "fills": [
+     "#EEF4E9"
+    ],
+    "filledCells": 18,
+    "borderedCells": 18
+   },
+   {
+    "rc": 6,
+    "cc": 5,
+    "head": "물 분자(H2O) 수원자 개수개수비(수소 원",
+    "fills": [
+     "#DEE7EB",
+     "#EBECEC"
+    ],
+    "filledCells": 11,
+    "borderedCells": 23
+   },
+   {
+    "rc": 6,
+    "cc": 6,
+    "head": "실험용기에 넣은 기체의 양(mL)생성된 수증",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 31
+   },
+   {
+    "rc": 9,
+    "cc": 2,
+    "head": "나의 학습 확인하기지식·이해 화학 반응에서 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 17
+   },
+   {
+    "rc": 9,
+    "cc": 2,
+    "head": "나의 학습 확인하기지식·이해 화학 반응이 일",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 17
+   },
+   {
+    "rc": 9,
+    "cc": 2,
+    "head": "나의 학습 확인하기지식·이해 화학 변화의 의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 17
+   }
+  ],
+  "picCount": 336,
+  "picSizes": {
+   "0x0": 107,
+   "0x1": 17,
+   "10x13": 1,
+   "11x13": 1,
+   "15x12": 1,
+   "18x2": 3,
+   "1x0": 29,
+   "1x1": 58,
+   "1x2": 1,
+   "20x1": 1,
+   "20x15": 1,
+   "20x2": 1,
+   "20x4": 1,
+   "20x5": 1,
+   "20x7": 1,
+   "21x4": 5,
+   "24x6": 1,
+   "27x4": 1,
+   "28x7": 1,
+   "2x1": 32,
+   "2x2": 1,
+   "34x4": 1,
+   "36x11": 1,
+   "3x2": 5,
+   "4x0": 5,
+   "4x1": 6,
+   "4x3": 3,
+   "5x1": 47,
+   "62x79": 42,
+   "6x1": 3,
+   "6x2": 6,
+   "7x1": 1,
+   "7x4": 1,
+   "7x5": 1,
+   "8x4": 2,
+   "9x7": 1
+  },
+  "ghostTables": 0,
+  "longNbspRuns": 16,
+  "whiteSquareCount": 0,
+  "visibleChars": 23540,
+  "paragraphs": 1583,
+  "binDataCount": 397
+ }
+}
