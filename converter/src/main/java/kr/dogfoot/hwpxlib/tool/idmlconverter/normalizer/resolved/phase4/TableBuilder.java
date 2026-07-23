@@ -3284,9 +3284,13 @@ public final class TableBuilder {
                 for (int i = 0; i < paragraphs.size(); i++) {
                     ASTInlineObject nested = firstNestedTextFrame(paragraphs.get(i));
                     if (nested == null || nested.paragraphs() == null || nested.paragraphs().isEmpty()) continue;
+                    List<ASTParagraph> authoritative = authoritativeParagraphsForNestedTextFrame(ctx, nested);
+                    if (authoritative != null && !authoritative.isEmpty()) {
+                        nested.paragraphs().clear();
+                        nested.paragraphs().addAll(authoritative);
+                    }
                     if (isPlannedInlineTextShellObject(ctx, nested)) continue;
                     if (hasDrawableNestedTextFrameShell(nested)) continue;
-                    List<ASTParagraph> authoritative = authoritativeParagraphsForNestedTextFrame(ctx, nested);
                     List<ASTParagraph> sourceParagraphs =
                             authoritative != null && !authoritative.isEmpty() ? authoritative : nested.paragraphs();
                     if (shouldReplaceAnchorParagraphWithNestedFirst(paragraphs, i, sourceParagraphs)) {

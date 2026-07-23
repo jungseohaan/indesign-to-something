@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
@@ -100,6 +101,11 @@ public final class ResolvedTextFlowAstConverter {
         if (run == null || text == null) return new ArrayList<>();
         Options opts = options != null ? options : options();
         String runText = text;
+        boolean arrowRun = BTFontGlyphMap.isBTArrowFont(run.fontFamily())
+                || BTFontGlyphMap.isBTArrowFontStyle(run.charStyle());
+        if (arrowRun) {
+            runText = BTFontGlyphMap.normalizeArrowGlyphText(run.fontFamily(), run.charStyle(), runText);
+        }
         // EH 폰트 해킹 글리프가 EH 수식 그룹에 못 들어간 채 일반 텍스트로 남으면
         // raw 라틴 문자(µ ª ù)로 새어 한글에서 깨진다. 모든 resolved 텍스트 경로
         // (본문·테이블 셀·인라인 프레임)가 이 메서드를 거치므로 여기서 공통 디코딩한다.
@@ -121,7 +127,7 @@ public final class ResolvedTextFlowAstConverter {
         if (opts.skipBlankRuns && runText.trim().isEmpty()) {
             return new ArrayList<>();
         }
-        return convertPreparedRunText(runText, run, paragraph, opts);
+        return convertPreparedRunText(runText, arrowRun ? plainArrowStyleRun(run) : run, paragraph, opts);
     }
 
     public static List<ASTTextRun> convertSyntheticText(String text,
@@ -160,6 +166,22 @@ public final class ResolvedTextFlowAstConverter {
                 paragraph != null && paragraph.hasTabStops(),
                 options.preserveUnderlineBlank,
                 options.styleOptions);
+    }
+
+    private static ResolvedRun plainArrowStyleRun(ResolvedRun src) {
+        ResolvedRun out = new ResolvedRun();
+        out.text(BTFontGlyphMap.ARROW);
+        out.fontSize(src.fontSize());
+        out.fillColor(src.fillColor());
+        out.tracking(src.tracking());
+        out.horizontalScale(src.horizontalScale());
+        out.verticalScale(src.verticalScale());
+        out.underline(src.underline());
+        out.strikeThru(src.strikeThru());
+        out.type(src.type());
+        out.anchoredObjectId(src.anchoredObjectId());
+        out.storyAnchorPlacement(src.storyAnchorPlacement());
+        return out;
     }
 
     private static ASTParagraph convertParagraph(ResolvedParagraph resolvedPara, Options options) {

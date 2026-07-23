@@ -457,7 +457,7 @@ public class IDMLStoryParser {
                     pendingAce8 = 0;
                 } else if ("Content".equals(tag)) {
                     int lenBefore = contentBuilder.length();
-                    appendContentWithPIs(elem, contentBuilder);
+                    appendContentWithPIs(elem, contentBuilder, currentRun);
                     // ACE 8이 추가한 \uFFFC 개수 카운트
                     for (int ci = lenBefore; ci < contentBuilder.length(); ci++) {
                         if (contentBuilder.charAt(ci) == '\uFFFC') pendingAce8++;
@@ -735,6 +735,10 @@ public class IDMLStoryParser {
      * Content 요소의 텍스트 및 처리 지시(PI)를 StringBuilder에 추가한다.
      */
     static void appendContentWithPIs(Element contentElem, StringBuilder builder) {
+        appendContentWithPIs(contentElem, builder, null);
+    }
+
+    static void appendContentWithPIs(Element contentElem, StringBuilder builder, IDMLCharacterRun run) {
         NodeList children = contentElem.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
@@ -757,10 +761,18 @@ public class IDMLStoryParser {
                         builder.append('\uFFFE'); // Auto Page Number
                     } else if ("19".equals(data)) {
                         builder.append('\uFFFF'); // Section Marker
+                    } else if ("1a".equalsIgnoreCase(data) && isArrowGlyphRange(run)) {
+                        builder.append(BTFontGlyphMap.ARROW);
                     }
                 }
             }
         }
+    }
+
+    private static boolean isArrowGlyphRange(IDMLCharacterRun run) {
+        if (run == null) return false;
+        return BTFontGlyphMap.isBTArrowFont(run.fontFamily())
+                || BTFontGlyphMap.isBTArrowFontStyle(run.appliedCharacterStyle());
     }
 
     /**

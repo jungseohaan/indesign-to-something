@@ -151,7 +151,8 @@ public final class TextFlowAstMaterializer {
             // 정규화했다. 여기서는 폰트만 벗긴다 — BT화살표 폰트를 그대로 두면
             // 한글이 글리프를 렌더링하지 못한다.
             boolean arrowRun = textAtom.sourceRun != null
-                    && BTFontGlyphMap.isBTArrowFont(textAtom.sourceRun.fontFamily());
+                    && (BTFontGlyphMap.isBTArrowFont(textAtom.sourceRun.fontFamily())
+                    || BTFontGlyphMap.isBTArrowFontStyle(textAtom.sourceRun.charStyle()));
 
             for (ASTTextRun run : runs) {
                 if (arrowRun) {
