@@ -1,0 +1,4434 @@
+{
+ "meta": {
+  "source": "math-u5-base.hwpx",
+  "gitRev": "720460fd"
+ },
+ "signature": {
+  "sections": 1,
+  "equations": [
+   "overline{PA}",
+   "=overline{PB}",
+   "PAO=∠PBO=90ù",
+   "PAO",
+   "W",
+   "O",
+   "O",
+   "M",
+   "overline{AM}",
+   "overline{BM}",
+   ")",
+   "O",
+   "M",
+   "overline{OA}",
+   "overline{OB}",
+   "OAM",
+   "OBM",
+   "OMA=∠OMB=90ù",
+   "=overline{OB}",
+   "(",
+   "),",
+   "overline{OM}",
+   "OAM",
+   "OBM",
+   ")",
+   "AM^{̅}=BM^{̅}",
+   "overline{OA}",
+   "overline{OB}",
+   "O",
+   "A",
+   "ABC",
+   "O",
+   "M",
+   "N",
+   "overline{OC}",
+   "OAM",
+   "OCN",
+   "OMA=∠ONC=90ù",
+   "overline{OA}",
+   "=overline{OC}",
+   "(",
+   "),",
+   "=overline{ON}",
+   ")",
+   "AM",
+   "=overline{CN}",
+   "overline{AB}",
+   "overline{CD}",
+   "=2overline{CN}",
+   "overline{AB}",
+   "=overline{CD}",
+   "overline{OA}",
+   "overline{OC}",
+   "O",
+   "M",
+   "N",
+   "overline{AB}",
+   "=overline{CD}",
+   "=overline{ON}",
+   "O",
+   "O",
+   "x",
+   "O",
+   "O",
+   "A",
+   "O",
+   "P",
+   "O",
+   "A",
+   "overline{OP}",
+   "PAO",
+   "PBO",
+   "PAO=∠PBO=90ù",
+   "overline{OP}",
+   "=overline{OB}",
+   "(",
+   ")",
+   "PAO",
+   "PBO",
+   ")",
+   "overline{PA}",
+   "=overline{PB}",
+   "overline{OA}",
+   "overline{OB}",
+   "overline{OP}",
+   "O",
+   "P",
+   "O",
+   "A",
+   "B",
+   "P",
+   "overline{PA}",
+   "overline{PB}",
+   "overline{PA}",
+   "=overline{PB}",
+   "A",
+   "B",
+   "P",
+   "O",
+   "overline{PA}",
+   "=overline{PB}",
+   "A",
+   "B",
+   "P",
+   "O",
+   "x",
+   "l",
+   "Q",
+   "O",
+   "O",
+   "A",
+   "B",
+   "l",
+   "P",
+   "O",
+   "O",
+   "x",
+   "overline{AB}",
+   "overline{BC}",
+   "overline{AC}",
+   "O",
+   "overline{BD}",
+   "=overline{BE}",
+   "=6cm",
+   "CF^{̅}=CE^{̅}",
+   "=8cm",
+   "overline{AF}",
+   "=overline{AD}",
+   "=overline{AB}",
+   "overline{BD}",
+   "=11-6=5(cm",
+   ")",
+   "overline{AC}",
+   "=overline{AF}",
+   ")",
+   "□13cm",
+   "ABC",
+   "D",
+   "E",
+   "F",
+   "overline{AC}",
+   "ABC",
+   "D",
+   "E",
+   "x",
+   "O",
+   "□^{ABCD}",
+   "^{6+8=14(}^{cm}^{)}^{, }^{5+9=14(}^{cm}^{)}",
+   "overline{AB}",
+   "AM^{̅}=BM^{̅}",
+   "overline{PA}",
+   "overline{PB}",
+   "overline{ON}",
+   "overline{AB}",
+   "overline{CD}",
+   "overline{AB}",
+   "overline{CD}",
+   "overline{ON}",
+   "A",
+   "B",
+   "P",
+   "O",
+   "OP^{̅}",
+   "O",
+   "P",
+   "Q",
+   "R",
+   "S",
+   "O",
+   "overline{AB}",
+   "overline{CD}",
+   "overline{ON}",
+   "=overline{ON}",
+   "AM^{̅}=BM",
+   "overline{AB}",
+   "=overline{CD}",
+   "overline{OB}",
+   "overline{OB}",
+   "=overline{OC}",
+   "=overline{CN}",
+   "AM",
+   "=overline{ON}",
+   "O",
+   "P",
+   "O",
+   "overline{AB}",
+   "overline{OC}",
+   "overline{OA}",
+   "O",
+   "overline{AB}",
+   "overline{AB}",
+   "=overline{CD}",
+   "OCD",
+   "12 sqrt{3}",
+   "O",
+   "P",
+   "overline{PA}",
+   "overline{PB}",
+   "O",
+   "A",
+   "B",
+   "ABC",
+   "D",
+   "E",
+   "overline{AD}",
+   "O",
+   "overline{AB}",
+   "overline{CD}",
+   "overline{AB}",
+   "=45m",
+   "overline{CD}",
+   "=25m",
+   "E",
+   "overline{CD}",
+   "F",
+   "overline{EF}",
+   "m",
+   "A",
+   "B",
+   "overline{AB}",
+   "=32m",
+   "A",
+   "B",
+   "C",
+   "D",
+   "B",
+   "C",
+   "O",
+   "A",
+   "B",
+   "P",
+   "O",
+   "P",
+   "{1} over {2}",
+   "O",
+   "O",
+   "O",
+   "RPA=",
+   "{1} over {2}",
+   "RPB=",
+   "{1} over {2}",
+   "APB=∠RPB",
+   "={1} over {2}(angleROB-angleROA)",
+   "{1} over {2}",
+   "OPA",
+   "overline{OP}",
+   "OPA=∠OAP",
+   "OPA",
+   "AOB=∠OPA+∠OAP=2∠APB",
+   "APB=",
+   "APQ=",
+   "{1} over {2}",
+   "BPQ=",
+   "{1} over {2}",
+   "APB=∠APQ+∠BPQ",
+   "APB=",
+   "{1} over {2}(angleAOQ+angleBOQ)=",
+   "{1} over {2}",
+   "O",
+   "O",
+   "O",
+   "x= TIMES 190^{5}=^{5}",
+   "x=^{5}",
+   "y=^{5}",
+   "{1} over {2}",
+   "APB=",
+   "{1} over {2}",
+   "APB=∠AQB",
+   "overline{AB}",
+   "O",
+   "{1} over {2}",
+   "AOB=90ù",
+   "overline{AB}",
+   "overline{AC}",
+   "O",
+   "⌒AB=⌒",
+   "AOB=∠COD",
+   "{1} over {2}",
+   "APB=",
+   "{1} over {2}",
+   "AOB=",
+   "{1} over {2}",
+   "COD=",
+   "A",
+   "QB",
+   "⌒AC=⌒",
+   "O",
+   "{1} over {2}",
+   "{1} over {2}anglea+{1} over {2}anglec",
+   "{1} over {2}(anglea+anglec)",
+   "{1} over {2}",
+   "A+∠C=180ù",
+   "B+∠D=180ù",
+   "□^{ABCD}",
+   "B",
+   "D",
+   "B",
+   "D",
+   "A+∠C=180ù",
+   "B+∠D=180ù",
+   "O",
+   "x=180",
+   "O",
+   "y",
+   "O",
+   "overline{BC}",
+   "E",
+   "A=",
+   "O",
+   "A",
+   "B",
+   "P",
+   "A",
+   "CAT=∠CPA=90ù",
+   "BC",
+   "BAC=",
+   "BAT=90",
+   "BAC=90",
+   "CAT=∠CPA=90ù",
+   "BC",
+   "BAC=",
+   "BAC=90",
+   "BPA=90ù",
+   "BAT=∠BPA",
+   "BAT=∠BPA",
+   "x=^{5}",
+   "x=^{5}",
+   "O",
+   "A",
+   "y",
+   "O",
+   "A",
+   "ABC",
+   "⌒AB=⌒",
+   "APB=∠CQD",
+   "APB=angleCQD",
+   "⌒AB=⌒",
+   "A+angleC=180 DEG~",
+   "angleB+angleD=180DEG",
+   "O",
+   "overline{BC}",
+   "O",
+   "BAT=∠BPA",
+   "P",
+   "overline{AB}",
+   "=overline{AP}",
+   "x",
+   "⌒AB=2⌒~BC",
+   "O",
+   "ABC",
+   "DEF",
+   "D",
+   "E",
+   "F",
+   "P",
+   "O",
+   "C",
+   "CA=5:4:3",
+   "A",
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "O",
+   "B",
+   "C",
+   "⌒~BC=⌒~CD=⌒~DE",
+   "A",
+   "B",
+   "l",
+   "A",
+   "B",
+   "l",
+   "Q",
+   "l",
+   "Q",
+   "P",
+   "R",
+   "overline{AP}",
+   "overline{AR}",
+   "S",
+   "T",
+   "ASB=∠APB",
+   "+",
+   "ASB&gt;∠APB",
+   "ASB=",
+   "BRT",
+   "ATB=",
+   "AQB&gt;∠ARB",
+   "overline{AB}",
+   "O",
+   "overline{CD}",
+   "Ooverline{M}",
+   "overline{CD}",
+   "overline{AB}",
+   "O",
+   "C=90ù",
+   "D",
+   "E",
+   "A",
+   "B",
+   "O",
+   "x",
+   "E",
+   "P",
+   "O",
+   "overline{AB}",
+   "overline{AD}",
+   "overline{BC}",
+   "overline{CD}",
+   "overline{AB}",
+   "O",
+   "A",
+   "B",
+   "E",
+   "overline{AB}",
+   "O",
+   "P",
+   "x",
+   "m",
+   "B",
+   "x+angley",
+   "B",
+   "C",
+   "O",
+   "ABC",
+   "O",
+   "sin~xù",
+   "{3} over {4}",
+   "D"
+  ],
+  "tables": [
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ", , 는 각각 원 의 접선이므로 , -따라",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ", , 를그어 만든 두 삼각형이서로 합동임을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ", 를 그어 만든 두 삼각형이 서로 합동임을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": ", 를 그어 만든 두 삼각형이 서로 합동임을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "0",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "01",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "01",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "01",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "02",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "02",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1 2 3 4 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "1 원과 직선2 원주각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "10",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "11",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "12",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "13",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "14",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "15",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "166",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "168",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "169쪽 171쪽 174쪽 177쪽 183쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "170",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "172",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "174",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "176",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "178",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "180",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "182",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "184",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "186",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "188",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "190",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "192",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "194",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "195",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "196",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "197",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "5 4 3 2 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "7",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "8",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "9",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR72",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR73",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR74",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR75",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR76",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR77",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR78",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR79",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR80",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR81",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR82",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR83",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR84",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR85",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR86",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR87",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR88",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR89",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR90",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR91",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR92",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR93",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR94",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR95",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR96",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR97",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR98",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "QR99",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "[11~15] 다음 문제의 풀이 과정과 답을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "•호 AB는 ⌒AB 와 같이 나타낸다.•원 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠A'QB'을 오려 내어 ∠APB에 포개어 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠APB와 ∠''의 크기를 비교해 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠A를 ∠C에 이어 붙인다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠A를 오려 낸다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠BAT가 둔각일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠BAT가 둔각일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠BAT가 예각일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠BAT가 예각일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠BAT가 직각일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "∠BAT가 직각일 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "⌒ CD의 중심각의 크기를 이용하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●원의 접선에 관한 성질을 이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●원의 현에 관한 성질을 이해",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●원주각의 성질을 이해하고 정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃ ●원주각의 성질을 이해하고 정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "┃학습 목표┃●원주각의 성질을 활용하여 여러",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "□ABCD가 원에 내접할 때 ∠",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "△는 =OAÓ인 이등변삼각형이므로 ∠ 이다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "▶ 1, 2, 11▶ 3, 4, 12▶ 5,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "❶원의 중심에서 현에 내린 수선은 그 현을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "ㄱ. Ó ㄴ. ㄷ. =DNÓ ㄹ. ㅁ. BM",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "개념정리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고등",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "고등원의 방정식",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공감적 소통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공학 도구로 관찰하기원의 접선과 현이 이루는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공학 도구를 이용하여 원 밖의 한 점 에서 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공학 도구를 이용하여 원 위의 세 점 , ,",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "공학 도구를 이용하여 원 의 중심으로부터 같",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "과제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "광화문 광장의 이순신 장군 동상처럼 사람의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "국립 현대 미술관 과천관의 옥상",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "궁금한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "그런데 덮개의 크기가 다양해. 머그잔의 밑면",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기본 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기본 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기초 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "기초 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나는 원과 직선 단원에서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나는 원주각 단원에서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나는 이번 단원에서 을/를 잘했고, 이/가 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나만의 방법",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나만의 방법",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "나의 학습 되돌아보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다양한 활동으로 수학 역량을 키워 보자. 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림과 같이 원 O 위의 점 에서 접하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림과 같이 원 에 내접하는 사각형에서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 ∠x의 크기를 구하시오.⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 가 원 의 지름일 때, ∠x의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 두 점 , 는 점 에서 원 에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 두 현 AC, BD의 교점을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 원 O는 △의 내접원이고 세 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 원 는 △의 내접원이면서 △의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 점 는 원 의 두 현 AB, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 직선 AT는 원 O의 접선이고",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 그림에서 직선 AT는 원 의 접선이고 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 x의 값을 구하시오. ⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 x의 값을 구하시오. ⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 x의 값을 구하시오. ⑴⑵⑶",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 x의 값을 구하시오. ⑴⑵⑶",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 x의 값을 구하시오.⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 x의 값을 구하시오.⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 x의 값을 구하시오.⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 ∠x,~angley의 크기를",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 ∠x의 크기를 구하시오. ⑴",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서 ∠x의 크기를 구하시오.⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 원 O에서⌒AB:⌒~BC:⌒일 때 ∠의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음 중 옳지 않은 것은?① 원에서 현의 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음과 같이 배운 내용을 나만의 방법으로 정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음과 같이 배운 내용을 나만의 방법으로 정",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음과 같이 색종이에 원 와 현 AB를 그린",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음은 색종이를 이용하여 길이가 같은 호에 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음은 색종이를 이용하여 원에 내접하는 사각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "다음을 읽고, 혜린이가 원의 지름을 찾은 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "대교의 폭",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "도전 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "도전 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "동상을 감상하기에 가장 좋은 위치",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "따라서 감상할 동상의 위 끝과 아래 끝의 위",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "따라서 원의 접선과 그 접점을 지나는 현이 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "따라서 한 호에 대한 원주각의 크기는 그 호",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "머그잔에서 원의 지름 찾기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모둠별로 만든 이모티콘을 발표하고, 친구들과",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모둠별로 이모티콘으로 표현하고 싶은 감정이나",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 3",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 4",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 5",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제 6",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "문제풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "뭐 해?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "미술",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "반원에 대한 원주각의 크기는 90ù이다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "별 모양 그림과 원주각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "보통",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빈칸에 알맞은 수를 써 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "빗변의 길이와 다른 한 변의 길이가 각각 같",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "사고확산하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "사고확산하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "사고확산하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "사고확산하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "사회",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "색종이를 펼치고, 두 호 AB, A'B'에 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "서술형 문제",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "서우",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "서우",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수의 아름다움과신비함이 담긴 이 별 그림을우",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학 이모티콘 만들기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학 익힘책 244쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "수학 익힘책 245쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 정리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 정리",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "스스로 확인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "실생활 속 원 모양 구조물",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "어느 게시판에 올라온 다음 질문에 답하고, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "여러 개의 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 관찰한 사실을 원의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 수학적 근거를 바탕으로 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 실생활 문제에서 원주각의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량 속 가치•태도 타당한 근거에 따라 자신",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "역량활동",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예술",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "예제 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 □ABCD가 원 에 내접",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 □ABCD는 원에 내접하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 가 원 의 지름일 때, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 를 지름으로 하는 반원 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 반지름의 길이가 10cm",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 반지름의 길이가 6cm인",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 반지름의 길이가 cm인 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 삼각형 ABC의 외심 에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 O에서 CD이면 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 O에서 ⌒AB 위에 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 밖의 한 점 에서 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 에 길이가 같은 현을",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 에 내접하는 □ABC",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 에 내접하는 □ABC",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 에 내접하는 사각형에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 에 외접하는 에서 두",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 위의 점 를 지나는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 의 중심에서 같은 거",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 의 중심에서 두 현 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원 의 중심에서 현 AB",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 원탁에 8명의 사람이 둘",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림과 같이 직선 은 한 점 에서 두",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 , , 는 를 지름으로 하는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 , ∠일 때, △와 합동인 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 는 원 의 지름이고 µ CD",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 는 원 의 지름이고, ⊥일 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 두 점 , B는 점 P에서 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 두 점 , 는 점 에서 원 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 두 점 , 는 점 에서 원 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 원 O는 ∠인 직각삼각형 A",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 원 O는 △의 내접원이고 세",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 원 O는 △의 내접원이고 세",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 원 는 △의 외접원이고 직선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 원 는 춘천 대교의 주탑, ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 점 P가 두 현 AC, BD",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 직선 CT는 원의 접선이고 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 직선 PT는 원의 접선이고 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서 직선 TB는 원의 접선이고 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림에서□ABCD는 원 에 외접하고 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림은 국립 현대 미술관 과천관의 옥",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림은 원 에 내접하는 정오각형 AB",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 그림은 원 위에 7개의 점을 잡고 점",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 원 O 위에 다음을 나타내시오.⑴ 호",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 원 O에서 ∠x의 크기를 구하시오.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 원 O에서 두 현 AB, CD가 서로",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 원 에서 ⊥OMÓ, ⊥이고 OMÓ일 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 원 에서 ⊥OMÓ이고 일 때, △의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "오른쪽 원 에서 ⊥일 때, 의 길이를 구하시",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "와 원의 교점을 각각 라고 하자.△BPS에서",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원 O 밖의 한 점 P에서 원 O에 그을 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원 O에서❶ OMÓ=이면 = ❷ = 이면 O",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원 모양의 바퀴는 먼 거리를 빠르게 이동할 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원 모양의 색종이를 반으로 접어 길이가 같은",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원 모양의 시계판의 중심을 찾아 시곗바늘을 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원 밖의 한 점에서 그 원에 그은 두 접선의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원 속의 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원, 현, 접선 등을 이용하여 그림을 그리고",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원과 관련된 개념, 용어, 성질 등을 사용하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원과 직선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원과 직선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원기둥 모양의 머그잔의 덮개를 사려고 찾는 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원에 내접하는 를 그린 후 오려 낸다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원에 내접하는 사각형에는 어떤 성질이 있을까",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원에 내접하는 사각형의 성질원에 내접하는 사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원에 내접하는사각형의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원에 내접하는사각형의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원에 외접하는 사각형의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원으로 그리는 추상화추상화는 사물을 있는 그",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원은 완벽한 대칭성과 조화로움을 지닌 도형으",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 성질은 일상생활뿐만 아니라 자연, 예술",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선과 현이 이루는 각에는 어떤 성질이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선과 현이 이루는 각의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선과 현이 이루는 각의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선과 현이 이루는 각의 성질원의 접선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선과 현이 이루는 각의 성질을 알아보",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선에 관한 성질을 이해하고 정당화할 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선에는 어떤 성질이 있을까?",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선은 그 접점을 지나는 반지름과 수직",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선의 성질",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 접선의 성질원 밖의 한 점에서 그 원에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심 찾기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심과 현의 수직이등분선 사이에는 어떤",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심과 현의 수직이등분선 사이의 관계❶",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심과현의 수직이등분선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심과현의 수직이등분선",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심에서 현까지의 거리와 현의 길이 사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심에서 현까지의 거리와 현의 길이 사",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심에서 현까지의 거리와현의 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 중심에서 현까지의 거리와현의 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 현",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 현에 관한 성질을 이해하고 정당화할 수",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원의 현원의 접선원주각원주각의 활용",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각과 중심각의 크기 사이에는 어떤 관계가",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각과 중심각의 크기 사이의 관계❶한 호에",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각과중심각의 크기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각과중심각의 크기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각의 성질을 이해하고 정당화할 수 있나요",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각의 성질을 활용하여 여러 가지 원의 성",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각의 크기와 호의 길이 사이에는 어떤 관",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각의 크기와 호의 길이 사이의 관계한 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각의 크기와호의 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각의 크기와호의 길이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "원주각의 활용",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "위의 함께 탐구 에서 원의 중심에서 현에 내",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "위의 함께 탐구 에서 한 원의 중심으로부터 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "윤재가 다음 그림과 같은 바다 전망대의 원 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원에서는",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원에서는 원의 여러 가지 성질을 탐구하",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원의 학습 계획을 적어 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이 단원의 학습 계획을 적어 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이때 밑면의 둘레와 종이의 두 변이 각각 만",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이모티콘(emoticon)은 emotion[",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이상을 정리하면 다음과 같다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이상을 정리하면 다음과 같다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이상을 정리하면 다음과 같다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이상을 정리하면 다음과 같다.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "이제 원에서 현의 수직이등분선이 그 원의 중",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "임을 이용하기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "잘함",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 C가 두 점 , B로부터 같은 거리에 있",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 가 ∠APB의 내부에 있을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 가 ∠APB의 내부에 있을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 가 ∠APB의 외부에 있을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 가 ∠APB의 외부에 있을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 가 ∠APB의 한 변 위에 있을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "점 가 ∠APB의 한 변 위에 있을 때",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정답 및 풀이 270쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정답 및 풀이 272쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "정답 및 풀이 273쪽",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "좋아요!",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "주탑",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비 활동",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "준비 활동",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1 다각형",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1 원과 부채꼴",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1 원과 부채꼴",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 1평면도형의 성질중 2삼각형과 사각형의 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "중 2 직각삼각형의 합동 조건",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지름 AC와 현 PC를 그으면 에 의해 ∠ ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지름 AC와 현 PC를 그으면 에 의해 ∠이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지름 PQ를 그으면 에 의해 ∠∠AOQ, ∠",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "지름 PR를 그으면 에 의해 ∠∠ROA, ∠",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "직사각형 모양의 종이를 준비해. 그리고 종이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "직선 AT는 원의 접선이고 점 A는 그 접점",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "창의적 설계",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "춘천 대교의 원 모양 주탑",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 1 ∠A와 ∠C의 크기의 합을 구해 보",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 1 점 B를 움직이면서 ∠APB와 ∠A",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "탐구 2 점 P를 움직이면서 ∠APB의 크기",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "틀린 문제는 오답 공책을 만들어 확인해 보자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "풀이",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "피타고라스(Pythagoras, .. 569",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습 결과물을 모아 나만의 포트폴리오를만들어",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습 내용",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습 태도",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "학습한 개념을 스스로 정리해 보자. 스스로 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "한 원 또는 합동인 두 원에서 부채꼴의 호의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "한 원 또는 합동인 두 원에서 호의 길이가 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "한 원 또는 합동인 두 원에서❶ CD이면 ∠",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "한 원에서 호의 길이는 그 호에 대한 중심각",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "한 호에 대한 원주각과 중심각의 크기 사이의",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "한편 한 호에 대한 원주각은 무수히 많지만 ",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 탐구",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "함께 해요",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "항목별로 나의 점수를 색칠해 보자.",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "현 AB는 원 O의 지름이므로 ⌒AB에 대한",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "현으로 만드는 원",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "협력적 실행",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "혜린",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "혜린",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "화합과 평등의 상징, 원탁회의원탁회의는 원탁",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
+    "head": "확실히 이해한 문제의 번호에 □표를 해 보자",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 4
+   },
+   {
+    "rc": 1,
+    "cc": 6,
+    "head": "(1) ∠(2) ∠",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 6
+   },
+   {
+    "rc": 1,
+    "cc": 6,
+    "head": "(1) ∠(2) ∠∠",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 6
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "다각형의 성질을 이해했나요?잘함보통모름",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "부채꼴의 중심각과 호의 관계를 이해했나요?잘",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "직각삼각형의 합동 조건을 이용하여 두 직각삼",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 1,
+    "head": "호, 현, 부채꼴, 중심각의 뜻을 알고 있나",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 2
+   },
+   {
+    "rc": 2,
+    "cc": 4,
+    "head": "⑴⑵",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 8
+   },
+   {
+    "rc": 2,
+    "cc": 4,
+    "head": "⑴⑵⑶⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 8
+   },
+   {
+    "rc": 2,
+    "cc": 4,
+    "head": "⑴⑵⑶⑷",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 8
+   }
+  ],
+  "picCount": 258,
+  "picSizes": {
+   "0x0": 43,
+   "10x10": 1,
+   "10x5": 2,
+   "10x7": 2,
+   "10x8": 2,
+   "10x9": 1,
+   "11x10": 1,
+   "11x6": 1,
+   "11x7": 1,
+   "11x8": 2,
+   "12x6": 1,
+   "12x8": 1,
+   "12x9": 2,
+   "13x10": 1,
+   "13x2": 3,
+   "13x7": 1,
+   "17x12": 1,
+   "17x5": 1,
+   "18x0": 1,
+   "19x7": 1,
+   "1x0": 8,
+   "1x1": 25,
+   "1x2": 1,
+   "23x0": 1,
+   "25x1": 2,
+   "2x1": 2,
+   "30x1": 2,
+   "30x16": 1,
+   "32x22": 1,
+   "38x15": 1,
+   "3x1": 13,
+   "3x2": 1,
+   "47x15": 1,
+   "49x14": 1,
+   "4x1": 3,
+   "4x2": 3,
+   "59x30": 1,
+   "59x77": 34,
+   "5x4": 2,
+   "5x5": 2,
+   "5x6": 1,
+   "6x11": 1,
+   "6x3": 2,
+   "6x6": 9,
+   "6x7": 3,
+   "7x1": 1,
+   "7x5": 3,
+   "7x6": 4,
+   "7x7": 17,
+   "7x8": 10,
+   "8x10": 1,
+   "8x2": 1,
+   "8x6": 2,
+   "8x7": 12,
+   "8x8": 8,
+   "8x9": 3,
+   "9x6": 1,
+   "9x7": 9,
+   "9x8": 1,
+   "9x9": 1
+  },
+  "ghostTables": 0,
+  "longNbspRuns": 0,
+  "whiteSquareCount": 10,
+  "visibleChars": 10349,
+  "paragraphs": 894,
+  "binDataCount": 282
+ }
+}
