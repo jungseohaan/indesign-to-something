@@ -298,6 +298,7 @@ function _executionCandidateContractFields() {
         "ownedTextFrameIds",
         "editableTextFrameIds",
         "hiddenTextFrameIds",
+        "ownedTextPathStoryIds",
         "exportTargetObjectId",
         "atomicExportTargetObjectId",
         "atomicExportTargetObjectIds",
@@ -492,6 +493,11 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     if (objectPlan.ownedTextFrameIds) {
         candidate.ownedTextFrameIds = _sortedNumericIds(objectPlan.ownedTextFrameIds);
         candidate.editableTextFrameIds = _sortedNumericIds(objectPlan.ownedTextFrameIds);
+    }
+    if (objectPlan.ownedTextPathStoryIds) {
+        candidate.ownedTextPathStoryIds = _sortedNumericIds(objectPlan.ownedTextPathStoryIds);
+    } else {
+        candidate.ownedTextPathStoryIds = [];
     }
     if (objectPlan.hiddenTextFrameIds) {
         candidate.hiddenTextFrameIds = _sortedNumericIds(objectPlan.hiddenTextFrameIds);

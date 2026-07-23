@@ -975,6 +975,7 @@ public final class StoryConverter {
 
     private static boolean isStoryFullyOwnedByIndesignPng(ResolvedBuildContext ctx, String storyId) {
         if (ctx == null || ctx.resolvedData == null || storyId == null) return false;
+        if (ctx.isTextPathStoryOwnedByPngPlan(storyId)) return true;
         List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
         if (frames == null || frames.isEmpty()) return false;
         boolean hasOwnedFrame = false;
@@ -4279,7 +4280,10 @@ public final class StoryConverter {
                         try {
                             int tfDec = Integer.parseInt(tfHex, 16);
                             int tpDec = Integer.parseInt(tpHex, 16);
-                            map.put(String.valueOf(tfDec), String.valueOf(tpDec));
+                            String tpStoryId = String.valueOf(tpDec);
+                            if (!ctx.isTextPathStoryOwnedByPngPlan(tpStoryId)) {
+                                map.put(String.valueOf(tfDec), tpStoryId);
+                            }
                         } catch (NumberFormatException e) { /* skip */ }
                     }
                 }

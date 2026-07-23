@@ -762,6 +762,19 @@ public final class ResolvedBuildContext {
         return plan != null && plan.textAction == TextAction.OWNED_BY_PNG;
     }
 
+    public boolean isTextPathStoryOwnedByPngPlan(String storyId) {
+        Integer parsed = parseDecimalId(storyId);
+        if (parsed == null || ownershipPlans == null || ownershipPlans.isEmpty()) return false;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null || plan.textAction != TextAction.OWNED_BY_PNG) continue;
+            if (plan.ownedTextPathStoryIds == null) continue;
+            for (int ownedStoryId : plan.ownedTextPathStoryIds) {
+                if (ownedStoryId == parsed) return true;
+            }
+        }
+        return false;
+    }
+
     private ObjectPlan findAnyTextFrameOwnershipPlanByKey(String textFrameId) {
         if (textFrameId == null || textFrameId.isEmpty()) return null;
         ObjectPlan fallback = null;
