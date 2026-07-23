@@ -6,14 +6,14 @@
 
 IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) 데스크탑 앱 + React 프론트엔드.
 
-## 활성 작업 (2026-07-19 기준)
+## 활성 작업 (2026-07-23 기준)
 
-- **브랜치**: `open-indd` — EH 재작성(PR #35)·SPEC-041(PR #36)·SPEC-042(chemical-eq, PR #41) 머지됨. main 은 PR #40 시점까지 반영
-- **진행 중 SPEC**:
-  - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) (앵커 가장자리 라벨 셀 흡수) — **구현 완료, 한글 육안 확인 대기** (p187 pill 위치)
-  - source ownership policy — Tier A.5/A.6/B 구현 완료, **미테스트** (InDesign 재추출 필요). 잔여: A.1.5/A.4/A.8/Tier B 효과
-  - [SPEC-027](docs/specs/SPEC-027-badge-scribble-outline-png.md) (배지 scribble 외곽선 PNG 폴백) — 신규(2026-05-20). 일러스트 톤 배지 외곽선만 PNG, 텍스트는 HWPX. **데이터 조사 단계**
-- **기타 Active SPEC**: SPEC-012 (속성 우선순위), SPEC-014 (폰트 자동 매핑), SPEC-015 (AST 디버깅), SPEC-018 (시멘틱 M3)
+- **브랜치**: `open-indd` — 과학 u1(p8-49) 이슈 스윕 완료: SPEC-048/056/057/059/060 + 유령 스페이서(#105) + SPEC-061 골든 게이트(#116) 머지됨
+- **진행 중**:
+  - [SPEC-058](docs/specs/SPEC-058-equation-font-box-formula.md) (박스 반응식 통짜 hp:equation) — **PR #118 리뷰 대기** (`spec-058-boxed-equation-v2`)
+  - p17 리본 배너 TextPath 유실 — 수정 커밋됨 (`fix-p17-banner-text`), **u1 전체 재추출 골든 게이트 후 PR 예정**
+  - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) + SPEC-044~047 (화학식 계열) — 구현 완료, **한글 육안 확인 대기**
+- **기타 Active SPEC**: SPEC-012 (속성 우선순위), SPEC-014 (폰트 자동 매핑), SPEC-015 (AST 디버깅), SPEC-018 (시멘틱 M3), SPEC-055 (화학식 전면 수식화)
 - **전체 SPEC 인덱스**: [docs/specs/INDEX.md](docs/specs/INDEX.md)
 
 ## 빌드 & 실행
@@ -288,6 +288,7 @@ packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 - **dev 루프 실효 dpi 는 150 이었다**: perf-mode=fast 가 `pngExportResolution` 을 150 으로 강제 override (SPEC-030). SPEC-054 부터 issue.py 가 `--dpi`(기본 96) + `pngExportResolutionLocked` 로 명시 dpi 를 우선시킴. 페이지 평면 캐시는 dpi 별 디렉토리로 분리
 - **resolved 좌표 단위 불일치**: InDesign DOM은 문서 측정 단위(mm/in/pt)로 반환, IDML은 항상 pt → `ResolvedData.normalizeToPoints(idmlPageWidthPt)`로 scaleFactor 자동 계산. ExtendScript `viewPreferences` 변경은 효과 없음
 - **resolved Group bounds 과대**: DOM의 Group `geometricBounds`는 비가시 자식까지 포함 → 벡터 그룹은 IDML 폴백, 개별 도형만 resolved 사용
+- **TextPath(곡선 위 텍스트)는 수집기 미추출 — textless 숨김 금지**: text_collectors/resolved 는 TextFrame 만 추출하므로 TextPath 를 textless 렌더에서 숨기면 편집 텍스트 재배치 없이 그대로 유실된다 (p17 리본 배너: 흰 외곽선 벡터만 남음). 곡선 조판은 HWPX 재현 불가 → PNG 에 구운 채 유지 (`render_inline_objects.jsx` `isTextItem`)
 - **문단 인덱스 불일치**: IDML(AST)과 InDesign DOM(resolved)의 문단 수가 다름 → 텍스트 기반 매핑 사용
 - **HWPX 연결 글상자**: 한글은 연결 글상자 체인에서 후속 프레임의 명시적 콘텐츠를 무시 → distributed 프레임은 `linkListIDRef=0`으로 해제
 
