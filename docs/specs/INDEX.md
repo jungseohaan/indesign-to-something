@@ -17,6 +17,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-037](SPEC-037-issue-debug-cycle-acceleration.md) | Active support | Faster page issue loop, ObjectPlan tracing, regression audit workflow |
 | [SPEC-038](SPEC-038-extract-indd-modularization-map.md) | Active support | `extract_indd.jsx` modularization map and removal of legacy extraction paths |
 | [SPEC-061](SPEC-061-hwpx-structural-golden-gate.md) | Active support | HWPX 구조 시그니처 골든 게이트 — verify_hwpx.py + test-data/golden, PR 전 회귀 비교 관례 |
+| [SPEC-067](SPEC-067-grep-normalization-and-math-grouping.md) | Active | GREP 변환 정상화(수학 37% 규칙 소멸) + 수식 그룹 경계 문맥 기반 재설계 — 분석 완료, 구현 대기. charPr 프로파일러/4교과서 기준선 확보 |
 | [SPEC-041](SPEC-041-anchored-edge-label-floating.md) | Active | 앵커 가장자리 라벨(구절 풀이 배지) 테이블 셀 흡수 — 컨버터 오버레이 채널 보존으로 수정 (구현 완료, 육안 확인 대기) |
 | [SPEC-048](SPEC-048-floating-anchored-gauge-inline-misplacement.md) | Done | FLOATING_ANCHORED 게이지(눈금+100%+연필)의 인라인 오배치 — 추출기 3-seed 통짜PNG 통일 + FLOATING/PAGE 배치 (2026-07-22 한글 육안 확인 완료) |
 | [SPEC-056](SPEC-056-cell-answer-blank-inline-loss.md) | Done | 표 셀 답란(연필+밑줄) 인라인 객체 유실 — 스페이서 오판·□ 삼킴·fallback 순서 손실 3중 수정 (2026-07-22 한글 육안 확인 완료) |
