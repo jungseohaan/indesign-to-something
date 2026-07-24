@@ -252,3 +252,61 @@ GREP 이 `1²`|`=1,`|`2²`|`=4` 로 쪼갬 — 단, `=1,` 는 ASTEquation 이 �
 - `scripts/dev/charpr_profile.py` — 색/폰트/이탤릭/첨자 분포 프로파일러.
   **구조 시그니처 골든에는 이 축이 없다** (GREP 은 주로 여기에 작용)
 - 골든: 수학 u1/u5, 영어 u1/u3 구조 + 4교과서 charPr 기준선
+
+## **근본 원인·해결 확정: GREP BasedOn 상속 누락 → DOM 색 의존** (2026-07-24)
+
+p56 대화 녹색 + 과학 색자 딜레마의 진짜 뿌리를 실측으로 규명했다.
+
+**초기 개발 트레이드오프의 실체**: 초기엔 GREP 규칙의 BasedOn 상속을 구현하지
+못해, 파생 문단스타일이 부모의 GREP 색을 못 받아 색이 비었다. 그래서 임시로
+InDesign DOM 렌더값(`character.fillColor`)을 추출기에서 읽어다 썼다. 하지만 DOM 은
+이웃 문단 색을 흘려 **비결정적으로 오보고**한다(같은 p56 bigger 가 재추출마다
+녹색↔회색). 이게 p56 녹색 누출의 근원이다.
+
+**실측 규명**: 과학 "무엇을 알아볼까"(초록 #00633E)는 문단스타일
+`02_탐구,해보기_준비물` 의 GREP `^무엇을 알아볼까|어떻게 할까` → 문자스타일
+`2_무엇을알아볼까요(제목)`(FillColor=C=79 M=0 Y=77 K=49)에서 온다. 실제 텍스트의
+문단스타일은 파생 `02_탐구,해보기_준비물(내어쓰기)`(BasedOn=준비물)인데, **변환기가
+BasedOn GREP 을 상속 안 해** 초록을 놓쳤다. preview.pdf 육안: "무엇을 알아볼까"만
+초록, 뒤 문장 검정 — GREP 이 정확히 그 첫 구절만 착색.
+
+**핵심 버그 2곳**: (1) `IDMLStoryParser.resolveGrepGenericStyles`/`resolveGrepMathStyles`
+가 raw `paraStyle.grepStyles()` 만 봄(BasedOn 무시). (2) `StylePropertyResolver.mergeStyles`
+가 BasedOn 병합 시 grepStyles 를 안 합침.
+
+### 수정 A — GREP BasedOn 상속 (`IDMLStoryParser`)
+
+`collectInheritedGrepStyles(doc, paraStyle)` 추가: 문단스타일의 GREP 을 BasedOn
+부모 체인까지 상속 수집(자식이 같은 표현식 재정의 시 자식 우선, 순환 방지).
+`resolveGrepGenericStyles`·`resolveGrepMathStyles` 양쪽이 이걸 쓴다. 결과: 과학
+"무엇을 알아볼까" 가 IDML 만으로 #00633E 초록 복원. 3교과서에서 상속으로 색 증가
+(과학 #00633E 805→833, #2D4069 142→308 등 — 검정이던 게 원래 색 찾음).
+
+### 수정 B — DOM 글자 속성 읽기 차단 (`text_collectors.jsx`)
+
+`_masterDynamicRunFromRange` 가 아니라 `text_collectors.jsx` 의 런 빌더(runData 블록,
+`horizontalScale` 세팅 지점으로 소스 확정)가 대화 story 런의 소스다. 여기서 DOM
+글자 속성(color/size/font/style/charStyle/baselineShift/position + GREP 색 보정)을
+읽지 않는다. tracking/장평/verticalScale/underline/strikeThru 는 유지. 색은 이제
+GREP 상속 포함 IDML 이 확정하므로 DOM 불필요. **추출 성능도 개선**(개별 문자 속성
+접근이 InDesign 에서 가장 느린 호출).
+
+### 이번 커밋: GREP BasedOn 상속만 (수정 A)
+
+수정 A(GREP BasedOn 상속)만 커밋한다. 과학 "무엇을 알아볼까" 초록이 DOM 없이도
+IDML 로 복원됨을 확인. 3교과서 구조 골든 FAIL 은 추출 버전 노이즈(이미지/표 개수)
+로 수식과 무관.
+
+### 후속 과제: DOM 글자속성 차단 (수정 B) — 채우기 미비 선결 필요
+
+수정 B(text_collectors.jsx 에서 DOM 글자속성 안 읽기)는 p56 녹색을 제거하지만,
+색뿐 아니라 폰트/스타일/크기까지 IDML 로만 가게 해서 **IDML 채우기 미비가 동시에
+드러난다**(실측, 영어 u3 전체):
+- 볼드 유실: IDML `19 Bk`(Black)·`07 Bd`(Bold) 약자를 `isBoldStyle` 이 볼드로 판정
+  못함(웨이트 19<65). → CharPrFactory.isBoldStyle 에 Bk/Bd 인식 추가 필요.
+- 로컬색 스와치 오매핑: `Listen` 의 로컬 FillColor `Color/writing tips`(시안 #3899C9)
+  가 #3C4C74 로 잘못 나옴. 스와치 이름 해석 문제.
+- 경로 불일치: text_collectors(막힘) vs composedLines(안 막힘)로 같은 텍스트가
+  색 있음/없음으로 갈림.
+
+DOM 완전 차단 전에 이 채우기 미비들을 다 잡아야 회귀 없음. p56 은 그때까지 미해결.
