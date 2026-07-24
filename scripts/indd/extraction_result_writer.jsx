@@ -346,6 +346,7 @@ function _sourceItemPreviewRow(src) {
         pageRelativePathBounds: src.pageRelativePathBounds || null,
         zOrder: src.zOrder !== undefined ? src.zOrder : null,
         layerName: src.layerName || null,
+        layerIndex: src.layerIndex !== undefined ? src.layerIndex : null,
         visible: src.visible,
         hiddenLayer: src.hiddenLayer === true,
         nonprinting: src.nonprinting === true,

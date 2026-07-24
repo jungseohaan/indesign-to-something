@@ -8285,6 +8285,41 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
                 || lower === "bg"
                 || lower.indexOf("backdrop") >= 0;
     }
+    // InDesign layer indexes run top-to-bottom, so the background layer has the
+    // largest index and the layer painted directly on top of it has the next
+    // smaller one. Computed from the sources actually present on the page.
+    // Bleed is the tell. A shape drawn past the trim edge only looks right when
+    // something renders it at page geometry and lets the overhang fall away.
+    // HWPX cannot place a box outside the page, so as its own PNG such a shape is
+    // always either cropped smaller than authored or squeezed to fit — which is
+    // exactly how these shapes came out inset and distorted. Folding it into the
+    // page plane hands it to the whole-page export, where the overhang is trimmed
+    // by the page itself and the artwork lands at true size.
+    //
+    // Textless is the guard that matters: a bleeding frame that carries copy must
+    // stay editable, so it keeps its own plan and its own PNG.
+    var BLEED_ABSORB_MIN_OVERHANG = 0.5;
+    function sourceBleedsPastPage(src, targetPageIndex) {
+        var pageBounds = pageBoundsForCanonicalPlane(targetPageIndex);
+        var srcBounds = sourceBounds(src);
+        if (!pageBounds || !srcBounds) return false;
+        if (boundsIntersectionAreaForPageBackgroundRole(srcBounds, pageBounds) <= 0) {
+            return false;
+        }
+        var overhang = Math.max(0, Number(pageBounds[0]) - Number(srcBounds[0]))
+                + Math.max(0, Number(pageBounds[1]) - Number(srcBounds[1]))
+                + Math.max(0, Number(srcBounds[2]) - Number(pageBounds[2]))
+                + Math.max(0, Number(srcBounds[3]) - Number(pageBounds[3]));
+        return overhang > BLEED_ABSORB_MIN_OVERHANG;
+    }
+    function sourceIsBleedingBackdropShape(src, targetPageIndex) {
+        if (!src) return false;
+        if (sourceHasBackgroundRoleLayerName(src)) return false;
+        if (sourceIsStoryFlowOrAnchored(src)) return false;
+        if (sourceTreeHasEditableText(src.id, {})) return false;
+        if (!sourceTreeHasVisibleGraphicMaterial(src.id, {})) return false;
+        return sourceBleedsPastPage(src, targetPageIndex);
+    }
     function sourceHasPageBackgroundSourceEvidence(src, plan) {
         if (sourceHasBackgroundRoleLayerName(src)) return true;
         if (!plan) return false;
@@ -8543,6 +8578,9 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         if (sourceHasPageBackgroundSourceEvidence(src, plan)) {
             return "BACKGROUND_LAYER_TEXTLESS_GRAPHIC";
         }
+        if (sourceIsBleedingBackdropShape(src, targetPageIndex)) {
+            return "BLEEDING_TEXTLESS_PAGE_SHAPE";
+        }
         return null;
     }
     function pageBackgroundCandidatePagesForSource(src) {
@@ -8554,7 +8592,13 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
                 !isMasterTextless
                 && sourceIsTextlessGraphic(src)
                 && sourceHasPageBackgroundSourceEvidence(src, null);
-        if (!isMasterTextless && !isBackgroundEvidenceTextless) return pages;
+        var isBackdropLayerShape =
+                !isMasterTextless
+                && !isBackgroundEvidenceTextless
+                && sourceIsTextlessGraphic(src);
+        if (!isMasterTextless && !isBackgroundEvidenceTextless && !isBackdropLayerShape) {
+            return pages;
+        }
         var visiblePages = sourceVisiblePageIndexes(src);
         for (var mi = 0; mi < visiblePages.length; mi++) {
             var pageIndex = Number(visiblePages[mi]);
