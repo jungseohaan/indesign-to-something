@@ -289,16 +289,22 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
     var zOrder = _plannerBundleZOrder(candidate, primarySourceObjectId, clusterIndex);
     var tableCellInlineAnchorSource = _plannerBundleSourceSetHasTableCellInlineAnchor(
             sourceIds, clusterIndex);
+    var candidatePagePositionedAnchoredSource = candidate.pagePositionedAnchoredSource === true
+            || declaredCandidate.pagePositionedAnchoredSource === true;
     var pagePositionedAnchoredSource = tableCellInlineAnchorSource
             ? false
-            : _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex);
+            : (candidatePagePositionedAnchoredSource
+                    || _plannerBundleSourceSetHasPagePositionedAnchor(sourceIds, clusterIndex));
     var sourceInlineFlow = tableCellInlineAnchorSource
             ? true
             : (pagePositionedAnchoredSource
                     ? false
-                    : _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex));
+                    : (candidate.sourceInlineFlow === true
+                        || declaredCandidate.sourceInlineFlow === true
+                        || _plannerBundleSourceSetIsInlineFlow(sourceIds, clusterIndex)));
     var inlineAnchorSourceObjectId = candidate.inlineAnchorSourceObjectId
             || _plannerBundleStoryTextInlineAnchorSourceObjectId(sourceIds, clusterIndex);
+    if (pagePositionedAnchoredSource) inlineAnchorSourceObjectId = null;
     var inlineCompositeLayoutDescendant = _plannerBundleIsInsideInlineCompositeLayout(
             sourceIds, clusterIndex);
     var connectorDecorationVisual = _plannerBundleIsInlineCompositeTextlessVectorDecoration(
@@ -393,9 +399,13 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         sourceInlineFlow: sourceInlineFlow,
         tableCellInlineAnchorSource: tableCellInlineAnchorSource,
         pagePositionedAnchoredSource: pagePositionedAnchoredSource,
+        storyAnchorPlacement: declaredCandidate.storyAnchorPlacement || null,
+        anchoredPosition: declaredCandidate.anchoredPosition || null,
+        storyTextInlineSlot: declaredCandidate.storyTextInlineSlot === true,
+        tableCellStoryTextInlineSlot: declaredCandidate.tableCellStoryTextInlineSlot === true,
         inlineCompositeLayoutDescendant: inlineCompositeLayoutDescendant,
         inlineAnchorSourceObjectId: inlineAnchorSourceObjectId || null,
-        inlineSourceTreeClosed: candidate.inlineSourceTreeClosed === true,
+        inlineSourceTreeClosed: !pagePositionedAnchoredSource && candidate.inlineSourceTreeClosed === true,
         inlineFlowSourceObjectIds: inlineFlowSourceObjectIds,
         inlineTextStyleMarkerSource: _plannerBundleHasInlineTextStyleMarkerSource(
                 candidate, sourceIds, clusterIndex),

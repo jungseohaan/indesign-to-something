@@ -2269,6 +2269,10 @@ function _slimObjectPlanForWrite(plan) {
         "sourceInlineFlow",
         "tableCellInlineAnchorSource",
         "pagePositionedAnchoredSource",
+        "storyAnchorPlacement",
+        "anchoredPosition",
+        "storyTextInlineSlot",
+        "tableCellStoryTextInlineSlot",
         "inlineCompositeLayoutDescendant",
         "inlineAnchorSourceObjectId",
         "inlineSourceTreeClosed",
@@ -2835,6 +2839,7 @@ function _tableOnlyTextFrameObjectPlan(src, id, sourceById, pageIndex, zOrder, t
     var ownsTableStyle = styleSourceObjectIds.length > 0;
     var textAction = textActionOverride || "OWNED_BY_HWPX_TEXT";
     var sourceInlineFlow = _objectPlanTextFrameSourceInlineFlow(src);
+    var planBounds = _objectPlanTextFramePlanBounds(src, sourceInlineFlow);
     return {
         objectPlanId: "objectPlan.table_only_text_frame." + String(id),
         bundleId: "textFrame.tableOnly." + String(id),
@@ -2875,7 +2880,7 @@ function _tableOnlyTextFrameObjectPlan(src, id, sourceById, pageIndex, zOrder, t
         visualLayer: "CONTENT_VISUAL",
         zOrder: zOrder,
         reason: reasonOverride || "table_only_text_frame",
-        bounds: src.bounds || null,
+        bounds: planBounds,
         ownershipSlot: ownsTableStyle ? "TABLE_STYLE_SLOT" : "TEXT_SLOT",
         policyLayer: "TEXT",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
@@ -3229,6 +3234,14 @@ function _objectPlanSourceBounds(item) {
     return item.bounds || item.pageRelativeBounds || item.geometricBounds || null;
 }
 
+function _objectPlanTextFramePlanBounds(src, sourceInlineFlow) {
+    if (!src) return null;
+    if (sourceInlineFlow) {
+        return src.bounds || src.pageRelativeBounds || src.geometricBounds || null;
+    }
+    return src.pageRelativeBounds || src.bounds || src.geometricBounds || null;
+}
+
 function _objectPlanInlineTextFrameShellCropBounds(src) {
     if (!src) return null;
     var sourceBounds = src.bounds || src.pageRelativeBounds || src.geometricBounds || null;
@@ -3348,6 +3361,7 @@ function _objectPlanSetKeysAsNumbers(set) {
 function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
     var idIsNumeric = typeof id === "number" && !isNaN(id);
     var sourceInlineFlow = _objectPlanTextFrameSourceInlineFlow(src);
+    var planBounds = _objectPlanTextFramePlanBounds(src, sourceInlineFlow);
     var masterSourceId = null;
     try {
         if (!idIsNumeric && src && src.masterSourceId !== undefined && src.masterSourceId !== null) {
@@ -3402,7 +3416,7 @@ function _textFrameObjectPlan(src, id, pageIndex, zOrder, passId, reason) {
         visualLayer: "CONTENT_VISUAL",
         zOrder: zOrder,
         reason: reason,
-        bounds: src.bounds || null,
+        bounds: planBounds,
         ownershipSlot: "TEXT_SLOT",
         policyLayer: "TEXT",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
@@ -6666,6 +6680,51 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
         }
     }
 
+    function sourceDescendsFromRootId(src, rootId) {
+        if (!src || rootId === null || rootId === undefined) return false;
+        var rootKey = String(rootId);
+        var current = src;
+        var guard = 0;
+        while (current && guard++ < 64) {
+            if (String(current.id) === rootKey) return true;
+            var parentId = current.parentId;
+            if (parentId === null || parentId === undefined || String(parentId) === "") return false;
+            current = sourceById[String(parentId)] || null;
+        }
+        return false;
+    }
+
+    function collectSamePageSubtreeByParentWalk(rootId, pageIndex, out, seen) {
+        for (var i = 0; i < sourceItems.length; i++) {
+            var src = sourceItems[i];
+            if (!src || src.id === null || src.id === undefined) continue;
+            if (src.pageIndex !== null && src.pageIndex !== undefined
+                    && pageIndex !== null && pageIndex !== undefined
+                    && Number(src.pageIndex) !== Number(pageIndex)) {
+                continue;
+            }
+            if (!sourceDescendsFromRootId(src, rootId)) continue;
+            _pushUniqueId(out, seen, src.id);
+        }
+    }
+
+    function collectOwnedTextFrameIdsByParentWalk(rootId, pageIndex) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < sourceItems.length; i++) {
+            var src = sourceItems[i];
+            if (!src || sourceKind(src) !== "TextFrame" || src.hasText !== true) continue;
+            if (src.pageIndex !== null && src.pageIndex !== undefined
+                    && pageIndex !== null && pageIndex !== undefined
+                    && Number(src.pageIndex) !== Number(pageIndex)) {
+                continue;
+            }
+            if (!sourceDescendsFromRootId(src, rootId)) continue;
+            _pushUniqueId(out, seen, src.id);
+        }
+        return _internSourceSetIds(_sortedNumericIds(out));
+    }
+
     function collectVisibleVectorLeaves(src, pageIndex, out, seen, visiting) {
         if (!src || src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return;
         var key = String(src.id);
@@ -6690,12 +6749,37 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
         }
     }
 
-    function unionBoundsForSourceIds(sourceIds) {
+    function sourceIsPagePositionedAnchor(src) {
+        if (!src) return false;
+        return String(src.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED"
+                || String(src.anchoredPosition || "").toUpperCase() === "ANCHORED";
+    }
+
+    function sourceIsFloatingAnchoredGaugePattern(src, vectorLeafIds) {
+        if (!src || sourceKind(src) !== "Group") return false;
+        if (src.storyTextInlineSlot !== true) return false;
+        if (!sourceIsPagePositionedAnchor(src)) return false;
+        var minLines = typeof _gaugeLikeGraphicLineMin === "function"
+                ? _gaugeLikeGraphicLineMin()
+                : 8;
+        var graphicLineCount = 0;
+        for (var i = 0; vectorLeafIds && i < vectorLeafIds.length; i++) {
+            var leaf = sourceById[String(vectorLeafIds[i])];
+            if (leaf && sourceKind(leaf) === "GraphicLine") graphicLineCount++;
+        }
+        return graphicLineCount >= minLines;
+    }
+
+    function unionBoundsForSourceIds(sourceIds, preferPageRelative) {
         var out = null;
         for (var i = 0; sourceIds && i < sourceIds.length; i++) {
             var src = sourceById[String(sourceIds[i])];
-            if (!src || isTextLikeSource(src) || !src.bounds || src.bounds.length < 4) continue;
-            var b = [Number(src.bounds[0]), Number(src.bounds[1]), Number(src.bounds[2]), Number(src.bounds[3])];
+            if (!src || isTextLikeSource(src)) continue;
+            var raw = preferPageRelative && src.pageRelativeBounds && src.pageRelativeBounds.length >= 4
+                    ? src.pageRelativeBounds
+                    : src.bounds;
+            if (!raw || raw.length < 4) continue;
+            var b = [Number(raw[0]), Number(raw[1]), Number(raw[2]), Number(raw[3])];
             if (isNaN(b[0]) || isNaN(b[1]) || isNaN(b[2]) || isNaN(b[3])) continue;
             if (!out) {
                 out = b;
@@ -6755,7 +6839,8 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
                 && Number(parent.pageIndex) !== pageIndex) {
             return null;
         }
-        if (sourceHasEditableTextInSubtree(parent, pageIndex, {})) return null;
+        var parentHasEditableText = sourceHasEditableTextInSubtree(parent, pageIndex, {});
+        if (parentHasEditableText && !sourceIsPagePositionedAnchor(parent)) return null;
         if (!isInlineSourceOrDescendant(rep) && !isInlineSourceOrDescendant(parent)) return null;
         var best = parent;
         var guard = 0;
@@ -6768,7 +6853,8 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
                 break;
             }
             if (sourceHasPlacedVisualInSubtree(grand, {})) break;
-            if (sourceHasEditableTextInSubtree(grand, pageIndex, {})) break;
+            var grandHasEditableText = sourceHasEditableTextInSubtree(grand, pageIndex, {});
+            if (grandHasEditableText && !sourceIsPagePositionedAnchor(grand)) break;
             if (!isInlineSourceOrDescendant(grand) && !isInlineSourceOrDescendant(best)) break;
             best = grand;
         }
@@ -6824,12 +6910,27 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
             collectVisibleVectorLeaves(parentSrc, group.pageIndex, vectorLeafIdsRaw, vectorLeafSeen, {});
         }
         addIds(subtreeIdsRaw, subtreeSeen, vectorLeafIdsRaw);
-        var subtreeIds = _internSourceSetIds(_sortedNumericIds(subtreeIdsRaw));
         var vectorLeafIds = _internSourceSetIds(_sortedNumericIds(vectorLeafIdsRaw));
+        var pagePositionedGaugePattern = sourceIsFloatingAnchoredGaugePattern(parentSrc, vectorLeafIds);
+        if (sourceHasEditableTextInSubtree(parentSrc, group.pageIndex, {})
+                && !pagePositionedGaugePattern) {
+            continue;
+        }
+        if (pagePositionedGaugePattern) {
+            collectSamePageSubtree(parentSrc, group.pageIndex, subtreeIdsRaw, subtreeSeen);
+            collectSamePageSubtreeByParentWalk(parentSrc.id, group.pageIndex, subtreeIdsRaw, subtreeSeen);
+        }
+        var subtreeIds = _internSourceSetIds(_sortedNumericIds(subtreeIdsRaw));
+        var ownedGaugeTextFrameIds = pagePositionedGaugePattern
+                ? collectOwnedTextFrameIdsByParentWalk(parentSrc.id, group.pageIndex)
+                : [];
         if (group.entries.length < 8 && vectorLeafIds.length < 12) continue;
         if (!subtreeIds || subtreeIds.length === 0 || !vectorLeafIds || vectorLeafIds.length === 0) continue;
         var sourceSetId = _sourceSetId(subtreeIds);
-        var visualSetId = _sourceSetId(vectorLeafIds);
+        var completeGaugeVisualIds = pagePositionedGaugePattern
+                ? _internSourceSetIds([parentSrc.id])
+                : vectorLeafIds;
+        var visualSetId = _sourceSetId(completeGaugeVisualIds);
         var parentId = Number(parentSrc.id);
         var objectPlanId = "object-plan.inline-micro-vector-pattern.page."
                 + String(group.pageIndex) + ".src." + String(parentId)
@@ -6842,7 +6943,12 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
             }
         }
         if (!alreadyExists) {
-            var bounds = unionBoundsForSourceIds(subtreeIds) || parentSrc.bounds || null;
+            var bounds = pagePositionedGaugePattern
+                    ? (parentSrc.pageRelativeBounds || parentSrc.bounds || null)
+                    : (unionBoundsForSourceIds(subtreeIds, false) || parentSrc.bounds || null);
+            var renderBounds = pagePositionedGaugePattern
+                    ? (parentSrc.bounds || parentSrc.pageRelativeBounds || null)
+                    : (unionBoundsForSourceIds(subtreeIds, false) || parentSrc.bounds || null);
             objectPlans.push({
                 objectPlanId: objectPlanId,
                 bundleId: "bundle.inline-micro-vector-pattern.page."
@@ -6856,14 +6962,23 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
                 kind: parentSrc.kind || "InlineMicroVectorPattern",
                 mode: "TEXTLESS_CANDIDATE",
                 candidatePurpose: "INLINE_CANDIDATE",
-                compositeRole: "inline_micro_vector_pattern_shell",
-                slotRole: "inline_micro_vector_pattern_shell_slot",
+                compositeRole: pagePositionedGaugePattern
+                        ? "page_positioned_gauge_complete_png"
+                        : "inline_micro_vector_pattern_shell",
+                slotRole: pagePositionedGaugePattern
+                        ? "content_visual_slot"
+                        : "inline_micro_vector_pattern_shell_slot",
                 layoutOnlyInlineSlot: false,
-                sourceInlineFlow: true,
+                sourceInlineFlow: !pagePositionedGaugePattern,
+                pagePositionedAnchoredSource: pagePositionedGaugePattern,
+                storyAnchorPlacement: parentSrc.storyAnchorPlacement || null,
+                anchoredPosition: parentSrc.anchoredPosition || null,
+                storyTextInlineSlot: parentSrc.storyTextInlineSlot === true,
+                tableCellStoryTextInlineSlot: parentSrc.tableCellStoryTextInlineSlot === true,
                 inlineCompositeLayoutDescendant: true,
-                inlineAnchorSourceObjectId: parentId,
-                inlineSourceTreeClosed: true,
-                inlineFlowSourceObjectIds: subtreeIds,
+                inlineAnchorSourceObjectId: pagePositionedGaugePattern ? null : parentId,
+                inlineSourceTreeClosed: !pagePositionedGaugePattern,
+                inlineFlowSourceObjectIds: pagePositionedGaugePattern ? [] : subtreeIds,
                 connectorDecorationVisual: false,
                 primarySourceObjectId: parentId,
                 sourceSetId: sourceSetId,
@@ -6878,14 +6993,14 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
                 clusterKindCounts: {},
                 omittedClusterSourceObjectIds: [],
                 omittedClusterKindCounts: {},
-                clusterHasEditableText: false,
-                clusterHasTextFrame: false,
+                clusterHasEditableText: ownedGaugeTextFrameIds.length > 0,
+                clusterHasTextFrame: ownedGaugeTextFrameIds.length > 0,
                 clusterHasPlacedContent: false,
                 clusterHasVisualSource: true,
-                visualSourceObjectIds: vectorLeafIds,
+                visualSourceObjectIds: completeGaugeVisualIds,
                 styleSourceObjectIds: [],
-                ownedTextFrameIds: [],
-                exportSourceObjectIds: vectorLeafIds,
+                ownedTextFrameIds: ownedGaugeTextFrameIds,
+                exportSourceObjectIds: completeGaugeVisualIds,
                 exportTargetObjectId: parentId,
                 atomicExportTargetObjectId: parentId,
                 atomicExportTargetObjectIds: _internSourceSetIds([parentId]),
@@ -6893,19 +7008,21 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
                 atomicContentVisualSlot: false,
                 hiddenVisualSourceObjectIds: [],
                 excludedInlineSourceObjectIds: [],
-                materialization: "EXTRACTED_PNG_VECTOR",
-                textAction: "DROP_TEXT",
-                visualAction: "PLACE_TEXT_SHELL",
-                placement: "INLINE",
-                coordinateSpace: "STORY_FLOW",
-                visualLayer: "LABEL_BACKDROP",
+                materialization: pagePositionedGaugePattern ? "COMPLETE_PNG" : "EXTRACTED_PNG_VECTOR",
+                textAction: pagePositionedGaugePattern ? "OWNED_BY_PNG" : "DROP_TEXT",
+                visualAction: pagePositionedGaugePattern ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL",
+                placement: pagePositionedGaugePattern ? "FLOATING" : "INLINE",
+                coordinateSpace: pagePositionedGaugePattern ? "PAGE" : "STORY_FLOW",
+                visualLayer: pagePositionedGaugePattern ? "CONTENT_VISUAL" : "LABEL_BACKDROP",
                 zOrder: parentSrc.zOrder !== undefined && parentSrc.zOrder !== null ? parentSrc.zOrder : 0,
-                reason: "stage1_dense_inline_textless_vector_pattern",
+                reason: pagePositionedGaugePattern
+                        ? "stage1_page_positioned_gauge_complete_png"
+                        : "stage1_dense_inline_textless_vector_pattern",
                 bounds: bounds,
-                renderSourceBounds: bounds,
+                renderSourceBounds: renderBounds,
                 cropSourceBounds: null,
-                ownershipSlot: "SHELL_SLOT",
-                policyLayer: "DECORATION",
+                ownershipSlot: pagePositionedGaugePattern ? "CONTENT_VISUAL_SLOT" : "SHELL_SLOT",
+                policyLayer: pagePositionedGaugePattern ? "CONTENT" : "DECORATION",
                 clusterRelation: "INLINE_DENSE_VECTOR_PATTERN",
                 migrationStatus: "READY_EXACT_CLUSTER",
                 migrationBlocker: "NONE",
@@ -6931,6 +7048,44 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
                     + ":superseded_by_inline_micro_vector_pattern_shell";
             summary.droppedChildPlanCount++;
             summary.droppedChildObjectPlanIds.push(child.objectPlanId || null);
+        }
+        if (pagePositionedGaugePattern && ownedGaugeTextFrameIds.length > 0) {
+            var ownedTextSeen = {};
+            for (var oti = 0; oti < ownedGaugeTextFrameIds.length; oti++) {
+                ownedTextSeen[String(ownedGaugeTextFrameIds[oti])] = true;
+            }
+            for (var opi = 0; opi < objectPlans.length; opi++) {
+                var textPlan = objectPlans[opi];
+                if (!textPlan || textPlan.objectPlanId === objectPlanId) continue;
+                var textSources = textPlan.sourceObjectIds || [];
+                var ownsGaugeText = false;
+                for (var tsi = 0; tsi < textSources.length; tsi++) {
+                    if (ownedTextSeen[String(textSources[tsi])]) {
+                        ownsGaugeText = true;
+                        break;
+                    }
+                }
+                if (!ownsGaugeText) {
+                    var textOwners = textPlan.ownedTextFrameIds || [];
+                    for (var toi = 0; toi < textOwners.length; toi++) {
+                        if (ownedTextSeen[String(textOwners[toi])]) {
+                            ownsGaugeText = true;
+                            break;
+                        }
+                    }
+                }
+                if (!ownsGaugeText) continue;
+                textPlan.textAction = "DROP_TEXT";
+                textPlan.visualAction = "DROP_VISUAL";
+                textPlan.materialization = "HWPX_TEXT";
+                textPlan.ownedTextFrameIds = [];
+                textPlan.ownedTextFrameSetId = _sourceSetId([]);
+                textPlan.executable = false;
+                textPlan.reason = String(textPlan.reason || "text_plan")
+                        + ":owned_by_page_positioned_complete_png";
+                summary.droppedChildPlanCount++;
+                summary.droppedChildObjectPlanIds.push(textPlan.objectPlanId || null);
+            }
         }
     }
     return { summary: summary };
@@ -7236,6 +7391,10 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         sourceInlineFlow: bundle.sourceInlineFlow === true,
         tableCellInlineAnchorSource: bundle.tableCellInlineAnchorSource === true,
         pagePositionedAnchoredSource: bundle.pagePositionedAnchoredSource === true,
+        storyAnchorPlacement: bundle.storyAnchorPlacement || null,
+        anchoredPosition: bundle.anchoredPosition || null,
+        storyTextInlineSlot: bundle.storyTextInlineSlot === true,
+        tableCellStoryTextInlineSlot: bundle.tableCellStoryTextInlineSlot === true,
         inlineCompositeLayoutDescendant: bundle.inlineCompositeLayoutDescendant === true,
         inlineAnchorSourceObjectId: placement === "INLINE"
                 ? (bundle.inlineAnchorSourceObjectId || null)

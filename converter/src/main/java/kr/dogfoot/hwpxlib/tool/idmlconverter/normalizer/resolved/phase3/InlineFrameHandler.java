@@ -12,6 +12,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
@@ -3504,7 +3505,7 @@ public class InlineFrameHandler {
                 paragraphs = convertShellTextParagraphs(ctx, story);
             }
             if (paragraphs != null && !paragraphs.isEmpty()) {
-                applyIdmlRunTintFallbackToParagraphs(ctx, childTf, paragraphs);
+                applyIdmlRunStyleFallbackToParagraphs(ctx, childTf, paragraphs);
                 if (!preserveSourceShellBox) {
                     fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, obj, childTf, ctx);
                 }
@@ -4003,15 +4004,15 @@ public class InlineFrameHandler {
         } else {
             runs = ResolvedTextFlowAstConverter.convertSyntheticText(text, null, paragraph);
         }
-        applyIdmlRunTintFallback(ctx, textFrame, runs);
+        applyIdmlRunStyleFallback(ctx, textFrame, runs);
         for (ASTTextRun run : runs) {
             paragraph.addItem(run);
         }
     }
 
-    private static void applyIdmlRunTintFallbackToParagraphs(ResolvedBuildContext ctx,
-                                                             ResolvedTextFrame textFrame,
-                                                             List<ASTParagraph> paragraphs) {
+    private static void applyIdmlRunStyleFallbackToParagraphs(ResolvedBuildContext ctx,
+                                                              ResolvedTextFrame textFrame,
+                                                              List<ASTParagraph> paragraphs) {
         if (paragraphs == null || paragraphs.isEmpty()) return;
         List<ASTTextRun> runs = new ArrayList<>();
         for (ASTParagraph paragraph : paragraphs) {
@@ -4022,7 +4023,7 @@ public class InlineFrameHandler {
                 }
             }
         }
-        applyIdmlRunTintFallback(ctx, textFrame, runs);
+        applyIdmlRunStyleFallback(ctx, textFrame, runs);
     }
 
     private static ResolvedRun firstResolvedRun(ResolvedBuildContext ctx, ResolvedTextFrame textFrame) {
@@ -4114,40 +4115,93 @@ public class InlineFrameHandler {
         return sb.toString();
     }
 
-    private static void applyIdmlRunTintFallback(ResolvedBuildContext ctx,
-                                                 ResolvedTextFrame textFrame,
-                                                 List<ASTTextRun> runs) {
+    private static void applyIdmlRunStyleFallback(ResolvedBuildContext ctx,
+                                                  ResolvedTextFrame textFrame,
+                                                  List<ASTTextRun> runs) {
         if (ctx == null || ctx.loadIDMLStory == null || textFrame == null
                 || textFrame.storyId() == null || runs == null || runs.isEmpty()) {
             return;
         }
-        IDMLCharacterRun idmlRun = firstVisibleIdmlRun(ctx, textFrame.storyId());
-        if (idmlRun == null || idmlRun.fillColor() == null || idmlRun.fillTint() == null) {
-            return;
-        }
-        String tinted = RunBuilder.resolveColorToHex(ctx, idmlRun.fillColor(), idmlRun.fillTint());
-        if (tinted == null) return;
+        IDMLParagraph paragraph = firstVisibleIdmlParagraph(ctx, textFrame.storyId());
+        if (paragraph == null) return;
+        IDMLCharacterRun idmlRun = firstVisibleIdmlRun(paragraph);
+        if (idmlRun == null) return;
+        ASTTextRun template = new ASTTextRun();
+        TextStyleApplicator.applyIdmlStyle(
+                template,
+                idmlRun,
+                paragraph.appliedParagraphStyle(),
+                ctx.styleResolver,
+                ctx.resolvedData);
         for (ASTTextRun run : runs) {
-            if (run != null) run.textColor(tinted);
+            applyMissingTextStyle(run, template);
         }
     }
 
     private static IDMLCharacterRun firstVisibleIdmlRun(ResolvedBuildContext ctx, String storyId) {
+        IDMLParagraph paragraph = firstVisibleIdmlParagraph(ctx, storyId);
+        return firstVisibleIdmlRun(paragraph);
+    }
+
+    private static IDMLParagraph firstVisibleIdmlParagraph(ResolvedBuildContext ctx, String storyId) {
         IDMLStory idmlStory = loadIdmlStoryByResolvedId(ctx, storyId);
         if (idmlStory == null || idmlStory.paragraphs() == null) return null;
         for (IDMLParagraph paragraph : idmlStory.paragraphs()) {
             if (paragraph == null || paragraph.characterRuns() == null) continue;
-            for (IDMLCharacterRun run : paragraph.characterRuns()) {
-                if (run == null || run.content() == null) continue;
-                String visible = run.content()
-                        .replace("\uFFFC", "")
-                        .replace("\r", "")
-                        .replace("\n", "")
-                        .trim();
-                if (!visible.isEmpty()) return run;
-            }
+            if (firstVisibleIdmlRun(paragraph) != null) return paragraph;
         }
         return null;
+    }
+
+    private static IDMLCharacterRun firstVisibleIdmlRun(IDMLParagraph paragraph) {
+        if (paragraph == null || paragraph.characterRuns() == null) return null;
+        for (IDMLCharacterRun run : paragraph.characterRuns()) {
+            if (run == null || run.content() == null) continue;
+            String visible = run.content()
+                    .replace("\uFFFC", "")
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .trim();
+            if (!visible.isEmpty()) return run;
+        }
+        return null;
+    }
+
+    private static void applyMissingTextStyle(ASTTextRun target, ASTTextRun template) {
+        if (target == null || template == null) return;
+        if (isBlank(target.characterStyleRef()) && !isBlank(template.characterStyleRef())) {
+            target.characterStyleRef(template.characterStyleRef());
+        }
+        if (isBlank(target.fontFamily()) && !isBlank(template.fontFamily())) {
+            target.fontFamily(template.fontFamily());
+        }
+        if (isBlank(target.fontStyle()) && !isBlank(template.fontStyle())) {
+            target.fontStyle(template.fontStyle());
+        }
+        if ((target.fontSizeHwpunits() == null || target.fontSizeHwpunits() <= 0)
+                && template.fontSizeHwpunits() != null
+                && template.fontSizeHwpunits() > 0) {
+            target.fontSizeHwpunits(template.fontSizeHwpunits());
+        }
+        if (isBlank(target.textColor()) && !isBlank(template.textColor())) {
+            target.textColor(template.textColor());
+        }
+        if (target.letterSpacing() == null && template.letterSpacing() != null) {
+            target.letterSpacing(template.letterSpacing());
+        }
+        if (target.horizontalScale() == null && template.horizontalScale() != null) {
+            target.horizontalScale(template.horizontalScale());
+        }
+        if (!target.underline() && template.underline()) {
+            target.underline(true);
+        }
+        if (!target.strikeThrough() && template.strikeThrough()) {
+            target.strikeThrough(true);
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private static IDMLStory loadIdmlStoryByResolvedId(ResolvedBuildContext ctx, String storyId) {
@@ -4712,6 +4766,7 @@ public class InlineFrameHandler {
                 if (rr.strikeThru() != null && rr.strikeThru()) run.strikeThrough(true);
             }
         }
+        applyIdmlRunStyleFallback(ctx, tf, java.util.Collections.singletonList(run));
         if (inlineVocabularyMarker) {
             Short markerShift = inlineFrameBaselineShift(tf, run, story);
             if (markerShift != null) run.baselineShift(markerShift);
@@ -6168,6 +6223,9 @@ public class InlineFrameHandler {
             int anchoredObjectId,
             ASTParagraph paragraph) {
         if (paragraph == null) return false;
+        if (paragraph.alignment() != null && !paragraph.alignment().trim().isEmpty()) {
+            return false;
+        }
         ClosedInlineCarrier carrier = findClosedInlineCarrier(ctx, anchoredObjectId);
         if (carrier == null) return false;
         int[] hiddenIds = plannedHiddenVisualSourceObjectIds(carrier.plan);
@@ -7716,10 +7774,11 @@ public class InlineFrameHandler {
 
     private static void applyFirstRunStyle(ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTextRun run) {
         ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
-        if (story == null || story.paragraphs().isEmpty()) return;
-        ResolvedRun rr = firstVisibleResolvedRun(story);
-        if (rr == null) return;
-        applyResolvedRunStyle(ctx, rr, run);
+        if (story != null && !story.paragraphs().isEmpty()) {
+            ResolvedRun rr = firstVisibleResolvedRun(story);
+            if (rr != null) applyResolvedRunStyle(ctx, rr, run);
+        }
+        applyIdmlRunStyleFallback(ctx, tf, java.util.Collections.singletonList(run));
     }
 
     // 배지 그래픽 PNG를 흰 배경에 합성해 로드. HWP imgBrush는 알파를 검정으로 칠하므로(투명→검정),
@@ -7840,6 +7899,7 @@ public class InlineFrameHandler {
             if (rr != null) {
                 applyResolvedRunStyle(ctx, rr, textRunInner);
             }
+            applyIdmlRunStyleFallback(ctx, tf, java.util.Collections.singletonList(textRunInner));
             paraInner.addItem(textRunInner);
             box.addParagraph(paraInner);
             box.verticalJustification("CenterAlign");

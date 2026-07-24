@@ -153,6 +153,21 @@ function _pushExtractionCandidate(candidates, seen, passId, item, attrs) {
         textOwner: attrs.textOwner || null,
         containsEditableText: attrs.containsEditableText === true,
         completePngTextAllowed: attrs.completePngTextAllowed === true,
+        materialization: attrs.materialization || null,
+        textAction: attrs.textAction || null,
+        visualAction: attrs.visualAction || null,
+        visualLayer: attrs.visualLayer || null,
+        placement: attrs.placement || null,
+        coordinateSpace: attrs.coordinateSpace || null,
+        ownershipSlot: attrs.ownershipSlot || null,
+        sourceInlineFlow: attrs.sourceInlineFlow === true,
+        storyTextInlineSlot: attrs.storyTextInlineSlot === true,
+        tableCellStoryTextInlineSlot: attrs.tableCellStoryTextInlineSlot === true,
+        pagePositionedAnchoredSource: attrs.pagePositionedAnchoredSource === true,
+        inlineAnchorSourceObjectId: attrs.inlineAnchorSourceObjectId !== undefined
+                ? attrs.inlineAnchorSourceObjectId
+                : null,
+        inlineSourceTreeClosed: attrs.inlineSourceTreeClosed === true,
         textWrapMode: attrs.textWrapMode || null,
         textWrapSide: attrs.textWrapSide || null,
         textWrapTop: attrs.textWrapTop !== undefined ? attrs.textWrapTop : null,
@@ -476,6 +491,8 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
                 // SPEC-048: 게이지는 "100%" 가 simple marker 가 아니어도 통짜 PNG 로 소유
                 || _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
                         sourceEntry, sourceInfoById, childIdsByParentId);
+        var completeMarkerFloatingAnchored = completeMarkerOwnsText
+                && String(sourceEntry.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED";
         var sourceObjectIds = completeMarkerOwnsText
                 ? closedSourceSubtree(sourceEntry.id)
                 : _sortedNumericIds([sourceEntry.id].concat(editableTextFrameIds));
@@ -499,11 +516,20 @@ function _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, 
             completePngTextAllowed: completeMarkerOwnsText,
             materialization: completeMarkerOwnsText ? "COMPLETE_PNG" : null,
             textAction: completeMarkerOwnsText ? "OWNED_BY_PNG" : null,
-            visualAction: completeMarkerOwnsText ? "PLACE_INLINE_PNG" : null,
+            visualAction: completeMarkerOwnsText
+                    ? (completeMarkerFloatingAnchored ? "PLACE_FLOATING_PNG" : "PLACE_INLINE_PNG")
+                    : null,
             ownershipSlot: completeMarkerOwnsText ? "CONTENT_VISUAL_SLOT" : null,
-            placement: "INLINE",
-            coordinateSpace: "STORY_FLOW",
-            inlineSourceTreeClosed: completeMarkerOwnsText
+            placement: completeMarkerFloatingAnchored ? "FLOATING" : "INLINE",
+            coordinateSpace: completeMarkerFloatingAnchored ? "PAGE" : "STORY_FLOW",
+            storyAnchorPlacement: sourceEntry.storyAnchorPlacement || null,
+            anchoredPosition: sourceEntry.anchoredPosition || null,
+            sourceInlineFlow: !completeMarkerFloatingAnchored && sourceEntry.storyTextInlineSlot === true,
+            storyTextInlineSlot: sourceEntry.storyTextInlineSlot === true,
+            tableCellStoryTextInlineSlot: sourceEntry.tableCellStoryTextInlineSlot === true,
+            pagePositionedAnchoredSource: completeMarkerFloatingAnchored,
+            inlineAnchorSourceObjectId: completeMarkerFloatingAnchored ? null : sourceEntry.id,
+            inlineSourceTreeClosed: !completeMarkerFloatingAnchored && completeMarkerOwnsText
         });
     }
 }
