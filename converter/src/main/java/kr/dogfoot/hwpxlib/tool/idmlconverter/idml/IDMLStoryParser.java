@@ -1697,10 +1697,12 @@ public class IDMLStoryParser {
 
         for (Map.Entry<String, IDMLStyleDef> entry : doc.paraStyles().entrySet()) {
             IDMLStyleDef paraStyle = entry.getValue();
-            if (paraStyle.grepStyles() == null) continue;
+            // SPEC-067: 수식 GREP 도 BasedOn 부모 체인까지 상속해 수집.
+            List<IDMLStyleDef.GrepStyleRule> inheritedGrep = collectInheritedGrepStyles(doc, paraStyle);
+            if (inheritedGrep.isEmpty()) continue;
 
             List<java.util.regex.Pattern> patterns = new ArrayList<>();
-            for (IDMLStyleDef.GrepStyleRule rule : paraStyle.grepStyles()) {
+            for (IDMLStyleDef.GrepStyleRule rule : inheritedGrep) {
                 // GREP 규칙이 수식 문자 스타일을 적용하는지 확인
                 if (!mathCharStyleRefs.contains(rule.appliedCharacterStyle())) continue;
 
@@ -1767,6 +1769,43 @@ public class IDMLStoryParser {
      * GREP 스타일에서 일반 문자 스타일 속성(FillColor 등)을 동적 적용한다.
      * BT수식M 전용인 resolveGrepMathStyles와 달리, 모든 GREP 규칙의 문자 스타일을 적용한다.
      */
+    /**
+     * SPEC-067: 문단스타일의 GREP 규칙을 BasedOn 부모 체인까지 상속해 수집한다.
+     * 자식 스타일이 같은 GREP 표현식을 재정의하면 자식 것이 이긴다(부모는 스킵).
+     * InDesign 은 파생 문단스타일이 부모의 GREP 스타일을 물려받는다.
+     */
+    private static List<IDMLStyleDef.GrepStyleRule> collectInheritedGrepStyles(
+            IDMLDocument doc, IDMLStyleDef paraStyle) {
+        List<IDMLStyleDef.GrepStyleRule> out = new ArrayList<>();
+        Set<String> seenExpr = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+        IDMLStyleDef cur = paraStyle;
+        while (cur != null) {
+            String selfRef = cur.selfRef();
+            if (selfRef != null && !visited.add(selfRef)) break;   // 순환 방지
+            if (cur.grepStyles() != null) {
+                for (IDMLStyleDef.GrepStyleRule rule : cur.grepStyles()) {
+                    // 자식이 먼저 추가되므로 같은 표현식의 부모 규칙은 스킵(자식 우선)
+                    if (rule.grepExpression() != null && seenExpr.add(rule.grepExpression())) {
+                        out.add(rule);
+                    }
+                }
+            }
+            String basedOn = cur.basedOn();
+            if (basedOn == null || basedOn.isEmpty()
+                    || basedOn.contains("[No Paragraph Style]")
+                    || basedOn.contains("[Root Paragraph Style]")) {
+                break;
+            }
+            IDMLStyleDef parent = doc.paraStyles().get(basedOn);
+            if (parent == null && basedOn.startsWith("ParagraphStyle/")) {
+                parent = doc.paraStyles().get(basedOn.substring("ParagraphStyle/".length()));
+            }
+            cur = parent;
+        }
+        return out;
+    }
+
     static void resolveGrepGenericStyles(IDMLDocument doc) {
         // BT수식M 문자 스타일 ID (이미 resolveGrepMathStyles에서 처리됨 → 제외)
         Set<String> btMathCharStyleRefs = new HashSet<>();
@@ -1784,10 +1823,16 @@ public class IDMLStoryParser {
 
         for (Map.Entry<String, IDMLStyleDef> entry : doc.paraStyles().entrySet()) {
             IDMLStyleDef paraStyle = entry.getValue();
-            if (paraStyle.grepStyles() == null) continue;
+            // SPEC-067: GREP 규칙을 BasedOn 부모 체인까지 상속해 수집한다. 파생 문단
+            // 스타일(예: "02_탐구,해보기_준비물(내어쓰기)")은 자기 GREP 이 없고 부모
+            // ("02_탐구,해보기_준비물")의 "^무엇을 알아볼까→2_무엇을알아볼까요(제목)" 초록
+            // GREP 을 물려받아야 한다. 상속을 안 하면 초록 제목이 색을 잃고 DOM 색에
+            // 의존하게 된다(과학 u1 탐구 학습목표 초록).
+            List<IDMLStyleDef.GrepStyleRule> inheritedGrep = collectInheritedGrepStyles(doc, paraStyle);
+            if (inheritedGrep.isEmpty()) continue;
 
             List<Object[]> rules = new ArrayList<>();
-            for (IDMLStyleDef.GrepStyleRule rule : paraStyle.grepStyles()) {
+            for (IDMLStyleDef.GrepStyleRule rule : inheritedGrep) {
                 if (btMathCharStyleRefs.contains(rule.appliedCharacterStyle())) continue;
                 // 적용 대상 문자 스타일이 존재하는지 확인
                 IDMLStyleDef charStyle = findCharStyle(rule.appliedCharacterStyle(), doc);

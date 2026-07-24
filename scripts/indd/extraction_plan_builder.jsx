@@ -8244,6 +8244,93 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
                 || plan.slotRole === "background_layer_backdrop_stack"
                 || plan.compositeRole === "background_layer_backdrop_stack";
     }
+    // Page/spread geometry is source metadata only. We cache DOM reads here so
+    // spread-cross/page-wide diagnostics can use geometry without turning that
+    // geometry into an ownership shortcut.
+    var _canonicalPlanePageBoundsCache = {};
+    function pageBoundsForCanonicalPlane(pageIndex) {
+        var cacheKey = String(Number(pageIndex));
+        if (_canonicalPlanePageBoundsCache.hasOwnProperty(cacheKey)) {
+            return _canonicalPlanePageBoundsCache[cacheKey];
+        }
+        var bounds = null;
+        try {
+            if (typeof _pageBoundsForIndex === "function") {
+                bounds = _pageBoundsForIndex(doc, Number(pageIndex));
+            }
+        } catch (ePageBoundsCanonical) {}
+        if (!bounds) {
+            try {
+                var page = doc.pages[Number(pageIndex)];
+                var pb = page.bounds;
+                bounds = [Number(pb[0]), Number(pb[1]), Number(pb[2]), Number(pb[3])];
+            } catch (ePageBoundsCanonicalFallback) {}
+        }
+        _canonicalPlanePageBoundsCache[cacheKey] = bounds;
+        return bounds;
+    }
+    function boundsOverlapForCanonicalPlane(a, b) {
+        if (!a || !b || a.length < 4 || b.length < 4) return false;
+        return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
+                && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
+    }
+    var _canonicalPlaneSpreadIdCache = {};
+    function spreadIdForCanonicalPlane(pageIndex) {
+        var cacheKey = String(pageIndex);
+        if (_canonicalPlaneSpreadIdCache.hasOwnProperty(cacheKey)) {
+            return _canonicalPlaneSpreadIdCache[cacheKey];
+        }
+        var spreadId = null;
+        try {
+            if (typeof _pageSpreadIdForIndex === "function") {
+                spreadId = _pageSpreadIdForIndex(doc, pageIndex);
+            }
+        } catch (eSpreadIdCanonical) {}
+        _canonicalPlaneSpreadIdCache[cacheKey] = spreadId;
+        return spreadId;
+    }
+    function sameSpreadForCanonicalPlane(a, b) {
+        if (a === null || a === undefined || b === null || b === undefined) return false;
+        a = Number(a);
+        b = Number(b);
+        if (isNaN(a) || isNaN(b) || a < 0 || b < 0) return false;
+        if (typeof _pageSpreadIdForIndex === "function") {
+            var spreadA = spreadIdForCanonicalPlane(a);
+            var spreadB = spreadIdForCanonicalPlane(b);
+            return spreadA !== null && spreadB !== null && spreadA === spreadB;
+        }
+        return a === b;
+    }
+    var _canonicalPlanePageCount = -1;
+    function pageCountForCanonicalPlane() {
+        if (_canonicalPlanePageCount < 0) {
+            try { _canonicalPlanePageCount = Number(doc.pages.length); }
+            catch (ePageCount) { _canonicalPlanePageCount = 0; }
+        }
+        return _canonicalPlanePageCount;
+    }
+    function sourceSameSpreadIntersectingPages(src, anchorPageIndex) {
+        var out = [];
+        var seen = {};
+        if (!doc || !doc.pages || !src || !src.bounds || src.bounds.length < 4) return out;
+        var pageCount = pageCountForCanonicalPlane();
+        for (var pi = 0; pi < pageCount; pi++) {
+            if (!sameSpreadForCanonicalPlane(anchorPageIndex, pi)) continue;
+            var pb = pageBoundsForCanonicalPlane(pi);
+            if (!boundsOverlapForCanonicalPlane(src.bounds, pb)) continue;
+            seen[String(pi)] = true;
+            out.push(pi);
+        }
+        for (var ri = 0; src.rangeTargetPageIndexes && ri < src.rangeTargetPageIndexes.length; ri++) {
+            var rangePage = Number(src.rangeTargetPageIndexes[ri]);
+            if (isNaN(rangePage) || seen[String(rangePage)]) continue;
+            if (!sameSpreadForCanonicalPlane(anchorPageIndex, rangePage)) continue;
+            seen[String(rangePage)] = true;
+            out.push(rangePage);
+        }
+        out.sort(function(a, b) { return a - b; });
+        return out;
+    }
     function sourceVisiblePageIndexes(src) {
         var pages = [];
         var seen = {};
@@ -8261,6 +8348,9 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             }
         }
         if (src) addPage(src.pageIndex);
+        var anchorPageIndex = sourceAnchorPageIndex(src);
+        var spreadPages = sourceSameSpreadIntersectingPages(src, anchorPageIndex);
+        for (var si = 0; si < spreadPages.length; si++) addPage(spreadPages[si]);
         pages.sort(function(a, b) { return a - b; });
         return pages;
     }
@@ -8300,8 +8390,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     }
     function sourceIsPageWideBackgroundGraphicOnPage(src, targetPageIndex, plan) {
         if (!sourceHasPageBackgroundSourceEvidence(src, plan)) return false;
-        var pageBounds = null;
-        try { pageBounds = doc && doc.pages ? doc.pages[Number(targetPageIndex)].bounds : null; } catch (ePageBounds) {}
+        var pageBounds = pageBoundsForCanonicalPlane(targetPageIndex);
         var srcBounds = sourceBounds(src);
         if (!pageBounds || !srcBounds) return false;
         var pageHeight = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));

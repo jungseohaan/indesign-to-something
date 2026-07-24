@@ -75,7 +75,10 @@ public final class FontStyleClassifier {
                 || hasToken(tokens, "eb", "xb")) {
             return 800;
         }
-        if (lower.contains("black") || hasToken(tokens, "blk")) {
+        // SPEC-067: "bk" 는 InDesign 가변폰트 Black 약자(예: "19 Bk"). DOM 이 아니라
+        // IDML 원본 FontStyle 을 쓰면 이 약자로 나온다(영어 u3/u4 단원명 "Think Twice"
+        // 19 Bk). 앞 웨이트 숫자가 낮아도(19) Bk 가 Black 신호다.
+        if (lower.contains("black") || hasToken(tokens, "blk", "bk")) {
             return 900;
         }
         if (lower.contains("heavy") || hasToken(tokens, "hv")) {

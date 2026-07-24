@@ -85,3 +85,6 @@ testFile/tool/sample_image_list.hwpx
 Contents/
 teaching_material.json
 BetterChoice.md
+output/
+__pycache__/
+*.pyc

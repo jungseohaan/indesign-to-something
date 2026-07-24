@@ -316,23 +316,12 @@ function collectComposedLineRuns(line) {
                 end: cursor + text.length
             };
             cursor = run.end;
-            try {
-                var fill = rng.fillColor;
-                if (fill && fill.name) run.fillColor = String(fill.name);
-            } catch (eFill) {}
-            try {
-                var font = rng.appliedFont;
-                if (font && font.fontFamily) run.fontFamily = String(font.fontFamily);
-            } catch (eFont) {}
-            try {
-                if (rng.fontStyle !== undefined && rng.fontStyle !== null) {
-                    run.fontStyle = String(rng.fontStyle);
-                }
-            } catch (eStyle) {}
-            try {
-                var size = Number(rng.pointSize);
-                if (isFinite(size)) run.fontSize = size;
-            } catch (eSize) {}
+            // SPEC-067: composedLines 런의 글자 속성(fillColor/appliedFont/fontStyle/
+            // pointSize)은 DOM 에서 읽지 않는다. 이 함수의 목적은 줄바꿈 매핑(text/start/end
+            // + 상위 collectComposedLines 의 bounds/wrapIndent)이고, 변환기는 ComposedRun 의
+            // 글자 속성을 전혀 소비하지 않는다(line.runs() 호출처 0개, getter 미사용 실측).
+            // 글자 속성은 IDML 이 담당한다. DOM 개별 속성 접근은 느리므로 성능도 개선된다.
+            // 되돌리려면 아래 fillColor/appliedFont/fontStyle/pointSize 읽기를 복원한다.
             result.push(run);
         }
     } catch (eRanges) {}
@@ -835,23 +824,27 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
 
     function _masterDynamicRunFromRange(range, text) {
         var run = { text: text };
-        try {
-            var font = range.appliedFont;
-            if (font) run.fontFamily = String(font.name || font);
-        } catch (eFont) {}
-        try { if (range.fontStyle !== undefined && range.fontStyle !== null) run.fontStyle = String(range.fontStyle); } catch (eFontStyle) {}
-        try { if (range.pointSize !== undefined && range.pointSize !== null) run.fontSize = range.pointSize; } catch (eFontSize) {}
-        try {
-            var fill = range.fillColor;
-            if (fill) run.fillColor = String(fill.name || fill);
-        } catch (eFill) {}
-        var charStyle = _masterDynamicStyleName(range, "appliedCharacterStyle");
-        if (charStyle) run.charStyle = charStyle;
+        // SPEC-067: DOM 글자 속성(font/style/size/color/charStyle/baselineShift/position)을
+        // 읽지 않는다. 이 함수는 표지·헤더 등 동적 story clone 런을 만드는데, 글자 속성은
+        // IDML 이 확정한다(GREP BasedOn 상속 포함). tracking/장평/underline/strikeThru 는 유지.
+        // 되돌리려면 아래 주석 블록을 복원한다.
+        // try {
+        //     var font = range.appliedFont;
+        //     if (font) run.fontFamily = String(font.name || font);
+        // } catch (eFont) {}
+        // try { if (range.fontStyle !== undefined && range.fontStyle !== null) run.fontStyle = String(range.fontStyle); } catch (eFontStyle) {}
+        // try { if (range.pointSize !== undefined && range.pointSize !== null) run.fontSize = range.pointSize; } catch (eFontSize) {}
+        // try {
+        //     var fill = range.fillColor;
+        //     if (fill) run.fillColor = String(fill.name || fill);
+        // } catch (eFill) {}
+        // var charStyle = _masterDynamicStyleName(range, "appliedCharacterStyle");
+        // if (charStyle) run.charStyle = charStyle;
         try { if (range.tracking !== undefined && range.tracking !== null) run.tracking = range.tracking; } catch (eTracking) {}
         try { if (range.horizontalScale !== undefined && range.horizontalScale !== null) run.horizontalScale = range.horizontalScale; } catch (eHScale) {}
         try { if (range.verticalScale !== undefined && range.verticalScale !== null) run.verticalScale = range.verticalScale; } catch (eVScale) {}
-        try { if (range.baselineShift !== undefined && range.baselineShift !== null) run.baselineShift = range.baselineShift; } catch (eBaseline) {}
-        try { if (range.position !== undefined && range.position !== null) run.position = String(range.position); } catch (ePosition) {}
+        // try { if (range.baselineShift !== undefined && range.baselineShift !== null) run.baselineShift = range.baselineShift; } catch (eBaseline) {}
+        // try { if (range.position !== undefined && range.position !== null) run.position = String(range.position); } catch (ePosition) {}
         try { run.underline = !!range.underline; } catch (eUnderline) {}
         try { run.strikeThru = !!range.strikeThru; } catch (eStrike) {}
         return run;
