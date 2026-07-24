@@ -72,6 +72,57 @@ public class RunBuilderTest {
         Assert.assertEquals("#000000", bodyRun.textColor());
     }
 
+    @Test
+    public void splitResolvedRunsConvertsTrackingToHwpxLetterSpacing() {
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = new ResolvedData();
+        ctx.spec016Counts = new int[3];
+        ctx.lastMatchResult = new int[] { -1 };
+
+        IDMLCharacterRun raw = new IDMLCharacterRun();
+        raw.fontSize(10.0);
+        raw.fontFamily("Adobe Myungjo Std");
+        raw.fontStyle("Regular");
+        raw.tracking(-60.0);
+
+        ResolvedRun head = new ResolvedRun();
+        head.text("화학 반응이");
+        head.fontFamily("Adobe Myungjo Std");
+        head.fontSize(10.0);
+        head.fontStyle("Regular");
+        head.tracking(-60.0);
+        head.horizontalScale(100.0);
+
+        ResolvedRun tail = new ResolvedRun();
+        tail.text(" 일어날 때");
+        tail.fontFamily("Adobe Myungjo Std");
+        tail.fontSize(10.0);
+        tail.fontStyle("Regular");
+        tail.tracking(-60.0);
+        tail.horizontalScale(100.0);
+
+        ASTParagraph paragraph = new ASTParagraph();
+        StoryConverter.StyleContext styleContext =
+                new StoryConverter.StyleContext("#000000", -60.0, "Adobe Myungjo Std", 10.0, null, null);
+
+        boolean split = RunBuilder.splitIdmlRunByResolvedRuns(
+                ctx,
+                raw,
+                "화학 반응이 일어날 때",
+                Arrays.asList(head, tail),
+                0,
+                paragraph,
+                styleContext);
+
+        Assert.assertTrue(split);
+        ASTTextRun headRun = firstTextRunContaining(paragraph.items(), "화학");
+        ASTTextRun tailRun = firstTextRunContaining(paragraph.items(), "일어날");
+        Assert.assertNotNull(headRun);
+        Assert.assertNotNull(tailRun);
+        Assert.assertEquals(Short.valueOf((short) -6), headRun.letterSpacing());
+        Assert.assertEquals(Short.valueOf((short) -6), tailRun.letterSpacing());
+    }
+
     private static ASTTextRun firstTextRunContaining(List<ASTInlineItem> items, String text) {
         for (ASTInlineItem item : items) {
             if (!(item instanceof ASTTextRun)) continue;
