@@ -758,7 +758,7 @@ function _pagePlaneCacheFileName(pageIndex, pageHash, hideSig) {
     // SPEC-049: when table-style source hiding is active, the page plane depends
     // on which sources are hidden. hideSig (deterministic per INDD) is appended
     // so cached planes only match when produced under the same hide set.
-    var base = "page_textless_plane_p" + String(pageIndex + 1);
+    var base = "page_background_plane_p" + String(pageIndex + 1);
     if (hideSig) base += "_" + hideSig;
     return base + ".png";
 }
@@ -847,7 +847,7 @@ function _restoreCachedSingleTextlessPagePlanes(doc, ctx) {
                 summary.entries.push(entry);
                 continue;
             }
-            var outName = "page_textless_plane_p" + String(pageIndex + 1) + ".png";
+            var outName = "page_background_plane_p" + String(pageIndex + 1) + ".png";
             var outFile = File(renderDir.fsName + "/" + outName);
             _copyFileReplacingGeneric(cacheFile, outFile, "page plane cache");
             entry.hit = true;
@@ -1594,7 +1594,7 @@ function _runRenderPhases(doc, ctx, allItems) {
         _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult);
         _marker(ctx.outputDir, "06b1a_pageTextlessGroups_cacheStoreDone");
     }
-    _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_textless_graphic_groups");
+    _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_backgrounds");
     _marker(ctx.outputDir, "06b2_pageTextlessGroups_metaDone");
     for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
         renderedFloatingItems.push(pageTextlessGroupResult.frames[ptgi]);

@@ -15820,8 +15820,8 @@ public final class OwnershipPlanner {
     /**
      * Placed images can be real CONTENT, but a page/spread-sized placed image
      * whose source depth is behind local editable text is a source-owned
-     * backdrop. It still remains a placed backdrop, not a synthetic page
-     * background, unless the source itself was declared as a page background.
+     * backdrop. It still remains a placed backdrop, not a page-background
+     * plane, unless the source itself was declared as a page background.
      * This keeps Stage 1 as the only promotion/demotion point while avoiding a
      * second page-background execution path for ordinary placed images.
      */

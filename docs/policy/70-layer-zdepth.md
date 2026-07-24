@@ -229,8 +229,21 @@ is an explicit page background plane:
 `slotRole=page_background_plane` and `compositeRole=page_background_plane`.
 The executor-facing action may be the existing extracted text-shell path or a
 dedicated page-plane action, but the ownership contract is the same: the plane
-is assembled from Stage 1 source-connected page/floating non-text visual
-components.
+is assembled only from Stage 1 source-connected textless visual components with
+an explicit page-background source role.
+
+Allowed page-background source roles:
+
+- `MASTER_TEXTLESS_GRAPHIC`: textless graphic material from an applied master
+  page or an applied master graphic candidate.
+- `SPREAD_CROSS_TEXTLESS_GRAPHIC`: textless graphic material whose source
+  bounds intersect at least two pages of the same applied spread. Each
+  intersected page may receive its own page-local background fragment.
+
+Page-wide bounds alone are not a page-background source role. A page-local
+textless graphic that merely covers most or all of a page stays ordinary
+`TEXTLESS_IMAGE_GROUP` material unless it also satisfies one of the allowed
+source roles above.
 
 A page-root background/textless plane may include only component members that
 satisfy all of the following source-owned facts:
@@ -239,6 +252,8 @@ satisfy all of the following source-owned facts:
 - visible source proof exists through `visualSourceObjectIds` or
   `exportSourceObjectIds`;
 - the source is not story-flow inline material and has no inline anchor owner.
+- the source role is `MASTER_TEXTLESS_GRAPHIC` or
+  `SPREAD_CROSS_TEXTLESS_GRAPHIC`.
 
 The following source slots are always excluded from a page background plane:
 

@@ -33,7 +33,7 @@ TRACE_SOURCE_PATH = REPO_ROOT / "scripts" / "dev" / "trace_source.py"
 PAGE_INVENTORY_PATH = REPO_ROOT / "scripts" / "dev" / "page_inventory.py"
 IDML_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "idml"
 PREVIEW_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "preview"
-PAGE_PLANE_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "page_textless_plane"
+PAGE_PLANE_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "page_background_plane"
 
 CASE_ALIASES = {
     "park31-u1": ("중3-1국어교과서(박영민)", "u1"),

@@ -657,19 +657,17 @@ public final class OwnershipPlanValidator {
     private static boolean isExplicitPageBackgroundPlaneContract(ObjectPlan plan) {
         if (plan == null) return false;
         String slotRole = safe(plan.slotRole);
-        if (!"page_background_plane".equals(slotRole)
-                && !"page_textless_plane".equals(slotRole)) {
+        if (!"page_background_plane".equals(slotRole)) {
             return false;
         }
         if (plan.materialization == Materialization.PAGE_PLANE_PNG) return true;
         String candidate = safe(plan.candidateId);
         String reason = safe(plan.reason);
         return candidate.contains("page_background_plane")
-                || candidate.contains("single_textless_page_plane")
-                || candidate.contains("page_textless_plane")
+                || candidate.contains("source_backed_page_background_plane")
                 || reason.contains("page_background_plane")
                 || reason.contains("PAGE_BACKGROUND_PLANE")
-                || reason.contains("single_textless_page_plane");
+                || reason.contains("source_backed_page_background_plane");
     }
 
     private void validateBackgroundDepthBand() {
@@ -754,6 +752,9 @@ public final class OwnershipPlanValidator {
             double pageHeight = pageHeight(plan.pageIndex);
             if (pageWidth <= 0.0 || pageHeight <= 0.0) continue;
             if (plan.materialization == Materialization.TEXTLESS_VISUAL_FRAGMENT) {
+                continue;
+            }
+            if (isExplicitPageBackgroundPlaneContract(plan)) {
                 continue;
             }
             if (plan.visualPolicyLayer() == PolicyLayer.BACKGROUND

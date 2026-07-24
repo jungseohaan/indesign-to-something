@@ -285,10 +285,23 @@ function _stampExportUnitsOnRenderedItems(ctx, renderedFloatingItems) {
     } catch (eCandidateLookup) {
         candidateById = {};
     }
+    function fillMissingArray(item, planCandidate, fieldName) {
+        if (!item || !planCandidate || !fieldName) return;
+        if (item[fieldName] && item[fieldName].length > 0) return;
+        if (!planCandidate[fieldName] || planCandidate[fieldName].length === 0) return;
+        item[fieldName] = planCandidate[fieldName].slice(0);
+    }
     for (var i = 0; i < renderedFloatingItems.length; i++) {
         var item = renderedFloatingItems[i];
         if (!item) continue;
         var planCandidate = item.candidateId ? candidateById[String(item.candidateId)] : null;
+        fillMissingArray(item, planCandidate, "sourceObjectIds");
+        fillMissingArray(item, planCandidate, "visualSourceObjectIds");
+        fillMissingArray(item, planCandidate, "exportSourceObjectIds");
+        fillMissingArray(item, planCandidate, "hiddenVisualSourceObjectIds");
+        fillMissingArray(item, planCandidate, "hiddenTextFrameIds");
+        fillMissingArray(item, planCandidate, "excludedInlineSourceObjectIds");
+        fillMissingArray(item, planCandidate, "editableTextFrameIds");
         var contract = _exportUnitContract(item, planCandidate);
         item.exportUnitId = contract.exportUnitId;
         item.exportUnitContractKey = contract.contractKey;

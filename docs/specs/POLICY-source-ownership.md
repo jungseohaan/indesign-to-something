@@ -209,15 +209,21 @@ diagnostics only. They do not create four HWPX execution layers.
 
 ## Canonical Graphic Materialization Path
 
-The default graphic materialization path is `single-textless-plane`.
-For every page in the extraction range, Stage 3 exports one page-sized PNG that
-contains page/floating textless visual source material with editable text
-hidden. HWPX text and table text remain owned by `TEXT_TABLE_STRUCTURE`.
+The page-background materialization path is source-backed. Stage 3 may export a
+page-sized PNG for a page only when Stage 1 has assigned eligible
+page-background source material to a `page_background_plane` ObjectPlan whose
+`sourceObjectIds`, `visualSourceObjectIds`, and `exportSourceObjectIds` point to
+real source ids. Eligible source roles are limited to
+`MASTER_TEXTLESS_GRAPHIC` and `SPREAD_CROSS_TEXTLESS_GRAPHIC`; page-wide bounds
+alone are not sufficient. HWPX text and table text remain owned by
+`TEXT_TABLE_STRUCTURE`.
 
-This page plane is the main execution path, not an experimental fallback. It
-replaces per-object page/floating vector export for ordinary page graphics.
-The legacy per-object `policy` graphics path may remain available only for
-comparison, debugging, or rollback while migration is in progress.
+This page-background plane is the main execution path for eligible background
+source material, not an experimental fallback. Ordinary page-local graphics that
+do not carry one of the eligible source roles remain ordinary textless image
+group material. The legacy per-object `policy` graphics path may remain
+available only for comparison, debugging, or rollback while migration is in
+progress.
 
 The page plane must not absorb:
 
