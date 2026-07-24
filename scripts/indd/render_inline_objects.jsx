@@ -13,6 +13,13 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage,
 function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                                         allItems, itemById, inlineCandidates, opts) {
     opts = opts || {};
+    var allowedPageIndexSet = null;
+    if (opts.allowedPageIndexes && opts.allowedPageIndexes.length > 0) {
+        allowedPageIndexSet = {};
+        for (var api = 0; api < opts.allowedPageIndexes.length; api++) {
+            allowedPageIndexSet[String(Number(opts.allowedPageIndexes[api]))] = true;
+        }
+    }
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -29,6 +36,159 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
 
     function nowMs() {
         try { return (new Date()).getTime(); } catch (eNow) { return 0; }
+    }
+
+    function pagePlaneAllowed(pageIndex) {
+        if (!allowedPageIndexSet) return true;
+        return allowedPageIndexSet[String(Number(pageIndex))] === true;
+    }
+
+    var pagePlaneCandidateByPageIndex = {};
+    try {
+        var pagePlaneCandidates = opts.pagePlaneCandidates || [];
+        for (var ppci = 0; ppci < pagePlaneCandidates.length; ppci++) {
+            var ppc = pagePlaneCandidates[ppci];
+            if (!ppc) continue;
+            var ppcPageIndex = Number(ppc.pageIndex);
+            if (isNaN(ppcPageIndex) || ppcPageIndex < 0) continue;
+            var ppcKey = String(ppcPageIndex);
+            var existingPpc = pagePlaneCandidateByPageIndex[ppcKey] || null;
+            if (!existingPpc || String(ppc.passId || "") === "pass.page_textless_graphic_groups") {
+                pagePlaneCandidateByPageIndex[ppcKey] = ppc;
+            }
+        }
+    } catch (ePagePlaneCandidateIndex) {
+        pagePlaneCandidateByPageIndex = {};
+    }
+
+    function pagePlaneCandidateForPage(pageIndex) {
+        return pagePlaneCandidateByPageIndex[String(Number(pageIndex))] || null;
+    }
+
+    function isPageTextlessGraphicGroupCandidate(candidate) {
+        return candidate && String(candidate.passId || "") === "pass.page_textless_graphic_groups";
+    }
+
+    function pagePlaneTypeForCandidate(candidate) {
+        return isPageTextlessGraphicGroupCandidate(candidate)
+                ? "page_textless_graphic_group"
+                : "page_background_plane";
+    }
+
+    function pagePlaneFileNameForCandidate(pageIndex, candidate) {
+        var prefix = isPageTextlessGraphicGroupCandidate(candidate)
+                ? "page_textless_graphic_group_p"
+                : "page_background_plane_p";
+        return prefix + String(pageIndex + 1) + ".png";
+    }
+
+    function pagePlaneReasonForCandidate(candidate, suffix) {
+        var prefix = isPageTextlessGraphicGroupCandidate(candidate)
+                ? "source_backed_page_textless_graphic_group"
+                : "source_backed_page_background_plane";
+        return prefix + "_" + suffix;
+    }
+
+    function isPageBackgroundPlaneCandidate(candidate) {
+        if (!candidate) return true;
+        var candidateId = String(candidate.candidateId || "");
+        return candidate.materialization === "PAGE_PLANE_PNG"
+                || candidate.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
+                || candidate.passId === "pass.page_backgrounds"
+                || candidate.slotRole === "page_background_plane"
+                || candidate.compositeRole === "page_background_plane"
+                || candidateId.indexOf(".page_backgrounds.") >= 0
+                || candidateId.indexOf("page_background_plane") >= 0
+                || String(candidate.type || "") === "page_background_plane";
+    }
+
+    function copyRenderedFrameFile(sourceRelativePath, targetRelativePath, label) {
+        if (!sourceRelativePath || !targetRelativePath || sourceRelativePath === targetRelativePath) {
+            return sourceRelativePath;
+        }
+        var sourceFile = File(outputDir + "/" + sourceRelativePath);
+        var targetFile = File(outputDir + "/" + targetRelativePath);
+        if (!sourceFile.exists) {
+            throw new Error((label || "rendered frame") + " source missing: " + sourceRelativePath);
+        }
+        if (targetFile.exists) {
+            try { targetFile.remove(); } catch (eRemoveTarget) {}
+        }
+        if (!sourceFile.copy(targetFile.fsName)) {
+            throw new Error((label || "rendered frame") + " copy failed: "
+                    + sourceRelativePath + " -> " + targetRelativePath);
+        }
+        return targetRelativePath;
+    }
+
+    function copyIds(values) {
+        var out = [];
+        for (var i = 0; values && i < values.length; i++) out.push(values[i]);
+        return out;
+    }
+
+    function pagePlaneFrameFromCandidate(candidate, pageIndex, file, bounds, fileBytes, globalRenderedFrame, reason) {
+        var fallbackCandidateId = typeof _canonicalPagePlaneCandidateId === "function"
+                ? _canonicalPagePlaneCandidateId(pageIndex)
+                : ("cand.pass.page_backgrounds.page."
+                    + String(pageIndex)
+                    + ".source_backed_page_background_plane");
+        var forcePageBackgroundPlane = isPageBackgroundPlaneCandidate(candidate);
+        return {
+            id: candidate && candidate.primarySourceObjectId !== undefined && candidate.primarySourceObjectId !== null
+                    ? candidate.primarySourceObjectId
+                    : 0,
+            type: pagePlaneTypeForCandidate(candidate),
+            candidateId: candidate && candidate.candidateId ? candidate.candidateId : fallbackCandidateId,
+            candidateMatchStrategy: candidate ? "page_plane_candidate" : "page_plane_direct",
+            file: file,
+            bounds: candidate && candidate.bounds ? candidate.bounds : bounds,
+            pageIndex: pageIndex,
+            zOrder: forcePageBackgroundPlane
+                    ? -900000
+                    : (candidate && candidate.zOrder !== undefined && candidate.zOrder !== null
+                    ? candidate.zOrder
+                    : -900000),
+            zOrderKnown: true,
+            visualLayer: forcePageBackgroundPlane
+                    ? "PAGE_BACKGROUND"
+                    : (candidate && candidate.visualLayer ? candidate.visualLayer : "PAGE_BACKGROUND"),
+            policyLayer: forcePageBackgroundPlane
+                    ? "BACKGROUND"
+                    : (candidate && candidate.policyLayer
+                            ? candidate.policyLayer
+                            : (candidate && candidate.visualLayer === "CONTENT_VISUAL"
+                                    ? "CONTENT"
+                                    : "BACKGROUND")),
+            visualOwner: "indesign_png",
+            textOwner: candidate && candidate.textOwner ? candidate.textOwner : "none",
+            placement: candidate && candidate.placement ? candidate.placement : "FLOATING",
+            coordinateSpace: candidate && candidate.coordinateSpace ? candidate.coordinateSpace : "PAGE",
+            materialization: forcePageBackgroundPlane
+                    ? "PAGE_PLANE_PNG"
+                    : (candidate && candidate.materialization ? candidate.materialization : "PAGE_PLANE_PNG"),
+            slotRole: forcePageBackgroundPlane
+                    ? "page_background_plane"
+                    : (candidate && candidate.slotRole ? candidate.slotRole : "page_background_plane"),
+            ownershipSlot: forcePageBackgroundPlane
+                    ? "SHELL_SLOT"
+                    : (candidate && candidate.ownershipSlot ? candidate.ownershipSlot : "SHELL_SLOT"),
+            reason: candidate && candidate.reason ? candidate.reason : reason,
+            sourceObjectIds: copyIds(candidate && candidate.sourceObjectIds || []),
+            visualSourceObjectIds: copyIds(candidate && candidate.visualSourceObjectIds || []),
+            exportSourceObjectIds: copyIds(candidate && candidate.exportSourceObjectIds || []),
+            hiddenVisualSourceObjectIds: copyIds(candidate && candidate.hiddenVisualSourceObjectIds || []),
+            hiddenTextFrameIds: copyIds(candidate && candidate.hiddenTextFrameIds || []),
+            excludedInlineSourceObjectIds: copyIds(candidate && candidate.excludedInlineSourceObjectIds || []),
+            editableTextFrameIds: copyIds(candidate && candidate.editableTextFrameIds || []),
+            globalRenderedFrame: globalRenderedFrame === true,
+            exportSanity: {
+                singleTextlessPagePlane: true,
+                fileBytes: fileBytes || 0,
+                pageRelativeBounds: bounds,
+                globalPreExport: globalRenderedFrame === true
+            }
+        };
     }
 
     function pageLocalBounds(page) {
@@ -66,11 +226,11 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             if (c.materialization === "HWPX_TEXT" || c.materialization === "HWPX_TABLE_STYLE") continue;
             var item = inlineItemForCandidate(c);
             if (!item) continue;
-            // Planned inline visuals must be removed from the page plane even
+            // Planned inline visuals must be removed from the page composite even
             // when the export target itself is a TextFrame shape.  The later
             // text-hiding pass preserves TextFrame fill/stroke by design, so
             // excluding TextFrames here bakes inline checkbox/marker shells
-            // into page_background_plane_p*.png.
+            // into the composite PNG.
             var id = null;
             try { id = item.id; } catch (eId) {}
             var key = id !== null && id !== undefined ? String(id) : String(items.length);
@@ -152,6 +312,29 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
             var pageIndex = pageNumber - 1;
             var ids = idsByPage[String(pageIndex)] || [];
+            for (var i = 0; i < ids.length; i++) {
+                var id = ids[i];
+                if (id === null || id === undefined) continue;
+                var key = String(id);
+                if (seen[key]) continue;
+                var item = itemById ? itemById[key] : null;
+                if (!item) continue;
+                seen[key] = true;
+                items.push(item);
+            }
+        }
+        return items;
+    }
+
+    function collectPagePlaneHiddenVisualSourceItems() {
+        var items = [];
+        var seen = {};
+        for (var ci = 0; ci < pagePlaneCandidates.length; ci++) {
+            var candidate = pagePlaneCandidates[ci];
+            if (!candidate) continue;
+            var candidatePageIndex = Number(candidate.pageIndex);
+            if (!isNaN(candidatePageIndex) && !pagePlaneAllowed(candidatePageIndex)) continue;
+            var ids = candidate.hiddenVisualSourceObjectIds || [];
             for (var i = 0; i < ids.length; i++) {
                 var id = ids[i];
                 if (id === null || id === undefined) continue;
@@ -342,7 +525,11 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         } catch (eDocExport) {
             diagnostics.push({
                 accepted: false,
-                reason: "source_backed_page_background_plane_export_failed",
+                    reason: pagePlaneReasonForCandidate(
+                            pagePlaneCandidateForPage(page && page.documentOffset !== undefined
+                                    ? page.documentOffset
+                                    : -1),
+                            "export_failed"),
                 pageIndex: page && page.documentOffset !== undefined ? page.documentOffset : -1,
                 error: String(eDocExport)
             });
@@ -357,6 +544,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     var savedInlineItems = [];
     var savedCompletePngTextOwnerItems = [];
     var savedTableStyleItems = [];
+    var savedPagePlaneHiddenVisualItems = [];
     var savedDocumentTextFrames = [];
     // SPEC-030 계측 변수 (예외 경로에서도 정의되도록 미리 선언)
     var _tCollectInline = 0, _tHideInline = 0, _tCollectText = 0, _tHideText = 0;
@@ -366,7 +554,9 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         var _reuseStartedAt = nowMs();
         for (var reusePageNumber = startPage; reusePageNumber <= endPage; reusePageNumber++) {
             var reusePageIndex = reusePageNumber - 1;
+            if (!pagePlaneAllowed(reusePageIndex)) continue;
             var reuseEntry = opts.precomputedPagePlanesByPageIndex[String(reusePageIndex)];
+            var reuseCandidate = pagePlaneCandidateForPage(reusePageIndex);
             var reusePage = null;
             try { reusePage = doc.pages[reusePageIndex]; } catch (eReusePage) {}
             var reuseBounds = reuseEntry && reuseEntry.bounds ? reuseEntry.bounds
@@ -374,7 +564,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             if (!reuseEntry || !reuseEntry.file) {
                 diagnostics.push({
                     accepted: false,
-                    reason: "source_backed_page_background_plane_precomputed_missing",
+                    reason: pagePlaneReasonForCandidate(reuseCandidate, "precomputed_missing"),
                     pageIndex: reusePageIndex,
                     file: null,
                     bounds: reuseBounds,
@@ -382,52 +572,43 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 });
                 continue;
             }
+            var reuseFile = reuseEntry.file;
+            var desiredReuseFile = "rendered_frames/"
+                    + pagePlaneFileNameForCandidate(reusePageIndex, reuseCandidate);
+            try {
+                reuseFile = copyRenderedFrameFile(reuseEntry.file, desiredReuseFile, "precomputed page composite");
+            } catch (eCopyReuse) {
+                diagnostics.push({
+                    accepted: false,
+                    reason: pagePlaneReasonForCandidate(reuseCandidate, "precomputed_copy_failed"),
+                    pageIndex: reusePageIndex,
+                    file: reuseEntry.file,
+                    targetFile: desiredReuseFile,
+                    bounds: reuseBounds,
+                    elapsedMs: 0,
+                    error: String(eCopyReuse)
+                });
+                continue;
+            }
             diagnostics.push({
                 accepted: true,
-                reason: "source_backed_page_background_plane_reused",
+                reason: pagePlaneReasonForCandidate(reuseCandidate, "reused"),
                 pageIndex: reusePageIndex,
-                file: reuseEntry.file,
+                file: reuseFile,
                 bounds: reuseBounds,
                 elapsedMs: 0,
                 globalRenderedFrame: true
             });
-            var reuseCandidateId = typeof _canonicalPagePlaneCandidateId === "function"
-                    ? _canonicalPagePlaneCandidateId(reusePageIndex)
-                    : ("cand.pass.page_backgrounds.page."
-                        + String(reusePageIndex)
-                        + ".source_backed_page_background_plane");
-            results.push({
-                id: 0,
-                type: "page_background_plane",
-                candidateId: reuseCandidateId,
-                candidateMatchStrategy: "page_plane_direct",
-                file: reuseEntry.file,
-                bounds: reuseBounds,
-                pageIndex: reusePageIndex,
-                zOrder: -900000,
-                zOrderKnown: true,
-                visualLayer: "PAGE_BACKGROUND",
-                policyLayer: "BACKGROUND",
-                visualOwner: "indesign_png",
-                textOwner: "none",
-                placement: "FLOATING",
-                coordinateSpace: "PAGE",
-                materialization: "PAGE_PLANE_PNG",
-                slotRole: "page_background_plane",
-                ownershipSlot: "SHELL_SLOT",
-                reason: "source_backed_page_background_plane_reused",
-                sourceObjectIds: [],
-                visualSourceObjectIds: [],
-                exportSourceObjectIds: [],
-                hiddenTextFrameIds: [],
-                globalRenderedFrame: true,
-                exportSanity: {
-                    singleTextlessPagePlane: true,
-                    globalPreExportReused: true,
-                    fileBytes: reuseEntry.fileBytes || 0,
-                    pageRelativeBounds: reuseBounds
-                }
-            });
+            var reuseFrame = pagePlaneFrameFromCandidate(
+                    reuseCandidate,
+                    reusePageIndex,
+                    reuseFile,
+                    reuseBounds,
+                    reuseEntry.fileBytes || 0,
+                    true,
+                    pagePlaneReasonForCandidate(reuseCandidate, "reused"));
+            reuseFrame.exportSanity.globalPreExportReused = true;
+            results.push(reuseFrame);
         }
         try {
             writeJson(outputDir + "/single-textless-page-plane-export.json", {
@@ -485,6 +666,9 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
 
         savedTableStyleItems = _hideItemsForExport(collectTableStyleSourceItemsToHide());
 
+        savedPagePlaneHiddenVisualItems =
+                _hideItemsForExport(collectPagePlaneHiddenVisualSourceItems());
+
         _t0 = nowMs();
         var _textHideScope = opts.documentWideTextHide === true ? "document" : "range";
         var _textToHide = opts.documentWideTextHide === true
@@ -505,70 +689,46 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
 
         for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
             var pageIndex = pageNumber - 1;
+            if (!pagePlaneAllowed(pageIndex)) continue;
             var page = null;
             try { page = doc.pages[pageIndex]; } catch (ePage) {}
             if (!page) continue;
+            var pagePlaneCandidate = pagePlaneCandidateForPage(pageIndex);
             var pageStart = nowMs();
-            var fileName = "page_background_plane_p" + String(pageIndex + 1) + ".png";
+            var fileName = pagePlaneFileNameForCandidate(pageIndex, pagePlaneCandidate);
             var outFile = File(renderDir + "/" + fileName);
             var ok = exportPage(page, outFile);
             var bounds = pageLocalBounds(page);
             diagnostics.push({
                 accepted: ok === true,
-                reason: ok ? "source_backed_page_background_plane_exported"
-                        : "source_backed_page_background_plane_missing_file",
+                reason: ok ? pagePlaneReasonForCandidate(pagePlaneCandidate, "exported")
+                        : pagePlaneReasonForCandidate(pagePlaneCandidate, "missing_file"),
                 pageIndex: page.documentOffset,
                 file: ok ? "rendered_frames/" + fileName : null,
                 bounds: bounds,
                 elapsedMs: nowMs() - pageStart
             });
             if (!ok) continue;
-            var candidateId = typeof _canonicalPagePlaneCandidateId === "function"
-                    ? _canonicalPagePlaneCandidateId(page.documentOffset)
-                    : ("cand.pass.page_backgrounds.page."
-                        + String(page.documentOffset)
-                        + ".source_backed_page_background_plane");
-            results.push({
-                id: 0,
-                type: "page_background_plane",
-                candidateId: candidateId,
-                candidateMatchStrategy: "page_plane_direct",
-                file: "rendered_frames/" + fileName,
-                bounds: bounds,
-                pageIndex: page.documentOffset,
-                zOrder: -900000,
-                zOrderKnown: true,
-                visualLayer: "PAGE_BACKGROUND",
-                policyLayer: "BACKGROUND",
-                visualOwner: "indesign_png",
-                textOwner: "none",
-                placement: "FLOATING",
-                coordinateSpace: "PAGE",
-                materialization: "PAGE_PLANE_PNG",
-                slotRole: "page_background_plane",
-                ownershipSlot: "SHELL_SLOT",
-                reason: "source_backed_page_background_plane_export",
-                sourceObjectIds: [],
-                visualSourceObjectIds: [],
-                exportSourceObjectIds: [],
-                hiddenTextFrameIds: [],
-                globalRenderedFrame: opts.globalPreExport === true,
-                exportSanity: {
-                    singleTextlessPagePlane: true,
-                    fileBytes: outFile.exists ? outFile.length : 0,
-                    pageRelativeBounds: bounds,
-                    hiddenInlineItemCount: savedInlineItems.length,
-                    hiddenCompletePngTextOwnerItemCount: savedCompletePngTextOwnerItems.length,
-                    hiddenTextFrameCount: savedDocumentTextFrames.length,
-                    hiddenTableStyleItemCount: savedTableStyleItems.length,
-                    globalPreExport: opts.globalPreExport === true
-                }
-            });
+            var frame = pagePlaneFrameFromCandidate(
+                    pagePlaneCandidate,
+                    page.documentOffset,
+                    "rendered_frames/" + fileName,
+                    bounds,
+                    outFile.exists ? outFile.length : 0,
+                    opts.globalPreExport === true,
+                    pagePlaneReasonForCandidate(pagePlaneCandidate, "export"));
+            frame.exportSanity.hiddenInlineItemCount = savedInlineItems.length;
+            frame.exportSanity.hiddenCompletePngTextOwnerItemCount = savedCompletePngTextOwnerItems.length;
+            frame.exportSanity.hiddenTextFrameCount = savedDocumentTextFrames.length;
+            frame.exportSanity.hiddenTableStyleItemCount = savedTableStyleItems.length;
+            frame.exportSanity.hiddenVisualSourceItemCount = savedPagePlaneHiddenVisualItems.length;
+            results.push(frame);
         }
         _tExportLoop = nowMs() - _exportLoopStart;
     } finally {
         var _restoreStart = nowMs();
         try { restoreTextFrames(savedDocumentTextFrames); } catch (eRestoreTextFrames) {}
+        try { _restoreItemsForExport(savedPagePlaneHiddenVisualItems); } catch (eRestorePagePlaneHiddenVisual) {}
         try { _restoreItemsForExport(savedCompletePngTextOwnerItems); } catch (eRestoreCompletePngTextOwner) {}
         try { _restoreItemsForExport(savedTableStyleItems); } catch (eRestoreTableStyle) {}
         try { _restoreItemsForExport(savedInlineItems); } catch (eRestoreInline) {}
@@ -594,6 +754,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             hiddenInlineItemCount: savedInlineItems.length,
             hiddenCompletePngTextOwnerItemCount: savedCompletePngTextOwnerItems.length,
             hiddenTableStyleItemCount: savedTableStyleItems.length,
+            hiddenVisualSourceItemCount: savedPagePlaneHiddenVisualItems.length,
             textHideScope: _textHideScope
         };
         writeJson(outputDir + "/single-textless-page-plane-export.json", {
@@ -835,6 +996,26 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
         return saved;
     }
 
+    function _collectCandidateHiddenVisualItems(candidate) {
+        var items = [];
+        var seen = {};
+        var ids = candidate ? (candidate.hiddenVisualSourceObjectIds || []) : [];
+        for (var i = 0; i < ids.length; i++) {
+            var id = ids[i];
+            if (id === null || id === undefined) continue;
+            var key = String(id);
+            if (seen[key]) continue;
+            var item = itemById ? itemById[key] : null;
+            if (!item) continue;
+            try {
+                if (item.constructor && item.constructor.name === "TextFrame") continue;
+            } catch (eTextHiddenVisual) {}
+            seen[key] = true;
+            items.push(item);
+        }
+        return items;
+    }
+
     function _duplicateNestedCompletePngForExport(item, candidate, doc) {
         if (!item || !candidate || !doc) return null;
         if (candidate.materialization !== "COMPLETE_PNG"
@@ -900,6 +1081,12 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 var plannedTextFrameShell = inlineCandidate.visualAction === "PLACE_TEXT_SHELL"
                         && (inlineCandidate.slotRole === "direct_child_shell_slot"
                             || inlineCandidate.compositeRole === "direct_child_shell_slot"
+                            || inlineCandidate.slotRole === "shell_slot_only"
+                            || inlineCandidate.compositeRole === "shell_slot_only"
+                            || inlineCandidate.slotRole === "background_shell_slot"
+                            || inlineCandidate.compositeRole === "background_vector_source"
+                            || inlineCandidate.slotRole === "textless_group_visual_slot"
+                            || inlineCandidate.compositeRole === "textless_group_visual_slot"
                             || inlineCandidate.slotRole === "inline_text_frame_shell_slot"
                             || inlineCandidate.compositeRole === "inline_visible_text_frame_shell"
                             || inlineCandidate.slotRole === "inline_editable_text_shell_composite"
@@ -909,7 +1096,9 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             || inlineCandidate.slotRole === "table_cell_shell_slot"
                             || inlineCandidate.compositeRole === "table_carrier_sibling_decoration"
                             || inlineCandidate.slotRole === "source_bundle_text_range_shell_slot"
-                            || inlineCandidate.compositeRole === "source_bundle_text_range_shell")
+                            || inlineCandidate.compositeRole === "source_bundle_text_range_shell"
+                            || inlineCandidate.slotRole === "inline_micro_vector_pattern_shell_slot"
+                            || inlineCandidate.compositeRole === "inline_micro_vector_pattern_shell")
                         && (inlineCandidate.exportSourceObjectIds && inlineCandidate.exportSourceObjectIds.length > 0);
                 var plannedInlineTextFrameVisual = inlineCandidate.visualAction === "PLACE_INLINE_PNG"
                         && inlineCandidate.placement === "INLINE"
@@ -1011,6 +1200,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                 var savedInlineTextFrames = [];
                 var inlineHiddenTextFrameIds = [];
                 var savedInlineOutOfScopeItems = [];
+                var savedInlineHiddenVisualItems = [];
                 var inlineCompleteMarkerEditableIds = [];
                 var inlineCompleteMarker = false;
                 try {
@@ -1036,6 +1226,10 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
                     inlineStats.exportAttempts++;
                     try {
+                        var inlineHiddenVisualItems = _collectCandidateHiddenVisualItems(inlineCandidate);
+                        if (inlineHiddenVisualItems.length > 0) {
+                            savedInlineHiddenVisualItems = _hideItemsForExport(inlineHiddenVisualItems);
+                        }
                         var inlineExportSourceIds = inlineCandidate.exportSourceObjectIds || [];
                         if (inlineExportSourceIds.length > 0) {
                             var inlineOutOfScope = _collectOutOfScopeChildrenForSourceIds(
@@ -1184,6 +1378,11 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         _restoreItemsForExport(savedInlineOutOfScopeItems);
                     }
                 } catch (eRestoreInlineOutOfScope) {}
+                try {
+                    if (savedInlineHiddenVisualItems && savedInlineHiddenVisualItems.length > 0) {
+                        _restoreItemsForExport(savedInlineHiddenVisualItems);
+                    }
+                } catch (eRestoreInlineHiddenVisual) {}
                 restoreTextFrames(savedInlineTextFrames);
         } catch (eInline) {}
     }

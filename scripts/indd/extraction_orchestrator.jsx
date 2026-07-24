@@ -1450,6 +1450,8 @@ function _runRenderPhases(doc, ctx, allItems) {
             sourceOwnershipStageGateSummary: ctx.extractionPlan.sourceOwnershipStageGateSummary,
             preObjectPlanTextlessShellSuppressionSummary:
                     ctx.extractionPlan.preObjectPlanTextlessShellSuppressionSummary,
+            inlineMicroVectorPatternCollapseSummary:
+                    ctx.extractionPlan.inlineMicroVectorPatternCollapseSummary,
             sourceSlotCanonicalizationSummary: ctx.extractionPlan.sourceSlotCanonicalizationSummary,
             executionCandidateContractSummary: ctx.extractionPlan.executionCandidateContractSummary,
             legacyNormalizationFilterSummary: ctx.extractionPlan.legacyNormalizationFilterSummary,
@@ -1559,8 +1561,35 @@ function _runRenderPhases(doc, ctx, allItems) {
     var tfShellFrames = [];
 
     _marker(ctx.outputDir, "06b_pageTextlessGroups");
+    var pageBackgroundPlaneCandidates =
+            _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.page_backgrounds");
+    var pageTextlessGroupCandidates =
+            _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.page_textless_graphic_groups");
+    var pageTextlessPlanePages = [];
+    var pageTextlessPlanePageSeen = {};
+    function addPageTextlessPlanePage(candidate) {
+        if (!candidate) return;
+        var pageIndex = Number(candidate.pageIndex);
+        if (isNaN(pageIndex) || pageIndex < 0) return;
+        if (pageTextlessPlanePageSeen[String(pageIndex)]) return;
+        pageTextlessPlanePageSeen[String(pageIndex)] = true;
+        pageTextlessPlanePages.push(pageIndex);
+    }
+    for (var pbci = 0; pbci < pageBackgroundPlaneCandidates.length; pbci++) {
+        addPageTextlessPlanePage(pageBackgroundPlaneCandidates[pbci]);
+    }
+    var pageTextlessGroupPageSeen = {};
+    for (var ptgci = 0; ptgci < pageTextlessGroupCandidates.length; ptgci++) {
+        addPageTextlessPlanePage(pageTextlessGroupCandidates[ptgci]);
+        var ptgPageIndex = Number(pageTextlessGroupCandidates[ptgci].pageIndex);
+        if (!isNaN(ptgPageIndex) && ptgPageIndex >= 0) {
+            pageTextlessGroupPageSeen[String(ptgPageIndex)] = true;
+        }
+    }
     var pagePlaneExportOptions = {
         inlineFallbackAllItems: true,
+        allowedPageIndexes: pageTextlessPlanePages,
+        pagePlaneCandidates: pageTextlessGroupCandidates.concat(pageBackgroundPlaneCandidates),
         hiddenTableStyleSourceObjectIdsByPage:
                 ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {},
         hiddenCompletePngTextOwnerSourceObjectIdsByPage:
@@ -1580,7 +1609,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     if (imagePlacedPngCandidates && imagePlacedPngCandidates.length > 0) {
         pagePlaneHideCandidates = inlinePngCandidates.concat(imagePlacedPngCandidates);
     }
-    if (!_contentTextOnly) {
+    if (!_contentTextOnly && pageTextlessPlanePages.length > 0) {
         pageTextlessGroupResult = exportSingleTextlessPagePlanes(
                 doc,
                 ctx.outputDir,
@@ -1594,7 +1623,15 @@ function _runRenderPhases(doc, ctx, allItems) {
         _storeCachedSingleTextlessPagePlanes(ctx, pageTextlessGroupResult);
         _marker(ctx.outputDir, "06b1a_pageTextlessGroups_cacheStoreDone");
     }
-    _addRenderMeta(pageTextlessGroupResult.frames, "page_object", "pass.page_backgrounds");
+    for (var ptgm = 0; pageTextlessGroupResult.frames && ptgm < pageTextlessGroupResult.frames.length; ptgm++) {
+        var ptgFrame = pageTextlessGroupResult.frames[ptgm];
+        var ptgFramePageIndex = Number(ptgFrame && ptgFrame.pageIndex);
+        var ptgFramePass = !isNaN(ptgFramePageIndex)
+                && pageTextlessGroupPageSeen[String(ptgFramePageIndex)]
+                ? "pass.page_textless_graphic_groups"
+                : "pass.page_backgrounds";
+        _addRenderMeta([ptgFrame], "page_object", ptgFramePass);
+    }
     _marker(ctx.outputDir, "06b2_pageTextlessGroups_metaDone");
     for (var ptgi = 0; ptgi < pageTextlessGroupResult.frames.length; ptgi++) {
         renderedFloatingItems.push(pageTextlessGroupResult.frames[ptgi]);

@@ -1219,7 +1219,10 @@ function _plannerBundleIsPageRootTextlessVisualPlane(candidate) {
     if (!candidate) return false;
     return candidate.slotRole === "page_root_textless_visual_plane"
             || candidate.compositeRole === "page_root_textless_visual_plane"
-            || candidate.kind === "PageRootTextlessVisualPlane";
+            || candidate.slotRole === "page_root_textless_visual_group"
+            || candidate.compositeRole === "page_root_textless_visual_group"
+            || candidate.kind === "PageRootTextlessVisualPlane"
+            || candidate.kind === "PageRootTextlessVisualGroup";
 }
 
 function _plannerBundleSourceIdsUnion(a, b) {

@@ -594,7 +594,9 @@ function _shouldPreserveObjectPlanCandidateId(objectPlan) {
             || objectPlan.visualAction === "PLACE_PAGE_BACKGROUND_PNG"
             || objectPlan.passId === "pass.master_page_graphics"
             || objectPlan.slotRole === "page_background_plane"
-            || objectPlan.compositeRole === "page_background_plane";
+            || objectPlan.compositeRole === "page_background_plane"
+            || objectPlan.slotRole === "background_layer_backdrop_stack"
+            || objectPlan.compositeRole === "background_layer_backdrop_stack";
 }
 
 function _applyDroppedObjectPlanExecutionShape(candidate, objectPlan) {

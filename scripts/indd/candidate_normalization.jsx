@@ -90,6 +90,50 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         return _sortedNumericIds(ids);
     }
 
+    function hiddenVisualSourceIdsIncludeNonTextVisual(candidate) {
+        var ids = candidate ? (candidate.hiddenVisualSourceObjectIds || []) : [];
+        for (var i = 0; i < ids.length; i++) {
+            var src = sourceInfoById[String(ids[i])];
+            if (!src) continue;
+            if (String(src.kind || "") !== "TextFrame") return true;
+            if (src.hasPlacedVisual === true
+                    || src.hasVisibleFill === true
+                    || src.hasVisibleStroke === true) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function sourceIsExportSourceOrCarrier(sourceId, exportSourceIds) {
+        if (sourceId === null || sourceId === undefined) return false;
+        if (_sourceIdsContain(exportSourceIds || [], sourceId)) return true;
+        for (var i = 0; exportSourceIds && i < exportSourceIds.length; i++) {
+            if (sourceContainsSourceId(sourceId, exportSourceIds[i])) return true;
+        }
+        return false;
+    }
+
+    function completeSlotOnlyShellHiddenVisualContract(candidate) {
+        if (!_isExtractionShellCandidate(candidate)) return false;
+        if (candidate.slotRole !== "shell_slot_only" && candidate.mode !== "SLOT_ONLY") return false;
+        if (!candidate.sourceObjectIds || candidate.sourceObjectIds.length === 0) return false;
+        if (!candidate.exportSourceObjectIds || candidate.exportSourceObjectIds.length === 0) return false;
+        var hidden = _sourceIdsUnion(candidate.hiddenVisualSourceObjectIds || [], []);
+        var hiddenSeen = _sourceIdSet(hidden);
+        for (var i = 0; i < candidate.sourceObjectIds.length; i++) {
+            var sourceId = candidate.sourceObjectIds[i];
+            if (sourceIsExportSourceOrCarrier(sourceId, candidate.exportSourceObjectIds)) continue;
+            if (hiddenSeen[String(sourceId)]) continue;
+            hiddenSeen[String(sourceId)] = true;
+            hidden.push(sourceId);
+        }
+        hidden = _sourceIdsMinus(_sortedNumericIds(hidden), candidate.exportSourceObjectIds);
+        var before = _sourceSetKey(candidate.hiddenVisualSourceObjectIds || []);
+        candidate.hiddenVisualSourceObjectIds = hidden;
+        return before !== _sourceSetKey(candidate.hiddenVisualSourceObjectIds || []);
+    }
+
     function sourceIsTextlessTextFrameShellMaterial(sourceId) {
         var src = sourceInfoById[String(sourceId)];
         if (!src || String(src.kind || "") !== "TextFrame") return false;
@@ -2471,8 +2515,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (shellCandidate.slotRole === "shell_slot_only"
                 && shellCandidate.exportSourceObjectIds
                 && shellCandidate.exportSourceObjectIds.length > 0
-                && shellCandidate.hiddenVisualSourceObjectIds
-                && shellCandidate.hiddenVisualSourceObjectIds.length > 0) {
+                && hiddenVisualSourceIdsIncludeNonTextVisual(shellCandidate)) {
             continue;
         }
 
@@ -3273,6 +3316,11 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
                     + _sourceSetKey(normalized[rebuiltIdx].sourceObjectIds)] = true;
             var rebuiltExactKey = exactShellSlotKeyForCandidate(normalized[rebuiltIdx]);
             if (rebuiltExactKey) normalizedExactShellOwnerIndexByKey[rebuiltExactKey] = rebuiltIdx;
+        }
+    }
+    for (var hiddenContractIdx = 0; hiddenContractIdx < normalized.length; hiddenContractIdx++) {
+        if (completeSlotOnlyShellHiddenVisualContract(normalized[hiddenContractIdx])) {
+            refreshCandidateIdentity(normalized[hiddenContractIdx]);
         }
     }
     var exactValidated = assertNoExactShellSlotDuplicates(normalized);

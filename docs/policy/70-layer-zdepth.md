@@ -222,10 +222,12 @@ occlusion, page numbers, literal text, or coordinate-specific exceptions.
 
 If the source metadata marks a visual-only page/spread object as belonging to a
 background-role layer, such as `배경`, `바탕`, `background`, `bg`, or `backdrop`, Stage 1
-must treat that layer name as a diagnostic hint only. It may help explain why a
-visual source sits low in the source stream, but it does not choose the HWPX
-execution stratum. The visual becomes `PAGE_BACKGROUND` only when the ObjectPlan
-is an explicit page background plane:
+must treat that layer name as source metadata, not as an executor shortcut. It
+does not choose the HWPX execution stratum by itself; it can prove the
+`BACKGROUND_LAYER_TEXTLESS_GRAPHIC` role only when the same source is textless,
+page/floating material and its visible pages come from IDML/resolved source
+range metadata. The visual becomes `PAGE_BACKGROUND` only when the ObjectPlan is
+an explicit page background plane:
 `slotRole=page_background_plane` and `compositeRole=page_background_plane`.
 The executor-facing action may be the existing extracted text-shell path or a
 dedicated page-plane action, but the ownership contract is the same: the plane
@@ -236,14 +238,24 @@ Allowed page-background source roles:
 
 - `MASTER_TEXTLESS_GRAPHIC`: textless graphic material from an applied master
   page or an applied master graphic candidate.
-- `SPREAD_CROSS_TEXTLESS_GRAPHIC`: textless graphic material whose source
-  bounds intersect at least two pages of the same applied spread. Each
-  intersected page may receive its own page-local background fragment.
+- `BACKGROUND_LAYER_TEXTLESS_GRAPHIC`: textless graphic material whose source
+  metadata places it on a background-role layer and whose visible-page set comes
+  from IDML/resolved source range metadata. This role is source-backed; it is not
+  inferred from page-wide bounds, spread-crossing geometry, rendered pixels, or
+  output occlusion.
+- `SPREAD_CROSS_BACKGROUND_GRAPHIC`: textless graphic material whose source
+  visible-page set crosses more than one page and whose source metadata also
+  proves background intent. Spread-cross geometry names the placement pattern;
+  it does not prove background ownership by itself.
+- `PAGE_WIDE_BACKGROUND_GRAPHIC`: textless graphic material whose source bounds
+  broadly cover a page and whose source metadata also proves background intent.
+  Page-wide geometry names the placement pattern; it does not prove background
+  ownership by itself.
 
-Page-wide bounds alone are not a page-background source role. A page-local
-textless graphic that merely covers most or all of a page stays ordinary
-`TEXTLESS_IMAGE_GROUP` material unless it also satisfies one of the allowed
-source roles above.
+Spread-cross bounds and page-wide bounds without background source evidence are
+not page-background source roles. A page-local or spread-cross textless graphic
+that merely covers most or all of a page stays ordinary `TEXTLESS_IMAGE_GROUP`
+material unless it has one of the allowed source roles above.
 
 A page-root background/textless plane may include only component members that
 satisfy all of the following source-owned facts:
@@ -252,8 +264,9 @@ satisfy all of the following source-owned facts:
 - visible source proof exists through `visualSourceObjectIds` or
   `exportSourceObjectIds`;
 - the source is not story-flow inline material and has no inline anchor owner.
-- the source role is `MASTER_TEXTLESS_GRAPHIC` or
-  `SPREAD_CROSS_TEXTLESS_GRAPHIC`.
+- the source role is `MASTER_TEXTLESS_GRAPHIC`,
+  `BACKGROUND_LAYER_TEXTLESS_GRAPHIC`, `SPREAD_CROSS_BACKGROUND_GRAPHIC`, or
+  `PAGE_WIDE_BACKGROUND_GRAPHIC`.
 
 The following source slots are always excluded from a page background plane:
 
@@ -262,6 +275,13 @@ The following source slots are always excluded from a page background plane:
 - `COMPLETE_PNG` or `OWNED_BY_PNG` text owners;
 - story-flow inline source objects, even when their pixels are obtained through
   a page/master export helper.
+
+Once Stage 1 emits `slotRole=page_background_plane`, every later bridge,
+renderer, and HWPX importer must preserve the execution contract as
+`visualLayer=PAGE_BACKGROUND`, `policyLayer=BACKGROUND`,
+`materialization=PAGE_PLANE_PNG`, page coordinate space, and bottom page-plane
+z-depth. It is invalid for a cached or rendered page plane to inherit a legacy
+`CONTENT_VISUAL` layer from the candidate that supplied its export source.
 
 When a text-owning shell component is folded into a page background plane, the
 plane owns only the visual shell slot. Its `ownedTextFrameIds`,

@@ -794,7 +794,9 @@ public class HwpxImageBuilder {
     private static boolean isBehindTextVisualLayer(String visualLayer) {
         return "PAGE_BACKGROUND".equals(visualLayer)
                 || "CONTAINER_BACKDROP".equals(visualLayer)
-                || "LABEL_BACKDROP".equals(visualLayer);
+                || "LABEL_BACKDROP".equals(visualLayer)
+                || "CONTENT_BACKDROP".equals(visualLayer)
+                || "TEXT_CARD_BACKDROP".equals(visualLayer);
     }
 
     // ── 배경 PNG ──

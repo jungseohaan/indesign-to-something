@@ -19,6 +19,8 @@ DIRECT_STRATEGIES = {
     "candidate_source_set_direct",
     "candidate_source_set_contains_master_cluster",
     "explicit_ownership_candidate",
+    "page_plane_candidate",
+    "page_plane_direct",
     "planned_source_set_composite",
 }
 

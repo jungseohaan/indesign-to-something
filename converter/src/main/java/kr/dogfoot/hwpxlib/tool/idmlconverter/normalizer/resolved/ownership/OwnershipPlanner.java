@@ -3188,6 +3188,10 @@ public final class OwnershipPlanner {
 
     private void addPlanForRendered(RenderedGroup rg, String channel) {
         if (rg == null) return;
+        if (isRenderedPageBackgroundPlane(rg)) {
+            addPlanForRenderedPageBackgroundPlane(rg, channel);
+            return;
+        }
         Placement placement = placementOf(rg);
         TextAction textAction = textActionOf(rg);
         VisualAction visualAction = visualActionOf(rg, placement, textAction);
@@ -3280,6 +3284,75 @@ public final class OwnershipPlanner {
                 sourceLayerName(rg, sourceIds),
                 sourceLayerIndex(rg, sourceIds));
         plans.add(plan.withCropSourceBounds(cropSourceBounds));
+    }
+
+    private void addPlanForRenderedPageBackgroundPlane(RenderedGroup rg, String channel) {
+        int[] sourceIds = sourceIdsOrSelf(rg);
+        int[] visualSourceIds = rg.exportSourceObjectIds() != null && rg.exportSourceObjectIds().length > 0
+                ? sortedCopyOf(rg.exportSourceObjectIds())
+                : sortedCopyOf(sourceIds);
+        String candidateId = !safe(rg.candidateId()).isEmpty()
+                ? rg.candidateId()
+                : "cand.pass.page_backgrounds.page." + rg.pageIndex()
+                + ".source_backed_page_background_plane";
+        String planPassId = !safe(rg.planPassId()).isEmpty()
+                ? rg.planPassId()
+                : "pass.page_backgrounds";
+        String reason = !safe(rg.reason()).isEmpty()
+                ? rg.reason()
+                : "rendered_page_background_plane_contract_restored";
+        ObjectPlan plan = new ObjectPlan(
+                rg.id(),
+                channel + ":page_background_plane:" + safe(rg.itemType()),
+                rg.pageIndex(),
+                TextAction.DROP_TEXT,
+                VisualAction.PLACE_FLOATING_PNG,
+                VisualLayer.PAGE_BACKGROUND,
+                Placement.FLOATING,
+                rg.id(),
+                sourceIds,
+                visualSourceIds,
+                new int[0],
+                new int[0],
+                new int[0],
+                sourceBundleKeyOf(rg, sourceIds, new int[0]),
+                Materialization.PAGE_PLANE_PNG,
+                CoordinateSpace.PAGE,
+                null,
+                -900000,
+                reason,
+                rg.file(),
+                rg.bounds(),
+                null,
+                sourceLayerId(rg, sourceIds),
+                sourceLayerName(rg, sourceIds),
+                sourceLayerIndex(rg, sourceIds))
+                .withPlannerIdentity(candidateId, planPassId, "page_background_plane");
+        plans.add(plan);
+    }
+
+    private static boolean isRenderedPageBackgroundPlane(RenderedGroup rg) {
+        if (rg == null) return false;
+        String slotRole = safe(rg.slotRole());
+        String compositeRole = safe(rg.compositeRole());
+        String candidateId = safe(rg.candidateId());
+        String planPassId = safe(rg.planPassId());
+        String type = safe(rg.type());
+        String file = safe(rg.file());
+        return "page_background_plane".equals(slotRole)
+                || "page_background_plane".equals(compositeRole)
+                || "pass.page_backgrounds".equals(planPassId)
+                || type.equals("page_background_plane")
+                || candidateId.contains("source_backed_page_background_plane")
+                || candidateId.contains("page_background_plane")
+                || file.contains("page_background_plane_p");
+    }
+
+    private static int[] sortedCopyOf(int[] ids) {
+        if (ids == null || ids.length == 0) return new int[0];
+        int[] copy = Arrays.copyOf(ids, ids.length);
+        Arrays.sort(copy);
+        return copy;
     }
 
     private double[] renderedPlanBounds(
@@ -5679,16 +5752,8 @@ public final class OwnershipPlanner {
     }
 
     private boolean isPageSpanningBackdropVisualFragmentPlan(ObjectPlan plan) {
-        if (plan == null || !plan.hasVisibleVisual()) return false;
-        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return false;
-        if (plan.placement != Placement.FLOATING) return false;
-        if (plan.materialization != Materialization.TEXTLESS_VISUAL_FRAGMENT) return false;
-        if (plan.visualPolicyLayer() != PolicyLayer.BACKGROUND) return false;
-        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
-        if (plan.hiddenVisualSourceObjectIds != null && plan.hiddenVisualSourceObjectIds.length > 0) return false;
-        if (!isBackgroundBoundsSanityCandidate(plan.bounds)) return false;
-        if (!hasPageLevelSourceObject(plan.sourceObjectIds)) return false;
-        return pageSpanningBackdropSourceIds(plan).length > 0;
+        // Page-spanning geometry is not a source role; keep the Stage 1 plan.
+        return false;
     }
 
     private boolean hasPageLevelSourceObject(int[] sourceObjectIds) {
@@ -5704,34 +5769,15 @@ public final class OwnershipPlanner {
     }
 
     private boolean isPageMaterialVisualPlan(ObjectPlan plan) {
-        if (plan == null || !plan.hasVisibleVisual()) return false;
-        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG) return false;
-        if (plan.placement != Placement.FLOATING) return false;
-        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
-        int[] sourceIds = visualSourceIds(plan);
-        if (sourceIds.length == 0) return false;
-        boolean hasMaterialBackdrop = false;
-        for (int sourceId : sourceIds) {
-            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
-            if (item == null) return false;
-            if (!isSingleColorPageBackgroundSourceItem(item)) return false;
-            double[] pageLocal = pageLocalBoundsOf(item, plan.pageIndex, true);
-            if (isMaterialPageBackdropOnPage(item, plan.pageIndex, pageLocal)) {
-                hasMaterialBackdrop = true;
-            }
-        }
-        return hasMaterialBackdrop && isLowestPageWideBackgroundSourceDepth(sourceIds, plan.pageIndex);
+        // Page-wide/single-color geometry is not source ownership evidence.
+        // Stage 1 may execute only an explicit source-declared ObjectPlan.
+        return false;
     }
 
     private boolean isNativePageMaterialShapeVisualPlan(ObjectPlan plan) {
-        if (plan == null) return false;
-        int[] sourceIds = visualSourceIds(plan);
-        if (sourceIds.length == 0) return false;
-        for (int sourceId : sourceIds) {
-            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
-            if (!isSingleColorPageBackgroundSourceItem(item)) return false;
-        }
-        return true;
+        // See isPageMaterialVisualPlan: broad page material is not promoted
+        // from geometry alone.
+        return false;
     }
 
     private static boolean isPaperFillOnlyPageMaterialItem(ResolvedPageItem item) {
@@ -5764,14 +5810,8 @@ public final class OwnershipPlanner {
     }
 
     private boolean isSingleSourcePageWideBackground(int[] sourceIds, int pageIndex) {
-        if (sourceIds == null || sourceIds.length == 0 || data == null) return false;
-        int[] roots = sourceRootObjectIds(sourceIds);
-        if (roots.length != 1) return false;
-        ResolvedPageItem root = data.getPageItem(String.valueOf(roots[0]));
-        if (!isSingleColorPageBackgroundSourceItem(root)) return false;
-        double[] pageLocal = pageLocalBoundsOf(root, pageIndex, true);
-        if (!isMaterialPageBackdropOnPage(root, pageIndex, pageLocal)) return false;
-        return isLowestPageWideBackgroundSourceDepth(roots, pageIndex);
+        // Page-wide bounds are no longer a page-background source role.
+        return false;
     }
 
     private boolean isLowestPageWideBackgroundSourceDepth(int[] sourceIds, int pageIndex) {
@@ -5871,13 +5911,9 @@ public final class OwnershipPlanner {
     }
 
     private boolean isPageSpanningBackdropVisualPlan(ObjectPlan plan) {
-        if (plan == null || !isBackgroundBoundsSanityCandidate(plan.bounds)) return false;
-        if (isPlannerDeclaredObjectPlan(plan)) return false;
-        int[] visualSourceIds = visualSourceIds(plan);
-        if (visualSourceIds.length == 0) return false;
-        if (!hasPageLevelSourceRoots(visualSourceIds)) return false;
-        if (plan.hiddenVisualSourceObjectIds != null && plan.hiddenVisualSourceObjectIds.length > 0) return false;
-        return pageSpanningBackdropSourceIds(plan).length > 0;
+        // Do not rewrite ordinary broad textless material into a page-spanning
+        // owner unless Stage 1 has emitted an explicit page-plane ObjectPlan.
+        return false;
     }
 
     private ObjectPlan pageSpanningBackdropVisualPlan(ObjectPlan plan) {
@@ -7576,17 +7612,17 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (rg.isPageBackground()) {
-            return VisualLayer.CONTENT_VISUAL;
+            return VisualLayer.CONTENT_BACKDROP;
         }
         if (isSourceBackgroundLayer(rg, sourceIds)
                 && !(visualAction == VisualAction.PLACE_TEXT_SHELL
                 && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
-            return VisualLayer.CONTENT_VISUAL;
+            return VisualLayer.CONTENT_BACKDROP;
         }
         if (isSourceAuthoredPageWashBackdropImage(rg, sourceIds)
                 && !(visualAction == VisualAction.PLACE_TEXT_SHELL
                 && textAction == TextAction.OWNED_BY_HWPX_TEXT)) {
-            return VisualLayer.CONTENT_VISUAL;
+            return VisualLayer.CONTENT_BACKDROP;
         }
         if (isSourceDepthPageOrSpreadBackdropImage(rg, sourceIds)
                 && !(visualAction == VisualAction.PLACE_TEXT_SHELL
@@ -15646,6 +15682,11 @@ public final class OwnershipPlanner {
                     : VisualLayer.CONTENT_VISUAL;
         }
         if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.placement == Placement.FLOATING
+                && planHasPrimitiveBackgroundLayerShellSource(plan)) {
+            return VisualLayer.CONTENT_BACKDROP;
+        }
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && layer == VisualLayer.CONTAINER_BACKDROP
                 && !isPlanAllowedBackgroundPlane(plan, zOrder)) {
             layer = VisualLayer.LABEL_BACKDROP;
@@ -15742,13 +15783,17 @@ public final class OwnershipPlanner {
         }
         if (isSourceAuthoredPageWashBackdropImage(
                 renderedGroupForPlan(plan), plan.sourceObjectIds)) {
-            return VisualLayer.CONTENT_VISUAL;
+            return VisualLayer.CONTENT_BACKDROP;
         }
         if (!hasPlacedContentSourceTree(plan)) return layer;
         if (hasVisibleShellRootWithPlacedContentTree(plan)) return layer;
-        if (isBackgroundLayerName(plan.sourceLayerName)
+        if (plan.placement == Placement.FLOATING
+                && planHasBackgroundLayerSource(plan)) {
+            return VisualLayer.CONTENT_BACKDROP;
+        }
+        if (planHasBackgroundLayerSource(plan)
                 && (layer == VisualLayer.PAGE_BACKGROUND || layer == VisualLayer.CONTAINER_BACKDROP)) {
-            return VisualLayer.CONTENT_VISUAL;
+            return VisualLayer.CONTENT_BACKDROP;
         }
         if (layer == VisualLayer.PAGE_BACKGROUND
                 || layer == VisualLayer.CONTAINER_BACKDROP) {
@@ -15770,6 +15815,37 @@ public final class OwnershipPlanner {
             return layer;
         }
         return VisualLayer.CONTENT_VISUAL;
+    }
+
+    private boolean planHasBackgroundLayerSource(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (isBackgroundLayerName(plan.sourceLayerName)) return true;
+        int[] roots = sourceRootObjectIds(plan.sourceObjectIds);
+        if (roots.length == 0) roots = sourceRootObjectIds(visualSourceIds(plan));
+        for (int rootId : roots) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(rootId));
+            if (item != null && isBackgroundLayerName(item.layerName())) return true;
+        }
+        return false;
+    }
+
+    private boolean planHasPrimitiveBackgroundLayerShellSource(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (plan.placement == Placement.INLINE) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        if (plan.hiddenVisualSourceObjectIds != null
+                && plan.hiddenVisualSourceObjectIds.length > 0) return false;
+        if (!planHasBackgroundLayerSource(plan)) return false;
+        int[] roots = sourceRootObjectIds(plan.sourceObjectIds);
+        if (roots.length != 1) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(roots[0]));
+        if (item == null || item.type() == null) return false;
+        String type = item.type();
+        if ("Group".equals(type) || "TextFrame".equals(type)) return false;
+        return "Rectangle".equals(type)
+                || "Oval".equals(type)
+                || "Polygon".equals(type)
+                || "GraphicLine".equals(type);
     }
 
     private static boolean isPageSpanningBackdropVisualFragmentContract(ObjectPlan plan) {

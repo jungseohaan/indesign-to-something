@@ -48,8 +48,9 @@ consolidated here.
     that says otherwise. `composedLines` may be used to preserve source line
     geometry or to validate overlap, but not to rewrite alignment by heuristic.
 14. Page-background graphics use source-backed page-background planes only when
-    Stage 1 assigns eligible master or spread-cross textless source material.
-    Ordinary page-local graphics remain ordinary textless image group material.
+    Stage 1 assigns eligible master-page textless source material. Ordinary
+    page-local and spread-cross graphics remain ordinary textless image group
+    material.
 
 ## 1.1 Refactoring Direction
 

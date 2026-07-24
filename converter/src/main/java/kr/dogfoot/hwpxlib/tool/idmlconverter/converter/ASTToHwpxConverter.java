@@ -334,37 +334,49 @@ public class ASTToHwpxConverter {
             ctx.framesConverted++;
         }
 
-        // 일반 플로팅 텍스트 프레임 + TABLE + 그룹 내부 FIGURE: z-order 순으로 인터리빙
-        // TABLE도 플로팅 객체이므로 먼저 모두 배치하면 뒤늦게 나온 그림이 표 텍스트를 덮을 수 있다.
-        List<ASTBlock> inFrontBlocks = new ArrayList<>();
+        // 2) IN_FRONT_OF_TEXT FIGURE: label shell, foreground mask, content
+        // visual 등 텍스트 없는 시각 재료를 먼저 배치한다. Stage 1 source
+        // zOrder는 이 visual plane 내부 순서에만 쓴다.
+        List<ASTFigure> inFrontFigures = new ArrayList<>();
+        // 3) TEXT_TABLE_STRUCTURE: editable/searchable HWPX text and table
+        // content always remain above textless graphics.
+        List<ASTBlock> textStructureBlocks = new ArrayList<>();
         for (ASTTextFrameBlock block : floatingBlocks) {
-            inFrontBlocks.add(block);
+            textStructureBlocks.add(block);
         }
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.TABLE) {
-                inFrontBlocks.add(block);
+                textStructureBlocks.add(block);
                 continue;
             }
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
                 if (!isBehindTextPlaneFigure(fig)) {
-                    inFrontBlocks.add(fig);
+                    inFrontFigures.add(fig);
                 }
             }
         }
-        Collections.sort(inFrontBlocks, new Comparator<ASTBlock>() {
+        Collections.sort(inFrontFigures, new Comparator<ASTFigure>() {
+            @Override
+            public int compare(ASTFigure a, ASTFigure b) {
+                return Integer.compare(zOrderOf(a), zOrderOf(b));
+            }
+        });
+        for (ASTFigure fig : inFrontFigures) {
+            imageBuilder.convertFigure(secPrPara, fig);
+            ctx.framesConverted++;
+        }
+        Collections.sort(textStructureBlocks, new Comparator<ASTBlock>() {
             @Override
             public int compare(ASTBlock a, ASTBlock b) {
                 return Integer.compare(zOrderOf(a), zOrderOf(b));
             }
         });
-        for (ASTBlock block : inFrontBlocks) {
+        for (ASTBlock block : textStructureBlocks) {
             if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
                 textBoxBuilder.convertTextFrameBlock(secPrPara, (ASTTextFrameBlock) block);
             } else if (block.blockType() == ASTBlock.BlockType.TABLE) {
                 tableBuilder.convertTable(secPrPara, (ASTTable) block);
-            } else if (block.blockType() == ASTBlock.BlockType.FIGURE) {
-                imageBuilder.convertFigure(secPrPara, (ASTFigure) block);
             }
             ctx.framesConverted++;
         }
@@ -399,6 +411,9 @@ public class ASTToHwpxConverter {
         if (fig == null) return false;
         String layer = fig.visualLayer();
         if ("PAGE_BACKGROUND".equals(layer)) return true;
+        if ("CONTAINER_BACKDROP".equals(layer)) return true;
+        if ("CONTENT_BACKDROP".equals(layer)) return true;
+        if ("TEXT_CARD_BACKDROP".equals(layer)) return true;
         if (layer != null && !layer.isEmpty()) return false;
         if (fig.fromGroup()) return false;
         return true;

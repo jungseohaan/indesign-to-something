@@ -482,30 +482,6 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                 || anchoredPosition === "INLINEPOSITION";
     }
 
-    function sourceMayBeBackgroundVectorCandidateFast(itemInfo, pageIndex) {
-        if (!itemInfo) return false;
-        var kindName = String(itemInfo.kind || "");
-        if (kindName !== "Rectangle" && kindName !== "Oval" && kindName !== "Polygon") return false;
-        if (itemInfo.visible === false || itemInfo.hiddenLayer === true || itemInfo.nonprinting === true) return false;
-        if (!itemInfo.bounds || itemInfo.bounds.length < 4) return false;
-        if (itemInfo.hasChildren === true || itemInfo.hasPlacedVisual === true) return false;
-        if (itemInfo.hasVisibleFill !== true || itemInfo.hasVisibleStroke === true) return false;
-        var pb = pageBoundsForBase(Number(pageIndex));
-        if (!pb || pb.length < 4 || !sourceBoundsIntersects(itemInfo.bounds, pb)) return false;
-        var pageWidth = Math.max(0, Number(pb[3]) - Number(pb[1]));
-        var pageHeight = Math.max(0, Number(pb[2]) - Number(pb[0]));
-        if (pageWidth <= 0 || pageHeight <= 0) return false;
-        var width = Math.max(0, Number(itemInfo.bounds[3]) - Number(itemInfo.bounds[1]));
-        var height = Math.max(0, Number(itemInfo.bounds[2]) - Number(itemInfo.bounds[0]));
-        var touchesLeft = Number(itemInfo.bounds[1]) <= Number(pb[1]) + 1.0;
-        var touchesRight = Number(itemInfo.bounds[3]) >= Number(pb[3]) - 1.0;
-        var touchesTop = Number(itemInfo.bounds[0]) <= Number(pb[0]) + 1.0;
-        var touchesBottom = Number(itemInfo.bounds[2]) >= Number(pb[2]) - 1.0;
-        var spansWidth = width >= pageWidth * 0.85 && touchesLeft && touchesRight;
-        var spansHeight = height >= pageHeight * 0.85 && touchesTop && touchesBottom;
-        return spansWidth || spansHeight;
-    }
-
     function sourceMayNeedDecorationCompositeBranch(itemInfo) {
         if (!itemInfo) return false;
         var kindName = String(itemInfo.kind || "");
@@ -993,87 +969,6 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         return false;
     }
 
-    function sourceLayerNameIsBackground(layerName) {
-        if (!layerName) return false;
-        var lower = String(layerName).toLowerCase();
-        return lower.indexOf("\uBC30\uACBD") >= 0
-                || lower.indexOf("\uBC14\uD0D5") >= 0
-                || lower.indexOf("background") >= 0
-                || lower === "bg"
-                || lower.indexOf("backdrop") >= 0;
-    }
-
-    var pageWideSingleColorMinZByPage = {};
-
-    function sourceBoundsIntersects(a, b) {
-        if (!a || !b || a.length < 4 || b.length < 4) return false;
-        return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
-                && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
-    }
-
-    function sourceLooksLikePageWideSingleColorFill(info, pageIndex) {
-        if (!info) return false;
-        var kindName = String(info.kind || "");
-        if (kindName !== "Rectangle" && kindName !== "Oval" && kindName !== "Polygon") return false;
-        if (!info.bounds || info.bounds.length < 4) return false;
-        if (info.hasChildren === true || info.hasPlacedVisual === true) return false;
-        if (hasPlacedVisualInSubtreeForBase(info.id) === true) return false;
-        if (info.hasVisibleFill !== true || info.hasVisibleStroke === true) return false;
-        if (info.visible === false || info.hiddenLayer === true || info.nonprinting === true) return false;
-        var pb = null;
-        try { pb = sourceIndex.pageBounds(Number(pageIndex)); } catch (ePageBounds) { pb = null; }
-        if (!pb || pb.length < 4 || !sourceBoundsIntersects(info.bounds, pb)) return false;
-        var pageWidth = Math.max(0, Number(pb[3]) - Number(pb[1]));
-        var pageHeight = Math.max(0, Number(pb[2]) - Number(pb[0]));
-        if (pageWidth <= 0 || pageHeight <= 0) return false;
-        var width = Math.max(0, Number(info.bounds[3]) - Number(info.bounds[1]));
-        var height = Math.max(0, Number(info.bounds[2]) - Number(info.bounds[0]));
-        var touchesLeft = Number(info.bounds[1]) <= Number(pb[1]) + 1.0;
-        var touchesRight = Number(info.bounds[3]) >= Number(pb[3]) - 1.0;
-        var touchesTop = Number(info.bounds[0]) <= Number(pb[0]) + 1.0;
-        var touchesBottom = Number(info.bounds[2]) >= Number(pb[2]) - 1.0;
-        var spansWidth = width >= pageWidth * 0.85 && touchesLeft && touchesRight;
-        var spansHeight = height >= pageHeight * 0.85 && touchesTop && touchesBottom;
-        return spansWidth || spansHeight;
-    }
-
-    function minPageWideSingleColorSourceZ(pageIndex) {
-        var key = String(pageIndex);
-        if (pageWideSingleColorMinZByPage.hasOwnProperty(key)) {
-            return pageWideSingleColorMinZByPage[key];
-        }
-        var minZ = null;
-        var pb = null;
-        try { pb = sourceIndex.pageBounds(Number(pageIndex)); } catch (ePageBounds) { pb = null; }
-        for (var i = 0; sourceItems && i < sourceItems.length; i++) {
-            var src = sourceItems[i];
-            if (!src || !src.bounds || src.bounds.length < 4) continue;
-            if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
-            if (src.isInline === true) continue;
-            if (!pb || pb.length < 4 || !sourceBoundsIntersects(src.bounds, pb)) continue;
-            var z = Number(src.zOrder || 0);
-            if (minZ === null || z < minZ) minZ = z;
-        }
-        pageWideSingleColorMinZByPage[key] = minZ;
-        return minZ;
-    }
-
-    function sourceIsBackgroundVectorCandidate(info, sourceId, pageIndex) {
-        var startedAt = basePerfNow();
-        function finishBackgroundVectorCandidate(result) {
-            basePerfCall("sourceIsBackgroundVectorCandidate", startedAt);
-            return result;
-        }
-        if (!sourceLooksLikePageWideSingleColorFill(info, pageIndex)) return finishBackgroundVectorCandidate(false);
-        if (info.hasChildren === true || info.hasPlacedVisual === true) return finishBackgroundVectorCandidate(false);
-        if (hasPlacedVisualInSubtreeForBase(sourceId)) return finishBackgroundVectorCandidate(false);
-        if (hasCandidateVectorPaintForBase(sourceId) !== true) return finishBackgroundVectorCandidate(false);
-        var minZ = minPageWideSingleColorSourceZ(pageIndex);
-        if (minZ === null || minZ === undefined) return finishBackgroundVectorCandidate(false);
-        var result = Number(info.zOrder || 0) <= Number(minZ) + 0.001;
-        return finishBackgroundVectorCandidate(result);
-    }
-
     function sourceBoundsAreaForBase(sourceId) {
         var src = baseCandidateSourceInfoById[String(sourceId)];
         var b = src ? src.bounds : null;
@@ -1502,31 +1397,6 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                     return rectOwnedByClipParentShell;
                 }
 
-                if (sourceMayBeBackgroundVectorCandidateFast(itemInfo, extractionPageIndex)
-                        && sourceIsBackgroundVectorCandidate(itemInfo, id, extractionPageIndex)
-                        && !directSiblingTextShellOwnedForRect()
-                        && !ownedByClipParentShellForRect()) {
-                    var backgroundVectorSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
-                    if (hasBroaderDecorationSourceSet(extractionPageIndex, backgroundVectorSourceIds || [id])) continue;
-                    item = item || domItemForBase(id);
-                    if (!item) continue;
-                    pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
-                        sourceObjectIds: backgroundVectorSourceIds,
-                        pageIndex: extractionPageIndex,
-                        unit: "GROUP_OR_ITEM",
-                        mode: "TEXTLESS_CANDIDATE",
-                        candidatePurpose: "SHELL_CANDIDATE",
-                        compositeRole: "background_vector_source",
-                        slotRole: "background_shell_slot",
-                        exportSourceObjectIds: backgroundVectorSourceIds || [id],
-                        exportTargetObjectId: id,
-                        hiddenVisualSourceObjectIds: [],
-                        containsEditableText: false,
-                        textOwner: "none"
-                    }), "background_vector_source");
-                    recordDecorationSourceSet(extractionPageIndex, backgroundVectorSourceIds || [id]);
-                    continue;
-                }
                 if (sourceIndex.hasPlacedVisual(id) && !ownedByClipParentShellForRect()) {
                     item = item || domItemForBase(id);
                     if (!item) continue;

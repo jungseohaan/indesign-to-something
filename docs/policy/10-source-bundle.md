@@ -177,6 +177,17 @@ Slot ownership rules:
   no executable shell owner can be proven. This is deliberately conservative:
   ambiguous vector/group material must not become independent content by
   default.
+- A dense story-flow inline vector pattern under one textless source parent is
+  one executable `SHELL_SLOT`, not many `CONTENT_VISUAL_SLOT` images. Stage 1
+  may collapse the sibling vector candidates only when IDML/resolved parentage
+  proves that the shared parent has no placed visual descendants, no editable
+  text descendants, and only same-page visible vector paint descendants. The
+  collapsed plan keeps `placement=INLINE` / `coordinateSpace=STORY_FLOW`,
+  exports the shared parent as one `PLACE_TEXT_SHELL`, and suppresses the child
+  vector image candidates before ObjectPlan construction. Candidate count or
+  vector-leaf count may be used only as a density threshold for this
+  source-parent rule; bounds, colors, pixels, page numbers, and occlusion are
+  not ownership reasons.
 - A Rectangle/Oval/Polygon source that has nested page items is not a leaf
   vector source. It must not also emit a `pass.vector_shape_frames` candidate for
   the ancestor source. Stage 1 must choose a closed complex/content/shell
@@ -334,9 +345,13 @@ Slot ownership rules:
   source-connected `SHELL_SLOT` visual components after text, content visual,
   table-style, and story-flow inline slots have been excluded. The component
   must also have an explicit page-background source role:
-  `MASTER_TEXTLESS_GRAPHIC` or `SPREAD_CROSS_TEXTLESS_GRAPHIC`. Page-wide
-  rectangles, low z-depth, layer names, color, and large bounds are source
-  metadata only; none of them alone makes a source object a background owner.
+  `MASTER_TEXTLESS_GRAPHIC`, `BACKGROUND_LAYER_TEXTLESS_GRAPHIC`,
+  `SPREAD_CROSS_BACKGROUND_GRAPHIC`, or `PAGE_WIDE_BACKGROUND_GRAPHIC`.
+  Spread-cross graphics and page-wide rectangles may name the geometry behind a
+  background role, but they are not ownership proof by themselves. They require
+  source-backed background evidence, such as a background-role source layer,
+  plus the IDML/resolved visible-page set. Low z-depth, color, large bounds,
+  rendered pixels, and output occlusion are not ownership reasons.
 - A page background plane is not limited to a single leaf fill source. When the
   source-connected `SHELL_SLOT` component uses a root plus descendant
   fill/polygon/vector material to render one textless visual surface, Stage 1
