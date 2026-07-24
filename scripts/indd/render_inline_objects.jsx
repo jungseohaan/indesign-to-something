@@ -326,6 +326,30 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         return items;
     }
 
+    // Visuals owned by another plan's own export. They are not absorbed into
+    // the plane, so leaving them visible bakes them into the plane PNG on top of
+    // their own PNG.
+    function collectForeignVisualOwnerSourceItemsToHide() {
+        var items = [];
+        var seen = {};
+        var idsByPage = opts.hiddenForeignVisualOwnerSourceObjectIdsByPage || {};
+        for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
+            var pageIndex = pageNumber - 1;
+            var ids = idsByPage[String(pageIndex)] || [];
+            for (var i = 0; i < ids.length; i++) {
+                var id = ids[i];
+                if (id === null || id === undefined) continue;
+                var key = String(id);
+                if (seen[key]) continue;
+                var item = itemById ? itemById[key] : null;
+                if (!item) continue;
+                seen[key] = true;
+                items.push(item);
+            }
+        }
+        return items;
+    }
+
     function collectPagePlaneHiddenVisualSourceItems() {
         var items = [];
         var seen = {};
@@ -545,6 +569,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     var savedCompletePngTextOwnerItems = [];
     var savedTableStyleItems = [];
     var savedPagePlaneHiddenVisualItems = [];
+    var savedForeignVisualOwnerItems = [];
     var savedDocumentTextFrames = [];
     // SPEC-030 계측 변수 (예외 경로에서도 정의되도록 미리 선언)
     var _tCollectInline = 0, _tHideInline = 0, _tCollectText = 0, _tHideText = 0;
@@ -669,6 +694,9 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         savedPagePlaneHiddenVisualItems =
                 _hideItemsForExport(collectPagePlaneHiddenVisualSourceItems());
 
+        savedForeignVisualOwnerItems =
+                _hideItemsForExport(collectForeignVisualOwnerSourceItemsToHide());
+
         _t0 = nowMs();
         var _textHideScope = opts.documentWideTextHide === true ? "document" : "range";
         var _textToHide = opts.documentWideTextHide === true
@@ -722,12 +750,14 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             frame.exportSanity.hiddenTextFrameCount = savedDocumentTextFrames.length;
             frame.exportSanity.hiddenTableStyleItemCount = savedTableStyleItems.length;
             frame.exportSanity.hiddenVisualSourceItemCount = savedPagePlaneHiddenVisualItems.length;
+            frame.exportSanity.hiddenForeignVisualOwnerItemCount = savedForeignVisualOwnerItems.length;
             results.push(frame);
         }
         _tExportLoop = nowMs() - _exportLoopStart;
     } finally {
         var _restoreStart = nowMs();
         try { restoreTextFrames(savedDocumentTextFrames); } catch (eRestoreTextFrames) {}
+        try { _restoreItemsForExport(savedForeignVisualOwnerItems); } catch (eRestoreForeignVisualOwner) {}
         try { _restoreItemsForExport(savedPagePlaneHiddenVisualItems); } catch (eRestorePagePlaneHiddenVisual) {}
         try { _restoreItemsForExport(savedCompletePngTextOwnerItems); } catch (eRestoreCompletePngTextOwner) {}
         try { _restoreItemsForExport(savedTableStyleItems); } catch (eRestoreTableStyle) {}
@@ -755,6 +785,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             hiddenCompletePngTextOwnerItemCount: savedCompletePngTextOwnerItems.length,
             hiddenTableStyleItemCount: savedTableStyleItems.length,
             hiddenVisualSourceItemCount: savedPagePlaneHiddenVisualItems.length,
+            hiddenForeignVisualOwnerItemCount: savedForeignVisualOwnerItems.length,
             textHideScope: _textHideScope
         };
         writeJson(outputDir + "/single-textless-page-plane-export.json", {

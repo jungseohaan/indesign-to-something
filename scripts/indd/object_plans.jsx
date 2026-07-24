@@ -2321,6 +2321,7 @@ function _slimObjectPlanForWrite(plan) {
         "coverageSourceObjectIds",
         "hiddenTableStyleSourceObjectIds",
         "hiddenCompletePngTextOwnerSourceObjectIds",
+        "hiddenForeignVisualOwnerSourceObjectIds",
         "pageBackgroundSourceRoles",
         "pageBackgroundSourceRoleSourceIds",
         "canonicalPagePlaneAbsorbEligible",
