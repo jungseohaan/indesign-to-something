@@ -316,23 +316,12 @@ function collectComposedLineRuns(line) {
                 end: cursor + text.length
             };
             cursor = run.end;
-            try {
-                var fill = rng.fillColor;
-                if (fill && fill.name) run.fillColor = String(fill.name);
-            } catch (eFill) {}
-            try {
-                var font = rng.appliedFont;
-                if (font && font.fontFamily) run.fontFamily = String(font.fontFamily);
-            } catch (eFont) {}
-            try {
-                if (rng.fontStyle !== undefined && rng.fontStyle !== null) {
-                    run.fontStyle = String(rng.fontStyle);
-                }
-            } catch (eStyle) {}
-            try {
-                var size = Number(rng.pointSize);
-                if (isFinite(size)) run.fontSize = size;
-            } catch (eSize) {}
+            // SPEC-067: composedLines 런의 글자 속성(fillColor/appliedFont/fontStyle/
+            // pointSize)은 DOM 에서 읽지 않는다. 이 함수의 목적은 줄바꿈 매핑(text/start/end
+            // + 상위 collectComposedLines 의 bounds/wrapIndent)이고, 변환기는 ComposedRun 의
+            // 글자 속성을 전혀 소비하지 않는다(line.runs() 호출처 0개, getter 미사용 실측).
+            // 글자 속성은 IDML 이 담당한다. DOM 개별 속성 접근은 느리므로 성능도 개선된다.
+            // 되돌리려면 아래 fillColor/appliedFont/fontStyle/pointSize 읽기를 복원한다.
             result.push(run);
         }
     } catch (eRanges) {}
