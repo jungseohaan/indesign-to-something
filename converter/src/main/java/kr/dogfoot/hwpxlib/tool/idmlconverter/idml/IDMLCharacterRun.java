@@ -15,6 +15,15 @@ public class IDMLCharacterRun {
     private String fontFamily;
     private Double fontSize;
     private String fillColor;
+
+    // 이 런의 CharacterStyleRange 태그가 직접 명시한 값인지 표시한다.
+    // 파서는 스타일 체인에서 상속된 값도 같은 필드에 채우기 때문에, 값만 보고는
+    // "이 런이 실제로 지정한 속성"과 "문단/문자 스타일이 물려준 값"을 구분할 수 없다.
+    // 상속값을 런에 다시 실으면 그 런이 문단 CharPr 상속을 잃고 자체 CharPr 을 갖게 되어
+    // 크기가 기본값으로 떨어진다 (SPEC-072).
+    private boolean fontFamilyExplicit;
+    private boolean fontSizeExplicit;
+    private boolean fillColorExplicit;
     private Double fillTint;
     private String fontStyle;
     private String position;
@@ -75,6 +84,9 @@ public class IDMLCharacterRun {
         c.fontFamily = this.fontFamily;
         c.fontSize = this.fontSize;
         c.fillColor = this.fillColor;
+        c.fontFamilyExplicit = this.fontFamilyExplicit;
+        c.fontSizeExplicit = this.fontSizeExplicit;
+        c.fillColorExplicit = this.fillColorExplicit;
         c.fillTint = this.fillTint;
         c.fontStyle = this.fontStyle;
         c.position = this.position;
@@ -236,6 +248,18 @@ public class IDMLCharacterRun {
 
     public String fillColor() { return fillColor; }
     public void fillColor(String v) { this.fillColor = v; }
+
+    /** 이 런의 태그가 직접 명시한 폰트인가 (스타일 상속이 아니라). */
+    public boolean fontFamilyExplicit() { return fontFamilyExplicit; }
+    public void fontFamilyExplicit(boolean v) { this.fontFamilyExplicit = v; }
+
+    /** 이 런의 태그가 직접 명시한 크기인가. */
+    public boolean fontSizeExplicit() { return fontSizeExplicit; }
+    public void fontSizeExplicit(boolean v) { this.fontSizeExplicit = v; }
+
+    /** 이 런의 태그가 직접 명시한 색인가. */
+    public boolean fillColorExplicit() { return fillColorExplicit; }
+    public void fillColorExplicit(boolean v) { this.fillColorExplicit = v; }
 
     public Double fillTint() { return fillTint; }
     public void fillTint(Double v) { this.fillTint = v; }

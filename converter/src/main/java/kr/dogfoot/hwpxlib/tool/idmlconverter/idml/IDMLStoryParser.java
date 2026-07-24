@@ -655,6 +655,11 @@ public class IDMLStoryParser {
         }
     }
 
+    /**
+     * 문자 스타일 값을 런에 채운다. 여기서 채운 값은 <em>상속</em>이므로
+     * {@code *Explicit} 플래그를 세우지 않는다 — 런 태그가 직접 명시한 값만 explicit 이다
+     * (SPEC-072).
+     */
     private static void applyCharacterStyleToRun(IDMLCharacterRun run, IDMLStyleDef style) {
         if (run == null || style == null) return;
         if (style.fontFamily() != null) run.fontFamily(style.fontFamily());
@@ -883,9 +888,11 @@ public class IDMLStoryParser {
         run.appliedCharacterStyle(getAttrOrNull(charRange, "AppliedCharacterStyle"));
         run.fontStyle(getAttrOrNull(charRange, "FontStyle"));
         run.fillColor(getAttrOrNull(charRange, "FillColor"));
+        run.fillColorExplicit(run.fillColor() != null);
         run.fillTint(parseDoubleAttr(charRange, "FillTint"));
         run.position(getAttrOrNull(charRange, "Position"));
         run.fontSize(parseDoubleAttr(charRange, "PointSize"));
+        run.fontSizeExplicit(run.fontSize() != null);
         run.tracking(parseDoubleAttr(charRange, "Tracking"));
         run.baselineShift(parseDoubleAttr(charRange, "BaselineShift"));
         run.horizontalScale(parseDoubleAttr(charRange, "HorizontalScale"));
@@ -915,6 +922,7 @@ public class IDMLStoryParser {
             String fontFamily = getPropertyText(props, "AppliedFont");
             if (fontFamily != null) {
                 run.fontFamily(fontFamily);
+                run.fontFamilyExplicit(true);
             }
             // UnderlineType (Properties 안: <UnderlineType type="object">StrokeStyle/$ID/Wavy</UnderlineType>)
             String ulType = getPropertyText(props, "UnderlineType");

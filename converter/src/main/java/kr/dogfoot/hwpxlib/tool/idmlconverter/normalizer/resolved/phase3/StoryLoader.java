@@ -1468,6 +1468,122 @@ public class StoryLoader {
         return result;
     }
 
+    /**
+     * 표 셀의 resolved 런에 IDML 이 <em>직접 명시한</em> 글자속성을 채운다.
+     *
+     * <p>셀 런은 텍스트만 담는다 — SPEC-067 이 추출기의 DOM 글자속성을 차단한 뒤로 색·폰트의
+     * 출처가 사라져 빨간 산세리프 제목이 검정 기본 폰트로 렌더된다. 속성은 IDML 에 있으므로
+     * AST 런을 만들기 전에 옮겨 담는다.
+     *
+     * <p>단 <b>런 태그가 직접 명시한 값만</b> 옮긴다. 파서는 문단/문자 스타일에서 상속한
+     * 값도 같은 필드에 채우는데, 그 상속값까지 런에 실으면 해당 런이 문단 CharPr 상속을
+     * 잃고 자체 CharPr(기본 10pt)을 갖게 되어 크기가 무너진다. 실제로 상속 폰트를 함께
+     * 옮겼을 때 20페이지에서 크기 112건이 어긋났다 (SPEC-072).</p>
+     */
+    private static List<ResolvedRun> withExplicitIdmlCharacterAttributes(
+            ResolvedBuildContext ctx, IDMLParagraph idmlParagraph, List<ResolvedRun> runs) {
+        if (idmlParagraph == null || idmlParagraph.characterRuns() == null || runs == null) {
+            return runs;
+        }
+        List<IDMLCharacterRun> idmlRuns = idmlParagraph.characterRuns();
+        if (idmlRuns.isEmpty()) return runs;
+
+        Double paraFontSize = paragraphStyleFontSize(ctx, idmlParagraph);
+        List<ResolvedRun> out = new ArrayList<>(runs.size());
+        int offset = 0;
+        for (ResolvedRun run : runs) {
+            if (run == null || run.isInlineAnchor() || run.text() == null) {
+                out.add(run);
+                continue;
+            }
+            IDMLCharacterRun cr = idmlRunAtOffset(idmlRuns, offset, run.text());
+            out.add(cr == null ? run : runWithExplicitAttributes(run, cr, paraFontSize));
+            offset += run.text().length();
+        }
+        return out;
+    }
+
+    /**
+     * 문단 텍스트에서 {@code offset} 위치를 덮는 IDML 문자 런. 오프셋이 어긋나면
+     * (추출기와 IDML 의 제어문자 처리 차이) 텍스트로 맞춘다.
+     */
+    private static IDMLCharacterRun idmlRunAtOffset(
+            List<IDMLCharacterRun> idmlRuns, int offset, String runText) {
+        int cursor = 0;
+        for (IDMLCharacterRun cr : idmlRuns) {
+            if (cr == null || cr.content() == null) continue;
+            int len = cr.content().length();
+            if (len <= 0) continue;
+            if (offset >= cursor && offset < cursor + len) return cr;
+            cursor += len;
+        }
+        String needle = runText != null ? runText.trim() : "";
+        if (needle.isEmpty()) return null;
+        for (IDMLCharacterRun cr : idmlRuns) {
+            if (cr == null || cr.content() == null) continue;
+            if (cr.content().contains(needle)) return cr;
+        }
+        return null;
+    }
+
+    /**
+     * 이 문단의 스타일이 정한 글자 크기. 런이 자체 CharPr 을 갖게 될 때 이 값을 함께
+     * 실어야 크기가 하드코딩 기본값(10pt)으로 떨어지지 않는다.
+     */
+    private static Double paragraphStyleFontSize(ResolvedBuildContext ctx, IDMLParagraph p) {
+        if (ctx == null || ctx.styleResolver == null || p == null) return null;
+        String ref = p.appliedParagraphStyle();
+        if (ref == null) return null;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef def =
+                ctx.styleResolver.getResolvedParagraphStyle(ref);
+        if (def == null && ref.startsWith("ParagraphStyle/")) {
+            def = ctx.styleResolver.getResolvedParagraphStyle(
+                    ref.substring("ParagraphStyle/".length()));
+        }
+        return def != null ? def.fontSize() : null;
+    }
+
+    /** resolved 런 사본에 IDML 명시 속성만 채운다. 이미 값이 있으면 그대로 둔다. */
+    private static ResolvedRun runWithExplicitAttributes(
+            ResolvedRun run, IDMLCharacterRun cr, Double paraFontSize) {
+        boolean takeColor = cr.fillColorExplicit() && cr.fillColor() != null
+                && run.fillColor() == null;
+        boolean takeFont = cr.fontFamilyExplicit() && cr.fontFamily() != null
+                && run.fontFamily() == null;
+        boolean takeSize = cr.fontSizeExplicit() && cr.fontSize() != null && cr.fontSize() > 0
+                && run.fontSize() == null;
+        if (!takeColor && !takeFont && !takeSize) return run;
+
+        ResolvedRun copy = new ResolvedRun();
+        copy.text(run.text());
+        copy.fontFamily(run.fontFamily());
+        copy.fontSize(run.fontSize());
+        copy.fontStyle(run.fontStyle());
+        copy.fillColor(run.fillColor());
+        copy.charStyle(run.charStyle());
+        copy.tracking(run.tracking());
+        copy.horizontalScale(run.horizontalScale());
+        copy.verticalScale(run.verticalScale());
+        copy.baselineShift(run.baselineShift());
+        copy.position(run.position());
+        copy.underline(run.underline());
+        copy.strikeThru(run.strikeThru());
+        copy.type(run.type());
+        copy.anchoredObjectId(run.anchoredObjectId());
+        copy.storyAnchorPlacement(run.storyAnchorPlacement());
+
+        if (takeColor) copy.fillColor(cr.fillColor());
+        if (takeFont) copy.fontFamily(cr.fontFamily());
+        if (takeSize) copy.fontSize(cr.fontSize());
+        // 속성을 실은 런은 자체 CharPr 을 갖게 되는데, 그 경로가 크기를 하드코딩
+        // 기본값(10pt)으로 채운다. 런에도 IDML 에도 크기가 없으면 문단 스타일이 정한
+        // 크기를 실어 원래 크기를 지킨다 (p10 제목 12pt).
+        if (copy.fontSize() == null && paraFontSize != null && paraFontSize > 0) {
+            copy.fontSize(paraFontSize);
+        }
+        return copy;
+    }
+
     private static List<ASTParagraph> buildResolvedCellParagraphs(
             ResolvedBuildContext ctx,
             IDMLParagraph idmlParagraph,
@@ -1491,6 +1607,7 @@ public class StoryLoader {
             addNonEmptyParagraph(paragraphs, current);
             return paragraphs;
         }
+        runs = withExplicitIdmlCharacterAttributes(ctx, idmlParagraph, runs);
 
         for (int i = 0; i < runs.size(); i++) {
             ResolvedRun run = runs.get(i);

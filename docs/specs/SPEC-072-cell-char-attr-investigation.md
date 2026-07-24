@@ -1,9 +1,9 @@
-# SPEC-072: 표 셀 글자속성 복원 — 조사 결과
+# SPEC-072: 표 셀 글자속성 복원
 
-> 상태: **조사 완료, 구현 대기**. 2026-07-24.
+> 상태: **구현 완료, 육안 확인 대기**. 2026-07-25.
 > 선행 실패: SPEC-071(커밋 `4ac91966`, revert `f1428404`) — 20페이지에서 크기 회귀 112건.
 
-## 문제 (미해결)
+## 문제
 
 표 셀 안 텍스트가 IDML 의 글자속성을 잃는다. 영어 u1 p10 "Look Ahead" 표:
 
@@ -99,3 +99,49 @@ for (ASTTextRun run : runs) {
 - 비교 기준: 같은 추출물의 `converted/*.hwpx`
 - 확인 항목: 런별 (크기, 색, 폰트) 튜플 비교. **p10 만으로는 부족하다** — SPEC-071 은
   p10 에서 3건만 바뀌어 통과했지만 20페이지에서 112건이 깨졌다
+
+
+## 구현 (2026-07-25)
+
+### 1. 파서에 명시/상속 구분 플래그
+
+`IDMLCharacterRun` 에 `fontFamilyExplicit` / `fontSizeExplicit` / `fillColorExplicit` 를
+추가하고, **런 태그가 직접 명시한 값에만** 세운다.
+
+| 경로 | 플래그 |
+|---|---|
+| `createRunBase` — `FillColor`/`PointSize` 속성 | **true** |
+| `<AppliedFont>` 태그 | **true** |
+| `applyCharacterStyleToRun` — 문자 스타일 상속 | false |
+| 문단 후처리 상속(`resolveStyleProp`) | false |
+
+`shallowCopyWithoutInlines` 도 플래그를 함께 복사한다(누락 시 사본이 출처를 잃는다).
+
+계측으로 판별을 확인했다 — `Functions` 만 font·color 가 explicit=true 이고, 본문
+`I'm glad`/`What can I do` 는 `DIN Next LT Pro (TT)` 를 갖지만 explicit=false 다.
+이 구분이 없어 상속 폰트까지 옮긴 것이 SPEC-071 회귀의 원인이었다.
+
+### 2. 셀 경로에서 명시 속성만 주입
+
+`withExplicitIdmlCharacterAttributes` 가 AST 런 생성 **전에** 명시 속성만 resolved 런
+사본으로 옮긴다. 속성을 실은 런은 자체 CharPr 을 갖게 되고 그 경로가 크기를 하드코딩
+10pt 로 채우므로, 크기가 없으면 **문단 스타일의 `PointSize`** 를 함께 실어 원래 크기를
+지킨다. 전역 `createOverrideCharPr` 은 건드리지 않는다 — SPEC-072 제약 1 준수.
+
+## 검증 (20페이지)
+
+**전제: 기준선은 같은 빌드로 새로 만들어야 한다.** 커밋된 산출물과 비교했더니 크기 385건·
+폰트 708건이 어긋난 것처럼 보였는데, 그 파일이 다른 시점 코드로 만들어진 것이었다. 같은
+빌드로 baseline 을 다시 뽑으니 실제 변화는 아래가 전부다(변환 자체는 결정적임을 2회 실행으로 확인).
+
+```
+run counts: 5676 → 5676
+SIZE changed: 8   COLOR changed: 3   FONT changed: 8
+  Functions/Forms/Read : 12pt Color/Black 함초롬바탕 → 12pt #E05B5D Arial
+  ⓐ①②③               : 1pt → 10pt (부수 개선)
+```
+
+- 목표 3건은 **색·크기·폰트 셋 다** 원본과 일치(12pt 유지, 빨강, 산세리프)
+- 원문자 ⓐ①②③ 이 1pt(사실상 비가시) → 10pt 로 정상화. IDML 에서 이들도
+  `PointSize=None` + `[No paragraph style]`(12pt) 이라 1pt 가 오히려 버그였다
+- 구조 시그니처 `verify_hwpx` **PASS** (완전 일치)
