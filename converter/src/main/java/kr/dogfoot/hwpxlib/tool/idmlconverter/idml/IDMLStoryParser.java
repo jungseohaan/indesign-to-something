@@ -2339,6 +2339,8 @@ public class IDMLStoryParser {
         if (idGrep == null || idGrep.isEmpty()) return null;
         try {
             String javaRegex = idGrep;
+            // InDesign GREP anchored object marker -> Object Replacement Character.
+            javaRegex = javaRegex.replace("~a", "\uFFFC");
             // InDesign GREP uppercase class -> Java Unicode property
             javaRegex = javaRegex.replace("\\u", "\\p{Lu}");
             // InDesign GREP lowercase class -> Java Unicode property
