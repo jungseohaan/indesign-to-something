@@ -671,6 +671,7 @@ function _indexSingleTextlessPagePlaneFrames(result) {
 //   2. source-bundle text-range shell hide (…ShellHideCandidateCount)
 //   3. mixed-bundle placed-visual hide (…MixedBundlePlacedVisualHideCandidateCount)
 //   4. complete-PNG text owner source hide
+//   5. foreign visual owner hide (다른 plan 이 자기 PNG 로 그리는 시각 소스)
 // 셋 다 sourceItems / extractionPlan 에서 순수 도출되어 같은 INDD → 같은 값이다.
 // 이 서명을 캐시 파일명에 넣어 "같은 페이지 + 같은 숨김 정책 = 같은 캐시 파일"을
 // 보장한다. 정책이 (추출기 변경 등으로) 달라지면 서명이 바뀌어 자동 miss →
@@ -679,12 +680,14 @@ function _pagePlaneHideSignature(ctx) {
     if (!ctx) return null;
     var byPage = ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage;
     var completeByPage = ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage;
+    var foreignByPage = ctx.pagePlaneForeignVisualOwnerSourceObjectIdsByPage;
     var shellCount = ctx.pagePlaneSourceBundleTextRangeShellHideCandidateCount || 0;
     var mixedCount = ctx.pagePlaneMixedBundlePlacedVisualHideCandidateCount || 0;
     var tableKeyCount = (byPage ? _objectPlanMapKeyCount(byPage) : 0);
     var completeKeyCount = (completeByPage ? _objectPlanMapKeyCount(completeByPage) : 0);
+    var foreignKeyCount = (foreignByPage ? _objectPlanMapKeyCount(foreignByPage) : 0);
     if (tableKeyCount === 0 && shellCount === 0 && mixedCount === 0
-            && completeKeyCount === 0) return null;
+            && completeKeyCount === 0 && foreignKeyCount === 0) return null;
     // (1) table-style: 페이지 인덱스 오름차순, 각 페이지의 object id 오름차순으로
     // 정규화해 순회 순서에 무관한 안정적 문자열을 만든다.
     var parts = [];
@@ -736,6 +739,33 @@ function _pagePlaneHideSignature(ctx) {
             }
             completeIdList.sort();
             parts.push("C" + completeKey + ":" + completeIdList.join(","));
+        }
+    }
+    if (foreignByPage && foreignKeyCount > 0) {
+        var foreignPageKeys = [];
+        for (var fpk in foreignByPage) {
+            if (foreignByPage.hasOwnProperty(fpk)) foreignPageKeys.push(fpk);
+        }
+        foreignPageKeys.sort(function (a, b) { return Number(a) - Number(b); });
+        for (var fi = 0; fi < foreignPageKeys.length; fi++) {
+            var foreignKey = foreignPageKeys[fi];
+            var foreignIds = foreignByPage[foreignKey];
+            var foreignIdList = [];
+            if (foreignIds) {
+                if (foreignIds.length !== undefined && typeof foreignIds !== "string") {
+                    for (var fj = 0; fj < foreignIds.length; fj++) {
+                        foreignIdList.push(String(foreignIds[fj]));
+                    }
+                } else {
+                    for (var foreignIdKey in foreignIds) {
+                        if (foreignIds.hasOwnProperty(foreignIdKey)) {
+                            foreignIdList.push(String(foreignIdKey));
+                        }
+                    }
+                }
+            }
+            foreignIdList.sort();
+            parts.push("F" + foreignKey + ":" + foreignIdList.join(","));
         }
     }
     // (2)(3) shell / mixed 는 결정론적 후보 카운트로 서명한다 (id 목록은 ctx 에
@@ -1021,7 +1051,9 @@ function _prepareGlobalSingleTextlessPagePlanes(doc, ctx) {
                     hiddenTableStyleSourceObjectIdsByPage:
                             ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage,
                     hiddenCompletePngTextOwnerSourceObjectIdsByPage:
-                            ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage
+                            ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage,
+                    hiddenForeignVisualOwnerSourceObjectIdsByPage:
+                            ctx.pagePlaneForeignVisualOwnerSourceObjectIdsByPage
                 });
         ctx.globalSingleTextlessPagePlanesByPageIndex =
                 _indexSingleTextlessPagePlaneFrames(result);
@@ -1593,7 +1625,9 @@ function _runRenderPhases(doc, ctx, allItems) {
         hiddenTableStyleSourceObjectIdsByPage:
                 ctx.pagePlaneHiddenTableStyleSourceObjectIdsByPage || {},
         hiddenCompletePngTextOwnerSourceObjectIdsByPage:
-                ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage || {}
+                ctx.pagePlaneCompletePngTextOwnerSourceObjectIdsByPage || {},
+        hiddenForeignVisualOwnerSourceObjectIdsByPage:
+                ctx.pagePlaneForeignVisualOwnerSourceObjectIdsByPage || {}
     };
     // SPEC-049: restore 가 서명(hideSig) 기반으로 hit 을 판정했다면
     // globalSingleTextlessPagePlanesByPageIndex 는 현재 숨김 정책(table-style /

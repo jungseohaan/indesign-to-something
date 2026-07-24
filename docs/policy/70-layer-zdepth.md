@@ -276,6 +276,23 @@ The following source slots are always excluded from a page background plane:
 - story-flow inline source objects, even when their pixels are obtained through
   a page/master export helper.
 
+Source-role eligibility decides only *ownership* — which sources the plane may
+claim. It does not decide *visibility during the page export*. These are separate
+questions and must not share a gate. The page plane is produced by exporting the
+whole page, so any source that another executable plan paints through its own
+export must be hidden for the duration of that export, whether or not the plane
+was ever eligible to own it. Otherwise the same visual ships twice: once baked
+into the plane PNG and once as the owning plan's PNG.
+
+The plane therefore carries a `hiddenForeignVisualOwnerSourceObjectIds` set,
+alongside the existing table-style and complete-PNG text-owner hide sets. It is
+populated from every non-absorbed plan with a visible visual that is not
+story-flow inline material (inline sources are hidden by the inline collector,
+and hiding them here would also remove them from their own inline export). The
+plane's own coverage ids are subtracted so a plane never hides what it owns.
+Every hide set contributes to the page-plane cache signature; a hide set omitted
+from the signature causes a stale plane PNG to be reused.
+
 Once Stage 1 emits `slotRole=page_background_plane`, every later bridge,
 renderer, and HWPX importer must preserve the execution contract as
 `visualLayer=PAGE_BACKGROUND`, `policyLayer=BACKGROUND`,
