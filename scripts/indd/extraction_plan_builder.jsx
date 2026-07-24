@@ -8043,43 +8043,78 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         if (sourceTreeHasEditableText(src.id, {})) return false;
         return sourceTreeHasVisibleGraphicMaterial(src.id, {});
     }
+    // 페이지 bounds 는 추출 중 불변이라 인덱스별로 1회만 DOM 을 읽고 캐시한다.
+    // 이 함수는 sourceItems × targetPages × doc.pages 삼중 중첩(sourceSameSpread-
+    // IntersectingPages)의 최내곽에서 불려 영어 u1(20p) 기준 ~90만 DOM 접근이
+    // 발생했다. ExtendScript 는 DOM 개별 속성 접근이 가장 느리다.
+    var _canonicalPlanePageBoundsCache = {};
     function pageBoundsForCanonicalPlane(pageIndex) {
+        var cacheKey = String(Number(pageIndex));
+        if (_canonicalPlanePageBoundsCache.hasOwnProperty(cacheKey)) {
+            return _canonicalPlanePageBoundsCache[cacheKey];
+        }
+        var bounds = null;
         try {
             if (typeof _pageBoundsForIndex === "function") {
-                return _pageBoundsForIndex(doc, Number(pageIndex));
+                bounds = _pageBoundsForIndex(doc, Number(pageIndex));
             }
         } catch (ePageBoundsCanonical) {}
-        try {
-            var page = doc.pages[Number(pageIndex)];
-            var pb = page.bounds;
-            return [Number(pb[0]), Number(pb[1]), Number(pb[2]), Number(pb[3])];
-        } catch (ePageBoundsCanonicalFallback) {}
-        return null;
+        if (!bounds) {
+            try {
+                var page = doc.pages[Number(pageIndex)];
+                var pb = page.bounds;
+                bounds = [Number(pb[0]), Number(pb[1]), Number(pb[2]), Number(pb[3])];
+            } catch (ePageBoundsCanonicalFallback) {}
+        }
+        _canonicalPlanePageBoundsCache[cacheKey] = bounds;
+        return bounds;
     }
     function boundsOverlapForCanonicalPlane(a, b) {
         if (!a || !b || a.length < 4 || b.length < 4) return false;
         return Number(a[2]) > Number(b[0]) && Number(a[0]) < Number(b[2])
                 && Number(a[3]) > Number(b[1]) && Number(a[1]) < Number(b[3]);
     }
+    // 스프레드 소속도 추출 중 불변 — pageBounds 와 같은 이유로 인덱스별 1회만 읽는다.
+    var _canonicalPlaneSpreadIdCache = {};
+    function spreadIdForCanonicalPlane(pageIndex) {
+        var cacheKey = String(pageIndex);
+        if (_canonicalPlaneSpreadIdCache.hasOwnProperty(cacheKey)) {
+            return _canonicalPlaneSpreadIdCache[cacheKey];
+        }
+        var spreadId = null;
+        try {
+            if (typeof _pageSpreadIdForIndex === "function") {
+                spreadId = _pageSpreadIdForIndex(doc, pageIndex);
+            }
+        } catch (eSpreadIdCanonical) {}
+        _canonicalPlaneSpreadIdCache[cacheKey] = spreadId;
+        return spreadId;
+    }
     function sameSpreadForCanonicalPlane(a, b) {
         if (a === null || a === undefined || b === null || b === undefined) return false;
         a = Number(a);
         b = Number(b);
         if (isNaN(a) || isNaN(b) || a < 0 || b < 0) return false;
-        try {
-            if (typeof _pageSpreadIdForIndex === "function") {
-                var spreadA = _pageSpreadIdForIndex(doc, a);
-                var spreadB = _pageSpreadIdForIndex(doc, b);
-                return spreadA !== null && spreadB !== null && spreadA === spreadB;
-            }
-        } catch (eSameSpreadCanonical) {}
+        if (typeof _pageSpreadIdForIndex === "function") {
+            var spreadA = spreadIdForCanonicalPlane(a);
+            var spreadB = spreadIdForCanonicalPlane(b);
+            return spreadA !== null && spreadB !== null && spreadA === spreadB;
+        }
         return a === b;
+    }
+    var _canonicalPlanePageCount = -1;
+    function pageCountForCanonicalPlane() {
+        if (_canonicalPlanePageCount < 0) {
+            try { _canonicalPlanePageCount = Number(doc.pages.length); } catch (ePageCount) { _canonicalPlanePageCount = 0; }
+        }
+        return _canonicalPlanePageCount;
     }
     function sourceSameSpreadIntersectingPages(src, anchorPageIndex) {
         var out = [];
         var seen = {};
         if (!doc || !doc.pages || !src || !src.bounds || src.bounds.length < 4) return out;
-        for (var pi = 0; pi < doc.pages.length; pi++) {
+        var pageCount = pageCountForCanonicalPlane();
+        for (var pi = 0; pi < pageCount; pi++) {
             if (!sameSpreadForCanonicalPlane(anchorPageIndex, pi)) continue;
             var pb = pageBoundsForCanonicalPlane(pi);
             if (!boundsOverlapForCanonicalPlane(src.bounds, pb)) continue;
