@@ -117,6 +117,12 @@ source objects as the table's `TABLE_STYLE_SLOT`.
   inset becomes the HWPX cell margin, and its resolved run color remains the
   HWPX run text color. This is execution of a Stage 1 source relationship, not
   a bounds, text, page, or color heuristic.
+- This table-style absorption rule is not used for a table-cell inline atom
+  whose closed source root contains multiple editable TextFrame descendants and
+  non-text visual material. That structure is an inline complex form widget:
+  Stage 1 owns it as `CONTENT_VISUAL_SLOT` with `COMPLETE_PNG` /
+  `OWNED_BY_PNG` so the HWPX cell receives one inline image instead of an
+  unrepresentable set of nested editable/floating children.
 - A `PLACE_TABLE_STYLE` plan describes table structure, geometry, and declared
   source-authored table appearance. It must not project undeclared page shapes,
   row bands, cell plates, borders, or fills into HWPX cell style.

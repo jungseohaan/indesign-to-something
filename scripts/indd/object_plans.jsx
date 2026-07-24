@@ -6869,11 +6869,32 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
 
     var groups = {};
     var groupOrder = [];
+    var droppedTableCellInlineTextCarrierRoots = {};
+    for (var dpi = 0; dpi < objectPlans.length; dpi++) {
+        var droppedPlan = objectPlans[dpi];
+        if (!droppedPlan) continue;
+        if (droppedPlan.passId !== "pass.inline_objects") continue;
+        if (droppedPlan.tableCellStoryTextInlineSlot !== true) continue;
+        if (droppedPlan.visualAction !== "DROP_VISUAL") continue;
+        if (droppedPlan.slotRole !== "inline_editable_text_shell_composite"
+                && droppedPlan.compositeRole !== "inline_editable_text_shell_composite") {
+            continue;
+        }
+        if (droppedPlan.primarySourceObjectId !== null && droppedPlan.primarySourceObjectId !== undefined) {
+            droppedTableCellInlineTextCarrierRoots[String(droppedPlan.primarySourceObjectId)] = true;
+        }
+        if (droppedPlan.sourceRootObjectIds && droppedPlan.sourceRootObjectIds.length > 0) {
+            for (var dpr = 0; dpr < droppedPlan.sourceRootObjectIds.length; dpr++) {
+                droppedTableCellInlineTextCarrierRoots[String(droppedPlan.sourceRootObjectIds[dpr])] = true;
+            }
+        }
+    }
     for (var i = 0; i < objectPlans.length; i++) {
         var plan = objectPlans[i];
         if (!eligibleChildPlan(plan)) continue;
         var parent = patternParentForPlan(plan);
         if (!parent) continue;
+        if (droppedTableCellInlineTextCarrierRoots[String(parent.id)]) continue;
         var key = String(plan.pageIndex) + "|" + String(parent.id);
         if (!groups[key]) {
             groups[key] = {
@@ -7473,6 +7494,9 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
 }
 
 function _normalizeObjectPlanBundle(bundle, sourceById) {
+    if (_objectPlanBundleIsTableCellInlineComplexFormCompletePng(bundle, sourceById)) {
+        return _tableCellInlineComplexFormCompletePngBundle(bundle, sourceById);
+    }
     if (_objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById)) {
         return _inlineEditableTextShellCompositeBundle(bundle, sourceById);
     }
@@ -7486,6 +7510,84 @@ function _normalizeObjectPlanBundle(bundle, sourceById) {
         return _closedPlacedContentCarrierBundle(bundle);
     }
     return bundle || {};
+}
+
+function _objectPlanBundleIsTableCellInlineComplexFormCompletePng(bundle, sourceById) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.tableCellStoryTextInlineSlot !== true) return false;
+    if (bundle.pagePositionedAnchoredSource === true) return false;
+    if (bundle.storyAnchorPlacement === "FLOATING_ANCHORED") return false;
+    var anchoredPosition = String(bundle.anchoredPosition || "").toUpperCase();
+    if (anchoredPosition === "ANCHORED") return false;
+    var rootIds = _objectPlanInlineEditableTextShellRootIds(bundle);
+    if (!rootIds || rootIds.length === 0) return false;
+    var expandedIds = _objectPlanInlineRootExpandedSourceIds(rootIds, sourceById);
+    var sourceIds = _sourceIdsUnion(bundle.sourceObjectIds || [], expandedIds);
+    var ownedTextFrameIds = _sourceIdsUnion(
+            bundle.ownedTextFrameIds || [],
+            _objectPlanTextFrameSourceIds(sourceIds, sourceById));
+    if (!ownedTextFrameIds || ownedTextFrameIds.length < 2) return false;
+    var visualIds = _objectPlanNonTextVisualSourceIds(sourceIds, ownedTextFrameIds, sourceById);
+    return visualIds && visualIds.length > 0;
+}
+
+function _tableCellInlineComplexFormCompletePngBundle(bundle, sourceById) {
+    var normalized = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) normalized[key] = bundle[key];
+    }
+    var rootIds = _objectPlanInlineEditableTextShellRootIds(bundle);
+    var expandedIds = _objectPlanInlineRootExpandedSourceIds(rootIds, sourceById);
+    var sourceIds = _sourceIdsUnion(bundle.sourceObjectIds || [], expandedIds);
+    var ownedTextFrameIds = _sourceIdsUnion(
+            bundle.ownedTextFrameIds || [],
+            _objectPlanTextFrameSourceIds(sourceIds, sourceById));
+    var visualIds = _objectPlanNonTextVisualSourceIds(sourceIds, ownedTextFrameIds, sourceById);
+    var exportIds = rootIds.length > 0 ? rootIds : visualIds;
+
+    normalized.sourceObjectIds = sourceIds;
+    normalized.sourceRootObjectIds = rootIds;
+    normalized.clusterSourceObjectIds = _sourceIdsUnion(bundle.clusterSourceObjectIds || [], sourceIds);
+    normalized.visualSourceObjectIds = visualIds;
+    normalized.exportSourceObjectIds = exportIds;
+    normalized.hiddenVisualSourceObjectIds = [];
+    normalized.hiddenTextFrameIds = [];
+    normalized.ownedTextFrameIds = ownedTextFrameIds;
+    normalized.editableTextFrameIds = ownedTextFrameIds;
+    normalized.ownershipSlot = "CONTENT_VISUAL_SLOT";
+    normalized.policyLayer = "CONTENT";
+    normalized.visualLayer = "CONTENT_VISUAL";
+    normalized.requiredSlot = "CONTENT_VISUAL_SLOT";
+    normalized.requiredSlotReason = "table_cell_inline_complex_form_complete_png";
+    normalized.slotRole = "table_cell_inline_complex_form_complete_png";
+    normalized.compositeRole = "table_cell_inline_complex_form_complete_png";
+    normalized.inlineTextShellComposite = false;
+    normalized.tableCellInlineComplexFormCompletePng = true;
+    normalized.textOwner = "indesign_png";
+    normalized.containsEditableText = true;
+    normalized.completePngTextAllowed = true;
+    normalized.materialization = "COMPLETE_PNG";
+    normalized.textAction = "OWNED_BY_PNG";
+    normalized.visualAction = "PLACE_INLINE_PNG";
+    normalized.inlineSourceTreeClosed = true;
+    normalized.inlineFlowSourceObjectIds = sourceIds;
+    normalized.inlineAnchorSourceObjectId = rootIds.length > 0 ? rootIds[0] : normalized.inlineAnchorSourceObjectId;
+    normalized.exportTargetObjectId = rootIds.length > 0 ? rootIds[0] : normalized.exportTargetObjectId;
+    normalized.atomicExportTargetObjectId = rootIds.length > 0 ? rootIds[0] : normalized.atomicExportTargetObjectId;
+    normalized.atomicExportTargetObjectIds = rootIds;
+    normalized.sourceSetId = _sourceSetId(sourceIds);
+    normalized.sourceRootSetId = _sourceSetId(rootIds);
+    normalized.clusterSourceSetId = _sourceSetId(normalized.clusterSourceObjectIds || []);
+    normalized.visualSourceSetId = _sourceSetId(visualIds);
+    normalized.exportSourceSetId = _sourceSetId(exportIds);
+    normalized.hiddenSourceSetId = _sourceSetId([]);
+    normalized.clusterRelation = normalized.clusterRelation || "EXACT_SOURCE_CLUSTER";
+    normalized.executable = true;
+    normalized.required = true;
+    normalized.reason = String(normalized.reason || "")
+            + ":table_cell_inline_complex_form_complete_png";
+    return normalized;
 }
 
 function _objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById) {
@@ -7963,6 +8065,8 @@ function _objectPlanVisualAction(bundle, sourceById) {
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
     if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) return "ABSORB_TEXT_STYLE";
     if (_objectPlanBundleIsTextRangeDecorationShell(bundle)) return "ABSORB_TEXT_STYLE";
+    if (_objectPlanBundleIsEmptyTextStyleDecorationContainer(bundle, sourceById)) return "DROP_VISUAL";
+    if (_objectPlanBundleIsTableCellInlineTextCarrierShell(bundle)) return "DROP_VISUAL";
     if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return "DROP_VISUAL";
     if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) {
         return _objectPlanPlacement(bundle) === "INLINE"
@@ -7989,6 +8093,58 @@ function _objectPlanVisualAction(bundle, sourceById) {
                 : "PLACE_FLOATING_PNG";
     }
     return "DROP_VISUAL";
+}
+
+function _objectPlanBundleIsTableCellInlineTextCarrierShell(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.tableCellStoryTextInlineSlot !== true) return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (bundle.textOwner === "indesign_png" || bundle.completePngTextAllowed === true) return false;
+    var role = String(bundle.slotRole || bundle.compositeRole || "");
+    if (role !== "inline_editable_text_shell_composite"
+            && role !== "shell_slot_only"
+            && role !== "direct_child_shell_slot") {
+        return false;
+    }
+    return true;
+}
+
+function _objectPlanBundleIsEmptyTextStyleDecorationContainer(bundle, sourceById) {
+    if (!bundle || bundle.passId !== "pass.decoration_groups") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (bundle.clusterHasPlacedContent === true) return false;
+    if (bundle.textOwner === "indesign_png" || bundle.completePngTextAllowed === true) return false;
+    if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return false;
+    if (!bundle.sourceObjectIds || bundle.sourceObjectIds.length < 2) return false;
+    if (!bundle.styleSourceObjectIds || bundle.styleSourceObjectIds.length === 0) return false;
+
+    var sourceIds = _objectPlanSourceIdsUnion(
+            _objectPlanSourceIdsUnion(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || []),
+            bundle.exportSourceObjectIds || []);
+    var hasEmptyTextFrame = false;
+    var hasNonTextStyleShape = false;
+    for (var i = 0; i < sourceIds.length; i++) {
+        var src = sourceById ? sourceById[String(sourceIds[i])] : null;
+        if (!src) return false;
+        var kind = _objectPlanSourceKind(src);
+        if (kind === "TextFrame") {
+            if (src.hasText === true) return false;
+            hasEmptyTextFrame = true;
+            continue;
+        }
+        if (kind === "Group") continue;
+        if (kind === "Image" || kind === "PDF") return false;
+        if (kind === "Rectangle"
+                || kind === "Polygon"
+                || kind === "Oval"
+                || kind === "GraphicLine") {
+            hasNonTextStyleShape = true;
+            continue;
+        }
+        return false;
+    }
+    return hasEmptyTextFrame && hasNonTextStyleShape;
 }
 
 function _objectPlanBundleIsTextRangeDecorationShell(bundle) {
