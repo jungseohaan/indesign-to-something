@@ -179,6 +179,16 @@ public class EHParser {
                 // 변수다 — 디코딩해 radicand 로 넣는다(실측: 1단원 p16 √121 vs √u 구분).
                 if (radicandFollows()) {
                     parseRadicand(out, absorbTrailingSuperscript);
+                } else if (absorbTrailingSuperscript) {
+                    // SPEC-067: 키 큰 hook('"')은 "radicand 에 위첨자가 들어간다"는 신호다
+                    // (√3², √(-3)²). 그런데 radicand 가 뒤따르지 않는다는 건, GREP 정상화가
+                    // 그 지수 포함 radicand 를 다른 수식 조각으로 쪼개 떼어냈다는 뜻이다.
+                    // 이때 폭 선택자 글리프(0xC3 등)를 변수로 디코딩하면 sqrt{v}·sqrt{x}
+                    // 같은 stray 글리프가 근호 안에 새어 든다(실측: 1단원 sqrt{(-7)²} 조각화).
+                    // 키 큰 hook 은 단일 변수 radicand 를 갖지 않으므로, 폭 선택자만 남고
+                    // radicand 가 없으면 빈 근호로 둔다 — 쪼개진 지수 조각은 stitch 패스가
+                    // 뒤에서 이어 붙인다.
+                    return;
                 } else {
                     String var = EHFontGlyphMap.decodeText(
                             String.valueOf((char) t.rawCodepoint()), "EH분수대문자");

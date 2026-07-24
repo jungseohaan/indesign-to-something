@@ -58,6 +58,7 @@ class MathProcessor {
             }
         }
         if (hasEquation) {
+            stitchGrepSplitFormulaEquations(para);
             collapseMixedFormulaEquationClusters(ctx, para);
             if (hasEHRun) {
                 // 수식과 EH TextRun이 공존하더라도 의미 있는 원문 텍스트는 보존한다.
@@ -304,6 +305,157 @@ class MathProcessor {
             if ((c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3131 && c <= 0x318E)) return i;
         }
         return -1;
+    }
+
+    /**
+     * SPEC-067: GREP 정상화가 스타일 경계로 쪼갠 수식 조각을 다시 잇는다.
+     *
+     * <p>GREP 규칙이 숫자·변수는 이탤릭, 단위·연산자는 정자로 조판하려고 런을 나누는데,
+     * IDML 수식 빌더는 이 런 경계를 수식 경계로 오인해 하나였던 수식을 여러 ASTEquation
+     * 으로 쪼갠다. 예: "left(√a right)²=a,~left(-√a right)²=a" 가
+     * <pre>[EQ: left(√a right)²=a,~(-√a]  [ ]  [EQ: )²]  [EQ: =a]</pre>
+     * 로 갈라진다. 앞 조각은 괄호·중괄호 짝이 안 맞는다(열림 &gt; 닫힘)는 게 특징이다.</p>
+     *
+     * <p>선두 ASTEquation 의 괄호/중괄호가 미완결이면, 뒤따르는 (공백 런만 사이에 둔)
+     * ASTEquation 들을 짝이 맞을 때까지 스크립트를 이어 붙여 하나로 합친다. 조각 각각은
+     * 불균형이지만 합치면 균형이 복구된다. 균형이 이미 맞는 정상 수식은 건드리지 않는다.</p>
+     */
+    private static void stitchGrepSplitFormulaEquations(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.size() < 2) return;
+
+        List<ASTInlineItem> out = new ArrayList<>();
+        boolean changed = false;
+        int i = 0;
+        while (i < items.size()) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTEquation)) {
+                out.add(item);
+                i++;
+                continue;
+            }
+            ASTEquation lead = (ASTEquation) item;
+            if ("CHEM_FORMULA".equals(lead.sourceType()) || lead.hwpScript() == null || lead.hwpScript().isEmpty()) {
+                out.add(item);
+                i++;
+                continue;
+            }
+            // SPEC-067: 빈 근호 재봉합. EHParser 가 키 큰 hook 뒤 radicand 가 조각나
+            // 떨어져 나가면 근호를 "sqrt{ }"(빈 radicand)로 남긴다. 바로 뒤(공백만 사이)
+            // 조각이 그 radicand 이므로 빈 중괄호 안에 주입한다.
+            // 예: "sqrt{25} TIMES sqrt{ }" + "(-7)^{2}" → "sqrt{25} TIMES sqrt{(-7)^{2}}".
+            int emptyRadEnd = tryStitchEmptyRadicand(lead, items, i);
+            if (emptyRadEnd > i) {
+                out.add(lead);
+                i = emptyRadEnd;
+                changed = true;
+                continue;
+            }
+            // GREP 이 한 수식을 스타일 경계로 쪼개면 선두 조각의 괄호/중괄호 짝이
+            // 미완결(열림 > 닫힘)로 남는다(예: "(-√a" + ")²"). 이 신호가 있을 때만,
+            // 뒤따르는(공백만 사이에 둔) 수식 조각을 짝이 복구될 때까지 이어 붙인다.
+            // 짝이 이미 맞는 완결 수식은 절대 대상이 아니다 — '='로 시작하는 조각까지
+            // 흡수하면 원래부터 별개였던 등식(=overline{CD} 같은 도형 등식은 기준선에도
+            // 별개 조각으로 존재)을 잘못 삼켜 과병합한다(실측: 수학u5 40건). 불균형
+            // 복구는 조각이 명백히 미완결이라는 확실한 증거라서 안전하다.
+            StringBuilder merged = new StringBuilder(lead.hwpScript());
+            if (isBraceBalanced(merged.toString()) && isParenBalanced(merged.toString())) {
+                out.add(item);
+                i++;
+                continue;
+            }
+            int j = i + 1;
+            int consumedEnd = -1;   // 마지막으로 흡수한 ASTEquation 의 인덱스+1
+            while (j < items.size()) {
+                ASTInlineItem nxt = items.get(j);
+                if (nxt instanceof ASTTextRun && isWhitespaceOnlyRun((ASTTextRun) nxt)) {
+                    j++;   // 조각 사이 공백 런은 건너뛴다 (수식 밖 공백이므로 버림)
+                    continue;
+                }
+                if (!(nxt instanceof ASTEquation)) break;
+                ASTEquation follow = (ASTEquation) nxt;
+                if ("CHEM_FORMULA".equals(follow.sourceType())
+                        || follow.hwpScript() == null || follow.hwpScript().isEmpty()) break;
+                merged.append(follow.hwpScript());
+                consumedEnd = j + 1;
+                if (isBraceBalanced(merged.toString()) && isParenBalanced(merged.toString())) {
+                    break;  // 짝이 복구되면 완결
+                }
+                j++;
+            }
+            String mergedScript = merged.toString();
+            if (consumedEnd > i + 1
+                    && isBraceBalanced(mergedScript) && isParenBalanced(mergedScript)) {
+                // 이미 빌드된 수식 스크립트끼리 이어 붙인 것이므로 normalizeFormulaScript 를
+                // 다시 돌리면 안 된다 — RIGHT→rarrow 치환이 소괄호 키워드 "right)" 를 화살표로
+                // 깨뜨린다. 중복 공백만 정리한다.
+                lead.hwpScript(mergedScript.replaceAll("\\s+", " ").trim());
+                out.add(lead);
+                i = consumedEnd;   // 흡수한 조각·중간 공백을 모두 건너뛴다
+                changed = true;
+            } else {
+                out.add(item);
+                i++;
+            }
+        }
+        if (changed) {
+            items.clear();
+            items.addAll(out);
+        }
+    }
+
+    /**
+     * SPEC-067: 선두 수식이 빈 근호 "sqrt{ }" 로 끝나면, 뒤따르는(공백만 사이) 수식
+     * 조각을 그 빈 중괄호 안에 radicand 로 주입한다. 성공하면 소비한 마지막 인덱스+1 을,
+     * 대상이 아니면 start 를 반환한다.
+     *
+     * <p>EHParser 가 GREP 조각화로 radicand 를 잃은 근호를 "sqrt{ }" 로 남기는데
+     * (키 큰 hook + radicand 소실), 그 radicand 는 다음 ASTEquation 으로 떨어져 나가
+     * 있다. 빈 근호는 괄호 짝이 맞아 balance-stitch 가 못 잡으므로 별도 처리한다.</p>
+     */
+    private static int tryStitchEmptyRadicand(ASTEquation lead, List<ASTInlineItem> items, int start) {
+        String script = lead.hwpScript();
+        if (script == null) return start;
+        // 끝이 빈 근호인지: "sqrt{ }" 또는 "sqrt{}" (뒤 공백 허용)
+        java.util.regex.Matcher m = EMPTY_RADICAND_TAIL.matcher(script);
+        if (!m.find()) return start;
+        int braceOpen = m.start(1);   // '{' 위치
+        // 뒤따르는 첫 수식 조각(공백 런만 건너뜀)을 radicand 로 삼는다.
+        int j = start + 1;
+        while (j < items.size()) {
+            ASTInlineItem nxt = items.get(j);
+            if (nxt instanceof ASTTextRun && isWhitespaceOnlyRun((ASTTextRun) nxt)) { j++; continue; }
+            break;
+        }
+        if (j >= items.size() || !(items.get(j) instanceof ASTEquation)) return start;
+        ASTEquation rad = (ASTEquation) items.get(j);
+        if ("CHEM_FORMULA".equals(rad.sourceType()) || rad.hwpScript() == null || rad.hwpScript().isEmpty()) {
+            return start;
+        }
+        String radScript = rad.hwpScript().trim();
+        // radicand 조각 자체는 괄호·중괄호 짝이 맞아야 안전하게 주입 가능
+        // (예: "(-7)^{2}"). 안 맞으면 다른 조각화이므로 balance-stitch 에 맡긴다.
+        if (!isBraceBalanced(radScript) || !isParenBalanced(radScript)) return start;
+        // "sqrt{ " + radicand + "}" — 빈 중괄호 사이에 주입
+        String injected = script.substring(0, braceOpen + 1) + radScript + "}";
+        lead.hwpScript(injected.replaceAll("\\s+", " ").trim());
+        return j + 1;
+    }
+
+    /** 스크립트 끝의 빈 근호 "sqrt{ }" / "sqrt{}" 를 잡는다. 그룹1은 '{'. */
+    private static final java.util.regex.Pattern EMPTY_RADICAND_TAIL =
+            java.util.regex.Pattern.compile("sqrt\\s*(\\{)\\s*\\}\\s*$");
+
+    /** 공백(가는공백 포함)만으로 이뤄진 텍스트 런인가. */
+    private static boolean isWhitespaceOnlyRun(ASTTextRun run) {
+        if (run == null) return false;
+        String t = run.text();
+        if (t == null || t.isEmpty()) return true;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (!Character.isWhitespace(c) && !isFormulaSpace(c)) return false;
+        }
+        return true;
     }
 
     private static void collapseMixedFormulaEquationClusters(ResolvedBuildContext ctx, ASTParagraph para) {

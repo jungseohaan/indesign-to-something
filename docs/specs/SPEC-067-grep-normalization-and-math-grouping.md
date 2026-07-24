@@ -107,7 +107,135 @@ python3 scripts/dev/verify_hwpx.py out.hwpx --golden test-data/golden/수학u1-p
 python3 scripts/dev/charpr_profile.py out.hwpx --compare test-data/golden/수학u1-p010-049-charpr.json
 ```
 
-## 후속 (SPEC-067 이후)
+## 2차 세션 추가 규명 (2026-07-24)
 
-GREP 정상화가 끝나면 색 우선순위를 IDML/GREP 우선으로 전환한다
-(영어 u3 p56 한글→영문 색 번짐, 과학 p25/p26 색 오버라이드를 같은 규칙으로 해결).
+### 조각화의 정확한 메커니즘
+
+`x²=a` 소실 케이스를 IDML 원본까지 추적:
+- IDML: `xÛ`=a` **단일 런**, `[No character style]` (Û=제곱 글리프)
+- 문단 스타일 GREP: `\d+|[\l\u]|[+|\-|÷|...]` → "태광11.5:상부자(이탤릭)"
+- 매칭: `x`(0-1), `` ` ``(2-3), `=`(3-4), `a`(4-5) — **`Û`(1-2)만 매칭 안 됨**
+- 결과: `x`(이탤릭) / `Û`(스타일없음) / `` `=a ``(이탤릭) 로 분리 → 그룹 끊김
+
+즉 **EH 글리프 해킹 문자(Û 등 라틴-1 보충)가 GREP 규칙에 안 걸려** 그 위치만
+스타일이 비고, 스타일 경계에서 런이 쪼개진다.
+
+### 시도 5: 갭 메우기 (실패, stash v2)
+
+`charStylePerChar[]` 에서 매칭 사이에 낀 미매칭 수식 글리프를 인접 스타일로
+메우는 `fillMathGlyphGrepGaps` 추가. 하지만 이 케이스는 GREP 이 애초에 안 붙는
+문단(`x`의 grepCs=null)이라 대상이 아니었다 — 수학 149건 여전. WIP v2 로 stash.
+
+### 남은 근본 해법
+
+이 케이스의 `x`는 GREP 매칭 결과가 최종 런에 반영되지 않았다(grepCs=null).
+갭 메우기가 아니라, **GREP 매칭 결과 자체가 왜 이 문단에서 유실되는지**를 먼저
+봐야 한다. `resolveGrepGenericForParagraph` 의 런 재구성에서 매칭 정보가 손실되는
+지점 추적이 다음 착수점.
+
+## p56 색 문제 — GREP 과 독립된 별건으로 확정 (2026-07-24)
+
+영어 u3 p56 "A That happens…" 녹색 번짐은 **GREP 문제가 아니다**:
+- GREP 은 정상 작동: `A\t` → `1_Communication_선지(대화 AB)`(회색) 정상 매칭,
+  나머지 본문 → 색 규칙 없음(검정이 정답)
+- 그런데 최종 HWPX 는 전부 녹색(#67B755), 회색이어야 할 `A` 조차 녹색
+
+**실제 경로**: 이 대화 문단은 표 셀 안(`tbl>tc>subList`)이라
+`StoryLoader.buildResolvedCellParagraphs` → `ResolvedTextFlowAstConverter.convertRunText`
+→ `TextRunSegmenter.fromResolvedText` 경로를 탄다. 이 경로는 **RunBuilder 색
+우선순위(SPEC-065)를 안 거치고 resolved run 의 fillColor 를 그대로 쓴다.**
+resolved DOM 이 앞 한글 문단(녹색)을 흘려 이 영문 런을 녹색으로 오보고 →
+검증 없이 그대로 색이 됨.
+
+수정 지점: 셀 문단 경로(`buildResolvedCellParagraphs`)에도 IDML/GREP 색 근거
+검증을 넣어, 근거 없는 resolved 유채색을 문단 기본색으로 되돌린다. 영향 범위가
+셀 전체(과학 표 색자 포함)라 charPr 기준선으로 신중히 검증할 것.
+**GREP/수식 그룹핑과 독립적이므로 별도 브랜치에서 먼저 처리 가능.**
+
+## 3차 세션: 조각화 지점 특정 + balance-stitch 구현 (2026-07-24)
+
+3교과서(수학u1/u5·과학u1) 캐시 추출물로 재측정. **측정 원칙**: 골든이 다른
+추출 버전이라 이미지/표 축은 노이즈다 → `hp:script`(수식) + charpr 만 before/after
+비교. `eqcompare2.py`/`eqcompare3.py`(scratchpad)로 정규화(left(/right)·공백·~ 제거)
+후 멀티셋 비교하고, 손실을 "조각화(내용 보존)"와 "진짜 소실"로 분리.
+
+### 확정된 사실
+
+1. **GREP 구문 수정 단독은 순손실**. charpr 개선은 미미(수학u1 3건, 나머지 1건) —
+   색/폰트는 이미 resolved DOM 이 대주므로. 반면 수식 조각화가 큼:
+   - 수학u1: corrupt 52→74(구문수정만), 온전 수식 다수 fragmentation
+   - 수학u5 8건, 과학u1 0건
+2. **조각화는 IDML 경로에서 이미 여러 ASTEquation 으로 쪼개진 채 도착**한다
+   (`MathProcessor.processResolvedMathGrouping` 이 `hasEquation` 이면 early-return —
+   그래서 resolved 그룹 루프가 아니라 **상류 IDML 수식 빌더**가 원인).
+   실측 스트림: `[EQ:left(√a right)²=a,~(-√a]  [ ]  [EQ:)²]  [EQ:=a]`.
+   앞 조각은 **괄호/중괄호 짝 불균형**(열림>닫힘)이 특징.
+3. **`sqrt{v}`/`sqrt{x}` 글리프 오디코드**가 더 깊은 회귀. 구문수정 후 수학u1 에
+   15건(기준선 1건). `EHFontGlyphMap` 0xC3(Ã)→'v', 즉 sqrt 근호 내용 `(-7)`·`(-a)`
+   가 조각나면서 근호 안이 stray 글리프 'v'/'x' 로 디코드됨. **이건 그룹 경계가
+   아니라 EH 수식 렉서의 글리프 디코드 문제** (별건, [[eh-yakmul-glyph-mapping-adhoc]]).
+
+### 구현: `stitchGrepSplitFormulaEquations` (balance-only, 안전)
+
+`MathProcessor` 에 조각 재봉합 패스 추가. **선두 ASTEquation 의 괄호/중괄호가
+미완결일 때만**, 뒤따르는(공백만 사이) 수식 조각을 짝이 복구될 때까지 이어 붙인다
+(이미 빌드된 스크립트라 `normalizeFormulaScript` 재실행 금지 — RIGHT→rarrow 가
+`right)` 를 깨뜨림, 공백만 정리). 결과:
+- `)²` 고아 조각 계열(수학u1 17건) 정상 재봉합, corrupt 52→**49**(개선)
+- 기준선(구문수정 없음) 대비 거의 no-op(수학u5/과학u1 동일, 수학u1 1건 개선)
+
+### 반복 금지 (3차 실패 실측)
+
+- **연산자 시작(`=`,`<`,`+`,`,`,`~`) 조각 흡수**: 과병합. `overline{AB}` + `=overline{CD}`
+  같은 도형 등식을 삼킴. 게다가 `=overline{CD}` 는 **기준선에도 별개 조각으로 존재** —
+  GREP 회귀가 아니라 기존 조각화라 손익 판정 자체가 모호. 수학u5 lost 9→40. **불균형
+  복구 신호만 안전**(조각이 명백히 미완결이라는 확증).
+- **`isFormulaEquationScript` 에 `,~` 허용**(collectMixedFormulaEquationCluster 병합
+  유도): 그 경로는 box/arrow/chemical 없으면 return null 이라 순수 대수식엔 무효.
+
+## 4차 세션: `sqrt{v}` 글리프 오디코드 수정 (2026-07-24)
+
+### 근본 원인 특정 (실측)
+
+`EHFontEquationConverter.convert(runs)` 계측: `sqrt{v}` 는 runs = `"`(키 큰 hook,
+EH분수대문자) + `0xC3`(width-selector) **+ radicand 없음**에서 나온다. GREP 이
+근호 내용(`(-7)²` 등)을 다른 수식 조각으로 떼어내, hook 뒤에 width-selector 만
+남는다. `EHParser.parseRadicand` 의 WIDTH_SELECTOR 케이스가 `radicandFollows()`
+false 면 그 글리프를 **변수로 디코딩**(`0xC3`→v, `0xC5`→x) → stray `sqrt{v}`.
+
+### 수정 1 — `EHParser` (10줄): 키 큰 hook + radicand 소실 → 빈 근호
+
+WIDTH_SELECTOR 케이스에서 `absorbTrailingSuperscript`(키 큰 hook `"` = 지수 포함
+radicand 신호)인데 radicand 가 안 따라오면, 폭선택자를 변수로 디코딩하지 않고
+빈 근호로 둔다. **일반 hook(`'`)의 √u·√l 진짜 변수는 무영향**(absorbTrailing=false).
+결과: 수학u1 `sqrt{v}`/`sqrt{x}` 15건 → 0건. 대신 `sqrt{ }`(빈 근호)로 남음.
+
+### 수정 2 — `MathProcessor.tryStitchEmptyRadicand`: 빈 근호에 radicand 주입
+
+빈 근호 `sqrt{ }` 는 괄호 짝이 맞아 balance-stitch 가 못 잡는다. 선두 수식이
+`sqrt{ }` 로 끝나고 바로 뒤(공백만 사이) 조각이 짝 맞는 수식(`(-7)²`)이면 빈
+중괄호에 주입 → `sqrt{(-7)²}`. 수학u1 `sqrt{ }` 15→5, `sqrt{(-...)²}` 정상 복원.
+
+### 현재 브랜치 상태(work-0753) — **GREP 구문수정 없이 무해·개선**
+
+적용: `EHParser`(빈 근호) + `MathProcessor`(balance-stitch + 빈근호 주입).
+**GREP 구문수정은 여전히 되돌린 상태**. 기준선 대비:
+- 3교과서 charpr **PASS**, 수학u5·과학u1 완전 동일, 수학u1 몇 건 **재봉합만**
+  (`(84+84√2` 짝 복구, `=sqrt{ }`+`{a}over{b}` → `=sqrt{{a}over{b}}`)
+- 즉 구문수정을 안 켜도 stitch·빈근호 수정은 기존 조각화를 고쳐 **순이득**
+
+### 남은 블로커 (GREP 구문수정을 켜려면)
+
+구문수정 ON 시 수학u1 진짜소실 **24건**(4차 전 36→24, 빈근호로 12건 회수).
+남은 24건은 **연산자/쉼표 연속 조각**(`1²=1,2²=4` 는 기준선에선 단일 수식인데
+GREP 이 `1²`|`=1,`|`2²`|`=4` 로 쪼갬 — 단, `=1,` 는 ASTEquation 이 아니라
+**text run**이라 stitch 대상 밖) + 일부 깊은 글리프 깨짐(`{sqrt{13)}}`). 연산자
+연속 흡수는 `overline{AB}`+`=overline{CD}`(기준선에도 별개 조각인 도형 등식)를
+삼켜 과병합하므로 금지. **다음 착수**: 등식/쉼표로 쪼개진 조각을 안전하게 잇는
+법 — 기준선이 단일 수식이던 것만 구별하는 신호 필요(text-run 연속자 + 양옆 수식폰트).
+
+## 회귀 감시 자산 (커밋 완료)
+
+- `scripts/dev/charpr_profile.py` — 색/폰트/이탤릭/첨자 분포 프로파일러.
+  **구조 시그니처 골든에는 이 축이 없다** (GREP 은 주로 여기에 작용)
+- 골든: 수학 u1/u5, 영어 u1/u3 구조 + 4교과서 charPr 기준선
