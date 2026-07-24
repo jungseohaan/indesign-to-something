@@ -5800,9 +5800,11 @@ public class InlineFrameHandler {
                 && plan.placement == Placement.INLINE
                 && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
                 && plan.visualAction == VisualAction.DROP_VISUAL
-                && plan.textAction == TextAction.DROP_TEXT
+                && (plan.textAction == TextAction.DROP_TEXT
+                || isDroppedInlineTextShellTextOwnerPlan(plan))
                 && ((plan.kind != null && plan.kind.startsWith("layout_only_inline_slot:"))
                 || "layout_only_inline_slot".equals(plan.slotRole)
+                || "inline_editable_text_shell_composite".equals(plan.slotRole)
                 || "planner_declared_layout_only_inline_slot".equals(plan.reason)
                 || "page_plane_absorbed_inline_anchor_layout_slot".equals(plan.reason));
     }
@@ -6449,19 +6451,32 @@ public class InlineFrameHandler {
             if (plan == null) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
+            boolean droppedTextOwnerShell = isDroppedInlineTextShellTextOwnerPlan(plan);
             if (plan.hasVisibleVisual()
-                    || plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                    || isShellPlanWithOwnedHwpxText(ctx, plan)) {
+                    || (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT && !droppedTextOwnerShell)
+                    || (isShellPlanWithOwnedHwpxText(ctx, plan) && !droppedTextOwnerShell)) {
                 return null;
             }
             if (plan.visualAction == VisualAction.DROP_VISUAL
                     && (plan.textAction == TextAction.DROP_TEXT
-                    || plan.textAction == TextAction.OWNED_BY_PNG)) {
+                    || plan.textAction == TextAction.OWNED_BY_PNG
+                    || droppedTextOwnerShell)) {
                 dropOnly = true;
                 if (dropPlan == null) dropPlan = plan;
             }
         }
         return dropOnly ? dropPlan : null;
+    }
+
+    private static boolean isDroppedInlineTextShellTextOwnerPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
+                && plan.visualAction == VisualAction.DROP_VISUAL
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && ShellRole.isTextShell(plan)
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0;
     }
 
     private static boolean isRepeatedEmptyInlineTextFramePlaceholderPlan(ObjectPlan plan) {

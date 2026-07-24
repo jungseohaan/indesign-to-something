@@ -8196,6 +8196,26 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         if (ids.length === 0) ids = ids.concat(plan.sourceObjectIds || []);
         addForeignVisualOwnerIds(plan.pageIndex, ids);
     }
+    function markDroppedPageVisualSourceIds(plan) {
+        if (!plan) return;
+        if (plan.materialization === "PAGE_PLANE_PNG") return;
+        if (plan.visualAction !== "DROP_VISUAL") return;
+        if (plan.textAction !== "DROP_TEXT") return;
+        // Story-flow inline material is outside the page plane's ownership scan.
+        // Keeping this page-scoped avoids hiding inline exports by accident.
+        if (plan.placement === "INLINE") return;
+        if (plan.coordinateSpace === "STORY_FLOW") return;
+        var ids = [];
+        ids = ids.concat(plan.visualSourceObjectIds || []);
+        ids = ids.concat(plan.exportSourceObjectIds || []);
+        ids = ids.concat(plan.hiddenVisualSourceObjectIds || []);
+        if (ids.length === 0) ids = ids.concat(plan.sourceObjectIds || []);
+        addForeignVisualOwnerIds(plan.pageIndex, ids);
+        markIds(plan.sourceObjectIds || []);
+        markIds(plan.visualSourceObjectIds || []);
+        markIds(plan.exportSourceObjectIds || []);
+        markIds(plan.hiddenVisualSourceObjectIds || []);
+    }
     function markCompletePngTextOwnerIds(plan) {
         if (!plan) return;
         if (plan.textAction !== "OWNED_BY_PNG") return;
@@ -8668,6 +8688,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         if (!existing || existing.materialization === "PAGE_PLANE_PNG") continue;
         markTableStyleSourceIds(existing);
         markCompletePngTextOwnerIds(existing);
+        markDroppedPageVisualSourceIds(existing);
         if (!_sourceCoveragePlanHasVisibleVisual(existing)) continue;
         if (rememberAbsorbableExistingPlan(existing)) continue;
         markForeignVisualOwnerSourceIds(existing);

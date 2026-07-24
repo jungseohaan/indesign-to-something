@@ -184,6 +184,15 @@ Placement and coordinate space are a single source decision.
   text visible in the PNG and no separate HWPX TextFrame owner is created for
   those child TextFrames. Direct child shell slots that are independently
   executable remain separate source slots and are not folded by this rule.
+- The same complete-PNG rule applies when the inline atom is owned by table-cell
+  story flow (`tableCellStoryTextInlineSlot=true`) and the closed inline source
+  root contains multiple editable TextFrame descendants plus non-text visual
+  material. A HWPX table cell can host the resulting inline PNG, but it cannot
+  preserve the source's nested group-local coordinate system as editable cell
+  content. Stage 1 therefore assigns `CONTENT_VISUAL_SLOT`,
+  `placement=INLINE`, `coordinateSpace=STORY_FLOW`,
+  `materialization=COMPLETE_PNG`, and `textAction=OWNED_BY_PNG` to the direct
+  inline source root.
 - If that direct inline-anchor `ObjectPlan` is `DROP_TEXT` plus `DROP_VISUAL`,
   executors must not recreate the anchor through rendered PNG, group, badge, or
   text-shell fallback heuristics.

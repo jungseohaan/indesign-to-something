@@ -58,6 +58,21 @@ public final class FormulaStyleResolver {
         return eq != null && "CHEM_FORMULA".equals(eq.sourceType());
     }
 
+    public static String applyChemicalUprightScript(ASTEquation eq, String hwpScript) {
+        if (!usesBodyTextEquationStyle(eq)) return hwpScript;
+        return applyChemicalUprightScript(hwpScript);
+    }
+
+    static String applyChemicalUprightScript(String hwpScript) {
+        if (hwpScript == null || hwpScript.isEmpty()) return hwpScript;
+        String trimmed = hwpScript.trim();
+        if (startsWithHwpRomanFontCommand(trimmed)) {
+            return hwpScript;
+        }
+        // Hancom equation syntax treats rm as a font-state command, not as rm{...}.
+        return "rm " + hwpScript;
+    }
+
     private static String resolveColor(String sourceColor, String inheritedColor, String templateColor) {
         if (sourceColor != null && !sourceColor.isEmpty()) {
             if (!isDefaultBlack(sourceColor)) {
@@ -90,5 +105,17 @@ public final class FormulaStyleResolver {
         String normalized = color.trim();
         return "#000000".equalsIgnoreCase(normalized)
                 || "000000".equalsIgnoreCase(normalized);
+    }
+
+    private static boolean startsWithHwpRomanFontCommand(String script) {
+        return startsWithCommandToken(script, "rm")
+                || startsWithCommandToken(script, "rmbold");
+    }
+
+    private static boolean startsWithCommandToken(String script, String command) {
+        if (script == null || !script.startsWith(command)) return false;
+        if (script.length() == command.length()) return true;
+        char next = script.charAt(command.length());
+        return Character.isWhitespace(next);
     }
 }
