@@ -69,23 +69,49 @@ public final class SimpleButtonLabelPlanner {
         if (story == null || story.paragraphs() == null) return style;
         for (IDMLParagraph paragraph : story.paragraphs()) {
             if (paragraph == null || paragraph.characterRuns() == null) continue;
+            String paragraphText = clean(paragraphText(paragraph));
+            if (labelText != null && !labelText.isEmpty()
+                    && (labelText.equals(paragraphText) || paragraphText.contains(labelText))) {
+                for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                    if (run == null || clean(run.content()).isEmpty()) continue;
+                    applyStyleFromRun(ctx, style, run);
+                    return style;
+                }
+            }
             for (IDMLCharacterRun run : paragraph.characterRuns()) {
                 if (run == null) continue;
                 String text = clean(run.content());
                 if (text.isEmpty()) continue;
                 if (labelText != null && !labelText.equals(text) && !text.contains(labelText)) continue;
-                style.fontFamily = run.fontFamily();
-                style.fontStyle = run.fontStyle();
-                style.fontSizePt = run.fontSize();
-                style.tracking = run.tracking();
-                style.horizontalScale = run.horizontalScale();
-                style.textColorHex = run.fillTint() != null
-                        ? ctx.resolvedData.resolveTintedColorHex(run.fillColor(), run.fillTint())
-                        : ctx.resolvedData.resolveColorHex(run.fillColor());
+                applyStyleFromRun(ctx, style, run);
                 return style;
             }
         }
         return style;
+    }
+
+    private static String paragraphText(IDMLParagraph paragraph) {
+        if (paragraph == null || paragraph.characterRuns() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (IDMLCharacterRun run : paragraph.characterRuns()) {
+            if (run == null || run.content() == null) continue;
+            sb.append(run.content());
+        }
+        return sb.toString();
+    }
+
+    private static void applyStyleFromRun(ResolvedBuildContext ctx, LabelStyle style, IDMLCharacterRun run) {
+        if (style == null || run == null) return;
+        style.fontFamily = run.fontFamily();
+        style.fontStyle = run.fontStyle();
+        style.fontSizePt = run.fontSize();
+        style.tracking = run.tracking();
+        style.horizontalScale = run.horizontalScale();
+        if (ctx != null && ctx.resolvedData != null) {
+            style.textColorHex = run.fillTint() != null
+                    ? ctx.resolvedData.resolveTintedColorHex(run.fillColor(), run.fillTint())
+                    : ctx.resolvedData.resolveColorHex(run.fillColor());
+        }
     }
 
     private static String clean(String text) {

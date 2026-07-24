@@ -1167,6 +1167,8 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
                 (inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0
                         && _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
                                 sourceInfo, sourceInfoById, childIdsByParentId));
+        var completePngFloatingAnchored = ownsTextByCompletePng
+                && String(sourceInfo.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED";
         var inlineRequiresTextHidden = inlineEditableTextFrameIds
                 && inlineEditableTextFrameIds.length > 0 && !ownsTextByCompletePng;
         var inlineVisualSourceIds = ownsTextByCompletePng
@@ -1197,12 +1199,21 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
             completePngTextAllowed: ownsTextByCompletePng,
             materialization: ownsTextByCompletePng ? "COMPLETE_PNG" : null,
             textAction: ownsTextByCompletePng ? "OWNED_BY_PNG" : (inlineRequiresTextHidden ? "OWNED_BY_HWPX_TEXT" : null),
-            visualAction: ownsTextByCompletePng ? "PLACE_INLINE_PNG" : null,
+            visualAction: ownsTextByCompletePng
+                    ? (completePngFloatingAnchored ? "PLACE_FLOATING_PNG" : "PLACE_INLINE_PNG")
+                    : null,
             ownershipSlot: ownsTextByCompletePng ? "CONTENT_VISUAL_SLOT" : null,
             exportTargetObjectId: ownsTextByCompletePng ? sourceInfo.id : null,
-            placement: "INLINE",
-            coordinateSpace: "STORY_FLOW",
-            inlineSourceTreeClosed: ownsTextByCompletePng
+            placement: completePngFloatingAnchored ? "FLOATING" : "INLINE",
+            coordinateSpace: completePngFloatingAnchored ? "PAGE" : "STORY_FLOW",
+            storyAnchorPlacement: sourceInfo.storyAnchorPlacement || null,
+            anchoredPosition: sourceInfo.anchoredPosition || null,
+            sourceInlineFlow: !completePngFloatingAnchored && sourceInfo.storyTextInlineSlot === true,
+            storyTextInlineSlot: sourceInfo.storyTextInlineSlot === true,
+            tableCellStoryTextInlineSlot: sourceInfo.tableCellStoryTextInlineSlot === true,
+            pagePositionedAnchoredSource: completePngFloatingAnchored,
+            inlineAnchorSourceObjectId: completePngFloatingAnchored ? null : sourceInfo.id,
+            inlineSourceTreeClosed: !completePngFloatingAnchored && ownsTextByCompletePng
         };
         if (!inlineRequiresTextHidden) {
             attrs.compositeRole = "inline_textless_native_shape";
@@ -7576,6 +7587,8 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
                 (hiddenTextIds.length > 0
                         && _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
                                 root, sourceInfoById, childIdsByParentId));
+        var completePngFloatingAnchored = ownsTextByCompletePng
+                && String(root.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED";
         appended.push({
             candidateId: candidateId,
             passId: "pass.inline_objects",
@@ -7613,12 +7626,18 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             textAction: ownsTextByCompletePng
                     ? "OWNED_BY_PNG"
                     : (hiddenTextIds.length > 0 ? "OWNED_BY_HWPX_TEXT" : "DROP_TEXT"),
-            visualAction: "PLACE_INLINE_PNG",
+            visualAction: completePngFloatingAnchored ? "PLACE_FLOATING_PNG" : "PLACE_INLINE_PNG",
             visualLayer: "CONTENT_VISUAL",
-            placement: "INLINE",
-            coordinateSpace: "STORY_FLOW",
-            inlineAnchorSourceObjectId: root.id,
-            inlineSourceTreeClosed: true,
+            placement: completePngFloatingAnchored ? "FLOATING" : "INLINE",
+            coordinateSpace: completePngFloatingAnchored ? "PAGE" : "STORY_FLOW",
+            storyAnchorPlacement: root.storyAnchorPlacement || null,
+            anchoredPosition: root.anchoredPosition || null,
+            sourceInlineFlow: !completePngFloatingAnchored && root.storyTextInlineSlot === true,
+            storyTextInlineSlot: root.storyTextInlineSlot === true,
+            tableCellStoryTextInlineSlot: root.tableCellStoryTextInlineSlot === true,
+            pagePositionedAnchoredSource: completePngFloatingAnchored,
+            inlineAnchorSourceObjectId: completePngFloatingAnchored ? null : root.id,
+            inlineSourceTreeClosed: !completePngFloatingAnchored,
             zOrder: root.zOrder !== undefined ? root.zOrder : 0,
             required: false,
             reason: "inline_flow_visual_root"

@@ -325,6 +325,22 @@ function _storyTextContainerForItem(doc, item, parentStory) {
         if (!story && item) {
             try { story = item.parentStory; } catch (eItemStory) {}
         }
+        if (!story && item) {
+            var cur = item;
+            for (var depth = 0; cur && depth < 12; depth++) {
+                try {
+                    if (cur.parentStory) {
+                        story = cur.parentStory;
+                        break;
+                    }
+                } catch (eParentStory) {}
+                try {
+                    cur = cur.parent;
+                } catch (eParent) {
+                    cur = null;
+                }
+            }
+        }
         if (!story) return null;
         try {
             if (story.textContainers && story.textContainers.length > 0) {
@@ -408,6 +424,19 @@ function _isInlineFlowItemBySourceInfo(sourceInfo) {
     return placement === "INLINE"
             || anchoredPosition === "INLINE_POSITION"
             || anchoredPosition === "INLINEPOSITION";
+}
+
+function _sourceIndexPageRelativeBounds(doc, pageIndex, bounds) {
+    if (!bounds || bounds.length < 4) return null;
+    if (pageIndex === null || pageIndex === undefined || Number(pageIndex) < 0) return null;
+    var pageBounds = _pageBoundsForIndex(doc, Number(pageIndex));
+    if (!pageBounds || pageBounds.length < 4) return null;
+    return [
+        Number(bounds[0]) - Number(pageBounds[0]),
+        Number(bounds[1]) - Number(pageBounds[1]),
+        Number(bounds[2]) - Number(pageBounds[0]),
+        Number(bounds[3]) - Number(pageBounds[1])
+    ];
 }
 
 function _isClipCarryingShapeKind(kind) {
@@ -1172,6 +1201,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         }
         sourceIndexCursor("readItemInfo.pageIndex.before", itemIndex, id, kind);
         var sourcePageIndex = _pageIndexOfItem(doc, item);
+        if (sourcePageIndex < 0) {
+            sourcePageIndex = _pageIndexBySpreadBounds(doc, item, ctx);
+        }
         sourceIndexCursor("readItemInfo.pageIndex.after", itemIndex, id, kind);
         sourceIndexCursor("readItemInfo.inline.before", itemIndex, id, kind);
         var storyTextInlineSlot = _itemHasDirectStoryTextInlineSlot(item);
@@ -1183,6 +1215,10 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         sourceIndexCursor("readItemInfo.inline.after", itemIndex, id, kind);
 
         sourceIndexCursor("readItemInfo.info.before", itemIndex, id, kind);
+        var itemBounds = _itemBounds(item);
+        var itemGeometricBounds = _itemGeometricBounds(item);
+        var itemVisibleBounds = _itemVisibleBounds(item);
+        var itemPathBounds = _itemPathBounds(item);
         var info = {
             id: id,
             sourcePageIndex: sourcePageIndex,
@@ -1190,10 +1226,14 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             kind: kind,
             parentId: _itemParentId(item),
             parentKind: _itemParentKind(item),
-            bounds: _itemBounds(item),
-            geometricBounds: _itemGeometricBounds(item),
-            visibleBounds: _itemVisibleBounds(item),
-            pathBounds: _itemPathBounds(item),
+            bounds: itemBounds,
+            pageRelativeBounds: _sourceIndexPageRelativeBounds(doc, sourcePageIndex, itemBounds),
+            geometricBounds: itemGeometricBounds,
+            pageRelativeGeometricBounds: _sourceIndexPageRelativeBounds(doc, sourcePageIndex, itemGeometricBounds),
+            visibleBounds: itemVisibleBounds,
+            pageRelativeVisibleBounds: _sourceIndexPageRelativeBounds(doc, sourcePageIndex, itemVisibleBounds),
+            pathBounds: itemPathBounds,
+            pageRelativePathBounds: _sourceIndexPageRelativeBounds(doc, sourcePageIndex, itemPathBounds),
             sourceOrder: sourceItems.length,
             zOrder: sourceItems.length,
             name: null,
