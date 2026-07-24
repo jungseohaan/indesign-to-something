@@ -5066,7 +5066,7 @@ public class InlineFrameHandler {
                     && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
                     && (plan.visualAction == VisualAction.PLACE_INLINE_PNG
                     || plan.visualAction == VisualAction.PLACE_TEXT_SHELL)
-                    && (isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)
+                    && (isInlineVisualExecutionAnchor(ctx, plan, rg, anchoredObjectId)
                     || isClosedRenderedMaterialForInlineAnchor(rg, anchoredObjectId));
             if (rg.id() != anchoredObjectId && !plannedAnchorMaterial) continue;
 
@@ -5200,7 +5200,7 @@ public class InlineFrameHandler {
                     && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
                 continue;
             }
-            if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) continue;
+            if (!isInlineVisualExecutionAnchor(ctx, plan, rg, anchoredObjectId)) continue;
             if (plan.file == null || !plan.file.equals(rg.file())) continue;
             if (best == null || directInlineVisualPlanPriority(plan) > directInlineVisualPlanPriority(best)) {
                 best = plan;
@@ -7141,6 +7141,51 @@ public class InlineFrameHandler {
         if (plan == null) return Integer.MAX_VALUE;
         if (plan.zOrder != Integer.MIN_VALUE) return plan.zOrder;
         return plan.domId;
+    }
+
+    private static boolean isInlineVisualExecutionAnchor(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (!isDirectInlineAnchorPlan(ctx, plan, anchoredObjectId)) return false;
+        if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                || plan.placement != Placement.INLINE
+                || plan.coordinateSpace != CoordinateSpace.STORY_FLOW) {
+            return true;
+        }
+        return isInlinePngOwnerAnchor(plan, rg, anchoredObjectId);
+    }
+
+    private static boolean isInlinePngOwnerAnchor(
+            ObjectPlan plan,
+            RenderedGroup rg,
+            int anchoredObjectId) {
+        if (plan == null || anchoredObjectId < 0) return false;
+        if (plan.domId == anchoredObjectId
+                || (plan.renderId != null && plan.renderId == anchoredObjectId)) {
+            return true;
+        }
+        if (rg != null) {
+            if (rg.id() == anchoredObjectId) return true;
+            int renderedAnchor = rg.inlineAnchorSourceObjectId();
+            if (renderedAnchor > 0) return renderedAnchor == anchoredObjectId;
+        }
+        if (containsInt(plan.sourceRootObjectIds, anchoredObjectId)) {
+            return true;
+        }
+        if (plan.sourceRootObjectIds != null && plan.sourceRootObjectIds.length > 0) {
+            return false;
+        }
+        if (containsInt(plan.exportSourceObjectIds, anchoredObjectId)) {
+            return true;
+        }
+        if (containsInt(plan.visualSourceObjectIds, anchoredObjectId)) {
+            return true;
+        }
+        return plan.sourceObjectIds != null
+                && plan.sourceObjectIds.length == 1
+                && containsInt(plan.sourceObjectIds, anchoredObjectId);
     }
 
     private static boolean isDirectInlineAnchorPlan(

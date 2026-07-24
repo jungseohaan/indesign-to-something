@@ -14,6 +14,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.font.FontStyleClassifier;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -277,8 +278,7 @@ public class ASTDocumentAdapter implements ASTAdapter {
             r.fontStyle = tr.fontStyle();
             r.fontSize = tr.fontSizeHwpunits();
             r.textColor = tr.textColor();
-            // TS: bold = fontStyle?.includes('Bold')
-            if (tr.fontStyle() != null && tr.fontStyle().contains("Bold")) {
+            if (FontStyleClassifier.isBoldStyle(tr.fontStyle())) {
                 r.bold = Boolean.TRUE;
             }
             r.underline = tr.underline() ? Boolean.TRUE : null;

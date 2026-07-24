@@ -100,12 +100,8 @@ public final class CharPrBuilder {
             charPr.createItalic();
         }
 
-        short ratio = (horizontalScale != null) ? horizontalScale : 100;
-        // 장평 비율 적용 (폰트 매핑에서 원본보다 넓은 폰트로 매핑 시 축소)
         double fontRatio = fontRegistry.lastFontRatio();
-        if (fontRatio > 0 && fontRatio != 1.0) {
-            ratio = (short) Math.round(ratio * fontRatio);
-        }
+        short ratio = resolveEffectiveRatio(horizontalScale, fontRatio);
         charPr.createRatio();
         charPr.ratio().set(ratio, ratio, ratio, ratio, ratio, ratio, ratio);
 
@@ -139,5 +135,14 @@ public final class CharPrBuilder {
         charPr.createShadow();
         charPr.shadow().typeAnd(CharShadowType.NONE).colorAnd("#B2B2B2")
                 .offsetXAnd((short) 10).offsetY((short) 10);
+    }
+
+    static short resolveEffectiveRatio(Short horizontalScale, double fontRatio) {
+        // HWPX has one charPr ratio slot. Keep substitute-font width correction
+        // and source horizontalScale from multiplying into an accidental double scale.
+        if (fontRatio > 0 && fontRatio != 1.0) {
+            return (short) Math.round(100.0 * fontRatio);
+        }
+        return horizontalScale != null ? horizontalScale : 100;
     }
 }

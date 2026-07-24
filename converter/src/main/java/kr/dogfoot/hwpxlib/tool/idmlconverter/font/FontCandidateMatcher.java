@@ -234,25 +234,7 @@ public final class FontCandidateMatcher {
     }
 
     private static int inferWeight(String name, String style) {
-        if (name == null) return 0;
-        String s = (name + " " + (style == null ? "" : style)).toLowerCase();
-        if (s.contains("ultralight") || s.contains("thin")) return 100;
-        if (s.contains("extralight")) return 200;
-        if (s.contains("light")) return 300;
-        if (s.contains("medium")) return 500;
-        if (s.contains("semibold") || s.contains("demibold")) return 600;
-        if (s.contains("extrabold") || s.contains("ultrabold") || s.contains("heavy")) return 800;
-        if (s.contains("black")) return 900;
-        if (s.contains("bold")) return 700;
-        if (s.contains("regular") || s.contains("normal")) return 400;
-        // 숫자 추출 (Sandoll 고딕Neo1 30 → 300)
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\b(\\d{1,3})\\b").matcher(s);
-        if (m.find()) {
-            int n = Integer.parseInt(m.group(1));
-            if (n >= 10 && n <= 90) return n * 10;
-            if (n >= 100 && n <= 900) return n;
-        }
-        return 0;
+        return FontStyleClassifier.inferWeight(name, style);
     }
 
     private static String buildReason(String origName, String origCategory,

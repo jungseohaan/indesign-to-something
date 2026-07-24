@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.idml;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.font.FontStyleClassifier;
 import org.w3c.dom.*;
 import java.util.*;
 import static kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLXmlUtils.*;
@@ -264,9 +265,8 @@ public class IDMLResourceParser {
         // Bold/Italic 판별 (FontStyle 속성에서)
         String fontStyle = def.fontStyle();
         if (fontStyle != null) {
-            String lower = fontStyle.toLowerCase();
-            def.bold(lower.contains("bold"));
-            def.italic(lower.contains("italic") || lower.contains("oblique"));
+            def.bold(FontStyleClassifier.isBoldStyle(fontStyle));
+            def.italic(FontStyleClassifier.isItalicStyle(fontStyle));
         }
 
         // Word Spacing (DesiredWordSpacing, MinimumWordSpacing, MaximumWordSpacing)

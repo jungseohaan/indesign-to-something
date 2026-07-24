@@ -12,6 +12,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.CharPrBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.font.FontStyleClassifier;
 
 /**
  * TextRun + CharPr 생성 + 폰트 스타일 판별 (W4-2 Step C).
@@ -345,32 +346,9 @@ final class CharPrFactory {
 
     /**
      * fontStyle에서 Bold 여부를 판별한다.
-     * 단어 경계 기반 매칭으로 장식 폰트 이름(예: "SusicBoldItalicB140") 오인식을 방지.
-     * Helvetica Neue 넘버링(65+)도 DemiBold 이상으로 판단.
      */
     static boolean isBoldStyle(String fontStyle) {
-        if (fontStyle == null || fontStyle.isEmpty()) return false;
-        String lower = fontStyle.toLowerCase();
-        // "Bold", "Semi Bold", "SemiBold", "DemiBold" 등 단어 경계 매칭
-        if (lower.matches(".*\\b(bold|semibold|demibold|heavy|black|extrabold)\\b.*")) return true;
-        // Helvetica Neue 넘버링: "65 Medium", "75 Bold" 등 — 65 이상은 DemiBold급
-        if (lower.matches("^(\\d{2,3})\\s+.*")) {
-            try {
-                int num = Integer.parseInt(lower.split("\\s+")[0]);
-                if (num >= 65) return true;
-            } catch (NumberFormatException ignored) {}
-        }
-        // 가변폰트 숫자 weight (Yoon 시리즈 등):
-        //   10=Thin, 20=ExtraLight, 30=Light, 40=Regular, 50=Medium,
-        //   60=Semibold, 70=Bold, 80=ExtraBold, 90=Heavy
-        // → 70 이상부터 Bold 로 표시. (기존 ≥30 임계는 Light/Regular 까지 잘못 Bold 처리됨)
-        if (lower.matches("^\\d+$")) {
-            try {
-                int weight = Integer.parseInt(lower);
-                if (weight >= 70) return true;
-            } catch (NumberFormatException ignored) {}
-        }
-        return false;
+        return FontStyleClassifier.isBoldStyle(fontStyle);
     }
 
     /**
@@ -378,9 +356,7 @@ final class CharPrFactory {
      * 단어 경계 기반 매칭으로 장식 폰트 이름 오인식을 방지.
      */
     static boolean isItalicStyle(String fontStyle) {
-        if (fontStyle == null || fontStyle.isEmpty()) return false;
-        String lower = fontStyle.toLowerCase();
-        return lower.matches(".*\\b(italic|oblique)\\b.*");
+        return FontStyleClassifier.isItalicStyle(fontStyle);
     }
 
     private boolean isEquationFontCached(String fontFamily) {

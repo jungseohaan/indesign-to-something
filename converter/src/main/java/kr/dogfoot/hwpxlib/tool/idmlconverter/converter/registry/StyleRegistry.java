@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.object.content.header_xml.references.tabpr.TabItem;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.LineType2;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.TabItemType;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.font.FontStyleClassifier;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -213,10 +214,9 @@ public class StyleRegistry {
         // bold/italic: 명시적 플래그 우선, 없으면 fontStyle 파싱
         boolean bold = Boolean.TRUE.equals(styleDef.bold()) || isEmphasisStyle(styleDef.styleName());
         boolean italic = Boolean.TRUE.equals(styleDef.italic());
-        if (!bold && !italic && styleDef.fontStyle() != null) {
-            String fs = styleDef.fontStyle().toLowerCase();
-            bold = fs.contains("bold");
-            italic = fs.contains("italic") || fs.contains("oblique");
+        if (styleDef.fontStyle() != null) {
+            if (!bold) bold = FontStyleClassifier.isBoldStyle(styleDef.fontStyle());
+            if (!italic) italic = FontStyleClassifier.isItalicStyle(styleDef.fontStyle());
         }
         boolean underline = Boolean.TRUE.equals(styleDef.underline());
         boolean strikeThrough = Boolean.TRUE.equals(styleDef.strikeThrough());
