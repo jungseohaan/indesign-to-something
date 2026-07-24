@@ -59,21 +59,14 @@ function paragraphGeneratedPrefixText(para) {
 }
 
 function characterStyleChangesExportedRunProps(cs) {
-    if (!cs) return false;
-    try {
-        var fc = cs.fillColor;
-        if (fc && fc.name && fc.name !== "None" && fc.name !== "[None]") return true;
-    } catch (eFill) {}
-    try {
-        if (hasMeaningfulNumber(cs.pointSize)) return true;
-    } catch (eSize) {}
-    try {
-        var af = cs.appliedFont;
-        if (af && hasMeaningfulString(af.fontFamily)) return true;
-    } catch (eFont) {}
-    try {
-        if (hasMeaningfulString(cs.fontStyle)) return true;
-    } catch (eStyle) {}
+    // SPEC-067: DOM 글자속성 전면 차단. 이 함수는 문자스타일이 "export 런
+    // 속성(색/크기/폰트/스타일)을 바꾸는가"를 판정해 descriptor.needs 를 켜서
+    // 문자 단위 DOM 색상 전수검사(shouldRunCorrection)를 트리거했다. 그러나
+    // 그 GREP 색보정 경로는 이미 `false &&` 로 사망 처리됐고(글자속성은 IDML
+    // 에서 확정), 여기서 cs.fillColor/pointSize/appliedFont/fontStyle 을 읽는
+    // 것이 마지막 남은 DOM 글자속성 접근이었다. 항상 false 로 판정해 DOM 을
+    // 완전히 건드리지 않는다 — GREP 상속/색 확정은 Java(IDMLStoryParser)가 IDML
+    // 에서 처리한다.
     return false;
 }
 
@@ -548,12 +541,9 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
         // (유효했던 최적화: char 객체를 1회만 인덱싱해 7개 속성을 읽는다.
         //  기존은 속성마다 para.characters[absIdx] 를 다시 인덱싱했다.)
         function charColorFrom(ch) {
-            var color = null;
-            try {
-                var fc = ch.fillColor;
-                color = fc ? fc.name : null;
-            } catch (e) {}
-            return color;
+            // SPEC-067: DOM 문자 색을 읽지 않는다(IDML 이 색 확정). 색 기준 런 분할도
+            // 이로써 비활성화되어 런이 IDML textStyleRange 경계로만 나뉜다.
+            return null;
         }
         function getCharColor(absIdx) {
             if (colorCache[absIdx] !== undefined) return colorCache[absIdx];
@@ -566,34 +556,12 @@ function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrectio
             if (propsCache[absIdx]) return propsCache[absIdx];
             var color = null, size = null, font = null, style = null;
             var baselineShift = null, position = null, charStyle = null;
-            var ch = null;
-            try { ch = para.characters[absIdx]; } catch (eChar) { ch = null; }
-            if (ch === null) {
-                color = getCharColor(absIdx);
-            } else {
-                if (colorCache[absIdx] !== undefined) {
-                    color = colorCache[absIdx];
-                } else {
-                    color = charColorFrom(ch);
-                    colorCache[absIdx] = color;
-                }
-                try { size = ch.pointSize; } catch (e) {}
-                try { font = ch.appliedFont.fontFamily; } catch (e) {}
-                try { style = ch.fontStyle; } catch (e) {}
-                try { baselineShift = ch.baselineShift; } catch (e) {}
-                try { position = ch.position ? ch.position.toString() : null; } catch (e) {}
-                try { charStyle = ch.appliedCharacterStyle ? ch.appliedCharacterStyle.name : null; } catch (e) {}
-            }
-            // GREP 스타일로 적용된 이탤릭 감지: fontStyle이 숫자(가변 폰트 웨이트)인데
-            // appliedCharacterStyle에 "이탤릭" 또는 "Italic"이 포함되면 fontStyle을 "Italic"으로 보정
-            if (style && /^\d+$/.test(style)) {
-                try {
-                    var csName = charStyle;
-                    if (csName && (csName.indexOf("이탤릭") >= 0 || csName.toLowerCase().indexOf("italic") >= 0)) {
-                        style = "Italic";
-                    }
-                } catch (e2) {}
-            }
+            // SPEC-067: 인디자인 DOM 에서 글자 속성(color/size/font/style/charStyle/
+            // baselineShift/position)을 읽지 않는다. DOM 은 비결정적으로 오보고하고
+            // (영어 p56 대화 통째 녹색), 원래 목표는 IDML 만으로 변환이다. 변환기가
+            // GREP BasedOn 상속 포함 IDML 에서 이 속성들을 확정한다. DOM 개별 문자
+            // 속성 접근은 추출의 가장 느린 부분이라 성능도 크게 개선된다.
+            // 되돌리려면 아래 ch.pointSize/appliedFont/fontStyle/... 읽기를 복원한다.
             var p = {
                 color: color,
                 size: size,
@@ -1160,14 +1128,17 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                         strikeThru: null
                     };
 
-                    try { runData.fontFamily = rng.appliedFont ? rng.appliedFont.fontFamily : null; } catch (e) {}
-                    try { runData.fontSize = rng.pointSize; } catch (e) {}
-                    try { runData.fontStyle = rng.fontStyle; } catch (e) {}
-                    try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
-                    try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
-                    var shouldRunCorrection = needsCharacterCorrection
-                            && correctionDescriptorNeedsRunScan(correctionDescriptor,
-                                    correctionProbeTextForDescriptor(correctionDescriptor, para, runData.text || ""));
+                    // SPEC-067: DOM 글자 속성(font/size/style/color/charStyle) + 아래 GREP
+                    // 색 보정을 읽지 않는다. IDML 이 확정. 되돌리려면 주석 복원.
+                    // try { runData.fontFamily = rng.appliedFont ? rng.appliedFont.fontFamily : null; } catch (e) {}
+                    // try { runData.fontSize = rng.pointSize; } catch (e) {}
+                    // try { runData.fontStyle = rng.fontStyle; } catch (e) {}
+                    // try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
+                    // try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
+                    // SPEC-067: GREP/Nested 색 보정용 characters[].fillColor 전수
+                    // 읽기 제거(마지막 남았던 DOM 글자속성 접근). GREP 색은 IDML
+                    // (IDMLStoryParser BasedOn 상속 GREP)에서 확정한다.
+                    var shouldRunCorrection = false;
                     if (shouldRunCorrection) {
                         // GREP/Nested 스타일 색상 감지: 첫 번째 비제어 문자의 fillColor 확인
                         // textStyleRanges는 GREP 색상을 반영하지 않으므로 characters로 보정
@@ -1189,8 +1160,9 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                     try { runData.tracking = rng.tracking; } catch (e) {}
                     try { runData.horizontalScale = rng.horizontalScale; } catch (e) {}
                     try { runData.verticalScale = rng.verticalScale; } catch (e) {}
-                    try { runData.baselineShift = rng.baselineShift; } catch (e) {}
-                    try { runData.position = rng.position.toString(); } catch (e) {}
+                    // SPEC-067: baselineShift/position 도 DOM 에서 안 읽는다(IDML 확정).
+                    // try { runData.baselineShift = rng.baselineShift; } catch (e) {}
+                    // try { runData.position = rng.position.toString(); } catch (e) {}
                     try { runData.underline = rng.underline; } catch (e) {}
                     try { runData.strikeThru = rng.strikeThru; } catch (e) {}
 
@@ -1509,14 +1481,16 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds, cachedAll
                                         var cellRng = cellTSRs[cr];
                                         var runData = { text: "" };
                                         try { runData.text = cellRng.contents; } catch (er) {}
-                                        try { runData.fontFamily = cellRng.appliedFont.fontFamily; } catch (er) {}
-                                        try { runData.pointSize = cellRng.pointSize; } catch (er) {}
-                                        try { runData.fontStyle = cellRng.fontStyle; } catch (er) {}
-                                        try {
-                                            if (cellRng.fillColor && cellRng.fillColor.name !== "None") {
-                                                runData.fillColor = cellRng.fillColor.name;
-                                            }
-                                        } catch (er) {}
+                                        // SPEC-067: 셀 런도 DOM 글자 속성(font/size/style/color)을
+                                        // 읽지 않는다(IDML 확정). text 와 앵커 분리는 유지.
+                                        // try { runData.fontFamily = cellRng.appliedFont.fontFamily; } catch (er) {}
+                                        // try { runData.pointSize = cellRng.pointSize; } catch (er) {}
+                                        // try { runData.fontStyle = cellRng.fontStyle; } catch (er) {}
+                                        // try {
+                                        //     if (cellRng.fillColor && cellRng.fillColor.name !== "None") {
+                                        //         runData.fillColor = cellRng.fillColor.name;
+                                        //     }
+                                        // } catch (er) {}
                                         // inline anchor source policy: 셀 런도 inline anchor 마커(\uFFFC/\u0016) 분리
                                         var cellRunText = runData.text || "";
                                         if (cellRunText.indexOf("\uFFFC") >= 0 || cellRunText.indexOf("\u0016") >= 0) {

@@ -310,3 +310,112 @@ IDML 로 복원됨을 확인. 3교과서 구조 골든 FAIL 은 추출 버전 �
   색 있음/없음으로 갈림.
 
 DOM 완전 차단 전에 이 채우기 미비들을 다 잡아야 회귀 없음. p56 은 그때까지 미해결.
+
+## 5차 세션: 선결 3건 정산 — 스와치 항목은 **오진**이었다 (2026-07-24)
+
+수정 B 를 켜기 위한 선결 3건을 실측으로 정산했다. 2건은 이미 해결됐고,
+**남은 1건(스와치 오매핑)은 실재하지 않는 버그**로 확인됐다.
+
+| 선결 항목 | 결론 |
+|---|---|
+| 볼드 유실 (`19 Bk`) | 해결 — `FontStyleClassifier.inferStyleWeight` 에 `bk` 토큰 (b32ba4ad, PR #133) |
+| 경로 불일치 (composedLines) | 해결 — composedLines 도 DOM 글자속성 차단 (078a0184, PR #132) |
+| 로컬색 스와치 오매핑 | **오진 — 버그 없음** (아래) |
+
+### 스와치 "오매핑"은 서로 다른 두 색을 비교한 것
+
+문서가 적었던 전제("`Listen` 의 로컬 FillColor 가 `Color/writing tips`(시안 #3899C9)
+인데 #3C4C74 로 잘못 나옴")는 IDML 실측으로 **셋 다 틀렸다**:
+
+1. **`Listen` 런에는 로컬 FillColor 가 없다.** 영어 u3 `Stories/Story_u422c.xml`
+   의 해당 CharacterStyleRange 는 `FillColor` 속성 자체가 없고 문자스타일도
+   `[No character style]`. 색은 문단스타일에서 온다.
+2. **`Color/writing tips` 는 Styles.xml 에서 참조 0 건.** 스와치는 정의만 되어
+   있고 이 텍스트와 무관하다. (`grep -c "Color/writing tips" Resources/Styles.xml` → 0)
+3. **#3899C9 는 `writing tips` 의 색이 아니다.** `writing tips` 는 CMYK
+   70/52/0/35 이고 ICC 변환 결과가 정확히 `#3C4C74` 다. `#3899C9` 는 **별개
+   스와치** `C=70 M=20 Y=0 K=0` 의 색(역탐색 거리 0.0 으로 일치 확인).
+   즉 "오매핑"으로 보인 것은 변환 오류가 아니라 애초에 다른 두 색이었다.
+
+**`Listen` 의 진짜 색**: 문단스타일 `ParagraphStyle/표빈공간` 의
+`FillColor="Color/C=0 M=0 Y=0 K=60"` → ICC 변환 `#757877` (회색).
+이는 위 165 행에 "미해결 잔여: `#757877`(K60 회색 누출)" 로 이미 적어둔 값과
+**동일** — 두 항목은 사실 같은 사안이었다.
+
+### 검증 방법 (재현용)
+
+- `IDMLResourceParser.convertColorToHex("70 51.99999809265137 0 35","Process","CMYK")` → `#3C4C74`
+- `CMYKColorConverter.isIccAvailable()` → `true` (macOS Generic CMYK Profile
+  + JAR 번들 `/icc/GenericCMYK.icc` 양쪽 존재). 폴백 단순수식이면 `#3250A6` 로
+  달랐을 것이므로, ICC 경로가 실제로 쓰이고 있음도 함께 확인됨.
+- `CMYKColorConverter.cmykToHex(0,0,0,0.60)` → `#757877`
+
+### 스와치 이름 조회 경로는 정상 (별건 확인)
+
+`Color` 엘리먼트의 `Self` 가 이미 `Self="Color/writing tips"` 형태(이름 기반)라
+`Name` 속성을 따로 등록하지 않아도 조회된다. `IDMLDocument.putColor` 가
+bare/`Color/`/`Swatch/`/`#` 4 별칭을 펼치므로 슬래시·공백 포함 이름도 정상.
+→ `IDMLResourceParser.parseGraphic` 수정 불필요.
+
+### 수정 B 실측 (영어 u1 p10-29, 2026-07-24)
+
+DOM 글자속성 차단 상태로 영어 u1 을 재추출해 계측했다(text-only, 96dpi,
+IDML 캐시 miss 콜드런, 2회 반복해 재현 확인).
+
+**DOM 글자속성 제거: 11,396 → 0 (완전 차단)**
+
+| resolved.json 런 속성 | 23일(DOM) | 24일(차단) |
+|---|---:|---:|
+| fillColor / fontFamily / fontStyle | 2093 each | 0 |
+| fontSize | 2011 | 0 |
+| charStyle / baselineShift / position | 1008 each | 0 |
+| pointSize | 82 | 0 |
+| **합계** | **11396** | **0** |
+| (유지) tracking/장평/underline/strikeThru | 1008 each | 993 each |
+
+resolved.json 3.18MB → 2.81MB (-12%).
+
+**텍스트 수집 구간 26.83s → 12.75s (-52%)**
+
+| phase | 23일 | 24일 | delta |
+|---|---:|---:|---:|
+| `10i_collectStories_done` | 8.76s | 3.67s | -5.10s |
+| `10j_collectTextFrames_done` | 6.17s | 2.65s | -3.52s |
+| `10m_collectPageItems_done` | 3.45s | 1.16s | -2.29s |
+| `10_collectResolved_done` | 5.65s | 3.41s | -2.24s |
+| `10k_instanceMasterFrames_done` | 0.98s | 0.42s | -0.55s |
+| `11_writeJson_stories` | 1.82s | 1.44s | -0.38s |
+
+**품질: 텍스트 유실 없음, 경계 개선**
+
+visibleChars 11521 → 11721 (+200). 토큰 차분에서 OLD 쪽 "유실"은 전부
+`friendsmusicstudyingsportsFriends`·`wonderQ1What`·`NO조언을` 같은 **런 오병합
+덩어리**였고, NEW 는 `{friends music} over {studying sports}`·`있나요?조언을` 로
+정상 분리됐다. DOM 오보고가 만들던 잘못된 런 경계가 사라진 것.
+
+charPr 색: `#1A1A1A` 35→0, `#757877`(K60 회색 누출) 14→3 으로 감소.
+DOM 색 오보고가 실제로 제거됨을 확인.
+
+### ⚠️ 별건 회귀 발견: `03d15_plan_objectPlans` 0.81s → 116.89s
+
+같은 계측에서 **DOM 차단과 무관한 심각한 성능 회귀**를 발견했다. 추출 총시간이
+136s → 208s 로 늘었는데, 원인은 텍스트가 아니라 소유권 계획 단계다.
+
+- `03d15_plan_objectPlans`: 0.81s → **116.89s (+116s, 144배)**. 2회 실행 모두
+  재현(116.89s / 116.67s)이라 캐시·환경 노이즈가 아니다.
+- 범인 커밋: **`1c3ec362` "Remove synthetic page background plane"**.
+  `extraction_plan_builder.jsx` 를 395줄 수정하며 `_appendCanonicalPagePlaneObjectPlans`
+  계열에 다중 중첩 루프(`for pi < doc.pages.length` 내부의 rangeTargetPageIndexes/
+  crossingPages 순회 등)를 추가했다.
+- 같은 커밋이 `issue.py` 의 `PAGE_PLANE_CACHE_ROOT` 를 `page_textless_plane`
+  → `page_background_plane` 으로 바꿔 **기존 페이지 평면 캐시가 전부 무효화**됐다
+  (신규 경로에 캐시가 쌓이지도 않음 — text-only 라 저장 대상이 없음).
+
+DOM 차단이 텍스트에서 벌어들인 -14s 를 이 +116s 가 덮어써서 총시간이 늘어 보인다.
+**두 사안은 독립적이며, 이 회귀는 별도 SPEC/PR 로 다뤄야 한다.**
+
+### 결론: 수정 B 의 선결 조건은 모두 해소
+
+선결 3건이 전부 정리됐으므로 **수정 B(DOM 글자속성 차단)를 진행할 수 있다**.
+남은 K60 회색 누출(#757877)은 DOM 차단과 독립된 별건(SPEC-065 계열, 채도 낮아
+게이트 밖)이며 수정 B 의 블로커가 아니다.
