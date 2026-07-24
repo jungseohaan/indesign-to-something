@@ -59,6 +59,7 @@ class MathProcessor {
         }
         if (hasEquation) {
             stitchGrepSplitFormulaEquations(para);
+            stitchTextSeparatedFormulaEquationFragments(para);
             collapseMixedFormulaEquationClusters(ctx, para);
             if (hasEHRun) {
                 // 수식과 EH TextRun이 공존하더라도 의미 있는 원문 텍스트는 보존한다.
@@ -73,7 +74,7 @@ class MathProcessor {
 
         splitEHKoreanMixedTextRuns(items);
 
-        promoteEquationFontReactionRanges(items);
+        promoteEquationFontReactionRanges(ctx, items);
 
         List<ASTInlineItem> newItems = new ArrayList<>();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
@@ -445,6 +446,181 @@ class MathProcessor {
     /** 스크립트 끝의 빈 근호 "sqrt{ }" / "sqrt{}" 를 잡는다. 그룹1은 '{'. */
     private static final java.util.regex.Pattern EMPTY_RADICAND_TAIL =
             java.util.regex.Pattern.compile("sqrt\\s*(\\{)\\s*\\}\\s*$");
+
+    /**
+     * SPEC-067: GREP 정상화 후 일반 텍스트 연속자에 의해 갈라진 순수 수학 수식을 잇는다.
+     *
+     * <p>예: {@code 1^{2}} / {@code =1,} / {@code 2^{2}} / {@code =4}.
+     * 중간 {@link ASTTextRun} 은 숫자·단일 변수·연산자·쉼표만 포함한 연속자여야
+     * 하고, 양옆 {@link ASTEquation} 은 화학식/인라인분수/근호/선분 같은 보호 수식이
+     * 아니어야 한다.
+     * {@code overline{AB}=overline{CD}} 계열은 기준선에서도 별개 조각일 수 있어 여기서
+     * 병합하지 않는다.</p>
+     */
+    private static void stitchTextSeparatedFormulaEquationFragments(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.size() < 3) return;
+
+        List<ASTInlineItem> out = new ArrayList<>();
+        boolean changed = false;
+        int i = 0;
+        while (i < items.size()) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTEquation)
+                    || !isTextSeparatedStitchableEquation((ASTEquation) item)) {
+                out.add(item);
+                i++;
+                continue;
+            }
+
+            ASTEquation lead = (ASTEquation) item;
+            StringBuilder merged = new StringBuilder(lead.hwpScript());
+            int j = i + 1;
+            boolean consumedEquation = false;
+            boolean consumedAny = false;
+
+            while (j < items.size()) {
+                int connectorIndex = j;
+                StringBuilder connector = new StringBuilder();
+                while (connectorIndex < items.size()) {
+                    ASTInlineItem connectorItem = items.get(connectorIndex);
+                    if (!(connectorItem instanceof ASTTextRun)) break;
+                    ASTTextRun tr = (ASTTextRun) connectorItem;
+                    String text = tr.text();
+                    if (isWhitespaceOnlyRun(tr)) {
+                        connectorIndex++;
+                        continue;
+                    }
+                    if (!isFormulaEquationConnectorText(text)) {
+                        connectorIndex = -1;
+                    } else {
+                        connector.append(text);
+                        connectorIndex++;
+                    }
+                    break;
+                }
+                if (connectorIndex < 0 || connector.length() == 0) break;
+
+                int nextEquationIndex = connectorIndex;
+                while (nextEquationIndex < items.size()
+                        && items.get(nextEquationIndex) instanceof ASTTextRun
+                        && isWhitespaceOnlyRun((ASTTextRun) items.get(nextEquationIndex))) {
+                    nextEquationIndex++;
+                }
+
+                String connectorScript = normalizeFormulaConnectorScript(connector.toString());
+                if (connectorScript.isEmpty()) break;
+                if (nextEquationIndex < items.size()
+                        && items.get(nextEquationIndex) instanceof ASTEquation
+                        && isTextSeparatedStitchableEquation((ASTEquation) items.get(nextEquationIndex))) {
+                    ASTEquation follow = (ASTEquation) items.get(nextEquationIndex);
+                    merged.append(connectorScript).append(follow.hwpScript());
+                    consumedEquation = true;
+                    consumedAny = true;
+                    j = nextEquationIndex + 1;
+                    continue;
+                }
+
+                if (consumedEquation && isTerminalFormulaConnectorScript(connectorScript)) {
+                    merged.append(connectorScript);
+                    consumedAny = true;
+                    j = connectorIndex;
+                }
+                break;
+            }
+
+            if (consumedEquation && consumedAny) {
+                lead.hwpScript(normalizeTextSeparatedFormulaScript(merged.toString()));
+                out.add(lead);
+                i = j;
+                changed = true;
+            } else {
+                out.add(item);
+                i++;
+            }
+        }
+
+        if (changed) {
+            items.clear();
+            items.addAll(out);
+        }
+    }
+
+    private static boolean isTextSeparatedStitchableEquation(ASTEquation eq) {
+        if (eq == null || eq.hwpScript() == null || eq.hwpScript().isEmpty()) return false;
+        String sourceType = eq.sourceType();
+        if ("CHEM_FORMULA".equals(sourceType) || "INLINE_FRACTION".equals(sourceType)) return false;
+        String script = eq.hwpScript();
+        String lower = script.toLowerCase(Locale.ROOT);
+        if (lower.contains("overline") || lower.contains("sqrt")
+                || lower.contains("root") || lower.contains(" over ")
+                || lower.contains("rarrow")) {
+            return false;
+        }
+        boolean hasToken = false;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (isFormulaSpace(c) || c == '_' || c == '^' || c == '{' || c == '}'
+                    || c == '(' || c == ')' || c == '+' || c == '-' || c == '='
+                    || c == ',' || c == '.') {
+                continue;
+            }
+            if (isAsciiLetter(c) || Character.isDigit(c)) {
+                hasToken = true;
+                continue;
+            }
+            return false;
+        }
+        return hasToken;
+    }
+
+    private static boolean isFormulaEquationConnectorText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean hasOperator = false;
+        boolean hasValue = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isFormulaSpace(c) || c == ',' || c == '.') continue;
+            if (c == '+' || c == '-' || c == '=') {
+                hasOperator = true;
+                continue;
+            }
+            if (Character.isDigit(c) || isAsciiLetter(c)) {
+                hasValue = true;
+                continue;
+            }
+            return false;
+        }
+        return hasOperator && hasValue && !hasLongLatinWord(text, 2);
+    }
+
+    private static String normalizeFormulaConnectorScript(String text) {
+        if (text == null) return "";
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isFormulaSpace(c)) continue;
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static boolean isTerminalFormulaConnectorScript(String script) {
+        if (script == null || script.isEmpty()) return false;
+        boolean hasOperator = false;
+        boolean hasValue = false;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (c == '+' || c == '-' || c == '=') hasOperator = true;
+            if (Character.isDigit(c) || isAsciiLetter(c)) hasValue = true;
+        }
+        return hasOperator && hasValue;
+    }
+
+    private static String normalizeTextSeparatedFormulaScript(String script) {
+        if (script == null) return "";
+        return script.replaceAll("\\s+", " ").trim();
+    }
 
     /** 공백(가는공백 포함)만으로 이뤄진 텍스트 런인가. */
     private static boolean isWhitespaceOnlyRun(ASTTextRun run) {
@@ -1105,7 +1281,6 @@ class MathProcessor {
         ObjectPlan plan = findInlinePlaceholderPlan(ctx, sourceId);
         if (plan == null) return false;
         if (plan.placement != Placement.INLINE) return false;
-        if (isContentInlineVisualPlan(plan)) return false;
         if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
                 && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
             return false;
@@ -1121,6 +1296,7 @@ class MathProcessor {
                 if (isEmptyShellTextFrame(ctx, id) || isInlineAnswerBoxShape(ctx, id)) return true;
             }
         }
+        if (isContentInlineVisualPlan(plan)) return false;
         return isInlineAnswerBoxShape(ctx, sourceId);
     }
 
@@ -1258,7 +1434,7 @@ class MathProcessor {
      * 기존 클러스터+좌변 흡수 경로(SPEC-059)가 그대로 처리한다. 화살표 없는 토큰별
      * TF(p16-17 "2H2"/"+O2" 개별 프레임)도 자연 배제된다.</p>
      */
-    private static void promoteEquationFontReactionRanges(List<ASTInlineItem> items) {
+    private static void promoteEquationFontReactionRanges(ResolvedBuildContext ctx, List<ASTInlineItem> items) {
         if (items == null || items.size() < 3) return;
         for (int start = 0; start < items.size(); start++) {
             if (!(items.get(start) instanceof ASTTextRun)) continue;
@@ -1267,12 +1443,20 @@ class MathProcessor {
             int eqFontBeforeArrow = 0;
             int eqFontAfterArrow = 0;
             boolean sawArrow = false;
-            while (end < items.size() && items.get(end) instanceof ASTTextRun) {
-                ASTTextRun tr = (ASTTextRun) items.get(end);
+            while (end < items.size()) {
+                ASTInlineItem item = items.get(end);
+                if (item instanceof ASTInlineObject
+                        && isFormulaAnswerPlaceholder(ctx, (ASTInlineObject) item)) {
+                    end++;
+                    continue;
+                }
+                if (!(item instanceof ASTTextRun)) break;
+
+                ASTTextRun tr = (ASTTextRun) item;
                 applyPositionFromCharacterStyle(tr);
                 String text = tr.text();
                 if (text == null || text.isEmpty()) break;
-                if (text.trim().isEmpty()) {
+                if (isWhitespaceOnlyRun(tr)) {
                     // 공백 런은 중립 — 구간을 끊지 않는다
                     end++;
                     continue;
@@ -1325,9 +1509,16 @@ class MathProcessor {
             Integer preferredBaseUnit = null;
             String preferredFontFamily = null;
             for (int k = s; k < e; k++) {
-                ASTTextRun tr = (ASTTextRun) items.get(k);
+                ASTInlineItem item = items.get(k);
+                if (item instanceof ASTInlineObject
+                        && isFormulaAnswerPlaceholder(ctx, (ASTInlineObject) item)) {
+                    script.append('\u25A1');
+                    previousVisible = '\u25A1';
+                    continue;
+                }
+                ASTTextRun tr = (ASTTextRun) item;
                 String text = tr.text();
-                if (text == null || text.trim().isEmpty()) continue;
+                if (text == null || isWhitespaceOnlyRun(tr)) continue;
                 ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
                 if (!result.accepted) {
                     accepted = false;
@@ -1368,8 +1559,7 @@ class MathProcessor {
 
     private static boolean isWhitespaceOnlyRun(ASTInlineItem item) {
         if (!(item instanceof ASTTextRun)) return false;
-        String text = ((ASTTextRun) item).text();
-        return text != null && !text.isEmpty() && text.trim().isEmpty();
+        return isWhitespaceOnlyRun((ASTTextRun) item);
     }
 
     /** 구간 시작 직전 텍스트 런이 공백/경계 없이 영숫자로 끝나는가 (수식 연속 신호). */
