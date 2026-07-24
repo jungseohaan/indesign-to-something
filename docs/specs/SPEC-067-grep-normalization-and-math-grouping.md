@@ -152,6 +152,19 @@ resolved DOM 이 앞 한글 문단(녹색)을 흘려 이 영문 런을 녹색으
 셀 전체(과학 표 색자 포함)라 charPr 기준선으로 신중히 검증할 것.
 **GREP/수식 그룹핑과 독립적이므로 별도 브랜치에서 먼저 처리 가능.**
 
+### 수정 완료 (2026-07-24, 브랜치 `fix-eng-p56-cell-color-bleed`)
+
+`StoryLoader.revertUnbackedResolvedCellColors`: 셀 문단 빌드 후, IDML 색 근거
+집합(로컬 FillColor + GREP/적용 문자 스타일 색)에 없는 resolved 유채색을 검정으로
+되돌린다. **채도 게이트**(`isSaturatedChromatic`)로 선명한 유채색만 대상 —
+`#1A1A1A`(K90 근흑 본문색) 같은 회색은 DOM 보고라도 보존(채도<25% 또는 max<64 제외).
+- 검증: 3교과서(과학u1/수학u1/u5) **charpr PASS**(근흑 4000여 자 오되돌림 방지 확인).
+  영어 추출물이 캐시에 없어 p56 직접 재현 불가 → 채도 게이트 단위테스트
+  (`StoryLoaderTest.saturatedChromaticGateTargetsBleedColorsOnly`)로 녹색 #67B755
+  대상·근흑 비대상 고정.
+- 미해결 잔여: `#757877`(K60 회색 누출, SPEC-065 영어 u1 사례)는 채도 낮아 게이트 밖 —
+  검정과 근사해 무해하나, 진짜 근절하려면 회색 누출도 근거 검증 필요.
+
 ## 3차 세션: 조각화 지점 특정 + balance-stitch 구현 (2026-07-24)
 
 3교과서(수학u1/u5·과학u1) 캐시 추출물로 재측정. **측정 원칙**: 골든이 다른
