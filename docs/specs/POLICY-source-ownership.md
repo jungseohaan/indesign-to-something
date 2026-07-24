@@ -214,8 +214,11 @@ page-sized PNG for a page only when Stage 1 has assigned eligible
 page-background source material to a `page_background_plane` ObjectPlan whose
 `sourceObjectIds`, `visualSourceObjectIds`, and `exportSourceObjectIds` point to
 real source ids. Eligible source roles are limited to
-`MASTER_TEXTLESS_GRAPHIC` and `SPREAD_CROSS_TEXTLESS_GRAPHIC`; page-wide bounds
-alone are not sufficient. HWPX text and table text remain owned by
+`MASTER_TEXTLESS_GRAPHIC`, `BACKGROUND_LAYER_TEXTLESS_GRAPHIC`,
+`SPREAD_CROSS_BACKGROUND_GRAPHIC`, and `PAGE_WIDE_BACKGROUND_GRAPHIC`.
+Spread-cross bounds and page-wide bounds alone are never sufficient; those
+geometry roles require the same source-backed background evidence as ordinary
+background-layer material. HWPX text and table text remain owned by
 `TEXT_TABLE_STRUCTURE`.
 
 This page-background plane is the main execution path for eligible background
@@ -235,6 +238,12 @@ The page plane must not absorb:
 If one of those exclusions is violated, the fix belongs in Stage 1 source-slot
 ownership or in the page-plane export mask. It must not be patched with
 page/text/coordinate exceptions after extraction.
+
+Once Stage 1 emits a `page_background_plane`, later execution must preserve its
+background contract verbatim: `visualLayer=PAGE_BACKGROUND`,
+`policyLayer=BACKGROUND`, `materialization=PAGE_PLANE_PNG`, page coordinate
+space, and bottom page-plane z-depth. No renderer, bridge, or HWPX importer may
+promote the rendered plane back to `CONTENT_VISUAL`.
 
 The executable HWPX policy has exactly three strata:
 

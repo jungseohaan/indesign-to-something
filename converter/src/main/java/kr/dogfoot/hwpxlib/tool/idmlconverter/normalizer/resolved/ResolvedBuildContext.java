@@ -955,6 +955,7 @@ public final class ResolvedBuildContext {
     private static boolean isTextShellTextPlacementPlan(ObjectPlan plan) {
         if (plan == null) return false;
         if (ShellRole.isTextShell(plan)
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0
                 && (plan.visualAction == VisualAction.PLACE_TEXT_SHELL

@@ -170,6 +170,8 @@ function _slimExtractionPlanForWrite(plan) {
         crossPageClipParentDecorationSuppressionSummary:
                 plan.crossPageClipParentDecorationSuppressionSummary,
         pageTextlessGraphicGroupSummary: plan.pageTextlessGraphicGroupSummary,
+        inlineMicroVectorPatternCollapseSummary:
+                plan.inlineMicroVectorPatternCollapseSummary,
         sourceSlotCanonicalizationSummary: plan.sourceSlotCanonicalizationSummary,
         executionCandidateContractSummary: plan.executionCandidateContractSummary,
         exactShellSlotDuplicateSummary: plan.exactShellSlotDuplicateSummary,

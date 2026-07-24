@@ -526,6 +526,47 @@ public final class ObjectPlan {
                 sourceLayerIndex));
     }
 
+    public ObjectPlan withPlannerIdentity(
+            String newCandidateId,
+            String newPlanPassId,
+            String newSlotRole) {
+        return withCurrentInlineFlow(new ObjectPlan(
+                domId,
+                kind,
+                newCandidateId,
+                newPlanPassId,
+                newSlotRole,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                exportSourceObjectIds,
+                hiddenVisualSourceObjectIds,
+                sourceRootObjectIds,
+                clusterSourceObjectIds,
+                omittedClusterSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                renderSourceBounds,
+                cropSourceBounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex));
+    }
+
     public ObjectPlan withTextAction(TextAction newTextAction) {
         return withCurrentInlineFlow(new ObjectPlan(
                 domId,
