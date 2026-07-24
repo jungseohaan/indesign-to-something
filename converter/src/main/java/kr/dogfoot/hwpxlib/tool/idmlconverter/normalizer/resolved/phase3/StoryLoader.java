@@ -1501,7 +1501,106 @@ public class StoryLoader {
         }
 
         addNonEmptyParagraph(paragraphs, current);
+
+        // SPEC-067: 셀 문단 경로(buildResolvedCellParagraphs)는 RunBuilder 색 우선순위
+        // (SPEC-065)를 안 거치고 resolved run 의 fillColor 를 그대로 쓴다. resolved DOM 이
+        // 앞 문단 색(예: 대화 선지의 녹색)을 뒤 영문 런에 흘려 오보고하면, IDML 에 아무
+        // 색 근거가 없는데도 그 유채색이 그대로 렌더된다 (영어 u3 p56 "A That happens…"
+        // 전체가 녹색). IDML 문자 스타일·GREP·로컬 FillColor 어디에도 없는 유채색은
+        // 문단 기본색(검정)으로 되돌린다.
+        for (ASTParagraph p : paragraphs) {
+            revertUnbackedResolvedCellColors(ctx, idmlParagraph, p);
+        }
         return paragraphs;
+    }
+
+    /**
+     * SPEC-067: 셀 문단에서 IDML 색 근거가 없는 resolved 유채색을 검정으로 되돌린다.
+     *
+     * <p>근거 집합 = 이 IDML 문단의 모든 문자 런이 실제로 지닌 색(로컬 FillColor +
+     * GREP 적용 문자 스타일 색 + 적용 문자 스타일 색). 빌드된 ASTTextRun 색이 검정·흰색이
+     * 아니면서 이 근거 집합에 없으면 resolved DOM 이 흘려보낸 오색이므로 검정으로 되돌린다.
+     * 근거 있는 색자(과학 표의 @색자 등)는 근거 집합에 들어 있어 보존된다.</p>
+     */
+    private static void revertUnbackedResolvedCellColors(
+            ResolvedBuildContext ctx, IDMLParagraph idmlParagraph, ASTParagraph para) {
+        if (ctx == null || para == null || para.items() == null) return;
+        java.util.Set<String> evidence = collectIdmlColorEvidence(ctx, idmlParagraph);
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun tr = (ASTTextRun) item;
+            String c = tr.textColor();
+            if (c == null) continue;
+            String up = c.trim().toUpperCase(java.util.Locale.ROOT);
+            if (up.isEmpty() || "#000000".equals(up) || "#FFFFFF".equals(up)) continue;
+            // 채도 높은 유채색만 대상. #1A1A1A 같은 근흑·회색 본문색은 DOM 이
+            // 보고한 것이라도 정상 렌더값이므로 건드리지 않는다 (K90 등). 오색 누출은
+            // 선명한 색(녹색 #67B755 등)이라 채도로 구분된다.
+            if (!isSaturatedChromatic(up)) continue;
+            if (!evidence.contains(up)) {
+                tr.textColor(null);   // 문단 기본색(검정)으로 복귀
+            }
+        }
+    }
+
+    /**
+     * hex 색이 "선명한 유채색"인가 — HSV 채도·명도 기준. 근흑/회색(낮은 채도)과
+     * 아주 어두운 색은 본문색일 가능성이 높아 제외한다. 누출되는 오색(선지 녹색 등)은
+     * 채도가 높다.
+     */
+    static boolean isSaturatedChromatic(String hex) {
+        if (hex == null) return false;
+        String h = hex.startsWith("#") ? hex.substring(1) : hex;
+        if (h.length() != 6) return false;
+        int r, g, b;
+        try {
+            r = Integer.parseInt(h.substring(0, 2), 16);
+            g = Integer.parseInt(h.substring(2, 4), 16);
+            b = Integer.parseInt(h.substring(4, 6), 16);
+        } catch (NumberFormatException e) { return false; }
+        int max = Math.max(r, Math.max(g, b));
+        int min = Math.min(r, Math.min(g, b));
+        if (max < 64) return false;              // 너무 어두움(근흑) → 본문색
+        double saturation = max == 0 ? 0 : (double) (max - min) / max;
+        return saturation >= 0.25;               // 채도 25%↑ 만 유채색으로 본다
+    }
+
+    /** IDML 문단의 색 근거 집합(로컬 FillColor + GREP/적용 문자 스타일 색), 대문자 hex. */
+    private static java.util.Set<String> collectIdmlColorEvidence(
+            ResolvedBuildContext ctx, IDMLParagraph idmlParagraph) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (idmlParagraph == null || idmlParagraph.characterRuns() == null) return out;
+        for (IDMLCharacterRun cr : idmlParagraph.characterRuns()) {
+            if (cr == null) continue;
+            addColorEvidence(ctx, out, cr.fillColor());
+            addStyleColorEvidence(ctx, out, cr.grepAppliedCharStyle());
+            String applied = cr.appliedCharacterStyle();
+            if (applied != null && !applied.contains("[No character style]")) {
+                addStyleColorEvidence(ctx, out, applied);
+            }
+        }
+        return out;
+    }
+
+    private static void addStyleColorEvidence(
+            ResolvedBuildContext ctx, java.util.Set<String> out, String styleRef) {
+        if (styleRef == null || ctx.styleResolver == null) return;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef def =
+                ctx.styleResolver.getResolvedCharacterStyle(styleRef);
+        if (def == null && styleRef.startsWith("CharacterStyle/")) {
+            def = ctx.styleResolver.getResolvedCharacterStyle(
+                    styleRef.substring("CharacterStyle/".length()));
+        }
+        if (def != null) addColorEvidence(ctx, out, def.fillColor());
+    }
+
+    private static void addColorEvidence(
+            ResolvedBuildContext ctx, java.util.Set<String> out, String color) {
+        if (color == null || color.trim().isEmpty()) return;
+        String hex = RunBuilder.resolveColorToHex(ctx, color);
+        if (hex != null && !hex.trim().isEmpty()) {
+            out.add(hex.trim().toUpperCase(java.util.Locale.ROOT));
+        }
     }
 
     private static ASTParagraph createResolvedCellParagraph(
