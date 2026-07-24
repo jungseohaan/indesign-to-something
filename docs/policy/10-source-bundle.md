@@ -332,7 +332,9 @@ Slot ownership rules:
 - A page background plane is not a source-object classifier. Stage 1 may create
   or expand a `page_background_plane` only from page/floating
   source-connected `SHELL_SLOT` visual components after text, content visual,
-  table-style, and story-flow inline slots have been excluded. Page-wide
+  table-style, and story-flow inline slots have been excluded. The component
+  must also have an explicit page-background source role:
+  `MASTER_TEXTLESS_GRAPHIC` or `SPREAD_CROSS_TEXTLESS_GRAPHIC`. Page-wide
   rectangles, low z-depth, layer names, color, and large bounds are source
   metadata only; none of them alone makes a source object a background owner.
 - A page background plane is not limited to a single leaf fill source. When the

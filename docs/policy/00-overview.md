@@ -47,10 +47,9 @@ consolidated here.
     it remains top-aligned unless Stage 1 has an explicit source-style owner
     that says otherwise. `composedLines` may be used to preserve source line
     geometry or to validate overlap, but not to rewrite alignment by heuristic.
-14. The canonical page/floating graphic path is `single-textless-plane`: one
-    page-sized textless PNG per page plus HWPX-owned editable text/table
-    structure. Per-object page/floating graphic export is legacy fallback for
-    comparison and rollback, not the default ownership route.
+14. Page-background graphics use source-backed page-background planes only when
+    Stage 1 assigns eligible master or spread-cross textless source material.
+    Ordinary page-local graphics remain ordinary textless image group material.
 
 ## 1.1 Refactoring Direction
 
@@ -400,8 +399,8 @@ decision and must not be consumed by executors. It exists to show which Stage 1
 policy/model gap remains before the legacy candidate can become an authoritative
 ObjectPlan:
 
-- `SYNTHETIC_PAGE_BACKGROUND_NEEDS_SOURCE_MODEL`: a page background render still
-  has no source-root/page-fragment model.
+- `PAGE_BACKGROUND_NEEDS_SOURCE_MODEL`: a page background render still has no
+  source-root/page-fragment model.
 - `NO_CLUSTER_REFERENCE_NEEDS_SOURCE_MODEL`: the candidate cannot be tied back
   to a source cluster.
 - `SLOT_ONLY_HIDDEN_CHILDREN_NEEDS_OBJECTPLAN`: the candidate is intentionally

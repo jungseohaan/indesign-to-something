@@ -24,8 +24,8 @@
 
 ## 문제
 
-`single-textless-plane` 그래픽스 모드의 **페이지 평면 캐시**(`output/cache/page_textless_plane/`)는
-페이지당 PNG 1장(`page_textless_plane_p{N}.png`)을 캐시해, 같은 INDD를 재추출할 때
+`single-textless-plane` 그래픽스 모드의 **페이지 배경 평면 캐시**(`output/cache/page_background_plane/`)는
+페이지당 PNG 1장(`page_background_plane_p{N}.png`)을 캐시해, 같은 INDD를 재추출할 때
 `06b1_pageTextlessGroups_exportDone` 구간(가장 큰 단일 병목)을 파일 복사 수준으로 축소한다.
 
 그러나 **표(테이블스타일 소스)를 포함하는 문서에서는 이 캐시가 저장·복원 모두
@@ -81,7 +81,7 @@
    숨김 집합. 세션 간 랜덤성이 없다.
 
 2. **캐시 키는 이미 INDD 신원 기반이다.** 캐시 디렉토리는
-   `page_textless_plane/{indd sha}/extract-v{version}/single-textless-plane-{mode}`
+   `page_background_plane/{indd sha}/extract-v{version}/single-textless-plane-{mode}`
    로, INDD 경로/크기/mtime + 추출기 버전 + 그래픽스 모드 + perf 모드로 키가
    정해진다. 파일명 `_pagePlaneCacheFileName`
    ([extraction_orchestrator.jsx:668-674](../../scripts/indd/extraction_orchestrator.jsx#L668))
@@ -128,8 +128,8 @@
    서명의 캐시 파일이 있으면 hit, 없으면 miss(정상 fresh).
 
 4. **파일명 서명 반영** — `_pagePlaneCacheFileName(pageIndex, pageHash, hideSig)`
-   로 확장. `hideSig` 가 있으면 `page_textless_plane_p{N}_{hideSig}.png`,
-   없으면 기존 `page_textless_plane_p{N}.png` (하위 호환).
+   로 확장. `hideSig` 가 있으면 `page_background_plane_p{N}_{hideSig}.png`,
+   없으면 기존 `page_background_plane_p{N}.png`.
 
 ### 범위: 세 가드 모두 완화
 

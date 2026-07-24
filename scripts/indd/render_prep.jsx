@@ -1728,7 +1728,7 @@ function applyRenderOwnership(entry, renderTarget, opts) {
 function inferPlacementRole(entry, textOwner, textHidden) {
     var type = entry && entry.type ? entry.type : "";
     if (type === "inline_object") return "inline_object";
-    if (type === "page_textless_plane") return "page_visual_plane";
+    if (type === "page_background_plane") return "page_visual_plane";
     if (textOwner === "indesign_png") return "atomic_text_visual";
     if (textHidden) return "visual_only_png";
     return "page_visual_plane";

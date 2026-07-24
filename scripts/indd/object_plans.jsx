@@ -224,7 +224,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
             visualSourceCount: 0,
             excludedInlineSourceCount: 0,
             createdObjectPlanIds: [],
-            reason: "page_visuals_are_exported_by_canonical_single_textless_page_plane"
+            reason: "page_visuals_are_exported_by_source_backed_page_background_plane"
         }
     };
     _recordObjectPlanTiming("appendPageRootTextlessPlanePlans", _timingStartedAt, {
@@ -253,7 +253,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
             protectedTextlessGroupSlotCount: 0,
             protectedTextlessGroupSlots: [],
             disabled: true,
-            reason: "canonical_single_textless_page_plane_is_the_only_page_visual_owner"
+            reason: "source_backed_page_background_plane_is_the_only_page_background_owner"
         }
     };
     _recordObjectPlanTiming("applyPageBackgroundPlaneMaterialization", _timingStartedAt, {
@@ -2269,6 +2269,13 @@ function _slimObjectPlanForWrite(plan) {
         "hiddenVisualSourceObjectIds",
         "hiddenTextFrameIds",
         "excludedInlineSourceObjectIds",
+        "coverageSourceObjectIds",
+        "hiddenTableStyleSourceObjectIds",
+        "hiddenCompletePngTextOwnerSourceObjectIds",
+        "pageBackgroundSourceRoles",
+        "pageBackgroundSourceRoleSourceIds",
+        "canonicalPagePlaneAbsorbEligible",
+        "canonicalPagePlaneEligibleSourceObjectIds",
         "hiddenVisualSourceSetId",
         "hiddenTextFrameSetId",
         "materialization",
@@ -7323,7 +7330,7 @@ function _objectPlanVisualLayer(bundle) {
             || bundle.passId === "pass.master_page_graphics") {
         return "PAGE_BACKGROUND";
     }
-    if (bundle.policyLayer === "BACKGROUND") return "PAGE_BACKGROUND";
+    if (bundle.policyLayer === "BACKGROUND") return "CONTAINER_BACKDROP";
     if (bundle.policyLayer === "DECORATION") {
         if (bundle.connectorDecorationVisual === true) {
             return "LABEL_CONNECTOR_BACKDROP";
@@ -7384,7 +7391,7 @@ function _objectPlanMigrationBlocker(bundle, migrationStatus) {
     }
     if (migrationStatus === "NEEDS_SYNTHETIC_SOURCE_MODEL") {
         if (bundle.passId === "pass.page_backgrounds") {
-            return _objectPlanMigrationBlockerResult("SYNTHETIC_PAGE_BACKGROUND_NEEDS_SOURCE_MODEL", bundle, {
+            return _objectPlanMigrationBlockerResult("PAGE_BACKGROUND_NEEDS_SOURCE_MODEL", bundle, {
                 nextPolicyQuestion: "Stage 1 must point each page background render at the source bundle/page fragment that owns the visible background slot."
             });
         }

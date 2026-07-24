@@ -70,7 +70,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             // when the export target itself is a TextFrame shape.  The later
             // text-hiding pass preserves TextFrame fill/stroke by design, so
             // excluding TextFrames here bakes inline checkbox/marker shells
-            // into page_textless_plane_p*.png.
+            // into page_background_plane_p*.png.
             var id = null;
             try { id = item.id; } catch (eId) {}
             var key = id !== null && id !== undefined ? String(id) : String(items.length);
@@ -342,7 +342,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         } catch (eDocExport) {
             diagnostics.push({
                 accepted: false,
-                reason: "single_textless_page_plane_export_failed",
+                reason: "source_backed_page_background_plane_export_failed",
                 pageIndex: page && page.documentOffset !== undefined ? page.documentOffset : -1,
                 error: String(eDocExport)
             });
@@ -374,7 +374,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             if (!reuseEntry || !reuseEntry.file) {
                 diagnostics.push({
                     accepted: false,
-                    reason: "single_textless_page_plane_precomputed_missing",
+                    reason: "source_backed_page_background_plane_precomputed_missing",
                     pageIndex: reusePageIndex,
                     file: null,
                     bounds: reuseBounds,
@@ -384,24 +384,21 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             }
             diagnostics.push({
                 accepted: true,
-                reason: "single_textless_page_plane_reused",
+                reason: "source_backed_page_background_plane_reused",
                 pageIndex: reusePageIndex,
                 file: reuseEntry.file,
                 bounds: reuseBounds,
                 elapsedMs: 0,
                 globalRenderedFrame: true
             });
-            var reuseSyntheticSourceId = typeof _canonicalPagePlaneSyntheticSourceId === "function"
-                    ? _canonicalPagePlaneSyntheticSourceId(reusePageIndex)
-                    : (-940000000 + reusePageIndex);
             var reuseCandidateId = typeof _canonicalPagePlaneCandidateId === "function"
                     ? _canonicalPagePlaneCandidateId(reusePageIndex)
-                    : ("cand.pass.page_textless_graphic_groups.page."
+                    : ("cand.pass.page_backgrounds.page."
                         + String(reusePageIndex)
-                        + ".single_textless_page_plane");
+                        + ".source_backed_page_background_plane");
             results.push({
-                id: reuseSyntheticSourceId,
-                type: "page_textless_plane",
+                id: 0,
+                type: "page_background_plane",
                 candidateId: reuseCandidateId,
                 candidateMatchStrategy: "page_plane_direct",
                 file: reuseEntry.file,
@@ -416,12 +413,12 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
                 materialization: "PAGE_PLANE_PNG",
-                slotRole: "page_textless_plane",
-                ownershipSlot: "CONTENT_VISUAL_SLOT",
-                reason: "canonical_single_textless_page_plane_reused",
-                sourceObjectIds: [reuseSyntheticSourceId],
-                visualSourceObjectIds: [reuseSyntheticSourceId],
-                exportSourceObjectIds: [reuseSyntheticSourceId],
+                slotRole: "page_background_plane",
+                ownershipSlot: "SHELL_SLOT",
+                reason: "source_backed_page_background_plane_reused",
+                sourceObjectIds: [],
+                visualSourceObjectIds: [],
+                exportSourceObjectIds: [],
                 hiddenTextFrameIds: [],
                 globalRenderedFrame: true,
                 exportSanity: {
@@ -512,31 +509,28 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             try { page = doc.pages[pageIndex]; } catch (ePage) {}
             if (!page) continue;
             var pageStart = nowMs();
-            var fileName = "page_textless_plane_p" + String(pageIndex + 1) + ".png";
+            var fileName = "page_background_plane_p" + String(pageIndex + 1) + ".png";
             var outFile = File(renderDir + "/" + fileName);
             var ok = exportPage(page, outFile);
             var bounds = pageLocalBounds(page);
             diagnostics.push({
                 accepted: ok === true,
-                reason: ok ? "single_textless_page_plane_exported"
-                        : "single_textless_page_plane_missing_file",
+                reason: ok ? "source_backed_page_background_plane_exported"
+                        : "source_backed_page_background_plane_missing_file",
                 pageIndex: page.documentOffset,
                 file: ok ? "rendered_frames/" + fileName : null,
                 bounds: bounds,
                 elapsedMs: nowMs() - pageStart
             });
             if (!ok) continue;
-            var syntheticSourceId = typeof _canonicalPagePlaneSyntheticSourceId === "function"
-                    ? _canonicalPagePlaneSyntheticSourceId(page.documentOffset)
-                    : (-940000000 + pageIndex);
             var candidateId = typeof _canonicalPagePlaneCandidateId === "function"
                     ? _canonicalPagePlaneCandidateId(page.documentOffset)
-                    : ("cand.pass.page_textless_graphic_groups.page."
+                    : ("cand.pass.page_backgrounds.page."
                         + String(page.documentOffset)
-                        + ".single_textless_page_plane");
+                        + ".source_backed_page_background_plane");
             results.push({
-                id: syntheticSourceId,
-                type: "page_textless_plane",
+                id: 0,
+                type: "page_background_plane",
                 candidateId: candidateId,
                 candidateMatchStrategy: "page_plane_direct",
                 file: "rendered_frames/" + fileName,
@@ -551,12 +545,12 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
                 materialization: "PAGE_PLANE_PNG",
-                slotRole: "page_textless_plane",
-                ownershipSlot: "CONTENT_VISUAL_SLOT",
-                reason: "canonical_single_textless_page_plane_export",
-                sourceObjectIds: [syntheticSourceId],
-                visualSourceObjectIds: [syntheticSourceId],
-                exportSourceObjectIds: [syntheticSourceId],
+                slotRole: "page_background_plane",
+                ownershipSlot: "SHELL_SLOT",
+                reason: "source_backed_page_background_plane_export",
+                sourceObjectIds: [],
+                visualSourceObjectIds: [],
+                exportSourceObjectIds: [],
                 hiddenTextFrameIds: [],
                 globalRenderedFrame: opts.globalPreExport === true,
                 exportSanity: {
