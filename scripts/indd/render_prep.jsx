@@ -147,6 +147,45 @@ function classifyTextFrameCached(item) {
 
 // --- 렌더링 시 TextFrame 텍스트 제거 헬퍼 ---
 
+/**
+ * Blank the text of tables nested in a frame.
+ *
+ * A frame's content opacity does not reach a table it contains: the table draws
+ * as its own content, so its cell text survives an export that was meant to be
+ * textless. Returns restore states, empty when the frame has no table.
+ */
+function _hideTableCellTextForExport(tf) {
+    var states = [];
+    if (!tf) return states;
+    var tables = null;
+    try { tables = tf.tables.everyItem().getElements(); } catch (eTables) { return states; }
+    for (var ti = 0; tables && ti < tables.length; ti++) {
+        var cells = null;
+        try { cells = tables[ti].cells.everyItem().getElements(); } catch (eCells) { continue; }
+        for (var ci = 0; cells && ci < cells.length; ci++) {
+            var target = null;
+            try {
+                if (cells[ci].texts && cells[ci].texts.length > 0) target = cells[ci].texts[0];
+            } catch (eCellText) {}
+            if (!target) continue;
+            try {
+                var blend = target.transparencySettings.blendingSettings;
+                states.push({ target: target, opacity: blend.opacity });
+                blend.opacity = 0;
+            } catch (eCellOpacity) {}
+        }
+    }
+    return states;
+}
+
+function _restoreTableCellTextForExport(states) {
+    for (var i = 0; states && i < states.length; i++) {
+        try {
+            states[i].target.transparencySettings.blendingSettings.opacity = states[i].opacity;
+        } catch (eRestoreCellOpacity) {}
+    }
+}
+
 function hideOneTextFrameContent(tf, opts) {
     opts = opts || {};
     if (opts.forceHidden === true) {
@@ -181,7 +220,17 @@ function hideOneTextFrameContent(tf, opts) {
             var contentBlend = tf.contentTransparencySettings.blendingSettings;
             var oldOpacity = contentBlend.opacity;
             contentBlend.opacity = 0;
-            return { tf: tf, mode: "contentOpacity", opacity: oldOpacity };
+            // Content opacity blanks the frame's own text, but a table inside the
+            // frame draws as its own content and keeps rendering. A frame whose
+            // text lives in a table would otherwise export with that text baked
+            // in — visible both in the shell PNG and in the page plane.
+            var cellStates = _hideTableCellTextForExport(tf);
+            return {
+                tf: tf,
+                mode: "contentOpacity",
+                opacity: oldOpacity,
+                cellTextStates: cellStates
+            };
         } catch (eContentOpacityFirst) {}
     }
 
@@ -887,6 +936,7 @@ function restoreTextFrames(saved) {
                 }
             } else if (saved[ri].mode === "contentOpacity") {
                 saved[ri].tf.contentTransparencySettings.blendingSettings.opacity = saved[ri].opacity;
+                _restoreTableCellTextForExport(saved[ri].cellTextStates);
             } else {
                 saved[ri].tf.visible = saved[ri].wasVisible;
             }

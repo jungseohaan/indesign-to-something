@@ -1247,7 +1247,14 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             contentType: _itemContentTypeName(item),
             isGraphicContentFrame: _itemIsGraphicContentFrame(item),
             textLength: textLength,
-            hasText: textLength !== null ? textLength > 0 : null,
+            // A frame whose copy lives in a table reports contents of just the
+            // table anchor character, so length alone calls it empty. Downstream
+            // owners use hasText to decide which frames to hide before a textless
+            // export; without the table signal such a frame keeps its text and it
+            // gets baked into the PNG.
+            hasText: storyHasVisibleTableCellText === true
+                    ? true
+                    : (textLength !== null ? textLength > 0 : null),
             markerOnlyContents: markerOnlyContents,
             simpleMarkerLabelContents: simpleMarkerLabelContents,
             hasTextPath: textPathInfo.hasTextPath === true,
