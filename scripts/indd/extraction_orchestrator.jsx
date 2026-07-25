@@ -1580,6 +1580,20 @@ function _runRenderPhases(doc, ctx, allItems) {
     for (var ipi = 0; imagePlacedResult.items && ipi < imagePlacedResult.items.length; ipi++) {
         renderedFloatingItems.push(imagePlacedResult.items[ipi]);
     }
+
+    // Group 으로 묶인 배치 이미지(동영상 미리보기 사진 등). image_placed_frames 와 같은
+    // 실행기로 렌더한다 — 이 pass 의 렌더가 누락돼 있어 사진이 file=null 로 유실됐다(p13).
+    _requireExtractionPass(ctx, "pass.image_textless_groups");
+    var imageGroupPngCandidates = _pngExtractionCandidatesForPass(ctx.extractionPlan, "pass.image_textless_groups");
+    var imageGroupResult = _contentTextOnly
+            ? { items: [] }
+            : exportInlineObjects(doc, ctx.outputDir, ctx.startPage, ctx.endPage,
+                    allItems, extractionItemById,
+                    imageGroupPngCandidates);
+    _addRenderMeta(imageGroupResult.items, null, "pass.image_textless_groups");
+    for (var igi = 0; imageGroupResult.items && igi < imageGroupResult.items.length; igi++) {
+        renderedFloatingItems.push(imageGroupResult.items[igi]);
+    }
     try { $.gc(); } catch (e) {}
     // exportInlineObjects의 finally 블록이 true로 복원하지만, 예외 전파 등 만일의 경우를 대비한 안전망.
     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
