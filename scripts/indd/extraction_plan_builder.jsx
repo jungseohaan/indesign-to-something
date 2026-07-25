@@ -8390,8 +8390,10 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     // page plane hands it to the whole-page export, where the overhang is trimmed
     // by the page itself and the artwork lands at true size.
     //
-    // Textless is the guard that matters: a bleeding frame that carries copy must
-    // stay editable, so it keeps its own plan and its own PNG.
+    // Textless and non-placed visual material are the guards that matter: a
+    // bleeding frame that carries copy stays editable, and a crop frame that
+    // carries placed media remains CONTENT_VISUAL instead of being treated as a
+    // page backdrop just because the child image overhangs the trim.
     var BLEED_ABSORB_MIN_OVERHANG = 0.5;
     function sourceBleedsPastPage(src, targetPageIndex) {
         var pageBounds = pageBoundsForCanonicalPlane(targetPageIndex);
@@ -8411,6 +8413,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         if (sourceHasBackgroundRoleLayerName(src)) return false;
         if (sourceIsStoryFlowOrAnchored(src)) return false;
         if (sourceTreeHasEditableText(src.id, {})) return false;
+        if (sourceTreeHasPlacedMedia(src.id, {})) return false;
         if (!sourceTreeHasVisibleGraphicMaterial(src.id, {})) return false;
         return sourceBleedsPastPage(src, targetPageIndex);
     }
@@ -8647,6 +8650,23 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         var children = childIdsByParentId[key] || [];
         for (var ci = 0; ci < children.length; ci++) {
             if (sourceTreeHasVisibleGraphicMaterial(children[ci], seen)) return true;
+        }
+        return false;
+    }
+    function sourceTreeHasPlacedMedia(sourceId, seen) {
+        if (sourceId === null || sourceId === undefined) return false;
+        var key = String(sourceId);
+        seen = seen || {};
+        if (seen[key]) return false;
+        seen[key] = true;
+        var src = sourceById[key];
+        if (!src) return false;
+        var kind = sourceKind(src);
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+        if (src.hasPlacedVisual === true) return true;
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceTreeHasPlacedMedia(children[ci], seen)) return true;
         }
         return false;
     }
