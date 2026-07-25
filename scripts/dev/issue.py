@@ -973,8 +973,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument(
         "--dpi",
         type=int,
-        default=96,
-        help="SPEC-054: PNG export resolution for the dev loop (default 96; production uses 220).",
+        default=120,
+        help="SPEC-054: PNG export resolution for the dev loop (default 120; production uses 220).",
     )
     parser.add_argument(
         "--reuse-idml",

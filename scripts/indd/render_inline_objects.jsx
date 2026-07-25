@@ -1201,6 +1201,17 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
             }
             var spread = page && page.parent ? page.parent : null;
             if (!spread) return null;
+            // 그룹 루트 하나만 통PNG export 대상이면 그룹째 복제한다. 자식만 골라
+            // 재그룹하면 배경 알약·원 같은 비텍스트 시각 자식이 복제 집합에서 빠져
+            // 배지가 숫자만 남고 흰 텍스트가 사라진다 (SPEC-076, p25 탐구 배지).
+            // 숨김 대상(hiddenVisualSourceObjectIds/out-of-scope)은 이 함수 호출 전
+            // 원본에 선적용되므로 그룹째 복제해도 숨김이 유지된다.
+            var _completePngExportIds = candidate.exportSourceObjectIds || [];
+            if (_completePngExportIds.length === 1
+                    && String(_completePngExportIds[0]) === String(item.id)
+                    && item.constructor && String(item.constructor.name) === "Group") {
+                return item.duplicate(spread) || null;
+            }
             var sourceIds = _completePngDuplicateSourceIds(candidate);
             for (var si = 0; si < sourceIds.length; si++) {
                 if (String(sourceIds[si]) === String(item.id)) continue;
