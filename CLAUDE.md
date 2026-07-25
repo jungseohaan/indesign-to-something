@@ -28,7 +28,8 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
   - [SPEC-072](docs/specs/SPEC-072-cell-char-attr-investigation.md) (#144) — 표 셀 텍스트가 IDML 색·폰트 유실.
     파서에 **명시/상속 구분 플래그** 추가 후 명시값만 주입. 선행 실패(SPEC-071)의 원인 분석 포함
 - **진행 중 / 대기**:
-  - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) + SPEC-044~047 (화학식 계열) — 구현 완료, **한글 육안 확인 대기**
+  - **SPEC-044~047 (화학식 계열: 괄호 빈칸·계수 첨자·H₂O 셸 분리·말풍선 배경) — 2026-07-25 한글 육안 확인 완료 → Done**
+  - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) (고등문학지도서 u2, 앵커 라벨) — 구현 완료, **한글 육안 확인 대기** (과학 U1 아님)
   - **화학식 전수 조사 잔여(SPEC-078 후속, 미착수)**: (B) 반응식 좌변/계수 유실 — `2Mg+O₂→2MgO` 의 좌변 "2Mg+" 가 수식 밖 텍스트로 남고, `Cu+O₂→2CuO` 계수 유실. 기존 `stitchChemicalFormulaFragments` 선행-흡수가 `rm` 접두사 얽힘 + 연산자 체인 미지원으로 못 잡음. (C) 답란 반응식 `N₂□□□NH₃` 에서 □가 `+`/`→` 삼킴. fragile 반응식 재조립이라 회귀 게이트 충분히 돌리는 전용 SPEC 필요
   - SPEC-067 잔여: 수식 그룹 경계 문맥 기반 재설계(수학 조각화) — stash@{0}/{1} 에 WIP.
     남은 블로커는 연산자·쉼표 연속 조각 24건(`1²=1,2²=4`)

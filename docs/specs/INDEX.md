@@ -33,10 +33,10 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-056](SPEC-056-cell-answer-blank-inline-loss.md) | Done | 표 셀 답란(연필+밑줄) 인라인 객체 유실 — 스페이서 오판·□ 삼킴·fallback 순서 손실 3중 수정 (2026-07-22 한글 육안 확인 완료) |
 | [SPEC-057](SPEC-057-labeled-figure-inline-complete-png.md) | Done | 라벨 달린 삽화 그룹 시각 유실·라벨 유령 여백 — 인라인 통짜 PNG 승격 + 셸 여백 단위 정합 (2026-07-23 한글 육안 확인 완료) |
 | [SPEC-058](SPEC-058-equation-font-box-formula.md) | Done | 수식 폰트 박스 반응식(2H₂+O₂→2H₂O) 통짜 hp:equation 승격 — BT/EH 교차 그룹핑 프리패스 + equation-only 셸 재주입 차단 (2026-07-23 골든 +2 수식 검증) |
-| [SPEC-044](SPEC-044-blank-paren-spacer.md) | Active | 괄호 빈칸 스페이서(빈 답란 Rectangle) → NBSP 고정폭 공백 치환 (구현 완료, 육안 확인 대기) |
-| [SPEC-045](SPEC-045-coefficient-subscript-bleed.md) | Active | 화학 반응식 계수 첨자 오염(resolved 첨자 위치 흘림) — IDML 비첨자 증거 우선 (구현 완료, 육안 확인 대기) |
-| [SPEC-046](SPEC-046-formula-textrange-shell-misfire.md) | Active | 화학식 첫 글자의 text-range-shell 오분리 — 화학식 문단 range 분리 제외 (구현 완료, 육안 확인 대기) |
-| [SPEC-047](SPEC-047-inline-formula-body-textrange-split.md) | Active | 문장 중 화학식 진입이 앞 한글 본문을 text-range-shell 로 오분리(말풍선 배경 누락) — 추출기 화학식 폰트 진입 경계 제외 (구현 완료, 육안 확인 대기) |
+| [SPEC-044](SPEC-044-blank-paren-spacer.md) | Done | 괄호 빈칸 스페이서(빈 답란 Rectangle) → NBSP 고정폭 공백 치환 (과학 u1 p46 등, 2026-07-25 한글 육안 확인 완료) |
+| [SPEC-045](SPEC-045-coefficient-subscript-bleed.md) | Done | 화학 반응식 계수 첨자 오염(resolved 첨자 위치 흘림) — IDML 비첨자 증거 우선 (과학 u1 p25/26/28 생성물 박스 2H₂O, 2026-07-25 한글 육안 확인 완료) |
+| [SPEC-046](SPEC-046-formula-textrange-shell-misfire.md) | Done | 화학식 첫 글자의 text-range-shell 오분리 — 화학식 문단 range 분리 제외 (과학 u1 p17 파랑 H₂O 박스, 2026-07-25 한글 육안 확인 완료) |
+| [SPEC-047](SPEC-047-inline-formula-body-textrange-split.md) | Done | 문장 중 화학식 진입이 앞 한글 본문을 text-range-shell 로 오분리(말풍선 배경 누락) — 추출기 화학식 폰트 진입 경계 제외 (과학 u1 반응식 말풍선, 2026-07-25 한글 육안 확인 완료) |
 | [SPEC-059](SPEC-059-reaction-equation-lhs-truncation.md) | Done | 반응식 좌변 잘림(#107 소유 전환으로 노출) — 화살표 시작 클러스터의 좌변 흡수 (2026-07-23 기준선 대조 검증) |
 | [SPEC-060](SPEC-060-nested-table-style-supersede.md) | Done | 중첩 데이터 표 스타일 흡수 소실(#93 포괄 supersede) — stage0 대체 억제를 per-plan 커버리지 검사로 (2026-07-23 육안 확인 완료) |
 | [SPEC-062](SPEC-062-sibling-shell-bounds-multi-claim.md) | Done | p16-17 수식 토큰 겹침 — 형제 셸 bounds 치환을 단독 점유로 제한 + 셸 치환 블록 수직 중앙 정렬 (2026-07-23 육안 확인 완료) |
