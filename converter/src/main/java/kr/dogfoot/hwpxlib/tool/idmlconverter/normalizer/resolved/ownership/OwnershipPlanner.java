@@ -4172,14 +4172,6 @@ public final class OwnershipPlanner {
         return false;
     }
 
-    private static boolean containsAnySet(int[] values, Set<Integer> candidates) {
-        if (values == null || values.length == 0 || candidates == null || candidates.isEmpty()) return false;
-        for (int value : values) {
-            if (candidates.contains(value)) return true;
-        }
-        return false;
-    }
-
     private static double[] expandBounds(double[] bounds, double padding) {
         if (bounds == null || bounds.length < 4) return bounds;
         double p = Math.max(0.0, padding);
@@ -7746,16 +7738,6 @@ public final class OwnershipPlanner {
             if (id.equals(other.parentId())) return true;
         }
         return false;
-    }
-
-    private static double[] expandBounds(double[] b, double tolerance) {
-        if (b == null || b.length < 4) return null;
-        return new double[] {
-                b[0] - tolerance,
-                b[1] - tolerance,
-                b[2] + tolerance,
-                b[3] + tolerance
-        };
     }
 
     private TextAction textActionOf(RenderedGroup rg) {
