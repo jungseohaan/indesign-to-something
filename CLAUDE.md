@@ -13,7 +13,7 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
   - [SPEC-074](docs/specs/SPEC-074-image-textless-group-render-missing.md) (#147) — Group 배치 이미지 유실(p13 동영상 사진).
     plan 이 참조하는 `pass.image_textless_groups` 렌더 미등록 → pass 등록. 20p 회귀 PASS(+7 이미지)
   - [SPEC-075](docs/specs/SPEC-075-graphic-short-text-button-group-complete-png.md) (#149) — YES/NO 버튼 글자 안 보임·줄바꿈(p16).
-    편집 셸 대신 **그래픽+짧은텍스트 그룹 통PNG**(짧은TF≥2+그래픽+긴TF<3 게이트). 회귀 PASS(10개 정확 전환)
+    편집 셸 대신 **그래픽+짧은텍스트 그룹 통PNG**(짧은TF≥2+그래픽+긴TF<3 게이트). 회귀 PASS(10개 정확 전환), 한글 육안 확인 완료
 - **최근 완료 (2026-07-24~25)**: 영어 u1 p10 한 페이지에서 연쇄적으로 드러난 4건
   - [SPEC-068](docs/specs/SPEC-068-page-plane-foreign-visual-owner-hide.md) (#140) — 배경 평면에 도형이 중복.
     **소유권 게이트와 숨김 게이트를 분리** (`hiddenForeignVisualOwnerSourceObjectIds`). 20p 에서 1,751건 숨김
