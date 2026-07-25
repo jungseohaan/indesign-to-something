@@ -178,6 +178,7 @@ public class StylePropertyResolver {
         if (child.fillColor() != null) merged.fillColor(child.fillColor());
         if (child.tracking() != null) merged.tracking(child.tracking());
         if (child.horizontalScale() != null) merged.horizontalScale(child.horizontalScale());
+        if (child.verticalScale() != null) merged.verticalScale(child.verticalScale());
         if (child.baselineShift() != null) merged.baselineShift(child.baselineShift());
         if (child.position() != null) merged.position(child.position());
         if (child.underline() != null) merged.underline(child.underline());
@@ -201,6 +202,12 @@ public class StylePropertyResolver {
         if (child.spaceBefore() != null) merged.spaceBefore(child.spaceBefore());
         if (child.spaceAfter() != null) merged.spaceAfter(child.spaceAfter());
         if (child.rightIndent() != null) merged.rightIndent(child.rightIndent());
+        if (child.bulletsCharacterStyle() != null) merged.bulletsCharacterStyle(child.bulletsCharacterStyle());
+        if (child.bulletsFont() != null) merged.bulletsFont(child.bulletsFont());
+        if (child.bulletsFontStyle() != null) merged.bulletsFontStyle(child.bulletsFontStyle());
+        if (child.grepStyles() != null) merged.grepStyles(new ArrayList<>(child.grepStyles()));
+        if (child.nestedStyles() != null) merged.nestedStyles(new ArrayList<>(child.nestedStyles()));
+        if (child.tabStops() != null) merged.tabStops(new ArrayList<>(child.tabStops()));
 
         // selfRef/name은 child 것으로
         merged.selfRef(child.selfRef());
@@ -222,6 +229,7 @@ public class StylePropertyResolver {
         copy.fillColor(src.fillColor());
         copy.tracking(src.tracking());
         copy.horizontalScale(src.horizontalScale());
+        copy.verticalScale(src.verticalScale());
         copy.baselineShift(src.baselineShift());
         copy.position(src.position());
         copy.underline(src.underline());
@@ -243,6 +251,12 @@ public class StylePropertyResolver {
         copy.spaceBefore(src.spaceBefore());
         copy.spaceAfter(src.spaceAfter());
         copy.rightIndent(src.rightIndent());
+        copy.bulletsCharacterStyle(src.bulletsCharacterStyle());
+        copy.bulletsFont(src.bulletsFont());
+        copy.bulletsFontStyle(src.bulletsFontStyle());
+        if (src.grepStyles() != null) copy.grepStyles(new ArrayList<>(src.grepStyles()));
+        if (src.nestedStyles() != null) copy.nestedStyles(new ArrayList<>(src.nestedStyles()));
+        if (src.tabStops() != null) copy.tabStops(new ArrayList<>(src.tabStops()));
         return copy;
     }
 

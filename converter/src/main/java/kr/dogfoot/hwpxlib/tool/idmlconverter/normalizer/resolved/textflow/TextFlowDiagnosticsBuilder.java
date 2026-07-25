@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildCo
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.SourceTextStyleResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
@@ -83,6 +84,7 @@ public final class TextFlowDiagnosticsBuilder {
             flow.textOwner = hasHwpxTextOwner ? "HWPX_TEXT" : (hasPngTextOwner ? "PNG_TEXT" : "UNKNOWN");
 
             int paragraphIndex = 0;
+            IDMLStory idmlStory = loadIdmlStory(ctx, story.id());
             for (ResolvedParagraph paragraph : story.paragraphs()) {
                 TextFlowDiagnostics.TextFlowParagraph outPara =
                         new TextFlowDiagnostics.TextFlowParagraph();
@@ -92,12 +94,15 @@ public final class TextFlowDiagnosticsBuilder {
                     outPara.styleName = paragraph.styleName();
                     outPara.justification = paragraph.justification();
                     outPara.generatedPrefixText = paragraph.generatedPrefixText();
+                    IDMLParagraph idmlParagraph = idmlParagraphAt(idmlStory, outPara.index);
+                    applyGeneratedPrefixStyle(ctx, outPara, paragraph, idmlParagraph);
                     int runIndex = 0;
                     for (ResolvedRun run : paragraph.runs()) {
                         TextFlowDiagnostics.TextFlowRun outRun = buildRun(ctx, run, runIndex++);
                         if (outRun != null) outPara.runs.add(outRun);
                     }
                     overlayIdmlInlineSlots(ctx, story.id(), outPara);
+                    applyEffectiveIdmlTextStyles(ctx, outPara, idmlParagraph);
                 }
                 flow.paragraphs.add(outPara);
             }
@@ -174,6 +179,241 @@ public final class TextFlowDiagnosticsBuilder {
         out.horizontalScale = run.horizontalScale();
         out.baselineShift = run.baselineShift();
         return out;
+    }
+
+    private static IDMLStory loadIdmlStory(ResolvedBuildContext ctx, String storyId) {
+        if (ctx == null || ctx.loadIDMLStory == null || storyId == null || storyId.isEmpty()) return null;
+        return ctx.loadIDMLStory.apply(storyId);
+    }
+
+    private static IDMLParagraph idmlParagraphAt(IDMLStory story, int index) {
+        if (story == null || story.paragraphs() == null || index < 0
+                || index >= story.paragraphs().size()) {
+            return null;
+        }
+        return story.paragraphs().get(index);
+    }
+
+    private static void applyGeneratedPrefixStyle(
+            ResolvedBuildContext ctx,
+            TextFlowDiagnostics.TextFlowParagraph outPara,
+            ResolvedParagraph resolvedParagraph,
+            IDMLParagraph idmlParagraph) {
+        if (ctx == null || outPara == null || resolvedParagraph == null) return;
+        String prefix = resolvedParagraph.generatedPrefixText();
+        if (prefix == null || prefix.trim().isEmpty()) return;
+        ResolvedRun base = firstVisibleResolvedRun(resolvedParagraph);
+        if (base == null) return;
+
+        ResolvedRun markerRun = SourceTextStyleResolver.copyRun(base);
+        ResolvedRun separatorRun = SourceTextStyleResolver.copyRun(base);
+        String paraStyleRef = idmlParagraph != null && idmlParagraph.appliedParagraphStyle() != null
+                ? idmlParagraph.appliedParagraphStyle()
+                : resolvedParagraph.styleName();
+        SourceTextStyleResolver.applyGeneratedBulletStyle(ctx, markerRun, paraStyleRef);
+        outPara.generatedPrefixMarkerRun = markerRun;
+        outPara.generatedPrefixSeparatorRun = separatorRun;
+        outPara.generatedPrefixMarkerCharStyle = markerRun.charStyle();
+        outPara.generatedPrefixMarkerFillColor = markerRun.fillColor();
+        outPara.generatedPrefixMarkerHorizontalScale = markerRun.horizontalScale();
+        outPara.generatedPrefixMarkerVerticalScale = markerRun.verticalScale();
+    }
+
+    private static void applyEffectiveIdmlTextStyles(
+            ResolvedBuildContext ctx,
+            TextFlowDiagnostics.TextFlowParagraph paragraph,
+            IDMLParagraph idmlParagraph) {
+        if (ctx == null || paragraph == null || idmlParagraph == null
+                || paragraph.runs == null || paragraph.runs.isEmpty()) {
+            return;
+        }
+        List<IdmlTextSpan> spans = idmlTextSpans(idmlParagraph);
+        if (spans.isEmpty()) return;
+
+        List<TextFlowDiagnostics.TextFlowRun> rebuilt = new ArrayList<>();
+        int spanIndex = 0;
+        int spanOffset = 0;
+        boolean changed = false;
+
+        for (TextFlowDiagnostics.TextFlowRun run : paragraph.runs) {
+            if (run == null || !"TEXT".equals(run.kind) || run.text == null || run.text.isEmpty()) {
+                if (run != null && "INLINE_SLOT".equals(run.kind)) {
+                    SpanCursor advanced = skipObjectReplacementSpans(spans, spanIndex, spanOffset);
+                    if (advanced == null) {
+                        return;
+                    }
+                    spanIndex = advanced.index;
+                    spanOffset = advanced.offset;
+                }
+                rebuilt.add(run);
+                continue;
+            }
+            int runOffset = 0;
+            while (runOffset < run.text.length()) {
+                SpanCursor advanced = skipObjectReplacementSpans(spans, spanIndex, spanOffset);
+                if (advanced == null) {
+                    return;
+                }
+                spanIndex = advanced.index;
+                spanOffset = advanced.offset;
+                while (spanIndex < spans.size()
+                        && spanOffset >= spans.get(spanIndex).text.length()) {
+                    spanIndex++;
+                    spanOffset = 0;
+                }
+                if (spanIndex >= spans.size()) {
+                    String remaining = run.text.substring(runOffset);
+                    if (isOnlyParagraphTerminators(remaining)) {
+                        TextFlowDiagnostics.TextFlowRun piece = copyTextRun(run);
+                        piece.text = remaining;
+                        piece.sourceRun = SourceTextStyleResolver.copyRun(run.sourceRun);
+                        if (piece.sourceRun != null) {
+                            piece.sourceRun.text(remaining);
+                        }
+                        rebuilt.add(piece);
+                        changed = true;
+                        runOffset = run.text.length();
+                        break;
+                    }
+                    return;
+                }
+                IdmlTextSpan span = spans.get(spanIndex);
+                int take = Math.min(
+                        run.text.length() - runOffset,
+                        span.text.length() - spanOffset);
+                if (take <= 0) return;
+                String resolvedPart = run.text.substring(runOffset, runOffset + take);
+                String idmlPart = span.text.substring(spanOffset, spanOffset + take);
+                if (!resolvedPart.equals(idmlPart)) {
+                    return;
+                }
+                TextFlowDiagnostics.TextFlowRun piece = copyTextRun(run);
+                piece.text = resolvedPart;
+                piece.sourceRun = SourceTextStyleResolver.copyRun(run.sourceRun);
+                if (piece.sourceRun != null) {
+                    piece.sourceRun.text(resolvedPart);
+                    SourceTextStyleResolver.applyCharacterRun(ctx, piece.sourceRun, span.run);
+                    copyResolvedFields(piece, piece.sourceRun);
+                }
+                rebuilt.add(piece);
+                if (take != run.text.length() || spanOffset != 0
+                        || take != span.text.length()) {
+                    changed = true;
+                }
+                if (span.run != null && SourceTextStyleResolver.hasEffectiveStyle(span.run)) {
+                    changed = true;
+                }
+                runOffset += take;
+                spanOffset += take;
+            }
+        }
+        if (!changed) return;
+        paragraph.runs.clear();
+        paragraph.runs.addAll(rebuilt);
+        reindexRuns(paragraph);
+    }
+
+    private static boolean isOnlyParagraphTerminators(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c != '\r' && c != '\n') return false;
+        }
+        return true;
+    }
+
+    private static SpanCursor skipObjectReplacementSpans(
+            List<IdmlTextSpan> spans,
+            int spanIndex,
+            int spanOffset) {
+        if (spans == null) return null;
+        while (spanIndex < spans.size()) {
+            IdmlTextSpan span = spans.get(spanIndex);
+            String text = span != null ? span.text : null;
+            if (text == null || text.isEmpty() || spanOffset >= text.length()) {
+                spanIndex++;
+                spanOffset = 0;
+                continue;
+            }
+            if (text.charAt(spanOffset) != OBJECT_REPLACEMENT) {
+                return new SpanCursor(spanIndex, spanOffset);
+            }
+            spanOffset++;
+            if (spanOffset >= text.length()) {
+                spanIndex++;
+                spanOffset = 0;
+            }
+        }
+        return new SpanCursor(spanIndex, spanOffset);
+    }
+
+    private static List<IdmlTextSpan> idmlTextSpans(IDMLParagraph paragraph) {
+        List<IdmlTextSpan> spans = new ArrayList<>();
+        if (paragraph == null || paragraph.characterRuns() == null) return spans;
+        for (IDMLCharacterRun run : paragraph.characterRuns()) {
+            if (run == null || run.content() == null || run.content().isEmpty()) continue;
+            spans.add(new IdmlTextSpan(run.content(), run));
+        }
+        return spans;
+    }
+
+    private static ResolvedRun firstVisibleResolvedRun(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return null;
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+            String text = run.text().replace(OBJECT_REPLACEMENT, ' ').trim();
+            if (!text.isEmpty()) return run;
+        }
+        return null;
+    }
+
+    private static TextFlowDiagnostics.TextFlowRun copyTextRun(TextFlowDiagnostics.TextFlowRun source) {
+        TextFlowDiagnostics.TextFlowRun copy = new TextFlowDiagnostics.TextFlowRun();
+        copy.index = source.index;
+        copy.kind = source.kind;
+        copy.text = source.text;
+        copy.sourceRun = source.sourceRun;
+        copy.fontFamily = source.fontFamily;
+        copy.fontSize = source.fontSize;
+        copy.fontStyle = source.fontStyle;
+        copy.fillColor = source.fillColor;
+        copy.charStyle = source.charStyle;
+        copy.tracking = source.tracking;
+        copy.horizontalScale = source.horizontalScale;
+        copy.baselineShift = source.baselineShift;
+        return copy;
+    }
+
+    private static void copyResolvedFields(TextFlowDiagnostics.TextFlowRun target, ResolvedRun source) {
+        if (target == null || source == null) return;
+        target.fontFamily = source.fontFamily();
+        target.fontSize = source.fontSize();
+        target.fontStyle = source.fontStyle();
+        target.fillColor = source.fillColor();
+        target.charStyle = source.charStyle();
+        target.tracking = source.tracking();
+        target.horizontalScale = source.horizontalScale();
+        target.baselineShift = source.baselineShift();
+    }
+
+    private static final class IdmlTextSpan {
+        final String text;
+        final IDMLCharacterRun run;
+
+        IdmlTextSpan(String text, IDMLCharacterRun run) {
+            this.text = text;
+            this.run = run;
+        }
+    }
+
+    private static final class SpanCursor {
+        final int index;
+        final int offset;
+
+        SpanCursor(int index, int offset) {
+            this.index = index;
+            this.offset = offset;
+        }
     }
 
     private static void overlayIdmlInlineSlots(

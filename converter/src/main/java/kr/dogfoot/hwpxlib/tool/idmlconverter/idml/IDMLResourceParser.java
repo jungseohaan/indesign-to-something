@@ -176,6 +176,7 @@ public class IDMLResourceParser {
         def.spaceBefore(parseDoubleAttr(styleElem, "SpaceBefore"));
         def.spaceAfter(parseDoubleAttr(styleElem, "SpaceAfter"));
         def.horizontalScale(parseDoubleAttr(styleElem, "HorizontalScale"));
+        def.verticalScale(parseDoubleAttr(styleElem, "VerticalScale"));
         def.tracking(parseDoubleAttr(styleElem, "Tracking"));
         def.baselineShift(parseDoubleAttr(styleElem, "BaselineShift"));
         def.position(getAttrOrNull(styleElem, "Position"));
@@ -309,6 +310,10 @@ public class IDMLResourceParser {
                     }
                 }
             }
+
+            def.bulletsCharacterStyle(getPropertyText(props2, "BulletsCharacterStyle"));
+            def.bulletsFont(getPropertyText(props2, "BulletsFont"));
+            def.bulletsFontStyle(getPropertyText(props2, "BulletsFontStyle"));
 
             Element tabList = getFirstChildElement(props2, "TabList");
             if (tabList != null) {

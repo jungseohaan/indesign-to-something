@@ -674,6 +674,7 @@ public class IDMLStoryParser {
         if (style.strikeThrough() != null) run.strikeThrough(style.strikeThrough());
         if (style.baselineShift() != null) run.baselineShift(style.baselineShift());
         if (style.horizontalScale() != null) run.horizontalScale(style.horizontalScale());
+        if (style.verticalScale() != null) run.verticalScale(style.verticalScale());
         if (style.capitalization() != null) run.capitalization(style.capitalization());
     }
 
@@ -896,6 +897,7 @@ public class IDMLStoryParser {
         run.tracking(parseDoubleAttr(charRange, "Tracking"));
         run.baselineShift(parseDoubleAttr(charRange, "BaselineShift"));
         run.horizontalScale(parseDoubleAttr(charRange, "HorizontalScale"));
+        run.verticalScale(parseDoubleAttr(charRange, "VerticalScale"));
         run.capitalization(getAttrOrNull(charRange, "Capitalization"));
         String directShadeColor = firstAttr(charRange,
                 "CharacterShadingColor", "ShadingColor", "TextShadingColor");
@@ -1894,42 +1896,60 @@ public class IDMLStoryParser {
         if (rules == null || rules.isEmpty()) return;
 
         List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
+        StringBuilder paragraphText = new StringBuilder();
+        int[] runStarts = new int[originalRuns.size()];
+        java.util.Arrays.fill(runStarts, -1);
+        for (int i = 0; i < originalRuns.size(); i++) {
+            IDMLCharacterRun run = originalRuns.get(i);
+            String text = run != null ? run.content() : null;
+            if (text == null || text.isEmpty()) continue;
+            runStarts[i] = paragraphText.length();
+            paragraphText.append(text);
+        }
+        if (paragraphText.length() == 0) return;
+
+        // InDesign GREP styles are paragraph-scoped. Matching run-by-run misses
+        // styles that cross CharacterRun or anchored-object boundaries.
+        String[] charStylePerChar = new String[paragraphText.length()];
+        boolean anyParagraphMatch = false;
+        for (Object[] rule : rules) {
+            String charStyleRef = (String) rule[0];
+            java.util.regex.Pattern pat = (java.util.regex.Pattern) rule[1];
+            try {
+                java.util.regex.Matcher m = pat.matcher(paragraphText);
+                while (m.find()) {
+                    if (m.end() <= m.start()) continue;
+                    for (int i = m.start(); i < m.end(); i++) {
+                        charStylePerChar[i] = charStyleRef;
+                        anyParagraphMatch = true;
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+        }
+        if (!anyParagraphMatch) return;
+
         List<IDMLCharacterRun> newRuns = new ArrayList<>();
         boolean modified = false;
 
-        for (IDMLCharacterRun run : originalRuns) {
+        for (int runIndex = 0; runIndex < originalRuns.size(); runIndex++) {
+            IDMLCharacterRun run = originalRuns.get(runIndex);
             String text = run.content();
             if (text == null || text.isEmpty()) {
                 newRuns.add(run);
                 continue;
             }
 
-            // 각 문자에 대해 가장 마지막으로 매칭된 GREP 규칙의 charStyleRef 저장
-            String[] charStylePerChar = new String[text.length()];
-            boolean anyMatch = false;
-            for (Object[] rule : rules) {
-                String charStyleRef = (String) rule[0];
-                java.util.regex.Pattern pat = (java.util.regex.Pattern) rule[1];
-                try {
-                    java.util.regex.Matcher m = pat.matcher(text);
-                    while (m.find()) {
-                        for (int i = m.start(); i < m.end(); i++) {
-                            charStylePerChar[i] = charStyleRef;
-                            anyMatch = true;
-                        }
-                    }
-                } catch (Exception e) { /* ignore */ }
-            }
-            if (!anyMatch) {
+            int paragraphOffset = runStarts[runIndex];
+            if (paragraphOffset < 0) {
                 newRuns.add(run);
                 continue;
             }
 
             // 전체 매칭 확인
             boolean allSame = true;
-            String firstStyle = charStylePerChar[0];
-            for (int i = 1; i < charStylePerChar.length; i++) {
-                if (!java.util.Objects.equals(charStylePerChar[i], firstStyle)) {
+            String firstStyle = charStylePerChar[paragraphOffset];
+            for (int i = 1; i < text.length(); i++) {
+                if (!java.util.Objects.equals(charStylePerChar[paragraphOffset + i], firstStyle)) {
                     allSame = false;
                     break;
                 }
@@ -1959,11 +1979,13 @@ public class IDMLStoryParser {
             int segStart = 0;
             for (int i = 1; i <= text.length(); i++) {
                 if (i == text.length()
-                        || !java.util.Objects.equals(charStylePerChar[i], charStylePerChar[segStart])) {
+                        || !java.util.Objects.equals(
+                                charStylePerChar[paragraphOffset + i],
+                                charStylePerChar[paragraphOffset + segStart])) {
                     String segText = text.substring(segStart, i);
                     IDMLCharacterRun subRun = cloneRunWithText(run, segText);
-                    if (charStylePerChar[segStart] != null) {
-                        subRun.grepAppliedCharStyle(charStylePerChar[segStart]);
+                    if (charStylePerChar[paragraphOffset + segStart] != null) {
+                        subRun.grepAppliedCharStyle(charStylePerChar[paragraphOffset + segStart]);
                         counts[0]++;
                     }
                     // 이 세그먼트에 포함된 \uFFFC 개수만큼 인라인 항목 배분
@@ -2349,6 +2371,12 @@ public class IDMLStoryParser {
             String javaRegex = idGrep;
             // InDesign GREP anchored object marker -> Object Replacement Character.
             javaRegex = javaRegex.replace("~a", "\uFFFC");
+            // InDesign GREP figure space marker. Glossary/title styles commonly
+            // use this as the delimiter between the term and its explanation.
+            javaRegex = javaRegex.replace("~/", "\u2007");
+            // InDesign GREP em space marker. Process-label styles use this as
+            // the delimiter after labels such as "관찰·예상".
+            javaRegex = javaRegex.replace("~m", "\u2003");
             // InDesign GREP uppercase class -> Java Unicode property
             javaRegex = javaRegex.replace("\\u", "\\p{Lu}");
             // InDesign GREP lowercase class -> Java Unicode property

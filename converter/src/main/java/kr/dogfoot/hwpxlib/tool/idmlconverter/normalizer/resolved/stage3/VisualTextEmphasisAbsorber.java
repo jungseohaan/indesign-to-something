@@ -11,6 +11,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextRangeRef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
@@ -113,6 +114,9 @@ public final class VisualTextEmphasisAbsorber {
             int pageIndex,
             double[] bounds,
             String color) {
+        if (applyOwnedTextRanges(ctx, sections, plan, color)) {
+            return true;
+        }
         TableParagraphMatch tableMatch = findBestTableParagraphMatch(ctx, sections, pageIndex, bounds, plan);
         if (tableMatch != null && applyCharacterShadeToParagraph(tableMatch.paragraph, color)) {
             return true;
@@ -121,6 +125,29 @@ public final class VisualTextEmphasisAbsorber {
         if (match == null || match.tf == null || match.line == null) return false;
         ASTParagraph para = findAstParagraphForLine(ctx, sections, pageIndex, match.tf, match.line);
         return para != null && applyCharacterShadeToComposedLine(para, match.line, color);
+    }
+
+    private static boolean applyOwnedTextRanges(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections,
+            ObjectPlan plan,
+            String color) {
+        if (ctx == null || sections == null || plan == null || color == null
+                || plan.ownedTextRanges == null || plan.ownedTextRanges.length == 0) {
+            return false;
+        }
+        boolean changed = false;
+        for (TextRangeRef range : plan.ownedTextRanges) {
+            if (range == null || range.paragraphEnd <= range.paragraphStart) continue;
+            ASTParagraph para = findAstParagraphForTextRange(ctx, sections, plan.pageIndex, range);
+            if (para == null) continue;
+            changed |= shadeParagraphTextRange(
+                    para,
+                    range.paragraphStart,
+                    range.paragraphEnd,
+                    color);
+        }
+        return changed;
     }
 
     private static boolean applyCharacterShadeToParagraph(ASTParagraph para, String color) {
@@ -760,6 +787,33 @@ public final class VisualTextEmphasisAbsorber {
                     return para;
                 }
             }
+        }
+        return null;
+    }
+
+    private static ASTParagraph findAstParagraphForTextRange(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections,
+            int resolvedPageIndex,
+            TextRangeRef range) {
+        if (ctx == null || sections == null || range == null) return null;
+        int pageIdx = ctx.toSectionIndex.applyAsInt(resolvedPageIndex);
+        if (pageIdx < 0 || pageIdx >= sections.size()) return null;
+        ASTSection section = sections.get(pageIdx);
+        if (section == null || section.blocks() == null) return null;
+
+        String tfId = String.valueOf(range.textFrameId);
+        for (ASTBlock block : section.blocks()) {
+            if (!(block instanceof ASTTextFrameBlock)) continue;
+            ASTTextFrameBlock tfBlock = (ASTTextFrameBlock) block;
+            String blockDomId = ParagraphTextHelpers.domIdFromSourceId(tfBlock.sourceId());
+            if (!tfId.equals(blockDomId)) continue;
+            List<ASTParagraph> paras = tfBlock.paragraphs();
+            if (paras == null || paras.isEmpty()) return null;
+            if (range.paragraphIndex >= 0 && range.paragraphIndex < paras.size()) {
+                return paras.get(range.paragraphIndex);
+            }
+            return paras.get(0);
         }
         return null;
     }

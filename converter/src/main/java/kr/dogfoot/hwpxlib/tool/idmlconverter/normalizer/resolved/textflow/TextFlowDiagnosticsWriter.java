@@ -62,6 +62,10 @@ public final class TextFlowDiagnosticsWriter {
         sb.append(",\"styleName\":\"").append(escape(paragraph.styleName)).append("\"");
         sb.append(",\"justification\":\"").append(escape(paragraph.justification)).append("\"");
         appendString(sb, "generatedPrefixText", paragraph.generatedPrefixText);
+        appendString(sb, "generatedPrefixMarkerCharStyle", paragraph.generatedPrefixMarkerCharStyle);
+        appendString(sb, "generatedPrefixMarkerFillColor", paragraph.generatedPrefixMarkerFillColor);
+        appendNumber(sb, "generatedPrefixMarkerHorizontalScale", paragraph.generatedPrefixMarkerHorizontalScale);
+        appendNumber(sb, "generatedPrefixMarkerVerticalScale", paragraph.generatedPrefixMarkerVerticalScale);
         sb.append(",\"runs\":[");
         for (int i = 0; i < paragraph.runs.size(); i++) {
             if (i > 0) sb.append(',');

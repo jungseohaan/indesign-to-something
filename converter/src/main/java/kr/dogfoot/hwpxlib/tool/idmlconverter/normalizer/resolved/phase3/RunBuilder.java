@@ -94,6 +94,9 @@ class RunBuilder {
                 // lose their white/washed rendering and become the raw swatch color.
             }
         }
+        if (grepCharStyle != null) {
+            tr.grepStyleApplied(true);
+        }
 
         // SPEC-065: 실제 문자 스타일(@색자 등)이 적용된 런의 IDML 색은 resolved DOM 보다
         // 권위다. IDML 조판 의미상 로컬 오버라이드 없는 charStyle 색이 확정 렌더 색인데,
@@ -162,8 +165,10 @@ class RunBuilder {
 
         // fontFamily / fontSize / textColor: 헬퍼로 단일 우선순위 적용
         // SPEC-016: 매칭 신뢰도(confidence)에 따라 resolved 오버라이드 여부 결정
-        String resolvedFontFamily = RunPropertyResolver.resolveFontFamilyWithConfidence(
-                rr, cr, sc.fontFamily, text, confidence);
+        String resolvedFontFamily = grepCharStyle != null && grepCharStyle.fontFamily() != null
+                ? grepCharStyle.fontFamily()
+                : RunPropertyResolver.resolveFontFamilyWithConfidence(
+                        rr, cr, sc.fontFamily, text, confidence);
         if (resolvedFontFamily != null) {
             // EH/BT/NP 수식 전용 폰트가 일반 텍스트(수식 그룹 밖)에 적용된 경우
             // → 이탤릭이면 Times New Roman (수식 변수 스타일), 아니면 ParagraphStyle 기본 폰트
@@ -181,8 +186,10 @@ class RunBuilder {
             }
             tr.fontFamily(resolvedFontFamily);
         }
-        Integer resolvedFontSize = RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
-                rr, cr, sc.fontSize, confidence);
+        Integer resolvedFontSize = grepCharStyle != null && grepCharStyle.fontSize() != null
+                ? (int) CoordinateConverter.pointsToHwpunits(grepCharStyle.fontSize())
+                : RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
+                        rr, cr, sc.fontSize, confidence);
         if (resolvedFontSize != null) {
             tr.fontSizeHwpunits(resolvedFontSize);
         }
@@ -218,8 +225,10 @@ class RunBuilder {
             tr.shadeColor(resolvedShadeColor);
         }
 
-        String resolvedFontStyle = RunPropertyResolver.resolveFontStyleWithConfidence(
-                rr, cr, sc.fontStyle, confidence);
+        String resolvedFontStyle = grepCharStyle != null && grepCharStyle.fontStyle() != null
+                ? grepCharStyle.fontStyle()
+                : RunPropertyResolver.resolveFontStyleWithConfidence(
+                        rr, cr, sc.fontStyle, confidence);
         if (resolvedFontStyle != null) {
             // 이탤릭 적용 여부는 "원본" 폰트(EH/BT 여부)로 판단해야 한다. resolvedFontFamily
             // 는 위에서 이미 본문 폰트로 교체됐을 수 있어 EH 판정이 사라진다. rr/cr 우선.
@@ -234,7 +243,9 @@ class RunBuilder {
         // 명시적 매핑 폰트: tracking / 10 (e.g., -30 → -3%)
         // 한국어 폰트(한글 포함 이름)는 대부분 한컴돋움 fallback → 그대로 사용
         {
-            Double trackingVal = resolveTracking(cr, rr, sc, confidence);
+            Double trackingVal = grepCharStyle != null && grepCharStyle.tracking() != null
+                    ? grepCharStyle.tracking()
+                    : resolveTracking(cr, rr, sc, confidence);
             if (trackingVal != null && trackingVal != 0) {
                 // resolved spacing policy: IDML tracking 1/1000 em → HWPX spacing % (1/100 em). 표준 변환은 /10.
                 // (이전 한국어 fontName 케이스는 × 0.5 = ×50 적용으로 자간 5배 과대 → 제거)
@@ -457,6 +468,8 @@ class RunBuilder {
 
     private static String resolvedCharacterStyleRef(ResolvedRun rr, IDMLCharacterRun cr,
                                                     MatchConfidence confidence) {
+        String grepStyle = cr != null ? cr.grepAppliedCharStyle() : null;
+        if (isUsableCharacterStyleRef(grepStyle)) return grepStyle;
         String rrStyle = rr != null ? rr.charStyle() : null;
         String crStyle = cr != null ? cr.appliedCharacterStyle() : null;
         // resolved 가 첨자 charStyle(하부자/상부자)을 붙였는데 IDML CR 은 비첨자
@@ -762,6 +775,8 @@ class RunBuilder {
                                                  IDMLStyleDef grepCharStyle,
                                                  StoryConverter.StyleContext sc,
                                                  MatchConfidence confidence) {
+        Double grepScale = firstNonDefaultScale(grepCharStyle != null ? grepCharStyle.horizontalScale() : null);
+        if (grepScale != null) return grepScale;
         if (isReliableResolvedRun(rr, confidence)) {
             Double resolvedScale = firstNonDefaultScale(rr.horizontalScale());
             if (resolvedScale != null) return resolvedScale;

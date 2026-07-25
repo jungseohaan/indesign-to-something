@@ -43,6 +43,7 @@ public class IDMLCharacterRun {
     private Boolean strikeThrough; // 취소선 (IDML StrikeThru="true")
     private Double baselineShift;  // 기준선 이동 (points, 양수=위)
     private Double horizontalScale; // 장평 (%, 100=normal)
+    private Double verticalScale;   // 세로 배율 (%, 100=normal)
     private String capitalization;  // "SmallCaps", "AllCaps", "Normal" 등
 
     /**
@@ -96,6 +97,7 @@ public class IDMLCharacterRun {
         c.grepAppliedCharStyle = this.grepAppliedCharStyle;
         c.baselineShift = this.baselineShift;
         c.horizontalScale = this.horizontalScale;
+        c.verticalScale = this.verticalScale;
         return c;
     }
 
@@ -384,6 +386,9 @@ public class IDMLCharacterRun {
 
     public Double horizontalScale() { return horizontalScale; }
     public void horizontalScale(Double v) { this.horizontalScale = v; }
+
+    public Double verticalScale() { return verticalScale; }
+    public void verticalScale(Double v) { this.verticalScale = v; }
 
     public String capitalization() { return capitalization; }
     public void capitalization(String v) { this.capitalization = v; }

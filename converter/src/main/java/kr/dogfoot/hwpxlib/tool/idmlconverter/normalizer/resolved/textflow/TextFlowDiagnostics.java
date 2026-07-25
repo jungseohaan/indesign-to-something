@@ -30,6 +30,12 @@ public final class TextFlowDiagnostics {
         public String styleName;
         public String justification;
         public String generatedPrefixText;
+        public transient ResolvedRun generatedPrefixMarkerRun;
+        public transient ResolvedRun generatedPrefixSeparatorRun;
+        public String generatedPrefixMarkerCharStyle;
+        public String generatedPrefixMarkerFillColor;
+        public Double generatedPrefixMarkerHorizontalScale;
+        public Double generatedPrefixMarkerVerticalScale;
         public final List<TextFlowRun> runs = new ArrayList<>();
     }
 
