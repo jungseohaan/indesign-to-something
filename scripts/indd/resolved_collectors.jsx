@@ -435,8 +435,11 @@ function _resolvedAtomicRowsFromOptions(resolvedOptions) {
                 targetIds = _resolvedIdList([c.exportTargetObjectId]);
             }
             if (targetIds.length === 0) continue;
-            var sourceIds = _resolvedIdList(c.sourceObjectIds || c.executionSourceObjectIds || []);
+            var sourceIds = _resolvedIdList(
+                    c.atomicSourceObjectIds || c.sourceObjectIds || c.executionSourceObjectIds || []);
             var exportIds = _resolvedIdList(c.exportSourceObjectIds || sourceIds);
+            var atomicVisualIds = _resolvedIdList(c.atomicVisualSourceObjectIds || exportIds);
+            var atomicOwnedTextIds = _resolvedIdList(c.atomicOwnedTextFrameIds || []);
             if (sourceIds.length === 0) sourceIds = exportIds.slice(0);
             if (sourceIds.length <= targetIds.length) continue;
             var hiddenIds = _resolvedIdList(c.hiddenVisualSourceObjectIds
@@ -454,6 +457,8 @@ function _resolvedAtomicRowsFromOptions(resolvedOptions) {
                 pageIndex: pageIndex,
                 sourceObjectIds: sourceIds,
                 exportSourceObjectIds: exportIds,
+                atomicVisualSourceObjectIds: atomicVisualIds,
+                atomicOwnedTextFrameIds: atomicOwnedTextIds,
                 hiddenVisualSourceObjectIds: hiddenIds,
                 atomicExportTargetObjectIds: targetIds
             });
@@ -516,6 +521,9 @@ function _buildResolvedAtomicCollectionIndex(resolvedOptions) {
                 sourceObjectCount: row.sourceObjectIds.length,
                 exportSourceObjectCount: row.exportSourceObjectIds.length,
                 hiddenSourceObjectCount: row.hiddenVisualSourceObjectIds.length,
+                atomicSourceObjectIds: row.sourceObjectIds.slice(0),
+                atomicVisualSourceObjectIds: row.atomicVisualSourceObjectIds.slice(0),
+                atomicOwnedTextFrameIds: row.atomicOwnedTextFrameIds.slice(0),
                 atomicExportTargetObjectIds: row.atomicExportTargetObjectIds.slice(0)
             };
         }
@@ -1630,6 +1638,9 @@ function _collectPageItemsFromSourceItems(startPage, endPage, skipRenderPagesMap
                 data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
                 data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
                 data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
+                data.atomicSourceObjectIds = rootInfo.atomicSourceObjectIds.slice(0);
+                data.atomicVisualSourceObjectIds = rootInfo.atomicVisualSourceObjectIds.slice(0);
+                data.atomicOwnedTextFrameIds = rootInfo.atomicOwnedTextFrameIds.slice(0);
                 data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
                 data.childIds = [];
                 data.childIdsOmittedByAtomicContent = true;
@@ -1765,6 +1776,9 @@ function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAll
                         data.atomicSourceObjectCount = rootInfo.sourceObjectCount;
                         data.atomicExportSourceObjectCount = rootInfo.exportSourceObjectCount;
                         data.atomicHiddenSourceObjectCount = rootInfo.hiddenSourceObjectCount;
+                        data.atomicSourceObjectIds = rootInfo.atomicSourceObjectIds.slice(0);
+                        data.atomicVisualSourceObjectIds = rootInfo.atomicVisualSourceObjectIds.slice(0);
+                        data.atomicOwnedTextFrameIds = rootInfo.atomicOwnedTextFrameIds.slice(0);
                         data.atomicExportTargetObjectIds = rootInfo.atomicExportTargetObjectIds.slice(0);
                         data.childIds = [];
                         data.childIdsOmittedByAtomicContent = true;

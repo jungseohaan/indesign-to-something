@@ -3879,7 +3879,7 @@ public class InlineFrameHandler {
                 null,
                 atom -> {
                     if (atom == null || atom.anchoredObjectId == null) return null;
-                    return loadPlannedInlineAnchorItems(ctx, atom.anchoredObjectId, null, null);
+                    return new ArrayList<>();
                 }));
     }
 
@@ -5554,6 +5554,11 @@ public class InlineFrameHandler {
             String previousText,
             String nextText) {
         if (ctx == null || ctx.ownershipPlans == null || anchoredObjectId < 0) return null;
+        List<ASTInlineItem> closedCarrierTextShellItems =
+                loadClosedInlineCarrierTextShellItems(ctx, anchoredObjectId);
+        if (closedCarrierTextShellItems != null && !closedCarrierTextShellItems.isEmpty()) {
+            return closedCarrierTextShellItems;
+        }
         List<ASTInlineItem> closedCarrierItems =
                 loadClosedInlineCarrierFlowItems(ctx, anchoredObjectId);
         if (findPagePositionedStoryAnchorOwnerPlan(
@@ -6075,6 +6080,45 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static List<ASTInlineItem> loadClosedInlineCarrierTextShellItems(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        ClosedInlineCarrier carrier = findClosedInlineCarrier(ctx, anchoredObjectId);
+        if (carrier == null || carrier.plan == null) return null;
+        ObjectPlan shellPlan = carrier.plan;
+        if (shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                || shellPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                || shellPlan.placement != Placement.INLINE
+                || shellPlan.coordinateSpace != CoordinateSpace.STORY_FLOW
+                || shellPlan.ownedTextFrameIds == null
+                || shellPlan.ownedTextFrameIds.length == 0) {
+            return null;
+        }
+        int[] flowIds = plannedInlineFlowSourceObjectIds(shellPlan);
+        if (flowIds == null || flowIds.length == 0) return null;
+        ASTInlineObject leadingCompletePng = null;
+        for (int sourceId : flowIds) {
+            ObjectPlan completePngPlan = directInlineCompletePngPlan(ctx, sourceId);
+            if (completePngPlan == null) continue;
+            leadingCompletePng = loadCompleteInlinePngFromPlan(ctx, completePngPlan, sourceId);
+            if (leadingCompletePng != null) break;
+        }
+        if (leadingCompletePng == null) return null;
+
+        ASTInlineObject shell = loadPlannedInlineTextShellForAnchor(ctx, anchoredObjectId);
+        if (shell == null || shell.paragraphs() == null || shell.paragraphs().isEmpty()) return null;
+        ASTParagraph first = shell.paragraphs().get(0);
+        if (first == null || first.items() == null) return null;
+        first.items().add(0, leadingCompletePng);
+        shell.textMarginLeft(0L);
+        shell.squeezeLineWrap(true);
+        shell.keepInline(true);
+
+        List<ASTInlineItem> out = new ArrayList<>();
+        out.add(shell);
+        return out;
     }
 
     private static List<ASTInlineItem> loadClosedInlineCarrierFlowItems(

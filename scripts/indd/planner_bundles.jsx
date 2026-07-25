@@ -358,6 +358,12 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         atomicExportTargetObjectId: declaredCandidate.atomicExportTargetObjectId !== undefined
                 ? declaredCandidate.atomicExportTargetObjectId
                 : null,
+        atomicSourceObjectIds: _internSourceSetIds(
+                declaredCandidate.atomicSourceObjectIds || []),
+        atomicVisualSourceObjectIds: _internSourceSetIds(
+                declaredCandidate.atomicVisualSourceObjectIds || []),
+        atomicOwnedTextFrameIds: _internSourceSetIds(
+                declaredCandidate.atomicOwnedTextFrameIds || []),
         atomicExportTargetObjectIds: _internSourceSetIds(
                 declaredCandidate.atomicExportTargetObjectIds || []),
         atomicTextlessVectorContent: declaredCandidate.atomicTextlessVectorContent === true,

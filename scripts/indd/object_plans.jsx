@@ -199,6 +199,12 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var atomicShellFloatingFragmentResolution =
+            _resolveAtomicInlineShellFloatingFragments(objectPlans, sourceById);
+    _recordObjectPlanTiming("resolveAtomicInlineShellFloatingFragments", _timingStartedAt, {
+        objectPlanCount: objectPlans.length
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var inlineCompletePngTextOwnerResolution =
             _resolveObjectPlanDuplicateInlineCompletePngTextOwners(objectPlans, sourceById);
     _recordObjectPlanTiming("resolveDuplicateInlineCompletePngTextOwners", _timingStartedAt, {
@@ -308,6 +314,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     summary.inlineVisibleTextFrameShells = inlineVisibleTextFrameShells.summary;
     summary.textOwnershipResolution = textOwnershipResolution.summary;
     summary.visibleVisualSourceResolution = visibleVisualSourceResolution.summary;
+    summary.atomicShellFloatingFragmentResolution = atomicShellFloatingFragmentResolution.summary;
     summary.nestedInlineTextShellResolution = nestedInlineTextShellResolution.summary;
     summary.inlineCompletePngTextOwnerResolution = inlineCompletePngTextOwnerResolution.summary;
     summary.inlineVisualInventory = inlineVisualInventory.summary;
@@ -2308,6 +2315,10 @@ function _slimObjectPlanForWrite(plan) {
         "exportSourceObjectIds",
         "exportSourceSetId",
         "exportTargetObjectId",
+        "atomicSourceObjectIds",
+        "atomicVisualSourceObjectIds",
+        "atomicOwnedTextFrameIds",
+        "absorbedFloatingShellFragmentSourceObjectIds",
         "atomicExportTargetObjectId",
         "atomicExportTargetObjectIds",
         "atomicTextlessVectorContent",
@@ -4316,6 +4327,206 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _resolveAtomicInlineShellFloatingFragments(objectPlans, sourceById) {
+    var plans = objectPlans || [];
+    var summary = {
+        atomicInlineShellOwnerCount: 0,
+        floatingFragmentPlanCount: 0,
+        droppedPlanCount: 0,
+        absorbedSourceCount: 0,
+        sameStoryFallbackDropCount: 0,
+        droppedObjectPlanIds: []
+    };
+    if (!plans || plans.length === 0 || !sourceById) return { summary: summary };
+
+    var ownersByPageSource = {};
+    var ownersByPageStory = {};
+
+    function addOwner(plan, sourceIds) {
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            var sourceId = Number(sourceIds[i]);
+            if (isNaN(sourceId)) continue;
+            var key = String(plan.pageIndex) + "|" + String(sourceId);
+            if (!ownersByPageSource[key]) ownersByPageSource[key] = [];
+            ownersByPageSource[key].push(plan);
+        }
+    }
+
+    function addOwnerStories(plan) {
+        var seenStories = {};
+        for (var i = 0; plan.ownedTextFrameIds && i < plan.ownedTextFrameIds.length; i++) {
+            var storyKey = _objectPlanSourceStoryKey(sourceById[String(plan.ownedTextFrameIds[i])]);
+            if (!storyKey || seenStories[storyKey]) continue;
+            seenStories[storyKey] = true;
+            var key = String(plan.pageIndex) + "|" + storyKey;
+            if (!ownersByPageStory[key]) ownersByPageStory[key] = [];
+            ownersByPageStory[key].push(plan);
+        }
+    }
+
+    for (var oi = 0; oi < plans.length; oi++) {
+        var owner = plans[oi];
+        if (!_objectPlanIsAtomicInlineTextShellOwner(owner)) continue;
+        summary.atomicInlineShellOwnerCount++;
+        addOwner(owner, owner.atomicVisualSourceObjectIds || []);
+        addOwnerStories(owner);
+    }
+
+    for (var pi = 0; pi < plans.length; pi++) {
+        var fragment = plans[pi];
+        if (!_objectPlanIsFloatingAnchoredShellFragment(fragment, sourceById)) continue;
+        summary.floatingFragmentPlanCount++;
+        var fragmentIds = _objectPlanSourceIdsUnion(
+                fragment.visualSourceObjectIds || [],
+                fragment.exportSourceObjectIds || []);
+        if (fragmentIds.length === 0) fragmentIds = fragment.sourceObjectIds || [];
+        var canonicalOwner = null;
+        var matchedByAtomicSource = false;
+        var absorbedIds = [];
+        var seenAbsorbed = {};
+        for (var fi = 0; fi < fragmentIds.length; fi++) {
+            var fragmentId = Number(fragmentIds[fi]);
+            if (isNaN(fragmentId)) continue;
+            var ownerKey = String(fragment.pageIndex) + "|" + String(fragmentId);
+            var owners = ownersByPageSource[ownerKey] || [];
+            for (var ci = 0; ci < owners.length; ci++) {
+                var candidateOwner = owners[ci];
+                if (!_objectPlanFragmentSharesOwnedStory(candidateOwner, fragmentId, sourceById)) continue;
+                canonicalOwner = candidateOwner;
+                matchedByAtomicSource = true;
+                _objectPlanPushUniqueId(absorbedIds, seenAbsorbed, fragmentId);
+                break;
+            }
+            if (!canonicalOwner) {
+                var fragmentStory = _objectPlanSourceStoryKey(sourceById[String(fragmentId)]);
+                if (fragmentStory) {
+                    var storyOwners = ownersByPageStory[
+                            String(fragment.pageIndex) + "|" + fragmentStory] || [];
+                    if (storyOwners.length === 1) {
+                        canonicalOwner = storyOwners[0];
+                        _objectPlanPushUniqueId(absorbedIds, seenAbsorbed, fragmentId);
+                    }
+                }
+            }
+        }
+        if (!canonicalOwner || absorbedIds.length === 0) continue;
+
+        canonicalOwner.sourceObjectIds = _objectPlanSourceIdsUnion(
+                canonicalOwner.sourceObjectIds || [], absorbedIds);
+        canonicalOwner.visualSourceObjectIds = _objectPlanSourceIdsUnion(
+                canonicalOwner.visualSourceObjectIds || [], absorbedIds);
+        canonicalOwner.exportSourceObjectIds = _objectPlanSourceIdsUnion(
+                canonicalOwner.exportSourceObjectIds || [], absorbedIds);
+        canonicalOwner.hiddenVisualSourceObjectIds = _objectPlanSourceIdsMinus(
+                canonicalOwner.hiddenVisualSourceObjectIds || [], absorbedIds);
+        canonicalOwner.absorbedFloatingShellFragmentSourceObjectIds =
+                _objectPlanSourceIdsUnion(
+                        canonicalOwner.absorbedFloatingShellFragmentSourceObjectIds || [],
+                        absorbedIds);
+        var absorbedBounds = _objectPlanUnionSourceBoundsForIds(absorbedIds, sourceById);
+        if (absorbedBounds) {
+            canonicalOwner.bounds = _objectPlanUnionTwoBounds(
+                    canonicalOwner.bounds || null, absorbedBounds);
+            canonicalOwner.renderSourceBounds = _objectPlanUnionTwoBounds(
+                    canonicalOwner.renderSourceBounds || canonicalOwner.bounds || null,
+                    absorbedBounds);
+        }
+        canonicalOwner.reason = String(canonicalOwner.reason || "")
+                + ":absorbed_atomic_floating_shell_fragment";
+
+        fragment.hiddenVisualSourceObjectIds = _objectPlanSourceIdsUnion(
+                fragment.hiddenVisualSourceObjectIds || [], absorbedIds);
+        fragment.visualSourceObjectIds = _objectPlanSourceIdsMinus(
+                fragment.visualSourceObjectIds || [], absorbedIds);
+        fragment.exportSourceObjectIds = _objectPlanSourceIdsMinus(
+                fragment.exportSourceObjectIds || [], absorbedIds);
+        if (!fragment.visualSourceObjectIds || fragment.visualSourceObjectIds.length === 0) {
+            fragment.visualAction = "DROP_VISUAL";
+            fragment.materialization = "HWPX_TEXT";
+            fragment.visibleVisualOwnershipResolution =
+                    matchedByAtomicSource
+                            ? "DROPPED_ATOMIC_INLINE_SHELL_FLOATING_FRAGMENT"
+                            : "DROPPED_SAME_STORY_INLINE_SHELL_FLOATING_FRAGMENT";
+            fragment.visibleVisualOwnershipResolutionReason =
+                    matchedByAtomicSource
+                            ? "same-story floating anchored shell fragment is absorbed by the atomic inline shell owner"
+                            : "same-story floating anchored shell fragment is absorbed by the unique inline shell owner for that story";
+            fragment.reason = String(fragment.reason || "")
+                    + ":atomic_inline_shell_floating_fragment_absorbed";
+            summary.droppedPlanCount++;
+            if (!matchedByAtomicSource) summary.sameStoryFallbackDropCount++;
+            summary.droppedObjectPlanIds.push(
+                    fragment.objectPlanId || fragment.bundleId || fragment.candidateId || ("plan.index." + pi));
+        }
+        summary.absorbedSourceCount += absorbedIds.length;
+    }
+
+    return { summary: summary };
+}
+
+function _objectPlanIsAtomicInlineTextShellOwner(plan) {
+    if (!plan) return false;
+    if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
+    if (plan.ownershipSlot !== "SHELL_SLOT") return false;
+    if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+    if (plan.textAction !== "OWNED_BY_HWPX_TEXT") return false;
+    if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return false;
+    return true;
+}
+
+function _objectPlanIsFloatingAnchoredShellFragment(plan, sourceById) {
+    if (!plan || !sourceById) return false;
+    if (plan.placement !== "FLOATING" || plan.coordinateSpace !== "PAGE") return false;
+    if (plan.ownershipSlot !== "SHELL_SLOT") return false;
+    if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+    var ids = _objectPlanSourceIdsUnion(
+            plan.visualSourceObjectIds || [], plan.exportSourceObjectIds || []);
+    if (ids.length === 0) ids = plan.sourceObjectIds || [];
+    if (ids.length === 0) return false;
+    for (var i = 0; i < ids.length; i++) {
+        var src = sourceById[String(ids[i])] || null;
+        if (!_objectPlanSourceIsFloatingAnchoredStoryFragment(src)) return false;
+    }
+    return true;
+}
+
+function _objectPlanSourceIsFloatingAnchoredStoryFragment(src) {
+    if (!src) return false;
+    var placement = String(src.storyAnchorPlacement || "").toUpperCase();
+    var anchored = String(src.anchoredPosition || "").toUpperCase();
+    if (placement !== "FLOATING_ANCHORED" && anchored !== "ANCHORED") return false;
+    if (src.storyTextInlineSlot !== true) return false;
+    var kind = _objectPlanSourceKind(src);
+    if (kind === "TextFrame" || _objectPlanSourceKindIsTextOnly(kind)) return false;
+    if (src.hasVisibleFill === true || src.hasVisibleStroke === true) return true;
+    return src.hasCandidateVectorPaint === true || src.hasPlacedVisual === true;
+}
+
+function _objectPlanFragmentSharesOwnedStory(owner, fragmentSourceId, sourceById) {
+    if (!owner || !sourceById) return false;
+    var fragmentStory = _objectPlanSourceStoryKey(sourceById[String(fragmentSourceId)]);
+    if (!fragmentStory) {
+        return _objectPlanSourceSetContainsId(owner.atomicVisualSourceObjectIds || [], fragmentSourceId);
+    }
+    for (var i = 0; owner.ownedTextFrameIds && i < owner.ownedTextFrameIds.length; i++) {
+        var textId = owner.ownedTextFrameIds[i];
+        var textStory = _objectPlanSourceStoryKey(sourceById[String(textId)]);
+        if (textStory && textStory === fragmentStory) return true;
+    }
+    return false;
+}
+
+function _objectPlanSourceStoryKey(src) {
+    if (!src) return "";
+    if (src.storyId !== null && src.storyId !== undefined && String(src.storyId) !== "") {
+        return String(src.storyId);
+    }
+    if (src.parentStoryId !== null && src.parentStoryId !== undefined && String(src.parentStoryId) !== "") {
+        return String(src.parentStoryId);
+    }
+    return "";
 }
 
 function _resolveObjectPlanNestedInlineTextShellOwners(objectPlans, sourceById) {
@@ -6438,6 +6649,7 @@ function _appendInlineVisualInventoryObjectPlans(objectPlans, sourceItems, sourc
         if (plan.visualAction === "DROP_VISUAL") continue;
         markOwned(plan.visualSourceObjectIds || []);
         markOwned(plan.exportSourceObjectIds || []);
+        markOwned(plan.absorbedFloatingShellFragmentSourceObjectIds || []);
     }
 
     function sourceKind(src) {
@@ -7452,6 +7664,12 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         exportTargetObjectId: bundle.exportTargetObjectId !== undefined
                 ? bundle.exportTargetObjectId
                 : null,
+        atomicSourceObjectIds: _internSourceSetIds(
+                bundle.atomicSourceObjectIds || []),
+        atomicVisualSourceObjectIds: _internSourceSetIds(
+                bundle.atomicVisualSourceObjectIds || []),
+        atomicOwnedTextFrameIds: _internSourceSetIds(
+                bundle.atomicOwnedTextFrameIds || []),
         atomicExportTargetObjectId: bundle.atomicExportTargetObjectId !== undefined
                 ? bundle.atomicExportTargetObjectId
                 : null,
@@ -7808,6 +8026,15 @@ function _objectPlanSourceIdsUnion(a, b) {
     return _sortedNumericIds(out);
 }
 
+function _objectPlanPushUniqueId(out, seen, id) {
+    var n = Number(id);
+    if (isNaN(n)) return;
+    var key = String(n);
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(n);
+}
+
 function _objectPlanInlineFlowSourceObjectIds(bundle) {
     if (!bundle || bundle.inlineSourceTreeClosed !== true) return [];
     var ids = bundle.inlineFlowSourceObjectIds || [];
@@ -8019,7 +8246,144 @@ function _objectPlanTextAction(bundle, sourceById) {
 
 function _objectPlanBundleOwnsInlinePngText(bundle, sourceById) {
     return _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById)
+            || _objectPlanBundleOwnsInlineCarrierChildBadgeText(bundle, sourceById)
             || _objectPlanBundleOwnsInlineCompletePngText(bundle);
+}
+
+function _objectPlanBundleOwnsInlineCarrierChildBadgeText(bundle, sourceById) {
+    if (!bundle || !sourceById) return false;
+    if (bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (bundle.tableCellStoryTextInlineSlot === true) return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length < 2) return false;
+    if ((!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)
+            && (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0)) {
+        return false;
+    }
+
+    var childGroupId = _objectPlanCommonParentGroupForTextFrames(
+            bundle.ownedTextFrameIds, sourceById);
+    if (childGroupId === null) return false;
+    if (!_objectPlanSourceSetContainsId(bundle.sourceObjectIds || [], childGroupId)) return false;
+    if (!_objectPlanInlineBadgeTextFramesUseMarkerStyles(
+            bundle.ownedTextFrameIds, sourceById)) {
+        return false;
+    }
+    var visibleBadgeSources = _objectPlanSourceIdsUnion(
+            bundle.visualSourceObjectIds || [], bundle.exportSourceObjectIds || []);
+    if (!_objectPlanSourceSetContainsAny(
+            visibleBadgeSources, _objectPlanDirectNonTextChildren(childGroupId, sourceById))) {
+        return false;
+    }
+
+    var childGroup = sourceById[String(childGroupId)];
+    var carrierId = childGroup && childGroup.parentId !== undefined && childGroup.parentId !== null
+            ? Number(childGroup.parentId)
+            : NaN;
+    if (isNaN(carrierId)) return false;
+    var carrier = sourceById[String(carrierId)];
+    if (!carrier || _objectPlanSourceKind(carrier) !== "Group") return false;
+    if (carrier.storyTextInlineSlot !== true && carrier.storyAnchorPlacement !== "INLINE") {
+        return false;
+    }
+    return _objectPlanInlineCarrierHasResidualContentTextFrame(
+            carrier, bundle.ownedTextFrameIds, sourceById);
+}
+
+function _objectPlanCommonParentGroupForTextFrames(textFrameIds, sourceById) {
+    var parentId = null;
+    for (var i = 0; textFrameIds && i < textFrameIds.length; i++) {
+        var tf = sourceById ? sourceById[String(textFrameIds[i])] : null;
+        if (!tf || _objectPlanSourceKind(tf) !== "TextFrame") return null;
+        if (tf.textFrameClass !== "editable" || tf.hasText !== true) return null;
+        var nextParent = tf.parentId !== undefined && tf.parentId !== null
+                ? Number(tf.parentId)
+                : NaN;
+        if (isNaN(nextParent)) return null;
+        if (parentId === null) {
+            parentId = nextParent;
+        } else if (parentId !== nextParent) {
+            return null;
+        }
+    }
+    var parent = parentId !== null && sourceById ? sourceById[String(parentId)] : null;
+    return parent && _objectPlanSourceKind(parent) === "Group" ? parentId : null;
+}
+
+function _objectPlanInlineBadgeTextFramesUseMarkerStyles(textFrameIds, sourceById) {
+    var hasSimpleMarker = false;
+    for (var i = 0; textFrameIds && i < textFrameIds.length; i++) {
+        var tf = sourceById ? sourceById[String(textFrameIds[i])] : null;
+        if (!tf || _objectPlanSourceKind(tf) !== "TextFrame") return false;
+        if (tf.simpleMarkerLabelContents === true) {
+            hasSimpleMarker = true;
+            continue;
+        }
+        if (!_objectPlanTextFrameUsesBuiltinMarkerStyle(tf)) return false;
+    }
+    return hasSimpleMarker;
+}
+
+function _objectPlanTextFrameUsesBuiltinMarkerStyle(src) {
+    var names = src && src.paragraphStyleNames ? src.paragraphStyleNames : [];
+    if (!names || names.length === 0) return false;
+    for (var i = 0; i < names.length; i++) {
+        var name = String(names[i] || "").toLowerCase();
+        if (name.indexOf("no paragraph style") >= 0) continue;
+        if (name.indexOf("basic paragraph") >= 0) continue;
+        if (name.indexOf("단락 스타일 없음") >= 0) continue;
+        if (name.indexOf("기본 단락") >= 0) continue;
+        if (name.indexOf("$id/[no paragraph style]") >= 0) continue;
+        return false;
+    }
+    return true;
+}
+
+function _objectPlanDirectNonTextChildren(parentId, sourceById) {
+    var parent = sourceById ? sourceById[String(parentId)] : null;
+    var out = [];
+    var seen = {};
+    var childIds = parent && parent.childIds ? parent.childIds : [];
+    for (var i = 0; i < childIds.length; i++) {
+        var id = Number(childIds[i]);
+        if (isNaN(id)) continue;
+        var child = sourceById[String(id)];
+        if (!child || _objectPlanSourceKindIsTextOnly(_objectPlanSourceKind(child))) continue;
+        _pushUniqueId(out, seen, id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanSourceSetContainsAny(sourceIds, needles) {
+    var set = _objectPlanSourceSetMembership(sourceIds || []);
+    for (var i = 0; needles && i < needles.length; i++) {
+        if (set[String(needles[i])]) return true;
+    }
+    return false;
+}
+
+function _objectPlanSourceSetContainsId(sourceIds, sourceId) {
+    var n = Number(sourceId);
+    if (isNaN(n)) return false;
+    for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+        if (Number(sourceIds[i]) === n) return true;
+    }
+    return false;
+}
+
+function _objectPlanInlineCarrierHasResidualContentTextFrame(carrier, ownedTextFrameIds, sourceById) {
+    if (!carrier || !carrier.childIds || !sourceById) return false;
+    var owned = _objectPlanSourceSetMembership(ownedTextFrameIds || []);
+    for (var i = 0; i < carrier.childIds.length; i++) {
+        var childId = Number(carrier.childIds[i]);
+        if (isNaN(childId) || owned[String(childId)]) continue;
+        var child = sourceById[String(childId)];
+        if (!child || _objectPlanSourceKind(child) !== "TextFrame") continue;
+        if (child.textFrameClass !== "editable" || child.hasText !== true) continue;
+        if (child.simpleMarkerLabelContents === true) continue;
+        return true;
+    }
+    return false;
 }
 
 function _objectPlanBundleOwnsInlineCompletePngText(bundle) {

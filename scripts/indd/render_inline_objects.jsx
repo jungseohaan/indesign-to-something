@@ -177,6 +177,8 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             sourceObjectIds: copyIds(candidate && candidate.sourceObjectIds || []),
             visualSourceObjectIds: copyIds(candidate && candidate.visualSourceObjectIds || []),
             exportSourceObjectIds: copyIds(candidate && candidate.exportSourceObjectIds || []),
+            absorbedFloatingShellFragmentSourceObjectIds: copyIds(
+                    candidate && candidate.absorbedFloatingShellFragmentSourceObjectIds || []),
             hiddenVisualSourceObjectIds: copyIds(candidate && candidate.hiddenVisualSourceObjectIds || []),
             hiddenTextFrameIds: copyIds(candidate && candidate.hiddenTextFrameIds || []),
             excludedInlineSourceObjectIds: copyIds(candidate && candidate.excludedInlineSourceObjectIds || []),
@@ -329,12 +331,16 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     // Visuals owned by another plan's own export. They are not absorbed into
     // the plane, so leaving them visible bakes them into the plane PNG on top of
     // their own PNG.
-    function collectForeignVisualOwnerSourceItemsToHide() {
+    function collectForeignVisualOwnerSourceItemsToHide(pageIndexFilter) {
         var items = [];
         var seen = {};
         var idsByPage = opts.hiddenForeignVisualOwnerSourceObjectIdsByPage || {};
         for (var pageNumber = startPage; pageNumber <= endPage; pageNumber++) {
             var pageIndex = pageNumber - 1;
+            if (pageIndexFilter !== null && pageIndexFilter !== undefined
+                    && Number(pageIndexFilter) !== Number(pageIndex)) {
+                continue;
+            }
             var ids = idsByPage[String(pageIndex)] || [];
             for (var i = 0; i < ids.length; i++) {
                 var id = ids[i];
@@ -569,8 +575,8 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
     var savedCompletePngTextOwnerItems = [];
     var savedTableStyleItems = [];
     var savedPagePlaneHiddenVisualItems = [];
-    var savedForeignVisualOwnerItems = [];
     var savedDocumentTextFrames = [];
+    var _pageLocalForeignHiddenTotal = 0;
     // SPEC-030 계측 변수 (예외 경로에서도 정의되도록 미리 선언)
     var _tCollectInline = 0, _tHideInline = 0, _tCollectText = 0, _tHideText = 0;
     var _tPrepTotal = 0, _tExportLoop = 0, _tRestore = 0;
@@ -694,9 +700,6 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
         savedPagePlaneHiddenVisualItems =
                 _hideItemsForExport(collectPagePlaneHiddenVisualSourceItems());
 
-        savedForeignVisualOwnerItems =
-                _hideItemsForExport(collectForeignVisualOwnerSourceItemsToHide());
-
         _t0 = nowMs();
         var _textHideScope = opts.documentWideTextHide === true ? "document" : "range";
         var _textToHide = opts.documentWideTextHide === true
@@ -725,7 +728,16 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             var pageStart = nowMs();
             var fileName = pagePlaneFileNameForCandidate(pageIndex, pagePlaneCandidate);
             var outFile = File(renderDir + "/" + fileName);
-            var ok = exportPage(page, outFile);
+            var savedPageForeignVisualOwnerItems = [];
+            var ok = false;
+            try {
+                savedPageForeignVisualOwnerItems =
+                        _hideItemsForExport(collectForeignVisualOwnerSourceItemsToHide(pageIndex));
+                _pageLocalForeignHiddenTotal += savedPageForeignVisualOwnerItems.length;
+                ok = exportPage(page, outFile);
+            } finally {
+                try { _restoreItemsForExport(savedPageForeignVisualOwnerItems); } catch (eRestorePageForeignVisualOwner) {}
+            }
             var bounds = pageLocalBounds(page);
             diagnostics.push({
                 accepted: ok === true,
@@ -750,14 +762,13 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             frame.exportSanity.hiddenTextFrameCount = savedDocumentTextFrames.length;
             frame.exportSanity.hiddenTableStyleItemCount = savedTableStyleItems.length;
             frame.exportSanity.hiddenVisualSourceItemCount = savedPagePlaneHiddenVisualItems.length;
-            frame.exportSanity.hiddenForeignVisualOwnerItemCount = savedForeignVisualOwnerItems.length;
+            frame.exportSanity.hiddenForeignVisualOwnerItemCount = savedPageForeignVisualOwnerItems.length;
             results.push(frame);
         }
         _tExportLoop = nowMs() - _exportLoopStart;
     } finally {
         var _restoreStart = nowMs();
         try { restoreTextFrames(savedDocumentTextFrames); } catch (eRestoreTextFrames) {}
-        try { _restoreItemsForExport(savedForeignVisualOwnerItems); } catch (eRestoreForeignVisualOwner) {}
         try { _restoreItemsForExport(savedPagePlaneHiddenVisualItems); } catch (eRestorePagePlaneHiddenVisual) {}
         try { _restoreItemsForExport(savedCompletePngTextOwnerItems); } catch (eRestoreCompletePngTextOwner) {}
         try { _restoreItemsForExport(savedTableStyleItems); } catch (eRestoreTableStyle) {}
@@ -785,7 +796,7 @@ function exportSingleTextlessPagePlanes(doc, outputDir, startPage, endPage,
             hiddenCompletePngTextOwnerItemCount: savedCompletePngTextOwnerItems.length,
             hiddenTableStyleItemCount: savedTableStyleItems.length,
             hiddenVisualSourceItemCount: savedPagePlaneHiddenVisualItems.length,
-            hiddenForeignVisualOwnerItemCount: savedForeignVisualOwnerItems.length,
+            hiddenForeignVisualOwnerItemCount: _pageLocalForeignHiddenTotal,
             textHideScope: _textHideScope
         };
         writeJson(outputDir + "/single-textless-page-plane-export.json", {
@@ -1030,12 +1041,19 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
     function _collectCandidateHiddenVisualItems(candidate) {
         var items = [];
         var seen = {};
+        var absorbed = {};
+        var absorbedIds = candidate ? (candidate.absorbedFloatingShellFragmentSourceObjectIds || []) : [];
+        for (var ai = 0; ai < absorbedIds.length; ai++) {
+            if (absorbedIds[ai] === null || absorbedIds[ai] === undefined) continue;
+            absorbed[String(absorbedIds[ai])] = true;
+        }
         var ids = candidate ? (candidate.hiddenVisualSourceObjectIds || []) : [];
         for (var i = 0; i < ids.length; i++) {
             var id = ids[i];
             if (id === null || id === undefined) continue;
             var key = String(id);
             if (seen[key]) continue;
+            if (absorbed[key]) continue;
             var item = itemById ? itemById[key] : null;
             if (!item) continue;
             try {
@@ -1045,6 +1063,126 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
             items.push(item);
         }
         return items;
+    }
+
+    function _completePngDuplicateSourceIds(candidate) {
+        var out = [];
+        var seen = {};
+        function add(ids) {
+            for (var i = 0; ids && i < ids.length; i++) {
+                var id = ids[i];
+                if (id === null || id === undefined) continue;
+                var key = String(id);
+                if (seen[key]) continue;
+                seen[key] = true;
+                out.push(id);
+            }
+        }
+        add(candidate ? candidate.exportSourceObjectIds || [] : []);
+        if (candidate
+                && candidate.materialization === "COMPLETE_PNG"
+                && candidate.textAction === "OWNED_BY_PNG") {
+            add(candidate.ownedTextFrameIds || []);
+            add(candidate.editableTextFrameIds || []);
+        }
+        return out;
+    }
+
+    function _itemAncestorInSourceSet(item, sourceSet) {
+        if (!item || !sourceSet) return false;
+        try {
+            var cur = item.parent;
+            while (cur) {
+                try {
+                    if (cur.id !== undefined && cur.id !== null
+                            && sourceSet[String(cur.id)]) {
+                        return true;
+                    }
+                } catch (eCurId) {}
+                var kind = "";
+                try { kind = cur.constructor ? String(cur.constructor.name || "") : ""; } catch (eKind) {}
+                if (kind === "Spread" || kind === "Page" || kind === "Document" || kind === "Story") break;
+                try { cur = cur.parent; } catch (eParent) { break; }
+            }
+        } catch (eAncestor) {}
+        return false;
+    }
+
+    function _candidateHasExternalExportSource(item, candidate) {
+        if (!item || !candidate) return false;
+        var exportIds = candidate.exportSourceObjectIds || [];
+        for (var i = 0; i < exportIds.length; i++) {
+            if (String(exportIds[i]) === String(item.id)) continue;
+            if (_itemTreeContainsId(item, exportIds[i])) continue;
+            return true;
+        }
+        return false;
+    }
+
+    function _plannedCompositeShellDuplicateSourceIds(item, candidate) {
+        if (!item || !candidate) return [];
+        if (candidate.visualAction !== "PLACE_TEXT_SHELL"
+                || candidate.materialization !== "EXTRACTED_PNG_VECTOR"
+                || candidate.placement !== "INLINE"
+                || candidate.coordinateSpace !== "STORY_FLOW") {
+            return [];
+        }
+        var exportIds = candidate.exportSourceObjectIds || [];
+        if (exportIds.length < 2 || !_candidateHasExternalExportSource(item, candidate)) return [];
+        var exportSet = {};
+        for (var ei = 0; ei < exportIds.length; ei++) {
+            if (exportIds[ei] === null || exportIds[ei] === undefined) continue;
+            exportSet[String(exportIds[ei])] = true;
+        }
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < exportIds.length; i++) {
+            var id = exportIds[i];
+            if (id === null || id === undefined) continue;
+            var key = String(id);
+            if (seen[key]) continue;
+            var source = itemById ? itemById[key] : null;
+            if (!source) continue;
+            if (_itemAncestorInSourceSet(source, exportSet)) continue;
+            seen[key] = true;
+            out.push(id);
+        }
+        return out;
+    }
+
+    function _duplicatePlannedCompositeShellForExport(item, candidate, doc) {
+        if (!item || !candidate || !doc) return null;
+        var sourceIds = _plannedCompositeShellDuplicateSourceIds(item, candidate);
+        if (sourceIds.length < 2) return null;
+        var copies = [];
+        try {
+            var page = _resolveParentPage(item, doc);
+            if (!page && candidate.pageIndex !== null && candidate.pageIndex !== undefined
+                    && candidate.pageIndex >= 0 && candidate.pageIndex < doc.pages.length) {
+                page = doc.pages[candidate.pageIndex];
+            }
+            var spread = page && page.parent ? page.parent : null;
+            if (!spread) return null;
+            for (var si = 0; si < sourceIds.length; si++) {
+                var source = itemById ? itemById[String(sourceIds[si])] : null;
+                if (!source) continue;
+                try {
+                    copies.push(source.duplicate(spread));
+                } catch (eDuplicateSource) {}
+            }
+            if (copies.length < 2) {
+                for (var ri = copies.length - 1; ri >= 0; ri--) {
+                    try { copies[ri].remove(); } catch (eRemoveSingleCopy) {}
+                }
+                return null;
+            }
+            return spread.groups.add(copies);
+        } catch (eDuplicateCompositeShell) {
+            for (var ci = copies.length - 1; ci >= 0; ci--) {
+                try { copies[ci].remove(); } catch (eRemoveFailedCopy) {}
+            }
+        }
+        return null;
     }
 
     function _duplicateNestedCompletePngForExport(item, candidate, doc) {
@@ -1063,7 +1201,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
             }
             var spread = page && page.parent ? page.parent : null;
             if (!spread) return null;
-            var sourceIds = candidate.exportSourceObjectIds || [];
+            var sourceIds = _completePngDuplicateSourceIds(candidate);
             for (var si = 0; si < sourceIds.length; si++) {
                 if (String(sourceIds[si]) === String(item.id)) continue;
                 var source = itemById ? itemById[String(sourceIds[si])] : null;
@@ -1271,8 +1409,10 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         }
                     } catch (eInlineOutOfScope) {}
                     try {
-                        _inlineExportDuplicate = _duplicateNestedCompletePngForExport(
-                                inItem, inlineCandidate, doc);
+                        _inlineExportDuplicate = _duplicatePlannedCompositeShellForExport(
+                                inItem, inlineCandidate, doc)
+                                || _duplicateNestedCompletePngForExport(
+                                        inItem, inlineCandidate, doc);
                         var _inlineExportTarget =
                                 _inlineExportDuplicate
                                 || inItem;
@@ -1382,6 +1522,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                         : (_inlineDropsText ? [] : inlineHiddenTextFrameIds),
                                 sourceObjectIds: _inlineEntrySourceIds,
                                 exportSourceObjectIds: inlineCandidate.exportSourceObjectIds || [],
+                                absorbedFloatingShellFragmentSourceObjectIds:
+                                        inlineCandidate.absorbedFloatingShellFragmentSourceObjectIds || [],
                                 hiddenVisualSourceObjectIds: inlineCandidate.hiddenVisualSourceObjectIds || [],
                                 exportTargetObjectId: inlineCandidate.exportTargetObjectId,
                                 slotRole: inlineCandidate.slotRole || null,

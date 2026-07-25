@@ -1204,6 +1204,11 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
                     : null,
             ownershipSlot: ownsTextByCompletePng ? "CONTENT_VISUAL_SLOT" : null,
             exportTargetObjectId: ownsTextByCompletePng ? sourceInfo.id : null,
+            atomicSourceObjectIds: sourceInfo.atomicSourceObjectIds || [],
+            atomicVisualSourceObjectIds: sourceInfo.atomicVisualSourceObjectIds || [],
+            atomicOwnedTextFrameIds: sourceInfo.atomicOwnedTextFrameIds || [],
+            atomicExportTargetObjectIds: sourceInfo.atomicExportTargetObjectIds || [],
+            atomicTextlessVectorContent: sourceInfo.atomicTextlessVectorContent === true,
             placement: completePngFloatingAnchored ? "FLOATING" : "INLINE",
             coordinateSpace: completePngFloatingAnchored ? "PAGE" : "STORY_FLOW",
             storyAnchorPlacement: sourceInfo.storyAnchorPlacement || null,
@@ -8195,6 +8200,7 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     var completePngTextOwnerSourceIdsByPage = {};
     var tableStyleHiddenSourceIdsByPage = {};
     var foreignVisualOwnerSourceIdsByPage = {};
+    var hiddenForeignVisualOwnerSourceIdsByPage = {};
     var absorbableExistingPlanSourceIdsByPage = {};
     var pageBackgroundSourceRolesByPage = {};
     function markIds(ids) {
@@ -8841,6 +8847,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         var hiddenForeignVisualOwnerSourceObjectIds = _sourceIdsMinus(
                 _sortedNumericIds(foreignVisualOwnerSourceIdsByPage[pageKey] || []),
                 coverageIds);
+        hiddenForeignVisualOwnerSourceIdsByPage[pageKey] =
+                hiddenForeignVisualOwnerSourceObjectIds;
         var pageBackgroundSourceRoleSourceIds =
                 normalizePageBackgroundSourceRoleMap(pageKey);
         var pageBackgroundSourceRoles = [];
@@ -8935,6 +8943,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
                     completePngTextOwnerSourceIdsByPage,
             foreignVisualOwnerSourceIdsByPage:
                     foreignVisualOwnerSourceIdsByPage,
+            hiddenForeignVisualOwnerSourceIdsByPage:
+                    hiddenForeignVisualOwnerSourceIdsByPage,
             hiddenTableStyleSourcePageCount:
                     _objectPlanMapKeyCount(tableStyleHiddenSourceIdsByPage),
             pageBackgroundSourceRolesByPage:
@@ -8950,6 +8960,8 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
                 completePngTextOwnerSourceIdsByPage,
         foreignVisualOwnerSourceIdsByPage:
                 foreignVisualOwnerSourceIdsByPage,
+        hiddenForeignVisualOwnerSourceIdsByPage:
+                hiddenForeignVisualOwnerSourceIdsByPage,
         hiddenTableStyleSourcePageCount:
                 _objectPlanMapKeyCount(tableStyleHiddenSourceIdsByPage),
         hiddenTableStyleSourceIdsByPage: tableStyleHiddenSourceIdsByPage,
@@ -9182,9 +9194,9 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         }
     }
     if (canonicalPagePlaneObjectPlanDiagnostics
-            && canonicalPagePlaneObjectPlanDiagnostics.foreignVisualOwnerSourceIdsByPage) {
+            && canonicalPagePlaneObjectPlanDiagnostics.hiddenForeignVisualOwnerSourceIdsByPage) {
         var foreignVisualByPage =
-                canonicalPagePlaneObjectPlanDiagnostics.foreignVisualOwnerSourceIdsByPage;
+                canonicalPagePlaneObjectPlanDiagnostics.hiddenForeignVisualOwnerSourceIdsByPage;
         ctx.pagePlaneForeignVisualOwnerSourceObjectIdsByPage =
                 ctx.pagePlaneForeignVisualOwnerSourceObjectIdsByPage || {};
         for (var foreignVisualPageKey in foreignVisualByPage) {

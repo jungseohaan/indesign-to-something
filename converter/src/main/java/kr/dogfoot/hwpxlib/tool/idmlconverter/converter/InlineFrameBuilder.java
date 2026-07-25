@@ -278,6 +278,7 @@ final class InlineFrameBuilder {
 
     private boolean shouldUseInlineDrawTextShell(ASTInlineObject obj) {
         if (obj != null && obj.imageFillData() != null && obj.imageFillData().length > 0) {
+            if (obj.forceImageFill()) return true;
             boolean hasEditableParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
             boolean hasOverlayText = obj.overlayFrames() != null && !obj.overlayFrames().isEmpty();
             return !hasEditableParagraphs || hasOverlayText;
