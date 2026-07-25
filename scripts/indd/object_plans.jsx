@@ -154,6 +154,13 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         createdPlanCount: inlineVisibleTextFrameShellInventory.summary.createdPlanCount
     });
     _timingStartedAt = _objectPlanNowMs();
+    var floatingVisibleTextFrameShellInventory =
+            _appendFloatingVisibleTextFrameShellObjectPlans(objectPlans, sourceItems);
+    _recordObjectPlanTiming("appendFloatingVisibleTextFrameShellPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        createdPlanCount: floatingVisibleTextFrameShellInventory.summary.createdPlanCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var repeatedEmptyInlineTextFramePlaceholders =
             _resolveRepeatedEmptyInlineTextFramePlaceholders(objectPlans);
     _recordObjectPlanTiming("resolveRepeatedEmptyInlineTextFramePlaceholders", _timingStartedAt, {
@@ -310,6 +317,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     });
     summary.objectPlanDeduplication = deduplication.summary;
     summary.inlineVisibleTextFrameShellInventory = inlineVisibleTextFrameShellInventory.summary;
+    summary.floatingVisibleTextFrameShellInventory = floatingVisibleTextFrameShellInventory.summary;
     summary.pngOwnedTextFrameCleanup = pngOwnedTextFrameCleanup.summary;
     summary.inlineVisibleTextFrameShells = inlineVisibleTextFrameShells.summary;
     summary.textOwnershipResolution = textOwnershipResolution.summary;
@@ -1590,6 +1598,34 @@ function _appendInlineVisibleTextFrameShellObjectPlans(objectPlans, sourceItems)
     return { summary: summary };
 }
 
+function _appendFloatingVisibleTextFrameShellObjectPlans(objectPlans, sourceItems) {
+    var summary = {
+        createdPlanCount: 0,
+        skippedExistingVisualDecisionCount: 0,
+        createdObjectPlanIds: []
+    };
+    if (!objectPlans || !sourceItems) return { summary: summary };
+    var decisionIndex = _createObjectPlanDecisionIndex(objectPlans);
+    for (var i = 0; i < sourceItems.length; i++) {
+        var src = sourceItems[i];
+        if (!_objectPlanSourceIsFloatingVisibleTextFrameShell(src)) continue;
+        var id = _objectPlanTextFrameIdValue(src);
+        if (id === null || id === undefined || typeof id !== "number" || isNaN(id)) continue;
+        if (_objectPlanDecisionIndexHasVisualDecision(decisionIndex, id)) {
+            summary.skippedExistingVisualDecisionCount++;
+            continue;
+        }
+        var pageIndex = src.pageIndex !== undefined && src.pageIndex !== null ? src.pageIndex : -1;
+        var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
+        var plan = _floatingVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder);
+        objectPlans.push(plan);
+        _addObjectPlanToDecisionIndex(decisionIndex, plan);
+        summary.createdPlanCount++;
+        summary.createdObjectPlanIds.push(plan.objectPlanId);
+    }
+    return { summary: summary };
+}
+
 function _appendSourceBundleTextRangeShellObjectPlans(objectPlans, sourceItems, sourceById, childrenByParentId) {
     var summary = {
         observedBundleCount: 0,
@@ -1879,6 +1915,17 @@ function _objectPlanSourceIsInlineVisibleTextFrameShell(src) {
         return false;
     }
     if (src.hasTablesInStory === true || src.storyHasVisibleTableCellText === true) return false;
+    return _objectPlanSourceHasVisibleFramePaint(src);
+}
+
+function _objectPlanSourceIsFloatingVisibleTextFrameShell(src) {
+    var kind = String(src && (src.kind || src.type || src.itemType) || "");
+    if (!src || kind !== "TextFrame") return false;
+    if (src.textFrameClass !== "editable") return false;
+    if (src.hasText !== true) return false;
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.hasTablesInStory === true || src.storyHasVisibleTableCellText === true) return false;
+    if (_objectPlanSourceIsInlineVisibleTextFrameShell(src)) return false;
     return _objectPlanSourceHasVisibleFramePaint(src);
 }
 
@@ -3575,6 +3622,81 @@ function _inlineVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
         bounds: src.bounds || null,
         renderSourceBounds: src.bounds || null,
         cropSourceBounds: cropSourceBounds || src.bounds || null,
+        ownershipSlot: "SHELL_SLOT",
+        policyLayer: "DECORATION",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_EXACT_CLUSTER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
+        executable: true,
+        required: true
+    };
+}
+
+function _floatingVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
+    var sourceIds = _internSourceSetIds([id]);
+    var sourceSetId = _sourceSetId(sourceIds);
+    return {
+        objectPlanId: "objectPlan.floating_visible_textframe_shell." + String(id),
+        bundleId: "textFrame.floatingVisibleShell." + String(id),
+        candidateId: _candidateId("pass.decoration_groups", id, pageIndex)
+                + ".floating_textframe_shell",
+        passId: "pass.decoration_groups",
+        pageIndex: pageIndex,
+        kind: "TextFrame",
+        unit: "PAGE_OBJECT",
+        mode: "TEXTLESS_CANDIDATE",
+        candidatePurpose: "SHELL_CANDIDATE",
+        compositeRole: "floating_visible_text_frame_shell",
+        slotRole: "floating_text_frame_shell_slot",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: false,
+        inlineCompositeLayoutDescendant: false,
+        inlineAnchorSourceObjectId: null,
+        inlineSourceTreeClosed: false,
+        inlineFlowSourceObjectIds: [],
+        connectorDecorationVisual: false,
+        primarySourceObjectId: id,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: sourceSetId,
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: sourceSetId,
+        styleSourceSetId: sourceSetId,
+        exportSourceSetId: sourceSetId,
+        hiddenSourceSetId: _sourceSetId(sourceIds),
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: sourceIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: { TextFrame: 1 },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: true,
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: true,
+        visualSourceObjectIds: sourceIds,
+        styleSourceObjectIds: sourceIds,
+        ownedTextFrameIds: [],
+        exportSourceObjectIds: sourceIds,
+        exportTargetObjectId: id,
+        atomicExportTargetObjectId: id,
+        atomicExportTargetObjectIds: sourceIds,
+        hiddenTextFrameIds: sourceIds,
+        hiddenVisualSourceObjectIds: [],
+        excludedInlineSourceObjectIds: [],
+        materialization: "EXTRACTED_PNG_VECTOR",
+        textAction: "DROP_TEXT",
+        visualAction: "PLACE_TEXT_SHELL",
+        placement: "FLOATING",
+        coordinateSpace: "PAGE",
+        visualLayer: "LABEL_BACKDROP",
+        zOrder: zOrder,
+        reason: "stage1_floating_visible_text_frame_shell_from_source_inventory",
+        bounds: src.bounds || null,
+        renderSourceBounds: src.bounds || null,
+        cropSourceBounds: src.bounds || null,
         ownershipSlot: "SHELL_SLOT",
         policyLayer: "DECORATION",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
