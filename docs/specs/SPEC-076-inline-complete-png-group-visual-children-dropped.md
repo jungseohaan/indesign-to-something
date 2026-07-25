@@ -87,3 +87,18 @@ SPEC-075 버튼 그룹 통PNG(`_graphicShortTextButtonGroupCompletePngBundle`)�
 `_duplicateNestedCompletePngForExport` 경로를 쓰지만, 그 경우 `item`(스토리 앵커를 든 조상)이
 그룹 루트와 **다르므로** 새 조건(`exportSourceObjectIds===[item.id]`)에 걸리지 않고 기존 동작을
 유지한다. 탐구 배지는 `item` 자체가 그룹 루트라 새 경로를 탄다. 수정은 이 케이스에만 국한된다.
+
+## 후속 확장 (p36 ① 배지, PR #165)
+
+원래 SPEC-076 수정은 그룹째 복제 조건을 `item.constructor.name === "Group"` 으로만 걸었다.
+그런데 p36 "화학 반응에서 보존되는 질량" 제목 앞의 인라인 **① 배지**는 배경이 **Oval**(① 원)
+이고 자식이 "1" TextFrame 인 구조라 **Group 이 아니다**. 따라서 그룹째 복제 조건에 걸리지 못하고
+`_completePngDuplicateSourceIds` cherry-pick 경로로 빠져 — 배경 Oval 이 복제 집합에서 빠지고
+textless 렌더로 자식 TF 텍스트도 숨겨져 — `inline_208666.png` 가 **빈 PNG(비흰 픽셀 0)** 로
+구워졌다.
+
+**해결**: Group 이 아니어도 `item.textFrames` / `item.pageItems` 로 자식 유무를 확인해,
+자식을 품은 컨테이너 도형(Oval/Rectangle/Polygon)이면 그룹째 복제하도록 조건 확장.
+
+- p36 재추출 → `inline_208666.png` 0 → **22x22, 비흰 388픽셀**("①" 주황 원) 정상 복구.
+- 추출기(jsx) 변경이므로 **전면 적용에는 8-49 재추출 필요** (PR #165 은 단일 페이지 p36 검증).
