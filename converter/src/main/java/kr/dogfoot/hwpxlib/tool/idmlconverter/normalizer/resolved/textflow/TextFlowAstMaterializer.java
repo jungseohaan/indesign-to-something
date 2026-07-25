@@ -191,21 +191,46 @@ public final class TextFlowAstMaterializer {
             styleRun = firstVisibleSourceRun(paragraph);
         }
         if (styleRun == null) return false;
+        ResolvedTextFlowAstConverter.Options options = runOptions != null
+                ? runOptions
+                : ResolvedTextFlowAstConverter.options()
+                        .colorResolver(color -> ctx.resolvedData != null
+                                ? ctx.resolvedData.resolveColorHex(color)
+                                : color)
+                        .truncateAtParagraphBreak(false);
+        int appendedCount = 0;
+        if (paragraph.generatedPrefixMarkerRun != null && !prefix.isEmpty()) {
+            int markerEnd = prefix.offsetByCodePoints(0, 1);
+            appendedCount += appendPrefixPiece(target, prefix.substring(0, markerEnd),
+                    paragraph.generatedPrefixMarkerRun, options);
+            if (markerEnd < prefix.length()) {
+                ResolvedRun separatorRun = paragraph.generatedPrefixSeparatorRun != null
+                        ? paragraph.generatedPrefixSeparatorRun
+                        : styleRun;
+                appendedCount += appendPrefixPiece(target, prefix.substring(markerEnd),
+                        separatorRun, options);
+            }
+        } else {
+            appendedCount += appendPrefixPiece(target, prefix, styleRun, options);
+        }
+        return appendedCount > 0;
+    }
+
+    private static int appendPrefixPiece(
+            ASTParagraph target,
+            String text,
+            ResolvedRun styleRun,
+            ResolvedTextFlowAstConverter.Options options) {
+        if (target == null || text == null || text.isEmpty() || styleRun == null) return 0;
         List<ASTTextRun> runs = ResolvedTextFlowAstConverter.convertRunText(
-                prefix,
+                text,
                 styleRun,
                 target,
-                runOptions != null
-                        ? runOptions
-                        : ResolvedTextFlowAstConverter.options()
-                                .colorResolver(color -> ctx.resolvedData != null
-                                        ? ctx.resolvedData.resolveColorHex(color)
-                                        : color)
-                                .truncateAtParagraphBreak(false));
+                options);
         for (ASTTextRun run : runs) {
             appendTextRunCoalescing(target, run);
         }
-        return !runs.isEmpty();
+        return runs.size();
     }
 
     private static void appendTextRunCoalescing(ASTParagraph target, ASTTextRun run) {

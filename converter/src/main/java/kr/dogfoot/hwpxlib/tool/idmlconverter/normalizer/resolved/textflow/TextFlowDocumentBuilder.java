@@ -37,6 +37,8 @@ public final class TextFlowDocumentBuilder {
             out.styleName = paragraph.styleName;
             out.justification = paragraph.justification;
             out.generatedPrefixText = paragraph.generatedPrefixText;
+            out.generatedPrefixMarkerRun = paragraph.generatedPrefixMarkerRun;
+            out.generatedPrefixSeparatorRun = paragraph.generatedPrefixSeparatorRun;
             for (TextFlowDiagnostics.TextFlowRun run : paragraph.runs) {
                 TextFlowDocument.TextFlowAtom atom = buildAtom(run, index, stack);
                 if (atom != null) out.atoms.add(atom);

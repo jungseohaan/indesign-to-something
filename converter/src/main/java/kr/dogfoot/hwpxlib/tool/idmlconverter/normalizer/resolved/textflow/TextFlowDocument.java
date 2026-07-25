@@ -25,6 +25,8 @@ public final class TextFlowDocument {
         public String styleName;
         public String justification;
         public String generatedPrefixText;
+        public transient ResolvedRun generatedPrefixMarkerRun;
+        public transient ResolvedRun generatedPrefixSeparatorRun;
         public final List<TextFlowAtom> atoms = new ArrayList<>();
     }
 

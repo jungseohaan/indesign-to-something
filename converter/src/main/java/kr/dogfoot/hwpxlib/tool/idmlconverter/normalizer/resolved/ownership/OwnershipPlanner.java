@@ -1672,11 +1672,12 @@ public final class OwnershipPlanner {
 
     private ObjectPlan canonicalizeImportedPreplannedObjectPlan(ObjectPlan plan) {
         if (isPlannerDeclaredInlineGraphicLineTextStyleMarker(plan)) {
-            warnImportedPlanRepairSuppressed(plan,
-                    "IMPORTED_INLINE_TEXT_STYLE_MARKER_REPAIR_SUPPRESSED",
-                    "expectedVisualAction=ABSORB_TEXT_STYLE expectedStyleSourceObjectIds="
-                            + ObjectPlan.intArrayJson(visualSourceIds(plan)));
-            return plan;
+            ObjectPlan absorbed = absorbTextStyleMarkerSource(plan,
+                    "inline_vector_text_style_marker");
+            return hasOwnedTextTarget(absorbed)
+                    ? absorbed
+                    : dropUntargetedTextStyleMarkerSource(plan,
+                            "inline_vector_text_style_marker_without_hwpx_text_target");
         }
         if (isInlineTextStyleMarkerSourcePlan(plan)
                 && plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) {
@@ -1782,6 +1783,11 @@ public final class OwnershipPlanner {
                 }
             }
         }
+        for (int ancestorId : inlineGraphicAnchorAncestorIds(plan)) {
+            if (isDirectStoryFlowInlineGraphicAnchor(ancestorId, plan.sourceObjectIds)) {
+                return ancestorId;
+            }
+        }
         return -1;
     }
 
@@ -1789,7 +1795,10 @@ public final class OwnershipPlanner {
         int[] styleIds = textStyleMarkerSourceIds(plan);
         if (styleIds.length == 0) styleIds = visualSourceIds(plan);
         if (styleIds.length == 0) styleIds = plan.sourceObjectIds;
-        int[] ownedTextFrameIds = storyTextFrameIdsForInlineAnchor(plan);
+        TextRangeRef[] ownedTextRanges = textStyleMarkerTargetRanges(plan);
+        int[] ownedTextFrameIds = textFrameIdsFromRanges(ownedTextRanges);
+        if (ownedTextFrameIds.length == 0) ownedTextFrameIds = storyTextFrameIdsForInlineAnchor(plan);
+        if (ownedTextFrameIds.length == 0) ownedTextFrameIds = siblingTextFrameIdsForTextStyleMarker(plan);
         if (ownedTextFrameIds.length == 0) ownedTextFrameIds = plan.ownedTextFrameIds;
         return plan
                 .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
@@ -1797,7 +1806,54 @@ public final class OwnershipPlanner {
                 .withMaterialization(Materialization.HWPX_TEXT)
                 .withVisualSourceObjectIds(new int[0])
                 .withStyleSourceObjectIds(styleIds)
-                .withOwnedTextFrameIds(ownedTextFrameIds);
+                .withOwnedTextFrameIds(ownedTextFrameIds)
+                .withOwnedTextRanges(ownedTextRanges);
+    }
+
+    private ObjectPlan dropUntargetedTextStyleMarkerSource(ObjectPlan plan, String reason) {
+        int[] styleIds = textStyleMarkerSourceIds(plan);
+        if (styleIds.length == 0) styleIds = visualSourceIds(plan);
+        if (styleIds.length == 0) styleIds = plan != null ? plan.sourceObjectIds : new int[0];
+        return plan
+                .withPlacementAndCoordinateSpace(Placement.INLINE, CoordinateSpace.STORY_FLOW)
+                .withVisualAction(VisualAction.DROP_VISUAL, reason)
+                .withMaterialization(Materialization.HWPX_TEXT)
+                .withVisualSourceObjectIds(new int[0])
+                .withStyleSourceObjectIds(styleIds)
+                .withOwnedTextFrameIds(new int[0])
+                .withOwnedTextRanges(new TextRangeRef[0]);
+    }
+
+    private static boolean hasOwnedTextTarget(ObjectPlan plan) {
+        if (plan == null) return false;
+        return (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0)
+                || (plan.ownedTextRanges != null && plan.ownedTextRanges.length > 0);
+    }
+
+    private int[] inlineGraphicAnchorAncestorIds(ObjectPlan plan) {
+        if (plan == null || data == null) return new int[0];
+        LinkedHashSet<Integer> out = new LinkedHashSet<>();
+        collectInlineGraphicAnchorAncestorIds(plan.sourceObjectIds, out);
+        collectInlineGraphicAnchorAncestorIds(visualSourceIds(plan), out);
+        int[] ids = new int[out.size()];
+        int index = 0;
+        for (Integer id : out) ids[index++] = id;
+        return ids;
+    }
+
+    private void collectInlineGraphicAnchorAncestorIds(int[] ids, LinkedHashSet<Integer> out) {
+        if (ids == null || out == null || data == null) return;
+        for (int id : ids) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            Set<String> seen = new HashSet<>();
+            while (item != null && item.parentId() != null && !item.parentId().isEmpty()) {
+                String parentId = item.parentId();
+                if (!seen.add(parentId)) break;
+                int parsed = parseFlexibleId(parentId);
+                if (parsed > 0) out.add(parsed);
+                item = data.getPageItem(parentId);
+            }
+        }
     }
 
     private int[] storyTextFrameIdsForInlineAnchor(ObjectPlan plan) {
@@ -1805,6 +1861,9 @@ public final class OwnershipPlanner {
         LinkedHashSet<Integer> anchorIds = new LinkedHashSet<>();
         int direct = directStoryFlowInlineGraphicAnchorId(plan);
         if (direct > 0) anchorIds.add(direct);
+        for (int ancestorId : inlineGraphicAnchorAncestorIds(plan)) {
+            if (ancestorId > 0) anchorIds.add(ancestorId);
+        }
         if (plan.sourceObjectIds != null) {
             for (int id : plan.sourceObjectIds) anchorIds.add(id);
         }
@@ -1829,6 +1888,149 @@ public final class OwnershipPlanner {
         int index = 0;
         for (Integer id : out) ids[index++] = id;
         return ids;
+    }
+
+    private TextRangeRef[] storyTextRangesForInlineAnchor(ObjectPlan plan) {
+        if (plan == null || data == null) return new TextRangeRef[0];
+        LinkedHashSet<Integer> anchorIds = new LinkedHashSet<>();
+        int direct = directStoryFlowInlineGraphicAnchorId(plan);
+        if (direct > 0) anchorIds.add(direct);
+        for (int ancestorId : inlineGraphicAnchorAncestorIds(plan)) {
+            if (ancestorId > 0) anchorIds.add(ancestorId);
+        }
+        if (plan.sourceObjectIds != null) {
+            for (int id : plan.sourceObjectIds) anchorIds.add(id);
+        }
+        List<TextRangeRef> ranges = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (ResolvedStory story : data.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (int paraIndex = 0; paraIndex < story.paragraphs().size(); paraIndex++) {
+                ResolvedParagraph paragraph = story.paragraphs().get(paraIndex);
+                if (!paragraphHasInlineAnchor(paragraph, anchorIds)) continue;
+                String visibleText = paragraphVisibleText(paragraph);
+                if (visibleText.trim().isEmpty()) continue;
+                for (ResolvedTextFrame tf : data.textFrames()) {
+                    if (tf == null || tf.id() == null) continue;
+                    if (!sameNullable(tf.storyId(), story.id())) continue;
+                    if (paraIndex < tf.paragraphStart() || paraIndex > tf.paragraphEnd()) continue;
+                    int textFrameId = parseFlexibleId(tf.id());
+                    if (textFrameId < 0) continue;
+                    String key = textFrameId + ":" + paraIndex;
+                    if (!seen.add(key)) continue;
+                    ranges.add(new TextRangeRef(
+                            textFrameId,
+                            story.id(),
+                            paraIndex,
+                            -1,
+                            0,
+                            visibleText.length(),
+                            0,
+                            visibleText.length(),
+                            visibleText));
+                }
+            }
+        }
+        return ranges.toArray(new TextRangeRef[0]);
+    }
+
+    private TextRangeRef[] textStyleMarkerTargetRanges(ObjectPlan plan) {
+        List<TextRangeRef> ranges = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        addTextRanges(ranges, seen, storyTextRangesForInlineAnchor(plan));
+        addTextRanges(ranges, seen, siblingTextFrameRangesForTextStyleMarker(plan));
+        return ranges.toArray(new TextRangeRef[0]);
+    }
+
+    private TextRangeRef[] siblingTextFrameRangesForTextStyleMarker(ObjectPlan plan) {
+        if (plan == null || data == null) return new TextRangeRef[0];
+        LinkedHashSet<Integer> textFrameIds = new LinkedHashSet<>();
+        collectSiblingTextFrameIdsForTextStyleMarker(plan.sourceObjectIds, textFrameIds);
+        collectSiblingTextFrameIdsForTextStyleMarker(visualSourceIds(plan), textFrameIds);
+        List<TextRangeRef> ranges = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (Integer textFrameId : textFrameIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+            if (tf == null || tf.storyId() == null) continue;
+            ResolvedStory story = data.getStory(tf.storyId());
+            if (story == null || story.paragraphs() == null) continue;
+            int start = Math.max(0, tf.paragraphStart());
+            int end = Math.min(story.paragraphs().size() - 1, tf.paragraphEnd());
+            for (int paraIndex = start; paraIndex <= end; paraIndex++) {
+                ResolvedParagraph paragraph = story.paragraphs().get(paraIndex);
+                String visibleText = paragraphVisibleText(paragraph);
+                if (visibleText.trim().isEmpty()) continue;
+                String key = textFrameId + ":" + paraIndex;
+                if (!seen.add(key)) continue;
+                ranges.add(new TextRangeRef(
+                        textFrameId,
+                        story.id(),
+                        paraIndex,
+                        -1,
+                        0,
+                        visibleText.length(),
+                        0,
+                        visibleText.length(),
+                        visibleText));
+            }
+        }
+        return ranges.toArray(new TextRangeRef[0]);
+    }
+
+    private int[] siblingTextFrameIdsForTextStyleMarker(ObjectPlan plan) {
+        TextRangeRef[] ranges = siblingTextFrameRangesForTextStyleMarker(plan);
+        return textFrameIdsFromRanges(ranges);
+    }
+
+    private void collectSiblingTextFrameIdsForTextStyleMarker(int[] ids, LinkedHashSet<Integer> out) {
+        if (ids == null || out == null || data == null) return;
+        for (int id : ids) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            ResolvedPageItem parent = data.getPageItem(item.parentId());
+            if (parent == null || parent.childIds() == null) continue;
+            for (int childId : parent.childIds()) {
+                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(childId));
+                if (isVisibleEditableTextFrameSource(tf)) {
+                    out.add(childId);
+                }
+            }
+        }
+    }
+
+    private static void addTextRanges(
+            List<TextRangeRef> out,
+            Set<String> seen,
+            TextRangeRef[] ranges) {
+        if (out == null || seen == null || ranges == null) return;
+        for (TextRangeRef range : ranges) {
+            if (range == null) continue;
+            String key = textRangeKey(range);
+            if (!seen.add(key)) continue;
+            out.add(range);
+        }
+    }
+
+    private static int[] textFrameIdsFromRanges(TextRangeRef[] ranges) {
+        if (ranges == null || ranges.length == 0) return new int[0];
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (TextRangeRef range : ranges) {
+            if (range != null && range.textFrameId >= 0) ids.add(range.textFrameId);
+        }
+        int[] out = new int[ids.size()];
+        int index = 0;
+        for (Integer id : ids) out[index++] = id;
+        return out;
+    }
+
+    private static String paragraphVisibleText(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.isInlineAnchor()) continue;
+            sb.append(textRangeVisibleText(run.text()));
+        }
+        return sb.toString();
     }
 
     private boolean paragraphHasInlineAnchor(ResolvedParagraph paragraph, Set<Integer> anchorIds) {

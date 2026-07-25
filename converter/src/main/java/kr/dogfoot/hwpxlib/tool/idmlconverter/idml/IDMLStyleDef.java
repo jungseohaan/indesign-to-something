@@ -23,6 +23,7 @@ public class IDMLStyleDef {
     private String leadingType;
     private Double autoLeading;
     private Double horizontalScale;
+    private Double verticalScale;
     private Double tracking;
     private Boolean underline;     // 밑줄
     private String underlineType;  // 밑줄 타입 ("StrokeStyle/$ID/Wavy" 등)
@@ -63,6 +64,11 @@ public class IDMLStyleDef {
 
     // Nested 스타일 규칙 (단락 스타일에서만 사용)
     private java.util.List<NestedStyleRule> nestedStyles;
+
+    // Bullet/list marker style (단락 스타일에서만 사용)
+    private String bulletsCharacterStyle;
+    private String bulletsFont;
+    private String bulletsFontStyle;
 
     /**
      * GREP 스타일 규칙 — 단락 스타일의 AllGREPStyles에서 파싱.
@@ -199,6 +205,9 @@ public class IDMLStyleDef {
     public Double horizontalScale() { return horizontalScale; }
     public void horizontalScale(Double v) { this.horizontalScale = v; }
 
+    public Double verticalScale() { return verticalScale; }
+    public void verticalScale(Double v) { this.verticalScale = v; }
+
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }
 
@@ -303,6 +312,15 @@ public class IDMLStyleDef {
         }
         this.nestedStyles.add(rule);
     }
+
+    public String bulletsCharacterStyle() { return bulletsCharacterStyle; }
+    public void bulletsCharacterStyle(String v) { this.bulletsCharacterStyle = v; }
+
+    public String bulletsFont() { return bulletsFont; }
+    public void bulletsFont(String v) { this.bulletsFont = v; }
+
+    public String bulletsFontStyle() { return bulletsFontStyle; }
+    public void bulletsFontStyle(String v) { this.bulletsFontStyle = v; }
 
     /**
      * selfRef에서 간단한 이름 추출.

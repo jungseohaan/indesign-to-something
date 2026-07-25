@@ -31,6 +31,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Shell
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.SourceTextStyleResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -197,7 +198,7 @@ public class StoryLoader {
             ConversionTiming.addCounter("phase3.storyLoader.styleContextNanos",
                     System.nanoTime() - styleContextStart);
 
-            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, ip, para);
             buildParagraphContent(ctx, ip, resolvedParagraph, resolvedRuns, storyId, i, sc, para);
             MathProcessor.convertMathRunsInParagraph(ctx, para);
 
@@ -1596,7 +1597,7 @@ public class StoryLoader {
         ASTParagraph current = createResolvedCellParagraph(ctx, idmlParagraph, resolvedParagraph);
         appendLeadingAnchorOnlyRuns(ctx, idmlParagraph, resolvedParagraph, current);
         if (includeTextRuns) {
-            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, current);
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, idmlParagraph, current);
         }
 
         ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
@@ -1946,7 +1947,7 @@ public class StoryLoader {
             boolean includeTextRuns) {
         if (ctx == null || resolvedParagraph == null || resolvedParagraph.runs() == null || para == null) return;
         if (includeTextRuns) {
-            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, para);
+            appendGeneratedParagraphPrefix(ctx, resolvedParagraph, null, para);
         }
         ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
                 .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
@@ -1998,17 +1999,37 @@ public class StoryLoader {
     private static void appendGeneratedParagraphPrefix(
             ResolvedBuildContext ctx,
             ResolvedParagraph resolvedParagraph,
+            IDMLParagraph idmlParagraph,
             ASTParagraph para) {
         if (ctx == null || resolvedParagraph == null || para == null) return;
         String prefix = ResolvedTextFlowAstConverter.generatedPrefixToInsert(resolvedParagraph);
         if (prefix == null || prefix.trim().isEmpty()) return;
         ResolvedRun styleRun = ResolvedTextFlowAstConverter.firstVisibleResolvedRun(resolvedParagraph);
         if (styleRun == null) return;
+        ResolvedRun markerRun = copyResolvedRun(styleRun);
+        String paraStyleRef = idmlParagraph != null && idmlParagraph.appliedParagraphStyle() != null
+                ? idmlParagraph.appliedParagraphStyle()
+                : resolvedParagraph.styleName();
+        SourceTextStyleResolver.applyGeneratedBulletStyle(ctx, markerRun, paraStyleRef);
         ResolvedTextFlowAstConverter.Options options = ResolvedTextFlowAstConverter.options()
                 .colorResolver(color -> ctx.resolvedData != null ? ctx.resolvedData.resolveColorHex(color) : color)
                 .truncateAtParagraphBreak(false);
-        for (ASTTextRun run : ResolvedTextFlowAstConverter.convertRunText(prefix, styleRun, para, options)) {
-            para.addItem(run);
+        if (!prefix.isEmpty() && markerRun.charStyle() != null) {
+            int markerEnd = prefix.offsetByCodePoints(0, 1);
+            for (ASTTextRun run : ResolvedTextFlowAstConverter.convertRunText(
+                    prefix.substring(0, markerEnd), markerRun, para, options)) {
+                para.addItem(run);
+            }
+            if (markerEnd < prefix.length()) {
+                for (ASTTextRun run : ResolvedTextFlowAstConverter.convertRunText(
+                        prefix.substring(markerEnd), styleRun, para, options)) {
+                    para.addItem(run);
+                }
+            }
+        } else {
+            for (ASTTextRun run : ResolvedTextFlowAstConverter.convertRunText(prefix, styleRun, para, options)) {
+                para.addItem(run);
+            }
         }
     }
 

@@ -86,6 +86,7 @@ public final class IDMLStoryTokenDiagnosticsWriter {
         StringBuilder sb = prefix(resolvedStoryId, idmlStoryId, paragraphIndex, runIndex, tokenIndex, "TEXT");
         appendString(sb, "text", text);
         appendString(sb, "charStyle", run.appliedCharacterStyle());
+        appendString(sb, "grepCharStyle", run.grepAppliedCharStyle());
         appendString(sb, "fontFamily", run.fontFamily());
         appendNumber(sb, "fontSize", run.fontSize());
         appendString(sb, "fontStyle", run.fontStyle());

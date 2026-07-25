@@ -62,8 +62,13 @@ public final class TextStyleApplicator {
         IDMLStyleDef charStyle = resolvedCharacterStyle(styleResolver, characterRun);
         IDMLStyleDef grepStyle = resolvedGrepStyle(styleResolver, characterRun);
 
-        if (characterRun != null && characterRun.appliedCharacterStyle() != null) {
-            target.characterStyleRef(characterRun.appliedCharacterStyle());
+        if (grepStyle != null) {
+            target.grepStyleApplied(true);
+        }
+
+        String characterStyleRef = effectiveCharacterStyleRef(characterRun);
+        if (characterStyleRef != null) {
+            target.characterStyleRef(characterStyleRef);
         }
 
         String fontFamily = firstNonEmpty(
@@ -290,6 +295,14 @@ public final class TextStyleApplicator {
 
     private static boolean isNoCharacterStyle(String ref) {
         return ref == null || ref.isEmpty() || ref.contains("[No character style]");
+    }
+
+    private static String effectiveCharacterStyleRef(IDMLCharacterRun characterRun) {
+        if (characterRun == null) return null;
+        String grepStyle = characterRun.grepAppliedCharStyle();
+        if (!isNoCharacterStyle(grepStyle)) return grepStyle;
+        String directStyle = characterRun.appliedCharacterStyle();
+        return !isNoCharacterStyle(directStyle) ? directStyle : null;
     }
 
     private static String resolveColor(ResolvedData resolvedData, String colorRef) {
