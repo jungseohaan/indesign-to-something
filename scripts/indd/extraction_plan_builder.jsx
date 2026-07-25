@@ -8393,7 +8393,10 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
     // Textless and non-placed visual material are the guards that matter: a
     // bleeding frame that carries copy stays editable, and a crop frame that
     // carries placed media remains CONTENT_VISUAL instead of being treated as a
-    // page backdrop just because the child image overhangs the trim.
+    // page backdrop just because the child image overhangs the trim. Placed
+    // media can still be a page plane source when the source leaf itself carries
+    // page-wide geometry through an independent clipping path; that is handled
+    // by sourceIsPlacedMediaPageBackgroundCarrier below.
     var BLEED_ABSORB_MIN_OVERHANG = 0.5;
     function sourceBleedsPastPage(src, targetPageIndex) {
         var pageBounds = pageBoundsForCanonicalPlane(targetPageIndex);
@@ -8416,6 +8419,52 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         if (sourceTreeHasPlacedMedia(src.id, {})) return false;
         if (!sourceTreeHasVisibleGraphicMaterial(src.id, {})) return false;
         return sourceBleedsPastPage(src, targetPageIndex);
+    }
+    function sourceIsPlacedMediaKind(src) {
+        var kind = sourceKind(src);
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+    function sourceIsStandalonePolygonPlacedCarrier(src) {
+        if (!src || src.parentId === null || src.parentId === undefined) return false;
+        var parent = sourceById[String(src.parentId)];
+        if (!parent) return false;
+        if (sourceKind(parent) !== "Polygon") return false;
+        var parentKind = String(parent.parentKind || "");
+        if (parent.parentId !== null && parent.parentId !== undefined
+                && parentKind !== "Page" && parentKind !== "Spread") {
+            return false;
+        }
+        if (parent.visible === false || parent.hiddenLayer === true || parent.nonprinting === true) {
+            return false;
+        }
+        if (sourceIsStoryFlowOrAnchored(parent)) return false;
+        if (sourceTreeHasEditableText(parent.id, {})) return false;
+        return true;
+    }
+    function sourceHasPageWideGeometryOnPage(src, targetPageIndex) {
+        var pageBounds = pageBoundsForCanonicalPlane(targetPageIndex);
+        var srcBounds = sourceBounds(src);
+        if (!pageBounds || !srcBounds) return false;
+        var pageHeight = Math.abs(Number(pageBounds[2]) - Number(pageBounds[0]));
+        var pageWidth = Math.abs(Number(pageBounds[3]) - Number(pageBounds[1]));
+        if (pageHeight <= 0 || pageWidth <= 0) return false;
+        var srcHeight = Math.abs(Number(srcBounds[2]) - Number(srcBounds[0]));
+        var srcWidth = Math.abs(Number(srcBounds[3]) - Number(srcBounds[1]));
+        var intersectionArea = boundsIntersectionAreaForPageBackgroundRole(srcBounds, pageBounds);
+        var pageArea = boundsAreaForPageBackgroundRole(pageBounds);
+        if (pageArea <= 0 || intersectionArea <= 0) return false;
+        return srcWidth >= pageWidth * 0.92
+                || srcHeight >= pageHeight * 0.92
+                || intersectionArea >= pageArea * 0.45;
+    }
+    function sourceIsPlacedMediaPageBackgroundCarrier(src, targetPageIndex) {
+        if (!src) return false;
+        if (!sourceIsPlacedMediaKind(src) && src.hasPlacedVisual !== true) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (sourceIsStoryFlowOrAnchored(src)) return false;
+        if (!sourceIsStandalonePolygonPlacedCarrier(src)) return false;
+        return sourceHasPageWideGeometryOnPage(src, targetPageIndex)
+                || sourceBleedsPastPage(src, targetPageIndex);
     }
     function sourceHasPageBackgroundSourceEvidence(src, plan) {
         if (sourceHasBackgroundRoleLayerName(src)) return true;
@@ -8547,12 +8596,19 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         return false;
     }
     function sourceBounds(src) {
-        if (!src || !src.bounds || src.bounds.length < 4) return null;
+        var bounds = src
+                ? (src.bounds && src.bounds.length >= 4
+                        ? src.bounds
+                        : (src.geometricBounds && src.geometricBounds.length >= 4
+                                ? src.geometricBounds
+                                : null))
+                : null;
+        if (!bounds || bounds.length < 4) return null;
         return [
-            Number(src.bounds[0]),
-            Number(src.bounds[1]),
-            Number(src.bounds[2]),
-            Number(src.bounds[3])
+            Number(bounds[0]),
+            Number(bounds[1]),
+            Number(bounds[2]),
+            Number(bounds[3])
         ];
     }
     function boundsAreaForPageBackgroundRole(bounds) {
@@ -8688,6 +8744,9 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
         }
         if (sourceIsPageWideBackgroundGraphicOnPage(src, targetPageIndex, plan)) {
             return "PAGE_WIDE_BACKGROUND_GRAPHIC";
+        }
+        if (sourceIsPlacedMediaPageBackgroundCarrier(src, targetPageIndex)) {
+            return "PAGE_WIDE_PLACED_MEDIA_BACKGROUND_CARRIER";
         }
         if (sourceHasPageBackgroundSourceEvidence(src, plan)) {
             return "BACKGROUND_LAYER_TEXTLESS_GRAPHIC";
