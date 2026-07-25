@@ -7715,6 +7715,12 @@ function _normalizeObjectPlanBundle(bundle, sourceById) {
     if (_objectPlanBundleIsTableCellInlineComplexFormCompletePng(bundle, sourceById)) {
         return _tableCellInlineComplexFormCompletePngBundle(bundle, sourceById);
     }
+    // YES/NO·T/F 버튼, A/B/C·숫자 배지, 드롭캡 제목처럼 짧은 텍스트프레임 여럿과
+    // 그래픽이 한 그룹에 묶인 케이스는 편집 셸로 재현하면 좌우/격자 배치가 무너져
+    // 글자가 밀리거나 찌그러진다. 그룹째 통짜 PNG 로 굽는 편이 원본에 충실하다.
+    if (_objectPlanBundleIsGraphicShortTextButtonGroup(bundle, sourceById)) {
+        return _graphicShortTextButtonGroupCompletePngBundle(bundle, sourceById);
+    }
     if (_objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById)) {
         return _inlineEditableTextShellCompositeBundle(bundle, sourceById);
     }
@@ -7806,6 +7812,118 @@ function _tableCellInlineComplexFormCompletePngBundle(bundle, sourceById) {
     normalized.reason = String(normalized.reason || "")
             + ":table_cell_inline_complex_form_complete_png";
     return normalized;
+}
+
+/**
+ * YES/NO·배지·드롭캡처럼 짧은 텍스트프레임 여럿 + 그래픽 그룹을 통짜 PNG 로 굽는다.
+ * 편집 셸로 재현하면 좌우/격자 배치가 무너지므로 그룹째 이미지化한다.
+ * 통PNG 골격(materialization=COMPLETE_PNG, textAction=OWNED_BY_PNG, 텍스트프레임 미숨김)은
+ * 테이블셀 통PNG 와 동일하고 slotRole/reason 만 버튼 그룹용으로 바꾼다.
+ */
+function _graphicShortTextButtonGroupCompletePngBundle(bundle, sourceById) {
+    var normalized = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) normalized[key] = bundle[key];
+    }
+    var rootIds = _objectPlanInlineEditableTextShellRootIds(bundle);
+    var expandedIds = _objectPlanInlineRootExpandedSourceIds(rootIds, sourceById);
+    var sourceIds = _sourceIdsUnion(bundle.sourceObjectIds || [], expandedIds);
+    var ownedTextFrameIds = _sourceIdsUnion(
+            bundle.ownedTextFrameIds || [],
+            _objectPlanTextFrameSourceIds(sourceIds, sourceById));
+    var visualIds = _objectPlanNonTextVisualSourceIds(sourceIds, ownedTextFrameIds, sourceById);
+    var exportIds = rootIds.length > 0 ? rootIds : visualIds;
+
+    normalized.sourceObjectIds = sourceIds;
+    normalized.sourceRootObjectIds = rootIds;
+    normalized.clusterSourceObjectIds = _sourceIdsUnion(bundle.clusterSourceObjectIds || [], sourceIds);
+    normalized.visualSourceObjectIds = visualIds;
+    normalized.exportSourceObjectIds = exportIds;
+    normalized.hiddenVisualSourceObjectIds = [];
+    normalized.hiddenTextFrameIds = [];
+    normalized.ownedTextFrameIds = ownedTextFrameIds;
+    normalized.editableTextFrameIds = ownedTextFrameIds;
+    normalized.ownershipSlot = "CONTENT_VISUAL_SLOT";
+    normalized.policyLayer = "CONTENT";
+    normalized.visualLayer = "CONTENT_VISUAL";
+    normalized.requiredSlot = "CONTENT_VISUAL_SLOT";
+    normalized.requiredSlotReason = "graphic_short_text_button_group_complete_png";
+    normalized.slotRole = "graphic_short_text_button_group_complete_png";
+    normalized.compositeRole = "graphic_short_text_button_group_complete_png";
+    normalized.inlineTextShellComposite = false;
+    normalized.graphicShortTextButtonGroupCompletePng = true;
+    normalized.textOwner = "indesign_png";
+    normalized.containsEditableText = true;
+    normalized.completePngTextAllowed = true;
+    normalized.materialization = "COMPLETE_PNG";
+    normalized.textAction = "OWNED_BY_PNG";
+    normalized.visualAction = "PLACE_INLINE_PNG";
+    normalized.inlineSourceTreeClosed = true;
+    normalized.inlineFlowSourceObjectIds = sourceIds;
+    normalized.inlineAnchorSourceObjectId = rootIds.length > 0 ? rootIds[0] : normalized.inlineAnchorSourceObjectId;
+    normalized.exportTargetObjectId = rootIds.length > 0 ? rootIds[0] : normalized.exportTargetObjectId;
+    normalized.atomicExportTargetObjectId = rootIds.length > 0 ? rootIds[0] : normalized.atomicExportTargetObjectId;
+    normalized.atomicExportTargetObjectIds = rootIds;
+    normalized.sourceSetId = _sourceSetId(sourceIds);
+    normalized.sourceRootSetId = _sourceSetId(rootIds);
+    normalized.clusterSourceSetId = _sourceSetId(normalized.clusterSourceObjectIds || []);
+    normalized.visualSourceSetId = _sourceSetId(visualIds);
+    normalized.exportSourceSetId = _sourceSetId(exportIds);
+    normalized.hiddenSourceSetId = _sourceSetId([]);
+    normalized.clusterRelation = normalized.clusterRelation || "EXACT_SOURCE_CLUSTER";
+    normalized.executable = true;
+    normalized.required = true;
+    normalized.reason = String(normalized.reason || "")
+            + ":graphic_short_text_button_group_complete_png";
+    return normalized;
+}
+
+/**
+ * 짧은 텍스트프레임 여럿 + 그래픽이 한 그룹에 묶인 버튼/배지형인지.
+ *
+ * <p>조건: 그룹 소스 트리에 (1) 짧은 텍스트프레임(3자 이하) 2개 이상, (2) 그래픽 객체
+ * (Rectangle/Polygon/Oval/GraphicLine/Image) 존재, (3) 긴 텍스트프레임(4자 이상)이 3개
+ * 미만. YES/NO·T/F·배지·드롭캡이 여기 걸린다. 긴 TF 가 3개 이상이면 실질 편집표
+ * (스케줄표·단어형성표 등)로 보고 제외해 표가 통째로 이미지化되는 것을 막는다.
+ * 순수 텍스트 조각 그룹(그래픽 없음)도 제외된다.</p>
+ */
+function _objectPlanBundleIsGraphicShortTextButtonGroup(bundle, sourceById) {
+    if (!bundle || !sourceById) return false;
+    if (bundle.passId !== "pass.inline_objects") return false;
+    var ids = _sourceIdsUnion(
+            bundle.sourceObjectIds || [],
+            _objectPlanInlineRootExpandedSourceIds(
+                    _objectPlanInlineEditableTextShellRootIds(bundle), sourceById));
+    var shortTextCount = 0;
+    var longTextCount = 0;
+    var hasGraphic = false;
+    var GFX = { "Rectangle": 1, "Polygon": 1, "Oval": 1, "GraphicLine": 1, "Image": 1 };
+    for (var i = 0; i < ids.length; i++) {
+        var src = sourceById[String(ids[i])];
+        if (!src) continue;
+        var kind = String(src.kind || src.type || "");
+        if (kind === "TextFrame") {
+            var len = _objectPlanTextFrameCharCount(src);
+            if (len === null) continue;   // 텍스트 길이 미상이면 판단 보류
+            if (len > 3) longTextCount++;
+            else shortTextCount++;
+        } else if (GFX[kind]) {
+            hasGraphic = true;
+        }
+    }
+    if (longTextCount >= 3) return false;   // 긴 TF 3개 이상 → 편집표로 보고 제외
+    return shortTextCount >= 2 && hasGraphic;
+}
+
+/** 텍스트프레임 소스의 글자 수(공백·마커 제외). 미상이면 null. */
+function _objectPlanTextFrameCharCount(src) {
+    if (!src) return null;
+    if (src.textLength !== null && src.textLength !== undefined) {
+        return Number(src.textLength);
+    }
+    var t = src.plainText || src.contents || null;
+    if (t === null || t === undefined) return null;
+    return String(t).replace(/[\s\r\n\t￼﻿]/g, "").length;
 }
 
 function _objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById) {
