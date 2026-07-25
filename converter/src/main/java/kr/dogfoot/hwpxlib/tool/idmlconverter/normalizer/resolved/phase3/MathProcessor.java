@@ -70,6 +70,7 @@ class MathProcessor {
             convertSubscriptChemicalSegments(para);
             reassembleFragmentedChemicalFormula(para);
             stitchChemicalFormulaFragments(para);
+            reassembleFragmentedChemicalReaction(para);
             demoteIsolatedSingleLetterMathEquation(para);
             return;
         }
@@ -252,6 +253,7 @@ class MathProcessor {
         convertSubscriptChemicalSegments(para);
         reassembleFragmentedChemicalFormula(para);
         stitchChemicalFormulaFragments(para);
+        reassembleFragmentedChemicalReaction(para);
         demoteIsolatedSingleLetterMathEquation(para);
     }
 
@@ -2702,6 +2704,89 @@ class MathProcessor {
             }
         }
         return false;
+    }
+
+    /**
+     * SPEC-078(B): 화살표 근거가 있는 반응식이 인접 조각(텍스트 좌변·별도 수식·orphan 첨자)으로
+     * 갈라진 것을 하나의 반응식 수식으로 재조립한다.
+     *
+     * <p>예: {@code [T "2Mg"][T "+"][EQ "O_{2} rarrow 2MgO"]} → {@code rm 2Mg+O_{2} rarrow 2MgO},
+     * {@code [EQ "rm H_{2}O_{2}"][EQ "rarrow 2H_{2}O+O_{2}"]} → 하나로,
+     * {@code [EQ "H"][EQ "rm _{2}+O_{2} rarrow H_{2}O"]} → {@code rm H_{2}+O_{2} rarrow H_{2}O}.
+     *
+     * <p><b>over-merge 방지</b>: (1) 연속 조각(화학조각 텍스트 or 화학 수식)만, (2) 한글/비화학은
+     * 즉시 종료, (3) <b>화살표(rarrow/→) 근거가 있어야만</b> 병합(완성된 단일 반응식은 조각 1개라
+     * 미대상), (4) 병합 결과가 화학식으로 유효해야 함.
+     */
+    static void reassembleFragmentedChemicalReaction(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.size() < 2) return;
+        for (int i = 0; i < items.size(); i++) {
+            if (reactionFragmentRaw(items.get(i)) == null) continue;
+            int end = i;
+            boolean hasArrow = false;
+            String color = null;
+            Integer size = null;
+            String font = null;
+            StringBuilder raw = new StringBuilder();
+            for (int j = i; j < items.size(); j++) {
+                ASTInlineItem it = items.get(j);
+                String frag = reactionFragmentRaw(it);
+                if (frag == null) break;
+                raw.append(frag);
+                if (frag.indexOf('→') >= 0 || frag.contains("rarrow")) hasArrow = true;
+                if (it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation e =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) it;
+                    if (color == null) color = e.textColor();
+                    if (font == null) font = e.preferredFontFamily();
+                    if (size == null || (e.preferredBaseUnit() != null && e.preferredBaseUnit() > size)) {
+                        if (e.preferredBaseUnit() != null) size = e.preferredBaseUnit();
+                    }
+                }
+                end = j;
+            }
+            if (end <= i || !hasArrow) continue; // 단일 항목이거나 화살표 없음 → 미병합
+            String rawStr = raw.toString();
+            if (!ChemicalFormulaPolicy.containsElementText(rawStr)) continue;
+            String script = finalizeChemicalScript(rawStr);
+            if (script == null || script.isEmpty()) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation merged =
+                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(script, "CHEM_FORMULA");
+            if (color != null) merged.textColor(color);
+            if (size != null) merged.preferredBaseUnit(size);
+            if (font != null) merged.preferredFontFamily(font);
+            for (int k = end; k >= i; k--) items.remove(k);
+            items.add(i, merged);
+        }
+    }
+
+    /** 반응식 조각의 raw 문자열. 화학조각 텍스트 or 화학 수식이면 raw, 아니면 null(=시퀀스 종료). */
+    private static String reactionFragmentRaw(ASTInlineItem it) {
+        if (it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
+            String rawEq = equationToRaw(((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) it).hwpScript());
+            if (rawEq.indexOf('→') >= 0 || ChemicalFormulaPolicy.containsElementText(rawEq)) return rawEq;
+            return null; // 비화학 수식(이름 등) → 종료
+        }
+        if (it instanceof ASTTextRun) {
+            String t = ((ASTTextRun) it).text();
+            if (t == null || t.trim().isEmpty()) return "";
+            if (!isChemicalFragmentText(t)) return null;
+            return t;
+        }
+        return null;
+    }
+
+    /** HWP 수식 스크립트를 raw 화학식 문자열로: rm 제거, _{n}→n, rarrow→→, ~→공백. */
+    private static String equationToRaw(String script) {
+        if (script == null) return "";
+        String s = script.trim();
+        if (s.startsWith("rm ")) s = s.substring(3);
+        else if (s.equals("rm")) return "";
+        s = s.replace("rarrow", "→").replace("~", " ");
+        s = s.replaceAll("_\\{([^}]*)\\}", "$1").replaceAll("\\^\\{([^}]*)\\}", "$1");
+        s = s.replace("{", "").replace("}", "").replace("_", "").replace("^", "");
+        return s;
     }
 
     private static String stripRarrowKeyword(String script) {

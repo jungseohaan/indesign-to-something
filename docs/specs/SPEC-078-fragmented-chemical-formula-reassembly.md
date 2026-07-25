@@ -38,6 +38,16 @@
    로 교체. Java `\s` 는 U+200A 를 못 잡아 `rm H_{2} O`(여전히 벌어짐)가 새어나오던 것을,
    `Character.isSpaceChar`(유니코드 공백 포함) 기준으로 전부 제거.
 
+5. **B: 반응식 좌변/조각 재조립** — `reassembleFragmentedChemicalReaction`.
+   화살표(rarrow/→) 근거가 있는 반응식이 인접 조각으로 갈라진 것을 하나로 병합.
+   예: `[T "2Mg"][T "+"][EQ "O_{2} rarrow 2MgO"]` → `rm 2Mg+O_{2} rarrow 2MgO`,
+   `[EQ "rm H_{2}O_{2}"][EQ "rarrow 2H_{2}O+O_{2}"]` → 하나로,
+   `[EQ "H"][EQ "rm _{2}+O_{2} rarrow H_{2}O"]` → `rm H_{2}+O_{2} rarrow H_{2}O`.
+   over-merge 방지: **화살표 근거 필수**(완성 반응식은 조각 1개라 미대상) + 화학조각/화학수식만
+   연속 수집 + 한글/비화학 만나면 종료. `equationToRaw`(rm 제거·_{n}→n·rarrow→→)로 raw 복원 후
+   `finalizeChemicalScript` 재조립. **미해결(진짜 내용 손실)**: `Cu+O₂→2CuO`(좌변 계수 2 통째
+   유실, 인접 조각 없음) + 답란 `N₂□□□NH₃`(□가 +/→ 연산자 삼킴 — 답란 변환 경로).
+
 4. **audit-A: 고립 단일문자 수식 강등** — `demoteIsolatedSingleLetterMathEquation`.
    GREP 규칙(단일 라틴 문자 → charStyle `수식서체관련-태광`=BT수식H-편한글씨)이 문단의
    모든 단일 라틴 문자를 수식화해 **화학자 연표 이니셜(A 아보가드로·J 돌턴·L 게이뤼삭 등)**
