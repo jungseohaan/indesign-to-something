@@ -22,6 +22,10 @@ final class AlphaSafePng {
             if (src == null) return pngData;
             Color bg = parseRgb(backgroundColor);
             boolean hasAlpha = hasNonOpaqueAlpha(src);
+            if (hasAlpha) {
+                src = trimVerticalTransparentPadding(src);
+                hasAlpha = hasNonOpaqueAlpha(src);
+            }
             if (bg == null) {
                 return hasAlpha ? flattenOnto(src, Color.WHITE) : pngData;
             }
@@ -168,7 +172,8 @@ final class AlphaSafePng {
         int paddingH = src.getHeight() - visibleH;
         double visibleRatio = (double) visibleH / (double) src.getHeight();
         double paddingRatio = (double) paddingH / (double) src.getHeight();
-        if (visibleH >= src.getHeight() || visibleRatio < 0.45 || paddingRatio < 0.20) return src;
+        if (visibleH >= src.getHeight() || paddingRatio < 0.20) return src;
+        if (visibleHorizontalCoverage(src, hasAlpha, top, bottom) < 0.60) return src;
 
         BufferedImage out = new BufferedImage(src.getWidth(), visibleH, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = out.createGraphics();
@@ -181,6 +186,23 @@ final class AlphaSafePng {
             g.dispose();
         }
         return out;
+    }
+
+    private static double visibleHorizontalCoverage(BufferedImage src, boolean hasAlpha, int top, int bottom) {
+        int left = src.getWidth();
+        int right = -1;
+        for (int y = Math.max(0, top); y <= bottom && y < src.getHeight(); y++) {
+            for (int x = 0; x < src.getWidth(); x++) {
+                int argb = src.getRGB(x, y);
+                int alpha = (argb >>> 24) & 0xff;
+                if (hasAlpha ? alpha > 8 : isNonWhiteRgb(argb)) {
+                    if (x < left) left = x;
+                    if (x > right) right = x;
+                }
+            }
+        }
+        if (right < left || src.getWidth() <= 0) return 0.0;
+        return (double) (right - left + 1) / (double) src.getWidth();
     }
 
     private static boolean isNonWhiteRgb(int argb) {

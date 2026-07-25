@@ -1739,6 +1739,11 @@ function applyRenderOwnership(entry, renderTarget, opts) {
     if (opts.exportSourceObjectIds && opts.exportSourceObjectIds.length > 0) {
         entry.exportSourceObjectIds = opts.exportSourceObjectIds;
     }
+    if (opts.absorbedFloatingShellFragmentSourceObjectIds
+            && opts.absorbedFloatingShellFragmentSourceObjectIds.length > 0) {
+        entry.absorbedFloatingShellFragmentSourceObjectIds =
+                opts.absorbedFloatingShellFragmentSourceObjectIds;
+    }
     if (opts.exportTargetObjectId !== undefined && opts.exportTargetObjectId !== null) {
         entry.exportTargetObjectId = opts.exportTargetObjectId;
     }

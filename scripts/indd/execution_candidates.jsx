@@ -293,6 +293,7 @@ function _executionCandidateContractFields() {
         "visualSourceObjectIds",
         "styleSourceObjectIds",
         "exportSourceObjectIds",
+        "absorbedFloatingShellFragmentSourceObjectIds",
         "hiddenVisualSourceObjectIds",
         "excludedInlineSourceObjectIds",
         "ownedTextFrameIds",
@@ -539,6 +540,10 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
     }
     if (objectPlan.exportSourceObjectIds) {
         candidate.exportSourceObjectIds = _sortedNumericIds(objectPlan.exportSourceObjectIds);
+    }
+    if (objectPlan.absorbedFloatingShellFragmentSourceObjectIds) {
+        candidate.absorbedFloatingShellFragmentSourceObjectIds = _sortedNumericIds(
+                objectPlan.absorbedFloatingShellFragmentSourceObjectIds || []);
     }
     if (objectPlan.exportTargetObjectId !== undefined) {
         candidate.exportTargetObjectId = objectPlan.exportTargetObjectId;

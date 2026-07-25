@@ -604,6 +604,36 @@ function _isSimpleMarkerLabelTextForSourceIndex(text) {
     return false;
 }
 
+function _paragraphStyleNamesOfTextFrameForSourceIndex(item) {
+    var out = [];
+    var seen = {};
+    function addStyleName(style) {
+        var name = "";
+        try { name = style && style.name !== undefined ? String(style.name || "") : ""; } catch (eStyleName) {}
+        if (!name || seen[name]) return;
+        seen[name] = true;
+        out.push(name);
+    }
+    try {
+        var paragraphs = item && item.paragraphs
+                ? item.paragraphs.everyItem().getElements()
+                : [];
+        for (var i = 0; paragraphs && i < paragraphs.length; i++) {
+            try { addStyleName(paragraphs[i].appliedParagraphStyle); } catch (eParagraphStyle) {}
+        }
+    } catch (eParagraphs) {
+        try {
+            var count = item && item.paragraphs && item.paragraphs.length !== undefined
+                    ? Number(item.paragraphs.length || 0)
+                    : 0;
+            for (var pi = 0; pi < count; pi++) {
+                try { addStyleName(item.paragraphs[pi].appliedParagraphStyle); } catch (eParagraphStyleIndex) {}
+            }
+        } catch (eParagraphIndex) {}
+    }
+    return out;
+}
+
 function _storyTableSourceObjectIds(story) {
     var ids = [];
     try {
@@ -1106,6 +1136,15 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         cachedInfo.leadingStyledTextRanges = [];
                     }
                 }
+                if (String(cachedInfo.kind || "") === "TextFrame"
+                        && cachedInfo.paragraphStyleNames === undefined) {
+                    try {
+                        cachedInfo.paragraphStyleNames =
+                                _paragraphStyleNamesOfTextFrameForSourceIndex(item);
+                    } catch (eCachedParagraphStyleNames) {
+                        cachedInfo.paragraphStyleNames = [];
+                    }
+                }
                 try {
                     var cachedTw = _itemTextWrapInfoForSourceIndex(item);
                     if (cachedTw && cachedTw.mode) {
@@ -1150,6 +1189,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var rawContents = null;
         var markerOnlyContents = null;
         var simpleMarkerLabelContents = null;
+        var paragraphStyleNames = [];
         var storyId = null;
         var leadingStyledTextRanges = [];
         var tableCountInStory = null;
@@ -1180,6 +1220,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         _plainTextOfTextFrameForOwnership(item));
             } catch (eSimpleMarkerLabel) {
                 simpleMarkerLabelContents = null;
+            }
+            try {
+                paragraphStyleNames = _paragraphStyleNamesOfTextFrameForSourceIndex(item);
+            } catch (eParagraphStyleNames) {
+                paragraphStyleNames = [];
             }
             try {
                 leadingStyledTextRanges = _sourceIndexLeadingStyledStoryRunRanges(item);
@@ -1257,6 +1302,7 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                     : (textLength !== null ? textLength > 0 : null),
             markerOnlyContents: markerOnlyContents,
             simpleMarkerLabelContents: simpleMarkerLabelContents,
+            paragraphStyleNames: paragraphStyleNames,
             hasTextPath: textPathInfo.hasTextPath === true,
             textPathCount: textPathInfo.textPathCount || 0,
             textPathStoryIds: textPathInfo.textPathStoryIds || [],

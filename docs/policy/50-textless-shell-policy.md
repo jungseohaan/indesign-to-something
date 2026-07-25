@@ -160,6 +160,11 @@ Execution requirements:
   editable TextFrames. Exporters may render the declared child source target even
   when that child is not itself the story anchor; this is execution of the Stage 1
   plan, not a post-plan inline/floating reclassification.
+- If such an inline carrier has a direct child badge group whose TextFrames use
+  only built-in/no paragraph styles, include at least one source-declared simple
+  marker TextFrame, and the carrier has a separate residual content/title
+  TextFrame sibling, Stage 1 may materialize that child badge as a `COMPLETE_PNG`
+  owner. The residual content/title TextFrame remains `OWNED_BY_HWPX_TEXT`.
 - Direct child shell slots are planned in Stage 1 before normalization/render
   execution, after the parent composite's closed source cluster and residual
   export sources are known. This ordering is part of ownership, not an executor
@@ -187,6 +192,17 @@ Execution requirements:
 - Child TextFrames owned by such a native inline text-shell atom inherit
   `INLINE` / `STORY_FLOW` placement from the atom in Stage 1. They must not be
   emitted again as independent floating TextFrames.
+- Same-story floating-anchored non-text decoration fragments that are recorded
+  in that atom's closed `atomicVisualSourceObjectIds` belong to the same
+  `SHELL_SLOT`. In legacy bridge paths where that closed atomic source set is
+  not available, the same rule may be applied only when the fragment's source
+  story has exactly one inline text-shell owner on the page. Stage 1 absorbs
+  those fragments into the inline shell owner's `exportSourceObjectIds` and
+  expands that owner's bounds to cover the absorbed fragment. The alternate
+  floating shell plans are hidden/dropped; the absorbed pixels themselves are
+  not hidden from the owner export. Later stages must not emit the same terminal
+  cap, tail, connector, or backdrop fragment as an independent
+  `PLACE_TEXT_SHELL`.
 - A composite rendered text shell that contains multiple direct shell slots is a
   layout container, not the canonical visible shell, only when every owned
   TextFrame is covered by distinct direct shell slots and the parent contains
