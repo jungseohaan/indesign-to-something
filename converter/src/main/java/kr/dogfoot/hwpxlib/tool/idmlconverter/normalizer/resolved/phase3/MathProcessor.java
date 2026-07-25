@@ -68,7 +68,9 @@ class MathProcessor {
                         && isDiscardableEHStructureResidue((ASTTextRun) it));
             }
             convertSubscriptChemicalSegments(para);
+            reassembleFragmentedChemicalFormula(para);
             stitchChemicalFormulaFragments(para);
+            demoteIsolatedSingleLetterMathEquation(para);
             return;
         }
 
@@ -248,7 +250,9 @@ class MathProcessor {
         }
         collapseMixedFormulaEquationClusters(ctx, para);
         convertSubscriptChemicalSegments(para);
+        reassembleFragmentedChemicalFormula(para);
         stitchChemicalFormulaFragments(para);
+        demoteIsolatedSingleLetterMathEquation(para);
     }
 
     private static boolean isDiscardableEHStructureResidue(ASTTextRun run) {
@@ -2369,7 +2373,7 @@ class MathProcessor {
             // HWP 수식 문법에서 일반 공백은 토큰 구분자일 뿐 렌더되지 않는다.
             // 화살표 양쪽의 가시 공백은 '~'(스페이스 토큰)로 표기해야 한다 (p20 실측).
             if (i > 0) joined.append(" ~ rarrow ~ ");
-            joined.append(parts[i].replace(" ", "").replace("~", ""));
+            joined.append(stripAllFormulaSpaces(parts[i]));
         }
         return kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier
                 .inferChemicalSubscriptScript(joined.toString());
@@ -2413,11 +2417,27 @@ class MathProcessor {
                         ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).sourceType())) {
                     candText = ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).hwpScript();
                     commits = true;
+                } else if (cand instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation
+                        && isBareChemicalElementScript(
+                        ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).hwpScript())) {
+                    // 아래첨자와 다음 원소 사이의 hair space(U+200A)나 폰트크기 경계 때문에
+                    // "H₂O" 의 "O" 가 별도 수식으로 떨어져 나오는 경우가 있다(rm H_{2} + O →
+                    // 두 수식이 간격 두고 렌더). 단독 원소 수식이면 선행 화학식에 흡수한다.
+                    candText = ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) cand).hwpScript();
+                    commits = true;
                 } else {
                     break;
                 }
                 tailTexts.add(candText == null ? "" : candText);
-                if (commits) commitEnd = j;
+                if (commits) {
+                    commitEnd = j;
+                } else if (commitEnd >= 0 && cand instanceof ASTTextRun
+                        && candText != null && candText.trim().matches("[0-9]+")) {
+                    // 앞서 원소가 확정된 뒤의 단독 숫자 = 마지막 원소의 아래첨자.
+                    // (예 "rm N_{2}" + 수식 "H" + 텍스트 "4" = N₂H₄ 인데, 계수가 아닌
+                    //  꼬리 첨자라 chemicalFragmentCommits 가 false 라 빠지던 것을 흡수한다.)
+                    commitEnd = j;
+                }
             }
 
             // (a) 선행 조각 체인 — 빈/공백 런은 건너뛰고 [원소 조각] → [계수] 순으로 흡수.
@@ -2504,6 +2524,184 @@ class MathProcessor {
             }
             eq.hwpScript(rebuilt);
         }
+    }
+
+    /**
+     * 스크립트가 rm/첨자/연산자 없이 원소기호 1~3자만으로 된 "단독 원소 수식"인가.
+     * (예 "O","H","Cl"). hair space/폰트크기 경계로 화학식에서 떨어져 나온 조각을
+     * 선행 화학식에 흡수할지 판정하는 데 쓴다.
+     */
+    private static boolean isBareChemicalElementScript(String script) {
+        if (script == null) return false;
+        String s = script.trim();
+        if (s.isEmpty() || s.length() > 3) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))) return false;
+        }
+        return ChemicalFormulaPolicy.lettersAreKnownElements(s);
+    }
+
+    /**
+     * SPEC-078: 파편화된 화학식 재조립.
+     *
+     * <p>hair space(U+200A)·폰트크기 경계·첨자 강등 때문에 "H₂O" 라벨이
+     * {@code [수식 "H"][텍스트 "2"][수식 "O"]} 처럼 단독원소 수식과 숫자 텍스트로
+     * 갈라지는 경우가 있다(한글에서 "H 2 O" 로 벌어져 보임). 단독원소 수식으로 시작하는
+     * 연속 조각(단독원소 수식 + 숫자/원소 텍스트)을 모아 하나의 {@code rm H_{2}O} 화학식
+     * 수식으로 재조립한다. 첨자는 {@code finalizeChemicalScript} 가 계수/첨자 위치로 추론한다.
+     *
+     * <p>과병합 방지: (1) 시퀀스는 단독원소 수식으로 시작, (2) 라틴 문자는 전부 원소기호,
+     * (3) 알려진 원소 1개 이상, (4) 한글/비화학 텍스트를 만나면 즉시 종료.
+     */
+    static void reassembleFragmentedChemicalFormula(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.size() < 2) return;
+        for (int i = 0; i < items.size(); i++) {
+            if (!isBareChemicalElementEquation(items.get(i))) continue;
+            int end = i;
+            int bareEqCount = 0;
+            String color = null;
+            Integer baseUnit = null;
+            String font = null;
+            StringBuilder raw = new StringBuilder();
+            for (int j = i; j < items.size(); j++) {
+                ASTInlineItem it = items.get(j);
+                String frag = chemicalFragmentRawText(it);
+                if (frag == null) break;
+                if (isBareChemicalElementEquation(it)) {
+                    bareEqCount++;
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation e =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) it;
+                    if (color == null) color = e.textColor();
+                    if (font == null) font = e.preferredFontFamily();
+                    if (e.preferredBaseUnit() != null
+                            && (baseUnit == null || e.preferredBaseUnit() > baseUnit)) {
+                        baseUnit = e.preferredBaseUnit();
+                    }
+                }
+                raw.append(frag);
+                end = j;
+            }
+            if (end <= i || bareEqCount < 1) continue;
+            String rawStr = raw.toString().replaceAll("\\s+", "");
+            if (rawStr.length() < 2) continue;
+            if (!ChemicalFormulaPolicy.containsElementText(rawStr)
+                    || !ChemicalFormulaPolicy.lettersAreKnownElements(rawStr)) continue;
+            String script = finalizeChemicalScript(rawStr);
+            if (script == null || script.isEmpty()) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation merged =
+                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(script, "CHEM_FORMULA");
+            if (color != null) merged.textColor(color);
+            if (baseUnit != null) merged.preferredBaseUnit(baseUnit);
+            if (font != null) merged.preferredFontFamily(font);
+            for (int k = end; k >= i; k--) items.remove(k);
+            items.add(i, merged);
+            // i 는 방금 삽입한 merged — 다음 반복에서 i+1 로 진행
+        }
+    }
+
+    private static boolean isBareChemicalElementEquation(ASTInlineItem it) {
+        return it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation
+                && isBareChemicalElementScript(
+                ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) it).hwpScript());
+    }
+
+    /**
+     * 재조립 시퀀스에 포함될 조각의 raw 텍스트. 조각이 아니면 null, 공백 조각은 "".
+     * 단독원소 수식(script)·숫자/원소/'+' 로만 된 짧은 텍스트런만 조각으로 인정한다.
+     */
+    private static String chemicalFragmentRawText(ASTInlineItem it) {
+        if (it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation e =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) it;
+            if (isBareChemicalElementScript(e.hwpScript())) return e.hwpScript().trim();
+            return null; // rm/첨자 포함 수식은 시퀀스 종료 (stitchChemicalFormulaFragments 가 처리)
+        }
+        if (it instanceof ASTTextRun) {
+            String t = ((ASTTextRun) it).text();
+            if (t == null) return "";
+            String tr = t.trim();
+            if (tr.isEmpty()) return "";
+            boolean hasLatin = false;
+            for (int i = 0; i < tr.length(); i++) {
+                char c = tr.charAt(i);
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) hasLatin = true;
+                else if (!((c >= '0' && c <= '9') || c == '+' || c == ' ')) return null;
+            }
+            if (hasLatin && !ChemicalFormulaPolicy.lettersAreKnownElements(tr)) return null;
+            return tr;
+        }
+        return null;
+    }
+
+    /**
+     * 화학식 스크립트에서 모든 공백류(일반 공백·hair space U+200A·NBSP 등 유니코드 공백)와
+     * '~' 토큰을 제거한다. 화학식은 공백이 없어야 하며, Java {@code \\s} 는 U+200A 를 잡지
+     * 못해 "H_{2} O" 처럼 hair space 가 새어들어 "H₂ O" 로 벌어지는 것을 막는다.
+     */
+    private static String stripAllFormulaSpaces(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '~' || Character.isWhitespace(c) || Character.isSpaceChar(c)) continue;
+            b.append(c);
+        }
+        return b.toString();
+    }
+
+    /**
+     * SPEC-078(audit-A): 고립된 단일 라틴 문자 수식을 이탤릭 텍스트로 강등한다.
+     *
+     * <p>GREP 규칙(단일 라틴 문자 매칭)이 문단의 모든 단일 라틴 문자에 수식(BT수식) charStyle 을
+     * 입히면(예 수식서체관련-태광 = BT수식H-편한글씨), 화학자 연표의 이름 이니셜
+     * (A 아보가드로·J 돌턴·L 게이뤼삭 등)까지 단일문자 수식이 된다. 주변에 수식 근거(인접
+     * 수식)가 없는 단독 단일 문자는 수식이 아니라 이탤릭 텍스트로 되돌린다.
+     */
+    static void demoteIsolatedSingleLetterMathEquation(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+        for (int i = 0; i < items.size(); i++) {
+            if (!(items.get(i) instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) items.get(i);
+            String letter = singleLatinLetterOfScript(eq.hwpScript());
+            if (letter == null) continue;
+            if (adjacentItemIsEquation(items, i, -1) || adjacentItemIsEquation(items, i, 1)) continue;
+            ASTTextRun tr = new ASTTextRun();
+            tr.text(letter);
+            tr.fontStyle("Italic");
+            if (eq.textColor() != null) tr.textColor(eq.textColor());
+            if (eq.preferredBaseUnit() != null) tr.fontSizeHwpunits(eq.preferredBaseUnit());
+            items.set(i, tr);
+        }
+    }
+
+    /** 스크립트가 (rm 접두사 제외) 단일 라틴 문자면 그 문자를, 아니면 null. */
+    private static String singleLatinLetterOfScript(String script) {
+        if (script == null) return null;
+        String s = script.trim();
+        if (s.startsWith("rm ")) s = s.substring(3).trim();
+        if (s.length() != 1) return null;
+        char c = s.charAt(0);
+        return ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) ? String.valueOf(c) : null;
+    }
+
+    /** idx 에서 dir(+1/-1) 방향으로 공백 텍스트런을 건너뛴 첫 비공백 항목이 수식인가. */
+    private static boolean adjacentItemIsEquation(List<ASTInlineItem> items, int idx, int dir) {
+        for (int j = idx + dir; j >= 0 && j < items.size(); j += dir) {
+            ASTInlineItem it = items.get(j);
+            if (it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) return true;
+            if (it instanceof ASTTextRun) {
+                String t = ((ASTTextRun) it).text();
+                if (t != null && !t.trim().isEmpty()) return false; // 비공백 텍스트 → 수식 근거 아님
+                // 공백 런은 건너뜀
+            } else {
+                return false;
+            }
+        }
+        return false;
     }
 
     private static String stripRarrowKeyword(String script) {
