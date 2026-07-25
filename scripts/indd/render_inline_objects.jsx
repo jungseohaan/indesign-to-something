@@ -1258,6 +1258,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                             || inlineCandidate.compositeRole === "textless_group_visual_slot"
                             || inlineCandidate.slotRole === "inline_text_frame_shell_slot"
                             || inlineCandidate.compositeRole === "inline_visible_text_frame_shell"
+                            || inlineCandidate.slotRole === "floating_text_frame_shell_slot"
+                            || inlineCandidate.compositeRole === "floating_visible_text_frame_shell"
                             || inlineCandidate.slotRole === "inline_editable_text_shell_composite"
                             || inlineCandidate.compositeRole === "inline_editable_text_shell_composite"
                             || inlineCandidate.slotRole === "table_textless_shell_slot"

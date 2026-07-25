@@ -34,6 +34,9 @@ PAGE_INVENTORY_PATH = REPO_ROOT / "scripts" / "dev" / "page_inventory.py"
 IDML_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "idml"
 PREVIEW_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "preview"
 PAGE_PLANE_CACHE_ROOT = REPO_ROOT / "output" / "cache" / "page_background_plane"
+INDESIGN_EXTRACT_LOCK_DIR = REPO_ROOT / ".codex_tmp" / "indesign-extract.lock"
+INDESIGN_EXTRACT_LAST_FLAG = REPO_ROOT / ".codex_tmp" / "indesign-extract.last.json"
+INDESIGN_EXTRACT_STALE_SECONDS = 2 * 60 * 60
 
 CASE_ALIASES = {
     "park31-u1": ("중3-1국어교과서(박영민)", "u1"),
@@ -173,6 +176,93 @@ def try_run(cmd: List[str], *, cwd: Path = REPO_ROOT) -> subprocess.CompletedPro
         capture_output=True,
         text=True,
     )
+
+
+def process_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def read_json_if_exists(path: Path) -> Dict[str, Any]:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def acquire_indesign_extract_lock(issue_dir: Path, label: str, dry_run: bool) -> Optional[Dict[str, Any]]:
+    if dry_run:
+        return None
+    INDESIGN_EXTRACT_LOCK_DIR.parent.mkdir(parents=True, exist_ok=True)
+    waited = False
+    last_notice = 0.0
+    while True:
+        try:
+            INDESIGN_EXTRACT_LOCK_DIR.mkdir()
+            now = time.time()
+            state = {
+                "status": "running",
+                "label": label,
+                "pid": os.getpid(),
+                "startedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "startedAtEpoch": now,
+                "issueDir": str(issue_dir),
+            }
+            (INDESIGN_EXTRACT_LOCK_DIR / "state.json").write_text(
+                json.dumps(state, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"[issue] indesign-lock=acquired dir={INDESIGN_EXTRACT_LOCK_DIR}")
+            return state
+        except FileExistsError:
+            state = read_json_if_exists(INDESIGN_EXTRACT_LOCK_DIR / "state.json")
+            pid = int(state.get("pid") or -1)
+            started = float(state.get("startedAtEpoch") or 0.0)
+            stale = not state or (pid > 0 and not process_is_alive(pid)) or (
+                started > 0.0 and time.time() - started > INDESIGN_EXTRACT_STALE_SECONDS
+                and not process_is_alive(pid)
+            )
+            if stale:
+                print(f"[issue] indesign-lock=stale pid={pid}; removing {INDESIGN_EXTRACT_LOCK_DIR}")
+                shutil.rmtree(INDESIGN_EXTRACT_LOCK_DIR, ignore_errors=True)
+                continue
+            now = time.time()
+            if not waited or now - last_notice >= 30.0:
+                owner = state.get("issueDir") or "unknown"
+                print(f"[issue] indesign-lock=waiting owner={owner} pid={pid}")
+                waited = True
+                last_notice = now
+            time.sleep(2)
+
+
+def release_indesign_extract_lock(state: Optional[Dict[str, Any]], status: str, error: Optional[str] = None) -> None:
+    if not state:
+        return
+    ended = dict(state)
+    ended["status"] = status
+    ended["endedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    ended["endedAtEpoch"] = time.time()
+    if error:
+        ended["error"] = error
+    try:
+        INDESIGN_EXTRACT_LAST_FLAG.write_text(
+            json.dumps(ended, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    finally:
+        shutil.rmtree(INDESIGN_EXTRACT_LOCK_DIR, ignore_errors=True)
+        print(f"[issue] indesign-lock=released status={status}")
 
 
 def load_module(path: Path, name: str) -> Any:
@@ -676,7 +766,14 @@ def ensure_preview_pdf(
 
     script_path = issue_dir / "run_preview_export.scpt"
     write_preview_applescript(script_path, app_name, indd_path, extract_dir / "preview.pdf", start_page, end_page)
-    run(["osascript", str(script_path)], dry_run=dry_run)
+    lock_state = acquire_indesign_extract_lock(issue_dir, "preview", dry_run)
+    try:
+        run(["osascript", str(script_path)], dry_run=dry_run)
+    except Exception as exc:
+        release_indesign_extract_lock(lock_state, "failed", str(exc))
+        raise
+    else:
+        release_indesign_extract_lock(lock_state, "completed")
     store = store_cached_preview(indd_path, extract_dir, start_page, end_page, enabled)
     return {"restore": restore, "store": store}
 
@@ -960,9 +1057,17 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(f"[issue] idml-cache={idml_cache_restore.get('reason')} hit={idml_cache_restore.get('hit')} dir={idml_cache_restore.get('cacheDir')}")
     print(f"[issue] page-plane-cache=enabled dir={page_plane_cache}")
     print(f"[issue] preview-cache={'disabled' if args.skip_pdf else 'enabled'}")
+    print(f"[issue] indesign-lock-dir={INDESIGN_EXTRACT_LOCK_DIR}")
     print(f"[issue] output={issue_dir}")
-    ensure_indesign_running(args.app, issue_dir, args.dry_run)
-    run(["osascript", str(script_path)], dry_run=args.dry_run)
+    lock_state = acquire_indesign_extract_lock(issue_dir, "extract", args.dry_run)
+    try:
+        ensure_indesign_running(args.app, issue_dir, args.dry_run)
+        run(["osascript", str(script_path)], dry_run=args.dry_run)
+    except Exception as exc:
+        release_indesign_extract_lock(lock_state, "failed", str(exc))
+        raise
+    else:
+        release_indesign_extract_lock(lock_state, "completed")
 
     if not args.dry_run:
         issue_meta = {
