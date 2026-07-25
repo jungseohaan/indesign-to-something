@@ -1,130 +1,83 @@
 {
  "meta": {
-  "source": "u1-058-restored.hwpx",
-  "gitRev": "daec54d5"
+  "source": "중3과학교과서-u1-documents-p008-049.hwpx",
+  "gitRev": "48683eff"
  },
  "signature": {
   "sections": 1,
   "equations": [
-   "g",
+   "rm □H_{2}",
+   "O",
+   "rm H_{2}O",
+   "rm H_{2}O",
+   "rm H_{2}O",
+   "rm H_{2}O",
+   "rm H_{2}",
+   "rm H_{2}",
+   "rm O_{2}",
+   "rm H_{2}",
+   "rm O_{2}",
+   "rm H_{2}",
+   "rm H_{2}O",
+   "rm O_{2}",
+   "rm O_{2}",
+   "rm H_{2}",
+   "rm O_{2}",
+   "rm N_{2}□□□NH_{3}",
+   "rm N_{2}□□H_{2}□□NH_{3}",
+   "rm N_{2}",
+   "rm H_{2}",
+   "rm NH_{3}",
+   "rm N_{2}+□H_{2} ~ rarrow ~ □NH_{3}",
+   "rm H_{2}O_{2} ~ rarrow ~ □H_{2}O+O_{2}",
+   "rm N_{2}+3",
+   "H",
+   "rm ~ rarrow ~ 2NH_{3}",
+   "O",
+   "H",
+   "rm CaO+H_{2}O ~ rarrow ~ Ca(OH)_{2}",
+   "rm CH_{4}",
+   "O",
+   "rm CO_{2}",
    "H",
    "O",
-   "H_{2}O",
-   "H_{2}O",
-   "H_{2}O",
-   "H_{2}O",
-   "H_{2}",
-   "H_{2}",
-   "O_{2}",
-   "H_{2}",
-   "O_{2}",
-   "H_{2}",
-   "H_{2}O",
-   "O_{2}",
-   "O_{2}",
-   "H_{2}",
-   "O_{2}",
+   "rm CaCO_{3}",
+   "rm CaCl_{2}",
+   "rm CO_{2}",
+   "H",
+   "O",
+   "rm Cu_{2}",
+   "O",
    "N",
-   "NH_{3}",
-   "N",
-   "H",
-   "NH_{3}",
-   "N_{2}",
-   "H_{2}",
-   "NH_{3}",
-   "H_{2}O_{2} ~ rarrow ~",
-   "H_{2}O+O_{2}",
-   "N_{2}+3H_{2} ~ rarrow ~ 2NH_{3}",
-   "O",
-   "H",
-   "CaO+H_{2}O ~ rarrow ~ Ca(OH)_{2}",
-   "CH_{4}",
-   "O",
-   "CO_{2}",
    "H",
    "O",
-   "CO_{2}",
-   "H_{2}O",
-   "Cu_{2}",
-   "O",
-   "N",
-   "H_{2}O",
-   "H_{2}",
-   "O_{2}",
-   "N_{2}",
-   "H_{2}",
-   "NH_{3}",
+   "rm H_{2}",
+   "rm O_{2}",
+   "rm N_{2}",
+   "rm H_{2}",
+   "rm NH_{3}",
    "A.,                ",
-   "H_{2}",
-   "O_{2}",
+   "rm H_{2}",
+   "rm O_{2}",
    "J",
    "A",
-   "Gay-Lussac",
+   "rm Gay-Lussac",
    "J",
    "L",
-   "H_{2}",
-   "O_{2}",
-   "g",
-   "g",
-   "g",
-   "H_{2}+O_{2} ~ rarrow ~ H_{2}O",
-   "Cu+O_{2} ~ rarrow ~ 2CuO",
-   "H_{2}O_{2} ~ rarrow ~ 2H_{2}O+O_{2}",
-   "CH_{4}+2O_{2} ~ rarrow ~ CO_{2}+2H_{2}O",
-   "CaCO_{3}+2HCl ~ rarrow ~ CaCl_{2}+CO_{2}+2H_{2}O",
-   "N_{2}+3H_{2} ~ rarrow ~ 2NH_{3}",
-   "2H_{2}+O_{2} ~ rarrow ~ 2H_{2}O",
+   "rm H_{2}",
+   "rm O_{2}",
+   "H",
+   "rm _{2}+O_{2} ~ rarrow ~ H_{2}",
+   "O",
+   "rm Cu+O_{2} ~ rarrow ~ 2CuO",
+   "H",
+   "rarrow 2 H_{2}O+O_{2}",
+   "rm CH_{4}+2O_{2} ~ rarrow ~ CO_{2}+2H_{2}",
+   "O",
+   "rm CaCO_{3}+2HCl ~ rarrow ~ CaCl_{2}+CO_{2}+2H_{2}O",
    "I"
   ],
   "tables": [
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
    {
     "rc": 1,
     "cc": 1,
@@ -192,46 +145,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "#",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "(가) 양초",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "(가)~(다)에서 볼 수 있는 물질의 변화를",
     "fills": [],
     "filledCells": 0,
@@ -240,22 +153,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "(나) 얼음",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "(다) 사과",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "+",
     "fills": [],
     "filledCells": 0,
@@ -313,22 +210,6 @@
     "rc": 1,
     "cc": 1,
     "head": "+",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "+",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": ", . ., 1778￣1850",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -800,46 +681,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "1",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "1",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "1",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "1 단계",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "1.조사한 과학 기술 사례 중 한 가지를 선",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "1.화학 변화와 화학 반응식",
     "fills": [],
     "filledCells": 0,
@@ -896,167 +737,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "100%",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "11.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "12 쪽 학습 목표를 달성했는지 다음 문제로",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "14 쪽 학습 목표를 달성했는지 다음 문제로",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "16 쪽 학습 목표를 달성했는지 다음 문제로",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1240,22 +921,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "2 HCl염산",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2 단계",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "2 수소",
     "fills": [],
     "filledCells": 0,
@@ -1264,39 +929,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "2 암모니아",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2. 과 의 실험 결과를 공유 플랫폼에 올려",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "2. 관찰 봉지를 손이나 팔에 대어 보고 봉",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2. 모형 이용 색이 다른 원형 자석에 원소",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2. 색이 다른 원형 자석에 원소 기호 붙임",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1328,14 +961,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "2.협력적 소통 조사한 내용을 모둠 구성원과",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "2.화학 반응의 규칙성",
     "fills": [],
     "filledCells": 0,
@@ -1392,7 +1017,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "24 쪽 학습 목표를 달성했는지 다음 문제로",
+    "head": "2HCl염산",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1400,15 +1025,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "28 쪽 학습 목표를 달성했는지 다음 문제로",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2Mg + 2 2MgO마그네슘산소산화 마그네",
+    "head": "2물",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1417,54 +1034,6 @@
     "rc": 1,
     "cc": 1,
     "head": "3",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "3",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "3",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "3",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "3 단계",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "3 수소",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "3. 19 쪽 표에 화학 반응식과 화학 반응",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1520,15 +1089,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "32 쪽 학습 목표를 달성했는지 다음 문제로",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "38 쪽 학습 목표를 달성했는지 다음 문제로",
+    "head": "4",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1544,14 +1105,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "4. 반응 전후에 각 원자의 수를 종류별로 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "4. 표에 반응물의 모형을 그리고 각 입자 ",
     "fills": [],
     "filledCells": 0,
@@ -1560,7 +1113,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "40 쪽 학습 목표를 달성했는지 다음 문제로",
+    "head": "5",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1696,47 +1249,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": ":",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": ":",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": ":",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": ":",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "= ::",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "Avogadro, ., 1776￣1856",
+    "head": "= □::",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1745,30 +1258,6 @@
     "rc": 1,
     "cc": 1,
     "head": "C",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "CaCO3탄산 칼슘",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "CaCl2염화 칼슘",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "Dalton, ., 1766￣1844",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2048,14 +1537,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "QR 16",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "QR 17",
     "fills": [],
     "filledCells": 0,
@@ -2088,23 +1569,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "QR 20",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "QR 3",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "QR 4",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2129,14 +1594,6 @@
     "rc": 1,
     "cc": 1,
     "head": "QR 7",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "QR 8",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2176,14 +1633,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "| 그림 1-12 | 암모니아 기체가 생성될",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "| 그림 1-13 | 온도와 압력이 같을 때",
     "fills": [],
     "filledCells": 0,
@@ -2209,14 +1658,6 @@
     "rc": 1,
     "cc": 1,
     "head": "| 그림 1-16 | 주변에서 볼 수 있는 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "| 그림 1-2 | 이산화 탄소와 반응했을 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2256,14 +1697,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "| 그림 1-7 | 강철 솜의 연소",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "| 그림 1-8 | 산화 구리(Ⅱ)를 구성하",
     "fills": [],
     "filledCells": 0,
@@ -2273,94 +1706,6 @@
     "rc": 1,
     "cc": 1,
     "head": "| 그림 1-9 | 물 생성 과정에서의 일정",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "| 보기 |ㄱ. 물이 끓는다.ㄴ. 종이가 탄",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "| 보기 |ㄱ. 화학 반응식의 계수비는 부피",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "• 물이 생성될 때 수소나 산소 중 한 물질",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "• 반응물 모형을 만든 원형 자석을 모두 사",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "• 색이 다른 여러 종류의 원형 자석을 준비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "• 시약을 다룰 때 보안경을 착용하고, 피부",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "• 시약을 다룰 때 보안경을 착용하고, 피부",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "• 실험하는 동안 창문을 열어 환기가 되도록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "• 실험하는 동안 창문을 열어 환기가 되도록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "•일정 성분비 법칙 시뮬레이션•일정 성분비 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "→",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2408,14 +1753,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "▲ 강철 솜",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "▲ 금속 산화물과 알루미늄이 반응할 때 방출",
     "fills": [],
     "filledCells": 0,
@@ -2449,14 +1786,6 @@
     "rc": 1,
     "cc": 1,
     "head": "▲ 물이 끓는다.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "▲ 산화 철",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2504,14 +1833,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "▲ 화학 반응을 화학 반응식으로 표현하는 방",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "●계수 화학 반응식에서 화학식 앞에 있는 숫",
     "fills": [],
     "filledCells": 0,
@@ -2529,14 +1850,6 @@
     "rc": 1,
     "cc": 1,
     "head": "●앙금 일반적으로 용매에 녹지 않고 가라앉는",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "●열 변색 붙임딱지 온도에 따라 색이 변하는",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2584,119 +1897,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "가지 달린 삼각 플라스크",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "가치·태도",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "각 모둠에서 작성한 과학 기술 안내서를 발표",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "각 모둠에서 조사한 내용을 공유 플랫폼에 올",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "각 실험에서 반응한 수소 기체와 산소 기체의",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "각 화학 반응에서 열에너지 출입은 어떠한지 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2728,7 +1929,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "개념 확인 메테인 연소 반응은 ( 발열, 흡",
+    "head": "개념 적용하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2736,71 +1937,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "개념 확인 물질의 성질은 변하지 않으면서 모",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "개념 확인 일정한 온도와 압력에서 기체가 반",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "개념 확인 탄산수소 나트륨과 식초가 반응하면",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "개념 확인 화학 반응식에서 계수비는 반응물과",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "개념 확인 화학 반응이 일어날 때 ( )을/",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "개념 확인 화학 반응이 일어날 때 물질을 구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "개념 확인 화합물을 구성하는 성분 원소 사이",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "검색어",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "게이뤼삭",
+    "head": "개념 정리하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2840,263 +1977,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "계수비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "고려할 점",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "고무관",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "고무관",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "고무마개",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "공유하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "공학",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능 과 의 탐구 활동으로 물질의 질량",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능 요소와 물의 화학 반응을 이용해 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능 자료를 그래프로 옳게 변환하고, ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능 탄산수소 나트륨과 식초가 반응하면",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과정·기능 화학 반응을 모형으로 옳게 나타내",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학 기술의 원리",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학 역량 기르기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "과학사 극본 만들기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학이",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학이",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학이",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학적 증거에 기반하여 주장하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "과학적이고 창의적인 질문 만들기 에서 이야기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "구리 가루",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "구리:산소=4:1",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3120,23 +2001,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "구리와 산화 구리(Ⅱ)의 질량 측정 결과",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "그런데 더 많은 음식을 데우려면 열에너지가 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "그렇구나! 돌턴의 원자 개념 덕분에 질량 보",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3152,39 +2017,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "금속 산화물과 알루미늄이 반응하면서 방출하는",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "금속을 녹여 이어 붙이는 것을 용접이라고 하",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "기술",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "기체 반응 법칙은 모든 화학 반응에 적용될까",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "기체 반응에서 기체의 부피 관계 해석하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3216,63 +2049,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "기체가 차지하는 부피",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "기체가 차지하는 부피",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "기체의 부피비와 입자 수의 비는 어떤 관계가",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "깔때기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "꼭 포함해야 하는 용어화학 변화, 생성, 열",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 학습 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 학습 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 학습 확인하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3288,151 +2065,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "나의 활동 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "나의 활동확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "내 생각에는",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "냉각 팩",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "냉각수",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "너무 더워.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "다르게 해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "다르게해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "다르게해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "다르게해 보기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3448,62 +2081,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "단원을 학습하면서",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "달걀 껍데기와 염산 반응에서 질량 변화 관찰",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "달걀껍데기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "더알아보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "더알아보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "더해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "돌턴",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "돌턴이 제안한 원자 개념에서부터 분자 개념이",
     "fills": [],
     "filledCells": 0,
@@ -3512,39 +2089,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "두 번째 블록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "두 번째 블록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "두 번째 블록 찾기 발열 팩에 붓는 물의 양",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "두 종류 이상의 원소들이 결합하여 화합물을 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "디지털 탐구 도구 활용하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3561,14 +2106,6 @@
     "rc": 1,
     "cc": 1,
     "head": "로켓에는 ○○ kg의 연료와△△ kg의 산소",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "맞아. 같은 부피에 같은 수의 원자가 들어 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3608,78 +2145,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "모형 개발 및 이용하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "모형 개발 및 이용하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "무엇을 알아볼까 기체가 반응하여 새로운 기체",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "무엇을 알아볼까 모형을 이용하여 화학 반응에",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "무엇을 알아볼까 실험 자료를 해석하여 화합물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "무엇을 알아볼까 우리 주변에서 일어나는 물질",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "무엇을 알아볼까 화학 반응에서 열에너지가 출",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "무엇을 알아볼까 화학 반응에서의 열에너지 출",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "무엇을 알아볼까 화학 반응을 화학 반응식으로",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "무엇을 알아볼까 화학 반응이 일어날 때 반응",
     "fills": [],
     "filledCells": 0,
@@ -3696,7 +2161,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "무엇을 알아볼까 화학 변화에서 새로운 물질이",
+    "head": "문제 해결력 기르기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3704,39 +2169,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "무엇을 알아볼까 화합물에서 성분 원소의 질량",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "문제 해결에 적용 및 설명하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "문제를 인식하고 가설 설정하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "문제발견하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "문제해결하기",
+    "head": "문제 해결하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3753,70 +2186,6 @@
     "rc": 1,
     "cc": 1,
     "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물 분자를 구성하는 성분 원소의 질량비",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3825,14 +2194,6 @@
     "rc": 1,
     "cc": 1,
     "head": "물 생성 반응의 화학 반응식 완성!",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물리 변화",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3856,143 +2217,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "물을 부었을 때 발열 팩에서 일어나는 물질의",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물을 부으면 뜨거워지는발열 팩 속에는 산화 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물이 금방 뜨거워집니다.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물이 담긴 지퍼 백을 요소가 담긴 봉지에 넣",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물질의 변화 알아보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "물질의 변화⑴ ❶ 변화: 물질의 성질은 변하",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "물질의 변화에는 어떤 것이 있을까?장작이 타",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "묽은 수산화나트륨 용액+페놀프탈레인용액",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "묽은 염산",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "묽은염산",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "미래 에너지 전문가 되어 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응 전",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응 후",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응 후 용액",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응 후용액",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4048,23 +2273,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "반응물과 생성물로 화학 반응 나타내기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "반응물과 생성물로화학 반응 나타내기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물과 생성물을 화학식으로 표현하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4104,47 +2313,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "반응물의 산소 원자는 2 개이고, 생성물의 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물의 수소 원자가 2 개이고, 생성물의 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물인 수소와 산소는 의 왼쪽에 적고, 생",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물인 수소의 화학식은 H2, 산소의 화학",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "반응하는 질소와 수소, 생성되는 암모니아의 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "발열 도시락",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4168,30 +2337,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "발열 도시락에서 발생하는 열에너지의 양을 조",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "발열 도시락은산화 칼슘과 물의 발열 반응을 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "발열 반응",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "발열 반응",
     "fills": [],
     "filledCells": 0,
@@ -4201,38 +2346,6 @@
     "rc": 1,
     "cc": 1,
     "head": "발열 팩",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "발열 팩",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "발열 팩에 물을 부었을 때 발열 팩이 뜨거워",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "발열 팩에 붓는 물의 양을 조절하는 까닭을 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "발열 팩을 그릇에 넣고 물을 부으니",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4256,22 +2369,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "볶음밥이 따뜻하게데워졌어.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "본문을 학습하면서 얻은 블록을 조합하여 문제",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "부피비",
     "fills": [],
     "filledCells": 0,
@@ -4289,22 +2386,6 @@
     "rc": 1,
     "cc": 1,
     "head": "부피비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "부피비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "분자 개념 덕분에 기체 반응 법칙도 설명할 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4313,22 +2394,6 @@
     "rc": 1,
     "cc": 1,
     "head": "빵 반죽을 오븐에 넣어 가열하면 제빵 소다 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "뿌옇게흐려진다.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "산소",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4384,63 +2449,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "산화 구리(Ⅱ)",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "산화 구리(Ⅱ)의 질량이 구리의 질량보다 증",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "산화 칼슘과 물의 반응은 기체 반응이 아니므",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "산화 칼슘과 물이 반응하면 화학 변화가 일어",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "산화 칼슘과 물이 반응할 때 열에너지를 방출",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "산화 칼슘과 물이반응할 때 전체 질량은 변하",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "산화 칼슘과 물이반응해 수산화 칼슘을 생성하",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "산화 칼슘이 모두 반응하는 데 필요한 물의 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4464,7 +2473,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "삼각 플라스크에 수산화 바륨 10과 염화 암",
+    "head": "삼각 플라스크에 수산화 바륨 10g과 염화 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4504,103 +2513,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "생성물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "생성물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "생성물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "생성물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "생성물의 수소 원자가 4 개이니 반응물의 수",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "생활에 적용해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "석회수",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "석회수",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "설탕",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "세 번째 블록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "세 번째 블록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "세 번째 블록 찾기 발열 팩에 물을 부으면 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "손난로",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4617,22 +2530,6 @@
     "rc": 1,
     "cc": 1,
     "head": "손난로를가져왔어야 했는데.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "수산화 바륨+염화 암모늄",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "수소",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4680,14 +2577,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "수소 원자와 산소 원자가 일정한 ( )(으)",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "수소 원자의 수를 비교하면 반응 전에 4 개",
     "fills": [],
     "filledCells": 0,
@@ -4696,127 +2585,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "수학",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "수학적 사고력과 컴퓨팅 사고력 활용하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "스스로 확인하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "식초",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "식초",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "실험을 해 보니 일정한 온도와 압력에서 기체",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "아,그렇구나!",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "아보가드로",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "아이오딘화 칼륨 수용액",
+    "head": "스스로 평가하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4832,47 +2601,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "아이오딘화칼륨 수용액",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "암모니아 생성 반응에서 질소 분자 2 개와 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "암모니아 생성 반응의 화학 반응식을 나타낸 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "야외에 있어도 시원할 수는 없나?",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "어떤 용도로 사용하는가? 안전하게 사용할 수",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "어떻게 따뜻해졌지?",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -4888,54 +2617,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "에듀넷(www.edunet.net)누리집의 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "연소",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "열 변색 붙임딱지(저온용)",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "열 변색 붙임딱지(체온용)",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "열 봉합기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "열 봉합기로 봉지 입구를 밀봉한다.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "열에너지",
     "fills": [],
     "filledCells": 0,
@@ -4953,14 +2634,6 @@
     "rc": 1,
     "cc": 1,
     "head": "열에너지",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "열에너지가 출입하는 화학 반응 예 조사하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5000,95 +2673,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "염화 칼슘과 물이 반응할 때는 주변으로 열에",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "예 나무가 연소할 때 열에너지를 방출한다.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "예술",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "오개념 바로잡기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "요소",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5112,23 +2697,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "우리 생활에서 활용하는 예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "우리 주변에서는 | 그림 1-16 |과 같이",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "우리 주변의 모든 물질은 원자로 이루어져 있",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5144,14 +2713,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "우아,신기하다!",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "윗부분에 음식을 넣으면",
     "fills": [],
     "filledCells": 0,
@@ -5160,30 +2721,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "유리 막대",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "유리관",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "을",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "이 단원과 관련해 이미 알고 있는 것에 표시",
     "fills": [],
     "filledCells": 0,
@@ -5201,14 +2738,6 @@
     "rc": 1,
     "cc": 1,
     "head": "이 단원과 관련해 이미 알고 있는 것에 표시",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "이 단원과 관련해서 더 알고 싶은 내용을 이",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5225,14 +2754,6 @@
     "rc": 1,
     "cc": 1,
     "head": "이 단원에서 공부한 화학 반응의 규칙성에 대",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "이 단원을 마무리하며나의 학습 확인하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5304,22 +2825,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "이 단원을 배우면화학 변화의 의미를 알고, ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "이 반응에서 화학 반응 전후에 물질을 이루는",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "이산화 탄소",
     "fills": [],
     "filledCells": 0,
@@ -5329,14 +2834,6 @@
     "rc": 1,
     "cc": 1,
     "head": "이산화 탄소",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "이제 발열 도시락에서 발생하는 열에너지의 양",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5368,31 +2865,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "인터넷 검색",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "일정 성분비 법칙을 모형으로 설명하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "일정 성분비 법칙이 성립하는 까닭은 무엇일까",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "일정한 온도와 압력에서 수증기 30 mL를 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5408,22 +2881,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "일정한 온도와 압력에서 질소 30 mL, 수",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "입구가 넓은 플라스틱 병을 사용하고, 병의 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "입자 수의 비",
     "fills": [],
     "filledCells": 0,
@@ -5433,22 +2890,6 @@
     "rc": 1,
     "cc": 1,
     "head": "입자 수의 비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "자료 변환·비교·분석·해석하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "자료 수집하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5457,14 +2898,6 @@
     "rc": 1,
     "cc": 1,
     "head": "정리해 볼까 1. 고안한 생활용품에서 화학 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "정리해 볼까 1. 과 의 실험 결과를 각각 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5504,14 +2937,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "조합하면 문제를 해결할 수 있어.",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "종이는 타면 가벼워진다는데.",
     "fills": [],
     "filledCells": 0,
@@ -5528,207 +2953,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "주철관",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "준비물|아이오딘화 칼륨 수용액, 질산 은 수",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "준비물|연필, 지우개",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "준비물|요소, 물, 투명 봉지, 지퍼 백, ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "준비물|원형 자석, 자석 칠판, 원소 기호 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "준비물|탄산수소 나트륨, 식초, 석회수, 가",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지식·이해",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "지퍼 백을 손으로 눌러 물이 나오게 한 다음",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "직업, 주로 하는 일, 열에너지 활용 방법",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "질량 보존 법칙을 모형으로 알아보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "질량 보존 법칙이 성립하는 까닭은 무엇일까?",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "질산 은 수용액",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "질산 은수용액",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "질소",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5752,7 +2977,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "질소 암모니아2 2 2",
+    "head": "질소 암모니아",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5776,7 +3001,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "창의 융합",
+    "head": "창의 융합 프로젝트",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5784,55 +3009,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "창의적으로해결하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "처음 답한 것과 지금 정리한 내용을 비교해서",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "첫 번째 블록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "첫 번째 블록",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "첫 번째 블록 찾기 물을 부으면 발열 팩에서",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "친구들과 함께 실험 자료를 해석하고 화학 반",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탄산수소 나트륨",
+    "head": "탄산 칼슘",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -5848,143 +3025,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "탄산수소나트륨",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탐구 결과를 해석하여 결론 도출하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "평가 질문을 읽고 내 성취도를 점으로 표시한",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "프로젝트",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "핀치 집게",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "핀치 집게",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "핀치 집게",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -6000,87 +3041,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "함께발견하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "해 보기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "협력적 소통하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "화학 반응 전후에 원자의 종류와 수가 같은지",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 반응 전후의 질량 변화 관찰하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 반응 후 새롭게 만들어진 물질",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -6096,31 +3057,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "화학 반응과 화학 반응식⑴ 화학 반응: ❺이",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 반응식 해석하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "화학 반응식으로 무엇을 알 수 있을까?다음 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 반응식의 계수 맞추기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -6145,14 +3082,6 @@
     "rc": 1,
     "cc": 1,
     "head": "화학 반응에서 보존되는 질량⑴ ❶ 법칙: 화",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 반응에서 열에너지 출입 확인하기",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -6200,14 +3129,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "화학 반응을 이용한 간단한 냉각 장치 만들기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "화학 반응을 표현하는화학 반응식",
     "fills": [],
     "filledCells": 0,
@@ -6240,30 +3161,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "화학 반응의 규칙성",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 반응의 규칙성을 찾아내기까지의 과정이 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 반응이 일어나기 전 물질",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "화학 반응이 일어날 때 열에너지는 어떻게 될",
     "fills": [],
     "filledCells": 0,
@@ -6288,14 +3185,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "화학 변화",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "화학 변화❸ 변화가 일어나면 처음 물질과 성",
     "fills": [],
     "filledCells": 0,
@@ -6312,30 +3201,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "화학 변화를 알고 화학 반응을 화학 반응식으",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 변화에서 새로운 물질의 생성 관찰하기",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화학 변화에서 새로운 물질이 생성됨을 관찰하",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "화학 변화와 화학 반응식",
     "fills": [],
     "filledCells": 0,
@@ -6344,23 +3209,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "화학 변화와 화학 반응식 • 11쪽 화학 반",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "화합물은 성분 원소의 원자들이 일정한 개수비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "화합물을 구성하는 성분 원소 사이의 질량 관",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -6385,54 +3234,6 @@
     "rc": 1,
     "cc": 1,
     "head": "화합물을 구성하는원소의 질량비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "환경, 생활, 미래 기술 등 관심 있는 분야",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "활동 도우미",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "활동 도우미",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "활동 도우미",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "활동 도우미",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "흡열 반응",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -6536,7 +3337,7 @@
    {
     "rc": 2,
     "cc": 2,
-    "head": "다르게해 보기수산화 나트륨과 염산 반응에서 ",
+    "head": "다르게 해 보기수산화 나트륨과 염산 반응에서",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6544,7 +3345,7 @@
    {
     "rc": 2,
     "cc": 2,
-    "head": "더알아보기아보가드로아보가드로 (Avogadr",
+    "head": "더 알아보기아보가드로아보가드로 (Avogad",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6552,7 +3353,7 @@
    {
     "rc": 2,
     "cc": 2,
-    "head": "더알아보기질량 보존 법칙을 발견한 라부아지에",
+    "head": "더 알아보기질량 보존 법칙을 발견한 라부아지",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6596,7 +3397,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "나의 활동확인하기모형으로 질량 보존 법칙을 ",
+    "head": "나의 활동 확인하기모형으로 질량 보존 법칙을",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6604,7 +3405,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "나의 활동확인하기실험 자료를 해석하여 기체 ",
+    "head": "나의 활동 확인하기실험 자료를 해석하여 기체",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6612,7 +3413,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "나의 활동확인하기우리 생활에서 발열 반응과 ",
+    "head": "나의 활동 확인하기우리 생활에서 발열 반응과",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6620,7 +3421,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "나의 활동확인하기우리 주변에서 일어나는 물질",
+    "head": "나의 활동 확인하기우리 주변에서 일어나는 물",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6628,7 +3429,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "나의 활동확인하기화학 반응이 일어날 때 열에",
+    "head": "나의 활동 확인하기화학 반응이 일어날 때 열",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6636,7 +3437,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "나의 활동확인하기화합물에서 성분 원소의 질량",
+    "head": "나의 활동 확인하기화합물에서 성분 원소의 질",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6660,7 +3461,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "화학 반응식을 옳게 나타낸 것은?① ② ③ ",
+    "head": "화학 반응식을 옳게 나타낸 것은? 2 O2 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -6706,7 +3507,7 @@
    {
     "rc": 4,
     "cc": 2,
-    "head": "화학 반응식 질소 수소 암모니아계수비 1 :",
+    "head": "화학 반응식2 질소 수소 암모니아계수비 1 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 7
@@ -6714,7 +3515,7 @@
    {
     "rc": 4,
     "cc": 2,
-    "head": "화학 반응식N2+H2 → NH3계수비질소 :",
+    "head": "화학 반응식계수비질소 : 수소 : 암모니아 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 8
@@ -6821,7 +3622,7 @@
    {
     "rc": 6,
     "cc": 2,
-    "head": "다르게해 보기과산화 수소 분해 반응에서 계수",
+    "head": "다르게 해 보기과산화 수소 분해 반응에서 계",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 11
@@ -6829,7 +3630,7 @@
    {
     "rc": 6,
     "cc": 2,
-    "head": "다르게해 보기화합물을 구성하는 성분 원소 사",
+    "head": "다르게 해 보기화합물을 구성하는 성분 원소 ",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 11
@@ -6898,50 +3699,274 @@
     "borderedCells": 17
    }
   ],
-  "picCount": 336,
+  "picCount": 700,
   "picSizes": {
-   "0x0": 107,
-   "0x1": 17,
+   "0x0": 91,
+   "0x1": 5,
+   "10x0": 3,
+   "10x1": 3,
+   "10x10": 1,
    "10x13": 1,
-   "11x13": 1,
-   "15x12": 1,
+   "10x2": 2,
+   "10x28": 1,
+   "10x3": 1,
+   "10x5": 4,
+   "10x8": 3,
+   "10x9": 1,
+   "11x1": 3,
+   "11x10": 3,
+   "11x11": 3,
+   "11x13": 4,
+   "11x2": 3,
+   "11x3": 1,
+   "11x4": 1,
+   "11x5": 4,
+   "11x6": 6,
+   "11x7": 1,
+   "11x8": 1,
+   "12x0": 1,
+   "12x1": 2,
+   "12x11": 1,
+   "12x12": 2,
+   "12x2": 3,
+   "12x4": 2,
+   "12x5": 2,
+   "12x6": 1,
+   "12x9": 3,
+   "13x1": 2,
+   "13x2": 2,
+   "13x5": 3,
+   "13x7": 3,
+   "14x1": 1,
+   "14x14": 1,
+   "14x16": 1,
+   "14x2": 1,
+   "14x6": 1,
+   "14x9": 5,
+   "15x1": 20,
+   "15x11": 1,
+   "15x12": 2,
+   "15x13": 2,
+   "15x14": 1,
+   "15x2": 2,
+   "15x22": 2,
+   "15x3": 1,
+   "15x6": 1,
+   "16x1": 1,
+   "16x13": 2,
+   "16x4": 1,
+   "16x7": 1,
+   "17x17": 1,
+   "17x2": 3,
+   "18x1": 20,
+   "18x10": 1,
+   "18x16": 2,
    "18x2": 3,
-   "1x0": 29,
-   "1x1": 58,
-   "1x2": 1,
-   "20x1": 1,
+   "18x21": 1,
+   "18x3": 3,
+   "18x4": 2,
+   "18x8": 1,
+   "19x12": 1,
+   "19x2": 2,
+   "19x25": 1,
+   "19x3": 1,
+   "1x0": 35,
+   "1x1": 112,
+   "1x2": 3,
+   "1x3": 1,
+   "1x8": 1,
+   "20x1": 9,
+   "20x11": 2,
    "20x15": 1,
    "20x2": 1,
+   "20x20": 1,
+   "20x22": 2,
+   "20x25": 1,
+   "20x3": 1,
    "20x4": 1,
-   "20x5": 1,
+   "20x5": 2,
    "20x7": 1,
-   "21x4": 5,
-   "24x6": 1,
-   "27x4": 1,
-   "28x7": 1,
-   "2x1": 32,
-   "2x2": 1,
-   "34x4": 1,
-   "36x11": 1,
-   "3x2": 5,
-   "4x0": 5,
-   "4x1": 6,
-   "4x3": 3,
-   "5x1": 47,
-   "62x79": 42,
-   "6x1": 3,
-   "6x2": 6,
-   "7x1": 1,
-   "7x4": 1,
-   "7x5": 1,
-   "8x4": 2,
-   "9x7": 1
+   "21x1": 2,
+   "21x14": 2,
+   "21x4": 2,
+   "21x5": 1,
+   "21x9": 3,
+   "22x18": 1,
+   "22x3": 1,
+   "22x4": 1,
+   "22x6": 1,
+   "22x7": 1,
+   "24x13": 1,
+   "24x6": 2,
+   "25x3": 2,
+   "25x4": 1,
+   "25x5": 1,
+   "25x9": 1,
+   "26x2": 1,
+   "26x24": 1,
+   "26x6": 1,
+   "27x19": 1,
+   "27x26": 1,
+   "27x4": 2,
+   "27x6": 1,
+   "27x9": 2,
+   "28x2": 6,
+   "28x25": 7,
+   "28x8": 1,
+   "29x2": 1,
+   "29x5": 1,
+   "2x0": 15,
+   "2x1": 56,
+   "2x2": 20,
+   "2x3": 3,
+   "30x9": 1,
+   "32x16": 1,
+   "32x2": 3,
+   "32x4": 2,
+   "32x6": 2,
+   "33x16": 1,
+   "33x33": 1,
+   "33x7": 1,
+   "35x14": 1,
+   "35x3": 1,
+   "36x10": 1,
+   "36x11": 2,
+   "36x13": 1,
+   "36x17": 1,
+   "36x6": 1,
+   "36x9": 1,
+   "37x0": 2,
+   "37x1": 1,
+   "37x10": 5,
+   "37x11": 2,
+   "37x12": 2,
+   "37x13": 2,
+   "37x14": 2,
+   "37x16": 1,
+   "37x17": 1,
+   "37x2": 3,
+   "37x20": 2,
+   "37x21": 1,
+   "37x22": 1,
+   "37x24": 1,
+   "37x3": 2,
+   "37x4": 7,
+   "37x5": 6,
+   "37x6": 4,
+   "37x7": 6,
+   "37x8": 9,
+   "37x9": 2,
+   "38x11": 2,
+   "38x12": 2,
+   "38x13": 1,
+   "38x15": 2,
+   "38x16": 1,
+   "38x17": 1,
+   "38x18": 2,
+   "38x22": 1,
+   "38x32": 1,
+   "38x33": 1,
+   "38x5": 2,
+   "38x7": 1,
+   "38x8": 1,
+   "38x9": 2,
+   "39x4": 1,
+   "3x0": 9,
+   "3x1": 46,
+   "3x2": 8,
+   "3x3": 7,
+   "3x5": 1,
+   "40x11": 1,
+   "40x33": 1,
+   "41x2": 2,
+   "41x3": 2,
+   "42x3": 3,
+   "44x29": 1,
+   "44x30": 1,
+   "47x24": 1,
+   "48x20": 1,
+   "48x5": 2,
+   "49x24": 1,
+   "4x0": 14,
+   "4x1": 19,
+   "4x2": 9,
+   "4x3": 9,
+   "4x4": 11,
+   "4x5": 1,
+   "4x6": 1,
+   "50x11": 1,
+   "50x44": 1,
+   "51x13": 2,
+   "51x16": 3,
+   "51x18": 2,
+   "51x19": 1,
+   "51x20": 1,
+   "51x22": 1,
+   "51x28": 1,
+   "51x3": 1,
+   "51x30": 1,
+   "52x29": 1,
+   "53x14": 1,
+   "53x15": 2,
+   "53x72": 1,
+   "56x13": 1,
+   "56x51": 1,
+   "5x1": 55,
+   "5x11": 1,
+   "5x2": 9,
+   "5x3": 12,
+   "5x4": 2,
+   "5x5": 10,
+   "5x6": 3,
+   "5x8": 3,
+   "62x11": 3,
+   "62x79": 17,
+   "6x1": 19,
+   "6x2": 8,
+   "6x3": 2,
+   "6x6": 2,
+   "6x9": 1,
+   "7x0": 3,
+   "7x1": 15,
+   "7x2": 10,
+   "7x3": 3,
+   "7x4": 3,
+   "7x5": 6,
+   "7x7": 1,
+   "7x8": 1,
+   "7x9": 4,
+   "8x1": 15,
+   "8x10": 5,
+   "8x13": 1,
+   "8x2": 1,
+   "8x3": 1,
+   "8x4": 3,
+   "8x5": 2,
+   "8x8": 1,
+   "8x9": 7,
+   "9x0": 2,
+   "9x1": 8,
+   "9x10": 1,
+   "9x11": 2,
+   "9x12": 2,
+   "9x13": 1,
+   "9x14": 1,
+   "9x16": 1,
+   "9x2": 2,
+   "9x28": 1,
+   "9x3": 6,
+   "9x4": 3,
+   "9x5": 5,
+   "9x6": 3,
+   "9x7": 10,
+   "9x8": 4,
+   "9x9": 7
   },
   "ghostTables": 0,
   "longNbspRuns": 16,
-  "whiteSquareCount": 0,
-  "visibleChars": 23518,
-  "paragraphs": 1583,
-  "binDataCount": 397
+  "whiteSquareCount": 1,
+  "visibleChars": 23396,
+  "paragraphs": 1564,
+  "binDataCount": 728
  }
 }
