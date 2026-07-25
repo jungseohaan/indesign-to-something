@@ -1,7 +1,7 @@
 {
  "meta": {
-  "source": "중3과학교과서-u1-documents-p008-049.hwpx",
-  "gitRev": "48683eff"
+  "source": "spec077_test3.hwpx",
+  "gitRev": "c6eab2e6"
  },
  "signature": {
   "sections": 1,
@@ -42,6 +42,7 @@
    "H",
    "O",
    "rm CaCO_{3}",
+   "rm 2HCl",
    "rm CaCl_{2}",
    "rm CO_{2}",
    "H",
@@ -1010,14 +1011,6 @@
     "rc": 1,
     "cc": 1,
     "head": "2.화학 반응의 규칙성",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2HCl염산",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2665,6 +2658,14 @@
    {
     "rc": 1,
     "cc": 1,
+    "head": "염산",
+    "fills": [],
+    "filledCells": 0,
+    "borderedCells": 0
+   },
+   {
+    "rc": 1,
+    "cc": 1,
     "head": "염화 칼슘",
     "fills": [],
     "filledCells": 0,
@@ -3965,7 +3966,7 @@
   "ghostTables": 0,
   "longNbspRuns": 16,
   "whiteSquareCount": 1,
-  "visibleChars": 23396,
+  "visibleChars": 23392,
   "paragraphs": 1564,
   "binDataCount": 728
  }

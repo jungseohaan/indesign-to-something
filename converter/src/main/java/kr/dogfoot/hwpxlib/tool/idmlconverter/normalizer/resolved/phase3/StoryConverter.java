@@ -384,6 +384,7 @@ public final class StoryConverter {
         insertAnchoredTables(ctx, allTextFrameBlocks);
         applyAnchoredTableStylePlans(ctx, allTextFrameBlocks);
         applyComposedInkFontCaps(ctx, allTextFrameBlocks);
+        promoteSiblingContextChemicalLabels(ctx, allTextFrameBlocks);
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
 
         ConversionTiming.metric("stage2.textBuilder.storyConverter.aboveLineAnchorScanMs", millis(aboveLineScanNanos));
@@ -396,6 +397,98 @@ public final class StoryConverter {
         ConversionTiming.metric("stage2.textBuilder.storyConverter.distributeMs", millis(distributeNanos));
         ConversionTiming.metric("stage2.textBuilder.storyConverter.restoreInlineVisualsMs", millis(restoreInlineNanos));
         ConversionTiming.metric("stage2.textBuilder.storyConverter.postprocessMs", millis(postprocessNanos));
+    }
+
+    /**
+     * SPEC-077: 문맥 기반 화학식 형제 승격.
+     *
+     * <p>반응식 다이어그램은 성분마다 개별 라벨 TextFrame 이다. 아래첨자가 있는 라벨
+     * (CaCO₃·CaCl₂…)은 {@code ASTEquation("CHEM_FORMULA")} 로 승격되지만, 첨자가 없는
+     * "2HCl"(계수+HCl)은 수식 폰트 런이 없어 평범한 텍스트로 남아 형제와 조판이 어긋난다.
+     *
+     * <p>같은 부모 그룹(resolved {@code parentId})에 확정 화학식 형제가 있으면, 첨자 없는
+     * 화학 라벨도 같은 다이어그램의 일부로 보고 {@code rm <식>} 수식으로 승격한다.
+     * 승격은 <b>부모 그룹에 확정 화학식이 있을 때만</b> — 자석 "N극/S극" 같은 캡션은
+     * (1) 그룹에 확정 화학식이 없고 (2) 한글이 섞여 후보에서 탈락하므로 오승격되지 않는다.
+     */
+    private static void promoteSiblingContextChemicalLabels(
+            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null || blocks.isEmpty()) return;
+        java.util.Map<ASTTextFrameBlock, String> blockParent = new java.util.HashMap<>();
+        java.util.Set<String> confirmedGroups = new java.util.HashSet<>();
+        for (ASTTextFrameBlock tfb : blocks) {
+            if (tfb == null || tfb.sourceId() == null) continue;
+            String domId = ParagraphTextHelpers.domIdFromSourceId(tfb.sourceId());
+            if (domId == null) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem pi =
+                    ctx.resolvedData.getPageItem(domId);
+            if (pi == null || pi.parentId() == null || pi.parentId().isEmpty()) continue;
+            String parentId = pi.parentId();
+            blockParent.put(tfb, parentId);
+            if (blockHasChemFormulaEquation(tfb)) confirmedGroups.add(parentId);
+        }
+        if (confirmedGroups.isEmpty()) return;
+        int promoted = 0;
+        for (ASTTextFrameBlock tfb : blocks) {
+            String parentId = blockParent.get(tfb);
+            if (parentId == null || !confirmedGroups.contains(parentId)) continue;
+            if (tfb.paragraphs() == null) continue;
+            for (ASTParagraph para : tfb.paragraphs()) {
+                if (promoteSubscriptlessChemicalLabelParagraph(para)) promoted++;
+            }
+        }
+        if (promoted > 0) {
+            System.err.println("[ResolvedToASTBuilder] Phase 3 SPEC-077: 문맥 화학식 승격 "
+                    + promoted + "건");
+        }
+    }
+
+    private static boolean blockHasChemFormulaEquation(ASTTextFrameBlock tfb) {
+        if (tfb == null || tfb.paragraphs() == null) return false;
+        for (ASTParagraph para : tfb.paragraphs()) {
+            if (para == null || para.items() == null) continue;
+            for (ASTInlineItem it : para.items()) {
+                if (it instanceof ASTEquation
+                        && "CHEM_FORMULA".equals(((ASTEquation) it).sourceType())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 문단이 첨자 없는 화학 라벨(순수 텍스트)이면 {@code rm <식>} 수식으로 치환. */
+    private static boolean promoteSubscriptlessChemicalLabelParagraph(ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().isEmpty()) return false;
+        StringBuilder sb = new StringBuilder();
+        String color = null;
+        Integer sizeHwp = null;
+        String font = null;
+        for (ASTInlineItem it : para.items()) {
+            if (!(it instanceof ASTTextRun)) return false; // 순수 텍스트 라벨만 대상
+            ASTTextRun tr = (ASTTextRun) it;
+            // 첨자/윗첨자 속성 런은 이미 첨자 화학식(예 "2H₂O"의 ₂)이므로 flatten 금지.
+            // rm 식으로 통째 치환하면 첨자가 사라진다 — 문자속성 첨자 경로에 맡긴다.
+            if (tr.subscript() || tr.superscript()) return false;
+            if (tr.text() != null) sb.append(tr.text());
+            if (color == null) color = tr.textColor();
+            if (sizeHwp == null && tr.fontSizeHwpunits() != null && tr.fontSizeHwpunits() > 0) {
+                sizeHwp = tr.fontSizeHwpunits();
+            }
+            if (font == null && tr.fontFamily() != null && !tr.fontFamily().isEmpty()) {
+                font = tr.fontFamily();
+            }
+        }
+        if (!ChemicalFormulaPolicy.isSubscriptlessChemicalLabelCandidate(sb.toString())) return false;
+        String cleaned = sb.toString().replace(' ', ' ').replace(' ', ' ')
+                .replaceAll("\\s+", " ").trim();
+        ASTEquation eq = new ASTEquation("rm " + cleaned, "CHEM_FORMULA");
+        if (color != null) eq.textColor(color);
+        if (sizeHwp != null) eq.preferredBaseUnit(sizeHwp);
+        if (font != null) eq.preferredFontFamily(font);
+        para.items().clear();
+        para.items().add(eq);
+        return true;
     }
 
     private static void normalizeInitialSpaceBeforeForTextFrames(List<ASTTextFrameBlock> blocks) {
