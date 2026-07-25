@@ -254,6 +254,38 @@ public final class ChemicalFormulaPolicy {
         return sawElement;
     }
 
+    /**
+     * SPEC-077: 첨자 없는 화학 라벨 후보인가 (문맥 승격 전용).
+     *
+     * <p>계수+원소기호로만 이뤄진 짧은 라벨(예 "2HCl","HCl","NaCl","KI")을 인정한다.
+     * 라틴 문자는 전부 원소기호로 해석돼야 하고, 한글/수학구조/비원소 라틴이 섞이면 거부한다
+     * (자석 라벨 "N극/S극" 처럼 원소기호를 우연히 포함한 캡션 오승격 방지 — '극' 등 비라틴 거부).
+     *
+     * <p><b>단독 사용 금지.</b> 반드시 "같은 부모 그룹에 확정 화학식 형제가 있다"는 문맥
+     * 게이트와 함께 써야 한다 (첨자 없는 화학식은 수학과 구별이 약해 over-trigger 위험).
+     */
+    static boolean isSubscriptlessChemicalLabelCandidate(String text) {
+        if (text == null) return false;
+        String t = text.replace(' ', ' ').replace(' ', ' ').trim();
+        if (t.isEmpty() || t.length() > 15) return false;
+        if (containsMathStructure(t)) return false;
+        // 선두 계수(예 "2HCl"의 2)만 허용하고, 문자 뒤에 오는 숫자(=아래첨자, 예 "2H2O"의
+        // H 뒤 2)는 거부한다. 첨자가 있는 화학식은 첨자 문자속성/수식 경로가 처리해야 하며
+        // 여기서 rm 로 flatten 하면 첨자가 사라진다.
+        boolean sawLetter = false;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c >= '0' && c <= '9') {
+                if (sawLetter) return false; // 문자 뒤 숫자 = 아래첨자 → 후보 아님
+            } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                sawLetter = true;
+            } else if (c != ' ') {
+                return false; // 한글 등 비라틴 문자가 있으면 화학 라벨이 아님
+            }
+        }
+        return lettersAreKnownElements(t) && containsKnownChemicalElement(t);
+    }
+
     private static boolean containsKnownChemicalElement(String text) {
         if (text == null) return false;
         for (int i = 0; i < text.length(); i++) {

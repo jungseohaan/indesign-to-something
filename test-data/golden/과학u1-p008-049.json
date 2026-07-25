@@ -1,13 +1,12 @@
 {
  "meta": {
-  "source": "중3과학교과서-u1-documents-p008-049.hwpx",
-  "gitRev": "48683eff"
+  "source": "spec078_test5.hwpx",
+  "gitRev": "9f3a2bd2"
  },
  "signature": {
   "sections": 1,
   "equations": [
-   "rm □H_{2}",
-   "O",
+   "rm □H_{2}O",
    "rm H_{2}O",
    "rm H_{2}O",
    "rm H_{2}O",
@@ -30,27 +29,21 @@
    "rm NH_{3}",
    "rm N_{2}+□H_{2} ~ rarrow ~ □NH_{3}",
    "rm H_{2}O_{2} ~ rarrow ~ □H_{2}O+O_{2}",
-   "rm N_{2}+3",
-   "H",
-   "rm ~ rarrow ~ 2NH_{3}",
-   "O",
-   "H",
+   "rm N_{2}+3H_{2} ~ rarrow ~ 2NH_{3}",
+   "rm O_{2} ~ rarrow ~ 2MgO",
    "rm CaO+H_{2}O ~ rarrow ~ Ca(OH)_{2}",
    "rm CH_{4}",
-   "O",
+   "rm O_{2}",
    "rm CO_{2}",
-   "H",
-   "O",
+   "rm H_{2}O",
    "rm CaCO_{3}",
+   "rm 2HCl",
    "rm CaCl_{2}",
    "rm CO_{2}",
-   "H",
-   "O",
-   "rm Cu_{2}",
-   "O",
-   "N",
-   "H",
-   "O",
+   "rm H_{2}O",
+   "rm Cu_{2}O",
+   "rm N_{2}H_{4}",
+   "rm H_{2}O",
    "rm H_{2}",
    "rm O_{2}",
    "rm N_{2}",
@@ -59,23 +52,16 @@
    "A.,                ",
    "rm H_{2}",
    "rm O_{2}",
-   "J",
-   "A",
    "rm Gay-Lussac",
-   "J",
-   "L",
    "rm H_{2}",
    "rm O_{2}",
    "H",
-   "rm _{2}+O_{2} ~ rarrow ~ H_{2}",
-   "O",
+   "rm _{2}+O_{2} ~ rarrow ~ H_{2}O",
    "rm Cu+O_{2} ~ rarrow ~ 2CuO",
-   "H",
+   "rm H_{2}O_{2}",
    "rarrow 2 H_{2}O+O_{2}",
-   "rm CH_{4}+2O_{2} ~ rarrow ~ CO_{2}+2H_{2}",
-   "O",
-   "rm CaCO_{3}+2HCl ~ rarrow ~ CaCl_{2}+CO_{2}+2H_{2}O",
-   "I"
+   "rm CH_{4}+2O_{2} ~ rarrow ~ CO_{2}+2H_{2}O",
+   "rm CaCO_{3}+2HCl ~ rarrow ~ CaCl_{2}+CO_{2}+2H_{2}O"
   ],
   "tables": [
    {
@@ -1017,22 +1003,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "2HCl염산",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "2물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "3",
     "fills": [],
     "filledCells": 0,
@@ -1257,46 +1227,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "C",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "H",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "H",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "H",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "H",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "I.화학 반응의 규칙성",
     "fills": [],
     "filledCells": 0,
@@ -1450,38 +1380,6 @@
     "rc": 1,
     "cc": 1,
     "head": "I.화학 반응의 규칙성",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "O",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "O",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "O",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "O",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -1889,14 +1787,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "❷",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "각 실험에서 반응한 수소 기체와 산소 기체의",
     "fills": [],
     "filledCells": 0,
@@ -1946,22 +1836,6 @@
     "rc": 1,
     "cc": 1,
     "head": "계수는 간단한 정수로 나타내고, 1이면 생략",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "계수비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "계수비",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2137,14 +2011,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "면장갑을 착용할 경우 화상의 위험이 있습니다",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "무엇을 알아볼까 화학 반응이 일어날 때 반응",
     "fills": [],
     "filledCells": 0,
@@ -2218,22 +2084,6 @@
     "rc": 1,
     "cc": 1,
     "head": "물질의 변화⑴ ❶ 변화: 물질의 성질은 변하",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "반응물",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2337,14 +2187,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "발열 반응",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "발열 팩",
     "fills": [],
     "filledCells": 0,
@@ -2362,22 +2204,6 @@
     "rc": 1,
     "cc": 1,
     "head": "발열 팩을 컵에 넣고 물을 부은 뒤 또 다른",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "부피비",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "부피비",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2465,31 +2291,7 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "삼각 플라스크에 물 10mL를 넣은 다음, ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "삼각 플라스크에 수산화 바륨 10g과 염화 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "새로운 물질을생성하는 화학 변화",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "생성물",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2633,14 +2435,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "열에너지",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "열에너지가 출입하는 화학 반응 예⑴ ❹ 반응",
     "fills": [],
     "filledCells": 0,
@@ -2658,14 +2452,6 @@
     "rc": 1,
     "cc": 1,
     "head": "열에너지가 출입하는화학 반응 예",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "염화 칼슘",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2833,14 +2619,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "이산화 탄소",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "인공지능(AI)을 활용한 신약 개발 현황 조",
     "fills": [],
     "filledCells": 0,
@@ -2874,14 +2652,6 @@
     "rc": 1,
     "cc": 1,
     "head": "일정한 온도와 압력에서 수증기가 생성될 때 ",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "입자 수의 비",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -2953,14 +2723,6 @@
    {
     "rc": 1,
     "cc": 1,
-    "head": "직업, 주로 하는 일, 열에너지 활용 방법",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
     "head": "질소 : 수소 : 암모니아",
     "fills": [],
     "filledCells": 0,
@@ -3002,14 +2764,6 @@
     "rc": 1,
     "cc": 1,
     "head": "창의 융합 프로젝트",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
-    "cc": 1,
-    "head": "탄산 칼슘",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 0
@@ -3240,14 +2994,6 @@
    },
    {
     "rc": 1,
-    "cc": 1,
-    "head": "흡열 반응",
-    "fills": [],
-    "filledCells": 0,
-    "borderedCells": 0
-   },
-   {
-    "rc": 1,
     "cc": 2,
     "head": "을 모으면 화학 반응에서 열에너지가 출입함을",
     "fills": [],
@@ -3461,7 +3207,7 @@
    {
     "rc": 3,
     "cc": 1,
-    "head": "화학 반응식을 옳게 나타낸 것은? 2 O2 ",
+    "head": "화학 반응식을 옳게 나타낸 것은? 풀기 어려",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 3
@@ -3507,7 +3253,7 @@
    {
     "rc": 4,
     "cc": 2,
-    "head": "화학 반응식2 질소 수소 암모니아계수비 1 ",
+    "head": "화학 반응식 질소 수소 암모니아계수비 1 :",
     "fills": [],
     "filledCells": 0,
     "borderedCells": 7
@@ -3699,25 +3445,25 @@
     "borderedCells": 17
    }
   ],
-  "picCount": 700,
+  "picCount": 734,
   "picSizes": {
    "0x0": 91,
-   "0x1": 5,
+   "0x1": 2,
    "10x0": 3,
-   "10x1": 3,
+   "10x1": 4,
    "10x10": 1,
    "10x13": 1,
-   "10x2": 2,
+   "10x2": 4,
    "10x28": 1,
    "10x3": 1,
-   "10x5": 4,
+   "10x5": 7,
    "10x8": 3,
    "10x9": 1,
-   "11x1": 3,
+   "11x1": 4,
    "11x10": 3,
    "11x11": 3,
    "11x13": 4,
-   "11x2": 3,
+   "11x2": 4,
    "11x3": 1,
    "11x4": 1,
    "11x5": 4,
@@ -3763,7 +3509,7 @@
    "18x16": 2,
    "18x2": 3,
    "18x21": 1,
-   "18x3": 3,
+   "18x3": 5,
    "18x4": 2,
    "18x8": 1,
    "19x12": 1,
@@ -3771,7 +3517,7 @@
    "19x25": 1,
    "19x3": 1,
    "1x0": 35,
-   "1x1": 112,
+   "1x1": 115,
    "1x2": 3,
    "1x3": 1,
    "1x8": 1,
@@ -3782,22 +3528,23 @@
    "20x20": 1,
    "20x22": 2,
    "20x25": 1,
-   "20x3": 1,
    "20x4": 1,
    "20x5": 2,
    "20x7": 1,
    "21x1": 2,
    "21x14": 2,
-   "21x4": 2,
+   "21x4": 3,
    "21x5": 1,
    "21x9": 3,
    "22x18": 1,
-   "22x3": 1,
+   "22x2": 2,
    "22x4": 1,
    "22x6": 1,
    "22x7": 1,
+   "23x4": 1,
    "24x13": 1,
    "24x6": 2,
+   "25x2": 1,
    "25x3": 2,
    "25x4": 1,
    "25x5": 1,
@@ -3809,15 +3556,15 @@
    "27x26": 1,
    "27x4": 2,
    "27x6": 1,
+   "27x8": 1,
    "27x9": 2,
    "28x2": 6,
    "28x25": 7,
-   "28x8": 1,
    "29x2": 1,
    "29x5": 1,
-   "2x0": 15,
-   "2x1": 56,
-   "2x2": 20,
+   "2x0": 17,
+   "2x1": 54,
+   "2x2": 38,
    "2x3": 3,
    "30x9": 1,
    "32x16": 1,
@@ -3849,7 +3596,7 @@
    "37x21": 1,
    "37x22": 1,
    "37x24": 1,
-   "37x3": 2,
+   "37x3": 3,
    "37x4": 7,
    "37x5": 6,
    "37x6": 4,
@@ -3871,9 +3618,9 @@
    "38x8": 1,
    "38x9": 2,
    "39x4": 1,
-   "3x0": 9,
-   "3x1": 46,
-   "3x2": 8,
+   "3x0": 11,
+   "3x1": 59,
+   "3x2": 9,
    "3x3": 7,
    "3x5": 1,
    "40x11": 1,
@@ -3888,10 +3635,10 @@
    "48x5": 2,
    "49x24": 1,
    "4x0": 14,
-   "4x1": 19,
-   "4x2": 9,
+   "4x1": 21,
+   "4x2": 10,
    "4x3": 9,
-   "4x4": 11,
+   "4x4": 13,
    "4x5": 1,
    "4x6": 1,
    "50x11": 1,
@@ -3911,9 +3658,9 @@
    "53x72": 1,
    "56x13": 1,
    "56x51": 1,
-   "5x1": 55,
+   "5x1": 59,
    "5x11": 1,
-   "5x2": 9,
+   "5x2": 10,
    "5x3": 12,
    "5x4": 2,
    "5x5": 10,
@@ -3921,13 +3668,13 @@
    "5x8": 3,
    "62x11": 3,
    "62x79": 17,
-   "6x1": 19,
+   "6x1": 21,
    "6x2": 8,
    "6x3": 2,
    "6x6": 2,
    "6x9": 1,
    "7x0": 3,
-   "7x1": 15,
+   "7x1": 16,
    "7x2": 10,
    "7x3": 3,
    "7x4": 3,
@@ -3935,7 +3682,7 @@
    "7x7": 1,
    "7x8": 1,
    "7x9": 4,
-   "8x1": 15,
+   "8x1": 17,
    "8x10": 5,
    "8x13": 1,
    "8x2": 1,
@@ -3945,7 +3692,7 @@
    "8x8": 1,
    "8x9": 7,
    "9x0": 2,
-   "9x1": 8,
+   "9x1": 9,
    "9x10": 1,
    "9x11": 2,
    "9x12": 2,
@@ -3965,8 +3712,8 @@
   "ghostTables": 0,
   "longNbspRuns": 16,
   "whiteSquareCount": 1,
-  "visibleChars": 23396,
+  "visibleChars": 23381,
   "paragraphs": 1564,
-  "binDataCount": 728
+  "binDataCount": 762
  }
 }

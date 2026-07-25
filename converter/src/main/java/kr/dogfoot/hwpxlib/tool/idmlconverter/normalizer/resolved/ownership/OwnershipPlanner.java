@@ -106,6 +106,7 @@ public final class OwnershipPlanner {
         timed("declareSourceBundleTextRangeShellPlans", this::declareSourceBundleTextRangeShellPlans);
         timed("finalizeOwnedTextFrameDepthContracts.afterShellOwnedTextPlans", this::finalizeOwnedTextFrameDepthContracts);
         timed("normalizeStage1ContractsBeforeValidation", this::normalizeStage1ContractsBeforeValidation);
+        timed("suppressTableDuplicateMarkerTextFrames.stage1", this::suppressTableDuplicateMarkerTextFrames);
         timed("dropNativeSourceShapePlans", this::dropNativeSourceShapePlans);
         writeAndValidatePlans();
         ConversionTiming.metric("stage1.ownershipPlanner.importedPreplannedPlans",
@@ -130,6 +131,7 @@ public final class OwnershipPlanner {
      */
     private void runLegacyOwnershipMutationBridge() {
         timed("planTextFrames", this::planTextFrames);
+        timed("suppressTableDuplicateMarkerTextFrames.early", this::suppressTableDuplicateMarkerTextFrames);
         timed("resolveSiblingGroupTextShellOwners", this::resolveSiblingGroupTextShellOwners);
         timed("resolveIndependentSiblingTextShellOwners", this::resolveIndependentSiblingTextShellOwners);
         timed("normalizeSiblingGroupTextShellOwners", this::normalizeSiblingGroupTextShellOwners);
@@ -210,6 +212,7 @@ public final class OwnershipPlanner {
         timed("declareOrphanedPureDecorationVisuals", this::declareOrphanedPureDecorationVisuals);
         timed("resolveCompositeBakedChildVisuals.2", this::resolveCompositeBakedChildVisuals);
         timed("dropNonCanonicalRenderedGraphicFrameSlots", this::dropNonCanonicalRenderedGraphicFrameSlots);
+        timed("ensureTableStyleSourceObjectIds", this::ensureTableStyleSourceObjectIds);
         timed("normalizeVisualSlotsExcludeTableStyleSources", this::normalizeVisualSlotsExcludeTableStyleSources);
         timed("dropTableOnlyCarrierTextShellVisualOwners", this::dropTableOnlyCarrierTextShellVisualOwners);
         timed("normalizeDuplicateVisibleSourceSlots", this::normalizeDuplicateVisibleSourceSlots);
@@ -223,6 +226,7 @@ public final class OwnershipPlanner {
         timed("normalizeDirectInlineAnchoredTextShellsToStoryFlow", this::normalizeDirectInlineAnchoredTextShellsToStoryFlow);
         timed("normalizeOwnedTextFrameCoordinatesToVisibleShellOwners", this::normalizeOwnedTextFrameCoordinatesToVisibleShellOwners);
         timed("normalizeVisibleVisualSourcesToPlanPage", this::normalizeVisibleVisualSourcesToPlanPage);
+        timed("ensureTableStyleSourceObjectIds.final", this::ensureTableStyleSourceObjectIds);
         timed("normalizeVisualSlotsExcludeTableStyleSources.final", this::normalizeVisualSlotsExcludeTableStyleSources);
         timed("dropNativeSourceShapesOwnedByRenderedBundles", this::dropNativeSourceShapesOwnedByRenderedBundles);
         timed("normalizePaperPageMaterialVisualPlans", this::normalizePaperPageMaterialVisualPlans);
@@ -237,6 +241,7 @@ public final class OwnershipPlanner {
         timed("finalizeOwnedTextFrameDepthContracts.final", this::finalizeOwnedTextFrameDepthContracts);
         timed("completeRenderedExtractionSourceContracts", this::completeRenderedExtractionSourceContracts);
         timed("normalizeTextShellsWithMaterializedTextOwners", this::normalizeTextShellsWithMaterializedTextOwners);
+        timed("suppressTableDuplicateMarkerTextFrames.final", this::suppressTableDuplicateMarkerTextFrames);
         timed("restoreInlineCarrierVisualContracts", this::restoreInlineCarrierVisualContracts);
         timed("normalizePlannerDeclaredInlineCompletePngWithoutTextOwner",
                 this::normalizePlannerDeclaredInlineCompletePngWithoutTextOwner);
@@ -3967,6 +3972,229 @@ public final class OwnershipPlanner {
                     tf.layerId(),
                     tf.layerName(),
                     tf.layerIndex()));
+        }
+    }
+
+    private void suppressTableDuplicateMarkerTextFrames() {
+        List<TableMarkerCell> tableMarkers = tableMarkerCellsOwnedByHwpxTables();
+        if (tableMarkers.isEmpty()) return;
+
+        LinkedHashSet<Integer> duplicateTextFrameIds = new LinkedHashSet<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (!isEditableTextFrameTextSlotPlan(plan)) continue;
+            if (isTableDuplicateMarkerTextFrame(plan, tableMarkers)) {
+                duplicateTextFrameIds.add(plan.domId);
+            }
+        }
+        if (duplicateTextFrameIds.isEmpty()) return;
+
+        int suppressedTextPlans = 0;
+        int updatedShellPlans = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (isEditableTextFrameTextSlotPlan(plan)
+                    && duplicateTextFrameIds.contains(plan.domId)
+                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL,
+                                "table_cell_marker_text_owned_by_hwpx_table"));
+                suppressedTextPlans++;
+                continue;
+            }
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                    || plan.ownedTextFrameIds == null
+                    || plan.ownedTextFrameIds.length == 0
+                    || !containsAnySet(plan.ownedTextFrameIds, duplicateTextFrameIds)) {
+                continue;
+            }
+            int[] retainedOwnedTextFrameIds = removeIds(plan.ownedTextFrameIds, duplicateTextFrameIds);
+            ObjectPlan next = plan.withOwnedTextFrameIds(retainedOwnedTextFrameIds);
+            if (retainedOwnedTextFrameIds.length == 0
+                    && next.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+                next = next.withTextAction(TextAction.DROP_TEXT);
+            }
+            plans.set(i, next.withVisualAction(next.visualAction,
+                    "table_cell_marker_text_owned_by_hwpx_table"));
+            updatedShellPlans++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.tableDuplicateMarkerTextFrames.suppressedTextPlans",
+                suppressedTextPlans);
+        ConversionTiming.metric("stage1.ownershipPlanner.tableDuplicateMarkerTextFrames.updatedShellPlans",
+                updatedShellPlans);
+    }
+
+    private List<TableMarkerCell> tableMarkerCellsOwnedByHwpxTables() {
+        List<TableMarkerCell> out = new ArrayList<>();
+        if (data == null) return out;
+        for (ObjectPlan plan : plans) {
+            if (!isHwpxTableContentOwnerPlan(plan)) continue;
+            ResolvedTable table = tableForPlan(plan);
+            if (table == null || table.cells() == null) continue;
+            double[] tableBounds = validBounds(table.bounds()) ? table.bounds() : plan.bounds;
+            for (ResolvedTable.Cell cell : table.cells()) {
+                String marker = normalizeResolvedVisibleText(cellVisibleText(cell));
+                if (!isSimplePngOwnedMarkerText(marker)) continue;
+                double[] cellBounds = tableCellBounds(table, cell, tableBounds);
+                if (!validBounds(cellBounds)) continue;
+                out.add(new TableMarkerCell(plan.pageIndex, marker, cellBounds));
+            }
+        }
+        return out;
+    }
+
+    private boolean isHwpxTableContentOwnerPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        ResolvedTable table = tableForPlan(plan);
+        if (table == null) return false;
+        return planCarriesTableStyleSourceChannel(plan)
+                || "text_frame:table_only".equals(safe(plan.kind))
+                || safe(plan.kind).contains("table")
+                || sameIntSet(plan.ownedTextFrameIds, new int[] { tableStyleOwnerTextFrameId(plan) });
+    }
+
+    private static boolean isEditableTextFrameTextSlotPlan(ObjectPlan plan) {
+        if (plan == null || plan.domId < 0) return false;
+        String kind = safe(plan.kind);
+        return "text_frame".equals(kind)
+                || kind.startsWith("planner_declared_text_frame");
+    }
+
+    private ResolvedTable tableForPlan(ObjectPlan plan) {
+        if (plan == null || data == null) return null;
+        int[] ids = mergeIds(plan.sourceObjectIds, plan.styleSourceObjectIds);
+        for (int id : ids) {
+            ResolvedTable table = data.getTable(String.valueOf(id));
+            if (table != null) return table;
+        }
+        int ownerTextFrameId = tableStyleOwnerTextFrameId(plan);
+        ResolvedTextFrame tf = ownerTextFrameId >= 0
+                ? data.getTextFrame(String.valueOf(ownerTextFrameId))
+                : null;
+        if (tf == null || tf.storyId() == null) return null;
+        ResolvedTable matched = null;
+        for (ResolvedTable table : data.tables()) {
+            if (table == null || !tf.storyId().equals(table.storyId())) continue;
+            if (matched != null) return null;
+            matched = table;
+        }
+        return matched;
+    }
+
+    private static String cellVisibleText(ResolvedTable.Cell cell) {
+        if (cell == null || cell.paragraphs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedParagraph paragraph : cell.paragraphs()) {
+            sb.append(paragraphVisibleText(paragraph));
+        }
+        return sb.toString();
+    }
+
+    private static double[] tableCellBounds(
+            ResolvedTable table,
+            ResolvedTable.Cell cell,
+            double[] tableBounds) {
+        if (table == null || cell == null || !validBounds(tableBounds)) return null;
+        int rowCount = Math.max(1, table.rowCount());
+        int colCount = Math.max(1, table.columnCount());
+        int row = Math.max(0, Math.min(cell.row(), rowCount - 1));
+        int col = Math.max(0, Math.min(cell.col(), colCount - 1));
+        int rowSpan = Math.max(1, Math.min(cell.rowSpan(), rowCount - row));
+        int colSpan = Math.max(1, Math.min(cell.colSpan(), colCount - col));
+
+        double tableHeight = tableBounds[2] - tableBounds[0];
+        double tableWidth = tableBounds[3] - tableBounds[1];
+        double top = tableBounds[0] + dimensionOffset(table.rowHeights(), row, tableHeight, rowCount);
+        double bottom = top + dimensionExtent(table.rowHeights(), row, rowSpan, tableHeight, rowCount);
+        double left = tableBounds[1] + dimensionOffset(table.columnWidths(), col, tableWidth, colCount);
+        double right = left + dimensionExtent(table.columnWidths(), col, colSpan, tableWidth, colCount);
+        return new double[] { top, left, bottom, right };
+    }
+
+    private static double dimensionOffset(double[] sizes, int index, double total, int count) {
+        if (index <= 0) return 0.0;
+        if (sizes != null && sizes.length >= index) {
+            double out = 0.0;
+            for (int i = 0; i < index; i++) out += Math.max(0.0, sizes[i]);
+            return out;
+        }
+        return total * index / Math.max(1, count);
+    }
+
+    private static double dimensionExtent(double[] sizes, int index, int span, double total, int count) {
+        if (span <= 0) return 0.0;
+        if (sizes != null && sizes.length >= index + span) {
+            double out = 0.0;
+            for (int i = index; i < index + span; i++) out += Math.max(0.0, sizes[i]);
+            return out;
+        }
+        return total * span / Math.max(1, count);
+    }
+
+    private boolean isTableDuplicateMarkerTextFrame(
+            ObjectPlan plan,
+            List<TableMarkerCell> tableMarkers) {
+        if (plan == null || plan.domId < 0 || tableMarkers == null || tableMarkers.isEmpty()) return false;
+        ResolvedTextFrame tf = data != null ? data.getTextFrame(String.valueOf(plan.domId)) : null;
+        if (!isFloatingGraphicMarkerTextFrame(tf, plan.domId)) return false;
+        String marker = normalizeResolvedVisibleText(visibleText(tf));
+        double[] tfBounds = textFramePlanBounds(tf, plan.domId, false);
+        if (!validBounds(tfBounds)) return false;
+        int pageIndex = tf.pageIndex() >= 0 ? tf.pageIndex() : plan.pageIndex;
+        for (TableMarkerCell cell : tableMarkers) {
+            if (cell.pageIndex != pageIndex) continue;
+            if (!cell.marker.equals(marker)) continue;
+            if (containsCenter(expandBounds(cell.bounds, 0.75), tfBounds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isFloatingGraphicMarkerTextFrame(ResolvedTextFrame tf, int textFrameId) {
+        if (tf == null || textFrameId < 0 || data == null) return false;
+        if (tf.sourceHidden() || tf.isInline()) return false;
+        if (tf.previousFrameId() != null || tf.nextFrameId() != null) return false;
+        if (!isSimplePngOwnedMarkerText(normalizeResolvedVisibleText(visibleText(tf)))) return false;
+        ResolvedPageItem textItem = data.getPageItem(tf.id());
+        if (textItem == null || textItem.parentId() == null || textItem.parentId().isBlank()) return false;
+        String current = textItem.parentId();
+        HashSet<String> visited = new HashSet<>();
+        int depth = 0;
+        while (current != null && !current.isBlank() && visited.add(current) && depth++ < 4) {
+            ResolvedPageItem parent = data.getPageItem(current);
+            if (parent == null) break;
+            if (isVisibleGraphicCarrierForChildMarker(parent, textFrameId)) return true;
+            current = parent.parentId();
+        }
+        return false;
+    }
+
+    private static boolean containsAnySet(int[] values, Set<Integer> candidates) {
+        if (values == null || values.length == 0 || candidates == null || candidates.isEmpty()) return false;
+        for (int value : values) {
+            if (candidates.contains(value)) return true;
+        }
+        return false;
+    }
+
+    private static double[] expandBounds(double[] bounds, double padding) {
+        if (bounds == null || bounds.length < 4) return bounds;
+        double p = Math.max(0.0, padding);
+        return new double[] { bounds[0] - p, bounds[1] - p, bounds[2] + p, bounds[3] + p };
+    }
+
+    private static final class TableMarkerCell {
+        final int pageIndex;
+        final String marker;
+        final double[] bounds;
+
+        TableMarkerCell(int pageIndex, String marker, double[] bounds) {
+            this.pageIndex = pageIndex;
+            this.marker = marker;
+            this.bounds = bounds;
         }
     }
 
@@ -13801,11 +14029,6 @@ public final class OwnershipPlanner {
     private boolean isTableStyleCarrierVisualDuplicate(ObjectPlan visualPlan, List<ObjectPlan> tableStylePlans) {
         if (visualPlan == null || tableStylePlans == null || tableStylePlans.isEmpty()) return false;
         if (!visualPlan.hasVisibleVisual()) return false;
-        if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL
-                && visualPlan.ownedTextFrameIds != null
-                && visualPlan.ownedTextFrameIds.length > 0) {
-            return false;
-        }
         if (visualPlan.materialization == Materialization.HWPX_TABLE_STYLE) return false;
         if (visualPlan.domId < 0) return false;
 
@@ -13813,12 +14036,20 @@ public final class OwnershipPlanner {
             if (tableStylePlan == null || tableStylePlan == visualPlan) continue;
             if (sameTableStyleCarrierSource(visualPlan, tableStylePlan)) return true;
         }
+        if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && visualPlan.ownedTextFrameIds != null
+                && visualPlan.ownedTextFrameIds.length > 0) {
+            return false;
+        }
         return false;
     }
 
     private boolean sameTableStyleCarrierSource(ObjectPlan visualPlan, ObjectPlan tableStylePlan) {
         int[] tableStyleSources = mergeIds(tableStylePlan.sourceObjectIds, tableStylePlan.styleSourceObjectIds);
         int[] visualSources = visualSourceIds(visualPlan);
+        if (tableStyleSlotOwnsCompleteVisiblePayload(visualPlan, tableStyleSources)) {
+            return true;
+        }
         if (containsAny(tableStyleSources, visualSources)
                 && visualSourceOwnsAnyTableStyleTextFrame(visualSources, tableStylePlan)) {
             return true;
@@ -13828,6 +14059,65 @@ public final class OwnershipPlanner {
             return true;
         }
         return false;
+    }
+
+    private boolean tableStyleSlotOwnsCompleteVisiblePayload(ObjectPlan visualPlan, int[] tableStyleSources) {
+        if (visualPlan == null || tableStyleSources == null || tableStyleSources.length == 0) return false;
+        int[] payloadSources = nonStructuralVisiblePayloadSourceIds(visualPlan);
+        if (payloadSources.length == 0) return false;
+        if (!containsAny(tableStyleSources, payloadSources)) return false;
+        for (int payloadSource : payloadSources) {
+            if (contains(tableStyleSources, payloadSource)) continue;
+            if (isNonSemanticTableBackdropEffectSource(payloadSource)) continue;
+            return false;
+        }
+        return true;
+    }
+
+    private int[] nonStructuralVisiblePayloadSourceIds(ObjectPlan plan) {
+        int[] visibleSources = visualSourceIds(plan);
+        if (visibleSources == null || visibleSources.length == 0) return new int[0];
+        LinkedHashSet<Integer> payload = new LinkedHashSet<>();
+        for (int sourceId : visibleSources) {
+            if (isStructuralGroupSource(sourceId)) continue;
+            payload.add(sourceId);
+        }
+        if (payload.isEmpty()) {
+            addAll(visibleSources, payload);
+        }
+        return toIntArray(payload);
+    }
+
+    private boolean isStructuralGroupSource(int sourceId) {
+        if (data == null || sourceId < 0) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        return item != null && "Group".equals(safe(item.type()));
+    }
+
+    private boolean isNonSemanticTableBackdropEffectSource(int sourceId) {
+        if (data == null || sourceId < 0) return false;
+        if (data.getTextFrame(String.valueOf(sourceId)) != null) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item == null || item.sourceHidden()) return false;
+        String type = safe(item.type());
+        if ("Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) return false;
+        if (sourceItemHasVisibleFillOrStroke(item)) return false;
+        return item.opacity() < 99.99
+                || item.gradientFeatherApplied()
+                || item.hasDropShadow();
+    }
+
+    private static boolean sourceItemHasVisibleFillOrStroke(ResolvedPageItem item) {
+        if (item == null) return false;
+        String fill = safe(item.fillColorName());
+        if (!isNoneColor(fill) && !isPaperColor(fill) && item.fillTint() > 0.01) {
+            return true;
+        }
+        String stroke = safe(item.strokeColorName());
+        return item.strokeWeight() > 0.01
+                && !isNoneColor(stroke)
+                && !isPaperColor(stroke)
+                && item.strokeTint() > 0.01;
     }
 
     private boolean visualSourceOwnsAnyTableStyleTextFrame(int[] visualSources, ObjectPlan tableStylePlan) {
