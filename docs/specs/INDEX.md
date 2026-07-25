@@ -24,7 +24,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-072](SPEC-072-cell-char-attr-investigation.md) | Done | 표 셀 글자속성(색·폰트) 복원 — 파서에 IDML 명시/상속 구분 플래그 추가 후 명시값만 주입 (#144 머지). 선행 실패 SPEC-071 의 원인 분석 포함 |
 | [SPEC-073](SPEC-073-text-wrap-shell-gap.md) | Active | 라벨 셸과 본문이 겹침(영어 u1 p12 Listen & Number) — plan 이 감싸기를 버리던 것은 수정, **Java floating 경로가 `allowOverlap=true`로 무력화하는 본질은 미해결** |
 | [SPEC-074](SPEC-074-image-textless-group-render-missing.md) | Active | Group 으로 묶인 배치 이미지 유실(영어 u1 p13 동영상 사진) — plan 이 참조하는 `pass.image_textless_groups` 에 렌더 실행기가 미등록. pass 등록으로 수정 (구현 완료, 회귀 검증 중) |
-| [SPEC-075](SPEC-075-graphic-short-text-button-group-complete-png.md) | Active | 그래픽+짧은텍스트 버튼/배지 그룹 통PNG(영어 u1 p16 YES/NO 글자 안 보임·줄바꿈) — 편집 셸 대신 그룹째 통PNG. 짧은TF≥2+그래픽+긴TF<3 게이트. 회귀 PASS(10개 정확 전환, 육안 확인 대기) |
+| [SPEC-075](SPEC-075-graphic-short-text-button-group-complete-png.md) | Active | 그래픽+짧은텍스트 버튼/배지 그룹 통PNG(영어 u1 p16 YES/NO 글자 안 보임·줄바꿈) — 편집 셸 대신 그룹째 통PNG. 짧은TF≥2+그래픽+긴TF<3 게이트 (#149 머지, 회귀 PASS 10개 정확 전환, 육안 확인 대기) |
 | [SPEC-041](SPEC-041-anchored-edge-label-floating.md) | Active | 앵커 가장자리 라벨(구절 풀이 배지) 테이블 셀 흡수 — 컨버터 오버레이 채널 보존으로 수정 (구현 완료, 육안 확인 대기) |
 | [SPEC-048](SPEC-048-floating-anchored-gauge-inline-misplacement.md) | Done | FLOATING_ANCHORED 게이지(눈금+100%+연필)의 인라인 오배치 — 추출기 3-seed 통짜PNG 통일 + FLOATING/PAGE 배치 (2026-07-22 한글 육안 확인 완료) |
 | [SPEC-056](SPEC-056-cell-answer-blank-inline-loss.md) | Done | 표 셀 답란(연필+밑줄) 인라인 객체 유실 — 스페이서 오판·□ 삼킴·fallback 순서 손실 3중 수정 (2026-07-22 한글 육안 확인 완료) |
