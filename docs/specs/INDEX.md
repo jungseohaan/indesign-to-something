@@ -18,10 +18,10 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-038](SPEC-038-extract-indd-modularization-map.md) | Active support | `extract_indd.jsx` modularization map and removal of legacy extraction paths |
 | [SPEC-061](SPEC-061-hwpx-structural-golden-gate.md) | Active support | HWPX 구조 시그니처 골든 게이트 — verify_hwpx.py + test-data/golden, PR 전 회귀 비교 관례 |
 | [SPEC-067](SPEC-067-grep-normalization-and-math-grouping.md) | Active | GREP 변환 정상화 + 수식 그룹 경계 재설계. **수정 A(GREP BasedOn 상속, #131)·수정 B(DOM 글자속성 차단, #134) 완료** — DOM 글자속성 11,396→0, 텍스트 수집 -52%. 남은 것: 수식 그룹 경계 재설계(수학 조각화) |
-| [SPEC-068](SPEC-068-page-plane-foreign-visual-owner-hide.md) | Active | 페이지 배경 평면에 남는 도형 중복(영어 u1 p10 보라색·흰 박스) — 소유권 게이트와 숨김 게이트 분리, `hiddenForeignVisualOwnerSourceObjectIds` 채널 추가 (구현 완료, 육안 확인 대기) |
-| [SPEC-069](SPEC-069-bleeding-shape-page-plane-absorb.md) | Active | 도련(bleed) 도형이 작게·빈틈 있게 배치 — 개별 PNG 로는 불가(한글 음수 오프셋 미지원), textless 도련 도형을 배경 평면에 흡수 (구현 완료, 육안 확인 대기) |
-| [SPEC-070](SPEC-070-table-frame-hastext.md) | Active | 표에 담긴 본문이 셸 PNG 로 구워짐(영어 u1 p10 Look Ahead) — hasText 가 표 셀 텍스트 미인식 + contentOpacity 가 표에 미적용 (구현 완료, 육안 확인 대기) |
-| [SPEC-072](SPEC-072-cell-char-attr-investigation.md) | Active | 표 셀 글자속성(색·폰트) 복원 — 조사 완료·구현 대기. SPEC-071 실패 원인(전역 CharPr 경로 + lastCharPrIDRef 연쇄) 규명 |
+| [SPEC-068](SPEC-068-page-plane-foreign-visual-owner-hide.md) | Done | 페이지 배경 평면에 남는 도형 중복 — 소유권 게이트와 숨김 게이트 분리, `hiddenForeignVisualOwnerSourceObjectIds` 채널 추가 (#140 머지, 20p 회귀 PASS) |
+| [SPEC-069](SPEC-069-bleeding-shape-page-plane-absorb.md) | Done | 도련(bleed) 도형이 작게·빈틈 있게 배치 — 개별 PNG 로는 불가(한글 음수 오프셋 미지원), textless 도련 도형을 배경 평면에 흡수 (#142 머지, 20p 회귀 PASS) |
+| [SPEC-070](SPEC-070-table-frame-hastext.md) | Done | 표에 담긴 본문이 셸 PNG 로 구워짐 — hasText 가 표 셀 텍스트 미인식 + contentOpacity 가 표에 미적용 (#142 머지, 20p 회귀 PASS) |
+| [SPEC-072](SPEC-072-cell-char-attr-investigation.md) | Done | 표 셀 글자속성(색·폰트) 복원 — 파서에 IDML 명시/상속 구분 플래그 추가 후 명시값만 주입 (#144 머지). 선행 실패 SPEC-071 의 원인 분석 포함 |
 | [SPEC-041](SPEC-041-anchored-edge-label-floating.md) | Active | 앵커 가장자리 라벨(구절 풀이 배지) 테이블 셀 흡수 — 컨버터 오버레이 채널 보존으로 수정 (구현 완료, 육안 확인 대기) |
 | [SPEC-048](SPEC-048-floating-anchored-gauge-inline-misplacement.md) | Done | FLOATING_ANCHORED 게이지(눈금+100%+연필)의 인라인 오배치 — 추출기 3-seed 통짜PNG 통일 + FLOATING/PAGE 배치 (2026-07-22 한글 육안 확인 완료) |
 | [SPEC-056](SPEC-056-cell-answer-blank-inline-loss.md) | Done | 표 셀 답란(연필+밑줄) 인라인 객체 유실 — 스페이서 오판·□ 삼킴·fallback 순서 손실 3중 수정 (2026-07-22 한글 육안 확인 완료) |

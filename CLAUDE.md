@@ -6,20 +6,23 @@
 
 IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) 데스크탑 앱 + React 프론트엔드.
 
-## 활성 작업 (2026-07-24 기준)
+## 활성 작업 (2026-07-25 기준)
 
-- **브랜치**: `open-indd` — SPEC-067 GREP 정상화 스윕 머지 완료 (#127~#134)
-- **최근 완료 (2026-07-24)**: [SPEC-067](docs/specs/SPEC-067-grep-normalization-and-math-grouping.md) 수정 A·B
-  - 수정 A: GREP 규칙 BasedOn 부모 체인 상속 (#131) — 파생 문단스타일이 부모 GREP 색을 상속
-  - 수정 B: **추출기 DOM 글자속성 전면 차단** (#134) — DOM 은 줄바꿈·이미지 전용, 글자속성은 IDML.
-    영어 u1 실측: DOM 글자속성 11,396→0, 텍스트 수집 26.8s→12.8s(-52%), 런 오병합 해소로 visibleChars +200
-  - 부수: FontStyle "Bk" 볼드 판정(#133), composedLines DOM 읽기 제거(#132), sqrt 글리프 디코드(#127)
+- **브랜치**: `open-indd` — 영어 u1 도비라(p10) 시각/텍스트 스윕 머지 완료 (#140~#144)
+- **최근 완료 (2026-07-24~25)**: 영어 u1 p10 한 페이지에서 연쇄적으로 드러난 4건
+  - [SPEC-068](docs/specs/SPEC-068-page-plane-foreign-visual-owner-hide.md) (#140) — 배경 평면에 도형이 중복.
+    **소유권 게이트와 숨김 게이트를 분리** (`hiddenForeignVisualOwnerSourceObjectIds`). 20p 에서 1,751건 숨김
+  - [SPEC-069](docs/specs/SPEC-069-bleeding-shape-page-plane-absorb.md) (#142) — 도련(bleed) 도형이 작게·빈틈 있게 배치.
+    **개별 PNG 로는 불가**(한글이 음수 오프셋 미지원) → textless 도련 도형을 배경 평면에 흡수. 20p 에서 9페이지 13건
+  - [SPEC-070](docs/specs/SPEC-070-table-frame-hastext.md) (#142) — 표에 담긴 본문이 셸 PNG 로 구워짐.
+    `hasText` 가 표 셀 텍스트 미인식 + `contentOpacity` 가 표에 미적용
+  - [SPEC-072](docs/specs/SPEC-072-cell-char-attr-investigation.md) (#144) — 표 셀 텍스트가 IDML 색·폰트 유실.
+    파서에 **명시/상속 구분 플래그** 추가 후 명시값만 주입. 선행 실패(SPEC-071)의 원인 분석 포함
 - **진행 중 / 대기**:
-  - ⚠️ **`03d15_plan_objectPlans` 성능 회귀 (미수정)** — 0.81s→116.89s(144배, 2회 재현).
-    범인은 커밋 `1c3ec362`(중첩 루프 추가 + `PAGE_PLANE_CACHE_ROOT` 이름 변경으로 캐시 무효화). 별도 SPEC/PR 필요
-  - **영어 u1 구조 골든 갱신 필요** — 기존 골든은 full 모드·`720460fd` 시점이라 현재 text-only 실행과 조건 불일치
   - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) + SPEC-044~047 (화학식 계열) — 구현 완료, **한글 육안 확인 대기**
-  - SPEC-067 잔여: 수식 그룹 경계 문맥 기반 재설계(수학 조각화) — stash@{0}/{1} 에 WIP
+  - SPEC-067 잔여: 수식 그룹 경계 문맥 기반 재설계(수학 조각화) — stash@{0}/{1} 에 WIP.
+    남은 블로커는 연산자·쉼표 연속 조각 24건(`1²=1,2²=4`)
+  - 별건 관찰: 최종 HWPX 에 `Time to Shine` 이 두 번 나오는 중복 (영어 u1 p10, 미조사)
 - **기타 Active SPEC**: SPEC-012 (속성 우선순위), SPEC-014 (폰트 자동 매핑), SPEC-015 (AST 디버깅), SPEC-018 (시멘틱 M3), SPEC-055 (화학식 전면 수식화)
 - **전체 SPEC 인덱스**: [docs/specs/INDEX.md](docs/specs/INDEX.md)
 
