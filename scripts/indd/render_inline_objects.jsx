@@ -1206,11 +1206,28 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
             // 배지가 숫자만 남고 흰 텍스트가 사라진다 (SPEC-076, p25 탐구 배지).
             // 숨김 대상(hiddenVisualSourceObjectIds/out-of-scope)은 이 함수 호출 전
             // 원본에 선적용되므로 그룹째 복제해도 숨김이 유지된다.
+            // 그룹뿐 아니라 자식(예 ① 배지의 "1" TextFrame)을 품은 컨테이너 도형
+            // (Oval/Rectangle/Polygon)도 그룹째 복제해야 한다. 자식만 골라 재복제하면
+            // 배경 도형이 빠지고 textless 렌더로 텍스트도 숨겨져 빈 PNG 가 된다
+            // (SPEC-076 확장, p36 "화학 반응에서 보존되는 질량" 앞 ① 배지).
             var _completePngExportIds = candidate.exportSourceObjectIds || [];
             if (_completePngExportIds.length === 1
-                    && String(_completePngExportIds[0]) === String(item.id)
-                    && item.constructor && String(item.constructor.name) === "Group") {
-                return item.duplicate(spread) || null;
+                    && String(_completePngExportIds[0]) === String(item.id)) {
+                var _completePngItemType = item.constructor ? String(item.constructor.name) : "";
+                var _completePngHasChildContent = (_completePngItemType === "Group");
+                if (!_completePngHasChildContent) {
+                    try {
+                        _completePngHasChildContent = item.textFrames && item.textFrames.length > 0;
+                    } catch (eChildTf) {}
+                }
+                if (!_completePngHasChildContent) {
+                    try {
+                        _completePngHasChildContent = item.pageItems && item.pageItems.length > 0;
+                    } catch (eChildPi) {}
+                }
+                if (_completePngHasChildContent) {
+                    return item.duplicate(spread) || null;
+                }
             }
             var sourceIds = _completePngDuplicateSourceIds(candidate);
             for (var si = 0; si < sourceIds.length; si++) {
