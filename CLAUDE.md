@@ -16,6 +16,8 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
     편집 셸 대신 **그래픽+짧은텍스트 그룹 통PNG**(짧은TF≥2+그래픽+긴TF<3 게이트). 회귀 PASS(10개 정확 전환), 한글 육안 확인 완료
   - [SPEC-076](docs/specs/SPEC-076-inline-complete-png-group-visual-children-dropped.md) (#155) — 통PNG 배지 숫자만 남고 흰 "탐구"·배경 알약 소실(과학 u1 p25 탐구①/②).
     통PNG 그룹 복제(`_duplicateNestedCompletePngForExport`)가 그룹 루트 단독 export 시 배경 시각 자식을 떨궈 텍스트프레임만 재그룹 → **그룹째 `item.duplicate`**. 8-49 회귀 PASS + 골든 재생성. 함께 dev 루프 기본 dpi 96→120
+  - [SPEC-077](docs/specs/SPEC-077-contextual-chem-formula-sibling-promotion.md) + [SPEC-078](docs/specs/SPEC-078-fragmented-chemical-formula-reassembly.md) (#157) — 과학 u1 p26 화학식 전수 정리.
+    SPEC-077: 첨자 없는 화학 라벨(2HCl)이 CaCO₃/CaCl₂ 형제와 달리 평문으로 남던 것 → **같은 부모 그룹에 확정 화학식 형제 있으면 승격**(StoryConverter post-pass). SPEC-078: hair space·폰트크기로 파편난 H₂O(`[수식H][텍스트2][수식O]`)를 **`rm H_{2}O` 로 재조립**(MathProcessor) + 꼬리첨자(N₂H₄·H₂O₂) 흡수 + `stripAllFormulaSpaces`(U+200A 누수) + **단일문자 오수식화 강등**(GREP `[단일 라틴 문자]→BT수식` 이 과학자 이니셜 A/J/L/I 를 수식화 — 사용자 지적). 전수 조사(32개 고유 수식) 검증
 - **최근 완료 (2026-07-24~25)**: 영어 u1 p10 한 페이지에서 연쇄적으로 드러난 4건
   - [SPEC-068](docs/specs/SPEC-068-page-plane-foreign-visual-owner-hide.md) (#140) — 배경 평면에 도형이 중복.
     **소유권 게이트와 숨김 게이트를 분리** (`hiddenForeignVisualOwnerSourceObjectIds`). 20p 에서 1,751건 숨김
@@ -27,6 +29,7 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
     파서에 **명시/상속 구분 플래그** 추가 후 명시값만 주입. 선행 실패(SPEC-071)의 원인 분석 포함
 - **진행 중 / 대기**:
   - [SPEC-041](docs/specs/SPEC-041-anchored-edge-label-floating.md) + SPEC-044~047 (화학식 계열) — 구현 완료, **한글 육안 확인 대기**
+  - **화학식 전수 조사 잔여(SPEC-078 후속, 미착수)**: (B) 반응식 좌변/계수 유실 — `2Mg+O₂→2MgO` 의 좌변 "2Mg+" 가 수식 밖 텍스트로 남고, `Cu+O₂→2CuO` 계수 유실. 기존 `stitchChemicalFormulaFragments` 선행-흡수가 `rm` 접두사 얽힘 + 연산자 체인 미지원으로 못 잡음. (C) 답란 반응식 `N₂□□□NH₃` 에서 □가 `+`/`→` 삼킴. fragile 반응식 재조립이라 회귀 게이트 충분히 돌리는 전용 SPEC 필요
   - SPEC-067 잔여: 수식 그룹 경계 문맥 기반 재설계(수학 조각화) — stash@{0}/{1} 에 WIP.
     남은 블로커는 연산자·쉼표 연속 조각 24건(`1²=1,2²=4`)
   - 별건 관찰: 최종 HWPX 에 `Time to Shine` 이 두 번 나오는 중복 (영어 u1 p10, 미조사)
@@ -131,6 +134,7 @@ python3 scripts/dev/issue.py --case 중3과학교과서/u1-local --page 17 --con
 - **resolved 첨자 위치 흘림 → 계수 오첨자**: resolved DOM 이 화학식 "2H₂O"의 첨자 위치를 계수·hair space(U+200A)까지 SUBSCRIPT 로 흘리면, splitChemical 로 분리된 계수 2 가 `findResolvedRun`(텍스트 contains 매칭)에서 첨자 2 에 오매칭돼 계수가 아래첨자로 깨진다 (SPEC-045, pg25/26/28). IDML 원본은 Position=None + charStyle 로만 첨자 표기 → `RunBuilder.applyPositionStyle`/`resolvedCharacterStyleRef` 가 "IDML 비첨자 증거(position=null + 비첨자 charStyle)"면 resolved 첨자를 버린다. 진짜 첨자(H₂)는 IDML charStyle=하부자라 무영향
 - **CharPr 캐시 키는 스타일 인자 전부 포함**: `CharPrFactory` 계열 캐시 키에 CharPrBuilder.build 가 소비하는 인자(특히 subscript/superscript/fontStyle)가 하나라도 빠지면, 다른 문단이 만든 CharPr 을 물려받아 첨자가 이웃 글자로 전이된다 (SPEC-042 p47 사례: H↔2 첨자 스왑). AST 계측이 침묵인데 HWPX 에 속성이 있으면 CharPr 캐시/공유 층을 의심할 것
 - **resolved DOM 의 EH 폰트 과대 보고**: InDesign DOM 이 √ 글리프 뒤 한국어 문장까지 EH상부자 폰트로 보고할 수 있다 (IDML 은 [No character style]). resolved 셀 경로가 폰트만 보고 수식 그룹에 넣으면 lexSubSup 미매핑 스킵으로 한국어가 통째로 유실 → `MathProcessor.splitEHKoreanMixedTextRuns` 가 첫 한국어 문자에서 분리 (p20 사례, 36c2d24c)
+- **화학식 라벨이 여러 조각 수식으로 갈라짐 — hair space·폰트크기·GREP 단일문자가 원인**: 반응식 다이어그램 라벨 "H₂O" 가 한글에서 "H₂ O" 로 벌어지면, 원본에 아래첨자 ₂ 와 O 사이의 **hair space(U+200A)** + 폰트크기 경계 때문에 `[수식 H][텍스트 "2"][수식 O]` 3조각으로 갈라진 것이다. `MathProcessor.reassembleFragmentedChemicalFormula`(단독원소 수식+숫자 조각을 `finalizeChemicalScript` 로 재조립) + `stitchChemicalFormulaFragments`(꼬리첨자·바레원소 흡수)로 합친다. **주의: Java `\s` 는 U+200A 를 못 잡는다** — `finalizeChemicalScript` 는 `stripAllFormulaSpaces`(`Character.isSpaceChar` 기준)로 유니코드 공백까지 제거해야 `rm H_{2} O`(여전히 벌어짐) 누수를 막는다 (SPEC-078). 또한 **GREP 규칙 `[단일 라틴 문자] → charStyle 수식서체관련-태광(=BT수식H-편한글씨)`** 가 문단의 모든 단일 라틴 문자를 수식화해 **화학자 연표 이니셜(A/J/L…)까지 단일문자 수식**이 된다 → `demoteIsolatedSingleLetterMathEquation` 가 인접 수식 근거 없는 단독 단일 문자를 이탤릭 텍스트로 강등 (SPEC-078 audit-A). 첨자 없는 화학 라벨(2HCl)이 형제와 달리 평문이면 `ChemicalFormulaPolicy` 가 첨자 유무로만 판정하기 때문 → 같은 부모 그룹 확정 화학식 형제 문맥으로 승격 (SPEC-077). **남은 것: 반응식 좌변/계수 유실(2Mg+O₂→2MgO)·답란 연산자(N₂□□□NH₃) 은 미해결**
 - **표 전용 TF 는 hasText=false — 인라인 그룹의 표가 통PNG 로 구워짐**: 콘텐츠가 표 앵커 제어문자(U+0016)뿐인 TextFrame 은 `_textFrameHasContent`/`hasText` 판정이 거짓 → 인라인 앵커 그룹(표 TF + 배경 rect)이 편집 텍스트 없음으로 오분류돼 표 텍스트째 PNG 렌더 + Java 편집 테이블과 중복. 표 소유 여부는 `storyHasVisibleTableCellText` 로 판정할 것. 배경 rect 셀 fill 흡수는 `PLACE_TABLE_STYLE` plan 의 styleSourceObjectIds 경유인데, style 소스 수집의 `isInline` 무조건 배제가 같은 앵커 그룹 형제 rect 를 누락시킴 → 표 소유 TF 가 인라인이면 허용 (`_isTableAttributeStyleSource` allowInlineFlow, p47 사례, PR #85)
 - **캐리어 셀 흡수 테이블의 fixedOuterBounds 리셋 금지**: `normalizeNestedInlineTable` 이 `fixedOuterBounds(false)` 로 되돌리면 `HwpxTableBuilder.inlineFlowChunks` 가 다행 인라인 테이블을 행별 1×N 조각으로 분리한다 (p47 2×5 → 1×5 두 개 사례). resolved 가 외곽 경계를 아는 테이블은 흡수 후에도 플래그 보존
 
