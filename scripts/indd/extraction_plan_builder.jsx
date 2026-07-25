@@ -5551,6 +5551,74 @@ function _normalizePageCoordinateCandidateBounds(candidates, sourceIndex) {
     return candidates;
 }
 
+/**
+ * 후보에 텍스트 감싸기(text wrap) 계약을 싣는다.
+ *
+ * <p>InDesign 에서 라벨 셸이 본문 프레임과 겹치도록 배치돼도 겹쳐 보이지 않는 이유는
+ * 셸에 걸린 감싸기가 본문 첫 글자를 밀어내기 때문이다(영어 u1 p12 "Listen & Number"
+ * 배지: 셸 x23.3~52.6, 본문 프레임 x45 시작 — 프레임끼리는 7.6mm 겹친다).
+ * 감싸기를 잃으면 그 여백이 사라져 배지와 본문이 실제로 겹쳐 렌더된다.
+ *
+ * <p>추출기는 감싸기를 정상 수집하고(실측: `BoundingBoxTextWrap`, Right=8.5pt) Java 도
+ * `HwpxImageBuilder` 에서 `outMargin` 으로 실행할 준비가 돼 있는데, 그 사이 plan 생성이
+ * 감싸기를 `mixed_source_bundle_placed_visual_branch` 한 경로에서만 실었다. 다른 pass
+ * (decoration_groups 등)로 만들어진 후보는 값을 통째로 잃었다 — 실측 1,013개 plan 중
+ * 감싸기를 가진 것이 0개였다. 그래서 후보 종류를 가리지 않고 한 번에 적용한다.</p>
+ */
+function _applyTextWrapContractToCandidates(candidates, sourceItems) {
+    if (!candidates || !sourceItems || sourceItems.length === 0) return candidates || [];
+    var sourceById = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var s = sourceItems[i];
+        if (!s || s.id === null || s.id === undefined) continue;
+        sourceById[String(s.id)] = s;
+    }
+    function wrapSource(src) {
+        if (!src) return null;
+        var mode = String(src.textWrapMode || "");
+        if (!mode || mode === "None") return null;
+        return src;
+    }
+    // 감싸기는 후보가 소유한 소스 중 하나에 걸려 있다. 여러 개면 오른쪽 여백이 가장 큰
+    // 것을 쓴다 — 본문을 가장 많이 밀어내는 값이 실제 조판 결과를 결정한다.
+    function contractFor(candidate) {
+        var ids = []
+                .concat(candidate.visualSourceObjectIds || [])
+                .concat(candidate.sourceObjectIds || []);
+        var best = null;
+        var seen = {};
+        for (var k = 0; k < ids.length; k++) {
+            var key = String(ids[k]);
+            if (seen[key]) continue;
+            seen[key] = true;
+            var found = wrapSource(sourceById[key]);
+            if (!found) continue;
+            if (best === null
+                    || Number(found.textWrapRight || 0) > Number(best.textWrapRight || 0)) {
+                best = found;
+            }
+        }
+        return best;
+    }
+    var applied = 0;
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidate = candidates[ci];
+        if (!candidate) continue;
+        if (candidate.textWrapMode) continue;   // 이미 실린 경로는 그대로 둔다
+        var src = contractFor(candidate);
+        if (!src) continue;
+        candidate.textWrapMode = src.textWrapMode;
+        candidate.textWrapSide = src.textWrapSide || "BothSides";
+        candidate.textWrapTop = Number(src.textWrapTop || 0);
+        candidate.textWrapLeft = Number(src.textWrapLeft || 0);
+        candidate.textWrapBottom = Number(src.textWrapBottom || 0);
+        candidate.textWrapRight = Number(src.textWrapRight || 0);
+        candidate.textWrapSourceObjectId = src.id;
+        applied++;
+    }
+    return candidates;
+}
+
 function _completeFinalSlotOnlyShellHiddenVisualContracts(candidates, sourceItems) {
     if (!candidates || !sourceItems) return candidates || [];
     var sourceById = {};
@@ -9065,6 +9133,8 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13c_plan_preObjectPlanCanonicalizeSourceSlots");
     candidates = _completeFinalSlotOnlyShellHiddenVisualContracts(candidates, sourceItems);
     _marker(ctx.outputDir, "03d13d_plan_completeShellHiddenVisualContracts");
+    candidates = _applyTextWrapContractToCandidates(candidates, sourceItems);
+    _marker(ctx.outputDir, "03d13e_plan_applyTextWrapContract");
     if (ctx.writePlannerDiagnostics === true) {
         try {
             writeJson(ctx.outputDir + "/inline-flow-root-before-planner-bundles.json",

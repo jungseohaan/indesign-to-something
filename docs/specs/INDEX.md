@@ -22,6 +22,7 @@ Read these first for IDML -> HWPX V2 ownership work:
 | [SPEC-069](SPEC-069-bleeding-shape-page-plane-absorb.md) | Done | 도련(bleed) 도형이 작게·빈틈 있게 배치 — 개별 PNG 로는 불가(한글 음수 오프셋 미지원), textless 도련 도형을 배경 평면에 흡수 (#142 머지, 20p 회귀 PASS) |
 | [SPEC-070](SPEC-070-table-frame-hastext.md) | Done | 표에 담긴 본문이 셸 PNG 로 구워짐 — hasText 가 표 셀 텍스트 미인식 + contentOpacity 가 표에 미적용 (#142 머지, 20p 회귀 PASS) |
 | [SPEC-072](SPEC-072-cell-char-attr-investigation.md) | Done | 표 셀 글자속성(색·폰트) 복원 — 파서에 IDML 명시/상속 구분 플래그 추가 후 명시값만 주입 (#144 머지). 선행 실패 SPEC-071 의 원인 분석 포함 |
+| [SPEC-073](SPEC-073-text-wrap-shell-gap.md) | Active | 라벨 셸과 본문이 겹침(영어 u1 p12 Listen & Number) — plan 이 감싸기를 버리던 것은 수정, **Java floating 경로가 `allowOverlap=true`로 무력화하는 본질은 미해결** |
 | [SPEC-041](SPEC-041-anchored-edge-label-floating.md) | Active | 앵커 가장자리 라벨(구절 풀이 배지) 테이블 셀 흡수 — 컨버터 오버레이 채널 보존으로 수정 (구현 완료, 육안 확인 대기) |
 | [SPEC-048](SPEC-048-floating-anchored-gauge-inline-misplacement.md) | Done | FLOATING_ANCHORED 게이지(눈금+100%+연필)의 인라인 오배치 — 추출기 3-seed 통짜PNG 통일 + FLOATING/PAGE 배치 (2026-07-22 한글 육안 확인 완료) |
 | [SPEC-056](SPEC-056-cell-answer-blank-inline-loss.md) | Done | 표 셀 답란(연필+밑줄) 인라인 객체 유실 — 스페이서 오판·□ 삼킴·fallback 순서 손실 3중 수정 (2026-07-22 한글 육안 확인 완료) |
