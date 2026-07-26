@@ -99,7 +99,10 @@ class MathProcessor {
             }
 
             ASTTextRun tr = (ASTTextRun) item;
-            applyPositionFromCharacterStyle(tr);
+            // SPEC-080: 위첨자 밑수 가드용 앞 텍스트 런.
+            String prevPosText = (i > 0 && items.get(i - 1) instanceof ASTTextRun)
+                    ? ((ASTTextRun) items.get(i - 1)).text() : null;
+            applyPositionFromCharacterStyle(tr, prevPosText);
             String ff = tr.fontFamily();
             String currentType = mathTypeOf(tr);
 
@@ -852,7 +855,10 @@ class MathProcessor {
             ASTInlineItem item = items.get(i);
             if (item instanceof ASTTextRun) {
                 ASTTextRun tr = (ASTTextRun) item;
-                applyPositionFromCharacterStyle(tr);
+                // SPEC-080: 위첨자 밑수 가드용 앞 텍스트 런.
+                String prevText = (i > 0 && items.get(i - 1) instanceof ASTTextRun)
+                        ? ((ASTTextRun) items.get(i - 1)).text() : null;
+                applyPositionFromCharacterStyle(tr, prevText);
                 String text = tr.text();
                 if (text == null || text.isEmpty() || !isFormulaClusterText(text)) break;
                 if (isFormulaBoundaryText(text)) {
@@ -3037,7 +3043,15 @@ class MathProcessor {
     }
 
     private static void applyPositionFromCharacterStyle(ASTTextRun tr) {
+        applyPositionFromCharacterStyle(tr, null);
+    }
+
+    private static void applyPositionFromCharacterStyle(ASTTextRun tr, String prevText) {
         if (tr == null || tr.characterStyleRef() == null) return;
+        // SPEC-080: 함수 진입 시점의 위첨자는 상류 applyPositionStyle 이 position 근거로
+        // 세운 진짜 첨자다. 이 함수는 그 외에 charStyle 이름("상부자")만으로도 위첨자화하는데,
+        // 그 이름-폴백만 밑수 가드 대상으로 삼기 위해 진입 상태를 기록해 둔다.
+        boolean superscriptByPosition = tr.superscript();
         String style = tr.characterStyleRef().toLowerCase(Locale.ROOT)
                 .replace("%3a", ":")
                 .replace("%25", "%");
@@ -3061,6 +3075,13 @@ class MathProcessor {
         // 않는다. 실제 SUPERSCRIPT/SUBSCRIPT position 은 상류 applyPositionStyle 이 이미
         // 처리했으므로 이 이름-폴백 축소가 진짜 첨자를 놓치지 않는다.
         if (!isPlausibleScriptToken(tr.text())) return;
+        // SPEC-080: `상부자(이탤릭)` GREP 가 `\d+` 로 본문 숫자까지 이름-폴백 위첨자화한다
+        // ("제곱하여 4가 되는 수" 의 4·25). 위첨자(지수)는 밑수 뒤에만 온다 — position 이
+        // 아니라 스타일 이름만으로 온 위첨자는, 앞 런이 밑수(숫자·라틴 변수·닫는 괄호)로
+        // 끝날 때만 허용한다. 아래첨자(화학식 하부자)는 이 가드 대상 아님.
+        // 이름-폴백(position 근거 없음) 위첨자만 밑수 가드 대상.
+        boolean supByNameOnly = sup && !superscriptByPosition;
+        if (supByNameOnly && !precededByExponentBase(prevText)) return;
         if (sup) {
             tr.superscript(true);
             tr.subscript(false);
@@ -3068,6 +3089,19 @@ class MathProcessor {
             tr.subscript(true);
             tr.superscript(false);
         }
+    }
+
+    /** 위첨자(지수) 앞의 밑수인가 — 숫자·라틴 문자·닫는 괄호 }·)·]로 끝나면 참. */
+    private static boolean precededByExponentBase(String prevText) {
+        if (prevText == null) return false;
+        String t = prevText;
+        int e = t.length();
+        while (e > 0 && Character.isWhitespace(t.charAt(e - 1))) e--;
+        if (e == 0) return false;
+        char c = t.charAt(e - 1);
+        return (c >= '0' && c <= '9')
+                || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                || c == ')' || c == '}' || c == ']';
     }
 
     /** 첨자에 타당한 짧은 토큰(숫자·1~2 라틴 글자, 지수/화학식 계수)인가. */

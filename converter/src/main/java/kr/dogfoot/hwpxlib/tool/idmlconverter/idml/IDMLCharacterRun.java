@@ -337,6 +337,17 @@ public class IDMLCharacterRun {
                 || styleRefLooksLike(appliedCharacterStyle, "superscript", "상부자", "위첨자");
     }
 
+    /**
+     * SPEC-080: 위첨자 근거가 <b>charStyle 이름("상부자")뿐</b>이고 position 속성은
+     * 위첨자가 아닌가. `상부자(이탤릭)` GREP 가 본문 숫자에 이름만 입힌 경우를 가려내,
+     * 밑수 없는 본문 숫자의 위첨자화를 되돌리는 데 쓴다. position=superscript 인 진짜
+     * 첨자는 이름-폴백이 아니므로 false → 가드 대상 아님.
+     */
+    public boolean isSuperscriptByStyleNameOnly() {
+        return !positionLooksLike(position, "superscript")
+                && styleRefLooksLike(appliedCharacterStyle, "superscript", "상부자", "위첨자");
+    }
+
     private static boolean positionLooksLike(String position, String expected) {
         return position != null && position.toLowerCase(java.util.Locale.ROOT).contains(expected);
     }
