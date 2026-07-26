@@ -299,6 +299,27 @@ public class StoryLoader {
                 IDMLCharacterRun run = runs.get(idx);
                 applyCharacterStylePosition(ctx, run);
 
+                // SPEC-080 Phase 2: `상부자(이탤릭)` 숫자(제곱하여 4가 되는 수 → 4·25)는
+                // GREP 가 수식 서체로 명시한 요소다. EH/BT 그룹 파이프라인은 방어 로직이
+                // 여러 겹이라 순수 숫자를 텍스트로 폴백한다 → 여기서 열린 그룹을 flush 하고
+                // ASTEquation 으로 직접 방출해 모든 게이트를 우회한다(x 변수의 LATIN_VAR
+                // 경로와 동형). 과학 화학식은 `상부자(이탤릭)` 미사용(전수 0건)이라 무영향.
+                if (isGrepSangbujaItalicNumber(run) && !hasIdmlInlineAnchor(run)
+                        && isBodyNumberContext(runs, idx)
+                        && mathGroup.isEmpty() && ehMathGroup.isEmpty() && npMathGroup.isEmpty()) {
+                    MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                            new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation();
+                    eq.hwpScript(run.content().trim());
+                    eq.sourceType("GREP_NUMBER");
+                    if (run.fillColor() != null) {
+                        String hex = RunBuilder.resolveColorToHex(ctx, run.fillColor());
+                        if (hex != null && !hex.isEmpty()) eq.textColor(hex);
+                    }
+                    para.addItem(eq);
+                    continue;
+                }
+
                 // 근호 마커 직후(radicand 텍스트 없이) 순수 빈 답란 박스만 온 경우, 박스
                 // 1개를 HWP 수식 box{~} 로 근호 안 radicand 에 넣어 근호가 답란을 덮게 한다
                 // (실측: 1단원 p32 "√□"). 그룹 마지막이 sqrt 마커일 때만 — radicand 텍스트가
@@ -3305,6 +3326,80 @@ public class StoryLoader {
         return EHFontGlyphMap.isEHFontFamily(fontFamily)
                 || BTFontGlyphMap.isBTFontFamily(fontFamily)
                 || NPFontGlyphMap.isNPFont(fontFamily);
+    }
+
+    /**
+     * SPEC-080 Phase 2: `상부자(이탤릭)` charStyle 을 받은 수식 숫자 토큰인가. GREP 가
+     * 수식 서체로 명시한 본문 숫자(제곱하여 4가 되는 수 → 4·25)를 ASTEquation 으로 직접
+     * 방출하는 스코프. 과학 화학식은 `상부자(이탤릭)` 미사용(전수 0건)이라 안 걸린다.
+     */
+    private static boolean isGrepSangbujaItalicNumber(IDMLCharacterRun run) {
+        if (run == null) return false;
+        // GREP 로 적용된 charStyle 은 grepAppliedCharStyle 에 있다(appliedCharacterStyle 은
+        // IDML 원본=[No character style]). 둘 다 확인한다.
+        String cs = run.grepAppliedCharStyle() != null
+                ? run.grepAppliedCharStyle() : run.appliedCharacterStyle();
+        if (cs == null) return false;
+        String norm = cs.toLowerCase(java.util.Locale.ROOT).replace("%3a", ":").replace("%25", "%");
+        if (norm.contains("정체") || norm.contains("정자")) return false;
+        if (!(norm.contains("상부자") && norm.contains("이탤릭"))) return false;
+        String ct = run.content();
+        if (ct == null) return false;
+        String t = ct.trim();
+        if (t.isEmpty()) return false;
+        boolean hasDigit = false;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c >= '0' && c <= '9') { hasDigit = true; continue; }
+            if (c == '-' || c == '.' || c == ',') continue;
+            return false;
+        }
+        return hasDigit;
+    }
+
+    /** 런에 IDML 인라인 앵커(프레임·그래픽·￼)가 있는가 — 직접 수식 방출 제외용. */
+    private static boolean hasIdmlInlineAnchor(IDMLCharacterRun run) {
+        if (run == null) return false;
+        return (run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                || (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty())
+                || (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty())
+                || (run.content() != null && run.content().indexOf('￼') >= 0);
+    }
+
+    /**
+     * SPEC-080 Phase 2: idx 위치의 숫자가 <b>본문 문맥</b>(한글 문장 속)에 있는가.
+     *
+     * <p>순수 본문 숫자(제곱하여 4가 되는 수 → 4)는 앞뒤가 한글·문장부호·공백이거나
+     * 문단 경계다. 수식 조각 숫자(72m²·3&lt;5·(sqrt{5})²)는 앞/뒤에 라틴·수식폰트·연산자가
+     * 붙는다. 양쪽 이웃이 모두 본문 경계일 때만 직접 수식 방출해 수식 파괴를 막는다.</p>
+     */
+    private static boolean isBodyNumberContext(List<IDMLCharacterRun> runs, int idx) {
+        return neighborIsBodyBoundary(runs, idx - 1, true)
+                && neighborIsBodyBoundary(runs, idx + 1, false);
+    }
+
+    private static boolean neighborIsBodyBoundary(List<IDMLCharacterRun> runs, int n, boolean prev) {
+        if (n < 0 || n >= runs.size()) return true; // 문단 경계 = 본문
+        IDMLCharacterRun r = runs.get(n);
+        if (r == null) return true;
+        // 수식 폰트 이웃 = 수식 조각
+        String ff = r.fontFamily();
+        if ((ff != null && (EHFontGlyphMap.isEHFontFamily(ff) || BTFontGlyphMap.isBTFontFamily(ff)
+                || NPFontGlyphMap.isNPFont(ff)))
+                || r.isEHFont() || r.isBTFont() || r.isNPFont() || r.grepMathFont()) {
+            return false;
+        }
+        String c = r.content();
+        // 공백·탭만 있는 런 = 본문 경계
+        if (c == null || c.replace("\t", "").trim().isEmpty()) return true;
+        // 인접 모서리 문자: 한글이면 본문, 라틴·숫자·연산자면 수식 조각
+        String t = c.trim();
+        char edge = prev ? t.charAt(t.length() - 1) : t.charAt(0);
+        if ((edge >= 0xAC00 && edge <= 0xD7AF) || (edge >= 0x3131 && edge <= 0x318E)) return true;
+        // 원문자(⑴⑵⑶ ①②③, U+2460~24FF)·괄호숫자 항목 기호 = 본문 답 항목의 경계
+        if (edge >= 0x2460 && edge <= 0x24FF) return true;
+        // 문장부호(쉼표·마침표·따옴표 등)도 본문 경계로 인정
+        return ",.·:;)）'\"”’]".indexOf(edge) >= 0;
     }
 
     static boolean hasResolvedStructuralMathFont(String fontFamily) {
