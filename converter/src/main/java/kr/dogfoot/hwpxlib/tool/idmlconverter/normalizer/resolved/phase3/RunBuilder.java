@@ -186,8 +186,11 @@ class RunBuilder {
             }
             tr.fontFamily(resolvedFontFamily);
         }
+        // 삼항 오토언박싱 주의: true 분기가 primitive int 면 Java 가 양쪽을 int 로
+        // 통일하려 false 분기의 Integer 를 언박싱한다 → null 이면 여기서 NPE.
+        // (int) 대신 (Integer) 로 박싱해 삼항 전체를 Integer 로 유지, 아래 null 체크 유효화.
         Integer resolvedFontSize = grepCharStyle != null && grepCharStyle.fontSize() != null
-                ? (int) CoordinateConverter.pointsToHwpunits(grepCharStyle.fontSize())
+                ? (Integer) (int) CoordinateConverter.pointsToHwpunits(grepCharStyle.fontSize())
                 : RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
                         rr, cr, sc.fontSize, confidence);
         if (resolvedFontSize != null) {
