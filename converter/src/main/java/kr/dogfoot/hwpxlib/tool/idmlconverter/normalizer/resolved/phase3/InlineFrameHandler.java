@@ -159,8 +159,11 @@ public class InlineFrameHandler {
         // EH 수식 런이 포함되어 있으면 EH 변환 파이프라인으로 처리
         String numScript = convertRunsToHwpScript(rs.paragraphs().get(0));
         String denomScript = convertRunsToHwpScript(rs.paragraphs().get(1));
-        if (numScript == null) numScript = numerator;
-        if (denomScript == null) denomScript = denominator;
+        // raw 폴백 텍스트에도 EH 해킹 글리프(ù→°, Ñ→±, Ó/Û→², Ã 폭선택자 등)가 남는다
+        // (SPEC-081 클래스 Z: 4단원 90ù·BCÓ, 2단원 -bÑsqrt·Ãb2-4ac). 경로별로 디코딩이
+        // 흩어져 프래그먼트만 raw 로 새므로, 통일 진입점으로 한 번 더 훑는다.
+        if (numScript == null) numScript = EHFontGlyphMap.decodeStrayGlyphText(numerator, null);
+        if (denomScript == null) denomScript = EHFontGlyphMap.decodeStrayGlyphText(denominator, null);
 
         String hwpScript = "{" + numScript + "} over {" + denomScript + "}";
         return new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(hwpScript, "INLINE_FRACTION");
@@ -178,23 +181,54 @@ public class InlineFrameHandler {
     private static String convertRunsToHwpScript(ResolvedParagraph rp) {
         if (rp.runs() == null || rp.runs().isEmpty()) return null;
         boolean hasEH = false;
+        boolean hasHookGlyph = false;
         for (ResolvedRun r : rp.runs()) {
             if (r.fontFamily() != null && EHFontGlyphMap.isEHFontFamily(r.fontFamily())) {
                 hasEH = true;
-                break;
+            }
+            // resolved DOM 은 분수대문자 근호 갈고리(')·자리구분자(0x8C)·제곱(Û) 글리프에서
+            // fontFamily 를 null 로 흘린다(실측: 1·2단원 인라인 분수 프레임의 '3/'2 =
+            // √3/√2). 폰트만 보면 hasEH=false 로 raw 폴백돼 '가 그대로 노출된다
+            // (SPEC-081 클래스 A/F/G). 글리프 자체로도 EH 분수대문자 문맥임을 판정한다.
+            if (containsFractionUpperGlyph(r.text())) {
+                hasHookGlyph = true;
             }
         }
-        if (!hasEH) return null;
+        if (!hasEH && !hasHookGlyph) return null;
 
-        // EH 런을 IDMLCharacterRun으로 변환하여 EHFontEquationConverter로 처리
+        // EH 런을 IDMLCharacterRun으로 변환하여 EHFontEquationConverter로 처리.
+        // 폰트가 유실된 분수대문자 글리프 런은 EH분수대문자 폰트를 되찍어 lexFractionUpper
+        // 의 HOOK(√)·digit-sep·Û(²) 디코딩 경로를 타게 한다.
         List<IDMLCharacterRun> ehRuns = new ArrayList<>();
         for (ResolvedRun r : rp.runs()) {
             IDMLCharacterRun cr = new IDMLCharacterRun();
             cr.content(r.text());
-            cr.fontFamily(r.fontFamily());
+            String ff = r.fontFamily();
+            if ((ff == null || !EHFontGlyphMap.isEHFontFamily(ff))
+                    && containsFractionUpperGlyph(r.text())) {
+                ff = "EH분수대문자";
+            }
+            cr.fontFamily(ff);
             ehRuns.add(cr);
         }
         return EHFontEquationConverter.convert(ehRuns);
+    }
+
+    /**
+     * EH분수대문자 폰트 전용 글리프(근호 갈고리 '·"·®·¿·¾, 자리구분자 0x8C, 제곱 Û/Ü)를
+     * 포함하는지. resolved DOM 이 폰트를 null 로 흘려도 이 글리프면 분수대문자 문맥이다
+     * (SPEC-081). 일반 아포스트로피와 구분하려 숫자/근호 문맥까지 함께 본다.
+     */
+    private static boolean containsFractionUpperGlyph(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\'' || c == '"' || c == '®' || c == '¿' || c == '¾'
+                    || c == '' || c == 'Û' || c == 'Ü') {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

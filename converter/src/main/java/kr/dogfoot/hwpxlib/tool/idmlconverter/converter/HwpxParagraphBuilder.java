@@ -205,6 +205,14 @@ public class HwpxParagraphBuilder {
         // (Hancom 의 탭 디폴트 간격이 IDML 의 시각적 의도보다 넓게 렌더링되는 케이스 보정.)
         boolean replaceTabsInRuns = isHangingIndentParagraph(astPara);
 
+        // 단위 제곱 병합: "…cm"(텍스트) + "^{2}"(base 없는 수식) → "…"(텍스트) +
+        // "rm cm^{2}"(수식). 원본 3cmÛ`(3cm²)가 3·cm·^{2} 로 쪼개져 지수가 밑수 없이
+        // 떠 있던 것을 합친다 (SPEC-081 클래스 D). 렌더 루프 전에 AST 를 정규화한다.
+        mergeUnitExponentEquations(astPara);
+
+        // GREP+수식 전수 조사 (MATH_CENSUS 환경변수 있을 때만)
+        MathCensusDumper.dumpParagraph(astPara);
+
         // 인라인 항목 변환
         for (int i = 0; i < astPara.items().size(); i++) {
             ASTInlineItem item = astPara.items().get(i);
@@ -254,6 +262,56 @@ public class HwpxParagraphBuilder {
 
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
+    }
+
+    /** 밑수 없는 지수 수식 앞의 단위 텍스트를 흡수해 "rm <단위>^{n}" 한 덩어리로 만든다. */
+    private static final java.util.regex.Pattern BARE_EXPONENT =
+            java.util.regex.Pattern.compile("\\s*\\^\\{(\\d+)\\}\\s*");
+    // 원본 3cmÛ`(3cm²)에서 지수 앞에 붙는 단위. 긴 것부터 검사(cm/mm/km 이 m 보다 먼저).
+    private static final String[] EXPONENT_UNITS =
+            {"cm", "mm", "km", "kg", "m", "g", "L", "t"};
+
+    /**
+     * "…cm"(텍스트) 뒤에 base 없는 "^{n}"(수식)이 붙은 인라인 열을, 단위를 텍스트에서
+     * 떼어 "rm cm^{n}" 수식으로 흡수하도록 AST 를 in-place 정규화한다 (SPEC-081 클래스 D).
+     * 원본 3cmÛ`(3cm²)가 3·cm·^{2} 로 쪼개져 cm 은 텍스트, ² 는 밑수 없는 수식으로
+     * 떠 있던 것을 합친다. 단위 앞 텍스트(숫자·한글)는 그대로 둔다.
+     */
+    private static void mergeUnitExponentEquations(ASTParagraph astPara) {
+        java.util.List<ASTInlineItem> items = astPara.items();
+        if (items == null) return;
+        for (int i = 1; i < items.size(); i++) {
+            if (!(items.get(i) instanceof ASTEquation)) continue;
+            ASTEquation eq = (ASTEquation) items.get(i);
+            String script = eq.hwpScript();
+            if (script == null) continue;
+            java.util.regex.Matcher m = BARE_EXPONENT.matcher(script);
+            if (!m.matches()) continue;                 // 순수 ^{n} 만 대상
+            if (!(items.get(i - 1) instanceof ASTTextRun)) continue;
+            ASTTextRun tr = (ASTTextRun) items.get(i - 1);
+            String text = tr.text();
+            if (text == null || text.isEmpty()) continue;
+            String unit = trailingUnit(text);
+            if (unit == null) continue;
+            // 텍스트에서 단위 제거, 수식에 rm <단위>^{n} 로 흡수.
+            tr.text(text.substring(0, text.length() - unit.length()));
+            eq.hwpScript("rm " + unit + "^{" + m.group(1) + "}");
+        }
+    }
+
+    private static String trailingUnit(String text) {
+        for (String u : EXPONENT_UNITS) {
+            if (text.endsWith(u)) {
+                // 단위 앞이 문자(알파벳)면 단위가 아니라 단어의 일부 → 제외.
+                int at = text.length() - u.length();
+                if (at > 0) {
+                    char prev = text.charAt(at - 1);
+                    if (Character.isLetter(prev) && prev < 0x80) return null;
+                }
+                return u;
+            }
+        }
+        return null;
     }
 
     /**
