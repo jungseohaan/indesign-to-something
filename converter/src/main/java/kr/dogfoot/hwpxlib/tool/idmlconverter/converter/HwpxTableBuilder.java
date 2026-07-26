@@ -61,7 +61,8 @@ public class HwpxTableBuilder {
                 .dropcapstyleAnd(DropCapStyle.None);
 
         // 테이블 속성
-        int physicalRowCount = physicalRows(astTable).size();
+        java.util.List<ASTTableRow> physicalRows = physicalRows(astTable);
+        int physicalRowCount = physicalRows.size();
         String tableBorderFillId = createTableOuterBorderFill(astTable);
         table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.NONE : TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
@@ -72,7 +73,7 @@ public class HwpxTableBuilder {
                 .noAdjustAnd(astTable.fixedOuterBounds());
 
         // ShapeSize — floating table은 IDML 행 높이 합산값을 명시해야 셀선이 안정적으로 렌더된다.
-        long tableHeight = astTable.height();
+        long tableHeight = enclosingTableHeight(astTable, physicalRows);
         table.createSZ();
         table.sz().widthAnd(totalWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(tableHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
@@ -237,7 +238,8 @@ public class HwpxTableBuilder {
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None);
 
-        int physicalRowCount = physicalRows(astTable).size();
+        java.util.List<ASTTableRow> physicalRows = physicalRows(astTable);
+        int physicalRowCount = physicalRows.size();
         String tableBorderFillId = createTableOuterBorderFill(astTable);
         table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.NONE : TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
@@ -249,7 +251,7 @@ public class HwpxTableBuilder {
 
         table.createSZ();
         table.sz().widthAnd(totalWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(astTable.height()).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .heightAnd(enclosingTableHeight(astTable, physicalRows)).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
         // 인라인 위치 (글자처럼 취급)
@@ -556,6 +558,28 @@ public class HwpxTableBuilder {
             rows.add(row);
         }
         return rows;
+    }
+
+    private static long enclosingTableHeight(ASTTable table, java.util.List<ASTTableRow> physicalRows) {
+        long declared = table != null ? Math.max(0L, table.height()) : 0L;
+        long rowsHeight = 0L;
+        if (physicalRows != null) {
+            java.util.Map<Integer, Integer> rowIndexMap = physicalRowIndexMap(physicalRows);
+            for (ASTTableRow row : physicalRows) {
+                if (row == null) continue;
+                long rowHeight = Math.max(0L, row.rowHeight());
+                if (row.cells() != null) {
+                    for (ASTTableCell cell : row.cells()) {
+                        if (cell == null || cell.height() <= 0) continue;
+                        int span = physicalRowSpan(rowIndexMap, cell.rowIndex(), cell.rowSpan());
+                        long perRowHeight = (cell.height() + Math.max(1, span) - 1) / Math.max(1, span);
+                        rowHeight = Math.max(rowHeight, perRowHeight);
+                    }
+                }
+                rowsHeight += rowHeight;
+            }
+        }
+        return Math.max(declared, rowsHeight);
     }
 
     private static boolean isSingleCellTable(ASTTable table, java.util.List<ASTTableRow> physicalRows) {

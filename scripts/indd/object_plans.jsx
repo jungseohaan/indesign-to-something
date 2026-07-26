@@ -8224,6 +8224,7 @@ function _inlineEditableTextShellCompositeBundle(bundle, sourceById) {
     }
     normalized.inlineTextShellComposite = true;
     normalized.clusterRelation = normalized.clusterRelation || "EXACT_SOURCE_CLUSTER";
+    normalized.materialization = "EXTRACTED_PNG_VECTOR";
     normalized.executable = true;
     normalized.required = true;
     return normalized;
@@ -8797,6 +8798,7 @@ function _objectPlanVisualAction(bundle, sourceById) {
     if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) return "ABSORB_TEXT_STYLE";
     if (_objectPlanBundleIsTextRangeDecorationShell(bundle)) return "ABSORB_TEXT_STYLE";
     if (_objectPlanBundleIsEmptyTextStyleDecorationContainer(bundle, sourceById)) return "DROP_VISUAL";
+    if (_objectPlanBundleIsExecutableInlineEditableTextShell(bundle)) return "PLACE_TEXT_SHELL";
     if (_objectPlanBundleIsTableCellInlineTextCarrierShell(bundle)) return "DROP_VISUAL";
     if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return "DROP_VISUAL";
     if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) {
@@ -8824,6 +8826,28 @@ function _objectPlanVisualAction(bundle, sourceById) {
                 : "PLACE_FLOATING_PNG";
     }
     return "DROP_VISUAL";
+}
+
+function _objectPlanBundleIsExecutableInlineEditableTextShell(bundle) {
+    if (!bundle || bundle.passId !== "pass.inline_objects") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (_objectPlanPlacement(bundle) !== "INLINE") return false;
+    if (bundle.textOwner === "indesign_png" || bundle.completePngTextAllowed === true) return false;
+    var role = String(bundle.slotRole || bundle.compositeRole || "");
+    if (role !== "inline_editable_text_shell_composite"
+            && role !== "direct_child_shell_slot"
+            && role !== "inline_text_frame_shell_slot") {
+        return false;
+    }
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    if (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0) return false;
+    if (!bundle.hiddenVisualSourceObjectIds || bundle.hiddenVisualSourceObjectIds.length === 0) return false;
+    if (_sourceSetsIntersect(bundle.visualSourceObjectIds || [],
+            bundle.hiddenVisualSourceObjectIds || [])) {
+        return false;
+    }
+    return true;
 }
 
 function _objectPlanBundleIsTableCellInlineTextCarrierShell(bundle) {

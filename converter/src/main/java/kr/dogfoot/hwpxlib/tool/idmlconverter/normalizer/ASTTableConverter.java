@@ -152,9 +152,7 @@ public class ASTTableConverter {
         if (hasResolvedTableBounds) {
             lockFixedOuterBoundsRows(table);
         }
-        if (!hasResolvedTableBounds) {
-            ensureRowsFitVisibleCellContent(table);
-        }
+        ensureRowsFitVisibleCellContent(table);
         return table;
     }
 
@@ -463,9 +461,7 @@ public class ASTTableConverter {
         if (hasResolvedTableBounds) {
             lockFixedOuterBoundsRows(table);
         }
-        if (!hasResolvedTableBounds) {
-            ensureRowsFitVisibleCellContent(table);
-        }
+        ensureRowsFitVisibleCellContent(table);
         return table;
     }
 
@@ -533,9 +529,8 @@ public class ASTTableConverter {
             applyPlacementBounds(table, resolvedTable.bounds(), scale);
             table.fixedOuterBounds(true);
             lockFixedOuterBoundsRows(table);
-        } else {
-            ensureRowsFitVisibleCellContent(table);
         }
+        ensureRowsFitVisibleCellContent(table);
         return table;
     }
 
