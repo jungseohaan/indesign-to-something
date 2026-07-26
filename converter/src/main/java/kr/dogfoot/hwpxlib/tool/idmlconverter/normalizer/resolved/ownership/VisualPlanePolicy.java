@@ -20,19 +20,23 @@ public final class VisualPlanePolicy {
     }
 
     public static boolean isInFrontLayer(VisualLayer layer) {
-        return false;
+        return layer == VisualLayer.CONTENT_VISUAL
+                || layer == VisualLayer.CONTAINER_OUTLINE
+                || layer == VisualLayer.FOREGROUND_MASK;
     }
 
     public static boolean isInFrontLayerName(String layer) {
-        return false;
+        return "CONTENT_VISUAL".equals(layer)
+                || "CONTAINER_OUTLINE".equals(layer)
+                || "FOREGROUND_MASK".equals(layer);
     }
 
     public static boolean isBehindTextLayer(VisualLayer layer) {
-        return layer != null;
+        return layer != null && !isInFrontLayer(layer);
     }
 
     public static boolean isBehindTextLayerName(String layer) {
-        return layer != null && !layer.isEmpty();
+        return layer != null && !layer.isEmpty() && !isInFrontLayerName(layer);
     }
 
     public static boolean isBackgroundMaterialLayer(VisualLayer layer) {
