@@ -665,6 +665,7 @@ public class IDMLStoryParser {
         if (style.fontFamily() != null) run.fontFamily(style.fontFamily());
         if (style.fontSize() != null) run.fontSize(style.fontSize());
         if (style.fillColor() != null) run.fillColor(style.fillColor());
+        if (style.fillTint() != null) run.fillTint(style.fillTint());
         if (style.fontStyle() != null) run.fontStyle(style.fontStyle());
         if (style.tracking() != null) run.tracking(style.tracking());
         if (style.underline() != null) run.underline(style.underline());
@@ -1637,9 +1638,16 @@ public class IDMLStoryParser {
             // fillColor 상속 (CharacterStyle → ParagraphStyle)
             if (run.fillColor() == null) {
                 String color = resolveStyleProp(charStyleRef, doc, false, 0);
-                if (color == null) color = resolveStyleProp(paraStyleRef, doc, false, 0);
+                Double tint = color != null ? resolveStyleFillTint(charStyleRef, doc, 0) : null;
+                if (color == null) {
+                    color = resolveStyleProp(paraStyleRef, doc, false, 0);
+                    tint = color != null ? resolveStyleFillTint(paraStyleRef, doc, 0) : null;
+                }
                 if (color != null) {
                     run.fillColor(color);
+                    if (run.fillTint() == null && tint != null) {
+                        run.fillTint(tint);
+                    }
                     colorCount++;
                 }
             }
@@ -1676,6 +1684,15 @@ public class IDMLStoryParser {
         String value = isFont ? styleDef.fontFamily() : styleDef.fillColor();
         if (value != null) return value;
         return resolveStyleProp(styleDef.basedOn(), doc, isFont, depth + 1);
+    }
+
+    private static Double resolveStyleFillTint(String styleRef, IDMLDocument doc, int depth) {
+        if (styleRef == null || doc == null || depth > 10) return null;
+        IDMLStyleDef styleDef = doc.getCharacterStyle(styleRef);
+        if (styleDef == null) styleDef = doc.getParagraphStyle(styleRef);
+        if (styleDef == null) return null;
+        if (styleDef.fillTint() != null) return styleDef.fillTint();
+        return resolveStyleFillTint(styleDef.basedOn(), doc, depth + 1);
     }
 
     private static String resolveStylePosition(String styleRef, IDMLDocument doc, int depth) {

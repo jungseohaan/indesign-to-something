@@ -99,13 +99,13 @@ public final class TextStyleApplicator {
             colorHex = resolveColor(resolvedData, characterRun.fillColor(), characterRun.fillTint());
         }
         if (colorHex == null && grepStyle != null && grepStyle.fillColor() != null) {
-            colorHex = resolveColor(resolvedData, grepStyle.fillColor());
+            colorHex = resolveColor(resolvedData, grepStyle.fillColor(), grepStyle.fillTint());
         }
         if (colorHex == null && charStyle != null && charStyle.fillColor() != null) {
-            colorHex = resolveColor(resolvedData, charStyle.fillColor());
+            colorHex = resolveColor(resolvedData, charStyle.fillColor(), charStyle.fillTint());
         }
         if (colorHex == null && paraStyle != null && paraStyle.fillColor() != null) {
-            colorHex = resolveColor(resolvedData, paraStyle.fillColor());
+            colorHex = resolveColor(resolvedData, paraStyle.fillColor(), paraStyle.fillTint());
         }
         if (colorHex != null) target.textColor(colorHex);
 

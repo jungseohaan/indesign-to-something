@@ -16580,6 +16580,11 @@ public final class OwnershipPlanner {
     private VisualLayer canonicalPlacedContentVisualLayer(ObjectPlan plan) {
         if (plan == null) return null;
         VisualLayer layer = plan.visualLayer;
+        if (plan.materialization == Materialization.PAGE_PLANE_PNG
+                || "page_background_plane".equals(safe(plan.slotRole))
+                || "pass.page_backgrounds".equals(safe(plan.planPassId))) {
+            return VisualLayer.PAGE_BACKGROUND;
+        }
         if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
                 && plan.visualAction != VisualAction.PLACE_INLINE_PNG) {
             return layer;

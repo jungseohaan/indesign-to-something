@@ -1133,6 +1133,7 @@ public class ASTTableConverter {
                     }
                 }
             }
+            applyTableCellParagraphStyleTextColor(cell, idmlCell, resolvedData, styleResolver);
         } else {
             for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
                 ASTParagraph astPara = new ASTParagraph();
@@ -1153,6 +1154,49 @@ public class ASTTableConverter {
         normalizeTextHiddenInlineShellCarriers(cell, resolvedData);
 
         return cell;
+    }
+
+    private static void applyTableCellParagraphStyleTextColor(
+            ASTTableCell cell,
+            IDMLTableCell idmlCell,
+            ResolvedData resolvedData,
+            StylePropertyResolver styleResolver) {
+        if (cell == null || idmlCell == null || styleResolver == null
+                || cell.paragraphs() == null || idmlCell.paragraphs() == null) {
+            return;
+        }
+        int count = Math.min(cell.paragraphs().size(), idmlCell.paragraphs().size());
+        for (int i = 0; i < count; i++) {
+            ASTParagraph astPara = cell.paragraphs().get(i);
+            IDMLParagraph idmlPara = idmlCell.paragraphs().get(i);
+            if (astPara == null || idmlPara == null || astPara.items() == null) continue;
+            String color = paragraphStyleTextColor(idmlPara, resolvedData, styleResolver);
+            if (color == null || color.isEmpty()) continue;
+            if (idmlPara.appliedParagraphStyle() != null && astPara.paragraphStyleRef() == null) {
+                astPara.paragraphStyleRef(idmlPara.appliedParagraphStyle());
+            }
+            for (ASTInlineItem item : astPara.items()) {
+                if (!(item instanceof ASTTextRun)) continue;
+                ASTTextRun run = (ASTTextRun) item;
+                String text = run.text();
+                if (text == null || text.trim().isEmpty()) continue;
+                if (run.textColor() == null || run.textColor().isEmpty()) {
+                    run.textColor(color);
+                }
+            }
+        }
+    }
+
+    private static String paragraphStyleTextColor(
+            IDMLParagraph paragraph,
+            ResolvedData resolvedData,
+            StylePropertyResolver styleResolver) {
+        String styleRef = paragraph != null ? paragraph.appliedParagraphStyle() : null;
+        if (styleRef == null || styleRef.isEmpty()) return null;
+        IDMLStyleDef style = styleResolver.getResolvedParagraphStyle(styleRef);
+        if (style == null || isNoneColor(style.fillColor())) return null;
+        return resolveTableColor(resolvedData, style.fillColor(),
+                style.fillTint() != null ? style.fillTint() : 100.0);
     }
 
     private static void applyTableCellParagraphAlignment(

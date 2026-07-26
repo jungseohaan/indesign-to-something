@@ -1111,7 +1111,10 @@ public class ASTRunConverter {
             if (charStyle != null) {
                 if (fontFamily == null) fontFamily = charStyle.fontFamily();
                 if (fontSize == null) fontSize = charStyle.fontSize();
-                if (fillColor == null) fillColor = charStyle.fillColor();
+                if (fillColor == null) {
+                    fillColor = charStyle.fillColor();
+                    if (fillColor != null && fillTint == null) fillTint = charStyle.fillTint();
+                }
                 if (fontStyle == null) fontStyle = charStyle.fontStyle();
                 if (shadeColor == null) {
                     shadeColor = charStyle.shadeColor();
@@ -1140,7 +1143,10 @@ public class ASTRunConverter {
             if (paraStyle != null) {
                 if (fontFamily == null) fontFamily = paraStyle.fontFamily();
                 if (fontSize == null) fontSize = paraStyle.fontSize();
-                if (fillColor == null) fillColor = paraStyle.fillColor();
+                if (fillColor == null) {
+                    fillColor = paraStyle.fillColor();
+                    if (fillColor != null && fillTint == null) fillTint = paraStyle.fillTint();
+                }
                 if (fontStyle == null) fontStyle = paraStyle.fontStyle();
                 if (tracking == null) tracking = paraStyle.tracking();
                 if (underline == null) underline = paraStyle.underline();
@@ -1158,7 +1164,10 @@ public class ASTRunConverter {
             IDMLStyleDef grepCharStyle = ASTStoryConverter.resolveStyle(
                     run.grepAppliedCharStyle(), idmlDoc.charStyles());
             if (grepCharStyle != null) {
-                if (grepCharStyle.fillColor() != null) fillColor = grepCharStyle.fillColor();
+                if (grepCharStyle.fillColor() != null) {
+                    fillColor = grepCharStyle.fillColor();
+                    fillTint = grepCharStyle.fillTint();
+                }
                 if (grepCharStyle.shadeColor() != null) {
                     shadeColor = grepCharStyle.shadeColor();
                     shadeTint = grepCharStyle.shadeTint();
