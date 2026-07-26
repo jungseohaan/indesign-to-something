@@ -2670,6 +2670,13 @@ class MathProcessor {
                     (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) items.get(i);
             String letter = singleLatinLetterOfScript(eq.hwpScript());
             if (letter == null) continue;
+            // SPEC-079: 이탤릭 소문자는 수학 변수(x·a·b·n)로 보고 고립돼도 강등 금지.
+            // 대문자는 이탤릭이어도 강등 유지 — 항목 기호(A. B. C. R.)·과학자 이니셜이
+            // 같은 GREP 이탤릭 스타일을 받아, 대문자까지 살리면 보기 번호가 수식이 된다.
+            if (eq.sourceItalic()
+                    && letter.length() == 1 && Character.isLowerCase(letter.charAt(0))) {
+                continue;
+            }
             if (adjacentItemIsEquation(items, i, -1) || adjacentItemIsEquation(items, i, 1)) continue;
             ASTTextRun tr = new ASTTextRun();
             tr.text(letter);

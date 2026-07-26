@@ -857,7 +857,21 @@ public class ASTMathGrouper {
         String hwpScript = BTFontEquationConverter.convert(mathRuns);
         if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, mathRuns)) {
             String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "GREP_FONT";
-            para.addItem(new ASTEquation(hwpScript, sourceType));
+            ASTEquation eqItem = new ASTEquation(hwpScript, sourceType);
+            // SPEC-079: 원본이 이탤릭 수식 변수(x의 값)면 고립 단일문자 강등에서 제외.
+            // 신호는 (1) 명시 fontStyle=Italic 또는 (2) GREP 적용 문자 스타일 이름에
+            // "이탤릭"/"italic"(수학 변수 전용 스타일 "상부자(이탤릭)"). 과학자 이니셜은
+            // 비이탤릭 charStyle(BT수식) 이라 강등 대상으로 남는다.
+            for (IDMLCharacterRun mr : mathRuns) {
+                if (mr == null) continue;
+                String fs = mr.fontStyle();
+                String gcs = mr.grepAppliedCharStyle();
+                boolean italic = (fs != null && fs.toLowerCase().contains("italic"))
+                        || (gcs != null && (gcs.contains("이탤릭")
+                                || gcs.toLowerCase().contains("italic")));
+                if (italic) { eqItem.sourceItalic(true); break; }
+            }
+            para.addItem(eqItem);
         } else {
             // 수식이 아닌 BT 폰트 텍스트 → 일반 텍스트 런으로 폴백
             // SPEC-042: 그룹 첫 명시 색 — 색 없는 런(상속)은 그룹 색을 따른다

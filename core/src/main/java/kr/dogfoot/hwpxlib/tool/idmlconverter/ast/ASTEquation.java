@@ -10,6 +10,7 @@ public class ASTEquation extends ASTInlineItem {
     private String textColor;  // hex color (e.g., "#FFFFFF"), null이면 기본 검정
     private Integer preferredBaseUnit; // 본문형 수식이 따라야 할 목표 크기 (hwpunit)
     private String preferredFontFamily; // 본문형 수식이 따라야 할 목표 폰트 패밀리
+    private boolean sourceItalic; // 원본 런이 이탤릭이었는지 (수학 변수 vs 이니셜 구분, SPEC-079)
 
     public ASTEquation() {}
 
@@ -34,4 +35,7 @@ public class ASTEquation extends ASTInlineItem {
 
     public String preferredFontFamily() { return preferredFontFamily; }
     public void preferredFontFamily(String v) { this.preferredFontFamily = v; }
+
+    public boolean sourceItalic() { return sourceItalic; }
+    public void sourceItalic(boolean v) { this.sourceItalic = v; }
 }
