@@ -1088,6 +1088,33 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
         return out;
     }
 
+    function _completePngExportIdsCoveredByRoot(item, sourceIds) {
+        if (!item || !sourceIds || sourceIds.length === 0) return false;
+        var rootId = null;
+        try { rootId = item.id; } catch (eRootId) {}
+        if (rootId === null || rootId === undefined) return false;
+        var hasRoot = false;
+        for (var i = 0; i < sourceIds.length; i++) {
+            if (String(sourceIds[i]) === String(rootId)) {
+                hasRoot = true;
+                break;
+            }
+        }
+        if (!hasRoot) return false;
+        var covered = {};
+        try {
+            var rootTreeIds = _collectSourceObjectIds(item);
+            for (var ti = 0; rootTreeIds && ti < rootTreeIds.length; ti++) {
+                covered[String(rootTreeIds[ti])] = true;
+            }
+        } catch (eCollectRootTree) {}
+        covered[String(rootId)] = true;
+        for (var si = 0; si < sourceIds.length; si++) {
+            if (!covered[String(sourceIds[si])]) return false;
+        }
+        return true;
+    }
+
     function _itemAncestorInSourceSet(item, sourceSet) {
         if (!item || !sourceSet) return false;
         try {
@@ -1211,8 +1238,11 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
             // 배경 도형이 빠지고 textless 렌더로 텍스트도 숨겨져 빈 PNG 가 된다
             // (SPEC-076 확장, p36 "화학 반응에서 보존되는 질량" 앞 ① 배지).
             var _completePngExportIds = candidate.exportSourceObjectIds || [];
-            if (_completePngExportIds.length === 1
-                    && String(_completePngExportIds[0]) === String(item.id)) {
+            var _completePngRootOwnsExportTree =
+                    _completePngExportIds.length === 1
+                    ? String(_completePngExportIds[0]) === String(item.id)
+                    : _completePngExportIdsCoveredByRoot(item, _completePngExportIds);
+            if (_completePngRootOwnsExportTree) {
                 var _completePngItemType = item.constructor ? String(item.constructor.name) : "";
                 var _completePngHasChildContent = (_completePngItemType === "Group");
                 if (!_completePngHasChildContent) {
@@ -1231,7 +1261,6 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
             }
             var sourceIds = _completePngDuplicateSourceIds(candidate);
             for (var si = 0; si < sourceIds.length; si++) {
-                if (String(sourceIds[si]) === String(item.id)) continue;
                 var source = itemById ? itemById[String(sourceIds[si])] : null;
                 if (!source) continue;
                 try {

@@ -626,7 +626,19 @@ function _isSimpleMarkerLabelTextForSourceIndex(text) {
     if (text.length === 1) {
         var code = text.charCodeAt(0);
         if (code >= 0x2460 && code <= 0x2473) return true;
+        if (_isSingleMarkerSymbolCodeForSourceIndex(code)) return true;
     }
+    return false;
+}
+
+function _isSingleMarkerSymbolCodeForSourceIndex(code) {
+    if (code >= 0x0021 && code <= 0x002F) return true;
+    if (code >= 0x003A && code <= 0x0040) return true;
+    if (code >= 0x005B && code <= 0x0060) return true;
+    if (code >= 0x007B && code <= 0x007E) return true;
+    if (code >= 0x2190 && code <= 0x21FF) return true;
+    if (code >= 0x2200 && code <= 0x22FF) return true;
+    if (code >= 0x25A0 && code <= 0x25FF) return true;
     return false;
 }
 

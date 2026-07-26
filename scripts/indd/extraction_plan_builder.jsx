@@ -1161,12 +1161,18 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
         inlineEditableTextFrameIds = _unionTableCellTextFrameDescendantIds(
                 sourceInfo.id, inlineEditableTextFrameIds, sourceInfoById, childIdsByParentId);
 
+        var inlineSimpleMarkerCompletePng =
+                inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0
+                && _inlineSimpleMarkerCompletePngOwnsText(
+                        sourceInfo, inlineEditableTextFrameIds,
+                        sourceInfoById, childIdsByParentId);
         var ownsTextByCompletePng =
                 // SPEC-048: 게이지형 FLOATING_ANCHORED Group 은 편집 텍스트("100%")를
                 // 분리하지 않고 통짜 PNG 로 소유한다 (bundle 단계에서 FLOATING/PAGE 배치).
                 (inlineEditableTextFrameIds && inlineEditableTextFrameIds.length > 0
-                        && _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
-                                sourceInfo, sourceInfoById, childIdsByParentId));
+                        && (_isGaugeLikeFloatingAnchoredInlineGroupByMaps(
+                                sourceInfo, sourceInfoById, childIdsByParentId)
+                            || inlineSimpleMarkerCompletePng));
         var completePngFloatingAnchored = ownsTextByCompletePng
                 && String(sourceInfo.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED";
         var inlineRequiresTextHidden = inlineEditableTextFrameIds
@@ -1221,8 +1227,10 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
             inlineSourceTreeClosed: !completePngFloatingAnchored && ownsTextByCompletePng
         };
         if (!inlineRequiresTextHidden) {
-            attrs.compositeRole = "inline_textless_native_shape";
-            attrs.slotRole = "inline_textless_native_shape";
+            attrs.compositeRole = inlineSimpleMarkerCompletePng
+                    ? "inline_simple_marker_complete_png"
+                    : "inline_textless_native_shape";
+            attrs.slotRole = attrs.compositeRole;
         }
         var before = candidates ? candidates.length : 0;
         _pushExtractionCandidate(candidates, seen, "pass.inline_objects", inlineItem, attrs);
@@ -7743,14 +7751,20 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             continue;
         }
         if (candidateSeen) candidateSeen[candidateId] = true;
+        var inlineSimpleMarkerCompletePng =
+                hiddenTextIds.length > 0
+                && _inlineSimpleMarkerCompletePngOwnsText(
+                        root, hiddenTextIds, sourceInfoById, childIdsByParentId);
         var ownsTextByCompletePng =
                 // SPEC-048: 게이지형 FLOATING_ANCHORED Group 은 편집 텍스트("100%")를
                 // 분리하지 않고 통짜 PNG 로 소유한다.
                 (hiddenTextIds.length > 0
-                        && _isGaugeLikeFloatingAnchoredInlineGroupByMaps(
-                                root, sourceInfoById, childIdsByParentId));
+                        && (_isGaugeLikeFloatingAnchoredInlineGroupByMaps(
+                                root, sourceInfoById, childIdsByParentId)
+                            || inlineSimpleMarkerCompletePng));
         var completePngFloatingAnchored = ownsTextByCompletePng
                 && String(root.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED";
+        var completePngExportIds = ownsTextByCompletePng ? [root.id] : exportIds.slice(0);
         appended.push({
             candidateId: candidateId,
             passId: "pass.inline_objects",
@@ -7767,11 +7781,13 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
             parentKind: root.parentKind || null,
             composite: subtreeIds.length > 1,
             compositeRole: "inline_flow_visual_root",
-            slotRole: "inline_flow_visual_root",
-            exportSourceObjectIds: exportIds.slice(0),
+            slotRole: inlineSimpleMarkerCompletePng
+                    ? "inline_simple_marker_complete_png"
+                    : "inline_flow_visual_root",
+            exportSourceObjectIds: completePngExportIds,
             exportTargetObjectId: root.id,
             hiddenVisualSourceObjectIds: [],
-            visualSourceObjectIds: exportIds.slice(0),
+            visualSourceObjectIds: completePngExportIds,
             styleSourceObjectIds: [],
             ownedTextFrameIds: hiddenTextIds.slice(0),
             editableTextFrameIds: hiddenTextIds.slice(0),
@@ -7814,6 +7830,51 @@ function _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidat
         samples: fullDiagnostics ? diagnostics.samples : [],
         diagnostics: diagnostics
     };
+}
+
+function _inlineSimpleMarkerCompletePngOwnsText(root, textFrameIds, sourceInfoById, childIdsByParentId) {
+    if (!root || !textFrameIds || textFrameIds.length === 0) return false;
+    if (textFrameIds.length > 2) return false;
+    var rootKind = String(root.kind || root.type || "");
+    if (rootKind !== "Group" && rootKind !== "Rectangle"
+            && rootKind !== "Oval" && rootKind !== "Polygon") {
+        return false;
+    }
+    if (root.visible === false || root.hiddenLayer === true || root.nonprinting === true) return false;
+    if (String(root.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED") return false;
+
+    var descendants = {};
+    var hasVisibleGraphicCarrier = false;
+    function visit(id) {
+        if (id === null || id === undefined || descendants[String(id)]) return;
+        descendants[String(id)] = true;
+        var src = sourceInfoById ? sourceInfoById[String(id)] : null;
+        if (src) {
+            var kind = String(src.kind || src.type || "");
+            if (kind !== "TextFrame" && kind !== "Story"
+                    && kind !== "Character" && kind !== "InsertionPoint"
+                    && kind !== "Cell"
+                    && (src.hasPlacedVisual === true
+                        || src.hasVisibleFill === true
+                        || src.hasVisibleStroke === true
+                        || src.hasCandidateVectorPaint === true
+                        || kind === "Image")) {
+                hasVisibleGraphicCarrier = true;
+            }
+        }
+        var children = childIdsByParentId ? childIdsByParentId[String(id)] || [] : [];
+        for (var ci = 0; ci < children.length; ci++) visit(children[ci]);
+    }
+    visit(root.id);
+    if (!hasVisibleGraphicCarrier) return false;
+
+    for (var i = 0; i < textFrameIds.length; i++) {
+        var tf = sourceInfoById ? sourceInfoById[String(textFrameIds[i])] : null;
+        if (!tf || String(tf.kind || tf.type || "") !== "TextFrame") return false;
+        if (tf.simpleMarkerLabelContents !== true) return false;
+        if (!descendants[String(textFrameIds[i])]) return false;
+    }
+    return true;
 }
 
 function _inlineFlowVisualRootCandidateSnapshot(candidates, label) {
