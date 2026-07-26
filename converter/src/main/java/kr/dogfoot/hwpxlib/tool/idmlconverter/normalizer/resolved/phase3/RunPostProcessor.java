@@ -254,6 +254,116 @@ class RunPostProcessor {
     }
 
     /**
+     * 텍스트 런에 raw 로 남은 GREP 분수(;inner; / ;;inner;;)를 인라인 수식으로 변환한다
+     * (SPEC-081 후속: 수식 그룹에 안 묶여 본문 텍스트로 샌 분수). 전수 조사에서 5단원
+     * 걸쳐 ;2!;·;3!;·;;Á7°;;·y=;2!;x² 등 leak 확인. `decodeFractionInner` 로 분자/분모를
+     * 복원해 {num} over {denom} 수식으로 만들고, 분수 앞뒤 텍스트는 텍스트 런으로 보존한다.
+     * <p>주의: EH 근호 갈고리(®·')가 분수 바로 앞에 있으면 √(분수)이므로 sqrt 로 감싼다.
+     */
+    static void convertGrepFractionTextRuns(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+        boolean hasTarget = false;
+        for (ASTInlineItem it : items) {
+            if (it instanceof ASTTextRun) {
+                String t = ((ASTTextRun) it).text();
+                if (t != null && t.indexOf(';') >= 0 && hasGrepFractionMarker(t)) {
+                    hasTarget = true; break;
+                }
+            }
+        }
+        if (!hasTarget) return;
+
+        List<ASTInlineItem> newItems = new ArrayList<>();
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTTextRun)) { newItems.add(item); continue; }
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || !hasGrepFractionMarker(text)) { newItems.add(item); continue; }
+            splitGrepFractionRun(run, text, newItems);
+        }
+        para.items().clear();
+        para.items().addAll(newItems);
+    }
+
+    /** ;inner; 또는 ;;inner;; 형태의 GREP 분수 마커가 있는지(inner 1~10자). */
+    private static boolean hasGrepFractionMarker(String text) {
+        int i = 0;
+        while (i < text.length()) {
+            if (text.charAt(i) == ';') {
+                int j = i + 1;
+                while (j < text.length() && text.charAt(j) == ';') j++; // ;; 흡수
+                int close = j;
+                while (close < text.length() && text.charAt(close) != ';') close++;
+                int innerLen = close - j;
+                if (close < text.length() && innerLen >= 1 && innerLen <= 10) return true;
+                i = close;
+            } else i++;
+        }
+        return false;
+    }
+
+    /** GREP 분수 런을 텍스트+분수수식+텍스트 조각으로 분해해 newItems 에 추가. */
+    private static void splitGrepFractionRun(ASTTextRun run, String text, List<ASTInlineItem> out) {
+        int i = 0;
+        StringBuilder buf = new StringBuilder();
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (c == ';') {
+                int j = i + 1;
+                while (j < text.length() && text.charAt(j) == ';') j++;   // 여는 ;;
+                int close = j;
+                while (close < text.length() && text.charAt(close) != ';') close++;
+                int innerLen = close - j;
+                if (close < text.length() && innerLen >= 1 && innerLen <= 10) {
+                    String inner = text.substring(j, close);
+                    String[] nd = EHFontGlyphMap.decodeFractionInner(inner);
+                    if (nd != null && !nd[0].isEmpty() && !nd[1].isEmpty()) {
+                        int end = close + 1;
+                        while (end < text.length() && text.charAt(end) == ';') end++; // 닫는 ;;
+                        // 분수 바로 앞이 근호 갈고리면 앞 버퍼에서 떼어 √(분수)로.
+                        boolean rooted = false;
+                        int b = buf.length();
+                        while (b > 0 && (buf.charAt(b - 1) == '`' || buf.charAt(b - 1) == ' ')) b--;
+                        if (b > 0 && (buf.charAt(b - 1) == '®' || buf.charAt(b - 1) == '\'')) {
+                            buf.setLength(b - 1);
+                            rooted = true;
+                        }
+                        flushGrepText(buf, run, out);
+                        String frac = "{" + nd[0] + "} over {" + nd[1] + "}";
+                        String script = rooted ? "sqrt{" + frac + "}" : frac;
+                        ASTEquation eq = new ASTEquation(script, "GREP_FRACTION");
+                        eq.textColor(run.textColor());
+                        out.add(eq);
+                        i = end;
+                        continue;
+                    }
+                }
+                buf.append(c);
+                i++;
+            } else { buf.append(c); i++; }
+        }
+        flushGrepText(buf, run, out);
+    }
+
+    private static void flushGrepText(StringBuilder buf, ASTTextRun src, List<ASTInlineItem> out) {
+        if (buf.length() == 0) return;
+        // 남은 EH 글리프(®·자리구분자 등) 정리.
+        String t = EHFontGlyphMap.decodeStrayGlyphText(buf.toString().replace("`", ""), null);
+        buf.setLength(0);
+        if (t.isEmpty()) return;
+        ASTTextRun tr = new ASTTextRun();
+        tr.text(t);
+        tr.fontFamily(src.fontFamily());
+        tr.fontStyle(src.fontStyle());
+        tr.fontSizeHwpunits(src.fontSizeHwpunits());
+        tr.textColor(src.textColor());
+        tr.shadeColor(src.shadeColor());
+        tr.characterStyleRef(src.characterStyleRef());
+        out.add(tr);
+    }
+
+    /**
      * 이탤릭 TextRun을 인라인 수식(ASTEquation)으로 변환.
      * 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리.
      * 연속된 이탤릭 수학 런은 하나의 수식으로 합쳐서 변환.

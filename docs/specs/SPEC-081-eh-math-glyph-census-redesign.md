@@ -133,9 +133,22 @@ INLINE_FRACTION 경로에서 `Û` 도 `^{2}` 로 디코딩 안 됨.
 - 분석기: `scratchpad/analyze_census.py`, `scratchpad/classify.py`
 - 원시 census: `scratchpad/census-u1.jsonl` (435 단락)
 
+## 후속: 텍스트 런으로 샌 GREP 분수 (F 클래스, 육안 검수 중 발견)
+
+수식 census 는 ASTEquation 만 봐서 놓쳤던 별개 leak: GREP 분수가 **수식 그룹에 안 묶여
+본문 텍스트 런으로** 새어 `;2!;`·`;;Á7°;;`·`y=;2!;xÛ` 처럼 raw 노출된다(전수 23건).
+p33 ⑷ `√(1/3) √l ;;Á7°;;`(사용자 지적)가 이 케이스 — `;;Á7°;;`가 텍스트로 남아 있었다.
+
+`RunPostProcessor.convertGrepFractionTextRuns`: 텍스트 런의 `;inner;`/`;;inner;;`를
+`decodeFractionInner` 로 분자/분모 복원 → `{num} over {denom}` 수식. 분수 앞이 근호
+갈고리(`®`·`'`)면 `sqrt{...}`로 감싼다. StoryLoader(본문·셀)·StoryConverter 3경로에
+호출. **+19 수식 전환**(`;2!;`→½, `;;Á7°;;`→15/7, `y=;2!;x²`→y=½x²), 수식 유실 0.
+남은 3건: 표 셀 깊은 경로의 bare `;2!;` 1건 + `;1̅0;`(반복소수 표기, 분수 아님) 2건.
+
 ## 검증
 
-- [x] 수학 1~5단원 전수 재-census: A 112→1, Z 141→1, B 45→0, E 5→0, D 12→2
+- [x] 수학 1~5단원 전수 재-census: A 112→1, Z 141→1, B 45→0, E 5→0, D 12→2, F 23→3
+- [x] p33 ⑷: `;;Á7°;;` 텍스트 → `{15} over {7}` 수식 전환 확인
 - [x] 무회귀: baseline(수정 전) vs 수정 후 수식 개수 5단원 전부 동일
       (835/1085/810/495/352, 0 손실/0 추가), **336개 내용만 개선**. before/after
       페어 스팟검수로 전부 개선 확인(`^{V}`→TIMES, `'N`→sqrt{N}, `;4!;`→¼, cm²)

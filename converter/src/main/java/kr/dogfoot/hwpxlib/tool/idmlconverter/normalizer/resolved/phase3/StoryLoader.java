@@ -807,6 +807,9 @@ public class StoryLoader {
             // 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리
             RunPostProcessor.convertItalicRunsToEquations(para);
 
+            // 본문 텍스트로 샌 GREP 분수(;2!;·;;Á7°;;)를 인라인 수식으로 변환 (SPEC-081 후속)
+            RunPostProcessor.convertGrepFractionTextRuns(para);
+
             // SPEC-055(text-attribute): resolved 가 문단 전체를 단일 유채색으로
             // 보고하면, 매칭 실패(LOW)로 색을 잃은 런에도 그 색을 채운다
             // (p26 실측: 수식이 낀 줄의 조각들이 검정으로 빵꾸).
@@ -1479,6 +1482,9 @@ public class StoryLoader {
                 MathProcessor.convertMathRunsInParagraph(ctx, para);
                 RunPostProcessor.splitOverlineRuns(para);
                 RunPostProcessor.convertItalicRunsToEquations(para);
+
+            // 본문 텍스트로 샌 GREP 분수(;2!;·;;Á7°;;)를 인라인 수식으로 변환 (SPEC-081 후속)
+            RunPostProcessor.convertGrepFractionTextRuns(para);
                 RunBuilder.resetBulletParagraphColors(ctx, para);
                 recordCellInlineEmbeddedIds(ctx, para);
                 if (para.items() != null && !para.items().isEmpty()) {
