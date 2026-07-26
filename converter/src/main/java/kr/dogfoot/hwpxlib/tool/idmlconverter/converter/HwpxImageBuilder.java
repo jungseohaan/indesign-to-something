@@ -11,6 +11,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
 import javax.imageio.ImageIO;
@@ -792,10 +793,7 @@ public class HwpxImageBuilder {
     }
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
-        return "PAGE_BACKGROUND".equals(visualLayer)
-                || "CONTAINER_BACKDROP".equals(visualLayer)
-                || "CONTENT_BACKDROP".equals(visualLayer)
-                || "TEXT_CARD_BACKDROP".equals(visualLayer);
+        return VisualPlanePolicy.isBehindTextLayerName(visualLayer);
     }
 
     // ── 배경 PNG ──

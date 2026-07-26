@@ -16,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 
 import java.util.*;
 
@@ -410,10 +411,7 @@ public class ASTToHwpxConverter {
     private static boolean isBehindTextPlaneFigure(ASTFigure fig) {
         if (fig == null) return false;
         String layer = fig.visualLayer();
-        if ("PAGE_BACKGROUND".equals(layer)) return true;
-        if ("CONTAINER_BACKDROP".equals(layer)) return true;
-        if ("CONTENT_BACKDROP".equals(layer)) return true;
-        if ("TEXT_CARD_BACKDROP".equals(layer)) return true;
+        if (VisualPlanePolicy.isBehindTextLayerName(layer)) return true;
         if (layer != null && !layer.isEmpty()) return false;
         if (fig.fromGroup()) return false;
         return true;
