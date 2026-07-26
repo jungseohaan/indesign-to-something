@@ -1111,6 +1111,10 @@ public final class OwnershipPlanner {
                     skipped++;
                     continue;
                 }
+                if (range != null && isContainedByExecutableInlineTextShellPlan(shellId, range.textFrameId)) {
+                    skipped++;
+                    continue;
+                }
                 TextRangeShellPlan textRangeShell = textRangeShellPlanFromGroupedSource(
                         shell, rangeCandidate != null ? rangeCandidate.textFrame : null, range);
                 ObjectPlan objectPlan = objectPlanFromGroupedTextRangeShell(
@@ -1139,6 +1143,28 @@ public final class OwnershipPlanner {
                     + ",\"skipped\":" + skipped
                     + ",\"detail\":\"source Group exposes editable TextFrame children and textless closed-shell children; styled leading story ranges are assigned to shell slots within the same source bundle\"}");
         }
+    }
+
+    private boolean isContainedByExecutableInlineTextShellPlan(int shellId, int textFrameId) {
+        if (shellId < 0 || textFrameId < 0 || plans == null) return false;
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) continue;
+            if (!contains(plan.visualSourceObjectIds, shellId)
+                    && !contains(plan.exportSourceObjectIds, shellId)
+                    && !contains(plan.sourceObjectIds, shellId)) {
+                continue;
+            }
+            if (!contains(plan.ownedTextFrameIds, textFrameId)
+                    && !contains(plan.sourceObjectIds, textFrameId)) {
+                continue;
+            }
+            if (plan.ownedTextRanges != null && plan.ownedTextRanges.length > 0) continue;
+            return true;
+        }
+        return false;
     }
 
     private TextRangeShellBundle textRangeShellBundle(ResolvedPageItem group) {

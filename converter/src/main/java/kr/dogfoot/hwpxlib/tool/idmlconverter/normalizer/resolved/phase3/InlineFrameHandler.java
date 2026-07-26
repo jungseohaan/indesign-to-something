@@ -1405,6 +1405,7 @@ public class InlineFrameHandler {
                 ? explicitShellPlan
                 : findInlineTextShellOwnerPlan(ctx, shell, childTfs);
         if (shellPlan == null) return null;
+        if (ctx.isObjectPlanMaterialized(shellPlan)) return null;
         String shellFile = materialFile(shellPlan);
         if (shellFile == null || shellFile.isEmpty()) return null;
         if (shellPlan.bounds == null || shellPlan.bounds.length < 4) return null;
@@ -1550,6 +1551,7 @@ public class InlineFrameHandler {
                                 ? "placed planned inline textless shell as INLINE_TEXT_FRAME native source shape; editable text is owned by HWPX"
                                 : "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
             }
+            ctx.markObjectPlanMaterialized(shellPlan);
             return obj;
         } catch (Exception e) {
             return null;
@@ -1627,7 +1629,33 @@ public class InlineFrameHandler {
         if (shellPlan.placement != Placement.INLINE) return false;
         if (shellPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (!hasHwpxTextOwnershipForChildren(ctx, shellPlan, childTfs)) return false;
-        return visibleShellTextFrameCount(childTfs) > 1;
+        if (visibleShellTextFrameCount(childTfs) <= 1) return false;
+        if (hasMultiLineInlineShellChildText(childTfs)) return false;
+        return shouldSqueezeCompositeInlineShellText(childTfs);
+    }
+
+    private static boolean hasMultiLineInlineShellChildText(
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (childTfs == null) return false;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            String text = childTf.frameVisibleText();
+            if (normalizeInlineShellText(text).isEmpty()) continue;
+            if (hasMultipleVisibleTextLines(text)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasMultipleVisibleTextLines(String text) {
+        if (text == null || text.isEmpty()) return false;
+        int visibleLineCount = 0;
+        String[] lines = text.split("[\\r\\n]+");
+        for (String line : lines) {
+            if (normalizeInlineShellText(line).isEmpty()) continue;
+            visibleLineCount++;
+            if (visibleLineCount > 1) return true;
+        }
+        return false;
     }
 
     private static boolean shouldSqueezeCompositeInlineShellText(
@@ -1863,7 +1891,10 @@ public class InlineFrameHandler {
             ResolvedTextFrame childTf,
             ASTInlineObject overlay) {
         if (childTf == null || overlay == null) return;
-        List<ASTParagraph> paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
+        List<ASTParagraph> paragraphs = buildSourceStructuredShellTextParagraphs(ctx, childTf);
+        if (paragraphs == null || paragraphs.isEmpty()) {
+            paragraphs = buildSyntheticShellTextParagraphs(ctx, childTf);
+        }
         if (paragraphs == null || paragraphs.isEmpty()) return;
         fitSingleLineInlineTextShellBoxToComposedLine(paragraphs, overlay, childTf, ctx);
         capInlineShellParagraphLeadingToFrame(paragraphs, overlay, childTf, ctx);
@@ -3906,6 +3937,13 @@ public class InlineFrameHandler {
             ResolvedTextFrame childTf) {
         if (ctx == null || ctx.resolvedData == null || childTf == null || childTf.storyId() == null) {
             return new ArrayList<>();
+        }
+        TextFlowDocument.TextFlowUnit unit = textFlowUnitForTextFrame(ctx, childTf);
+        if (unit != null && unit.paragraphs != null && !unit.paragraphs.isEmpty()) {
+            List<ASTParagraph> flowParagraphs = convertShellTextParagraphs(ctx, unit);
+            if (flowParagraphs != null && !flowParagraphs.isEmpty()) {
+                return flowParagraphs;
+            }
         }
         ResolvedStory story = ctx.resolvedData.getStory(childTf.storyId());
         if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) {
