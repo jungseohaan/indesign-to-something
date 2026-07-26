@@ -38,6 +38,32 @@ function _sourceIndexVisibleText(text) {
             .replace(/[\uFFFC\u0003\u0007\b\r]/g, "");
 }
 
+function _sourceIndexTextIsWhitespaceOnly(text) {
+    var visible = _sourceIndexVisibleText(text);
+    return visible.length > 0 && visible.replace(/\s+/g, "").length === 0;
+}
+
+function _sourceIndexParagraphHasRuleBelow(paragraph) {
+    if (!paragraph) return false;
+    try { if (paragraph.ruleBelow === true) return true; } catch (eRuleBelow) {}
+    try {
+        var style = paragraph.appliedParagraphStyle;
+        if (style && style.ruleBelow === true) return true;
+    } catch (eStyleRuleBelow) {}
+    return false;
+}
+
+function _sourceIndexStoryHasParagraphRuleBelow(story) {
+    try {
+        if (!story) return false;
+        var paragraphs = story.paragraphs.everyItem().getElements();
+        for (var i = 0; paragraphs && i < paragraphs.length; i++) {
+            if (_sourceIndexParagraphHasRuleBelow(paragraphs[i])) return true;
+        }
+    } catch (eStoryRuleBelow) {}
+    return false;
+}
+
 // 화학식/수식 전용 폰트(BT수식·BTM·EH·NP)인가.
 // Java kr.dogfoot...BTFontGlyphMap/EHFontGlyphMap/NPFontGlyphMap 과 동일 기준.
 function _sourceIndexIsFormulaFont(fontName) {
@@ -1145,6 +1171,24 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         cachedInfo.paragraphStyleNames = [];
                     }
                 }
+                if (String(cachedInfo.kind || "") === "TextFrame"
+                        && cachedInfo.storyHasParagraphRuleBelow === undefined) {
+                    try {
+                        cachedInfo.storyHasParagraphRuleBelow =
+                                _sourceIndexStoryHasParagraphRuleBelow(item.parentStory);
+                    } catch (eCachedRuleBelow) {
+                        cachedInfo.storyHasParagraphRuleBelow = false;
+                    }
+                }
+                if (String(cachedInfo.kind || "") === "TextFrame"
+                        && cachedInfo.textIsWhitespaceOnly === undefined) {
+                    try {
+                        cachedInfo.textIsWhitespaceOnly =
+                                _sourceIndexTextIsWhitespaceOnly(String(item.contents || ""));
+                    } catch (eCachedWhitespaceOnly) {
+                        cachedInfo.textIsWhitespaceOnly = false;
+                    }
+                }
                 try {
                     var cachedTw = _itemTextWrapInfoForSourceIndex(item);
                     if (cachedTw && cachedTw.mode) {
@@ -1189,6 +1233,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var rawContents = null;
         var markerOnlyContents = null;
         var simpleMarkerLabelContents = null;
+        var textIsWhitespaceOnly = false;
+        var storyHasParagraphRuleBelow = false;
         var paragraphStyleNames = [];
         var storyId = null;
         var leadingStyledTextRanges = [];
@@ -1211,9 +1257,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 rawContents = String(item.contents || "");
                 markerOnlyContents = rawContents.replace(/[\s\r\n\t\u0007\u0008\u0016\u0018\u0003\uFFFC\uFEFF]/g, "").length === 0
                         && /[\u0007\u0008\u0016\u0018\u0003\uFFFC\uFEFF]/.test(rawContents);
+                textIsWhitespaceOnly = _sourceIndexTextIsWhitespaceOnly(rawContents);
             } catch (eRawContents) {
                 rawContents = null;
                 markerOnlyContents = null;
+                textIsWhitespaceOnly = false;
             }
             try {
                 simpleMarkerLabelContents = _isSimpleMarkerLabelTextForSourceIndex(
@@ -1230,6 +1278,11 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 leadingStyledTextRanges = _sourceIndexLeadingStyledStoryRunRanges(item);
             } catch (eLeadingStyledTextRanges) {
                 leadingStyledTextRanges = [];
+            }
+            try {
+                storyHasParagraphRuleBelow = _sourceIndexStoryHasParagraphRuleBelow(parentStory);
+            } catch (eStoryRuleBelow) {
+                storyHasParagraphRuleBelow = false;
             }
             try {
                 var tableMeta = storyTableMeta(parentStory, storyId);
@@ -1302,6 +1355,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                     : (textLength !== null ? textLength > 0 : null),
             markerOnlyContents: markerOnlyContents,
             simpleMarkerLabelContents: simpleMarkerLabelContents,
+            textIsWhitespaceOnly: textIsWhitespaceOnly,
+            storyHasParagraphRuleBelow: storyHasParagraphRuleBelow,
             paragraphStyleNames: paragraphStyleNames,
             hasTextPath: textPathInfo.hasTextPath === true,
             textPathCount: textPathInfo.textPathCount || 0,

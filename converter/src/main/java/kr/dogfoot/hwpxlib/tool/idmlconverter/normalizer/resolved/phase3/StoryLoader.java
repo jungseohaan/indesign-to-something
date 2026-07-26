@@ -1813,9 +1813,6 @@ public class StoryLoader {
         if (run == null || !run.isInlineAnchor()) return;
         Integer anchoredId = run.anchoredObjectId();
         if (anchoredId == null || anchoredId <= 0) return;
-        if (idmlParagraph != null && !paragraphContainsInlineAnchor(idmlParagraph, anchoredId)) {
-            return;
-        }
         if (!isResolvedCellPlannedInlineAnchor(ctx, anchoredId)) {
             return;
         }
@@ -2085,7 +2082,26 @@ public class StoryLoader {
             ResolvedBuildContext ctx,
             int anchoredId) {
         if (ctx != null && ctx.ownershipPlanPlacesInlineHwpxText(anchoredId)) return true;
+        if (isResolvedCellPlannedLayoutOnlyInlineAnchor(ctx, anchoredId)) return true;
         return isResolvedCellPlannedInlineVisualAnchor(ctx, anchoredId);
+    }
+
+    private static boolean isResolvedCellPlannedLayoutOnlyInlineAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredId) {
+        if (ctx == null || ctx.ownershipPlans == null || anchoredId <= 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.domId != anchoredId) continue;
+            if (plan.placement != Placement.INLINE) return false;
+            if (plan.visualAction != VisualAction.DROP_VISUAL) return false;
+            if (plan.textAction != TextAction.DROP_TEXT) return false;
+            if (plan.materialization != Materialization.HWPX_TEXT) return false;
+            return plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0
+                    && (plan.kind != null && plan.kind.startsWith("layout_only_inline_slot:")
+                    || "layout_only_inline_slot".equals(plan.slotRole)
+                    || "inline_rule_below_whitespace_placeholder".equals(plan.reason));
+        }
+        return false;
     }
 
     private static boolean isResolvedCellPlannedInlineVisualAnchor(
@@ -2124,7 +2140,6 @@ public class StoryLoader {
                 if (run == null || !run.isInlineAnchor()) continue;
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
-                if (!cellContainsInlineAnchor(idmlCell, anchoredId)) continue;
                 if (!isResolvedCellPlannedInlineAnchor(ctx, anchoredId)) {
                     continue;
                 }

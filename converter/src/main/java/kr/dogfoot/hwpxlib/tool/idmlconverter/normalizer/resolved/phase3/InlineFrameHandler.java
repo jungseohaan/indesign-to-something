@@ -3879,7 +3879,7 @@ public class InlineFrameHandler {
                 null,
                 atom -> {
                     if (atom == null || atom.anchoredObjectId == null) return null;
-                    return new ArrayList<>();
+                    return loadPlannedInlineAnchorItems(ctx, atom.anchoredObjectId, null, null);
                 }));
     }
 
@@ -6524,7 +6524,9 @@ public class InlineFrameHandler {
     }
 
     private static boolean isRepeatedEmptyInlineTextFramePlaceholderPlan(ObjectPlan plan) {
-        return plan != null && "repeated_empty_inline_text_frame_placeholder".equals(plan.reason);
+        return plan != null
+                && ("repeated_empty_inline_text_frame_placeholder".equals(plan.reason)
+                || "inline_rule_below_whitespace_placeholder".equals(plan.reason));
     }
 
     private static ASTInlineObject createLayoutOnlyInlineSpacer(
