@@ -694,6 +694,7 @@ function _appendEditableTextFrameObjectPlans(objectPlans, sourceItems) {
         if (!src || String(src.kind || "") !== "TextFrame") continue;
         if (src.textFrameClass !== "editable") continue;
         if (src.hasText !== true) continue;
+        if (_objectPlanSourceIsInlineRuleBelowWhitespaceTextFrame(src)) continue;
         var id = _objectPlanTextFrameIdValue(src);
         if (id === null || id === undefined) continue;
         if (supersededMasterTextFrameKeys[String(id)] === true) continue;
@@ -1237,7 +1238,9 @@ function _appendLayoutOnlyInlineSlotObjectPlans(objectPlans, sourceItems) {
             continue;
         }
         summary.decisionCheckMs += _objectPlanTimingNow() - decisionStartedAt;
-        if (String(src.kind || "") === "TextFrame") {
+        var inlineRuleBelowWhitespace =
+                _objectPlanSourceIsInlineRuleBelowWhitespaceTextFrame(src);
+        if (String(src.kind || "") === "TextFrame" && !inlineRuleBelowWhitespace) {
             summary.skippedTextFrameCount++;
             continue;
         }
@@ -1249,11 +1252,23 @@ function _appendLayoutOnlyInlineSlotObjectPlans(objectPlans, sourceItems) {
         if (isNaN(pageIndex) || pageIndex < 0) continue;
         var zOrder = src.zOrder !== undefined && src.zOrder !== null ? src.zOrder : 0;
         var footprintStartedAt = _objectPlanTimingNow();
-        var footprint = _objectPlanLayoutOnlyInlineFootprint(
-                src, footprintCandidateIndex, sourceById, childrenByParentId);
+        var footprint = inlineRuleBelowWhitespace
+                ? {
+                    bounds: src.bounds || null,
+                    sourceObjectIds: [],
+                    expanded: false,
+                    reason: "inline_rule_below_whitespace_placeholder"
+                }
+                : _objectPlanLayoutOnlyInlineFootprint(
+                    src, footprintCandidateIndex, sourceById, childrenByParentId);
         summary.footprintMs += _objectPlanTimingNow() - footprintStartedAt;
         if (footprint && footprint.expanded === true) summary.expandedFootprintCount++;
         var plan = _layoutOnlyInlineSlotObjectPlan(src, id, pageIndex, zOrder, footprint);
+        if (inlineRuleBelowWhitespace) {
+            plan.compositeRole = "inline_rule_below_whitespace_placeholder";
+            plan.layoutFootprintReason = "inline_rule_below_whitespace_placeholder";
+            plan.reason = "inline_rule_below_whitespace_placeholder";
+        }
         objectPlans.push(plan);
         var addStartedAt = _objectPlanTimingNow();
         _addObjectPlanToDecisionIndex(decisionIndex, plan);
@@ -1277,6 +1292,16 @@ function _objectPlanIsDirectInlineLayoutSource(src) {
     return src.storyTextInlineSlot === true
             || String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE"
             || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION";
+}
+
+function _objectPlanSourceIsInlineRuleBelowWhitespaceTextFrame(src) {
+    if (!src || String(src.kind || "") !== "TextFrame") return false;
+    if (src.textFrameClass !== "editable") return false;
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.hasTablesInStory === true || src.storyHasVisibleTableCellText === true) return false;
+    if (src.textIsWhitespaceOnly !== true) return false;
+    if (src.storyHasParagraphRuleBelow !== true) return false;
+    return _objectPlanIsDirectInlineLayoutSource(src);
 }
 
 function _objectPlanHasUsableInlineLayoutBounds(src) {

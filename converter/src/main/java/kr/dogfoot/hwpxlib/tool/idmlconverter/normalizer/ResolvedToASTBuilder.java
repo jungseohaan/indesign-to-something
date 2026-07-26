@@ -1417,7 +1417,9 @@ public class ResolvedToASTBuilder {
                 coordinateSpace,
                 jsonString(o, "anchorOwner"),
                 jsonInt(o, "zOrder", 0),
-                "planner_declared_layout_only_inline_slot",
+                jsonString(o, "reason").isEmpty()
+                        ? "planner_declared_layout_only_inline_slot"
+                        : jsonString(o, "reason"),
                 null,
                 jsonDoubleArray(o, "bounds"),
                 null,
