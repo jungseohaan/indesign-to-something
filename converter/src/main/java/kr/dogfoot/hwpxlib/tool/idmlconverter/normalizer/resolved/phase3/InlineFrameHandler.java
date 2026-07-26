@@ -5221,7 +5221,7 @@ public class InlineFrameHandler {
                         if (obj.anchoredPosition() == null) obj.anchoredPosition("Anchored");
                         obj.affectsLineSpacing(false);
                     }
-                    if (rg.inlineSourceTreeClosed()) {
+                    if (rg.inlineSourceTreeClosed() || isInlineMicroVectorPatternShell(plan, rg)) {
                         obj.affectsLineSpacing(false);
                     }
 
@@ -5262,6 +5262,15 @@ public class InlineFrameHandler {
             }
         }
         return best;
+    }
+
+    private static boolean isInlineMicroVectorPatternShell(ObjectPlan plan, RenderedGroup rg) {
+        String planSlot = plan != null ? plan.slotRole : null;
+        String rgSlot = rg != null ? rg.slotRole() : null;
+        String rgComposite = rg != null ? rg.compositeRole() : null;
+        return "inline_micro_vector_pattern_shell_slot".equals(planSlot)
+                || "inline_micro_vector_pattern_shell_slot".equals(rgSlot)
+                || "inline_micro_vector_pattern_shell".equals(rgComposite);
     }
 
     private static int directInlineVisualPlanPriority(ObjectPlan plan) {
