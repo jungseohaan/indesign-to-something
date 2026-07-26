@@ -258,6 +258,14 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var hiddenTextShellMaterialExportRestore =
+            _restoreObjectPlanHiddenTextShellMaterialExportSources(objectPlans, sourceById);
+    _recordObjectPlanTiming("restoreHiddenTextShellMaterialExportSources", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        mutatedPlanCount: hiddenTextShellMaterialExportRestore.summary.mutatedPlanCount,
+        restoredSourceCount: hiddenTextShellMaterialExportRestore.summary.restoredSourceCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var rawClippedImageVisualSourceResolution =
             _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById);
     _recordObjectPlanTiming("resolveRawClippedImageVisualSources", _timingStartedAt, {
@@ -330,6 +338,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
     summary.layoutOnlyInlineSlots = layoutOnlyInlineSlots.summary;
     summary.pageRootTextlessPlaneInventory = pageRootTextlessPlaneInventory.summary;
     summary.pageLocalVisibleSourceResolution = pageLocalVisibleSourceResolution.summary;
+    summary.hiddenTextShellMaterialExportRestore = hiddenTextShellMaterialExportRestore.summary;
     summary.rawClippedImageVisualSourceResolution = rawClippedImageVisualSourceResolution.summary;
     summary.backgroundLayerBackdropStackCollapse = backgroundLayerBackdropStackCollapse.summary;
     summary.pageBackgroundPlaneMaterialization = pageBackgroundPlaneMaterialization.summary;
@@ -5371,6 +5380,124 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _restoreObjectPlanHiddenTextShellMaterialExportSources(objectPlans, sourceById) {
+    var plans = objectPlans || [];
+    var mutatedPlanCount = 0;
+    var restoredSourceCount = 0;
+    var mutatedObjectPlanIds = [];
+
+    for (var pi = 0; pi < plans.length; pi++) {
+        var plan = plans[pi];
+        if (!_objectPlanHiddenTextShellMaterialRestoreCandidate(plan)) continue;
+        var hidden = plan.hiddenVisualSourceObjectIds || [];
+        var restored = [];
+        var restoredSeen = {};
+        for (var hi = 0; hi < hidden.length; hi++) {
+            var sourceId = hidden[hi];
+            var src = sourceById ? sourceById[String(sourceId)] : null;
+            if (!_objectPlanSourceIsExportableTextShellMaterial(src)) continue;
+            if (_objectPlanSourceHasVisibleOwnerOutsidePlan(plans, sourceId, plan)) continue;
+            _pushUniqueId(restored, restoredSeen, sourceId);
+        }
+        if (restored.length === 0) continue;
+
+        plan.visualSourceObjectIds = _sourceIdsUnion(plan.visualSourceObjectIds || [], restored);
+        plan.exportSourceObjectIds = _sourceIdsUnion(plan.exportSourceObjectIds || [], restored);
+        plan.hiddenVisualSourceObjectIds = _objectPlanSourceIdsMinus(
+                plan.hiddenVisualSourceObjectIds || [], restored);
+        plan.visualSourceSetId = _sourceSetId(plan.visualSourceObjectIds || []);
+        plan.exportSourceSetId = _sourceSetId(plan.exportSourceObjectIds || []);
+        plan.hiddenSourceSetId = _sourceSetId(plan.hiddenVisualSourceObjectIds || []);
+        plan.hiddenVisualSourceSetId = plan.hiddenSourceSetId;
+        plan.hiddenTextShellMaterialExportResolution = "RESTORED_VISIBLE_SHELL_MATERIAL";
+        plan.hiddenTextShellMaterialExportResolutionReason =
+                "visible non-paper shell material belongs to the SHELL_SLOT export owner";
+        plan.reason = String(plan.reason || "") + ":hidden_text_shell_material_export_restored";
+        mutatedPlanCount++;
+        restoredSourceCount += restored.length;
+        mutatedObjectPlanIds.push(plan.objectPlanId || plan.bundleId || plan.candidateId
+                || ("plan.index." + String(pi)));
+    }
+
+    return {
+        summary: {
+            mutatedPlanCount: mutatedPlanCount,
+            restoredSourceCount: restoredSourceCount,
+            mutatedObjectPlanIds: mutatedObjectPlanIds
+        }
+    };
+}
+
+function _objectPlanHiddenTextShellMaterialRestoreCandidate(plan) {
+    return !!(plan
+            && plan.visualAction === "PLACE_TEXT_SHELL"
+            && _objectPlanHasVisibleVisual(plan)
+            && plan.hiddenVisualSourceObjectIds
+            && plan.hiddenVisualSourceObjectIds.length > 0);
+}
+
+function _objectPlanSourceIsExportableTextShellMaterial(src) {
+    if (!src) return false;
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.sourceHidden === true || src.hiddenByParent === true) return false;
+    var opacity = src.opacity !== undefined && src.opacity !== null ? Number(src.opacity) : 100;
+    if (!isNaN(opacity) && opacity <= 0.01) return false;
+    var kind = String(src.kind || src.type || src.itemType || "");
+    if (kind === "TextFrame" || kind === "Image" || kind === "PDF" || kind === "EPS") return false;
+    if (src.hasPlacedVisual === true) return false;
+    var hasFill = _objectPlanSourceHasVisibleNonPaperFill(src);
+    var hasStroke = _objectPlanSourceHasVisibleNonPaperStroke(src);
+    if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "Group") {
+        return hasFill || hasStroke;
+    }
+    if (kind === "GraphicLine") return hasStroke;
+    return false;
+}
+
+function _objectPlanSourceHasVisibleNonPaperFill(src) {
+    var fill = String(src && (src.fillColorName || src.fillColor) || "");
+    if (!fill && src && src.hasVisibleFill === true) return true;
+    return !_objectPlanColorIsNone(fill) && !_objectPlanColorIsPaper(fill);
+}
+
+function _objectPlanSourceHasVisibleNonPaperStroke(src) {
+    var stroke = String(src && (src.strokeColorName || src.strokeColor) || "");
+    var strokeWeight = Number(src && src.strokeWeight || 0);
+    if (!stroke && src && src.hasVisibleStroke === true) return true;
+    return strokeWeight > 0
+            && !_objectPlanColorIsNone(stroke)
+            && !_objectPlanColorIsPaper(stroke);
+}
+
+function _objectPlanColorIsNone(colorName) {
+    if (!colorName) return true;
+    return colorName === "None" || colorName === "[None]";
+}
+
+function _objectPlanColorIsPaper(colorName) {
+    return colorName === "Paper" || colorName === "[Paper]" || colorName === "White";
+}
+
+function _objectPlanSourceHasVisibleOwnerOutsidePlan(plans, sourceId, owner) {
+    for (var pi = 0; plans && pi < plans.length; pi++) {
+        var plan = plans[pi];
+        if (!plan || plan === owner || !_objectPlanHasVisibleVisual(plan)) continue;
+        if (plan.visualAction === "PLACE_TABLE_STYLE") continue;
+        if (_objectPlanSourceIdsContains(plan.visualSourceObjectIds || [], sourceId)
+                || _objectPlanSourceIdsContains(plan.exportSourceObjectIds || [], sourceId)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function _objectPlanSourceIdsContains(ids, sourceId) {
+    for (var i = 0; ids && i < ids.length; i++) {
+        if (Number(ids[i]) === Number(sourceId)) return true;
+    }
+    return false;
 }
 
 function _applyObjectPlanPageBackgroundPlaneMaterialization(objectPlans, sourceById) {

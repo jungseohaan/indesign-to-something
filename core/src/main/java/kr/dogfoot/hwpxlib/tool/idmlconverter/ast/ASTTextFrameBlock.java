@@ -33,6 +33,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     // true이면 전역 native-textbox-graphics OFF여도 배경 fill/stroke를 강제로 칠한다.
     // (deco PNG가 풀어준 대형 배경/제목바를 네이티브 흡수한 사이드박스 블록 전용 — 좁은 범위)
     private boolean forceNativeFill;
+    // Stage 1 style source로 흡수된 parent shell의 원본 visual z-depth.
+    // 텍스트 carrier 순서와 shell 배경 순서를 분리해 HWPX 출력 zOrder 압축에 참여시킨다.
+    private Integer nativeWrapperZOrder;
     // true이면 전역 native-textbox-graphics OFF여도 imageFillData를 박스 배경으로 강제로 칠한다.
     // (통합 플로팅 배지 전용 — 텍스트는 검색 가능 런으로 유지되므로 source ownership policy 위배 아님)
     private boolean forceImageFill;
@@ -148,6 +151,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean forceNativeFill() { return forceNativeFill; }
     public void forceNativeFill(boolean v) { this.forceNativeFill = v; }
+
+    public Integer nativeWrapperZOrder() { return nativeWrapperZOrder; }
+    public void nativeWrapperZOrder(Integer v) { this.nativeWrapperZOrder = v; }
 
     public String strokeColor() { return strokeColor; }
     public void strokeColor(String v) { this.strokeColor = v; }
@@ -277,6 +283,7 @@ public class ASTTextFrameBlock extends ASTBlock {
         copy.imageFillData = imageFillData;
         copy.nativeGraphicsAllowed = nativeGraphicsAllowed;
         copy.forceNativeFill = forceNativeFill;
+        copy.nativeWrapperZOrder = nativeWrapperZOrder;
         copy.forceImageFill = forceImageFill;
         copy.strokeColor = strokeColor;
         copy.strokeWeight = strokeWeight;

@@ -84,6 +84,12 @@ public final class OwnershipPlanner {
         timed("ensureSiblingTextShellBoundsTextFramePlans",
                 this::ensureSiblingTextShellBoundsTextFramePlans);
         timed("planRenderedItems", this::planRenderedItems);
+        timed("normalizePageCoordinatePlanBounds",
+                this::normalizePageCoordinatePlanBounds);
+        timed("restoreHiddenTextShellMaterialExportSources",
+                this::restoreHiddenTextShellMaterialExportSources);
+        timed("attachNativeParentTextShellStyleSources",
+                this::attachNativeParentTextShellStyleSources);
         timed("planNativePageBackdropShapes", this::planNativePageBackdropShapes);
         timed("planNativeParentTextShells", this::planNativeParentTextShells);
         timed("planNativeSiblingTextShells", this::planNativeSiblingTextShells);
@@ -101,6 +107,7 @@ public final class OwnershipPlanner {
         int legacyBridgeWarningDelta = ctx.ownershipWarningLines.size() - legacyBridgeWarningStart;
         recordLegacyBridgeMetrics(legacyBridgePlanStart, legacyBridgeWarningStart, legacyBridgeSkipped);
         recordLegacyBridgeDiagnostics(legacyBridgePlanStart, preBridgePlanJsons, legacyBridgeSkipped);
+        timed("splitInlineTextShellOwnedTextSlots", this::splitInlineTextShellOwnedTextSlots);
         timed("ensureOwnedTextFramePlansForVisibleTextShells", this::ensureOwnedTextFramePlansForVisibleTextShells);
         timed("ensureSourceTextWrapContracts", this::ensureSourceTextWrapContracts);
         timed("declareSourceBundleTextRangeShellPlans", this::declareSourceBundleTextRangeShellPlans);
@@ -108,6 +115,7 @@ public final class OwnershipPlanner {
         timed("normalizeStage1ContractsBeforeValidation", this::normalizeStage1ContractsBeforeValidation);
         timed("suppressTableDuplicateMarkerTextFrames.stage1", this::suppressTableDuplicateMarkerTextFrames);
         timed("dropNativeSourceShapePlans", this::dropNativeSourceShapePlans);
+        timed("finalizeVisualDepthContracts.common", this::finalizeVisualDepthContracts);
         writeAndValidatePlans();
         ConversionTiming.metric("stage1.ownershipPlanner.importedPreplannedPlans",
                 importedPreplannedObjectPlanCount);
@@ -781,6 +789,18 @@ public final class OwnershipPlanner {
         return out;
     }
 
+    private static int[] appendUnique(int[] first, int value) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (first != null) {
+            for (int id : first) ids.add(id);
+        }
+        ids.add(value);
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) out[i++] = id != null ? id : -1;
+        return out;
+    }
+
     private static boolean containsInt(int[] values, int target) {
         if (values == null || values.length == 0) return false;
         for (int value : values) {
@@ -934,6 +954,48 @@ public final class OwnershipPlanner {
             }
         }
         return ambiguous ? null : best;
+    }
+
+    private void attachNativeParentTextShellStyleSources() {
+        if (data == null) return;
+        int attached = 0;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            int tfId = parseInt(tf.id(), -1);
+            if (tfId < 0) continue;
+            ResolvedPageItem textItem = data.getPageItem(tf.id());
+            if (textItem == null || textItem.parentId() == null || textItem.parentId().isBlank()) {
+                continue;
+            }
+            ResolvedPageItem parent = data.getPageItem(textItem.parentId());
+            if (!isNativeTextShellShape(parent)) continue;
+            int parentId = parseInt(parent.id(), -1);
+            if (parentId < 0) continue;
+            if (hasAnyVisibleOrStyleOwnerForSourceOnPage(parentId, tf.pageIndex())) continue;
+
+            int planIndex = hwpxTextPlanIndexForTextFrame(tfId);
+            if (planIndex < 0) continue;
+            ObjectPlan textPlan = plans.get(planIndex);
+            plans.set(planIndex, textPlan.withStyleSourceObjectIds(
+                    appendUnique(textPlan.styleSourceObjectIds, parentId)));
+            attached++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.nativeParentTextShellStyleSources.attached",
+                attached);
+    }
+
+    private int hwpxTextPlanIndexForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return -1;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.materialization != Materialization.HWPX_TEXT) continue;
+            if (plan.domId == textFrameId || contains(plan.ownedTextFrameIds, textFrameId)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static double siblingTextShellBoundsScore(
@@ -2615,6 +2677,40 @@ public final class OwnershipPlanner {
         };
     }
 
+    private void normalizePageCoordinatePlanBounds() {
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.coordinateSpace != CoordinateSpace.PAGE) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (plan.bounds == null || plan.bounds.length < 4) continue;
+
+            double[] normalizedBounds = normalizeSpreadBoundsToPage(plan.pageIndex, plan.bounds);
+            double[] normalizedCropBounds = normalizeSpreadBoundsToPage(
+                    plan.pageIndex, plan.cropSourceBounds);
+            if (sameBounds(plan.bounds, normalizedBounds)
+                    && sameBounds(plan.cropSourceBounds, normalizedCropBounds)) {
+                continue;
+            }
+            plans.set(i, plan
+                    .withBounds(normalizedBounds)
+                    .withCropSourceBounds(normalizedCropBounds));
+            normalized++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.pageCoordinateBounds.normalized",
+                normalized);
+    }
+
+    private static boolean sameBounds(double[] a, double[] b) {
+        if (a == b) return true;
+        if (a == null || b == null) return a == b;
+        if (a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++) {
+            if (Math.abs(a[i] - b[i]) > 0.0001) return false;
+        }
+        return true;
+    }
+
     private double[] clipPageRelativeBoundsToPage(int pageIdx, double[] bounds) {
         if (bounds == null || bounds.length < 4) return bounds;
         double[] page = pageBounds(pageIdx);
@@ -2842,11 +2938,15 @@ public final class OwnershipPlanner {
     }
 
     private void finalizeOwnedTextFrameDepthContracts() {
+        finalizeOwnedTextFrameDepthContracts(true);
+    }
+
+    private void finalizeOwnedTextFrameDepthContracts(boolean emitWarnings) {
         Map<Integer, Integer> maxShellZByTextFrame = new LinkedHashMap<>();
         for (ObjectPlan owner : plans) {
             if (!isVisibleTextShellOwningTextFrame(owner)) continue;
             if (isBackPlaneTextShell(owner)) continue;
-            for (int textFrameId : owner.ownedTextFrameIds) {
+            for (int textFrameId : ownedTextFrameIdsForPlan(owner)) {
                 Integer existing = maxShellZByTextFrame.get(textFrameId);
                 if (existing == null || owner.zOrder > existing) {
                     maxShellZByTextFrame.put(textFrameId, owner.zOrder);
@@ -2854,23 +2954,35 @@ public final class OwnershipPlanner {
             }
         }
         if (maxShellZByTextFrame.isEmpty()) return;
-        int suppressed = 0;
-        for (ObjectPlan plan : plans) {
+        int repaired = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
             if (plan == null || !isTextFramePlanKind(plan.kind)) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             Integer shellZ = maxShellZByTextFrame.get(plan.domId);
             if (shellZ == null) continue;
             int requiredTextZ = shellZ + 1;
             if (plan.zOrder >= requiredTextZ) continue;
-            warn("OWNED_TEXT_FRAME_ZORDER_REPAIR_SUPPRESSED",
-                    "plan=" + planRef(plan)
-                            + " currentZ=" + plan.zOrder
-                            + " requiredMinZ=" + requiredTextZ
-                            + " shellZ=" + shellZ);
-            suppressed++;
+            int relativeTextZ = Math.max(0, VisualPlanePolicy.sourceZOrderComponent(plan.zOrder));
+            int repairedTextZ = safeZOrderAdd(requiredTextZ, relativeTextZ);
+            plans.set(i, plan.withZOrder(repairedTextZ));
+            if (emitWarnings) {
+                warn("OWNED_TEXT_FRAME_ZORDER_REPAIRED",
+                        "plan=" + planRef(plan)
+                                + " currentZ=" + plan.zOrder
+                                + " repairedZ=" + repairedTextZ
+                                + " requiredMinZ=" + requiredTextZ
+                                + " shellZ=" + shellZ);
+            }
+            repaired++;
         }
-        ConversionTiming.metric("stage1.ownershipPlanner.finalizeOwnedTextFrameDepthContracts.suppressed",
-                suppressed);
+        ConversionTiming.metric("stage1.ownershipPlanner.finalizeOwnedTextFrameDepthContracts.repaired",
+                repaired);
+    }
+
+    private static int safeZOrderAdd(int base, int delta) {
+        long sum = (long) base + Math.max(0, delta);
+        return sum > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) sum;
     }
 
     private void ensureOwnedTextFramePlansForVisibleTextShells() {
@@ -2923,6 +3035,106 @@ public final class OwnershipPlanner {
             missing++;
         }
         ConversionTiming.metric("stage1.ownershipPlanner.ensureOwnedTextFramePlansForVisibleTextShells.missing", missing);
+    }
+
+    private void splitInlineTextShellOwnedTextSlots() {
+        if (data == null) return;
+        int splitShells = 0;
+        int addedTextPlans = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan shell = plans.get(i);
+            if (!isInlineExtractedTextShellWithEmbeddedTextSlot(shell)) continue;
+
+            boolean hasOwnedTextFrame = false;
+            boolean allOwnedTextFramesHaveTextSlot = true;
+            for (int textFrameId : shell.ownedTextFrameIds) {
+                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+                if (tf == null || tf.sourceHidden()) {
+                    allOwnedTextFramesHaveTextSlot = false;
+                    continue;
+                }
+                hasOwnedTextFrame = true;
+                if (!hasMaterializedHwpxTextOwnerForTextFrame(textFrameId)) {
+                    ObjectPlan textPlan = inlineTextShellChildTextSlotPlan(shell, tf, textFrameId);
+                    if (textPlan != null) {
+                        plans.add(textPlan);
+                        addedTextPlans++;
+                    }
+                }
+                if (!hasMaterializedHwpxTextOwnerForTextFrame(textFrameId)) {
+                    allOwnedTextFramesHaveTextSlot = false;
+                }
+            }
+
+            if (hasOwnedTextFrame && allOwnedTextFramesHaveTextSlot) {
+                plans.set(i, shell.withTextAction(TextAction.DROP_TEXT));
+                splitShells++;
+            }
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.splitInlineTextShellOwnedTextSlots.splitShells",
+                splitShells);
+        ConversionTiming.metric("stage1.ownershipPlanner.splitInlineTextShellOwnedTextSlots.addedTextPlans",
+                addedTextPlans);
+    }
+
+    private boolean isInlineExtractedTextShellWithEmbeddedTextSlot(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (plan.ownedTextRanges != null && plan.ownedTextRanges.length > 0) return false;
+        if (isDirectInlineTextFrameDrawTextPlan(plan)) return false;
+        return plan.materialization == Materialization.EXTRACTED_PNG_VECTOR
+                || plan.materialization == Materialization.TEXTLESS_VISUAL_FRAGMENT;
+    }
+
+    private ObjectPlan inlineTextShellChildTextSlotPlan(
+            ObjectPlan shell,
+            ResolvedTextFrame tf,
+            int textFrameId) {
+        if (shell == null || tf == null || textFrameId < 0) return null;
+        int pageIndex = tf.pageIndex() >= 0 ? tf.pageIndex() : shell.pageIndex;
+        int zOrder = Math.max(textFrameSourceZOrder(tf), shell.zOrder + 1);
+        ObjectPlan plan = new ObjectPlan(
+                textFrameId,
+                "text_frame:inline_text_shell_child",
+                pageIndex,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.DROP_VISUAL,
+                VisualLayer.CONTENT_VISUAL,
+                Placement.INLINE,
+                null,
+                new int[] { textFrameId },
+                new int[0],
+                new int[0],
+                new int[] { textFrameId },
+                new int[0],
+                "textFrame." + textFrameId,
+                Materialization.HWPX_TEXT,
+                CoordinateSpace.STORY_FLOW,
+                shell.anchorOwner,
+                zOrder,
+                "inline_text_shell_child_text_slot",
+                null,
+                textFramePlanBounds(tf, textFrameId, false),
+                tf.layerId(),
+                tf.layerName(),
+                tf.layerIndex());
+        return plan.withObjectPlanId("objectPlan.inline_text_shell_child_text."
+                + textFrameId + ".shell." + shell.domId);
+    }
+
+    private boolean hasMaterializedHwpxTextOwnerForTextFrame(int textFrameId) {
+        if (textFrameId < 0) return false;
+        for (ObjectPlan plan : plans) {
+            if (!isMaterializedHwpxTextOwner(plan)) continue;
+            if (plan.domId == textFrameId || contains(plan.ownedTextFrameIds, textFrameId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void normalizeStage1ContractsBeforeValidation() {
@@ -3131,10 +3343,9 @@ public final class OwnershipPlanner {
         return true;
     }
 
-    private static boolean isVisibleTextShellOwningTextFrame(ObjectPlan plan) {
+    private boolean isVisibleTextShellOwningTextFrame(ObjectPlan plan) {
         return isVisibleTextShell(plan)
-                && plan.ownedTextFrameIds != null
-                && plan.ownedTextFrameIds.length > 0;
+                && ownedTextFrameIdsForPlan(plan).length > 0;
     }
 
     private static boolean isExecutableShellOwningTextFrame(ObjectPlan plan) {
@@ -3281,7 +3492,10 @@ public final class OwnershipPlanner {
     }
 
     private static boolean isTextFramePlanKind(String kind) {
-        return kind != null && (kind.equals("text_frame") || kind.startsWith("text_frame:"));
+        return kind != null
+                && (kind.equals("text_frame")
+                || kind.startsWith("text_frame:")
+                || kind.startsWith("planner_declared_text_frame:"));
     }
 
     private void normalizeCrossPageTextShellOwnership() {
@@ -14013,15 +14227,16 @@ public final class OwnershipPlanner {
         if (!visualPlan.hasVisibleVisual()) return false;
         if (visualPlan.materialization == Materialization.HWPX_TABLE_STYLE) return false;
         if (visualPlan.domId < 0) return false;
-
-        for (ObjectPlan tableStylePlan : tableStylePlans) {
-            if (tableStylePlan == null || tableStylePlan == visualPlan) continue;
-            if (sameTableStyleCarrierSource(visualPlan, tableStylePlan)) return true;
-        }
+        // A text-owning shell and a table style source use different ownership slots.
         if (visualPlan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && visualPlan.ownedTextFrameIds != null
                 && visualPlan.ownedTextFrameIds.length > 0) {
             return false;
+        }
+
+        for (ObjectPlan tableStylePlan : tableStylePlans) {
+            if (tableStylePlan == null || tableStylePlan == visualPlan) continue;
+            if (sameTableStyleCarrierSource(visualPlan, tableStylePlan)) return true;
         }
         return false;
     }
@@ -15769,10 +15984,23 @@ public final class OwnershipPlanner {
                 }
             }
         }
+        if (isVisibleTextShell(plan)) {
+            addTextFrameSourceIds(plan != null ? plan.sourceObjectIds : null, ids);
+            addTextFrameSourceIds(visualSourceIds(plan), ids);
+        }
         int[] out = new int[ids.size()];
         int i = 0;
         for (Integer id : ids) out[i++] = id;
         return out;
+    }
+
+    private void addTextFrameSourceIds(int[] sourceIds, LinkedHashSet<Integer> out) {
+        if (sourceIds == null || out == null || data == null) return;
+        for (int sourceId : sourceIds) {
+            if (data.getTextFrame(String.valueOf(sourceId)) != null) {
+                out.add(sourceId);
+            }
+        }
     }
 
     private void warn(String code, String detail) {
@@ -16076,7 +16304,26 @@ public final class OwnershipPlanner {
             }
         }
         finalizeContainerOutlineDepthContracts();
-        finalizeOwnedTextFrameDepthContracts();
+        finalizeTextFrameSourceDepthContracts();
+        finalizeOwnedTextFrameDepthContracts(false);
+    }
+
+    private void finalizeTextFrameSourceDepthContracts() {
+        if (data == null) return;
+        int normalized = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (!isTextFramePlanKind(plan.kind)) continue;
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(plan.domId));
+            if (tf == null) continue;
+            int sourceZ = textFrameSourceZOrder(tf);
+            if (sourceZ < 0 || sourceZ == plan.zOrder) continue;
+            plans.set(i, plan.withZOrder(sourceZ));
+            normalized++;
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.finalizeTextFrameSourceDepthContracts.normalized",
+                normalized);
     }
 
     private static int canonicalVisualDepthZOrder(
@@ -16196,7 +16443,6 @@ public final class OwnershipPlanner {
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && layer == VisualLayer.LABEL_BACKDROP
                 && plan.placement == Placement.INLINE
-                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0;
     }
@@ -16204,7 +16450,6 @@ public final class OwnershipPlanner {
     private static boolean isOwnedTextShellBackPlane(ObjectPlan plan, VisualLayer layer) {
         return plan != null
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
-                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && (layer == VisualLayer.CONTAINER_BACKDROP
                 || layer == VisualLayer.LABEL_BACKDROP
                 || layer == VisualLayer.CONTENT_BACKDROP)
@@ -16222,14 +16467,13 @@ public final class OwnershipPlanner {
         if (effectiveCoordinateSpace(plan) != CoordinateSpace.PAGE) return false;
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         if (layer != VisualLayer.LABEL_BACKDROP) return false;
+        if (hasPlacedContentContract(plan)) return false;
         double[] b = plan.bounds != null ? plan.bounds : null;
         if (b == null) {
             RenderedGroup rg = renderedGroupForPlan(plan);
             b = rg != null ? rg.bounds() : null;
         }
-        return hasPageLevelSourceRoots(plan.sourceObjectIds)
-                && isBackgroundBoundsSanityCandidate(b)
-                && isBehindLocalHwpxTextBySourceDepth(b, plan.pageIndex, zOrder);
+        return isBehindSameStackingContextHwpxTextBySourceDepth(plan, b, plan.pageIndex, zOrder);
     }
 
     private boolean hasPlacedContentContract(ObjectPlan plan) {
@@ -16358,6 +16602,28 @@ public final class OwnershipPlanner {
             // front of a placed content visual, the visual must use a
             // behind-text plane so HWPX text remains visible.  This is a
             // Stage 1 source-depth decision, not a later occlusion repair.
+            if (textZOrder <= zOrder) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4 || area(tb) <= 0.0) continue;
+            if (overlapArea(rb, tb) <= 0.0) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isBehindSameStackingContextHwpxTextBySourceDepth(
+            ObjectPlan plan,
+            double[] rb,
+            int pageIndex,
+            int zOrder) {
+        if (plan == null || rb == null || rb.length < 4 || area(rb) <= 0.0 || data == null) {
+            return false;
+        }
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            if (tf.pageIndex() != pageIndex) continue;
+            if (!sameSourceLayer(plan, tf)) continue;
+            int textZOrder = textFrameSourceZOrder(tf);
             if (textZOrder <= zOrder) continue;
             double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
             if (tb == null || tb.length < 4 || area(tb) <= 0.0) continue;
@@ -17793,6 +18059,103 @@ public final class OwnershipPlanner {
         }
         ConversionTiming.metric("stage1.ownershipPlanner.normalizeVisibleVisualSourcesToPlanPage.suppressed",
                 suppressed);
+    }
+
+    private void restoreHiddenTextShellMaterialExportSources() {
+        if (data == null || plans.isEmpty()) return;
+        int mutatedPlans = 0;
+        int restoredSources = 0;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isHiddenTextShellMaterialRestoreCandidate(plan)) continue;
+
+            LinkedHashSet<Integer> visualIds = new LinkedHashSet<>();
+            addAll(plan.visualSourceObjectIds, visualIds);
+            LinkedHashSet<Integer> exportIds = new LinkedHashSet<>();
+            addAll(plan.exportSourceObjectIds, exportIds);
+            LinkedHashSet<Integer> hiddenIds = new LinkedHashSet<>();
+            addAll(plan.hiddenVisualSourceObjectIds, hiddenIds);
+
+            LinkedHashSet<Integer> restored = new LinkedHashSet<>();
+            for (int sourceId : plan.hiddenVisualSourceObjectIds) {
+                ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+                if (!isExportableTextShellMaterialSource(item)) continue;
+                if (sourceHasVisibleOwnerOutsidePlan(sourceId, plan)) continue;
+                visualIds.add(sourceId);
+                exportIds.add(sourceId);
+                hiddenIds.remove(sourceId);
+                restored.add(sourceId);
+            }
+            if (restored.isEmpty()) continue;
+
+            ObjectPlan next = plan
+                    .withVisualSourceObjectIds(toIntArray(visualIds))
+                    .withExtractionSourceObjectIds(toIntArray(exportIds), toIntArray(hiddenIds));
+            plans.set(i, next);
+            mutatedPlans++;
+            restoredSources += restored.size();
+            warn("TEXT_SHELL_HIDDEN_MATERIAL_EXPORT_RESTORED",
+                    "plan=" + planRef(plan)
+                            + " restoredSourceObjectIds=" + restored
+                            + " reason=visible non-paper shell material belongs to the SHELL_SLOT export owner");
+        }
+        ConversionTiming.metric("stage1.ownershipPlanner.hiddenTextShellMaterialExportSources.restoredPlans",
+                mutatedPlans);
+        ConversionTiming.metric("stage1.ownershipPlanner.hiddenTextShellMaterialExportSources.restoredSources",
+                restoredSources);
+    }
+
+    private boolean isHiddenTextShellMaterialRestoreCandidate(ObjectPlan plan) {
+        return plan != null
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.hasVisibleVisual()
+                && plan.hiddenVisualSourceObjectIds != null
+                && plan.hiddenVisualSourceObjectIds.length > 0;
+    }
+
+    private boolean isExportableTextShellMaterialSource(ResolvedPageItem item) {
+        if (item == null || item.sourceHidden() || item.hiddenByParent() || !item.visible()) {
+            return false;
+        }
+        if (item.opacity() <= 0.01) return false;
+        String type = safe(item.type());
+        if ("TextFrame".equals(type) || "Image".equals(type) || "PDF".equals(type) || "EPS".equals(type)) {
+            return false;
+        }
+        boolean hasNonPaperFill = hasVisibleNonPaperFill(item);
+        boolean hasNonPaperStroke = hasVisibleNonPaperStroke(item);
+        if ("Rectangle".equals(type) || "Oval".equals(type) || "Polygon".equals(type) || "Group".equals(type)) {
+            return hasNonPaperFill || hasNonPaperStroke;
+        }
+        if ("GraphicLine".equals(type)) {
+            return hasNonPaperStroke;
+        }
+        return false;
+    }
+
+    private static boolean hasVisibleNonPaperFill(ResolvedPageItem item) {
+        String fill = safe(item != null ? item.fillColorName() : null);
+        return !isNoneColor(fill) && !isPaperColor(fill);
+    }
+
+    private static boolean hasVisibleNonPaperStroke(ResolvedPageItem item) {
+        String stroke = safe(item != null ? item.strokeColorName() : null);
+        return item != null
+                && item.strokeWeight() > 0.01
+                && !isNoneColor(stroke)
+                && !isPaperColor(stroke);
+    }
+
+    private boolean sourceHasVisibleOwnerOutsidePlan(int sourceId, ObjectPlan owner) {
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan == owner || !plan.hasVisibleVisual()) continue;
+            if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE) continue;
+            if (contains(plan.visualSourceObjectIds, sourceId)
+                    || contains(plan.exportSourceObjectIds, sourceId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int[] retainPlanPageSourceIds(int[] ids, ObjectPlan plan) {

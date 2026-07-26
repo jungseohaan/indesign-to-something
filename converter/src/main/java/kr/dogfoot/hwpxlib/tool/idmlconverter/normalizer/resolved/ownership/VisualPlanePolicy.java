@@ -84,6 +84,10 @@ public final class VisualPlanePolicy {
                 && zOrder < planeBandForPolicyPlane(2);
     }
 
+    public static int sourceZOrderComponent(int zOrder) {
+        return normalizedSourceZOrder(zOrder % LAYER_STRIDE);
+    }
+
     private static int planeBandForLayer(VisualLayer layer) {
         return planeBandForPolicyPlane(policyPlaneIndex(layer));
     }

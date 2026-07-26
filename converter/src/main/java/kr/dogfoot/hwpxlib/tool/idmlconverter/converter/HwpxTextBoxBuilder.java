@@ -367,18 +367,21 @@ public class HwpxTextBoxBuilder {
 
         if (colCount <= 1) {
             boolean textOnlyOverlay = block.plannedVisualTextOverlay() && !block.forceNativeFill();
-            // 래퍼 fill 또는 프레임 자체 fill이 있으면 배경 사각형 추가.
-            // Native drawing is never forced from a text-frame carrier; textless
-            // graphics come from the InDesign-extracted visual owner instead.
-            boolean nativeOk = nativeTextBoxGraphicsEnabled();
+            // 래퍼 fill 또는 프레임 자체 fill/stroke가 있으면 배경 사각형 추가.
+            boolean nativeOk = nativeTextBoxGraphicsEnabled() || block.forceNativeFill();
             boolean hasOwnVisibleFill = !textOnlyOverlay
                     && nativeOk
                     && block.fillColor() != null
                     && block.fillColor().startsWith("#")
-                    && !block.fillColor().equals("#FFFFFF");
+                    && (block.forceNativeFill() || !block.fillColor().equals("#FFFFFF"));
+            boolean hasOwnVisibleStroke = !textOnlyOverlay
+                    && nativeOk
+                    && block.strokeColor() != null
+                    && block.strokeColor().startsWith("#")
+                    && block.strokeWeight() > 0;
             boolean hasWrapper = !textOnlyOverlay
                     && nativeOk
-                    && (block.hasWrapperFill() || hasOwnVisibleFill);
+                    && (block.hasWrapperFill() || hasOwnVisibleFill || hasOwnVisibleStroke);
             // 둥근 모서리 래퍼: Table 대신 Rectangle+DrawText 단일 객체 사용
             // (Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버림)
             if (hasWrapper && block.cornerRadius() > 0 && !containsInlineTable(block.paragraphs())
@@ -600,7 +603,8 @@ public class HwpxTextBoxBuilder {
      */
     private void addWrapperRoundedRect(Para framePara, ASTTextFrameBlock block,
                                         long w, long h) {
-        if (!nativeTextBoxGraphicsEnabled()) return;
+        boolean forceNativeGraphics = block != null && block.forceNativeFill();
+        if (!nativeTextBoxGraphicsEnabled() && !forceNativeGraphics) return;
 
         // 배경 fill: 래퍼 fill → 프레임 자체 fill → 없음
         String bgColor = null;
@@ -666,11 +670,11 @@ public class HwpxTextBoxBuilder {
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
         // 스트로크 (프레임 자체 stroke, tint 반영)
-        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", block.strokeTint(), false);
+        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", block.strokeTint(), forceNativeGraphics);
 
         // 배경 fill (래퍼 fill 또는 프레임 fill). No fill means transparent.
         if (hasBg) {
-            setupTextBoxFillBrush(rect, bgColor, bgTint, false);
+            setupTextBoxFillBrush(rect, bgColor, bgTint, forceNativeGraphics);
         }
 
         // 라운드 코너
@@ -708,6 +712,10 @@ public class HwpxTextBoxBuilder {
 
     private int nativeWrapperShellZOrder(ASTTextFrameBlock block) {
         if (block == null) return 0;
+        Integer nativeWrapperZOrder = block.nativeWrapperZOrder();
+        if (nativeWrapperZOrder != null) {
+            return nativeWrapperZOrder;
+        }
         if (block.forceNativeFill() || block.plannedVisualTextOverlay()) {
             return plannedShellZOrder(block.plannedShellVisualLayer(), block.zOrder());
         }
@@ -715,10 +723,7 @@ public class HwpxTextBoxBuilder {
     }
 
     int textCarrierZOrder(ASTTextFrameBlock block) {
-        if (plannedLabelBackdrop(block)) {
-            return plannedTextZOrder(block.plannedShellVisualLayer(), block.zOrder());
-        }
-        return block != null ? block.zOrder() : 0;
+        return block != null ? ctx.outputZOrder(block) : 0;
     }
 
     private boolean isPlannedShellCarrier(ASTTextFrameBlock block) {
