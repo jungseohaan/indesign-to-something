@@ -735,7 +735,7 @@ public final class ResolvedBuildContext {
         if (domId < 0) return null;
         ObjectPlan fallback = null;
         ensureOwnershipPlanIndexes();
-        java.util.List<ObjectPlan> candidates = ownershipPlansByExactDomId.get(domId);
+        java.util.List<ObjectPlan> candidates = textFramePlanCandidates(domId);
         if (candidates == null || candidates.isEmpty()) return null;
         for (ObjectPlan plan : candidates) {
             if (plan == null) continue;
@@ -792,7 +792,7 @@ public final class ResolvedBuildContext {
     public ObjectPlan findHwpxTextFrameOwnershipPlan(int domId) {
         if (domId < 0) return null;
         ensureOwnershipPlanIndexes();
-        java.util.List<ObjectPlan> candidates = ownershipPlansByExactDomId.get(domId);
+        java.util.List<ObjectPlan> candidates = textFramePlanCandidates(domId);
         if (candidates == null || candidates.isEmpty()) return null;
         for (ObjectPlan plan : candidates) {
             if (plan == null) continue;
@@ -800,6 +800,14 @@ public final class ResolvedBuildContext {
             if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return plan;
         }
         return null;
+    }
+
+    private java.util.List<ObjectPlan> textFramePlanCandidates(int domId) {
+        if (domId < 0) return java.util.Collections.emptyList();
+        java.util.LinkedHashSet<ObjectPlan> out = new java.util.LinkedHashSet<>();
+        addPlans(out, ownershipPlansByExactDomId.get(domId));
+        addPlans(out, ownershipPlansByOwnedTextFrameId.get(domId));
+        return out.isEmpty() ? java.util.Collections.emptyList() : new java.util.ArrayList<>(out);
     }
 
     public ObjectPlan findHwpxTextFrameOwnershipPlan(String textFrameId) {
@@ -1315,13 +1323,14 @@ public final class ResolvedBuildContext {
         if (localExportSourceIds == null || localExportSourceIds.length == 0) {
             localExportSourceIds = localSourceIds;
         }
+        double[] localizedBounds = localizedRenderedBounds(plan, rg);
         ObjectPlan localized = plan.withRenderedVisual(
                 plan.visualLayer,
                 localSourceIds,
                 plan.zOrder,
                 appendPlanReason(plan.reason, "localized_render_fragment"),
                 rg.file(),
-                rg.bounds());
+                localizedBounds);
         localized = localized.withExtractionSourceObjectIds(localExportSourceIds, rg.hiddenVisualSourceObjectIds());
         String localizedLayerId = rg.layerId();
         String localizedLayerName = rg.layerName();
@@ -1444,6 +1453,109 @@ public final class ResolvedBuildContext {
             if (Math.abs(a[i] - b[i]) > 0.01) return false;
         }
         return true;
+    }
+
+    private double[] localizedRenderedBounds(ObjectPlan plan, RenderedGroup rg) {
+        if (plan == null || rg == null) return rg != null ? rg.bounds() : null;
+        double[] renderedBounds = rg.bounds();
+        if (plan.coordinateSpace != CoordinateSpace.PAGE
+                || plan.bounds == null || plan.bounds.length < 4
+                || renderedBounds == null || renderedBounds.length < 4) {
+            return renderedBounds;
+        }
+        double[] renderedPageBounds = normalizeSpreadBoundsToPage(rg.pageIndex(), renderedBounds);
+        return sameBounds(plan.bounds, renderedPageBounds) ? plan.bounds : renderedBounds;
+    }
+
+    private double[] normalizeSpreadBoundsToPage(int pageIdx, double[] bounds) {
+        if (resolvedData == null || bounds == null || bounds.length < 4) {
+            return bounds;
+        }
+        if (resolvedData.pages() == null || pageIdx < 0 || pageIdx >= resolvedData.pages().size()) {
+            return bounds;
+        }
+        double[] pb = resolvedData.pages().get(pageIdx).bounds();
+        if (pb == null || pb.length < 4) return bounds;
+
+        double pageTop = pb[0];
+        double pageLeft = pb[1];
+        double pageBottom = pb[2];
+        double pageRight = pb[3];
+        double pageWidth = pageRight - pageLeft;
+        double pageHeight = pageBottom - pageTop;
+        if (pageWidth <= 0.0 || pageHeight <= 0.0) return bounds;
+
+        boolean xInSpreadPage = bounds[1] >= pageLeft - 0.5
+                && bounds[3] <= pageRight + 0.5
+                && pageLeft > 1.0;
+        boolean yInSpreadPage = bounds[0] >= pageTop - 0.5
+                && bounds[2] <= pageBottom + 0.5
+                && pageTop > 1.0;
+        boolean xInRightSpreadPage = !xInSpreadPage
+                && pageLeft <= 1.0
+                && bounds[1] >= pageWidth - 0.5
+                && bounds[3] <= pageWidth * 2.0 + 0.5;
+        boolean yInBottomSpreadPage = !yInSpreadPage
+                && pageTop <= 1.0
+                && bounds[0] >= pageHeight - 0.5
+                && bounds[2] <= pageHeight * 2.0 + 0.5;
+        double scale = scaleFactor != 0.0 ? scaleFactor : 1.0;
+        double localPageLeft = pageLeft / scale;
+        double localPageTop = pageTop / scale;
+        double localPageRight = pageRight / scale;
+        double localPageBottom = pageBottom / scale;
+        double localPageWidth = pageWidth / scale;
+        double localPageHeight = pageHeight / scale;
+        boolean xInLocalSpreadPage = !xInSpreadPage
+                && bounds[1] >= localPageLeft - 0.5
+                && bounds[3] <= localPageRight + 0.5
+                && localPageLeft > 1.0;
+        boolean yInLocalSpreadPage = !yInSpreadPage
+                && bounds[0] >= localPageTop - 0.5
+                && bounds[2] <= localPageBottom + 0.5
+                && localPageTop > 1.0;
+        boolean xInRightLocalSpreadPage = !xInSpreadPage
+                && !xInRightSpreadPage
+                && !xInLocalSpreadPage
+                && pageLeft <= 1.0
+                && localPageWidth > 0.0
+                && bounds[1] >= localPageWidth - 0.5
+                && bounds[3] <= localPageWidth * 2.0 + 0.5;
+        boolean yInBottomLocalSpreadPage = !yInSpreadPage
+                && !yInBottomSpreadPage
+                && !yInLocalSpreadPage
+                && pageTop <= 1.0
+                && localPageHeight > 0.0
+                && bounds[0] >= localPageHeight - 0.5
+                && bounds[2] <= localPageHeight * 2.0 + 0.5;
+        if (xInRightSpreadPage) {
+            pageLeft = pageWidth;
+            xInSpreadPage = true;
+        } else if (xInLocalSpreadPage) {
+            pageLeft = localPageLeft;
+            xInSpreadPage = true;
+        } else if (xInRightLocalSpreadPage) {
+            pageLeft = localPageWidth;
+            xInSpreadPage = true;
+        }
+        if (yInBottomSpreadPage) {
+            pageTop = pageHeight;
+            yInSpreadPage = true;
+        } else if (yInLocalSpreadPage) {
+            pageTop = localPageTop;
+            yInSpreadPage = true;
+        } else if (yInBottomLocalSpreadPage) {
+            pageTop = localPageHeight;
+            yInSpreadPage = true;
+        }
+        if (!xInSpreadPage && !yInSpreadPage) return bounds;
+
+        return new double[] {
+                bounds[0] - (yInSpreadPage ? pageTop : 0.0),
+                bounds[1] - (xInSpreadPage ? pageLeft : 0.0),
+                bounds[2] - (yInSpreadPage ? pageTop : 0.0),
+                bounds[3] - (xInSpreadPage ? pageLeft : 0.0)
+        };
     }
 
     private static String appendPlanReason(String reason, String suffix) {

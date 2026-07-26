@@ -14,6 +14,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Shell
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow.TextFlowDocument;
@@ -391,7 +392,13 @@ public final class FramePlacer {
             java.util.Set<String> plannedStyleSourceIds = plannedTextFrameStyleSourceIds(ctx, tfDomId);
             if (!hasPlannedTextShell && !plannedStyleSourceIds.isEmpty()) {
                 applyGroupBackgroundShapeStyle(ctx, block, plannedStyleSourceIds);
-                if (block.fillColor() != null && block.fillColor().startsWith("#")) {
+                int wrapperZOrder = plannedStyleSourceWrapperZOrder(ctx, tfDomId, plannedStyleSourceIds);
+                if (wrapperZOrder >= 0) {
+                    block.nativeWrapperZOrder(wrapperZOrder);
+                }
+                if ((block.fillColor() != null && block.fillColor().startsWith("#"))
+                        || (block.strokeColor() != null && block.strokeColor().startsWith("#")
+                        && block.strokeWeight() > 0)) {
                     block.forceNativeFill(true);
                 }
             }
@@ -836,6 +843,45 @@ public final class FramePlacer {
             }
         }
         return ids;
+    }
+
+    private static int plannedStyleSourceWrapperZOrder(
+            ResolvedBuildContext ctx,
+            int tfDomId,
+            java.util.Set<String> plannedStyleSourceIds) {
+        if (ctx == null || ctx.resolvedData == null || tfDomId < 0
+                || ctx.ownershipPlans == null || plannedStyleSourceIds == null
+                || plannedStyleSourceIds.isEmpty()) {
+            return -1;
+        }
+        int bestZOrder = -1;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.styleSourceObjectIds == null
+                    || plan.styleSourceObjectIds.length == 0) {
+                continue;
+            }
+            if (!containsInt(plan.ownedTextFrameIds, tfDomId)
+                    && plan.domId != tfDomId
+                    && !containsInt(plan.sourceObjectIds, tfDomId)) {
+                continue;
+            }
+            int sourceDepth = Math.max(0,
+                    VisualPlanePolicy.sourceZOrderComponent(plan.zOrder) - 1);
+            for (int styleSourceId : plan.styleSourceObjectIds) {
+                if (styleSourceId < 0
+                        || !plannedStyleSourceIds.contains(String.valueOf(styleSourceId))) {
+                    continue;
+                }
+                ResolvedPageItem source = ctx.resolvedData.getPageItem(String.valueOf(styleSourceId));
+                if (!isTextShellShape(source)) continue;
+                int zOrder = VisualPlanePolicy.textlessGraphicZOrder(
+                        VisualLayer.CONTAINER_BACKDROP,
+                        source.layerIndex(),
+                        sourceDepth);
+                bestZOrder = Math.max(bestZOrder, zOrder);
+            }
+        }
+        return bestZOrder;
     }
 
     private static boolean hasAnchoredTablePlan(ResolvedBuildContext ctx, int tfDomId) {

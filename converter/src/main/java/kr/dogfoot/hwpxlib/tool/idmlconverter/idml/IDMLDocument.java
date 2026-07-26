@@ -18,7 +18,7 @@ public class IDMLDocument {
     private Map<String, CellStyleInfo> cellStyles; // selfRef → table cell style metadata
     private Map<String, double[]> dashedStrokeStyles; // selfRef → dashArray (e.g., [3, 2])
     private Set<String> hiddenLayerIds;
-    private List<String> layerOrder;  // 레이어 ID 목록 (front-to-back, designmap.xml 순서)
+    private List<String> layerOrder;  // 레이어 ID 목록 (back-to-front, designmap.xml 순서)
     private Map<String, IDMLSpread> masterSpreads;
     private String basePath;
     private File tempDir;  // ZIP에서 추출한 임시 디렉토리 (cleanup 대상)
@@ -174,7 +174,7 @@ public class IDMLDocument {
     public Set<String> hiddenLayerIds() { return hiddenLayerIds; }
     public void addHiddenLayerId(String id) { hiddenLayerIds.add(id); }
 
-    /** 레이어 순서 (front-to-back, designmap.xml 순서) */
+    /** 레이어 순서 (back-to-front, designmap.xml 순서) */
     public List<String> layerOrder() { return layerOrder; }
     public void addLayerId(String id) { layerOrder.add(id); }
     public boolean isHiddenLayer(String layerId) {

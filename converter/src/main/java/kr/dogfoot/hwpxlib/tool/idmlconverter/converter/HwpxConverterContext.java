@@ -110,6 +110,12 @@ public class HwpxConverterContext {
             for (ASTBlock block : blocks) {
                 int raw = rawZOrder(block);
                 rawZOrders.put(raw, Boolean.TRUE);
+                if (block instanceof ASTTextFrameBlock) {
+                    Integer wrapperRaw = ((ASTTextFrameBlock) block).nativeWrapperZOrder();
+                    if (wrapperRaw != null) {
+                        rawZOrders.put(wrapperRaw, Boolean.TRUE);
+                    }
+                }
             }
         }
         int rank = 0;

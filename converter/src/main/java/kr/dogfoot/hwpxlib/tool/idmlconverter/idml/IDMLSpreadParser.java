@@ -35,7 +35,7 @@ class IDMLSpreadParser {
         int[] zOrderCounter = {0};  // 배열로 래핑하여 람다/내부 메서드에서 수정 가능
 
         // 레이어 순서를 고려하여 자식 요소를 정렬 (뒤 레이어→앞 레이어 순서로 z-order 부여)
-        // designmap.xml의 layerOrder는 front-to-back이므로 인덱스가 클수록 뒤 레이어
+        // designmap.xml의 layerOrder는 back-to-front이므로 인덱스가 클수록 앞 레이어
         List<Element> childElements = new ArrayList<Element>();
         NodeList children = spreadElem.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
@@ -45,14 +45,14 @@ class IDMLSpreadParser {
         }
 
         if (!layerOrder.isEmpty()) {
-            // 레이어 인덱스 맵 생성 (front=0 → back=N-1)
+            // 레이어 인덱스 맵 생성 (back=0 → front=N-1)
             final Map<String, Integer> layerIndexMap = new HashMap<String, Integer>();
             for (int li = 0; li < layerOrder.size(); li++) {
                 layerIndexMap.put(layerOrder.get(li), li);
             }
             // 안정 정렬: 같은 레이어 내에서는 XML 순서 유지
-            // 뒤 레이어(인덱스 큰)를 앞에 배치하여 낮은 z-order 부여
-            final int defaultIdx = layerOrder.size(); // 레이어 없는 요소 = 맨 뒤
+            // 뒤 레이어(인덱스 작은)를 앞에 배치하여 낮은 z-order 부여
+            final int defaultIdx = -1; // 레이어 없는 요소 = 맨 뒤
             Collections.sort(childElements, new Comparator<Element>() {
                 public int compare(Element a, Element b) {
                     String layerA = getAttrOrNull(a, "ItemLayer");
@@ -62,8 +62,8 @@ class IDMLSpreadParser {
                     int idxB = layerB != null && layerIndexMap.containsKey(layerB)
                             ? layerIndexMap.get(layerB) : defaultIdx;
                     // Page 요소는 ItemLayer 없음 → defaultIdx → 정렬 영향 없음
-                    // 내림차순: 뒤 레이어(큰 인덱스) 먼저 → 낮은 z-order
-                    return Integer.compare(idxB, idxA);
+                    // 오름차순: 뒤 레이어(작은 인덱스) 먼저 → 낮은 z-order
+                    return Integer.compare(idxA, idxB);
                 }
             });
         }

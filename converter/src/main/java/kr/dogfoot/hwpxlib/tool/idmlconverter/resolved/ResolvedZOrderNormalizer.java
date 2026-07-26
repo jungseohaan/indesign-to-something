@@ -158,11 +158,11 @@ public final class ResolvedZOrderNormalizer {
         for (int i = 0; i < layerOrder.size(); i++) {
             layerIndex.put(layerOrder.get(i), i);
         }
-        final int defaultIndex = layerOrder.size();
+        final int defaultIndex = -1;
         elements.sort((a, b) -> {
             int ia = layerIndex.getOrDefault(a.getAttribute("ItemLayer"), defaultIndex);
             int ib = layerIndex.getOrDefault(b.getAttribute("ItemLayer"), defaultIndex);
-            return Integer.compare(ib, ia); // back layer first, front layer later
+            return Integer.compare(ia, ib); // back layer first, front layer later
         });
         return elements;
     }

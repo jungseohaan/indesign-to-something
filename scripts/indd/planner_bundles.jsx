@@ -274,6 +274,16 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
             hiddenVisualSourceObjectIds, hiddenScopeSourceIds);
     hiddenVisualSourceObjectIds = _plannerBundlePruneClosedImageTextlessGroupHiddenIds(
             declaredCandidate, slot, hiddenVisualSourceObjectIds, clusterIndex);
+    var restoredHiddenShellMaterial = _plannerBundleRestoreHiddenTextShellMaterialExportSources(
+            declaredCandidate, slot, slotSources, exportSourceObjectIds,
+            hiddenVisualSourceObjectIds, clusterIndex);
+    exportSourceObjectIds = restoredHiddenShellMaterial.exportSourceObjectIds;
+    hiddenVisualSourceObjectIds = restoredHiddenShellMaterial.hiddenVisualSourceObjectIds;
+    if (restoredHiddenShellMaterial.restoredSourceObjectIds.length > 0) {
+        slotSources.visualSourceObjectIds = _plannerBundleSourceIdsUnion(
+                slotSources.visualSourceObjectIds || [],
+                restoredHiddenShellMaterial.restoredSourceObjectIds);
+    }
     var materialization = _plannerBundleMaterialization(
             declaredCandidate, slot, slotSources, exportSourceObjectIds,
             hiddenVisualSourceObjectIds, clusterIndex);
@@ -1635,6 +1645,84 @@ function _plannerBundlePruneClosedImageTextlessGroupHiddenIds(
         }
     }
     return _sortedNumericIds(kept);
+}
+
+function _plannerBundleRestoreHiddenTextShellMaterialExportSources(
+        candidate, slot, slotSources, exportSourceObjectIds,
+        hiddenVisualSourceObjectIds, clusterIndex) {
+    if (slot !== "SHELL_SLOT") {
+        return {
+            exportSourceObjectIds: _sortedNumericIds(exportSourceObjectIds || []),
+            hiddenVisualSourceObjectIds: _sortedNumericIds(hiddenVisualSourceObjectIds || []),
+            restoredSourceObjectIds: []
+        };
+    }
+    var restored = [];
+    var restoredSeen = {};
+    for (var i = 0; hiddenVisualSourceObjectIds && i < hiddenVisualSourceObjectIds.length; i++) {
+        var sourceId = hiddenVisualSourceObjectIds[i];
+        var src = clusterIndex && clusterIndex.sourceInfo
+                ? clusterIndex.sourceInfo(sourceId)
+                : null;
+        if (!_plannerBundleSourceIsExportableTextShellMaterial(src)) continue;
+        _pushUniqueId(restored, restoredSeen, sourceId);
+    }
+    if (restored.length === 0) {
+        return {
+            exportSourceObjectIds: _sortedNumericIds(exportSourceObjectIds || []),
+            hiddenVisualSourceObjectIds: _sortedNumericIds(hiddenVisualSourceObjectIds || []),
+            restoredSourceObjectIds: []
+        };
+    }
+    return {
+        exportSourceObjectIds: _plannerBundleSourceIdsUnion(
+                exportSourceObjectIds || [], restored),
+        hiddenVisualSourceObjectIds: _plannerBundleSourceIdsMinus(
+                hiddenVisualSourceObjectIds || [], restored),
+        restoredSourceObjectIds: _sortedNumericIds(restored)
+    };
+}
+
+function _plannerBundleSourceIsExportableTextShellMaterial(src) {
+    if (!src) return false;
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.sourceHidden === true || src.hiddenByParent === true) return false;
+    var opacity = src.opacity !== null && src.opacity !== undefined ? Number(src.opacity) : 100;
+    if (!isNaN(opacity) && opacity <= 0.01) return false;
+    var kind = String(src.kind || src.type || src.itemType || "");
+    if (kind === "TextFrame" || kind === "Image" || kind === "PDF" || kind === "EPS") return false;
+    if (src.hasPlacedVisual === true) return false;
+    var hasFill = _plannerBundleSourceHasVisibleNonPaperFill(src);
+    var hasStroke = _plannerBundleSourceHasVisibleNonPaperStroke(src);
+    if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "Group") {
+        return hasFill || hasStroke;
+    }
+    if (kind === "GraphicLine") return hasStroke;
+    return false;
+}
+
+function _plannerBundleSourceHasVisibleNonPaperFill(src) {
+    var fill = String(src && (src.fillColorName || src.fillColor) || "");
+    if (!fill && src && src.hasVisibleFill === true) return true;
+    return !_plannerBundleColorIsNone(fill) && !_plannerBundleColorIsPaper(fill);
+}
+
+function _plannerBundleSourceHasVisibleNonPaperStroke(src) {
+    var stroke = String(src && (src.strokeColorName || src.strokeColor) || "");
+    var weight = Number(src && src.strokeWeight || 0);
+    if (!stroke && src && src.hasVisibleStroke === true) return true;
+    return weight > 0
+            && !_plannerBundleColorIsNone(stroke)
+            && !_plannerBundleColorIsPaper(stroke);
+}
+
+function _plannerBundleColorIsNone(colorName) {
+    if (!colorName) return true;
+    return colorName === "None" || colorName === "[None]";
+}
+
+function _plannerBundleColorIsPaper(colorName) {
+    return colorName === "Paper" || colorName === "[Paper]" || colorName === "White";
 }
 
 function _plannerBundleTextFramesAreSimpleMarkers(textFrameIds, clusterIndex) {

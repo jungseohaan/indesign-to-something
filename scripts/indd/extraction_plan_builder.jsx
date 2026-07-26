@@ -5655,12 +5655,80 @@ function _completeFinalSlotOnlyShellHiddenVisualContracts(candidates, sourceItem
                 && candidate.ownershipSlot === "SHELL_SLOT";
     }
 
+    function colorIsNone(name) {
+        if (!name) return true;
+        return name === "None" || name === "[None]";
+    }
+
+    function colorIsPaper(name) {
+        return name === "Paper" || name === "[Paper]" || name === "White";
+    }
+
+    function hasVisibleNonPaperFill(src) {
+        var fill = String(src && (src.fillColorName || src.fillColor) || "");
+        if (!fill && src && src.hasVisibleFill === true) return true;
+        return !colorIsNone(fill) && !colorIsPaper(fill);
+    }
+
+    function hasVisibleNonPaperStroke(src) {
+        var stroke = String(src && (src.strokeColorName || src.strokeColor) || "");
+        var weight = Number(src && src.strokeWeight || 0);
+        if (!stroke && src && src.hasVisibleStroke === true) return true;
+        return weight > 0 && !colorIsNone(stroke) && !colorIsPaper(stroke);
+    }
+
+    function isExportableShellMaterial(sourceId) {
+        var src = sourceById[String(sourceId)];
+        if (!src) return false;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+        if (src.sourceHidden === true || src.hiddenByParent === true) return false;
+        var opacity = src.opacity !== undefined && src.opacity !== null ? Number(src.opacity) : 100;
+        if (!isNaN(opacity) && opacity <= 0.01) return false;
+        if (src.hasPlacedVisual === true) return false;
+        var kind = String(src.kind || src.type || src.itemType || "");
+        if (kind === "TextFrame" || kind === "Story" || kind === "Character"
+                || kind === "InsertionPoint" || kind === "Cell"
+                || kind === "Image" || kind === "PDF" || kind === "EPS") {
+            return false;
+        }
+        if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon" || kind === "Group") {
+            return hasVisibleNonPaperFill(src) || hasVisibleNonPaperStroke(src);
+        }
+        if (kind === "GraphicLine") return hasVisibleNonPaperStroke(src);
+        return false;
+    }
+
+    function hasVisibleOwnerOutsideCandidate(sourceId, owner) {
+        for (var oi = 0; oi < candidates.length; oi++) {
+            var other = candidates[oi];
+            if (!other || other === owner) continue;
+            if (other.disabled === true) continue;
+            if (other.visualAction === "DROP_VISUAL" || other.visualAction === "PLACE_TABLE_STYLE") continue;
+            if (_sourceIdsContain(other.visualSourceObjectIds || [], sourceId)
+                    || _sourceIdsContain(other.exportSourceObjectIds || [], sourceId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     function isExportSourceOrCarrier(sourceId, exportSourceIds) {
         if (_sourceIdsContain(exportSourceIds || [], sourceId)) return true;
         for (var ei = 0; exportSourceIds && ei < exportSourceIds.length; ei++) {
             if (sourceContains(sourceId, exportSourceIds[ei])) return true;
         }
         return false;
+    }
+
+    function hiddenIdsWithoutExportCarriers(hiddenIds, exportSourceIds) {
+        var out = [];
+        var seen = {};
+        for (var hi = 0; hiddenIds && hi < hiddenIds.length; hi++) {
+            var hiddenId = hiddenIds[hi];
+            if (isExportSourceOrCarrier(hiddenId, exportSourceIds)) continue;
+            _pushUniqueId(out, seen, hiddenId);
+        }
+        return _sortedNumericIds(out);
     }
 
     for (var ci = 0; ci < candidates.length; ci++) {
@@ -5671,15 +5739,36 @@ function _completeFinalSlotOnlyShellHiddenVisualContracts(candidates, sourceItem
         var hidden = _sortedNumericIds(candidate.hiddenVisualSourceObjectIds || []);
         var hiddenSeen = {};
         for (var hi = 0; hi < hidden.length; hi++) hiddenSeen[String(hidden[hi])] = true;
+        var restoredShellMaterialIds = [];
         for (var si2 = 0; si2 < candidate.sourceObjectIds.length; si2++) {
             var sourceId = candidate.sourceObjectIds[si2];
             if (isExportSourceOrCarrier(sourceId, candidate.exportSourceObjectIds)) continue;
             if (hiddenSeen[String(sourceId)]) continue;
+            if (isExportableShellMaterial(sourceId)
+                    && !hasVisibleOwnerOutsideCandidate(sourceId, candidate)) {
+                restoredShellMaterialIds.push(sourceId);
+                continue;
+            }
             hiddenSeen[String(sourceId)] = true;
             hidden.push(sourceId);
         }
-        candidate.hiddenVisualSourceObjectIds = _sourceIdsMinus(
+        if (restoredShellMaterialIds.length > 0) {
+            candidate.exportSourceObjectIds = _sourceIdsUnion(
+                    candidate.exportSourceObjectIds || [], restoredShellMaterialIds);
+            candidate.visualSourceObjectIds = _sourceIdsUnion(
+                    candidate.visualSourceObjectIds || [], restoredShellMaterialIds);
+            candidate.finalShellMaterialExportResolution = "RESTORED_VISIBLE_SHELL_MATERIAL";
+            candidate.finalShellMaterialExportResolutionReason =
+                    "visible non-paper shell material belongs to the SHELL_SLOT export owner";
+        }
+        candidate.hiddenVisualSourceObjectIds = hiddenIdsWithoutExportCarriers(
                 _sortedNumericIds(hidden), candidate.exportSourceObjectIds);
+        if (candidate.visualSourceObjectIds) candidate.visualSourceSetId = _sourceSetId(candidate.visualSourceObjectIds);
+        if (candidate.exportSourceObjectIds) candidate.exportSourceSetId = _sourceSetId(candidate.exportSourceObjectIds);
+        if (candidate.hiddenVisualSourceObjectIds) {
+            candidate.hiddenSourceSetId = _sourceSetId(candidate.hiddenVisualSourceObjectIds);
+            candidate.hiddenVisualSourceSetId = candidate.hiddenSourceSetId;
+        }
     }
     return candidates;
 }
