@@ -106,6 +106,24 @@ final class InlineFrameBuilder {
             tfs = TextFlowSide.BOTH_SIDES;
         }
 
+        // 인라인 shell 박스 비례 축소:
+        // treatAsChar 인라인 객체는 한글에서 세로 이동/중앙정렬이 불가해, 원본이 콘텐츠
+        // 한 줄보다 훨씬 큰 답란/마커 박스(예: p36 "❶ 법칙" 6mm 답란: 박스 17pt, 콘텐츠
+        // 한 줄 11.35pt)는 본문 줄보다 크게 솟아 행 리듬을 깬다. 박스 자체 콘텐츠 한 줄
+        // 높이로 높이를 클램프하고 폭·여백을 같은 비율로 줄여 비율을 유지한다. 한 줄짜리
+        // 짧은 shell 에만 적용해 여러 줄 글상자가 잘리는 것을 막는다.
+        double inlineShellScale = 1.0;
+        if (!useWrapping && shouldUseInlineDrawTextShell(obj) && isSingleLineMarkerShell(obj)) {
+            long contentLineHeight = singleLineContentHeight(obj);
+            // 명백히 과대한 답란만(콘텐츠 한 줄의 1.25배 초과) 축소한다. 콘텐츠에 거의
+            // 맞는 박스(예: "예" 마커 1029 vs 1023)를 미세 축소하지 않도록 임계값을 둔다.
+            if (contentLineHeight > 0 && h > contentLineHeight * 1.25) {
+                inlineShellScale = (double) contentLineHeight / (double) h;
+                w = Math.max(1L, Math.round(w * inlineShellScale));
+                h = contentLineHeight;
+            }
+        }
+
         long savedContainerWidth = ctx.currentContainerWidth;
         ctx.currentContainerWidth = w;
         if (obj.paragraphs() != null) {
@@ -115,7 +133,7 @@ final class InlineFrameBuilder {
         }
 
         if (shouldUseInlineDrawTextShell(obj)) {
-            addInlineExtractedShellTextFrame(para, obj, w, h, twm, tfs, useWrapping);
+            addInlineExtractedShellTextFrame(para, obj, w, h, twm, tfs, useWrapping, inlineShellScale);
             if (!hasParagraphs) {
                 queueInlineTextShellOverlays(obj);
             }
@@ -300,7 +318,8 @@ final class InlineFrameBuilder {
     }
 
     private void addInlineExtractedShellTextFrame(Para para, ASTInlineObject obj, long w, long h,
-                                                  TextWrapMethod twm, TextFlowSide tfs, boolean useWrapping) {
+                                                  TextWrapMethod twm, TextFlowSide tfs, boolean useWrapping,
+                                                  double heightScale) {
         Run run = para.addNewRun();
         run.charPrIDRef("0");
 
@@ -319,6 +338,14 @@ final class InlineFrameBuilder {
         applyShapeComponentGeometry(rect, w, h);
 
         DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromInlineObject(obj, w, h);
+        // 박스 높이를 행간으로 클램프한 경우, 안쪽 여백도 같은 비율로 줄여 콘텐츠 영역을
+        // 최대한 보존한다(원본 여백을 그대로 두면 작아진 박스에서 내용이 잘린다).
+        if (heightScale < 1.0) {
+            spec.marginTop = Math.round(spec.marginTop * heightScale);
+            spec.marginBottom = Math.round(spec.marginBottom * heightScale);
+            spec.marginLeft = Math.round(spec.marginLeft * heightScale);
+            spec.marginRight = Math.round(spec.marginRight * heightScale);
+        }
         if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
             spec.imageFillData = obj.imageFillData();
             spec.forceImageFill = true;
@@ -380,6 +407,41 @@ final class InlineFrameBuilder {
             return VertAlign.TOP;
         }
         return VertAlign.CENTER;
+    }
+
+    /**
+     * shell 박스 자체 콘텐츠의 한 줄 높이(HWPUNIT). 박스 첫 단락의 FIXED 행간 =
+     * 그 박스가 필요로 하는 한 줄 높이. 답란/마커 박스는 이 값보다 큰 세로 여백을
+     * 담고 있어, 이 값으로 클램프하면 콘텐츠에 딱 맞게 줄어든다.
+     */
+    private long singleLineContentHeight(ASTInlineObject obj) {
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return 0L;
+        ASTParagraph p = obj.paragraphs().get(0);
+        if (!"fixed".equals(p.lineSpacingType()) || p.lineSpacing() == null) return 0L;
+        long v = p.lineSpacing().longValue();
+        return v > 0 ? v : 0L;
+    }
+
+    /**
+     * 답란/번호 마커 shell 인지 판별. 비례 축소(높이 클램프)를 여러 줄 글상자나 라벨
+     * 칩(예: "지식·이해")에 적용하면 원치 않게 줄어들므로, 단일 단락 + 아주 짧은 마커
+     * 텍스트(원문자·숫자 등 1~2자) + 중첩 인라인 객체 없음 조건을 모두 만족할 때만 true.
+     */
+    private boolean isSingleLineMarkerShell(ASTInlineObject obj) {
+        if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
+        java.util.List<ASTParagraph> ps = obj.paragraphs();
+        if (ps == null || ps.size() != 1) return false;
+        ASTParagraph p = ps.get(0);
+        if (p.items() == null) return false;
+        int textLen = 0;
+        for (ASTInlineItem it : p.items()) {
+            if (it.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) return false;
+            if (it.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                String t = ((ASTTextRun) it).text();
+                if (t != null) textLen += t.trim().length();
+            }
+        }
+        return textLen >= 1 && textLen <= 2;
     }
 
     private void applyShapeComponentGeometry(
