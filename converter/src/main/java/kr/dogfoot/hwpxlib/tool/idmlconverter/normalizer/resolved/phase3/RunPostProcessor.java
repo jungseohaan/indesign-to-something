@@ -663,6 +663,7 @@ class RunPostProcessor {
 
     private static void emitItalicMathRunsAsText(List<IDMLCharacterRun> mathRuns, List<ASTInlineItem> out) {
         if (mathRuns == null) return;
+        String prevDecoded = null;
         for (IDMLCharacterRun run : mathRuns) {
             if (run == null) continue;
             String text = run.content();
@@ -679,9 +680,33 @@ class RunPostProcessor {
             if (run.fontSize() != null) tr.fontSizeHwpunits((int) Math.round(run.fontSize() * 100.0));
             if (run.fillColor() != null) tr.textColor(run.fillColor());
             tr.subscript(run.isSubscript());
-            tr.superscript(run.isSuperscript());
+            // SPEC-080: `상부자(이탤릭)` charStyle 이름-폴백(IDMLCharacterRun.isSuperscript)이
+            // GREP `\d+` 로 본문 숫자까지 위첨자화한다("제곱하여 4가 되는 수" 의 4·25).
+            // 위첨자(지수)는 밑수 뒤에만 온다 — 이 런 또는 앞 런이 밑수(숫자·라틴 변수·닫는
+            // 괄호)로 끝날 때만 위첨자 유지. 밑수 없는 본문 숫자·연도·번호는 본문으로 둔다.
+            // position 속성이나 명시 부호로 온 위첨자(isSuperscriptByPosition)는 그대로 존중.
+            boolean sup = run.isSuperscript();
+            if (sup && run.isSuperscriptByStyleNameOnly()
+                    && !precededByExponentBase(prevDecoded)) {
+                sup = false;
+            }
+            tr.superscript(sup);
             out.add(tr);
+            prevDecoded = decoded;
         }
+    }
+
+    /** 위첨자(지수) 앞의 밑수인가 — 숫자·라틴 문자·닫는 괄호 }·)·]로 끝나면 참. */
+    private static boolean precededByExponentBase(String prevText) {
+        if (prevText == null) return false;
+        String t = prevText;
+        int e = t.length();
+        while (e > 0 && Character.isWhitespace(t.charAt(e - 1))) e--;
+        if (e == 0) return false;
+        char c = t.charAt(e - 1);
+        return (c >= '0' && c <= '9')
+                || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                || c == ')' || c == '}' || c == ']';
     }
 
     /** 이탤릭 수학 런 판별: 수식 전용 폰트/기호/짧은 변수 런만 수식으로 승격한다. */
