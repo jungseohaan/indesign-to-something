@@ -646,6 +646,7 @@ public class ASTStoryConverter {
         merged.fontFamily(style.fontFamily() != null ? style.fontFamily() : parent.fontFamily());
         merged.fontSize(style.fontSize() != null ? style.fontSize() : parent.fontSize());
         merged.fillColor(style.fillColor() != null ? style.fillColor() : parent.fillColor());
+        merged.fillTint(style.fillTint() != null ? style.fillTint() : parent.fillTint());
         merged.fontStyle(style.fontStyle() != null ? style.fontStyle() : parent.fontStyle());
         merged.bold(style.bold() != null ? style.bold() : parent.bold());
         merged.italic(style.italic() != null ? style.italic() : parent.italic());

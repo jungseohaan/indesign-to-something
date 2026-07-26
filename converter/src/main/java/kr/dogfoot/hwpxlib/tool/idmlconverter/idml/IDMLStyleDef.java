@@ -10,6 +10,7 @@ public class IDMLStyleDef {
     private String fontFamily;
     private Double fontSize;
     private String fillColor;
+    private Double fillTint;
     private String fontStyle;
     private Boolean bold;
     private Boolean italic;
@@ -165,6 +166,9 @@ public class IDMLStyleDef {
 
     public String fillColor() { return fillColor; }
     public void fillColor(String v) { this.fillColor = v; }
+
+    public Double fillTint() { return fillTint; }
+    public void fillTint(Double v) { this.fillTint = v; }
 
     public String fontStyle() { return fontStyle; }
     public void fontStyle(String v) { this.fontStyle = v; }

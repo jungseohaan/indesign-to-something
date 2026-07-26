@@ -176,6 +176,7 @@ public class StylePropertyResolver {
         if (child.fontSize() != null) merged.fontSize(child.fontSize());
         if (child.leading() != null) merged.leading(child.leading());
         if (child.fillColor() != null) merged.fillColor(child.fillColor());
+        if (child.fillTint() != null) merged.fillTint(child.fillTint());
         if (child.tracking() != null) merged.tracking(child.tracking());
         if (child.horizontalScale() != null) merged.horizontalScale(child.horizontalScale());
         if (child.verticalScale() != null) merged.verticalScale(child.verticalScale());
@@ -227,6 +228,7 @@ public class StylePropertyResolver {
         copy.fontSize(src.fontSize());
         copy.leading(src.leading());
         copy.fillColor(src.fillColor());
+        copy.fillTint(src.fillTint());
         copy.tracking(src.tracking());
         copy.horizontalScale(src.horizontalScale());
         copy.verticalScale(src.verticalScale());

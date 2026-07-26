@@ -166,6 +166,7 @@ public class IDMLResourceParser {
         def.name(styleElem.getAttribute("Name"));
         def.fontStyle(getAttrOrNull(styleElem, "FontStyle"));
         def.fillColor(getAttrOrNull(styleElem, "FillColor"));
+        def.fillTint(parseDoubleAttr(styleElem, "FillTint"));
         def.textAlignment(getAttrOrNull(styleElem, "Justification"));
 
         // 숫자 속성

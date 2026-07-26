@@ -1034,7 +1034,13 @@ public final class ResolvedBuildContext {
         Placement placement = placementOf(rg);
         boolean ambiguousCandidate = isAmbiguousRenderedCandidate(rg.candidateId());
         boolean ambiguousRenderUnit = isAmbiguousRenderedRenderUnit(rg.renderUnitId());
-        ObjectPlan plan = plannerDeclaredRenderUnitPlanForRendered(rg, placement);
+        ObjectPlan plan = null;
+        if (isPageBackgroundPlaneRendered(rg)) {
+            plan = plannerDeclaredCandidatePlanForRendered(rg, placement);
+        }
+        if (plan == null) {
+            plan = plannerDeclaredRenderUnitPlanForRendered(rg, placement);
+        }
         if (plan == null) {
             plan = plannerDeclaredCandidatePlanForRendered(rg, placement);
         }
@@ -1057,6 +1063,21 @@ public final class ResolvedBuildContext {
         plan = localizeRenderedPlan(plan, rg, ambiguousCandidate || ambiguousRenderUnit);
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
+    }
+
+    private static boolean isPageBackgroundPlaneRendered(RenderedGroup rg) {
+        if (rg == null) return false;
+        String slotRole = nullSafe(rg.slotRole());
+        String compositeRole = nullSafe(rg.compositeRole());
+        String planPassId = nullSafe(rg.planPassId());
+        String candidateId = nullSafe(rg.candidateId());
+        String file = nullSafe(rg.file());
+        return "page_background_plane".equals(slotRole)
+                || "page_background_plane".equals(compositeRole)
+                || "pass.page_backgrounds".equals(planPassId)
+                || candidateId.contains("source_backed_page_background_plane")
+                || candidateId.contains("page_background_plane")
+                || file.contains("page_background_plane_p");
     }
 
     private ObjectPlan plannerDeclaredRenderUnitPlanForRendered(RenderedGroup rg, Placement placement) {
