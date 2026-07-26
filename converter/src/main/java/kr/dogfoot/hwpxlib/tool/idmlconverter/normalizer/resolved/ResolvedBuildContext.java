@@ -209,6 +209,7 @@ public final class ResolvedBuildContext {
     private java.util.Map<Integer, RenderedGroup> renderedFloatingById;
     private java.util.Map<Integer, RenderedGroup> inlineObjectById;
     private java.util.Map<String, RenderedGroup> tfInlineVisualOwnerByTextFrameId;
+    private final java.util.Set<String> materializedObjectPlanKeys = new java.util.HashSet<>();
 
     /**
      * Phase 4(TableBuilder)가 셀 단락을 공용 루틴으로 빌드하면서 셀 안 inline 객체(배지 drawText 등)로
@@ -243,6 +244,27 @@ public final class ResolvedBuildContext {
             if (domId == null) continue;
             markRenderedVisualHandled(domId);
         }
+    }
+
+    public boolean isObjectPlanMaterialized(ObjectPlan plan) {
+        String key = objectPlanMaterializationKey(plan);
+        return key != null && materializedObjectPlanKeys.contains(key);
+    }
+
+    public void markObjectPlanMaterialized(ObjectPlan plan) {
+        String key = objectPlanMaterializationKey(plan);
+        if (key != null) materializedObjectPlanKeys.add(key);
+    }
+
+    private static String objectPlanMaterializationKey(ObjectPlan plan) {
+        if (plan == null) return null;
+        if (plan.objectPlanId != null && !plan.objectPlanId.isEmpty()) {
+            return "plan:" + plan.objectPlanId;
+        }
+        if (plan.sourceBundleKey != null && !plan.sourceBundleKey.isEmpty()) {
+            return "bundle:" + plan.sourceBundleKey;
+        }
+        return null;
     }
 
     /** TextFrame domId가 지정된 disposition으로 등록되어 있으면 true. */

@@ -723,10 +723,6 @@ public class StoryLoader {
                                         InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, para);
                                         for (ASTInlineItem item : plannedItems) para.addItem(item);
                                         anchorIdx++;
-                                        if (isTableCellInlineComplexFormCompletePngAnchor(ctx, domId)) {
-                                            anchorIdx = inlineIds.size();
-                                            break;
-                                        }
                                         continue;
                                     }
                                     if (InlineFrameHandler.hasOwnershipPlanForAnchorBundle(ctx, domId)) {
@@ -868,26 +864,6 @@ public class StoryLoader {
             warnUnplannedInlineAnchorSkipped(ctx, storyId, domId);
         }
         return handled;
-    }
-
-    private static boolean isTableCellInlineComplexFormCompletePngAnchor(
-            ResolvedBuildContext ctx,
-            int domId) {
-        if (ctx == null || domId < 0) return false;
-        for (ObjectPlan plan : ctx.ownershipPlansForObjectId(domId)) {
-            if (plan == null) continue;
-            if (plan.textAction == TextAction.OWNED_BY_PNG
-                    && plan.visualAction == VisualAction.PLACE_INLINE_PNG
-                    && plan.materialization == Materialization.COMPLETE_PNG
-                    && plan.placement == Placement.INLINE
-                    && plan.coordinateSpace == CoordinateSpace.STORY_FLOW
-                    && "table_cell_inline_complex_form_complete_png".equals(plan.slotRole)
-                    && plan.ownedTextFrameIds != null
-                    && plan.ownedTextFrameIds.length > 1) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static List<String> inlineIdsInRunOrder(IDMLCharacterRun run) {

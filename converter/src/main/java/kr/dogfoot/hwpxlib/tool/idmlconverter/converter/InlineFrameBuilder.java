@@ -509,6 +509,10 @@ final class InlineFrameBuilder {
         bf.createDiagonal();
         bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
 
+        if (obj != null && obj.isOverlay()) {
+            return bfId;
+        }
+
         if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
             try {
                 String itemId = ImageInserter.registerImage(

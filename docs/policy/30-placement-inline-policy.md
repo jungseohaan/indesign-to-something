@@ -171,6 +171,10 @@ Placement and coordinate space are a single source decision.
 - When a parent composite contains a child atomic shell slot, the child atomic
   shell owns its TextFrame. The parent must remove that child TextFrame from its
   ownership set instead of also claiming it or changing the child's placement.
+- This child-slot split must run before duplicate text-owner resolution. A
+  closed inline parent/root group is ancestry for the remaining shell material;
+  it is not allowed to win duplicate ownership for a descendant shell's
+  TextFrame and then serialize that child text into the parent drawText.
 - A story inline anchor executes only the `ObjectPlan` whose `domId` or
   `renderId` is that anchor. Parent or composite plans that merely include the
   anchor in `sourceObjectIds` or `visualSourceObjectIds` are trace ancestry, not
@@ -184,15 +188,22 @@ Placement and coordinate space are a single source decision.
   text visible in the PNG and no separate HWPX TextFrame owner is created for
   those child TextFrames. Direct child shell slots that are independently
   executable remain separate source slots and are not folded by this rule.
-- The same complete-PNG rule applies when the inline atom is owned by table-cell
-  story flow (`tableCellStoryTextInlineSlot=true`) and the closed inline source
-  root contains multiple editable TextFrame descendants plus non-text visual
-  material. A HWPX table cell can host the resulting inline PNG, but it cannot
-  preserve the source's nested group-local coordinate system as editable cell
-  content. Stage 1 therefore assigns `CONTENT_VISUAL_SLOT`,
-  `placement=INLINE`, `coordinateSpace=STORY_FLOW`,
-  `materialization=COMPLETE_PNG`, and `textAction=OWNED_BY_PNG` to the direct
-  inline source root.
+- `tableCellStoryTextInlineSlot=true` is a placement fact, not a complete-PNG
+  ownership proof. Table-cell inline material follows the same source-slot rules
+  as other story-flow inline material: editable TextFrame descendants stay in
+  `TEXT_SLOT` unless every owned text source is an explicitly simple marker, and
+  shell visuals remain in `SHELL_SLOT` or `CONTENT_VISUAL_SLOT` according to
+  their source role. Stage 1 must not assign `COMPLETE_PNG` merely because the
+  inline root lives in a table cell.
+- When the table-cell inline root is a closed shell carrier with nested shell
+  children, the root carrier remains the `SHELL_SLOT` owner. The nested shell
+  children are source constituents, not independent story-flow anchors; their
+  editable child TextFrames are placed as HWPX text overlays inside the root
+  shell coordinate system.
+- Multiple TextFrame children may be serialized into one inline text flow only
+  when each child is single-line source text and their source composed lines
+  occupy one row. Multi-line or separately positioned child TextFrames must keep
+  their source bounds as overlays.
 - If that direct inline-anchor `ObjectPlan` is `DROP_TEXT` plus `DROP_VISUAL`,
   executors must not recreate the anchor through rendered PNG, group, badge, or
   text-shell fallback heuristics.

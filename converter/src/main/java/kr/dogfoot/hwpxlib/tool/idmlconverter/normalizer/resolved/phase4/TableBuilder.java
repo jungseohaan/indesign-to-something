@@ -931,7 +931,6 @@ public final class TableBuilder {
             astTable.x(x);
             astTable.y(y);
         }
-        applyTableCellInlineCompletePngOwnership(ctx, astTable);
         traceTableCells(ctx, "TableBuilder.afterConvertTableSimple", idmlTable, astTable);
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
         inlineNestedTextFrameParagraphsInCells(ctx, astTable);
@@ -952,86 +951,6 @@ public final class TableBuilder {
         applyPlannedTableCarrierCellVisuals(ctx, idmlTable, result);
         traceTableCells(ctx, "TableBuilder.afterStyleSlotPolicy", idmlTable, result);
         return result;
-    }
-
-    private static void applyTableCellInlineCompletePngOwnership(
-            ResolvedBuildContext ctx,
-            ASTTable table) {
-        if (ctx == null || table == null || table.rows() == null) return;
-        int removed = pruneTableCellInlineCompletePngChildren(ctx, table);
-        if (removed > 0 && ctx.debugAst) {
-            table.debugOrNew().note("table cell inline complete PNG consumed child serialization: " + removed);
-        }
-    }
-
-    private static int pruneTableCellInlineCompletePngChildren(
-            ResolvedBuildContext ctx,
-            ASTTable table) {
-        if (ctx == null || table == null || table.rows() == null) return 0;
-        int removed = 0;
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null) continue;
-                removed += pruneTableCellInlineCompletePngChildren(ctx, cell.paragraphs());
-            }
-        }
-        return removed;
-    }
-
-    private static int pruneTableCellInlineCompletePngChildren(
-            ResolvedBuildContext ctx,
-            List<ASTParagraph> paragraphs) {
-        if (ctx == null || paragraphs == null) return 0;
-        int removed = 0;
-        for (ASTParagraph paragraph : paragraphs) {
-            if (paragraph == null) continue;
-            if (paragraph.inlineTable() != null) {
-                removed += pruneTableCellInlineCompletePngChildren(ctx, paragraph.inlineTable());
-            }
-            List<ASTInlineItem> items = paragraph.items();
-            if (items == null || items.isEmpty()) continue;
-            for (int i = 0; i < items.size(); i++) {
-                ASTInlineItem item = items.get(i);
-                if (item instanceof ASTInlineObject) {
-                    ASTInlineObject obj = (ASTInlineObject) item;
-                    removed += pruneTableCellInlineCompletePngChildren(ctx, obj.paragraphs());
-                    if (obj.inlineTables() != null) {
-                        for (ASTTable nested : obj.inlineTables()) {
-                            removed += pruneTableCellInlineCompletePngChildren(ctx, nested);
-                        }
-                    }
-                    if (isTableCellInlineComplexFormCompletePngPlan(ctx, obj)) {
-                        int tail = items.size() - i - 1;
-                        if (tail > 0) {
-                            items.subList(i + 1, items.size()).clear();
-                            removed += tail;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        return removed;
-    }
-
-    private static boolean isTableCellInlineComplexFormCompletePngPlan(
-            ResolvedBuildContext ctx,
-            ASTInlineObject obj) {
-        if (ctx == null || obj == null) return false;
-        Integer domId = parseSourceObjectId(obj.sourceId());
-        if (domId == null || domId < 0) return false;
-        for (ObjectPlan plan : ctx.ownershipPlansForObjectId(domId)) {
-            if (plan == null) continue;
-            if (!"table_cell_inline_complex_form_complete_png".equals(plan.slotRole)) continue;
-            if (plan.placement != Placement.INLINE) continue;
-            if (plan.coordinateSpace != CoordinateSpace.STORY_FLOW) continue;
-            if (plan.materialization != Materialization.COMPLETE_PNG) continue;
-            if (plan.textAction != TextAction.OWNED_BY_PNG) continue;
-            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) continue;
-            return true;
-        }
-        return false;
     }
 
     private static void applyPlannedTableCarrierCellVisuals(

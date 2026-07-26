@@ -48,7 +48,8 @@ public final class StoryFlowAssembler {
             ResolvedBuildContext ctx,
             IDMLTable idmlTable,
             IDMLTableCell idmlCell) {
-        if (isResolvedInlineAnchorOnlyCell(ctx, idmlTable, idmlCell)) {
+        if (cellContainsClosedInlineTextShellOwner(ctx, idmlTable, idmlCell)
+                || isResolvedInlineAnchorOnlyCell(ctx, idmlTable, idmlCell)) {
             List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
             if (inlineShellFlow != null && !inlineShellFlow.isEmpty()) {
                 return inlineShellFlow;
@@ -99,6 +100,94 @@ public final class StoryFlowAssembler {
                 && !resolvedCell.hasTextRuns()
                 && resolvedCell.inlineAnchorIds() != null
                 && !resolvedCell.inlineAnchorIds().isEmpty();
+    }
+
+    private static boolean cellContainsClosedInlineTextShellOwner(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null) return false;
+        Set<Integer> anchorIds = new LinkedHashSet<>();
+        collectResolvedCellInlineAnchorIds(ctx, idmlTable, idmlCell, anchorIds);
+        collectIDMLCellInlineAnchorIds(idmlCell, anchorIds);
+        if (anchorIds.isEmpty()) return false;
+        for (Integer anchorId : anchorIds) {
+            if (anchorId == null || anchorId < 0) continue;
+            for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchorId, 8)) {
+                if (isClosedInlineTextShellOwnerPlan(ctx, plan)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void collectResolvedCellInlineAnchorIds(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            IDMLTableCell idmlCell,
+            Set<Integer> out) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null || out == null) return;
+        ResolvedTable resolvedTable = idmlTable != null
+                ? ctx.resolvedData.getTableByIdOrSourceId(idmlTable.selfId())
+                : null;
+        if (resolvedTable == null && idmlCell.selfId() != null) {
+            resolvedTable = ctx.resolvedData.getTableByIdOrSourceId(idmlCell.selfId());
+        }
+        if (resolvedTable == null) return;
+        ResolvedTable.Cell resolvedCell = resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex());
+        if (resolvedCell == null) return;
+        for (Integer id : resolvedCellInlineAnchorIds(resolvedCell)) {
+            if (id != null && id >= 0) out.add(id);
+        }
+    }
+
+    private static Set<Integer> resolvedCellInlineAnchorIds(ResolvedTable.Cell resolvedCell) {
+        Set<Integer> ids = new LinkedHashSet<>();
+        if (resolvedCell == null) return ids;
+        if (resolvedCell.inlineAnchorIds() != null) {
+            for (Integer id : resolvedCell.inlineAnchorIds()) {
+                if (id != null && id >= 0) ids.add(id);
+            }
+        }
+        if (resolvedCell.paragraphs() != null) {
+            for (ResolvedParagraph paragraph : resolvedCell.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null || !run.isInlineAnchor()
+                            || run.anchoredObjectId() == null
+                            || run.anchoredObjectId() < 0) {
+                        continue;
+                    }
+                    ids.add(run.anchoredObjectId());
+                }
+            }
+        }
+        return ids;
+    }
+
+    private static void collectIDMLCellInlineAnchorIds(
+            IDMLTableCell idmlCell,
+            Set<Integer> out) {
+        if (idmlCell == null || idmlCell.paragraphs() == null || out == null) return;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null) continue;
+                for (String inlineId : inlineGraphicIdsInRunOrder(run)) {
+                    int domId = parseInlineObjectDomId(inlineId);
+                    if (domId >= 0) out.add(domId);
+                }
+            }
+        }
+    }
+
+    private static boolean isClosedInlineTextShellOwnerPlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan) {
+        if (ctx == null || plan == null) return false;
+        if (!plan.inlineSourceTreeClosed) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        return plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0;
     }
 
     private static boolean hasMeaningfulFlowContent(List<ASTParagraph> paragraphs) {
@@ -276,16 +365,22 @@ public final class StoryFlowAssembler {
         }
         if (resolvedTable == null) return;
         ResolvedTable.Cell resolvedCell = resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex());
-        if (resolvedCell == null || resolvedCell.hasTextRuns()
-                || resolvedCell.inlineAnchorIds() == null
-                || resolvedCell.inlineAnchorIds().isEmpty()) {
+        Set<Integer> anchorIds = resolvedCellInlineAnchorIds(resolvedCell);
+        boolean closedInlineTextShellOwnerCell = hasClosedInlineTextShellOwnerForAnchors(ctx, anchorIds);
+        if (resolvedCell == null
+                || (!closedInlineTextShellOwnerCell && resolvedCell.hasTextRuns())
+                || anchorIds.isEmpty()) {
             return;
         }
         ASTParagraph paragraph = new ASTParagraph();
-        for (Integer anchorId : resolvedCell.inlineAnchorIds()) {
+        for (Integer anchorId : anchorIds) {
             if (anchorId == null || anchorId < 0) continue;
             if (appendedAnchorIds != null && appendedAnchorIds.contains(anchorId)) continue;
-            if (!cellContainsInlineAnchor(idmlCell, anchorId)) continue;
+            if (closedInlineTextShellOwnerCell
+                    && !hasDirectClosedInlineTextShellOwnerForAnchor(ctx, anchorId)) {
+                continue;
+            }
+            if (!closedInlineTextShellOwnerCell && !cellContainsInlineAnchor(idmlCell, anchorId)) continue;
             List<ASTInlineItem> plannedItems =
                     InlineFrameHandler.loadPlannedCellInlineCarrierItems(ctx, anchorId);
             if ((plannedItems == null || plannedItems.isEmpty())
@@ -304,6 +399,31 @@ public final class StoryFlowAssembler {
         if (paragraph.items() != null && !paragraph.items().isEmpty()) {
             paragraphs.add(paragraph);
         }
+    }
+
+    private static boolean hasClosedInlineTextShellOwnerForAnchors(
+            ResolvedBuildContext ctx,
+            Set<Integer> anchorIds) {
+        if (ctx == null || anchorIds == null || anchorIds.isEmpty()) return false;
+        for (Integer anchorId : anchorIds) {
+            if (anchorId == null || anchorId < 0) continue;
+            for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchorId, 8)) {
+                if (isClosedInlineTextShellOwnerPlan(ctx, plan)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasDirectClosedInlineTextShellOwnerForAnchor(
+            ResolvedBuildContext ctx,
+            int anchorId) {
+        if (ctx == null || anchorId < 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchorId, 8)) {
+            if (!isClosedInlineTextShellOwnerPlan(ctx, plan)) continue;
+            if (plan.domId == anchorId || plan.renderId == anchorId) return true;
+            if (containsInt(plan.sourceRootObjectIds, anchorId)) return true;
+        }
+        return false;
     }
 
     private static boolean cellContainsInlineAnchor(IDMLTableCell idmlCell, int anchorId) {
