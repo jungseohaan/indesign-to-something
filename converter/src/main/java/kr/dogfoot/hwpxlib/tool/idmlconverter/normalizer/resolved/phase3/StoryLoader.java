@@ -3390,11 +3390,14 @@ public class StoryLoader {
             return false;
         }
         String c = r.content();
-        if (c == null || c.trim().isEmpty()) return true; // 공백 런 = 본문 경계
+        // 공백·탭만 있는 런 = 본문 경계
+        if (c == null || c.replace("\t", "").trim().isEmpty()) return true;
         // 인접 모서리 문자: 한글이면 본문, 라틴·숫자·연산자면 수식 조각
         String t = c.trim();
         char edge = prev ? t.charAt(t.length() - 1) : t.charAt(0);
         if ((edge >= 0xAC00 && edge <= 0xD7AF) || (edge >= 0x3131 && edge <= 0x318E)) return true;
+        // 원문자(⑴⑵⑶ ①②③, U+2460~24FF)·괄호숫자 항목 기호 = 본문 답 항목의 경계
+        if (edge >= 0x2460 && edge <= 0x24FF) return true;
         // 문장부호(쉼표·마침표·따옴표 등)도 본문 경계로 인정
         return ",.·:;)）'\"”’]".indexOf(edge) >= 0;
     }
