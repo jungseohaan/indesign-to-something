@@ -1323,7 +1323,7 @@ public class ASTRunConverter {
             obj.anchoredPosition(ig.anchoredPosition());
             obj.textWrapMode(ig.textWrapMode());
             obj.keepInline(true); // IDML AnchoredPosition=InlineOrAbove → floating 추출 금지
-            if (rg.inlineSourceTreeClosed()) {
+            if (rg.inlineSourceTreeClosed() || isInlineMicroVectorPatternShell(rg)) {
                 obj.affectsLineSpacing(false);
             }
 
@@ -1341,6 +1341,13 @@ public class ASTRunConverter {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static boolean isInlineMicroVectorPatternShell(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg) {
+        if (rg == null) return false;
+        return "inline_micro_vector_pattern_shell_slot".equals(rg.slotRole())
+                || "inline_micro_vector_pattern_shell".equals(rg.compositeRole());
     }
 
     private static String blendWithWhite(String hex, double fraction) {
