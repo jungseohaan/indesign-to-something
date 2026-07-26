@@ -14361,11 +14361,9 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (plan == null || !planCarriesTableStyleSourceChannel(plan)) continue;
-            int[] canonical = tableStyleSourceIdsForPlan(plan);
-            if (canonical.length == 0) continue;
-            int[] merged = mergeIds(plan.styleSourceObjectIds, canonical);
-            if (sameIntSet(plan.styleSourceObjectIds, merged)) continue;
-            plans.set(i, plan.withStyleSourceObjectIds(merged));
+            int[] normalized = tableStyleSourceIdsForPlan(plan);
+            if (sameIntSet(plan.styleSourceObjectIds, normalized)) continue;
+            plans.set(i, plan.withStyleSourceObjectIds(normalized));
         }
     }
 

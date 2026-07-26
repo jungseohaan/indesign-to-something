@@ -1099,6 +1099,21 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         return _sourceInfoHasVisiblePaintMetadata(src);
     }
 
+    function sourceHasVisiblePaintInSubtree(sourceId, visiting) {
+        var src = sourceInfoById[String(sourceId)];
+        if (!src) return false;
+        var key = String(sourceId);
+        visiting = visiting || {};
+        if (visiting[key]) return false;
+        visiting[key] = true;
+        if (sourceHasVisiblePaint(src)) return true;
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (sourceHasVisiblePaintInSubtree(children[ci], visiting)) return true;
+        }
+        return false;
+    }
+
     function sourceTextFrameFitsShell(shellSourceId, textFrameSourceId) {
         var shellBounds = sourceBounds(shellSourceId);
         var tfBounds = sourceBounds(textFrameSourceId);
@@ -1114,7 +1129,7 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") return false;
         if (String(src.parentKind || "") !== "Group") return false;
         if (sourceHasEditableTextDescendant(shellSourceId)) return false;
-        return sourceHasVisiblePaint(src);
+        return sourceHasVisiblePaintInSubtree(shellSourceId);
     }
 
     function matchingDirectSiblingTextFrameIds(shellSourceId, pageIndex) {
