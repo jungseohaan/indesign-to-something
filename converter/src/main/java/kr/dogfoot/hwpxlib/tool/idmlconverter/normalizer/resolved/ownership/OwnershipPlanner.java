@@ -3043,9 +3043,16 @@ public final class OwnershipPlanner {
         if (data == null) return;
         int splitShells = 0;
         int addedTextPlans = 0;
+        int completeMarkerShells = 0;
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan shell = plans.get(i);
             if (!isInlineExtractedTextShellWithEmbeddedTextSlot(shell)) continue;
+
+            if (isInlineSimpleMarkerTextShell(shell)) {
+                plans.set(i, inlineSimpleMarkerCompletePngPlan(shell));
+                completeMarkerShells++;
+                continue;
+            }
 
             boolean hasOwnedTextFrame = false;
             boolean allOwnedTextFramesHaveTextSlot = true;
@@ -3077,6 +3084,46 @@ public final class OwnershipPlanner {
                 splitShells);
         ConversionTiming.metric("stage1.ownershipPlanner.splitInlineTextShellOwnedTextSlots.addedTextPlans",
                 addedTextPlans);
+        ConversionTiming.metric("stage1.ownershipPlanner.splitInlineTextShellOwnedTextSlots.completeMarkerShells",
+                completeMarkerShells);
+    }
+
+    private boolean isInlineSimpleMarkerTextShell(ObjectPlan shell) {
+        if (shell == null || data == null) return false;
+        if (!"inline_simple_marker_complete_png".equals(safe(shell.slotRole))) return false;
+        if (shell.ownedTextFrameIds == null || shell.ownedTextFrameIds.length == 0) return false;
+        if (shell.ownedTextFrameIds.length > 2) return false;
+        for (int textFrameId : shell.ownedTextFrameIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+            if (tf == null || tf.sourceHidden()) return false;
+            if (!contains(shell.sourceObjectIds, textFrameId)) return false;
+        }
+        return true;
+    }
+
+    private ObjectPlan inlineSimpleMarkerCompletePngPlan(ObjectPlan shell) {
+        LinkedHashSet<Integer> sourceIds = new LinkedHashSet<>();
+        addAll(shell.sourceObjectIds, sourceIds);
+        addAll(shell.ownedTextFrameIds, sourceIds);
+
+        LinkedHashSet<Integer> visualIds = new LinkedHashSet<>();
+        if (shell.visualSourceObjectIds != null && shell.visualSourceObjectIds.length > 0) {
+            addAll(shell.visualSourceObjectIds, visualIds);
+        } else {
+            addAll(shell.sourceObjectIds, visualIds);
+        }
+        if (visualIds.isEmpty()) visualIds.add(shell.domId);
+
+        return shell
+                .withSourceObjectIds(toIntArray(sourceIds))
+                .withVisualSourceObjectIds(toIntArray(visualIds))
+                .withExtractionSourceObjectIds(toIntArray(visualIds), new int[0])
+                .withTextAction(TextAction.OWNED_BY_PNG)
+                .withVisualAction(VisualAction.PLACE_INLINE_PNG, "inline_simple_marker_complete_png")
+                .withMaterialization(Materialization.COMPLETE_PNG)
+                .withDescendantVisualObjectIds(new int[0])
+                .withExtractionCandidate(shell.candidateId, shell.planPassId,
+                        "inline_simple_marker_complete_png");
     }
 
     private boolean isInlineExtractedTextShellWithEmbeddedTextSlot(ObjectPlan plan) {
