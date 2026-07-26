@@ -153,7 +153,7 @@ public final class TableSourceIndexBuilder {
                 ? data.getPageItem(carrier.parentId())
                 : null;
         if (parent != null) {
-            collectDirectTableStyleSources(data, parent, carrierDomId, ids);
+            collectDirectTableStyleSources(data, parent, carrier, carrierDomId, ids);
         }
         collectAncestryTableStyleSources(data, carrier, ids);
         collectSiblingTableStyleSources(data, carrier, ids);
@@ -166,15 +166,20 @@ public final class TableSourceIndexBuilder {
     private static void collectDirectTableStyleSources(
             ResolvedData data,
             ResolvedPageItem parent,
+            ResolvedPageItem carrier,
             int carrierDomId,
             LinkedHashSet<Integer> ids) {
-        if (data == null || parent == null || parent.childIds() == null) return;
+        if (data == null || parent == null || carrier == null || parent.childIds() == null) return;
+        double[] carrierBounds = carrier.geometricBounds();
+        if (!validBounds(carrierBounds)) return;
         String parentId = parent.id();
         for (int childId : parent.childIds()) {
             if (childId == carrierDomId) continue;
             ResolvedPageItem child = data.getPageItem(String.valueOf(childId));
             if (child == null || !sameId(parentId, child.parentId())) continue;
-            if (isTableStyleSource(child)) {
+            if (isTableStyleSource(child)
+                    && !subtreeContainsTextFrame(data, child, 0)
+                    && boundsNearOrInside(carrierBounds, child.geometricBounds(), 10.0)) {
                 add(ids, childId);
             }
         }
@@ -193,7 +198,9 @@ public final class TableSourceIndexBuilder {
             ResolvedPageItem parent = data.getPageItem(parentId);
             if (parent == null) return;
             int parentSourceId = parseInt(parent.id());
-            if (isTableStyleSource(parent) && overlaps(carrierBounds, parent.geometricBounds())) {
+            if (isTableStyleSource(parent)
+                    && overlaps(carrierBounds, parent.geometricBounds())
+                    && !subtreeContainsOtherTextFrame(data, parent, carrier.id(), 0)) {
                 add(ids, parentSourceId);
             }
             if (parent.childIds() != null) {
@@ -201,7 +208,9 @@ public final class TableSourceIndexBuilder {
                     if (sameId(String.valueOf(childId), childOnPathId)) continue;
                     ResolvedPageItem child = data.getPageItem(String.valueOf(childId));
                     if (child == null || !sameId(parent.id(), child.parentId())) continue;
-                    if (isTableStyleSource(child) && overlaps(carrierBounds, child.geometricBounds())) {
+                    if (isTableStyleSource(child)
+                            && !subtreeContainsTextFrame(data, child, 0)
+                            && boundsNearOrInside(carrierBounds, child.geometricBounds(), 10.0)) {
                         add(ids, childId);
                     }
                 }
@@ -212,14 +221,9 @@ public final class TableSourceIndexBuilder {
     }
 
     /**
-     * SPEC(table-style-absorb): 캐리어와 부모를 공유하지 않는 표 스타일 시각물 대응.
-     *
-     * <p>p28 실측: 표 배경 rect·둥근 외곽·행/열 괘선(Polygon)이 캐리어 TF 와 나란한
-     * <b>최상위 형제 그룹들</b>로 조판돼 부모/조상 스캔에 잡히지 않고 페이지 평면
-     * 전용으로 남았다. 같은 페이지의 형제(부모 없음) 중 캐리어 경계 근처
-     * (허용 오차 4pt — 외곽 rect 는 캐리어보다 몇 pt 크다)의 시각물을 style
-     * 소스로 수집한다. 그룹은 재귀하되, 다른 TextFrame 을 품은 서브트리(라벨
-     * pill 등)는 텍스트 소유 충돌을 피해 통째로 제외한다.
+     * Table style absorption can only claim textless visual sources that share
+     * the table carrier's geometry. Sources that contain their own TextFrame are
+     * separate text/shell bundles, even when they sit in the same parent group.
      */
     private static void collectSiblingTableStyleSources(
             ResolvedData data,
@@ -272,6 +276,24 @@ public final class TableSourceIndexBuilder {
             ResolvedPageItem child = data.getPageItem(String.valueOf(childId));
             if (child == null) continue;
             if (subtreeContainsTextFrame(data, child, depth + 1)) return true;
+        }
+        return false;
+    }
+
+    private static boolean subtreeContainsOtherTextFrame(
+            ResolvedData data,
+            ResolvedPageItem item,
+            String allowedTextFrameId,
+            int depth) {
+        if (item == null || depth > 6) return false;
+        if ("TextFrame".equals(item.type())) {
+            return !sameId(item.id(), allowedTextFrameId);
+        }
+        if (item.childIds() == null) return false;
+        for (int childId : item.childIds()) {
+            ResolvedPageItem child = data.getPageItem(String.valueOf(childId));
+            if (child == null) continue;
+            if (subtreeContainsOtherTextFrame(data, child, allowedTextFrameId, depth + 1)) return true;
         }
         return false;
     }

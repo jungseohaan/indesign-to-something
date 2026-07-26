@@ -6528,6 +6528,67 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                 || src.hasCandidateVectorPaint === true;
     }
 
+    function sourceBoundsArea(bounds) {
+        if (!bounds || bounds.length < 4) return 0;
+        return Math.max(0, Number(bounds[2]) - Number(bounds[0]))
+                * Math.max(0, Number(bounds[3]) - Number(bounds[1]));
+    }
+
+    function sourceBoundsOverlapArea(a, b) {
+        if (!a || !b || a.length < 4 || b.length < 4) return 0;
+        var top = Math.max(Number(a[0]), Number(b[0]));
+        var left = Math.max(Number(a[1]), Number(b[1]));
+        var bottom = Math.min(Number(a[2]), Number(b[2]));
+        var right = Math.min(Number(a[3]), Number(b[3]));
+        return Math.max(0, bottom - top) * Math.max(0, right - left);
+    }
+
+    function sourceCanBeDirectSiblingTextShell(sourceId) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        var kind = String(src.kind || "");
+        if (kind !== "Rectangle" && kind !== "Oval" && kind !== "Polygon") return false;
+        if (String(src.parentKind || "") !== "Group") return false;
+        if (sourceHasEditableTextDescendant(sourceId, src.pageIndex)) return false;
+        return sourceHasVectorPaintInSubtree(sourceId);
+    }
+
+    function directSiblingTextFrameIdsForShell(sourceId, pageIndex) {
+        var src = infoById[String(sourceId)];
+        if (!src || src.parentId === null || src.parentId === undefined) return [];
+        if (!sourceCanBeDirectSiblingTextShell(sourceId)) return [];
+        var shellBounds = src.bounds || src.geometricBounds || src.visibleBounds || null;
+        var siblings = childIdsByParentId[String(src.parentId)] || [];
+        var out = [];
+        var seen = {};
+        for (var si = 0; si < siblings.length; si++) {
+            var siblingId = siblings[si];
+            if (String(siblingId) === String(sourceId)) continue;
+            var sibling = infoById[String(siblingId)];
+            if (!sibling || String(sibling.kind || "") !== "TextFrame") continue;
+            if (sibling.textFrameClass !== "editable" || sibling.hasText !== true) continue;
+            if (pageIndex !== null && pageIndex !== undefined && Number(sibling.pageIndex) !== Number(pageIndex)) {
+                continue;
+            }
+            var textBounds = sibling.bounds || sibling.geometricBounds || sibling.visibleBounds || null;
+            var textArea = sourceBoundsArea(textBounds);
+            if (!shellBounds || !textBounds || textArea <= 0) continue;
+            if (sourceBoundsOverlapArea(shellBounds, textBounds) / textArea < 0.75) continue;
+            _pushUniqueId(out, seen, siblingId);
+        }
+        return _sortedNumericIds(out);
+    }
+
+    function sourceSetContainsChildDirectSiblingTextShellSlot(rootSourceId, sourceIds, pageIndex) {
+        for (var si = 0; sourceIds && si < sourceIds.length; si++) {
+            var sourceId = sourceIds[si];
+            if (String(sourceId) === String(rootSourceId)) continue;
+            var textFrameIds = directSiblingTextFrameIdsForShell(sourceId, pageIndex);
+            if (textFrameIds && textFrameIds.length === 1) return true;
+        }
+        return false;
+    }
+
     function collectUnclaimedVectorShellSubtree(sourceId, pageIndex, claimed, seen, out, forceIncludeRoot) {
         var src = infoById[String(sourceId)];
         if (!src) return out || [];
@@ -6831,6 +6892,17 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                     src, targetPageIndex, sourceIds.length > 0 ? sourceIds : [src.id]);
             if (visibleMaterialLeavesAllClaimed(sourceIds, claimed)) continue;
             var hasPlacedVisualTree = hasEditableTextDescendant ? false : sourceTreeHasPlacedVisual(sourceIds);
+            if (!hasPlacedVisualTree
+                    && sourceSetContainsChildDirectSiblingTextShellSlot(src.id, sourceIds, targetPageIndex)) {
+                continue;
+            }
+            var directSiblingTextFrameIds = !hasPlacedVisualTree
+                    ? directSiblingTextFrameIdsForShell(src.id, targetPageIndex)
+                    : [];
+            var directSiblingShellVisualSourceIds = sourceIds;
+            if (!hasPlacedVisualTree && directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1) {
+                sourceIds = _sortedNumericIds(_sourceIdsUnion(sourceIds, directSiblingTextFrameIds));
+            }
             var sourceKind = String(src.kind || "");
             var candidatePassId = hasPlacedVisualTree
                     ? (sourceKind === "Group" ? "pass.image_textless_groups" : "pass.image_placed_frames")
@@ -6853,12 +6925,22 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
             var candidateMode = candidatePassId === "pass.image_placed_frames"
                     ? "ORIGINAL_VISUAL"
                     : "TEXTLESS_CANDIDATE";
+            var directSiblingShellSlot = !hasPlacedVisualTree
+                    && directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1;
+            var exportSourceIds = directSiblingShellSlot
+                    ? directSiblingShellVisualSourceIds.slice(0)
+                    : sourceIds.slice(0);
+            var visualSourceIds = exportSourceIds.slice(0);
             var compositeRole = hasPlacedVisualTree
                     ? "source_required_content_visual_set"
-                    : "source_required_visible_vector_shell_set";
+                    : (directSiblingShellSlot
+                            ? "source_required_direct_sibling_text_shell_set"
+                            : "source_required_visible_vector_shell_set");
             var singleRole = hasPlacedVisualTree
                     ? "source_required_content_visual"
-                    : "source_required_visible_vector_shell";
+                    : (directSiblingShellSlot
+                            ? "source_required_direct_sibling_text_shell"
+                            : "source_required_visible_vector_shell");
             var candidate = {
                 candidateId: candidateId,
                 passId: candidatePassId,
@@ -6878,16 +6960,24 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                 composite: sourceIds.length > 1,
                 compositeRole: sourceIds.length > 1 ? compositeRole : singleRole,
                 slotRole: slotRole,
-                exportSourceObjectIds: sourceIds.slice(0),
+                exportSourceObjectIds: exportSourceIds,
                 exportTargetObjectId: src.id,
-                hiddenVisualSourceObjectIds: [],
-                visualSourceObjectIds: sourceIds.slice(0),
+                hiddenVisualSourceObjectIds: directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1
+                        ? directSiblingTextFrameIds.slice(0)
+                        : [],
+                visualSourceObjectIds: visualSourceIds,
                 styleSourceObjectIds: [],
-                ownedTextFrameIds: [],
-                editableTextFrameIds: [],
-                hiddenTextFrameIds: [],
-                requiresTextHidden: false,
-                textOwner: "none",
+                ownedTextFrameIds: directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1
+                        ? directSiblingTextFrameIds.slice(0)
+                        : [],
+                editableTextFrameIds: directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1
+                        ? directSiblingTextFrameIds.slice(0)
+                        : [],
+                hiddenTextFrameIds: directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1
+                        ? directSiblingTextFrameIds.slice(0)
+                        : [],
+                requiresTextHidden: directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1,
+                textOwner: directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1 ? "hwpx_tf" : "none",
                 containsEditableText: false,
                 completePngTextAllowed: false,
                 ownershipSlot: ownershipSlot,
@@ -6903,7 +6993,9 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                 requiredSlotReason: hasPlacedVisualTree
                         ? "visible_placed_material_tree"
                         : "visible_vector_material",
-                reason: "source_required_visible_vector_shell"
+                reason: directSiblingShellSlot
+                        ? "source_required_direct_sibling_text_shell"
+                        : "source_required_visible_vector_shell"
             };
             candidate.slotRole = slotRole;
             candidates.push(candidate);
@@ -6914,7 +7006,7 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                 pageIndex: targetPageIndex,
                 requiredSlot: ownershipSlot,
                 requiredSlotReason: candidate.requiredSlotReason,
-                reason: "source_required_visible_vector_shell"
+                reason: candidate.reason
             });
             mark(sourceIds, claimed);
         }

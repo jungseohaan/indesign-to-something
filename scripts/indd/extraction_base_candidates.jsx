@@ -569,6 +569,12 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             sourceIds = pageLocalSourceObjectIdsForBase(itemInfo.id, itemInfo.pageIndex);
             sourceIds = _sortedNumericIds(sourceIds);
             if (!sourceSetHasExecutableShellMaterial(sourceIds)) continue;
+            if (sourceSetContainsChildDirectSiblingTextShellSlot(itemInfo.id, sourceIds, itemInfo.pageIndex)) {
+                baseSuppressedPreview("unclaimed_visible_vector_contains_child_direct_sibling_text_shell_slot", itemInfo, {
+                    sourceObjectIds: sourceIds
+                });
+                continue;
+            }
 
             var exportIds = shellExportSourceIdsForSourceSet(itemInfo.id, sourceIds);
             if (!exportIds || exportIds.length === 0) exportIds = sourceIds;
@@ -1062,7 +1068,7 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
             basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
             return false;
         }
-        if (hasCandidateVectorPaintForBase(sourceId) !== true) {
+        if (sourceHasExecutableShellMaterialForBase(sourceId) !== true) {
             directSiblingTextShellOwnerByKey[cacheKey] = false;
             basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
             return false;
@@ -1094,6 +1100,36 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
         directSiblingTextShellOwnerByKey[cacheKey] = result;
         basePerfCall("sourceHasDirectSiblingTextShellOwner", startedAt);
         return result;
+    }
+
+    function directSiblingTextFrameIdsForShellSource(sourceId, pageIndex) {
+        var src = baseCandidateSourceInfoById[String(sourceId)];
+        if (!src || src.parentId === null || src.parentId === undefined) return [];
+        if (!sourceHasDirectSiblingTextShellOwner(sourceId, pageIndex)) return [];
+        var siblings = baseCandidateChildIdsByParentId[String(src.parentId)] || [];
+        var ids = [];
+        var seen = {};
+        for (var si = 0; si < siblings.length; si++) {
+            var siblingId = siblings[si];
+            if (String(siblingId) === String(sourceId)) continue;
+            var sibling = baseCandidateSourceInfoById[String(siblingId)];
+            if (!sibling || sibling.kind !== "TextFrame") continue;
+            if (!sourceIsInPagePlaneForBase(siblingId, pageIndex)) continue;
+            if (sibling.textFrameClass !== "editable" || sibling.hasText !== true) continue;
+            if (sibling.pageIndex !== pageIndex) continue;
+            if (!sourceTextFrameFitsShellForBase(sourceId, siblingId)) continue;
+            _pushUniqueId(ids, seen, siblingId);
+        }
+        return _sortedNumericIds(ids);
+    }
+
+    function sourceSetContainsChildDirectSiblingTextShellSlot(rootSourceId, sourceIds, pageIndex) {
+        for (var si = 0; sourceIds && si < sourceIds.length; si++) {
+            var sourceId = sourceIds[si];
+            if (String(sourceId) === String(rootSourceId)) continue;
+            if (sourceHasDirectSiblingTextShellOwner(sourceId, pageIndex)) return true;
+        }
+        return false;
     }
 
     var clipParentShellOwnerForBaseByKey = {};
@@ -1397,6 +1433,64 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                     return rectOwnedByClipParentShell;
                 }
 
+                if (directSiblingTextShellOwnedForRect()
+                        && !ownedByClipParentShellForRect()) {
+                    var directSiblingShellSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
+                    var directSiblingShellExportIds = shellExportSourceIdsForSourceSet(id, directSiblingShellSourceIds);
+                    if (!directSiblingShellExportIds || directSiblingShellExportIds.length === 0) {
+                        directSiblingShellExportIds = directSiblingShellSourceIds || [id];
+                    }
+                    if (hasBroaderDecorationSourceSet(extractionPageIndex, directSiblingShellExportIds || [id])) {
+                        basePerfBranchEnd("rectangle_oval_polygon", rectBranchStartedAt);
+                        continue;
+                    }
+                    if (!sourceSetHasExecutableShellMaterial(directSiblingShellExportIds)) {
+                        baseSuppressedPreview("direct_sibling_text_shell_without_executable_shell_material", itemInfo, {
+                            sourceObjectIds: directSiblingShellSourceIds,
+                            exportSourceObjectIds: directSiblingShellExportIds
+                        });
+                        basePerfBranchEnd("rectangle_oval_polygon", rectBranchStartedAt);
+                        continue;
+                    }
+                    var directSiblingTextFrameIds = directSiblingTextFrameIdsForShellSource(id, extractionPageIndex);
+                    item = item || domItemForBase(id);
+                    if (!item) {
+                        baseSuppressedPreview("direct_sibling_text_shell_missing_dom_item", itemInfo, {
+                            sourceObjectIds: directSiblingShellSourceIds,
+                            exportSourceObjectIds: directSiblingShellExportIds,
+                            editableTextFrameIds: directSiblingTextFrameIds
+                        });
+                        basePerfBranchEnd("rectangle_oval_polygon", rectBranchStartedAt);
+                        continue;
+                    }
+                    pushBaseExtractionCandidate("pass.decoration_groups", item, candidateAttrsForInfo(itemInfo, {
+                        sourceObjectIds: _sortedNumericIds(
+                                _sourceIdsUnion(directSiblingShellSourceIds || [id], directSiblingTextFrameIds)),
+                        exportSourceObjectIds: directSiblingShellExportIds,
+                        exportTargetObjectId: id,
+                        visualSourceObjectIds: directSiblingShellExportIds,
+                        editableTextFrameIds: directSiblingTextFrameIds,
+                        hiddenTextFrameIds: directSiblingTextFrameIds,
+                        hiddenVisualSourceObjectIds: directSiblingTextFrameIds,
+                        requiresTextHidden: directSiblingTextFrameIds.length > 0,
+                        textOwner: directSiblingTextFrameIds.length > 0 ? "hwpx_tf" : "none",
+                        pageIndex: extractionPageIndex,
+                        unit: "GROUP_OR_ITEM",
+                        mode: "TEXTLESS_CANDIDATE",
+                        candidatePurpose: "SHELL_CANDIDATE",
+                        compositeRole: directSiblingShellExportIds && directSiblingShellExportIds.length > 1
+                                ? "direct_sibling_text_shell_source_set"
+                                : "direct_sibling_text_shell_source",
+                        slotRole: "direct_child_shell_slot",
+                        renderMode: "SLOT_ONLY",
+                        visualOnlyChildIds: directSiblingShellExportIds,
+                        containsEditableText: false
+                    }), "direct_sibling_text_shell_source_set");
+                    recordDecorationSourceSet(extractionPageIndex, directSiblingShellExportIds || [id]);
+                    basePerfBranchEnd("rectangle_oval_polygon", rectBranchStartedAt);
+                    continue;
+                }
+
                 if (sourceIndex.hasPlacedVisual(id) && !ownedByClipParentShellForRect()) {
                     item = item || domItemForBase(id);
                     if (!item) continue;
@@ -1602,6 +1696,12 @@ function _appendBaseExtractionCandidates(ctx, sourceItems, sourceIndex, sourceCl
                             && shouldEmitDecorationSourceCandidate(itemInfo)) {
                         var decoSourceIds = pageLocalSourceObjectIdsForBase(id, extractionPageIndex);
                         if (hasBroaderDecorationSourceSet(extractionPageIndex, decoSourceIds)) continue;
+                        if (sourceSetContainsChildDirectSiblingTextShellSlot(id, decoSourceIds, extractionPageIndex)) {
+                            baseSuppressedPreview("decoration_group_contains_child_direct_sibling_text_shell_slot", itemInfo, {
+                                sourceObjectIds: decoSourceIds
+                            });
+                            continue;
+                        }
                         var decoExportSourceIds = shellExportSourceIdsForSourceSet(id, decoSourceIds);
                         if (!sourceSetHasExecutableShellMaterial(decoExportSourceIds)) {
                             baseSuppressedPreview("decoration_group_without_executable_shell_material", itemInfo, {

@@ -3902,16 +3902,14 @@ public class InlineFrameHandler {
         return postprocessShellTextParagraphs(ctx, TextFlowAstMaterializer.convertUnit(
                 ctx,
                 unit,
-                text -> text
-                        .replace("\uFFFC", "")
-                        .replace("\r", "")
-                        .replace("\n", ""),
+                InlineFrameHandler::normalizeShellTextFlowText,
                 "CENTER",
                 null,
                 atom -> {
                     if (atom == null || atom.anchoredObjectId == null) return null;
                     return loadPlannedInlineAnchorItems(ctx, atom.anchoredObjectId, null, null);
-                }));
+                },
+                shellTextLineBreakLayout(ctx, unit)));
     }
 
     private static List<ASTParagraph> convertShellTextParagraphs(
@@ -3921,15 +3919,52 @@ public class InlineFrameHandler {
                 story,
                 ResolvedTextFlowAstConverter.options()
                         .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
-                        .textTransformer(text -> text
-                                .replace("\uFFFC", "")
-                                .replace("\r", "")
-                                .replace("\n", ""))
+                        .textTransformer(InlineFrameHandler::normalizeShellTextFlowText)
                         .defaultAlignment("CENTER")
                         .copyTabStops(true)
                         .truncateAtParagraphBreak(false)
                         .skipBlankRuns(true)
                         .skipEmptyParagraphs(true)));
+    }
+
+    private static String normalizeShellTextFlowText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        return text
+                .replace("\uFFFC", "")
+                .replace('\t', ' ')
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace('\u2028', '\n');
+    }
+
+    private static TextFlowAstMaterializer.SourceLineBreakLayout shellTextLineBreakLayout(
+            ResolvedBuildContext ctx,
+            TextFlowDocument.TextFlowUnit unit) {
+        if (ctx == null || ctx.resolvedData == null || unit == null
+                || unit.ownerTextFrameIds == null || unit.ownerTextFrameIds.isEmpty()) {
+            return null;
+        }
+        double indentPt = Double.NaN;
+        boolean hasExplicitLineBreak = false;
+        for (String textFrameId : unit.ownerTextFrameIds) {
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(textFrameId);
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) continue;
+            for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+                if (line == null) continue;
+                String text = line.text();
+                if (text != null && (text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0 || text.indexOf('\u2028') >= 0)) {
+                    hasExplicitLineBreak = true;
+                }
+                double lineIndent = line.wrapIndentLeft();
+                if (lineIndent >= 0.5 && lineIndent <= 80.0) {
+                    indentPt = Double.isFinite(indentPt) ? Math.min(indentPt, lineIndent) : lineIndent;
+                }
+            }
+        }
+        if (!hasExplicitLineBreak || !Double.isFinite(indentPt) || indentPt <= 0.0) return null;
+        long indent = CoordinateConverter.pointsToHwpunits(indentPt);
+        if (indent <= 0) return null;
+        return new TextFlowAstMaterializer.SourceLineBreakLayout(indent, true);
     }
 
     private static List<ASTParagraph> buildSourceStructuredShellTextParagraphs(

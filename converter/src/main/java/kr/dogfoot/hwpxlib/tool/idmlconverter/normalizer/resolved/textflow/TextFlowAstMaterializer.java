@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.textflow;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBreak;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
@@ -19,6 +20,20 @@ public final class TextFlowAstMaterializer {
 
     public interface InlineAtomResolver {
         List<ASTInlineItem> resolve(TextFlowDocument.InlineSlotAtom atom);
+    }
+
+    public static final class SourceLineBreakLayout {
+        public final long indentToHerePosition;
+        public final boolean insertTabAfterLineBreak;
+
+        public SourceLineBreakLayout(long indentToHerePosition, boolean insertTabAfterLineBreak) {
+            this.indentToHerePosition = indentToHerePosition;
+            this.insertTabAfterLineBreak = insertTabAfterLineBreak;
+        }
+
+        boolean enabled() {
+            return indentToHerePosition > 0 || insertTabAfterLineBreak;
+        }
     }
 
     public static boolean appendFirstVisibleTextRuns(
@@ -59,6 +74,17 @@ public final class TextFlowAstMaterializer {
             String defaultAlignment,
             ResolvedTextFlowAstConverter.Options runOptions,
             InlineAtomResolver inlineAtomResolver) {
+        return convertUnit(ctx, unit, textTransformer, defaultAlignment, runOptions, inlineAtomResolver, null);
+    }
+
+    public static List<ASTParagraph> convertUnit(
+            ResolvedBuildContext ctx,
+            TextFlowDocument.TextFlowUnit unit,
+            Function<String, String> textTransformer,
+            String defaultAlignment,
+            ResolvedTextFlowAstConverter.Options runOptions,
+            InlineAtomResolver inlineAtomResolver,
+            SourceLineBreakLayout lineBreakLayout) {
         List<ASTParagraph> out = new ArrayList<>();
         if (ctx == null || unit == null || unit.paragraphs == null) return out;
         for (TextFlowDocument.TextFlowParagraph paragraph : unit.paragraphs) {
@@ -75,7 +101,10 @@ public final class TextFlowAstMaterializer {
                     astParagraph.alignment(alignment);
                 }
             }
-            if (appendTextAtoms(ctx, astParagraph, paragraph, textTransformer, runOptions, inlineAtomResolver)) {
+            if (lineBreakLayout != null && lineBreakLayout.indentToHerePosition > 0) {
+                astParagraph.indentToHerePosition(lineBreakLayout.indentToHerePosition);
+            }
+            if (appendTextAtoms(ctx, astParagraph, paragraph, textTransformer, runOptions, inlineAtomResolver, lineBreakLayout)) {
                 out.add(astParagraph);
             }
         }
@@ -106,67 +135,178 @@ public final class TextFlowAstMaterializer {
             Function<String, String> textTransformer,
             ResolvedTextFlowAstConverter.Options runOptions,
             InlineAtomResolver inlineAtomResolver) {
+        return appendTextAtoms(ctx, target, paragraph, textTransformer, runOptions, inlineAtomResolver, null);
+    }
+
+    private static boolean appendTextAtoms(
+            ResolvedBuildContext ctx,
+            ASTParagraph target,
+            TextFlowDocument.TextFlowParagraph paragraph,
+            Function<String, String> textTransformer,
+            ResolvedTextFlowAstConverter.Options runOptions,
+            InlineAtomResolver inlineAtomResolver,
+            SourceLineBreakLayout lineBreakLayout) {
         boolean appended = false;
         if (appendGeneratedPrefixText(ctx, target, paragraph, runOptions)) {
             appended = true;
         }
+        boolean previousInlineSlotMaterialized = false;
         for (TextFlowDocument.TextFlowAtom atom : paragraph.atoms) {
             if (atom instanceof TextFlowDocument.InlineSlotAtom) {
-                if (inlineAtomResolver == null) continue;
+                if (inlineAtomResolver == null) {
+                    previousInlineSlotMaterialized = false;
+                    continue;
+                }
                 List<ASTInlineItem> items = inlineAtomResolver.resolve((TextFlowDocument.InlineSlotAtom) atom);
-                if (items == null || items.isEmpty()) continue;
+                if (items == null || items.isEmpty()) {
+                    previousInlineSlotMaterialized = false;
+                    continue;
+                }
+                boolean inlineAppended = false;
                 for (ASTInlineItem item : items) {
                     if (item == null) continue;
                     target.addItem(item);
                     appended = true;
+                    inlineAppended = true;
                 }
+                previousInlineSlotMaterialized = inlineAppended;
                 continue;
             }
-            if (!(atom instanceof TextFlowDocument.TextAtom)) continue;
+            if (!(atom instanceof TextFlowDocument.TextAtom)) {
+                previousInlineSlotMaterialized = false;
+                continue;
+            }
             TextFlowDocument.TextAtom textAtom = (TextFlowDocument.TextAtom) atom;
             String text = textAtom.text;
+            if (previousInlineSlotMaterialized && isInlineSlotReservationSpacer(text)) {
+                continue;
+            }
             if (textTransformer != null) {
                 text = textTransformer.apply(text);
             }
-            if (text == null || text.trim().isEmpty()) continue;
-
-            List<ASTTextRun> runs;
-            if (textAtom.sourceRun != null) {
-                runs = ResolvedTextFlowAstConverter.convertRunText(
-                        text,
-                        textAtom.sourceRun,
-                        target,
-                        runOptions != null
-                                ? runOptions
-                                : ResolvedTextFlowAstConverter.options()
-                                        .colorResolver(color -> ctx.resolvedData != null
-                                                ? ctx.resolvedData.resolveColorHex(color)
-                                                : color)
-                                        .truncateAtParagraphBreak(false));
-            } else {
-                runs = ResolvedTextFlowAstConverter.convertSyntheticText(text, null, target);
+            if (text == null || text.trim().isEmpty()) {
+                previousInlineSlotMaterialized = false;
+                continue;
             }
 
-            // 화살표 런: 텍스트는 ResolvedDataReader 가 파싱 직후 이미 "→" 로
-            // 정규화했다. 여기서는 폰트만 벗긴다 — BT화살표 폰트를 그대로 두면
-            // 한글이 글리프를 렌더링하지 못한다.
-            boolean arrowRun = textAtom.sourceRun != null
-                    && (BTFontGlyphMap.isBTArrowFont(textAtom.sourceRun.fontFamily())
-                    || BTFontGlyphMap.isBTArrowFontStyle(textAtom.sourceRun.charStyle()));
+            appended |= appendTextAtomRuns(ctx, target, textAtom, text, runOptions, lineBreakLayout);
+            previousInlineSlotMaterialized = false;
+        }
+        return appended;
+    }
 
-            for (ASTTextRun run : runs) {
-                if (arrowRun) {
-                    run.fontFamily(null);
-                    run.fontStyle(null);
-                    run.grepMathFont(false);
-                    run.subscript(false);
-                    run.superscript(false);
-                }
-                appendTextRunCoalescing(target, run);
+    private static boolean isInlineSlotReservationSpacer(String text) {
+        if (text == null || text.isEmpty()) return false;
+        boolean hasReservationSpace = false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\u00A0'
+                    || ch == '\u2002'
+                    || ch == '\u2003'
+                    || ch == '\u2004'
+                    || ch == '\u2005'
+                    || ch == '\u2006'
+                    || ch == '\u2007'
+                    || ch == '\u2008'
+                    || ch == '\u2009'
+                    || ch == '\u200A') {
+                hasReservationSpace = true;
+                continue;
+            }
+            if (ch == ' ' || ch == '\t') {
+                continue;
+            }
+            return false;
+        }
+        return hasReservationSpace;
+    }
+
+    private static boolean appendTextAtomRuns(
+            ResolvedBuildContext ctx,
+            ASTParagraph target,
+            TextFlowDocument.TextAtom textAtom,
+            String text,
+            ResolvedTextFlowAstConverter.Options runOptions,
+            SourceLineBreakLayout lineBreakLayout) {
+        if (text == null || text.isEmpty()) return false;
+        boolean appended = false;
+        int start = 0;
+        for (int i = 0; i <= text.length(); i++) {
+            boolean atEnd = i == text.length();
+            boolean atLineBreak = !atEnd && isSourceLineBreak(text.charAt(i));
+            if (!atEnd && !atLineBreak) continue;
+            if (i > start) {
+                appended |= appendTextAtomSegment(ctx, target, textAtom, text.substring(start, i), runOptions);
+            }
+            if (atLineBreak) {
+                appendLineBreak(target, lineBreakLayout);
                 appended = true;
+                start = i + 1;
             }
         }
         return appended;
+    }
+
+    private static boolean appendTextAtomSegment(
+            ResolvedBuildContext ctx,
+            ASTParagraph target,
+            TextFlowDocument.TextAtom textAtom,
+            String segment,
+            ResolvedTextFlowAstConverter.Options runOptions) {
+        if (segment == null || segment.trim().isEmpty()) return false;
+        List<ASTTextRun> runs;
+        if (textAtom.sourceRun != null) {
+            runs = ResolvedTextFlowAstConverter.convertRunText(
+                    segment,
+                    textAtom.sourceRun,
+                    target,
+                    runOptions != null
+                            ? runOptions
+                            : ResolvedTextFlowAstConverter.options()
+                                    .colorResolver(color -> ctx.resolvedData != null
+                                            ? ctx.resolvedData.resolveColorHex(color)
+                                            : color)
+                                    .truncateAtParagraphBreak(false));
+        } else {
+            runs = ResolvedTextFlowAstConverter.convertSyntheticText(segment, null, target);
+        }
+
+        // 화살표 런: 텍스트는 ResolvedDataReader 가 파싱 직후 이미 "→" 로
+        // 정규화했다. 여기서는 폰트만 벗긴다 — BT화살표 폰트를 그대로 두면
+        // 한글이 글리프를 렌더링하지 못한다.
+        boolean arrowRun = textAtom.sourceRun != null
+                && (BTFontGlyphMap.isBTArrowFont(textAtom.sourceRun.fontFamily())
+                || BTFontGlyphMap.isBTArrowFontStyle(textAtom.sourceRun.charStyle()));
+
+        boolean appended = false;
+        for (ASTTextRun run : runs) {
+            if (arrowRun) {
+                run.fontFamily(null);
+                run.fontStyle(null);
+                run.grepMathFont(false);
+                run.subscript(false);
+                run.superscript(false);
+            }
+            appendTextRunCoalescing(target, run);
+            appended = true;
+        }
+        return appended;
+    }
+
+    private static boolean isSourceLineBreak(char ch) {
+        return ch == '\n' || ch == '\r' || ch == '\u2028';
+    }
+
+    private static void appendLineBreak(ASTParagraph target, SourceLineBreakLayout lineBreakLayout) {
+        if (target == null) return;
+        List<ASTInlineItem> items = target.items();
+        if (items != null && !items.isEmpty() && items.get(items.size() - 1) instanceof ASTBreak) return;
+        target.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
+        if (lineBreakLayout != null && lineBreakLayout.insertTabAfterLineBreak) {
+            ASTTextRun tab = new ASTTextRun();
+            tab.text("\t");
+            target.addItem(tab);
+        }
     }
 
     private static boolean appendGeneratedPrefixText(
