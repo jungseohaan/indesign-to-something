@@ -4,6 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFontDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLResourceParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
@@ -169,11 +170,56 @@ public final class InfraSetup {
                     doc.addParagraphStyle(sd);
                 }
             }
+            org.w3c.dom.NodeList charStyles = xmlDoc.getElementsByTagName("CharacterStyle");
+            for (int i = 0; i < charStyles.getLength(); i++) {
+                org.w3c.dom.Element cs = (org.w3c.dom.Element) charStyles.item(i);
+                String self = cs.getAttribute("Self");
+                String name = cs.getAttribute("Name");
+                if (self == null || self.isEmpty()) continue;
+
+                IDMLStyleDef rawStyle = IDMLResourceParser.parseStyleDef(cs);
+                IDMLStyleDef resolvedStyle = ctx.styleResolver != null
+                        ? ctx.styleResolver.getResolvedCharacterStyle(self) : null;
+                IDMLStyleDef style = resolvedStyle != null ? resolvedStyle : rawStyle;
+
+                ASTStyleDef sd = new ASTStyleDef();
+                sd.styleId(self);
+                sd.styleName(name != null && !name.isEmpty()
+                        ? name : (rawStyle != null ? rawStyle.simpleName() : self));
+                if (rawStyle != null) sd.basedOnStyleRef(rawStyle.basedOn());
+                copyCharacterStyle(style, sd);
+                doc.addCharacterStyle(sd);
+            }
             System.err.println("[ResolvedToASTBuilder] Phase 0: fonts=" + doc.fonts().size()
-                    + " styles=" + doc.paragraphStyles().size());
+                    + " paragraphStyles=" + doc.paragraphStyles().size()
+                    + " characterStyles=" + doc.characterStyles().size());
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] IDML 정의 복사 실패: " + e.getMessage());
         }
+    }
+
+    private static void copyCharacterStyle(IDMLStyleDef source, ASTStyleDef target) {
+        if (source == null || target == null) return;
+        target.fontFamily(source.fontFamily());
+        target.fontStyle(source.fontStyle());
+        if (source.fontSize() != null && source.fontSize() > 0) {
+            target.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(source.fontSize()));
+        }
+        if (source.fillColor() != null) {
+            target.textColor(source.fillColor());
+        }
+        if (source.tracking() != null) {
+            target.letterSpacing((short) Math.round(source.tracking() / 10.0));
+        }
+        target.bold(source.bold());
+        target.italic(source.italic());
+        if (source.horizontalScale() != null) {
+            target.horizontalScale((short) Math.round(source.horizontalScale()));
+        }
+        target.underline(source.underline());
+        target.underlineType(source.underlineType());
+        target.underlineColor(source.underlineColor());
+        target.strikeThrough(source.strikeThrough());
     }
 
     private static void copyLeading(IDMLStyleDef source, ASTStyleDef target) {

@@ -5693,8 +5693,12 @@ public class InlineFrameHandler {
             if (completePng != null) directCompleteItems.add(completePng);
             return directCompleteItems;
         }
+        ObjectPlan dropOnlyInlinePlan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
+        boolean repeatedEmptyInlinePlaceholder =
+                isRepeatedEmptyInlineTextFramePlaceholderPlan(dropOnlyInlinePlan);
         boolean hasDirectPlan = hasDirectExecutableInlinePlan(ctx, anchoredObjectId)
-                || ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId);
+                || ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)
+                || repeatedEmptyInlinePlaceholder;
         if (!hasDirectPlan && (closedCarrierItems == null || closedCarrierItems.isEmpty())) return null;
         if (closedCarrierItems != null && !closedCarrierItems.isEmpty()) {
             return closedCarrierItems;
@@ -5736,8 +5740,7 @@ public class InlineFrameHandler {
             return items;
         }
 
-        ObjectPlan dropOnlyInlinePlan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
-        if (isRepeatedEmptyInlineTextFramePlaceholderPlan(dropOnlyInlinePlan)) {
+        if (repeatedEmptyInlinePlaceholder) {
             items.add(createSpaceRunForEmptyAnchor(ctx, anchoredObjectId));
             return items;
         }
