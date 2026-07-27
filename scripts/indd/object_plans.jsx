@@ -5605,7 +5605,10 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
 
     function clippedParentIdForImageSource(sourceId) {
         var image = sourceById ? sourceById[String(sourceId)] : null;
-        if (!image || sourceType(image) !== "Image") return null;
+        var imageType = sourceType(image);
+        if (!image || (imageType !== "Image" && imageType !== "PDF" && imageType !== "EPS")) {
+            return null;
+        }
         if (image.parentId === null || image.parentId === undefined) return null;
         var parent = sourceById[String(image.parentId)];
         if (!parent) return null;
@@ -5631,6 +5634,20 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
         return out;
     }
 
+    function otherPlanOwnsClipParent(plan, clipParentId) {
+        for (var oi = 0; oi < plans.length; oi++) {
+            var owner = plans[oi];
+            if (!owner || owner === plan || !_objectPlanHasVisibleVisual(owner)) continue;
+            if (Number(owner.pageIndex) !== Number(plan.pageIndex)) continue;
+            if (owner.ownershipSlot !== "CONTENT_VISUAL_SLOT") continue;
+            var ownerVisibleIds = _sourceIdsUnion(
+                    owner.visualSourceObjectIds || [],
+                    owner.exportSourceObjectIds || []);
+            if (_sourceIdsContain(ownerVisibleIds, clipParentId)) return true;
+        }
+        return false;
+    }
+
     for (var pi = 0; pi < plans.length; pi++) {
         var plan = plans[pi];
         if (!_objectPlanHasVisibleVisual(plan)) continue;
@@ -5648,7 +5665,8 @@ function _resolveObjectPlanRawClippedImageVisualSources(objectPlans, sourceById)
             var sourceId = plan.visualSourceObjectIds[vi];
             var clipParentId = clippedParentIdForImageSource(sourceId);
             if (clipParentId !== null && clipParentId !== undefined) {
-                if (hiddenSet[String(clipParentId)] === true) {
+                if (hiddenSet[String(clipParentId)] === true
+                        || otherPlanOwnsClipParent(plan, clipParentId)) {
                     changed = true;
                     pruned = true;
                     prunedSourceCount++;
