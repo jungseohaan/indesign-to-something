@@ -8035,6 +8035,8 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         });
     }
 
+    var placementBounds = _objectPlanPlacementBounds(bundle, visualAction, placement, sourceById);
+
     return {
         objectPlanId: _objectPlanId(bundle, index),
         bundleId: bundle.bundleId || null,
@@ -8123,7 +8125,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         visualLayer: _objectPlanVisualLayer(bundle, visualAction, placement, sourceById),
         zOrder: bundle.zOrder !== undefined ? bundle.zOrder : null,
         reason: _objectPlanReason(bundle, migrationStatus),
-        bounds: bundle.bounds || null,
+        bounds: placementBounds,
         renderSourceBounds: bundle.renderSourceBounds || null,
         cropSourceBounds: bundle.cropSourceBounds || null,
         ownershipSlot: ownershipSlot,
@@ -8135,6 +8137,13 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         executable: bundle.executable === true,
         required: bundle.required === true
     };
+}
+
+function _objectPlanPlacementBounds(bundle, visualAction, placement, sourceById) {
+    if (_objectPlanBundleIsCrossPageSourceExtentBackdrop(bundle, visualAction, placement, sourceById)) {
+        return (bundle.cropSourceBounds || bundle.renderSourceBounds || bundle.bounds || null);
+    }
+    return bundle ? (bundle.bounds || null) : null;
 }
 
 function _normalizeObjectPlanBundle(bundle, sourceById) {
@@ -9212,6 +9221,10 @@ function _objectPlanVisualLayer(bundle, visualAction, placement, sourceById) {
             && _objectPlanIsPrimitiveBackgroundLayerShell(bundle, sourceById)) {
         return "CONTENT_BACKDROP";
     }
+    if (_objectPlanBundleIsCrossPageSourceExtentBackdrop(
+            bundle, visualAction, placement, sourceById)) {
+        return "CONTAINER_BACKDROP";
+    }
     if (bundle.policyLayer === "BACKGROUND") return "CONTAINER_BACKDROP";
     if (bundle.policyLayer === "DECORATION") {
         if (bundle.connectorDecorationVisual === true) {
@@ -9228,6 +9241,97 @@ function _objectPlanVisualLayer(bundle, visualAction, placement, sourceById) {
         return "LABEL_BACKDROP";
     }
     return "CONTENT_VISUAL";
+}
+
+function _objectPlanBundleIsCrossPageSourceExtentBackdrop(bundle, visualAction, placement, sourceById) {
+    if (!bundle || !sourceById) return false;
+    if (bundle.passId !== "pass.decoration_groups") return false;
+    if ((placement || _objectPlanPlacement(bundle)) !== "FLOATING") return false;
+    if ((visualAction || bundle.visualAction) !== "PLACE_TEXT_SHELL") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (!bundle.bounds || bundle.bounds.length < 4) return false;
+    var extent = bundle.cropSourceBounds || bundle.renderSourceBounds;
+    if (!extent || extent.length < 4) return false;
+    if (!_objectPlanBoundsContains(extent, bundle.bounds, 0.05)) return false;
+    if (!_objectPlanBoundsMateriallyLarger(extent, bundle.bounds, 0.5)) return false;
+    if (!_objectPlanBundleHasCrossPageVisualSource(bundle, sourceById)
+            && !_objectPlanBundleHasRootSourceExtentBackdrop(bundle, sourceById)) {
+        return false;
+    }
+    return _objectPlanBundleHasOnlyVectorShellSources(bundle, sourceById);
+}
+
+function _objectPlanBundleHasCrossPageVisualSource(bundle, sourceById) {
+    var pageIndex = Number(bundle.pageIndex);
+    if (isNaN(pageIndex)) return false;
+    var ids = _sourceIdsUnion(
+            _sourceIdsUnion(bundle.visualSourceObjectIds || [], bundle.exportSourceObjectIds || []),
+            bundle.sourceObjectIds || []);
+    for (var i = 0; i < ids.length; i++) {
+        var src = sourceById ? sourceById[String(ids[i])] : null;
+        if (!src || src.pageIndex === null || src.pageIndex === undefined) continue;
+        var sourcePageIndex = Number(src.pageIndex);
+        if (!isNaN(sourcePageIndex) && sourcePageIndex !== pageIndex) return true;
+    }
+    return false;
+}
+
+function _objectPlanBundleHasRootSourceExtentBackdrop(bundle, sourceById) {
+    if (!bundle || !sourceById || !bundle.bounds || bundle.bounds.length < 4) return false;
+    var rootIds = bundle.sourceRootObjectIds && bundle.sourceRootObjectIds.length > 0
+            ? bundle.sourceRootObjectIds
+            : (bundle.primarySourceObjectId !== null && bundle.primarySourceObjectId !== undefined
+                    ? [ bundle.primarySourceObjectId ]
+                    : []);
+    for (var i = 0; i < rootIds.length; i++) {
+        var root = sourceById[String(rootIds[i])];
+        if (!root || !root.bounds || root.bounds.length < 4) continue;
+        var kind = _objectPlanSourceKind(root);
+        if (kind !== "Group" && kind !== "Rectangle" && kind !== "Polygon" && kind !== "Oval") {
+            continue;
+        }
+        if (!_objectPlanBoundsContains(root.bounds, bundle.bounds, 0.05)) continue;
+        if (_objectPlanBoundsMateriallyLarger(root.bounds, bundle.bounds, 0.5)) return true;
+    }
+    return false;
+}
+
+function _objectPlanBundleHasOnlyVectorShellSources(bundle, sourceById) {
+    var ids = _sourceIdsUnion(
+            _sourceIdsUnion(bundle.visualSourceObjectIds || [], bundle.exportSourceObjectIds || []),
+            bundle.sourceObjectIds || []);
+    if (!ids || ids.length === 0) return false;
+    var hasVector = false;
+    for (var i = 0; i < ids.length; i++) {
+        var src = sourceById ? sourceById[String(ids[i])] : null;
+        if (!src) continue;
+        var kind = _objectPlanSourceKind(src);
+        if (kind === "Image" || kind === "PDF") return false;
+        if (kind === "Rectangle" || kind === "Polygon" || kind === "Oval"
+                || kind === "GraphicLine" || kind === "Group") {
+            hasVector = true;
+            continue;
+        }
+        if (_objectPlanSourceKindIsTextOnly(kind)) continue;
+        return false;
+    }
+    return hasVector;
+}
+
+function _objectPlanBoundsContains(outer, inner, eps) {
+    if (!outer || !inner || outer.length < 4 || inner.length < 4) return false;
+    eps = eps || 0;
+    return Number(outer[0]) <= Number(inner[0]) + eps
+            && Number(outer[1]) <= Number(inner[1]) + eps
+            && Number(outer[2]) >= Number(inner[2]) - eps
+            && Number(outer[3]) >= Number(inner[3]) - eps;
+}
+
+function _objectPlanBoundsMateriallyLarger(outer, inner, eps) {
+    if (!outer || !inner || outer.length < 4 || inner.length < 4) return false;
+    eps = eps || 0;
+    return (Number(outer[3]) - Number(outer[1])) > (Number(inner[3]) - Number(inner[1])) + eps
+            || (Number(outer[2]) - Number(outer[0])) > (Number(inner[2]) - Number(inner[0])) + eps;
 }
 
 function _objectPlanMigrationStatus(bundle, sourceById) {
