@@ -97,6 +97,10 @@ public class HwpxConverterContext {
     private final Map<Integer, Integer> outputZOrderByRaw = new LinkedHashMap<>();
     private int foregroundOutputZOrder = 1;
 
+    public HWPXFile hwpxFile() {
+        return hwpxFile;
+    }
+
     public void addWarning(String category, String detail) {
         warnings.add("[" + category + "] " + detail);
     }

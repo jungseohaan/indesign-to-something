@@ -1,6 +1,8 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBreak;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
@@ -43,10 +45,45 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Arrays;
 
 public class StoryConverterTest {
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void composedLineRecoveryDoesNotDuplicateExistingSourceLineBreakAroundEquations()
+            throws Exception {
+        ASTParagraph paragraph = new ASTParagraph();
+        ASTTextRun marker = new ASTTextRun();
+        marker.text("⑴\t");
+        paragraph.addItem(marker);
+        paragraph.addItem(new ASTEquation("(a+3)(a-3)", "EH_FONT"));
+        paragraph.addItem(new ASTEquation("=a^{2}-3^{2}", "EH_FONT"));
+        paragraph.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
+        paragraph.addItem(new ASTEquation("=a^{2}-9", "EH_FONT"));
+
+        ResolvedTextFrame.ComposedLine first = new ResolvedTextFrame.ComposedLine();
+        first.text("⑴\t(a+3)(a-3)\u0007=aÛ`-3Û`\t\u2028");
+        ResolvedTextFrame.ComposedLine second = new ResolvedTextFrame.ComposedLine();
+        second.text("=aÛ`-9\r");
+
+        Method insert = StoryConverter.class.getDeclaredMethod(
+                "insertComposedLineBreaks", ASTParagraph.class, java.util.List.class);
+        insert.setAccessible(true);
+        boolean changed = (Boolean) insert.invoke(null, paragraph, Arrays.asList(first, second));
+
+        Assert.assertFalse(changed);
+        int lineBreaks = 0;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTBreak
+                    && ((ASTBreak) item).breakType() == ASTBreak.BreakType.LINE) {
+                lineBreaks++;
+            }
+        }
+        Assert.assertEquals(1, lineBreaks);
+        Assert.assertEquals("⑴\t", ((ASTTextRun) paragraph.items().get(0)).text());
+    }
 
     @Test
     public void inlinePngPlanWithSeparateHwpxTextDoesNotBecomeInlineTextFrame() {
