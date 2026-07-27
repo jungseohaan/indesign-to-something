@@ -74,6 +74,17 @@ public class EHFontEquationConverterTest {
     }
 
     @Test
+    public void arithmeticPrefixBeforeSqrtStaysInSameEquation() {
+        // InDesign GREP applies EH상부자 to the baseline arithmetic prefix as
+        // well as to the radicand.  ASCII in that font is still baseline math,
+        // so the prefix must not be detached from the following radical.
+        Assert.assertEquals("4-sqrt{3},~-2+sqrt{11}",
+                convert(sup("4-"), fracUpper("'"), sup("3,"),
+                        body(" "), sup("-2+"), fracUpper("'"),
+                        sup("1"), fracUpper(""), sup("1")));
+    }
+
+    @Test
     public void sqrt_split_number_10() {
         // '1[8C]0 → √10 (0x8C 자리구분자 제거하고 이어붙임)
         Assert.assertEquals("sqrt{10}",

@@ -9,6 +9,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class RunPropertyResolverTest {
     @Test
@@ -101,5 +102,20 @@ public class RunPropertyResolverTest {
 
         assertEquals(Integer.valueOf(800), run.fontSizeHwpunits());
         assertEquals(Short.valueOf((short) 45), run.horizontalScale());
+    }
+
+    @Test
+    public void ehSangbujaItalicStyleIsMathTypographyNotSuperscript() {
+        ResolvedRun rr = new ResolvedRun();
+        rr.charStyle("CharacterStyle/상부자(이탤릭)");
+        ASTTextRun run = new ASTTextRun();
+
+        TextStyleApplicator.applyResolvedStyle(
+                run,
+                rr,
+                (java.util.function.Function<String, String>) null,
+                new TextStyleApplicator.ResolvedStyleOptions());
+
+        assertFalse(run.superscript());
     }
 }

@@ -15,6 +15,12 @@ import java.util.List;
 
 public class RunBuilderTest {
     @Test
+    public void ehOverlineMarkerDoesNotExtendLatinWordStreak() {
+        Assert.assertFalse(RunBuilder.containsLongLatinWord("OAÓ", 3));
+        Assert.assertTrue(RunBuilder.containsLongLatinWord("ABC", 3));
+    }
+
+    @Test
     public void splitResolvedRunsIgnoresLayoutTabRemovedFromIdmlText() {
         ResolvedBuildContext ctx = new ResolvedBuildContext();
         ctx.resolvedData = new ResolvedData();

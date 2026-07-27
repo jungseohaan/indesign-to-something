@@ -17,6 +17,14 @@ import org.junit.Test;
 
 public class MathProcessorTest {
     @Test
+    public void radicalBraceIsClosedBeforeItsOuterParenthesis() {
+        Assert.assertEquals(
+                "sqrt{(-9)^{2}}+left(-sqrt{13} right)^{2}",
+                MathProcessor.repairCrossingFormulaDelimiters(
+                        "sqrt{(-9)^{2}}+left(-sqrt{13 right)^{2}}"));
+    }
+
+    @Test
     public void normalLatinTextWithHyphenDoesNotBecomeFormulaEquation() {
         ASTParagraph para = new ASTParagraph();
         ASTTextRun run = new ASTTextRun();

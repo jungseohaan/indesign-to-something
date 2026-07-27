@@ -1,14 +1,113 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 public class StoryLoaderTest {
+    @Test
+    public void grepMathDigitAfterInlineAnswerBoundaryRemainsEquationOwned() {
+        IDMLCharacterRun before = new IDMLCharacterRun();
+        before.content("\uFFFC\u2003");
+        IDMLCharacterRun digit = decimalRun("2", 10.0);
+        IDMLCharacterRun after = new IDMLCharacterRun();
+        after.content("\u2002");
+
+        List<IDMLCharacterRun> runs = Arrays.asList(before, digit, after);
+
+        Assert.assertTrue(StoryLoader.shouldEmitGrepSangbujaItalicNumber(digit, runs, 1));
+    }
+
+    @Test
+    public void splitEhDecimalRunsAreCoalescedBeforeMathPlanning() {
+        IDMLCharacterRun zero = decimalRun("0", 9.5);
+        IDMLCharacterRun point = decimalRun(".", 9.0);
+        IDMLCharacterRun two = decimalRun("2", 9.5);
+
+        List<IDMLCharacterRun> merged = StoryLoader.coalesceSangbujaItalicDecimalRuns(
+                Arrays.asList(zero, point, two));
+
+        Assert.assertEquals(1, merged.size());
+        Assert.assertEquals("0.2", merged.get(0).content());
+        Assert.assertEquals(Double.valueOf(9.5), merged.get(0).fontSize());
+    }
+
+    @Test
+    public void grepRatioValueAndColonBecomeEquationCandidateAndPlainTextSeparator() {
+        IDMLCharacterRun ratio = new IDMLCharacterRun();
+        ratio.content("1`:`");
+        ratio.fontFamily("EH상부자");
+        ratio.fontStyle("Italic");
+        ratio.baselineShift(-0.5);
+        ratio.grepMathFont(true);
+        ratio.grepAppliedCharStyle("CharacterStyle/태광10.5%3a상부자(이탤릭) 10.5");
+
+        List<IDMLCharacterRun> split =
+                StoryLoader.splitGrepRatioSeparatorRuns(Collections.singletonList(ratio));
+
+        Assert.assertEquals(2, split.size());
+        Assert.assertEquals("1", split.get(0).content());
+        Assert.assertTrue(split.get(0).grepMathFont());
+        Assert.assertEquals("\u2009:\u2009", split.get(1).content());
+        Assert.assertFalse(split.get(1).grepMathFont());
+        Assert.assertNull(split.get(1).fontFamily());
+        Assert.assertNull(split.get(1).fontStyle());
+        Assert.assertNull(split.get(1).baselineShift());
+
+        IDMLCharacterRun prose = new IDMLCharacterRun();
+        prose.content("금강비는 ");
+        List<IDMLCharacterRun> context = Arrays.asList(prose, split.get(0), split.get(1));
+        Assert.assertTrue(StoryLoader.shouldEmitGrepSangbujaItalicNumber(
+                split.get(0), context, 1));
+    }
+
+    private static IDMLCharacterRun decimalRun(String text, double size) {
+        IDMLCharacterRun run = new IDMLCharacterRun();
+        run.content(text);
+        run.fontSize(size);
+        run.fontFamily("EH상부자");
+        run.grepAppliedCharStyle("CharacterStyle/태광9.5%3a상부자(이탤릭) 9.5");
+        return run;
+    }
+
+    @Test
+    public void sourceTabsBeforeChoiceMarkersAreRestoredAfterMathSplitting() {
+        IDMLParagraph source = new IDMLParagraph();
+        IDMLCharacterRun sourceRun = new IDMLCharacterRun();
+        sourceRun.content("⑴ 0<a<1\t⑵ a=1\t⑶ a>1");
+        source.addCharacterRun(sourceRun);
+
+        ASTParagraph para = new ASTParagraph();
+        ASTTextRun one = new ASTTextRun();
+        one.text("⑴");
+        para.addItem(one);
+        para.addItem(new ASTEquation("0<a<1", "EH_FONT"));
+        ASTTextRun two = new ASTTextRun();
+        two.text("⑵");
+        para.addItem(two);
+        para.addItem(new ASTEquation("a=1", "EH_FONT"));
+        ASTTextRun three = new ASTTextRun();
+        three.text("⑶");
+        para.addItem(three);
+
+        StoryLoader.restoreSourceTabsBeforeMarkers(para, source);
+
+        Assert.assertEquals("\t", ((ASTTextRun) para.items().get(2)).text());
+        Assert.assertEquals("⑵", ((ASTTextRun) para.items().get(3)).text());
+        Assert.assertEquals("\t", ((ASTTextRun) para.items().get(5)).text());
+        Assert.assertEquals("⑶", ((ASTTextRun) para.items().get(6)).text());
+    }
     @Test
     public void resolvedMathFontClassifiesIdmlRunBeforeEquationGrouping() {
         ResolvedBuildContext ctx = new ResolvedBuildContext();
@@ -41,6 +140,40 @@ public class StoryLoaderTest {
         Assert.assertTrue(StoryLoader.hasResolvedStructuralMathFont("NP_ISHS"));
         Assert.assertFalse(StoryLoader.hasResolvedStructuralMathFont("BT수식H"));
         Assert.assertFalse(StoryLoader.hasResolvedStructuralMathFont("Yoon가변 윤명조100Std_OTF"));
+    }
+
+    @Test
+    public void grepArithmeticPrefixImmediatelyBeforeSqrtRemainsMathOwned() {
+        IDMLCharacterRun prefix = new IDMLCharacterRun();
+        prefix.content("4-");
+        prefix.grepMathFont(true);
+        prefix.grepAppliedCharStyle("CharacterStyle/태광10.5:상부자(이탤릭) 10.5");
+        prefix.fontFamily("EH상부자");
+
+        IDMLCharacterRun hook = new IDMLCharacterRun();
+        hook.content("'");
+        hook.fontFamily("EH분수대문자");
+
+        Assert.assertTrue(StoryLoader.isGrepMathPrefixBeforeEHStructure(
+                prefix, Arrays.asList(prefix, hook), 0));
+        Assert.assertTrue(prefix.isEHFont());
+    }
+
+    @Test
+    public void grepArithmeticPrefixDoesNotCrossWhitespaceIntoSqrt() {
+        IDMLCharacterRun prefix = new IDMLCharacterRun();
+        prefix.content("4-");
+        prefix.grepMathFont(true);
+
+        IDMLCharacterRun space = new IDMLCharacterRun();
+        space.content(" ");
+
+        IDMLCharacterRun hook = new IDMLCharacterRun();
+        hook.content("'");
+        hook.fontFamily("EH분수대문자");
+
+        Assert.assertFalse(StoryLoader.isGrepMathPrefixBeforeEHStructure(
+                prefix, Arrays.asList(prefix, space, hook), 0));
     }
 
     @Test
@@ -77,6 +210,29 @@ public class StoryLoaderTest {
 
         Assert.assertEquals("EH분수대문자", idml.fontFamily());
         Assert.assertEquals("Black", idml.fillColor());
+    }
+
+    @Test
+    public void idmlGrepMathEvidencePreventsResolvedCellTextFlattening() {
+        IDMLTableCell cell = new IDMLTableCell();
+        IDMLParagraph paragraph = new IDMLParagraph();
+
+        IDMLCharacterRun body = new IDMLCharacterRun();
+        body.content("다음 대화를 읽고 ");
+        paragraph.addCharacterRun(body);
+
+        IDMLCharacterRun variable = new IDMLCharacterRun();
+        variable.content("a");
+        variable.grepMathFont(true);
+        variable.grepAppliedCharStyle("CharacterStyle/상부자(이탤릭)");
+        paragraph.addCharacterRun(variable);
+
+        IDMLCharacterRun particle = new IDMLCharacterRun();
+        particle.content("가");
+        paragraph.addCharacterRun(particle);
+        cell.addParagraph(paragraph);
+
+        Assert.assertTrue(StoryLoader.hasIdmlCellMathEvidence(cell));
     }
 
     @Test

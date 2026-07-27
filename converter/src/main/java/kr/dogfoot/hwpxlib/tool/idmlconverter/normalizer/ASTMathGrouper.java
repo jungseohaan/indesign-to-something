@@ -1666,6 +1666,23 @@ public class ASTMathGrouper {
     }
 
     private static void addEquationOrTextFallback(String script, String sourceType, ASTParagraph para) {
+        int commaSpace = findTopLevelCommaSpace(script);
+        if (commaSpace >= 0) {
+            String before = script.substring(0, commaSpace).trim();
+            if (!before.isEmpty()) {
+                addEquationOrTextFallback(before, sourceType, para);
+            }
+            ASTTextRun separator = new ASTTextRun();
+            separator.text(", ");
+            para.addItem(separator);
+            int after = commaSpace + 1;
+            while (after < script.length() && script.charAt(after) == '~') after++;
+            String rest = script.substring(after).trim();
+            if (!rest.isEmpty()) {
+                addEquationOrTextFallback(rest, sourceType, para);
+            }
+            return;
+        }
         if (shouldEmitConvertedEquation(script, null)) {
             para.addItem(new ASTEquation(script, sourceType));
             return;
@@ -1673,6 +1690,31 @@ public class ASTMathGrouper {
         ASTTextRun textRun = new ASTTextRun();
         textRun.text(FormulaClassifier.hwpScriptFallbackText(script));
         para.addItem(textRun);
+    }
+
+    /**
+     * 수식 나열 사이의 source 쉼표+공백({@code ,~}) 경계를 찾는다.
+     * 괄호·중괄호 안의 쉼표와 공백 없는 숫자 구분 쉼표는 수식 내부에 남긴다.
+     */
+    private static int findTopLevelCommaSpace(String script) {
+        if (script == null || script.length() < 2) return -1;
+        int brace = 0;
+        int paren = 0;
+        int bracket = 0;
+        for (int i = 0; i + 1 < script.length(); i++) {
+            char c = script.charAt(i);
+            if (c == '{') brace++;
+            else if (c == '}' && brace > 0) brace--;
+            else if (c == '(') paren++;
+            else if (c == ')' && paren > 0) paren--;
+            else if (c == '[') bracket++;
+            else if (c == ']' && bracket > 0) bracket--;
+            else if (c == ',' && script.charAt(i + 1) == '~'
+                    && brace == 0 && paren == 0 && bracket == 0) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static boolean isStandaloneSqrtSymbolScript(String script, List<IDMLCharacterRun> mathRuns) {

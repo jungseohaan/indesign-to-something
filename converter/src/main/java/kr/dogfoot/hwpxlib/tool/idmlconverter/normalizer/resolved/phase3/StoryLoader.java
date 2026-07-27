@@ -243,6 +243,8 @@ public class StoryLoader {
             runs = ASTMathGrouper.splitChemicalFormulaMixedRuns(runs);
             ASTRunConverter.convertCircledNumberRuns(runs);
             enrichMathFontsFromResolvedRuns(ctx, runs, resolvedRuns);
+            runs = coalesceSangbujaItalicDecimalRuns(runs);
+            runs = splitGrepRatioSeparatorRuns(runs);
             addUnderlineBlankTabStop(ctx, storyId, paraIndex, para, runs);
             sc.hasTabStops = para.hasTabStops();
             ConversionTiming.addCounter("phase3.storyLoader.runPrepNanos",
@@ -304,9 +306,7 @@ public class StoryLoader {
                 // 여러 겹이라 순수 숫자를 텍스트로 폴백한다 → 여기서 열린 그룹을 flush 하고
                 // ASTEquation 으로 직접 방출해 모든 게이트를 우회한다(x 변수의 LATIN_VAR
                 // 경로와 동형). 과학 화학식은 `상부자(이탤릭)` 미사용(전수 0건)이라 무영향.
-                if (isGrepSangbujaItalicNumber(run) && !hasIdmlInlineAnchor(run)
-                        && isBodyNumberContext(runs, idx)
-                        && mathGroup.isEmpty() && ehMathGroup.isEmpty() && npMathGroup.isEmpty()) {
+                if (shouldEmitGrepSangbujaItalicNumber(run, runs, idx)) {
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
                     kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
                             new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation();
@@ -360,7 +360,9 @@ public class StoryLoader {
                     String ct = run.content();
                     boolean isSingleLatinVar = ct != null && ct.trim().length() == 1
                             && Character.isLetter(ct.trim().charAt(0));
-                    if (!isSingleLatinVar) {
+                    boolean isArithmeticPrefixOfEHStructure =
+                            isGrepMathPrefixBeforeEHStructure(run, runs, idx);
+                    if (!isSingleLatinVar && !isArithmeticPrefixOfEHStructure) {
                         run.grepMathFont(false);
                         String ff = run.fontFamily();
                         if (ff != null && ff.contains("BT수식")) {
@@ -374,6 +376,8 @@ public class StoryLoader {
                     String ct = run.content();
                     boolean isSingleLatinVar = ct != null && ct.trim().length() == 1
                             && Character.isLetter(ct.trim().charAt(0));
+                    boolean isArithmeticPrefixOfEHStructure =
+                            isGrepMathPrefixBeforeEHStructure(run, runs, idx);
                     // 이 런 또는 근처 런(±5)에 3자+ 영단어가 있으면 이름/약어 그룹 → 리셋
                     boolean nearLongWord = RunBuilder.containsLongLatinWord(ct, 3);
                     if (!nearLongWord) {
@@ -388,7 +392,9 @@ public class StoryLoader {
                     // "a가 √a 보다 항상 더 큰지 말해 보자." → sqrt{a}. 로 잘림).
                     boolean koreanOnly = EHTextClassifier.containsKorean(ct)
                             && EHTextClassifier.isKoreanOnly(ct);
-                    if ((!paraHasMathSymbols && !isSingleLatinVar) || nearLongWord || koreanOnly) {
+                    if (((!paraHasMathSymbols && !isSingleLatinVar)
+                            && !isArithmeticPrefixOfEHStructure)
+                            || nearLongWord || koreanOnly) {
                         run.fontFamily(null);
                         run.fontStyle(null);
                         run.appliedCharacterStyle(null);
@@ -447,6 +453,8 @@ public class StoryLoader {
                         && (run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
+                        || (ehMathGroup.isEmpty()
+                            && isGrepMathPrefixBeforeEHStructure(run, runs, idx))
                         || (ehMathGroup.isEmpty() && ASTMathGrouper.isPreEHMathRun(run, runs, idx))
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
                         || (!ehMathGroup.isEmpty() && MathProcessor.isEHSqrtContent(run, ehMathGroup)));
@@ -805,6 +813,9 @@ public class StoryLoader {
             // 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리
             RunPostProcessor.convertItalicRunsToEquations(para);
 
+            // 본문 텍스트로 샌 GREP 분수(;2!;·;;Á7°;;)를 인라인 수식으로 변환 (SPEC-081 후속)
+            RunPostProcessor.convertGrepFractionTextRuns(para);
+
             // SPEC-055(text-attribute): resolved 가 문단 전체를 단일 유채색으로
             // 보고하면, 매칭 실패(LOW)로 색을 잃은 런에도 그 색을 채운다
             // (p26 실측: 수식이 낀 줄의 조각들이 검정으로 빵꾸).
@@ -1148,7 +1159,8 @@ public class StoryLoader {
             }
         }
         if (resolvedCell != null
-                && resolvedCell.hasTextRuns()) {
+                && resolvedCell.hasTextRuns()
+                && !hasIdmlCellMathEvidence(idmlCell)) {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
             if (resolvedCellParagraphs != null && !resolvedCellParagraphs.isEmpty()) {
@@ -1158,6 +1170,7 @@ public class StoryLoader {
         }
         ResolvedStory cellResolvedStory = findResolvedStoryForCell(ctx, idmlCell, cellStoryId);
         String effectiveCellStoryId = cellStoryId != null ? cellStoryId : firstCellStoryId(idmlCell);
+        List<IDMLParagraph> resultSourceParagraphs = new ArrayList<>();
         int paraIndex = 0;
         for (IDMLParagraph ip : idmlCell.paragraphs()) {
             if (ip == null) { paraIndex++; continue; }
@@ -1185,13 +1198,28 @@ public class StoryLoader {
                     effectiveCellStoryId, paraIndex, sc, para);
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             result.add(para);
+            resultSourceParagraphs.add(ip);
             ConversionTiming.addCounter("phase3.storyLoader.cell.paragraphs", 1);
             paraIndex++;
         }
         applyResolvedCellPlannedInlineAnchors(ctx, idmlCell, resolvedCell, result);
         removeDuplicateInlineObjectsFromCellFlow(ctx, result);
-        for (ASTParagraph para : result) {
+        for (int resultIndex = 0; resultIndex < result.size(); resultIndex++) {
+            ASTParagraph para = result.get(resultIndex);
             MathProcessor.convertMathRunsInParagraph(ctx, para);
+            // IDML table-cell flow must finish through the same semantic math
+            // post-processors as ordinary stories and resolved-cell flow.
+            // Without these calls, source-authored EH italic ranges such as
+            // variables and inequalities remain ASTTextRun in table cells even
+            // though the identical source range becomes ASTEquation outside a
+            // table.  The container must not change text/math ownership.
+            RunPostProcessor.splitOverlineRuns(para);
+            RunPostProcessor.convertItalicRunsToEquations(para);
+            RunPostProcessor.convertGrepFractionTextRuns(para);
+            RunPostProcessor.resolveInheritedEquationSizes(para);
+            if (resultIndex < resultSourceParagraphs.size()) {
+                restoreSourceTabsBeforeMarkers(para, resultSourceParagraphs.get(resultIndex));
+            }
             recordCellInlineEmbeddedIds(ctx, para);
         }
         if (!hasMeaningfulCellParagraphContent(result)
@@ -1200,6 +1228,71 @@ public class StoryLoader {
             return new ArrayList<>();
         }
         return result;
+    }
+
+    static void restoreSourceTabsBeforeMarkers(ASTParagraph para, IDMLParagraph sourceParagraph) {
+        if (para == null || sourceParagraph == null || sourceParagraph.characterRuns() == null) return;
+        List<String> markers = new ArrayList<>();
+        StringBuilder sourceText = new StringBuilder();
+        for (IDMLCharacterRun run : sourceParagraph.characterRuns()) {
+            String text = run != null ? run.content() : null;
+            if (text != null) sourceText.append(text);
+        }
+        String completeSourceText = sourceText.toString();
+        for (int tab = completeSourceText.indexOf('\t'); tab >= 0;
+             tab = completeSourceText.indexOf('\t', tab + 1)) {
+            int start = tab + 1;
+            while (start < completeSourceText.length()
+                    && completeSourceText.charAt(start) == ' ') start++;
+            String marker = listMarkerAt(completeSourceText, start);
+            if (marker != null) markers.add(marker);
+        }
+        for (String marker : markers) {
+            for (int i = 0; i < para.items().size(); i++) {
+                ASTInlineItem item = para.items().get(i);
+                if (!(item instanceof ASTTextRun)
+                        || !marker.equals(((ASTTextRun) item).text())) continue;
+                if (i > 0 && para.items().get(i - 1) instanceof ASTTextRun
+                        && ((ASTTextRun) para.items().get(i - 1)).text().endsWith("\t")) break;
+                ASTTextRun tabRun = new ASTTextRun();
+                tabRun.text("\t");
+                para.items().add(i, tabRun);
+                break;
+            }
+        }
+    }
+
+    private static String listMarkerAt(String text, int start) {
+        if (text == null || start >= text.length()) return null;
+        char first = text.charAt(start);
+        if (first >= '⑴' && first <= '⒇') return String.valueOf(first);
+        if (first != '(') return null;
+        int end = text.indexOf(')', start + 1);
+        if (end < 0) return null;
+        String digits = text.substring(start + 1, end);
+        return digits.matches("\\d{1,2}") ? text.substring(start, end + 1) : null;
+    }
+
+    /**
+     * IDML/GREP math ranges are the source of truth for text-vs-equation ownership.
+     * A resolved table cell may flatten the entire sentence into one body-text run,
+     * losing GREP ranges such as {@code a>0} and the variable in {@code a가}.  In that
+     * case the cell must use the IDML paragraph pipeline rather than replacing it
+     * with the flattened resolved text flow.
+     */
+    static boolean hasIdmlCellMathEvidence(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (idmlCell == null || idmlCell.paragraphs() == null) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null) continue;
+                if (run.grepMathFont() || run.isMathFont()) return true;
+                String grepStyle = run.grepAppliedCharStyle();
+                if (grepStyle != null && EHFontGlyphMap.isEHFontStyle(grepStyle)) return true;
+            }
+        }
+        return false;
     }
 
     private static List<ResolvedRun> splitCellMarkerBodyRunFromSiblingStyle(
@@ -1457,6 +1550,9 @@ public class StoryLoader {
                 MathProcessor.convertMathRunsInParagraph(ctx, para);
                 RunPostProcessor.splitOverlineRuns(para);
                 RunPostProcessor.convertItalicRunsToEquations(para);
+
+            // 본문 텍스트로 샌 GREP 분수(;2!;·;;Á7°;;)를 인라인 수식으로 변환 (SPEC-081 후속)
+            RunPostProcessor.convertGrepFractionTextRuns(para);
                 RunBuilder.resetBulletParagraphColors(ctx, para);
                 recordCellInlineEmbeddedIds(ctx, para);
                 if (para.items() != null && !para.items().isEmpty()) {
@@ -3505,6 +3601,120 @@ public class StoryLoader {
         return hasDigit;
     }
 
+    /**
+     * 원본 GREP 수식 숫자를 독립 수식으로 materialize 할지 결정한다.
+     *
+     * <p>인라인 답란은 앞 수식 조각을 시각적으로 끝내지만 IDML 런 그룹 상태에는
+     * 이전 EH 조각이 남을 수 있다. 열린 그룹의 유무는 source math ownership 증거가
+     * 아니므로 판정 조건으로 쓰지 않고, 호출자가 먼저 그룹을 flush 한다.</p>
+     */
+    static boolean shouldEmitGrepSangbujaItalicNumber(
+            IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+        return isGrepSangbujaItalicNumber(run)
+                && !hasIdmlInlineAnchor(run)
+                && isBodyNumberContext(runs, idx);
+    }
+
+    /**
+     * InDesign can assign a smaller decimal-point style, splitting one source decimal into
+     * {@code "0" | "." | "2"}. The body-number fast path would then emit only the last digit as
+     * GREP_NUMBER while the punctuation-only middle run disappears from math grouping. Rejoin
+     * source-adjacent EH 상부자(이탤릭) decimal components before any ownership/materialization
+     * decision so both plain {@code 0.2} and a radical's {@code sqrt{0.2}} stay atomic.
+     */
+    static List<IDMLCharacterRun> coalesceSangbujaItalicDecimalRuns(
+            List<IDMLCharacterRun> runs) {
+        if (runs == null || runs.size() < 3) return runs;
+        List<IDMLCharacterRun> out = new ArrayList<>();
+        for (int i = 0; i < runs.size(); i++) {
+            if (i + 2 < runs.size()
+                    && isSangbujaItalicDigits(runs.get(i))
+                    && isSangbujaItalicDecimalPoint(runs.get(i + 1))
+                    && isSangbujaItalicDigits(runs.get(i + 2))) {
+                IDMLCharacterRun first = runs.get(i);
+                IDMLCharacterRun merged = first.shallowCopyWithoutInlines();
+                merged.content(first.content() + "." + runs.get(i + 2).content());
+                Double maxSize = maxPositiveFontSize(
+                        first.fontSize(), runs.get(i + 1).fontSize(), runs.get(i + 2).fontSize());
+                if (maxSize != null) merged.fontSize(maxSize);
+                out.add(merged);
+                i += 2;
+                continue;
+            }
+            out.add(runs.get(i));
+        }
+        return out;
+    }
+
+    /**
+     * EH 비율 표기에서 한 GREP 런으로 묶인 값과 구분자를 ownership 경계대로 분리한다.
+     *
+     * <p>InDesign source의 {@code 1`:`}는 숫자 1과 콜론 양옆 thin-space marker가
+     * 모두 상부자(이탤릭) GREP 런 하나에 들어 있다. 이를 그대로 텍스트로 폴백하면
+     * 1은 수식에서 빠지고 콜론까지 이탤릭을 상속한다. 값은 원래 GREP 수식 스타일을
+     * 유지하고, {@code `:`} 구분자는 일반 텍스트 {@code thin-space : thin-space}로
+     * materialize 한다.</p>
+     */
+    static List<IDMLCharacterRun> splitGrepRatioSeparatorRuns(
+            List<IDMLCharacterRun> runs) {
+        if (runs == null || runs.isEmpty()) return runs;
+        List<IDMLCharacterRun> out = new ArrayList<>();
+        for (IDMLCharacterRun run : runs) {
+            String text = run != null ? run.content() : null;
+            if (!hasSangbujaItalicStyle(run) || text == null
+                    || !text.matches("[+\\-]?(?:\\d+(?:\\.\\d+)?|[A-Za-z]+)`:`")) {
+                out.add(run);
+                continue;
+            }
+
+            int marker = text.indexOf("`:`");
+            IDMLCharacterRun value = run.shallowCopyWithoutInlines();
+            value.content(text.substring(0, marker));
+            out.add(value);
+
+            IDMLCharacterRun separator = run.shallowCopyWithoutInlines();
+            separator.content("\u2009:\u2009");
+            separator.grepMathFont(false);
+            separator.grepAppliedCharStyle(null);
+            separator.appliedCharacterStyle(null);
+            separator.fontFamily(null);
+            separator.fontStyle(null);
+            separator.position(null);
+            separator.baselineShift(null);
+            out.add(separator);
+        }
+        return out;
+    }
+
+    private static boolean isSangbujaItalicDigits(IDMLCharacterRun run) {
+        return hasSangbujaItalicStyle(run)
+                && run.content() != null
+                && run.content().matches("\\d+");
+    }
+
+    private static boolean isSangbujaItalicDecimalPoint(IDMLCharacterRun run) {
+        return hasSangbujaItalicStyle(run) && ".".equals(run.content());
+    }
+
+    private static boolean hasSangbujaItalicStyle(IDMLCharacterRun run) {
+        if (run == null) return false;
+        String style = run.grepAppliedCharStyle() != null
+                ? run.grepAppliedCharStyle() : run.appliedCharacterStyle();
+        if (style == null) return false;
+        String normalized = style.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%25", "%");
+        return normalized.contains("상부자") && normalized.contains("이탤릭");
+    }
+
+    private static Double maxPositiveFontSize(Double... sizes) {
+        Double max = null;
+        for (Double size : sizes) {
+            if (size != null && size > 0 && (max == null || size > max)) max = size;
+        }
+        return max;
+    }
+
     /** 런에 IDML 인라인 앵커(프레임·그래픽·￼)가 있는가 — 직접 수식 방출 제외용. */
     private static boolean hasIdmlInlineAnchor(IDMLCharacterRun run) {
         if (run == null) return false;
@@ -3538,11 +3748,14 @@ public class StoryLoader {
             return false;
         }
         String c = r.content();
-        // 공백·탭만 있는 런 = 본문 경계
-        if (c == null || c.replace("\t", "").trim().isEmpty()) return true;
+        // 공백·탭만 있는 런 = 본문 경계. InDesign 조판 간격은 ASCII space뿐 아니라
+        // EN/EM/THIN SPACE(U+2000대)를 사용하므로 String.trim()만으로 판정하면
+        // 빈 답란 양옆의 수식 숫자를 일반 텍스트로 오분류한다.
+        if (c == null || isLayoutWhitespaceOnly(c.replace("\uFFFC", ""))) return true;
         // 인접 모서리 문자: 한글이면 본문, 라틴·숫자·연산자면 수식 조각
-        String t = c.trim();
-        char edge = prev ? t.charAt(t.length() - 1) : t.charAt(0);
+        Character edgeValue = edgeNonLayoutWhitespace(c, prev);
+        if (edgeValue == null) return true;
+        char edge = edgeValue;
         if ((edge >= 0xAC00 && edge <= 0xD7AF) || (edge >= 0x3131 && edge <= 0x318E)) return true;
         // 원문자(⑴⑵⑶ ①②③, U+2460~24FF)·괄호숫자 항목 기호 = 본문 답 항목의 경계
         if (edge >= 0x2460 && edge <= 0x24FF) return true;
@@ -3550,11 +3763,72 @@ public class StoryLoader {
         return ",.·:;)）'\"”’]".indexOf(edge) >= 0;
     }
 
+    private static Character edgeNonLayoutWhitespace(String text, boolean fromEnd) {
+        if (text == null || text.isEmpty()) return null;
+        int i = fromEnd ? text.length() - 1 : 0;
+        int step = fromEnd ? -1 : 1;
+        while (i >= 0 && i < text.length()) {
+            char c = text.charAt(i);
+            if (!Character.isWhitespace(c) && !Character.isSpaceChar(c)) return c;
+            i += step;
+        }
+        return null;
+    }
+
+    private static boolean isLayoutWhitespaceOnly(String text) {
+        if (text == null || text.isEmpty()) return true;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!Character.isWhitespace(c) && !Character.isSpaceChar(c)) return false;
+        }
+        return true;
+    }
+
     static boolean hasResolvedStructuralMathFont(String fontFamily) {
         return EHFontGlyphMap.isEHFontFamily(fontFamily)
                 || NPFontGlyphMap.isNPFont(fontFamily)
                 || (BTFontGlyphMap.isBTFontFamily(fontFamily)
                         && !BTFontGlyphMap.isBTBodyTextFont(fontFamily));
+    }
+
+    /**
+     * GREP 수식 범위가 근호 앞의 산술 접두부와 근호 구조 런을 나눠 놓은 경우인지 판정한다.
+     *
+     * <p>예: {@code 4- | ' | 3}에서 {@code 4-}는 상부자(이탤릭) GREP 수식 런이고
+     * 다음 {@code '}는 EH분수대문자 근호 갈고리다. 다문자 GREP 런을 일괄 리셋하면
+     * 근호부터만 수식이 되어 {@code 4-}가 일반 텍스트로 분리된다. source 스타일,
+     * 인접성, 실제 근호 글리프를 모두 확인해 이 경우에는 한 수식 그룹으로 유지한다.</p>
+     */
+    static boolean isGrepMathPrefixBeforeEHStructure(
+            IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+        if (run == null || runs == null || !run.grepMathFont() || hasIdmlInlineAnchor(run)) {
+            return false;
+        }
+        String text = run.content();
+        if (text == null || !text.trim().matches("[+\\-]?(?:\\d+(?:\\.\\d+)?|[A-Za-z])[+\\-*/=<>]+")) {
+            return false;
+        }
+        IDMLCharacterRun next = nextVisibleRunWithoutCrossingWhitespace(runs, idx + 1);
+        if (next == null || next.content() == null) return false;
+        String role = next.fontFamily();
+        if (!EHFontGlyphMap.isFractionNumeratorFont(role)) {
+            role = EHFontGlyphMap.extractFontFromStyle(next.appliedCharacterStyle());
+        }
+        return EHFontGlyphMap.isFractionNumeratorFont(role)
+                && EHFontGlyphMap.isFractionBarDecoration(next.content());
+    }
+
+    private static IDMLCharacterRun nextVisibleRunWithoutCrossingWhitespace(
+            List<IDMLCharacterRun> runs, int start) {
+        for (int i = start; i < runs.size(); i++) {
+            IDMLCharacterRun candidate = runs.get(i);
+            if (candidate == null || candidate.content() == null || candidate.content().isEmpty()) {
+                continue;
+            }
+            if (candidate.content().trim().isEmpty()) return null;
+            return candidate;
+        }
+        return null;
     }
 
     private static void applyCharacterStylePosition(ResolvedBuildContext ctx, IDMLCharacterRun run) {
