@@ -701,6 +701,10 @@ function _appendEditableTextFrameObjectPlans(objectPlans, sourceItems) {
         if (!src || String(src.kind || "") !== "TextFrame") continue;
         if (src.textFrameClass !== "editable") continue;
         if (src.hasText !== true) continue;
+        // The source codes in a visual glyph assembly are drawing primitives,
+        // not searchable text.  Its inline COMPLETE_PNG ObjectPlan is the sole
+        // owner of both the text and visual slots.
+        if (_objectPlanSourceIsInlineVisualGlyphAssembly(src)) continue;
         if (_objectPlanSourceIsInlineRuleBelowWhitespaceTextFrame(src)) continue;
         var id = _objectPlanTextFrameIdValue(src);
         if (id === null || id === undefined) continue;
@@ -1956,7 +1960,21 @@ function _objectPlanSourceIsInlineVisibleTextFrameShell(src) {
         return false;
     }
     if (src.hasTablesInStory === true || src.storyHasVisibleTableCellText === true) return false;
-    return _objectPlanSourceHasVisibleFramePaint(src);
+    return _objectPlanSourceHasVisibleFramePaint(src)
+            || _objectPlanSourceIsInlineVisualGlyphAssembly(src);
+}
+
+function _objectPlanSourceIsInlineVisualGlyphAssembly(src) {
+    if (!src || src.visualGlyphAssemblyRole !== "VISUAL_GLYPH_ASSEMBLY") return false;
+    var kind = String(src.kind || src.type || src.itemType || "");
+    if (kind !== "TextFrame" || src.textFrameClass !== "editable" || src.hasText !== true) return false;
+    if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
+    if (src.hasTablesInStory === true || src.storyHasVisibleTableCellText === true) return false;
+    return src.storyAnchorPlacement === "INLINE"
+            || src.storyTextInlineSlot === true
+            || src.isInline === true
+            || String(src.anchoredPosition || "").toUpperCase() === "INLINE_POSITION"
+            || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION";
 }
 
 function _objectPlanSourceIsFloatingVisibleTextFrameShell(src) {
@@ -2567,6 +2585,15 @@ function _applyPngOwnedTextFrameCleanupObjectPlans(objectPlans, sourceItems) {
     for (var p = 0; p < objectPlans.length; p++) {
         var plan = objectPlans[p];
         if (!plan) continue;
+        // A TextFrame may itself be the atomic COMPLETE_PNG owner (for
+        // source-font visual glyph assemblies).  It is the visible owner, not
+        // the duplicate HWPX text plan that this cleanup pass must suppress.
+        if (plan.textAction === "OWNED_BY_PNG"
+                && plan.materialization === "COMPLETE_PNG"
+                && (plan.visualAction === "PLACE_INLINE_PNG"
+                    || plan.visualAction === "PLACE_FLOATING_PNG")) {
+            continue;
+        }
         if (String(plan.kind || "") === "TextFrame"
                 && plan.primarySourceObjectId !== undefined
                 && plan.primarySourceObjectId !== null) {
@@ -3602,6 +3629,9 @@ function _emptyInlineTextFrameVisualObjectPlan(src, id, pageIndex, zOrder) {
 }
 
 function _inlineVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
+    if (_objectPlanSourceIsInlineVisualGlyphAssembly(src)) {
+        return _inlineVisualGlyphAssemblyObjectPlan(src, id, pageIndex, zOrder);
+    }
     var sourceIds = _internSourceSetIds([id]);
     var sourceSetId = _sourceSetId(sourceIds);
     var cropSourceBounds = _objectPlanInlineTextFrameShellCropBounds(src);
@@ -3672,6 +3702,96 @@ function _inlineVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
         contractStatus: "READY_FOR_STAGE1_IMPORT",
         executable: true,
         required: true
+    };
+}
+
+function _inlineVisualGlyphAssemblyObjectPlan(src, id, pageIndex, zOrder) {
+    var sourceIds = _internSourceSetIds([id]);
+    var sourceSetId = _sourceSetId(sourceIds);
+    // Line-assembly frames are commonly story-anchored but positioned relative
+    // to the page so that one tall glyph assembly can span several text rows.
+    // Preserve that source placement instead of forcing every story anchor into
+    // an inline baseline box.
+    var pagePositioned = String(src.storyAnchorPlacement || "").toUpperCase()
+            === "FLOATING_ANCHORED";
+    var visualAction = pagePositioned ? "PLACE_FLOATING_PNG" : "PLACE_INLINE_PNG";
+    var placement = pagePositioned ? "FLOATING" : "INLINE";
+    var coordinateSpace = pagePositioned ? "PAGE" : "STORY_FLOW";
+    var placementBounds = pagePositioned
+            ? (src.pageRelativeBounds || src.pageRelativeGeometricBounds || src.bounds || null)
+            : (src.bounds || null);
+    return {
+        objectPlanId: "objectPlan.inline_visual_glyph_assembly." + String(id),
+        bundleId: "textFrame.inlineVisualGlyphAssembly." + String(id),
+        candidateId: _candidateId("pass.inline_objects", id, pageIndex)
+                + ".inline_visual_glyph_assembly",
+        passId: "pass.inline_objects",
+        pageIndex: pageIndex,
+        kind: "TextFrame",
+        unit: "INLINE_OBJECT",
+        mode: "COMPLETE_PNG",
+        candidatePurpose: "INLINE_COMPLETE_PNG_TEXT_OWNER",
+        compositeRole: "inline_visual_glyph_assembly",
+        slotRole: "inline_visual_glyph_assembly_slot",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: !pagePositioned,
+        inlineCompositeLayoutDescendant: false,
+        inlineAnchorSourceObjectId: pagePositioned ? null : id,
+        inlineSourceTreeClosed: !pagePositioned,
+        inlineFlowSourceObjectIds: pagePositioned ? [] : sourceIds,
+        pagePositionedAnchoredSource: pagePositioned,
+        connectorDecorationVisual: true,
+        primarySourceObjectId: id,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: sourceSetId,
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: sourceSetId,
+        exportSourceSetId: sourceSetId,
+        hiddenSourceSetId: _sourceSetId([]),
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: sourceIds,
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: { TextFrame: 1 },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: true,
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: true,
+        visualSourceObjectIds: sourceIds,
+        styleSourceObjectIds: [],
+        ownedTextFrameIds: sourceIds,
+        exportSourceObjectIds: sourceIds,
+        exportTargetObjectId: id,
+        atomicExportTargetObjectId: id,
+        atomicExportTargetObjectIds: sourceIds,
+        hiddenTextFrameIds: [],
+        hiddenVisualSourceObjectIds: [],
+        excludedInlineSourceObjectIds: [],
+        materialization: "COMPLETE_PNG",
+        textAction: "OWNED_BY_PNG",
+        visualAction: visualAction,
+        placement: placement,
+        coordinateSpace: coordinateSpace,
+        visualLayer: "CONTENT_VISUAL",
+        zOrder: zOrder,
+        reason: "source_visual_glyph_assembly_owned_by_inline_complete_png",
+        bounds: placementBounds,
+        renderSourceBounds: placementBounds,
+        cropSourceBounds: placementBounds,
+        ownershipSlot: "CONTENT_VISUAL_SLOT",
+        policyLayer: "CONTENT",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_INLINE_COMPLETE_PNG_TEXT_OWNER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
+        executable: true,
+        required: true,
+        completePngTextAllowed: true,
+        sourceVisualGlyphAssemblyRole: src.visualGlyphAssemblyRole,
+        sourceFontFamilies: src.sourceFontFamilies || []
     };
 }
 
