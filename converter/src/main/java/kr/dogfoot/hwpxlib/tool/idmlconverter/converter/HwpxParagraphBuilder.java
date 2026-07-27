@@ -264,9 +264,13 @@ public class HwpxParagraphBuilder {
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
     }
 
-    /** 밑수 없는 지수 수식 앞의 단위 텍스트를 흡수해 "rm <단위>^{n}" 한 덩어리로 만든다. */
+    /**
+     * 밑수 없는 지수 수식 앞의 단위 텍스트를 흡수해 "rm <단위>^{n}" 한 덩어리로 만든다.
+     * 뒤에 쉼표 등 구두점이 붙은 "^{2}," 도 대상(꼬리는 보존). 실측: p19 3cm²,5cm² 에서
+     * 첫 지수가 "^{2}," 라 순수 매칭에 안 걸려 병합이 누락됐다.
+     */
     private static final java.util.regex.Pattern BARE_EXPONENT =
-            java.util.regex.Pattern.compile("\\s*\\^\\{(\\d+)\\}\\s*");
+            java.util.regex.Pattern.compile("\\s*\\^\\{(\\d+)\\}\\s*([,.)\\]]?)\\s*");
     // 원본 3cmÛ`(3cm²)에서 지수 앞에 붙는 단위. 긴 것부터 검사(cm/mm/km 이 m 보다 먼저).
     private static final String[] EXPONENT_UNITS =
             {"cm", "mm", "km", "kg", "m", "g", "L", "t"};
@@ -293,9 +297,10 @@ public class HwpxParagraphBuilder {
             if (text == null || text.isEmpty()) continue;
             String unit = trailingUnit(text);
             if (unit == null) continue;
-            // 텍스트에서 단위 제거, 수식에 rm <단위>^{n} 로 흡수.
+            // 텍스트에서 단위 제거, 수식에 rm <단위>^{n} 로 흡수. 꼬리 구두점은 보존.
             tr.text(text.substring(0, text.length() - unit.length()));
-            eq.hwpScript("rm " + unit + "^{" + m.group(1) + "}");
+            String tail = m.group(2) == null ? "" : m.group(2);
+            eq.hwpScript("rm " + unit + "^{" + m.group(1) + "}" + tail);
         }
     }
 

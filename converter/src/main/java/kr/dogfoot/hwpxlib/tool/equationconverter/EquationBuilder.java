@@ -81,6 +81,7 @@ public class EquationBuilder {
                 .trim();
         result = normalizeStrayEHGlyphs(result);
         result = decodeResidualGrepFraction(result);
+        result = ejectUnitFromRadicand(result);
         return ensureSqrtBoundary(result);
     }
 
@@ -193,6 +194,20 @@ public class EquationBuilder {
             i++;
         }
         return out.toString();
+    }
+
+    /**
+     * 근호 radicand 안에 단위(cm·mm·m…)가 딸려 들어간 것을 근호 밖으로 밀어낸다
+     * (SPEC-081, 실측 p19 √3 cm 이 sqrt&#123;3cm&#125; 로). √는 수치에만 걸리고 단위는
+     * 밖이다: sqrt&#123;3cm&#125; → sqrt&#123;3&#125; cm. 단위 뒤가 } 나 문자열 끝이어야
+     * 오적용을 막는다(radicand 안의 변수 m 등은 건드리지 않음).
+     */
+    private static String ejectUnitFromRadicand(String s) {
+        if (s == null || s.indexOf("sqrt{") < 0) return s;
+        // sqrt{<수치><단위>} → sqrt{<수치>} <단위>. 수치는 숫자·소수점만(변수 없는 경우).
+        return s.replaceAll(
+                "sqrt\\{(\\d+(?:\\.\\d+)?)(cm|mm|km|kg|m|g|L|t)\\}",
+                "sqrt{$1} $2");
     }
 
     private static boolean isXml10Character(int cp) {
