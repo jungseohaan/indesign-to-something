@@ -990,6 +990,10 @@ function _normalizeExtractionCandidateOwnershipSlots(candidates, sourceItems) {
         if (childMeta.pageKey !== clipParentMeta.pageKey) return false;
         if (!childMeta.sourceIds || childMeta.sourceIds.length === 0) return false;
         if (!_candidateMetaSourceContainsAll(clipParentMeta, childMeta)) return false;
+        if (_sourceSetContainsAll(
+                clipParent.hiddenVisualSourceObjectIds || [], childMeta.sourceIds || [])) {
+            return false;
+        }
         if (childMeta.hasEditableText) return false;
         if (candidate.passId !== "pass.decoration_groups"
                 && candidate.passId !== "pass.vector_shape_frames"

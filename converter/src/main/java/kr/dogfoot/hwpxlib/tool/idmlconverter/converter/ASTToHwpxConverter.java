@@ -2,6 +2,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.ParaPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
@@ -99,6 +100,7 @@ public class ASTToHwpxConverter {
     private HwpxTextBoxBuilder textBoxBuilder;
     private HwpxTableBuilder tableBuilder;
     private HwpxImageBuilder imageBuilder;
+    private String pageBreakBeforeSectionParaPrId;
 
     private ASTToHwpxConverter(ASTDocument doc, ProgressReporter reporter,
                                 int progressOffset, int progressTotal,
@@ -298,9 +300,10 @@ public class ASTToHwpxConverter {
             floatingBlocks.add(block);
         }
 
-        // SecPr 단락 생성 — 이 단락 하나에 모든 플로팅 객체 + secPr을 넣는다.
-        // 첫 페이지 이후에는 pageBreak=true로 설정 → 플로팅 객체가 올바른 페이지에 위치
-        Para secPrPara = createSectionPara(sectionFile, pagesConverted > 0);
+        Para secPrPara = createSectionPara(sectionFile, false);
+        if (pagesConverted > 0) {
+            secPrPara.paraPrIDRef(getOrCreatePageBreakBeforeSectionParaPrId());
+        }
 
         // 1) BEHIND_TEXT FIGURE: Stage 1 visualLayer가 behind plane으로 정한 그림을 배치
         //
@@ -572,6 +575,32 @@ public class ASTToHwpxConverter {
 
         run.addNewT();
         paragraphBuilder.addLineSegArray(para);
+    }
+
+    private String getOrCreatePageBreakBeforeSectionParaPrId() {
+        if (pageBreakBeforeSectionParaPrId != null) {
+            return pageBreakBeforeSectionParaPrId;
+        }
+        ParaPr base = null;
+        for (ParaPr pr : ctx.hwpxFile.headerXMLFile().refList().paraProperties().items()) {
+            if ("3".equals(pr.id())) {
+                base = pr;
+                break;
+            }
+        }
+        if (base == null) {
+            throw new IllegalStateException("Base section ParaPr id=3 not found");
+        }
+        String id = ctx.styleRegistry.nextParaPrId();
+        ParaPr paraPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+        paraPr.copyFrom(base);
+        paraPr.id(id);
+        if (paraPr.breakSetting() == null) {
+            paraPr.createBreakSetting();
+        }
+        paraPr.breakSetting().pageBreakBefore(true);
+        pageBreakBeforeSectionParaPrId = id;
+        return id;
     }
 
     private void addPageBorderFills(SecPr secPr) {
