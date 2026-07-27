@@ -2,6 +2,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.flat;
 
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.ParaPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
@@ -79,6 +80,7 @@ public class FlatToHwpxConverter {
     private HwpxTextBoxBuilder textBoxBuilder;
     private HwpxTableBuilder tableBuilder;
     private HwpxImageBuilder imageBuilder;
+    private String pageBreakBeforeSectionParaPrId;
 
     private FlatToHwpxConverter(FlatDocument flatDoc, ProgressReporter reporter,
                                  Map<String, String> customFontMap,
@@ -211,8 +213,10 @@ public class FlatToHwpxConverter {
         ctx.pageMarginTop = mTop;
         ctx.pageMarginLeft = mLeft;
 
-        // SecPr 단락 생성
-        Para secPrPara = createSectionPara(sectionFile, pagesConverted > 0);
+        Para secPrPara = createSectionPara(sectionFile, false);
+        if (pagesConverted > 0) {
+            secPrPara.paraPrIDRef(getOrCreatePageBreakBeforeSectionParaPrId());
+        }
 
         // Layer 1: BACKGROUND (배경 도형, 배경 텍스트프레임)
         for (FlatLayoutNode node : gateway.backgroundNodes(page.pageId())) {
@@ -412,6 +416,32 @@ public class FlatToHwpxConverter {
                 .fillArea(PageFillArea.PAPER);
         pbf.createOffset();
         pbf.offset().leftAnd(1417L).rightAnd(1417L).topAnd(1417L).bottom(1417L);
+    }
+
+    private String getOrCreatePageBreakBeforeSectionParaPrId() {
+        if (pageBreakBeforeSectionParaPrId != null) {
+            return pageBreakBeforeSectionParaPrId;
+        }
+        ParaPr base = null;
+        for (ParaPr pr : ctx.hwpxFile.headerXMLFile().refList().paraProperties().items()) {
+            if ("3".equals(pr.id())) {
+                base = pr;
+                break;
+            }
+        }
+        if (base == null) {
+            throw new IllegalStateException("Base section ParaPr id=3 not found");
+        }
+        String id = ctx.styleRegistry.nextParaPrId();
+        ParaPr paraPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+        paraPr.copyFrom(base);
+        paraPr.id(id);
+        if (paraPr.breakSetting() == null) {
+            paraPr.createBreakSetting();
+        }
+        paraPr.breakSetting().pageBreakBefore(true);
+        pageBreakBeforeSectionParaPrId = id;
+        return id;
     }
 
     // ── 유틸리티 ──

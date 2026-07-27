@@ -8680,24 +8680,62 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             return false;
         }
         var memberSourceIds = _canonicalPagePlaneExistingPlanSourceIds(plan);
-        var eligible = pageBackgroundEligibleSourceIdsForPage(
-                memberSourceIds,
-                planPageIndex,
-                plan);
-        if (!eligible || eligible.sourceIds.length === 0) {
+        var eligibleSourceIdUnion = [];
+        var eligibleSourceIdsByPage = {};
+        var eligibleRolesByPage = {};
+        for (var msi = 0; msi < memberSourceIds.length; msi++) {
+            var memberSourceId = Number(memberSourceIds[msi]);
+            if (isNaN(memberSourceId)) continue;
+            var memberSource = sourceById[String(memberSourceId)] || null;
+            var targetPages = memberSource
+                    ? pageBackgroundCandidatePagesForSource(memberSource)
+                    : [];
+            if (!targetPages || targetPages.length === 0) {
+                targetPages = [planPageIndex];
+            }
+            var targetSeen = {};
+            targetPages.push(planPageIndex);
+            for (var tpi = 0; tpi < targetPages.length; tpi++) {
+                var targetPageIndex = Number(targetPages[tpi]);
+                if (isNaN(targetPageIndex) || targetPageIndex < 0) continue;
+                var targetKey = String(targetPageIndex);
+                if (targetSeen[targetKey]) continue;
+                targetSeen[targetKey] = true;
+                var role = pageBackgroundEligibilityForSourceOnPage(
+                        memberSource,
+                        targetPageIndex,
+                        plan);
+                if (!role && planIsMasterTextlessGraphicPlan(plan)) {
+                    role = "MASTER_TEXTLESS_GRAPHIC";
+                }
+                if (!role) continue;
+                if (!eligibleSourceIdsByPage[targetKey]) {
+                    eligibleSourceIdsByPage[targetKey] = [];
+                    eligibleRolesByPage[targetKey] = {};
+                }
+                eligibleSourceIdsByPage[targetKey].push(memberSourceId);
+                eligibleRolesByPage[targetKey][String(memberSourceId)] = role;
+                eligibleSourceIdUnion.push(memberSourceId);
+            }
+        }
+        eligibleSourceIdUnion = _sortedNumericIds(eligibleSourceIdUnion);
+        if (eligibleSourceIdUnion.length === 0) {
             plan.canonicalPagePlaneAbsorbEligible = false;
             return false;
         }
         plan.canonicalPagePlaneAbsorbEligible = true;
-        plan.canonicalPagePlaneEligibleSourceObjectIds = eligible.sourceIds.slice(0);
-        var pageKey = String(plan.pageIndex);
-        if (!absorbableExistingPlanSourceIdsByPage[pageKey]) {
-            absorbableExistingPlanSourceIdsByPage[pageKey] = [];
+        plan.canonicalPagePlaneEligibleSourceObjectIds = eligibleSourceIdUnion.slice(0);
+        plan.canonicalPagePlaneEligibleSourceObjectIdsByPage = eligibleSourceIdsByPage;
+        for (var pageKey in eligibleSourceIdsByPage) {
+            if (!eligibleSourceIdsByPage.hasOwnProperty(pageKey)) continue;
+            if (!absorbableExistingPlanSourceIdsByPage[pageKey]) {
+                absorbableExistingPlanSourceIdsByPage[pageKey] = [];
+            }
+            absorbableExistingPlanSourceIdsByPage[pageKey] = _sortedNumericIds(
+                    absorbableExistingPlanSourceIdsByPage[pageKey].concat(
+                            eligibleSourceIdsByPage[pageKey]));
+            rememberPageBackgroundSourceRoles(pageKey, eligibleRolesByPage[pageKey]);
         }
-        absorbableExistingPlanSourceIdsByPage[pageKey] = _sortedNumericIds(
-                absorbableExistingPlanSourceIdsByPage[pageKey].concat(
-                        eligible.sourceIds));
-        rememberPageBackgroundSourceRoles(pageKey, eligible.rolesBySourceId);
         return true;
     }
     function sourceKind(src) {
