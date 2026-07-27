@@ -613,6 +613,9 @@ class RunBuilder {
                     continue; // 불릿 런 자체는 건너뜀
                 }
                 ASTTextRun run = (ASTTextRun) item;
+                if (run.grepStyleApplied()) {
+                    continue;
+                }
                 // 불릿 색상(비검정)이면 검정으로 리셋
                 if (run.textColor() != null && !run.textColor().equals("#000000")) {
                     run.textColor("#000000");

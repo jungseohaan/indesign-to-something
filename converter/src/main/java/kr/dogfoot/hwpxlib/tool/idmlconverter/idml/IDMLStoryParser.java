@@ -2022,7 +2022,7 @@ public class IDMLStoryParser {
                                     subRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, newIdx);
                                 }
                             } else if (frameIdx < srcFrames.size()) {
-                                subRun.addInlineFrame(srcFrames.get(frameIdx));
+                                addInlineFrameWithAnchor(subRun, srcFrames.get(frameIdx));
                                 frameIdx++;
                             }
                         }
@@ -2039,18 +2039,18 @@ public class IDMLStoryParser {
                         IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(ai);
                         if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
                                 && anchor.index() < srcFrames.size()) {
-                            lastSub.addInlineFrame(srcFrames.get(anchor.index()));
+                            addInlineFrameWithAnchor(lastSub, srcFrames.get(anchor.index()));
                         } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
                                 && anchor.index() < srcGraphics.size()) {
-                            lastSub.addInlineGraphic(srcGraphics.get(anchor.index()));
+                            addInlineGraphicWithAnchor(lastSub, srcGraphics.get(anchor.index()));
                         }
                     }
                 } else {
                     for (int fi = frameIdx; fi < srcFrames.size(); fi++) {
-                        lastSub.addInlineFrame(srcFrames.get(fi));
+                        addInlineFrameWithAnchor(lastSub, srcFrames.get(fi));
                     }
                     for (IDMLCharacterRun.InlineGraphic ig : srcGraphics) {
-                        lastSub.addInlineGraphic(ig);
+                        addInlineGraphicWithAnchor(lastSub, ig);
                     }
                 }
             }
@@ -2152,7 +2152,7 @@ public class IDMLStoryParser {
                                 }
                             } else if (frameIdx < srcFrames.size()) {
                                 // 레거시: FFFC → TextFrame 순서 매핑
-                                subRun.addInlineFrame(srcFrames.get(frameIdx));
+                                addInlineFrameWithAnchor(subRun, srcFrames.get(frameIdx));
                                 frameIdx++;
                             }
                         }
@@ -2170,19 +2170,19 @@ public class IDMLStoryParser {
                         IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(ai);
                         if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
                                 && anchor.index() < srcFrames.size()) {
-                            lastSub.addInlineFrame(srcFrames.get(anchor.index()));
+                            addInlineFrameWithAnchor(lastSub, srcFrames.get(anchor.index()));
                         } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
                                 && anchor.index() < srcGraphics.size()) {
-                            lastSub.addInlineGraphic(srcGraphics.get(anchor.index()));
+                            addInlineGraphicWithAnchor(lastSub, srcGraphics.get(anchor.index()));
                         }
                     }
                 } else {
                     // 레거시: 남은 프레임 + 모든 그래픽을 마지막 서브런에 전달
                     for (int fi = frameIdx; fi < srcFrames.size(); fi++) {
-                        lastSub.addInlineFrame(srcFrames.get(fi));
+                        addInlineFrameWithAnchor(lastSub, srcFrames.get(fi));
                     }
                     for (IDMLCharacterRun.InlineGraphic ig : srcGraphics) {
-                        lastSub.addInlineGraphic(ig);
+                        addInlineGraphicWithAnchor(lastSub, ig);
                     }
                 }
             }
@@ -2377,6 +2377,22 @@ public class IDMLStoryParser {
         clone.grepAppliedCharStyle(source.grepAppliedCharStyle());
         clone.content(newText);
         return clone;
+    }
+
+    private static void addInlineFrameWithAnchor(IDMLCharacterRun run, IDMLTextFrame frame) {
+        if (run == null || frame == null) return;
+        int newIdx = run.inlineFrames().size();
+        run.addInlineFrame(frame);
+        run.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.FRAME, newIdx);
+    }
+
+    private static void addInlineGraphicWithAnchor(
+            IDMLCharacterRun run,
+            IDMLCharacterRun.InlineGraphic graphic) {
+        if (run == null || graphic == null) return;
+        int newIdx = run.inlineGraphics().size();
+        run.addInlineGraphic(graphic);
+        run.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, newIdx);
     }
 
     /**

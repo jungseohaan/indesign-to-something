@@ -610,9 +610,9 @@ public class StoryLoader {
                     // 비수식 런: 열린 그룹 모두 flush
                     MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
 
-                    // 일반 런 변환 (U+FFFC 인라인 객체 포함)
-                    String text = run.content();
-                    if (text == null || text.isEmpty()) {
+                // 일반 런 변환 (U+FFFC 인라인 객체 포함)
+                String text = run.content();
+                if (text == null || text.isEmpty()) {
                         if (appendAnchorOnlyRunItems(ctx, runs, idx, run, resolvedParagraph,
                                 ip, storyId, para)) {
                             hasIdmlInlineAnchors = true;
@@ -719,6 +719,7 @@ public class StoryLoader {
                                             InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId,
                                                     partText, nextPartText);
                                     if (plannedItems != null) {
+                                        applyPlannedInlineTextOwnerColor(ctx, domId, plannedItems);
                                         applyPositionedInlineTextFrameAdvance(ctx, storyId, para, domId);
                                         InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, domId, para);
                                         for (ASTInlineItem item : plannedItems) para.addItem(item);
@@ -784,6 +785,7 @@ public class StoryLoader {
                     System.nanoTime() - runLoopStart);
             // 단락 끝 잔여 수식 그룹 flush
             MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
+            insertMissingResolvedInlineHwpxTextAnchors(ctx, resolvedRuns, para);
             applyTrailingPageNumberLeader(ctx, ip, para);
 
             // 패턴 감지: 행잉 인덴트 + 인라인 아이콘 + 탭
@@ -1818,8 +1820,178 @@ public class StoryLoader {
         List<ASTInlineItem> plannedItems =
                 InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
         if (plannedItems == null) return;
+        applyPlannedInlineTextOwnerColor(ctx, anchoredId, plannedItems);
         InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchoredId, para);
         appendInlineItemsKeepingObjectsInline(para, plannedItems);
+    }
+
+    private static void insertMissingResolvedInlineHwpxTextAnchors(
+            ResolvedBuildContext ctx,
+            List<ResolvedRun> resolvedRuns,
+            ASTParagraph para) {
+        if (ctx == null || resolvedRuns == null || resolvedRuns.isEmpty()
+                || para == null || para.items() == null) {
+            return;
+        }
+        StringBuilder textBefore = new StringBuilder();
+        for (int i = 0; i < resolvedRuns.size(); i++) {
+            ResolvedRun run = resolvedRuns.get(i);
+            if (run == null) continue;
+            if (!run.isInlineAnchor()) {
+                String text = run.text();
+                if (text != null) {
+                    int crIdx = text.indexOf('\r');
+                    textBefore.append(crIdx >= 0 ? text.substring(0, crIdx) : text);
+                }
+                continue;
+            }
+
+            Integer anchoredId = run.anchoredObjectId();
+            if (anchoredId == null || anchoredId <= 0) continue;
+            if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredId)) continue;
+            if (paragraphAlreadyContainsInlineObject(para, anchoredId)) continue;
+
+            String plannedText = resolvedInlineText(ctx, anchoredId);
+            if (!plannedText.isEmpty() && paragraphText(para).contains(plannedText)) continue;
+
+            String previousText = nearestResolvedText(resolvedRuns, i - 1, -1);
+            String nextText = nearestResolvedText(resolvedRuns, i + 1, 1);
+            List<ASTInlineItem> plannedItems =
+                    InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchoredId, previousText, nextText);
+            if (plannedItems == null || plannedItems.isEmpty()) continue;
+            applyPlannedInlineTextOwnerColor(ctx, anchoredId, plannedItems);
+
+            int insertAt = insertionIndexForTextOffset(para, textBefore.length());
+            if (insertAt < 0) continue;
+            for (ASTInlineItem item : plannedItems) {
+                if (item instanceof ASTInlineObject) {
+                    ((ASTInlineObject) item).keepInline(true);
+                }
+            }
+            para.items().addAll(insertAt, plannedItems);
+        }
+    }
+
+    private static void applyPlannedInlineTextOwnerColor(
+            ResolvedBuildContext ctx,
+            int anchoredId,
+            List<ASTInlineItem> plannedItems) {
+        if (ctx == null || ctx.resolvedData == null || anchoredId <= 0
+                || plannedItems == null || plannedItems.isEmpty()) {
+            return;
+        }
+        if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredId)) return;
+
+        String sourceColor = uniformVisibleResolvedTextColor(ctx, anchoredId);
+        for (ASTInlineItem item : plannedItems) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            if (run.textColor() != null && !run.textColor().trim().isEmpty()
+                    && !"#000000".equalsIgnoreCase(run.textColor().trim())) {
+                run.grepStyleApplied(true);
+                continue;
+            }
+            if (sourceColor == null) continue;
+            String text = run.text();
+            if (text == null || text.trim().isEmpty()) continue;
+            run.textColor(sourceColor);
+            run.grepStyleApplied(true);
+        }
+    }
+
+    private static String uniformVisibleResolvedTextColor(ResolvedBuildContext ctx, int anchoredId) {
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredId));
+        if (tf == null || tf.storyId() == null) return null;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return null;
+
+        String color = null;
+        int visibleRunCount = 0;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            String paragraphFill = resolvedParagraphStyleFillColor(ctx, paragraph);
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.isInlineAnchor()) continue;
+                String text = run.text();
+                if (text == null || text.replace("\uFFFC", "").trim().isEmpty()) continue;
+                String fill = run.fillColor();
+                if (fill == null || fill.trim().isEmpty()) {
+                    fill = paragraphFill;
+                }
+                if (fill == null || fill.trim().isEmpty()) return null;
+                String hex = RunBuilder.resolveColorToHex(ctx, fill);
+                if (hex == null || hex.trim().isEmpty()) return null;
+                String normalized = hex.trim().toUpperCase(java.util.Locale.ROOT);
+                if (color == null) {
+                    color = normalized;
+                } else if (!color.equals(normalized)) {
+                    return null;
+                }
+                visibleRunCount++;
+            }
+        }
+        if (visibleRunCount == 0) return null;
+        return color;
+    }
+
+    private static String resolvedParagraphStyleFillColor(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph paragraph) {
+        if (ctx == null || ctx.styleResolver == null || paragraph == null) return null;
+        String styleName = paragraph.styleName();
+        if (styleName == null || styleName.trim().isEmpty()) return null;
+        IDMLStyleDef style = ctx.styleResolver.getResolvedParagraphStyle(styleName);
+        return style != null ? style.fillColor() : null;
+    }
+
+    private static String resolvedInlineText(ResolvedBuildContext ctx, int anchoredId) {
+        if (ctx == null || ctx.resolvedData == null || anchoredId <= 0) return "";
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredId));
+        if (tf == null || tf.frameVisibleText() == null) return "";
+        return tf.frameVisibleText()
+                .replace("\uFFFC", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+    }
+
+    private static String paragraphText(ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null) sb.append(text);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static int insertionIndexForTextOffset(ASTParagraph para, int targetOffset) {
+        if (para == null || para.items() == null) return -1;
+        if (targetOffset <= 0) return 0;
+        int offset = 0;
+        List<ASTInlineItem> items = para.items();
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.isEmpty()) continue;
+            int next = offset + text.length();
+            if (targetOffset == offset) return i;
+            if (targetOffset == next) return i + 1;
+            if (targetOffset > offset && targetOffset < next) {
+                int split = targetOffset - offset;
+                ASTTextRun before = run.copyWithText(text.substring(0, split));
+                ASTTextRun after = run.copyWithText(text.substring(split));
+                items.set(i, before);
+                items.add(i + 1, after);
+                return i + 1;
+            }
+            offset = next;
+        }
+        return targetOffset <= offset ? items.size() : -1;
     }
 
     static void applyComposedLinePitchFallback(ASTParagraph para,
