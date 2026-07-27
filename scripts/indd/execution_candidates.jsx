@@ -516,7 +516,7 @@ function _applyObjectPlanExecutionFields(candidate, objectPlan) {
                             objectPlan.ownedTextFrameIds || []));
             candidate.editableTextFrameIds = candidate.hiddenTextFrameIds.slice(0);
             candidate.requiresTextHidden = candidate.hiddenTextFrameIds.length > 0;
-            if (candidate.requiresTextHidden) candidate.textOwner = "hwpx_tf";
+            candidate.textOwner = "none";
         } else if (dropTextHiddenFrameIds.length > 0) {
             candidate.hiddenTextFrameIds = dropTextHiddenFrameIds;
             candidate.editableTextFrameIds = [];

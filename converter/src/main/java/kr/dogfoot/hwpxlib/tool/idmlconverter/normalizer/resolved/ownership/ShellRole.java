@@ -58,6 +58,7 @@ public enum ShellRole {
     public static boolean ownsEditableText(ObjectPlan plan) {
         return plan != null
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0;
     }
