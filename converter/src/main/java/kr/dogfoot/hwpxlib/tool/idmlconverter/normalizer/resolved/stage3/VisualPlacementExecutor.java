@@ -3,10 +3,14 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
+
+import java.util.List;
 
 /**
  * Stage 3 visible-output executor.
@@ -48,6 +52,22 @@ public final class VisualPlacementExecutor {
 
         ShellRole shellRole = ShellRole.from(ownershipPlan);
         if (shellRole != ShellRole.NONE) {
+            if (shellRole == ShellRole.TEXT_OWNING_SHELL) {
+                List<ASTTextFrameBlock> textShells =
+                        InlineFrameHandler.buildFloatingTextShellBlocks(
+                                ctx, rg, plan.x, plan.y, plan.width, plan.height, plan.zOrder);
+                if (!textShells.isEmpty()) {
+                    for (ASTTextFrameBlock textShell : textShells) {
+                        section.addBlock(textShell);
+                    }
+                    ctx.markRenderedVisualHandled(rg.id());
+                    ctx.recordRenderedDecision(rg, ownershipPlan, "Stage3.VisualBuilder.Phase6",
+                            "PLACE_" + shellRole.name(),
+                            "placed planned " + shellRole.name()
+                                    + " as ASTTextFrameBlock with editable child text");
+                    return PlacementResult.textShellPlaced();
+                }
+            }
             ASTFigure fig = buildFigure(rg, image, plan, ownershipPlan);
             addVisualByPlannedOrder(section, fig);
             ctx.markRenderedVisualHandled(rg.id());

@@ -63,6 +63,43 @@ public final class FormulaStyleResolver {
         return applyChemicalUprightScript(hwpScript);
     }
 
+    public static String applyMathItalicScript(ASTEquation eq, String hwpScript) {
+        if (hwpScript == null || hwpScript.isEmpty() || eq == null
+                || usesBodyTextEquationStyle(eq)) {
+            return hwpScript;
+        }
+        String trimmed = hwpScript.trim();
+        if (startsWithCommandToken(trimmed, "rm")
+                || startsWithCommandToken(trimmed, "rmbold")
+                || startsWithCommandToken(trimmed, "it")) {
+            return hwpScript;
+        }
+        // Hancom documents `it` as the equation-font command that returns
+        // Roman text to math italic. Apply it only when an uppercase Latin
+        // variable needs the explicit state; lowercase variables are already
+        // italic in the default equation state.
+        return containsUppercaseVariable(trimmed) ? "it " + hwpScript : hwpScript;
+    }
+
+    private static boolean containsUppercaseVariable(String script) {
+        for (int i = 0; i < script.length(); i++) {
+            char ch = script.charAt(i);
+            if (ch < 'A' || ch > 'Z') continue;
+            int start = i;
+            int end = i + 1;
+            while (start > 0 && Character.isLetter(script.charAt(start - 1))) start--;
+            while (end < script.length() && Character.isLetter(script.charAt(end))) end++;
+            String token = script.substring(start, end);
+            if (!"TIMES".equals(token) && !"LEFT".equals(token)
+                    && !"RIGHT".equals(token) && !"SQRT".equals(token)
+                    && !"OVER".equals(token) && !"ATOP".equals(token)) {
+                return true;
+            }
+            i = end - 1;
+        }
+        return false;
+    }
+
     static String applyChemicalUprightScript(String hwpScript) {
         if (hwpScript == null || hwpScript.isEmpty()) return hwpScript;
         String trimmed = hwpScript.trim();

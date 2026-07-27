@@ -31,4 +31,11 @@ public class FormulaStyleResolverTest {
                 "rm H_{2}O ~ rarrow ~ CO_{2}",
                 FormulaStyleResolver.applyChemicalUprightScript("rm H_{2}O ~ rarrow ~ CO_{2}"));
     }
+
+    @Test
+    public void uppercaseMathVariableGetsExplicitItalicState() {
+        ASTEquation eq = new ASTEquation("=aM+bM", "EH_FONT");
+        Assert.assertEquals("it =aM+bM",
+                FormulaStyleResolver.applyMathItalicScript(eq, eq.hwpScript()));
+    }
 }

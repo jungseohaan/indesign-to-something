@@ -4185,7 +4185,26 @@ function _resolveObjectPlanDuplicateTextOwners(objectPlans, sourceById) {
         if (!owners || owners.length < 2) continue;
         duplicateTextFrameCount++;
         var canonical = null;
-        for (var inlineOwnerIndex = 0; inlineOwnerIndex < owners.length; inlineOwnerIndex++) {
+        for (var anchoredOwnerIndex = 0;
+                anchoredOwnerIndex < owners.length;
+                anchoredOwnerIndex++) {
+            var anchoredOwner = owners[anchoredOwnerIndex];
+            if (anchoredOwner.textAction !== "OWNED_BY_HWPX_TEXT"
+                    || anchoredOwner.visualAction !== "PLACE_TEXT_SHELL"
+                    || anchoredOwner.placement !== "FLOATING"
+                    || anchoredOwner.coordinateSpace !== "PAGE"
+                    || anchoredOwner.slotRole !== "story_anchored_shell_slot") {
+                continue;
+            }
+            if (!canonical
+                    || (anchoredOwner.sourceObjectIds || []).length
+                        > (canonical.sourceObjectIds || []).length) {
+                canonical = anchoredOwner;
+            }
+        }
+        for (var inlineOwnerIndex = 0;
+                !canonical && inlineOwnerIndex < owners.length;
+                inlineOwnerIndex++) {
             var inlineOwner = owners[inlineOwnerIndex];
             if (_objectPlanIsInlineVisibleTextFrameShellPlan(inlineOwner)
                     || _objectPlanOwnsInlineVisibleTextFrameSource(inlineOwner, sourceById)) {
@@ -8088,6 +8107,15 @@ function _objectPlanUnionBounds(plans) {
 function _objectPlanTextOwnerPriority(plan) {
     if (!plan) return 0;
     var score = 0;
+    if (plan.textAction === "OWNED_BY_HWPX_TEXT"
+            && plan.visualAction === "PLACE_TEXT_SHELL"
+            && plan.placement === "FLOATING"
+            && plan.coordinateSpace === "PAGE"
+            && plan.slotRole === "story_anchored_shell_slot"
+            && plan.ownedTextFrameIds
+            && plan.ownedTextFrameIds.length > 0) {
+        score += 1000;
+    }
     if (plan.textAction === "OWNED_BY_PNG") score += 400;
     if (plan.textAction === "OWNED_BY_HWPX_TEXT"
             && plan.visualAction === "PLACE_TEXT_SHELL"

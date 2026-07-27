@@ -43,6 +43,7 @@ class MathProcessor {
     static void convertMathRunsInParagraph(ResolvedBuildContext ctx, ASTParagraph para) {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
+        splitEmbeddedSourceLineBreaks(items);
 
         // 화학식은 문자속성 첨자 텍스트가 아니라 ASTEquation("CHEM_FORMULA")으로
         // 변환한다. 원본 run의 font size/color는 collectFormulaEquationCluster 에서
@@ -259,6 +260,33 @@ class MathProcessor {
         stitchChemicalFormulaFragments(para);
         reassembleFragmentedChemicalReaction(para);
         demoteIsolatedSingleLetterMathEquation(para);
+    }
+
+    private static void splitEmbeddedSourceLineBreaks(List<ASTInlineItem> items) {
+        for (int i = 0; i < items.size(); i++) {
+            if (!(items.get(i) instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) items.get(i);
+            String text = run.text();
+            if (text == null || (text.indexOf('\n') < 0 && text.indexOf('\u2028') < 0)) continue;
+
+            List<ASTInlineItem> replacement = new ArrayList<>();
+            int start = 0;
+            for (int p = 0; p <= text.length(); p++) {
+                boolean atEnd = p == text.length();
+                boolean atBreak = !atEnd && (text.charAt(p) == '\n' || text.charAt(p) == '\u2028');
+                if (!atEnd && !atBreak) continue;
+                int end = p;
+                while (end > start && text.charAt(end - 1) == '\t') end--;
+                if (end > start) replacement.add(run.copyWithText(text.substring(start, end)));
+                if (atBreak) {
+                    replacement.add(new ASTBreak(ASTBreak.BreakType.LINE));
+                }
+                start = p + 1;
+            }
+            items.remove(i);
+            items.addAll(i, replacement);
+            i += replacement.size() - 1;
+        }
     }
 
     private static boolean isDiscardableEHStructureResidue(ASTTextRun run) {
