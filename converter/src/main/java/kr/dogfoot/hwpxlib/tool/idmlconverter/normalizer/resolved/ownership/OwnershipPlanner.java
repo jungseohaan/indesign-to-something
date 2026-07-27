@@ -16555,6 +16555,9 @@ public final class OwnershipPlanner {
     private VisualLayer canonicalVisualPlane(ObjectPlan plan, int zOrder) {
         if (plan == null) return null;
         VisualLayer layer = canonicalPlacedContentVisualLayer(plan);
+        if (isPlannerDeclaredFloatingDecorationContainerShell(plan, layer)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
         if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && hasPlacedContentContract(plan)) {
             return isBehindLocalHwpxTextBySourceDepth(plan.bounds, plan.pageIndex, zOrder)
@@ -16595,6 +16598,19 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTENT_BACKDROP;
         }
         return layer;
+    }
+
+    private static boolean isPlannerDeclaredFloatingDecorationContainerShell(
+            ObjectPlan plan,
+            VisualLayer layer) {
+        if (!isPlannerDeclaredObjectPlan(plan)) return false;
+        if (layer != VisualLayer.CONTAINER_BACKDROP) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (plan.coordinateSpace != CoordinateSpace.PAGE) return false;
+        if (!"pass.decoration_groups".equals(safe(plan.planPassId))) return false;
+        return "SHELL_SLOT".equals(plan.ownershipSlot())
+                || "shell_slot_only".equals(safe(plan.slotRole));
     }
 
     private static boolean isInlineOwnedTextShellBackPlane(ObjectPlan plan, VisualLayer layer) {
