@@ -58,6 +58,7 @@ class MathProcessor {
             }
         }
         if (hasEquation) {
+            repairCrossingFormulaDelimiters(para);
             stitchGrepSplitFormulaEquations(para);
             stitchTextSeparatedFormulaEquationFragments(para);
             collapseMixedFormulaEquationClusters(ctx, para);
@@ -1061,7 +1062,7 @@ class MathProcessor {
 
     private static String normalizeExistingFormulaEquationScript(String script) {
         if (script == null) return "";
-        return script
+        return repairCrossingFormulaDelimiters(script
                 .replace('\uFFFC', '\u25A1')
                 .replace("@C", " rarrow ")
                 .replace("@c", " rarrow ")
@@ -1070,7 +1071,78 @@ class MathProcessor {
                 .replace("RIGHT", " rarrow ")
                 .replace("RARROW", " rarrow ")
                 .replace("->", " rarrow ")
-                .trim();
+                .trim());
+    }
+
+    /**
+     * 서로 다른 수식 구분자의 닫힘 순서가 교차된 스크립트를 복구한다.
+     *
+     * <p>스타일 경계에서 분리된 EH 근호와 바깥 소괄호가 다시 합쳐질 때
+     * {@code left(-sqrt{13 right)^{2}}}처럼 근호의 {@code }}가
+     * {@code right)} 뒤로 밀릴 수 있다. 원본의 열림 순서를 스택으로 추적하여
+     * 소괄호를 닫기 전에 아직 열린 중괄호를 닫고, 뒤에 남은 동일 개수의
+     * 고아 중괄호는 제거한다. 페이지나 문구가 아니라 수식 문법 불변식에
+     * 근거한 보정이다.</p>
+     */
+    static String repairCrossingFormulaDelimiters(String script) {
+        if (script == null || script.isEmpty()) return script;
+        StringBuilder out = new StringBuilder(script.length() + 4);
+        List<Character> stack = new ArrayList<>();
+        int relocatedBraces = 0;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (c == '{' || c == '(') {
+                stack.add(c);
+                out.append(c);
+                continue;
+            }
+            if (c == ')') {
+                int delimiterStart = out.length();
+                if (delimiterStart >= 5
+                        && "right".contentEquals(out.subSequence(delimiterStart - 5, delimiterStart))) {
+                    delimiterStart -= 5;
+                }
+                while (delimiterStart > 0
+                        && Character.isWhitespace(out.charAt(delimiterStart - 1))) {
+                    delimiterStart--;
+                }
+                String delimiterSuffix = out.substring(delimiterStart);
+                out.setLength(delimiterStart);
+                while (!stack.isEmpty() && stack.get(stack.size() - 1) == '{') {
+                    stack.remove(stack.size() - 1);
+                    out.append('}');
+                    relocatedBraces++;
+                }
+                out.append(delimiterSuffix);
+                if (!stack.isEmpty() && stack.get(stack.size() - 1) == '(') {
+                    stack.remove(stack.size() - 1);
+                }
+                out.append(c);
+                continue;
+            }
+            if (c == '}') {
+                if (!stack.isEmpty() && stack.get(stack.size() - 1) == '{') {
+                    stack.remove(stack.size() - 1);
+                    out.append(c);
+                } else if (relocatedBraces > 0) {
+                    relocatedBraces--;
+                } else {
+                    out.append(c);
+                }
+                continue;
+            }
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static void repairCrossingFormulaDelimiters(ASTParagraph para) {
+        if (para == null || para.items() == null) return;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTEquation)) continue;
+            ASTEquation equation = (ASTEquation) item;
+            equation.hwpScript(repairCrossingFormulaDelimiters(equation.hwpScript()));
+        }
     }
 
     private static boolean needsFormulaSpaceBefore(StringBuilder script, String next) {

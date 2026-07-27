@@ -43,6 +43,53 @@ public class RunPostProcessorTest {
     }
 
     @Test
+    public void ehMathVariablesRemainEquationsBesideKoreanParticles() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(ehItalicMathRun("a>0"));
+        para.addItem(bodyRun("일 때 "));
+        para.addItem(ehItalicMathRun("a"));
+        para.addItem(bodyRun("와 "));
+        para.addItem(ehItalicMathRun("a"));
+        para.addItem(bodyRun("의 대소 관계"));
+
+        RunPostProcessor.convertItalicRunsToEquations(para);
+
+        Assert.assertEquals(6, para.items().size());
+        assertEquation(para, 0, "a>0");
+        Assert.assertEquals("일 때 ", ((ASTTextRun) para.items().get(1)).text());
+        assertEquation(para, 2, "a");
+        Assert.assertEquals("와 ", ((ASTTextRun) para.items().get(3)).text());
+        assertEquation(para, 4, "a");
+        Assert.assertEquals("의 대소 관계", ((ASTTextRun) para.items().get(5)).text());
+    }
+
+    private static ASTTextRun ehItalicMathRun(String text) {
+        ASTTextRun run = new ASTTextRun();
+        run.text(text);
+        run.fontFamily("EH상부자");
+        run.fontStyle("Italic");
+        run.fontSizeHwpunits(850);
+        run.characterStyleRef("CharacterStyle/상부자(이탤릭)");
+        return run;
+    }
+
+    private static ASTTextRun bodyRun(String text) {
+        ASTTextRun run = new ASTTextRun();
+        run.text(text);
+        run.fontFamily("Sandoll 고딕NeoRound");
+        run.fontStyle("Regular");
+        run.fontSizeHwpunits(850);
+        return run;
+    }
+
+    private static void assertEquation(ASTParagraph para, int index, String script) {
+        Assert.assertTrue(para.items().get(index) instanceof ASTEquation);
+        ASTEquation equation = (ASTEquation) para.items().get(index);
+        Assert.assertEquals(script, equation.hwpScript());
+        Assert.assertEquals(Integer.valueOf(850), equation.preferredBaseUnit());
+    }
+
+    @Test
     public void italicGeometryLabelBecomesOneSourceSizedEquation() {
         ASTParagraph para = new ASTParagraph();
         ASTTextRun run = new ASTTextRun();
@@ -113,6 +160,95 @@ public class RunPostProcessorTest {
         Assert.assertEquals(1, para.items().size());
         Assert.assertTrue(para.items().get(0) instanceof ASTTextRun);
         Assert.assertEquals("ABC", ((ASTTextRun) para.items().get(0)).text());
+    }
+
+    @Test
+    public void mixedKoreanLatinVariableKeepsSourceEquationMetrics() {
+        ASTParagraph para = new ASTParagraph();
+        ASTTextRun run = new ASTTextRun();
+        run.text("일 때 a가");
+        run.fontFamily("EH상부자");
+        run.fontStyle("Italic");
+        run.fontSizeHwpunits(1050);
+        run.textColor("#123456");
+
+        RunBuilder.splitLatinVarsInMixedText(null, run, para);
+
+        Assert.assertEquals(3, para.items().size());
+        Assert.assertTrue(para.items().get(1) instanceof ASTEquation);
+        ASTEquation equation = (ASTEquation) para.items().get(1);
+        Assert.assertEquals("a", equation.hwpScript());
+        Assert.assertEquals(Integer.valueOf(1050), equation.preferredBaseUnit());
+        Assert.assertEquals("EH상부자", equation.preferredFontFamily());
+        Assert.assertEquals("#123456", equation.textColor());
+    }
+
+    @Test
+    public void italicEquationWithoutPointSizeInheritsAdjacentSourceTextSize() {
+        ASTParagraph para = new ASTParagraph();
+
+        ASTTextRun equationSource = new ASTTextRun();
+        equationSource.text("a");
+        equationSource.fontFamily("EH상부자");
+        equationSource.fontStyle("Italic");
+        para.addItem(equationSource);
+
+        ASTTextRun particle = new ASTTextRun();
+        particle.text("가");
+        particle.fontSizeHwpunits(1050);
+        para.addItem(particle);
+
+        RunPostProcessor.convertItalicRunsToEquations(para);
+
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals(Integer.valueOf(1050),
+                ((ASTEquation) para.items().get(0)).preferredBaseUnit());
+    }
+
+    @Test
+    public void italicEquationWithoutPointSizeInheritsAdjacentEquationSize() {
+        ASTParagraph para = new ASTParagraph();
+
+        ASTTextRun equationSource = new ASTTextRun();
+        equationSource.text("a");
+        equationSource.fontFamily("EH상부자");
+        equationSource.fontStyle("Italic");
+        equationSource.characterStyleRef("CharacterStyle/상부자(이탤릭)");
+        equationSource.fontSizeHwpunits(1000);
+        para.addItem(equationSource);
+
+        ASTTextRun particle = new ASTTextRun();
+        particle.text("가");
+        para.addItem(particle);
+
+        ASTEquation radical = new ASTEquation("sqrt{a}", "EH_FONT");
+        radical.preferredBaseUnit(1050);
+        para.addItem(radical);
+
+        RunPostProcessor.convertItalicRunsToEquations(para);
+        RunPostProcessor.resolveInheritedEquationSizes(para);
+
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals(Integer.valueOf(1050),
+                ((ASTEquation) para.items().get(0)).preferredBaseUnit());
+    }
+
+    @Test
+    public void genericTenPointVariableAlignsWithNearbyEquationFlow() {
+        ASTParagraph para = new ASTParagraph();
+        ASTEquation inequality = new ASTEquation("a>0", "EH_FONT");
+        inequality.preferredBaseUnit(1050);
+        para.addItem(inequality);
+        ASTTextRun prose = new ASTTextRun();
+        prose.text("일 때 ");
+        para.addItem(prose);
+        ASTEquation variable = new ASTEquation("a", "EH_FONT");
+        variable.preferredBaseUnit(1000);
+        para.addItem(variable);
+
+        RunPostProcessor.resolveInheritedEquationSizes(para);
+
+        Assert.assertEquals(Integer.valueOf(1050), variable.preferredBaseUnit());
     }
 
     @Test

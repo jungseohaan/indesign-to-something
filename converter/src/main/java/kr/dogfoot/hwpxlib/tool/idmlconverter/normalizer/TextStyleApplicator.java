@@ -247,7 +247,11 @@ public final class TextStyleApplicator {
             String style = normalizeStyleRef(resolvedRun.charStyle());
             // "정체"(정상 위치)는 상부자/하부자 폰트를 쓰되 첨자가 아니다(실측: Pythagoras
             // 등 "상부자(정체)" 본문 라틴). 이름의 "상부자/하부자"만으론 첨자화하지 않는다.
-            if (style.contains("정체") || style.contains("정자")) {
+            // Likewise, "상부자(이탤릭)" is the source's EH math-variable typography, not
+            // semantic superscript.  Position metadata remains authoritative when a real
+            // superscript is intended.
+            if (style.contains("정체") || style.contains("정자")
+                    || (style.contains("상부자") && style.contains("이탤릭"))) {
                 // 정상 위치 — 첨자 아님
             } else if (style.contains("superscript") || style.contains("상부자") || style.contains("위첨자")) {
                 target.superscript(true);

@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -79,6 +80,27 @@ public class ASTMathGrouperTest {
         Assert.assertEquals("√", textRun.text());
         Assert.assertEquals("#000000", textRun.textColor());
         Assert.assertNull(textRun.characterStyleRef());
+    }
+
+    @Test
+    public void topLevelCommaSpaceBetweenEHExpressionsIsPlainText() {
+        ASTParagraph para = new ASTParagraph();
+        ASTMathGrouper.flushEHMathGroup(Arrays.asList(
+                run("4-", "EH상부자", "CharacterStyle/상부자"),
+                run("'", "EH분수대문자", "CharacterStyle/분수대문자"),
+                run("3,", "EH상부자", "CharacterStyle/상부자"),
+                run(" ", null, "CharacterStyle/$ID/[No character style]"),
+                run("-2+", "EH상부자", "CharacterStyle/상부자"),
+                run("'", "EH분수대문자", "CharacterStyle/분수대문자"),
+                run("1", "EH상부자", "CharacterStyle/상부자"),
+                run("", "EH분수대문자", "CharacterStyle/분수대문자"),
+                run("1", "EH상부자", "CharacterStyle/상부자")),
+                para);
+
+        Assert.assertEquals(3, para.items().size());
+        Assert.assertEquals("4-sqrt{3}", ((ASTEquation) para.items().get(0)).hwpScript());
+        Assert.assertEquals(", ", ((ASTTextRun) para.items().get(1)).text());
+        Assert.assertEquals("-2+sqrt{11}", ((ASTEquation) para.items().get(2)).hwpScript());
     }
 
     @Test

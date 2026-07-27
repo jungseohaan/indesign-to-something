@@ -86,10 +86,37 @@ public class HwpxParagraphBuilder {
 
     // ── CharPrFactory delegate ──
     void addTextRun(Para para, ASTTextRun textRun, String defaultCharPrId) {
+        if (materializeEhMathVariableAsEquation(para, textRun)) return;
         charPrFactory.addTextRun(para, textRun, defaultCharPrId);
     }
     void addTextRun(Para para, ASTTextRun textRun, String defaultCharPrId, long indentToHerePosition) {
+        if (materializeEhMathVariableAsEquation(para, textRun)) return;
         charPrFactory.addTextRun(para, textRun, defaultCharPrId, indentToHerePosition);
+    }
+
+    private boolean materializeEhMathVariableAsEquation(Para para, ASTTextRun textRun) {
+        if (textRun == null || textRun.text() == null
+                || !textRun.text().matches("[A-Za-z]")) return false;
+        String styleRef = textRun.characterStyleRef();
+        String style = styleRef == null ? "" : styleRef.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%25", "%");
+        String fontStyle = textRun.fontStyle() == null
+                ? "" : textRun.fontStyle().toLowerCase(java.util.Locale.ROOT);
+        boolean sourceMathTypography =
+                (style.contains("상부자") && style.contains("이탤릭"))
+                || textRun.grepMathFont()
+                || fontStyle.contains("italic")
+                || fontStyle.contains("oblique");
+        if (!sourceMathTypography) return false;
+
+        ASTEquation equation = new ASTEquation(textRun.text(), "EH_FONT");
+        equation.preferredBaseUnit(textRun.fontSizeHwpunits());
+        equation.preferredFontFamily(textRun.fontFamily());
+        equation.textColor(textRun.textColor());
+        equation.sourceItalic(true);
+        inlineItemDispatcher.addEquationRun(para, equation);
+        return true;
     }
     void addTextWithSpecialChars(Run run, String text, long indentToHerePosition) {
         charPrFactory.addTextWithSpecialChars(run, text, indentToHerePosition);

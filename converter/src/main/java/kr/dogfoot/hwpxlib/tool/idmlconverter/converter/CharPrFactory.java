@@ -49,6 +49,14 @@ final class CharPrFactory {
         String charPrId = defaultCharPrId;
         String inheritedCharPrId = lastNonDefaultTextColorCharPrIDRef(para, defaultCharPrId);
 
+        // Generic EH "상부자(이탤릭)" is math-variable typography, not a semantic
+        // superscript style. Some legacy/resolved bridges have already inferred
+        // superscript=true from that name before reaching this single materialization
+        // gateway. Do not execute that name-only inference as <hh:supscript/>.
+        if (textRun.superscript() && isEhSangbujaItalicTypography(textRun.characterStyleRef())) {
+            textRun.superscript(false);
+        }
+
         // CharacterStyle 이름에서 밑줄 추론 (AST에서 설정되지 않은 경우)
         if (!textRun.underline() && textRun.characterStyleRef() != null) {
             String csRef = textRun.characterStyleRef();
@@ -105,6 +113,14 @@ final class CharPrFactory {
                 run.addNewT().addText(text);
             }
         }
+    }
+
+    private static boolean isEhSangbujaItalicTypography(String styleRef) {
+        if (styleRef == null) return false;
+        String normalized = styleRef.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":")
+                .replace("%25", "%");
+        return normalized.contains("상부자") && normalized.contains("이탤릭");
     }
 
     /** 공백 장평 축소 비율 (100 = 변경 없음, 50 = 50%로 축소) */

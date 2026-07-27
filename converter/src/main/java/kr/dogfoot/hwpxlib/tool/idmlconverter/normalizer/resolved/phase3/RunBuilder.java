@@ -871,6 +871,16 @@ class RunBuilder {
                 ASTEquation eq = new ASTEquation();
                 eq.hwpScript(String.valueOf(c));
                 eq.sourceType("LATIN_VAR");
+                // A variable split out of a mixed Korean text run still owns the
+                // source run's text metrics.  Dropping these hints makes the HWPX
+                // equation builder fall back to 10pt, so a 10.5/11pt body variable
+                // appears smaller and raised beside Korean text.
+                if (originalRun.fontSizeHwpunits() != null) {
+                    eq.preferredBaseUnit(originalRun.fontSizeHwpunits());
+                }
+                if (originalRun.fontFamily() != null) {
+                    eq.preferredFontFamily(originalRun.fontFamily());
+                }
                 if (originalRun.textColor() != null) eq.textColor(originalRun.textColor());
                 para.addItem(eq);
             } else {
@@ -1047,7 +1057,12 @@ class RunBuilder {
         int streak = 0;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (Character.isLetter(c) && c < 0x100) {
+            // EH상부자 0xD3(Ó)는 라틴 문자가 아니라 앞 토큰의 윗줄을 나타내는
+            // 구조 글리프다. "OAÓ"를 3자 영단어로 세면 주변의 √2 수식 런까지
+            // 일반 텍스트로 강등된다. source glyph semantics를 먼저 적용한다.
+            if (EHFontGlyphMap.containsOverlineMarker(String.valueOf(c))) {
+                streak = 0;
+            } else if (Character.isLetter(c) && c < 0x100) {
                 streak++;
                 if (streak >= minLen) return true;
             } else {

@@ -158,6 +158,32 @@ p33 ⑷ `√(1/3) √l ;;Á7°;;`(사용자 지적)가 이 케이스 — `;;Á7�
       (835/1085/810/495/352, 0 손실/0 추가), **336개 내용만 개선**. before/after
       페어 스팟검수로 전부 개선 확인(`^{V}`→TIMES, `'N`→sqrt{N}, `;4!;`→¼, cm²)
 - [x] 안전성: 과학 화학식은 상부자(이탤릭)·분수대문자 미사용(SPEC-080 전수 0건).
+
+## 후속: 수학 변수와 한국어 조사 경계 (p20 육안 검수)
+
+source metadata에서 `a>0`과 `a`는 `상부자(이탤릭)`/`EH상부자` 수학 런이고,
+`와`·`의 대소 관계`는 별도 일반 본문 런이다. `position=Superscript` 근거는 없다.
+따라서 `a와`를 한 본문 위첨자 런으로 취급하지 않고, source 수학 런은
+`ASTEquation`(`a`)으로, 조사는 `ASTTextRun`(`와`)으로 각각 materialize한다.
+같은 규칙으로 `a>0`도 하나의 `ASTEquation`으로 보존한다. 페이지·문구 예외 없이
+source character range의 수학 서체/style ownership 경계를 따른다.
+
+실제 p20 발문은 일반 story가 아니라 IDML table cell에 있었다. resolved-cell 경로는
+`MathProcessor → overline → italic equation → GREP fraction` 후처리를 모두 실행하지만,
+IDML cell 경로는 `MathProcessor`까지만 실행하여 `상부자(이탤릭)`/`EH상부자` 런이
+`ASTTextRun`으로 남았다. 컨테이너 종류가 text/math ownership을 바꾸지 않도록 IDML
+cell 경로에도 일반 story와 동일한 후처리 순서를 연결한다. 이에 따라 `a>0`과 독립
+변수 `a`는 `ASTEquation`, 한국어 조사 `가`·`와`는 `ASTTextRun`으로 materialize된다.
+
+추가로 resolved table cell은 문장 전체를 하나의 본문 런으로 평탄화하여 IDML/GREP의
+수학 range를 잃을 수 있다. IDML cell에 `grepMathFont`/EH 수식 서체 증거가 있으면
+resolved 평탄 런으로 교체하지 않고 IDML paragraph pipeline을 사용한다. 이 선택은
+문자 내용이나 페이지가 아니라 source의 수학 style metadata로 결정한다.
+
+한국어 혼합 런에서 단독 라틴 변수를 `LATIN_VAR` 수식으로 분리할 때도 원본 런의
+`fontSizeHwpunits`와 `fontFamily`를 `preferredBaseUnit`/`preferredFontFamily`로
+전달한다. 이 힌트가 없으면 HWPX 출력기가 10pt로 폴백하여 10.5pt 본문 속 변수가
+작고 위로 올라간 것처럼 보인다. 실제 superscript ownership은 만들지 않는다.
       변경은 EH 글리프 sanitize + 인라인 분수 + 단위 제곱만 건드림 → 화학식 무영향
 - [ ] 한글 육안 확인 (분수·근호·곱셈)
 
