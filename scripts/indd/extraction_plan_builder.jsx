@@ -5828,6 +5828,32 @@ function _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex) {
         ];
     }
 
+    function pageRelativeBounds(bounds, pageBounds) {
+        if (!hasArea(bounds) || !hasArea(pageBounds)) return null;
+        return [
+            Number(bounds[0]) - Number(pageBounds[0]),
+            Number(bounds[1]) - Number(pageBounds[1]),
+            Number(bounds[2]) - Number(pageBounds[0]),
+            Number(bounds[3]) - Number(pageBounds[1])
+        ];
+    }
+
+    function containsBounds(outer, inner, eps) {
+        if (!hasArea(outer) || !hasArea(inner)) return false;
+        eps = eps || 0;
+        return Number(outer[0]) <= Number(inner[0]) + eps
+                && Number(outer[1]) <= Number(inner[1]) + eps
+                && Number(outer[2]) >= Number(inner[2]) - eps
+                && Number(outer[3]) >= Number(inner[3]) - eps;
+    }
+
+    function materiallyLargerBounds(outer, inner, eps) {
+        if (!hasArea(outer) || !hasArea(inner)) return false;
+        eps = eps || 0;
+        return Number(outer[3]) - Number(outer[1]) > Number(inner[3]) - Number(inner[1]) + eps
+                || Number(outer[2]) - Number(outer[0]) > Number(inner[2]) - Number(inner[0]) + eps;
+    }
+
     function isCrossPageFloatingVisualCandidate(candidate) {
         if (!candidate || candidate.disabled === true) return false;
         if (candidate.placement === "INLINE" || candidate.coordinateSpace === "STORY_FLOW") return false;
@@ -8270,10 +8296,7 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
             continue;
         }
         var ownerGroup = mixedOwnerGroupForPlacedBranch(itemInfo);
-        if (!ownerGroup) {
-            skipped.noMixedOwnerGroup++;
-            continue;
-        }
+        if (!ownerGroup) skipped.noMixedOwnerGroup++;
         var branchRoot = mixedPlacedBranchRoot(itemInfo, ownerGroup);
         if (!branchRoot) {
             skipped.noMixedOwnerGroup++;
@@ -8314,7 +8337,9 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
             mode: "ORIGINAL_VISUAL",
             candidatePurpose: "CONTENT_CANDIDATE",
             compositeRole: sourceObjectIds.length > 1
-                    ? "mixed_bundle_placed_visual_branch"
+                    ? (ownerGroup
+                            ? "mixed_bundle_placed_visual_branch"
+                            : "direct_placed_visual_branch")
                     : null,
             slotRole: "content_visual_slot",
             bounds: branchRoot.bounds,
@@ -8325,9 +8350,11 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
             zOrder: branchRoot.zOrder,
             textOwner: "none",
             containsEditableText: false,
-            mixedOwnerGroupSourceObjectId: ownerGroup.id,
+            mixedOwnerGroupSourceObjectId: ownerGroup ? ownerGroup.id : null,
             requiredSlot: "CONTENT_VISUAL_SLOT",
-            requiredSlotReason: "mixed_source_bundle_placed_visual_branch"
+            requiredSlotReason: ownerGroup
+                    ? "mixed_source_bundle_placed_visual_branch"
+                    : "direct_source_placed_visual_branch"
         };
         var textWrapContract = textWrapContractForPlacedBranch(branchRoot, ownerGroup);
         if (textWrapContract) {
@@ -9606,6 +9633,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d13a_plan_backfillVisualSources");
     candidates = _normalizePageCoordinateCandidateBounds(candidates, sourceIndex);
     _marker(ctx.outputDir, "03d13b_plan_normalizePageCoordinateBounds");
+    candidates = _expandCrossPageFloatingVisualCandidates(candidates, sourceIndex);
     _marker(ctx.outputDir, "03d13b1_plan_expandCrossPageFloatingVisuals");
     var preObjectPlanSourceSlotCanonicalizationDiagnostics = null;
     if (_candidateListHasObjectPlanLikeExecutionFields(candidates)) {
