@@ -76,6 +76,57 @@ function _sourceIndexIsFormulaFont(fontName) {
             || f.indexOf("NP_") === 0;
 }
 
+// Some legacy fonts use ordinary character codes as pieces of a composed
+// visual symbol.  EH선모음, for example, maps characters such as (, {, 9,
+// N and M to the top/middle/bottom strokes of a tall classification brace.
+// These codes are not editable text and must remain an atomic source visual.
+function _sourceIndexVisualGlyphAssemblyInfo(textFrame) {
+    var info = {
+        role: null,
+        fontFamilies: []
+    };
+    if (!textFrame) return info;
+    var ranges = null;
+    try {
+        var story = textFrame.parentStory;
+        ranges = story ? story.textStyleRanges.everyItem().getElements() : null;
+    } catch (eRanges) {
+        ranges = null;
+    }
+    if (!ranges || ranges.length === 0) return info;
+
+    var sawVisibleGlyph = false;
+    var allVisibleGlyphsUseLineAssemblyFont = true;
+    var seenFonts = {};
+    for (var i = 0; i < ranges.length; i++) {
+        var run = ranges[i];
+        var visible = "";
+        try { visible = _sourceIndexVisibleText(run.contents).replace(/\s+/g, ""); } catch (eContents) {}
+        if (!visible) continue;
+        sawVisibleGlyph = true;
+
+        var fontName = _sourceIndexTextStyleValue(run, "appliedFont");
+        var fontFamily = "";
+        try {
+            if (run.appliedFont && run.appliedFont.fontFamily) {
+                fontFamily = String(run.appliedFont.fontFamily);
+            }
+        } catch (eFontFamily) {}
+        var effectiveFont = fontFamily || fontName;
+        if (effectiveFont && !seenFonts[effectiveFont]) {
+            seenFonts[effectiveFont] = true;
+            info.fontFamilies.push(effectiveFont);
+        }
+        if (effectiveFont.indexOf("EH선모음") !== 0) {
+            allVisibleGlyphsUseLineAssemblyFont = false;
+        }
+    }
+    if (sawVisibleGlyph && allVisibleGlyphsUseLineAssemblyFont) {
+        info.role = "VISUAL_GLYPH_ASSEMBLY";
+    }
+    return info;
+}
+
 function _sourceIndexRunStyleKey(run) {
     var parts = [];
     parts.push(_sourceIndexTextStyleValue(run, "appliedFont"));
@@ -1201,6 +1252,17 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                         cachedInfo.textIsWhitespaceOnly = false;
                     }
                 }
+                if (String(cachedInfo.kind || "") === "TextFrame"
+                        && cachedInfo.visualGlyphAssemblyRole === undefined) {
+                    try {
+                        var cachedAssembly = _sourceIndexVisualGlyphAssemblyInfo(item);
+                        cachedInfo.visualGlyphAssemblyRole = cachedAssembly.role;
+                        cachedInfo.sourceFontFamilies = cachedAssembly.fontFamilies;
+                    } catch (eCachedAssembly) {
+                        cachedInfo.visualGlyphAssemblyRole = null;
+                        cachedInfo.sourceFontFamilies = [];
+                    }
+                }
                 try {
                     var cachedTw = _itemTextWrapInfoForSourceIndex(item);
                     if (cachedTw && cachedTw.mode) {
@@ -1248,6 +1310,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         var textIsWhitespaceOnly = false;
         var storyHasParagraphRuleBelow = false;
         var paragraphStyleNames = [];
+        var visualGlyphAssemblyRole = null;
+        var sourceFontFamilies = [];
         var storyId = null;
         var leadingStyledTextRanges = [];
         var tableCountInStory = null;
@@ -1295,6 +1359,14 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 storyHasParagraphRuleBelow = _sourceIndexStoryHasParagraphRuleBelow(parentStory);
             } catch (eStoryRuleBelow) {
                 storyHasParagraphRuleBelow = false;
+            }
+            try {
+                var assemblyInfo = _sourceIndexVisualGlyphAssemblyInfo(item);
+                visualGlyphAssemblyRole = assemblyInfo.role;
+                sourceFontFamilies = assemblyInfo.fontFamilies;
+            } catch (eAssemblyInfo) {
+                visualGlyphAssemblyRole = null;
+                sourceFontFamilies = [];
             }
             try {
                 var tableMeta = storyTableMeta(parentStory, storyId);
@@ -1370,6 +1442,8 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
             textIsWhitespaceOnly: textIsWhitespaceOnly,
             storyHasParagraphRuleBelow: storyHasParagraphRuleBelow,
             paragraphStyleNames: paragraphStyleNames,
+            visualGlyphAssemblyRole: visualGlyphAssemblyRole,
+            sourceFontFamilies: sourceFontFamilies,
             hasTextPath: textPathInfo.hasTextPath === true,
             textPathCount: textPathInfo.textPathCount || 0,
             textPathStoryIds: textPathInfo.textPathStoryIds || [],

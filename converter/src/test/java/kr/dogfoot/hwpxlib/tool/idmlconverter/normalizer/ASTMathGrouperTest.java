@@ -104,6 +104,61 @@ public class ASTMathGrouperTest {
     }
 
     @Test
+    public void ehYakmulPiGlyphRemainsEquationSymbol() {
+        ASTParagraph para = new ASTParagraph();
+        ASTMathGrouper.flushEHMathGroup(Arrays.asList(
+                run("p", "EH약물", "CharacterStyle/상부자"),
+                run(",", "EH상부자", "CharacterStyle/상부자")),
+                para);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertTrue(String.valueOf(para.items().get(0)),
+                para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals("pi,", ((ASTEquation) para.items().get(0)).hwpScript());
+    }
+
+    @Test
+    public void standaloneDigitInExplicitEHFormulaFontRemainsEquation() {
+        ASTParagraph para = new ASTParagraph();
+        IDMLCharacterRun source = run(
+                "`0", null, "CharacterStyle/$ID/[No character style]");
+        source.grepAppliedCharStyle("CharacterStyle/태광10%3a상부자(이탤릭) 10");
+        ASTMathGrouper.flushEHMathGroup(Arrays.asList(source), para);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals("0", ((ASTEquation) para.items().get(0)).hwpScript());
+    }
+
+    @Test
+    public void standaloneDigitInResolvedEHUpperFontIsBaselineEquation() {
+        ASTParagraph para = new ASTParagraph();
+        IDMLCharacterRun source = run(
+                "`0", "EH상부자",
+                "CharacterStyle/태광10%3a상부자(이탤릭) 10");
+        ASTMathGrouper.flushEHMathGroup(Arrays.asList(source), para);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals("0", ((ASTEquation) para.items().get(0)).hwpScript());
+    }
+
+    @Test
+    public void standaloneEHAtomicEquationPreservesInheritedTextColor() {
+        ASTParagraph para = new ASTParagraph();
+        IDMLCharacterRun source = run(
+                "`0", "EH상부자",
+                "CharacterStyle/태광10%3a상부자(이탤릭) 10");
+        source.fillColor("#30428E");
+        ASTMathGrouper.flushEHMathGroup(
+                Arrays.asList(source), para, color -> color);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals("#30428E", ((ASTEquation) para.items().get(0)).textColor());
+    }
+
+    @Test
     public void nonNumericExpressionBeforeEHExponentDoesNotStartEHGroup() {
         Assert.assertFalse(preEH("1-2", "Û`"));
         Assert.assertFalse(preEH("23.", "Û`"));

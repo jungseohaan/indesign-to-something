@@ -1340,13 +1340,17 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         && inlineCandidate.materialization === "COMPLETE_PNG"
                         && inlineCandidate.textAction === "OWNED_BY_PNG"
                         && inlineCandidate.completePngTextAllowed === true;
-                if (inItem.constructor.name === "TextFrame" && !plannedTextFrameShell && !plannedInlineTextFrameVisual) {
+                var plannedPageVisual = inlineCandidate.placement === "FLOATING"
+                        && inlineCandidate.visualAction === "PLACE_FLOATING_PNG";
+                if (inItem.constructor.name === "TextFrame"
+                        && !plannedTextFrameShell
+                        && !plannedInlineTextFrameVisual
+                        && !plannedInlineCompletePng
+                        && !plannedPageVisual) {
                     inlineStats.textFrameSkipped++;
                     continue;
                 }
                 var plannedDirectChildShellSlot = inlineCandidate.slotRole === "direct_child_shell_slot";
-                var plannedPageVisual = inlineCandidate.placement === "FLOATING"
-                        && inlineCandidate.visualAction === "PLACE_FLOATING_PNG";
                 if (!isInlineItem(inItem) && !plannedDirectChildShellSlot && !plannedPageVisual
                         && !plannedInlineCompletePng
                         && !plannedTextFrameShell) {

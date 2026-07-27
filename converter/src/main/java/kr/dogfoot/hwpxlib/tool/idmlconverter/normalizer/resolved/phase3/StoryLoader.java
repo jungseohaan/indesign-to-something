@@ -447,10 +447,12 @@ public class StoryLoader {
                 // 진행 중인 수식 흐름을 끊으면 ":3:" 같은 비율 표기가 ":" 로 분해된다.
                 boolean bodyTextGlyphRun = ehMathGroup.isEmpty()
                         && BTFontGlyphMap.isBodyTextGlyphStyle(run.appliedCharacterStyle())
+                        && !isExplicitEHGrepAtomicDigit(run)
                         && !hasResolvedStructuralMathFont(run.fontFamily());
 
                 boolean enterEH = !_orcOnly && !bodyTextGlyphRun
                         && (run.isEHFont()
+                        || isExplicitEHGrepAtomicDigit(run)
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
                         || (ehMathGroup.isEmpty()
@@ -594,6 +596,14 @@ public class StoryLoader {
                             run.fillColor(rrColor.fillColor());
                         }
                     }
+                }
+                // 수식 그룹은 일반 RunBuilder 경로를 우회하므로, 문자 런에 직접 색이
+                // 없으면 계산된 문단 스타일 색을 그룹 입력에 명시적으로 전달한다.
+                // 이후 수식 생성기는 이 색만 실행하며 스타일 상속을 재판정하지 않는다.
+                if ((enterEH || enterNP || enterBT)
+                        && (run.fillColor() == null || run.fillColor().trim().isEmpty())
+                        && sc.fillColor != null && !sc.fillColor.trim().isEmpty()) {
+                    run.fillColor(sc.fillColor);
                 }
 
                 if (enterEH) {
@@ -3074,6 +3084,14 @@ public class StoryLoader {
         } catch (Exception e) {
             return true;
         }
+    }
+
+    private static boolean isExplicitEHGrepAtomicDigit(IDMLCharacterRun run) {
+        if (run == null || !EHFontGlyphMap.isEHFontStyle(run.grepAppliedCharStyle())) {
+            return false;
+        }
+        String text = run.content();
+        return text != null && text.replace("`", "").trim().matches("\\d");
     }
 
     private static boolean allInlineGraphicsAreVinculum(IDMLCharacterRun run) {

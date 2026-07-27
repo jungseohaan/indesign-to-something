@@ -694,6 +694,26 @@ public class ASTMathGrouper {
 
     public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para,
                                         java.util.function.Function<String, String> colorToHex) {
+        String atomicHwpScript = EHFontEquationConverter.convert(ehRuns);
+        if (containsEHYakmulPiGlyph(ehRuns)) {
+            String piScript = atomicHwpScript == null ? "pi" : atomicHwpScript.replace("π", "pi");
+            if (piScript.startsWith("p") && !piScript.startsWith("pi")) {
+                piScript = "pi" + piScript.substring(1);
+            }
+            ASTEquation eq = new ASTEquation(piScript, "EH_FONT");
+            applyTextDerivedEquationHints(eq, ehRuns);
+            applyTextDerivedEquationColor(eq, ehRuns, colorToHex);
+            para.addItem(eq);
+            return;
+        }
+        String explicitAtomicScript = explicitEHAtomicScript(ehRuns);
+        if (explicitAtomicScript != null) {
+            ASTEquation eq = new ASTEquation(explicitAtomicScript, "EH_FONT");
+            applyTextDerivedEquationHints(eq, ehRuns);
+            applyTextDerivedEquationColor(eq, ehRuns, colorToHex);
+            para.addItem(eq);
+            return;
+        }
         // 근호(√)·GREP 분수 구조가 포함된 EH 그룹은 화학식 경계 분할을 건너뛴다.
         // - 근호: radicand 안의 괄호(예: √(1/2)²)의 ")" 가 isChemicalFormulaBoundaryRun
         //   으로 감지돼 그룹이 통째로 쪼개지면 sqrt 구조가 파괴된다(실측: 1단원 p18
@@ -716,10 +736,11 @@ public class ASTMathGrouper {
                 return;
             }
         }
-        String hwpScript = EHFontEquationConverter.convert(ehRuns);
+        String hwpScript = atomicHwpScript;
         if (isStandaloneSqrtSymbolScript(hwpScript, ehRuns)) {
             ASTEquation eq = new ASTEquation("sqrt{ }", "EH_FONT");
             applyTextDerivedEquationHints(eq, ehRuns);
+            applyTextDerivedEquationColor(eq, ehRuns, colorToHex);
             para.addItem(eq);
             return;
         }
@@ -736,6 +757,7 @@ public class ASTMathGrouper {
                 ASTInlineItem it = para.items().get(i);
                 if (it instanceof ASTEquation) {
                     applyTextDerivedEquationHints((ASTEquation) it, ehRuns);
+                    applyTextDerivedEquationColor((ASTEquation) it, ehRuns, colorToHex);
                 }
             }
         } else {
@@ -1061,6 +1083,21 @@ public class ASTMathGrouper {
         }
         if (preferredFontFamily != null && !preferredFontFamily.isEmpty()) {
             equation.preferredFontFamily(preferredFontFamily);
+        }
+    }
+
+    private static void applyTextDerivedEquationColor(
+            ASTEquation equation,
+            List<IDMLCharacterRun> mathRuns,
+            java.util.function.Function<String, String> colorToHex) {
+        if (equation == null || mathRuns == null || colorToHex == null) return;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null || run.fillColor() == null || run.fillColor().trim().isEmpty()) continue;
+            String color = colorToHex.apply(run.fillColor());
+            if (color != null && !color.trim().isEmpty()) {
+                equation.textColor(color);
+                return;
+            }
         }
     }
 
@@ -1775,9 +1812,48 @@ public class ASTMathGrouper {
     }
 
     private static boolean shouldEmitConvertedEquation(String script, List<IDMLCharacterRun> mathRuns) {
+        if (explicitEHAtomicScript(mathRuns) != null) {
+            return true;
+        }
         return FormulaClassifier.shouldEmitConvertedEquation(
                 script,
                 containsEncodedMathEvidence(mathRuns));
+    }
+
+    /**
+     * Preserve atomic values whose mathematical meaning is declared by the
+     * source EH font.  The generic classifier intentionally rejects standalone
+     * numbers and words because they may be prose or list labels, but that
+     * loses two legitimate EH cases:
+     * <ul>
+     *   <li>EH약물 {@code p} decodes to the HWP equation keyword {@code pi}</li>
+     *   <li>a single digit in EH상부자 is an explicitly styled numeric formula</li>
+     * </ul>
+     */
+    private static String explicitEHAtomicScript(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null || mathRuns.size() != 1) return null;
+        IDMLCharacterRun run = mathRuns.get(0);
+        String role = ehFontRole(run);
+        String sourceAtomicText = run.content() == null
+                ? ""
+                : run.content().replace("`", "").trim();
+        return role != null && role.startsWith("EH상부자")
+                && sourceAtomicText.matches("\\d")
+                ? sourceAtomicText
+                : null;
+    }
+
+    private static boolean containsEHYakmulPiGlyph(List<IDMLCharacterRun> mathRuns) {
+        if (mathRuns == null) return false;
+        for (IDMLCharacterRun run : mathRuns) {
+            if (run == null || run.content() == null) continue;
+            String role = ehFontRole(run);
+            if (role != null && role.startsWith("EH약물")
+                    && run.content().indexOf('p') >= 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean containsEncodedMathEvidence(List<IDMLCharacterRun> mathRuns) {
@@ -1804,6 +1880,10 @@ public class ASTMathGrouper {
         String cs = run.appliedCharacterStyle();
         if (EHFontGlyphMap.isEHFontStyle(cs)) {
             return EHFontGlyphMap.extractFontFromStyle(cs);
+        }
+        String grepCs = run.grepAppliedCharStyle();
+        if (EHFontGlyphMap.isEHFontStyle(grepCs)) {
+            return EHFontGlyphMap.extractFontFromStyle(grepCs);
         }
         return ff;
     }
