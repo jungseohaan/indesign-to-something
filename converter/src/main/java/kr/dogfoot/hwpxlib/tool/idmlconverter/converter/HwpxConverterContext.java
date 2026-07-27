@@ -28,6 +28,7 @@ public class HwpxConverterContext {
     public final StyleRegistry styleRegistry;
     public final FontRegistry fontRegistry;
     public final List<ASTStyleDef> paragraphStyles;
+    public final List<ASTStyleDef> characterStyles;
     final AtomicInteger borderFillIdCounter;
 
     // CharPr 캐시: 동일한 인라인 오버라이드 조합을 재사용
@@ -157,11 +158,13 @@ public class HwpxConverterContext {
     public kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config;
 
     public HwpxConverterContext(HWPXFile hwpxFile, StyleRegistry styleRegistry,
-                                FontRegistry fontRegistry, List<ASTStyleDef> paragraphStyles) {
+                                FontRegistry fontRegistry, List<ASTStyleDef> paragraphStyles,
+                                List<ASTStyleDef> characterStyles) {
         this.hwpxFile = hwpxFile;
         this.styleRegistry = styleRegistry;
         this.fontRegistry = fontRegistry;
         this.paragraphStyles = paragraphStyles;
+        this.characterStyles = characterStyles;
         this.borderFillIdCounter = new AtomicInteger(3);
     }
 }

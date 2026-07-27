@@ -139,7 +139,8 @@ public class ASTToHwpxConverter {
         }
 
         // 3. 컨텍스트 + 빌더 생성
-        ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry, doc.paragraphStyles());
+        ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry,
+                doc.paragraphStyles(), doc.characterStyles());
         ctx.config = config;
 
         paragraphBuilder = new HwpxParagraphBuilder(ctx);

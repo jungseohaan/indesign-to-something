@@ -113,7 +113,7 @@ public class FlatToHwpxConverter {
 
         // 3. 컨텍스트 + 빌더 생성
         ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry,
-                gateway.paragraphStyles());
+                gateway.paragraphStyles(), gateway.characterStyles());
         ctx.config = config;
 
         paragraphBuilder = new HwpxParagraphBuilder(ctx);
