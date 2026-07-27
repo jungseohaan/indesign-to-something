@@ -364,9 +364,13 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         return false;
     }
 
-    function collectTextShellVisualExportSourceIds(shellSourceId, editableTextIds) {
+    function collectTextShellVisualExportSourceIds(shellSourceId, editableTextIds, includePlacedVisualBranches) {
         var sourceIds = collectSubtreeSourceIds(shellSourceId);
-        var exportIds = collectExportSourceIds(sourceIds, editableTextIds || [], false, shellSourceId);
+        var exportIds = collectExportSourceIds(
+                sourceIds,
+                editableTextIds || [],
+                false,
+                includePlacedVisualBranches === true ? null : shellSourceId);
         if (!exportIds || exportIds.length === 0) return [shellSourceId];
         return exportIds;
     }
@@ -587,6 +591,35 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         return false;
     }
 
+    function sourceIsDescendantOf(sourceId, ancestorId) {
+        var current = sourceInfoById[String(sourceId)];
+        for (var depth = 0; depth < 64 && current; depth++) {
+            if (String(current.id) === String(ancestorId)) return true;
+            if (current.parentId === null || current.parentId === undefined) return false;
+            current = sourceInfoById[String(current.parentId)];
+        }
+        return false;
+    }
+
+    function directSiblingTextShellsPartitionEditableText(sourceId, editableIds) {
+        if (!editableIds || editableIds.length === 0) return false;
+        for (var ti = 0; ti < editableIds.length; ti++) {
+            var textFrameId = editableIds[ti];
+            var textFrame = sourceInfoById[String(textFrameId)];
+            if (!textFrame || !sourceIsDescendantOf(textFrameId, sourceId)) return false;
+            var shellIds = matchingDirectSiblingShellSourceIds(textFrameId, textFrame.pageIndex);
+            if (!shellIds || shellIds.length !== 1) return false;
+            var shellId = shellIds[0];
+            if (!sourceIsDescendantOf(shellId, sourceId)) return false;
+            var shellTextIds = matchingDirectSiblingTextFrameIds(shellId, textFrame.pageIndex);
+            if (!shellTextIds || shellTextIds.length !== 1
+                    || String(shellTextIds[0]) !== String(textFrameId)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     function descendantClosedTextShellRoots(sourceId) {
         var cacheKey = String(sourceId);
         if (descendantClosedTextShellRootsCache.hasOwnProperty(cacheKey)) {
@@ -663,6 +696,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         while (parentId !== null && parentId !== undefined) {
             var parentInfo = closedTextOwningShellInfo(parentId);
             if (parentInfo && _sourceSetKey(parentInfo.editableIds || []) === editableKey) {
+                if (directSiblingTextShellsPartitionEditableText(parentId, parentInfo.editableIds || [])) {
+                    return false;
+                }
                 return true;
             }
             var parent = sourceInfoById[String(parentId)];
@@ -959,7 +995,7 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         var kind = String(src.kind || "");
         sourceCanBeDirectSiblingTextShellCache[cacheKey] = kind === "Rectangle" || kind === "Oval" || kind === "Polygon";
         if (!sourceCanBeDirectSiblingTextShellCache[cacheKey]) return false;
-        if (String(src.parentKind || "") !== "Group") {
+        if (!sourceParentCanHostSiblingTextShell(src)) {
             sourceCanBeDirectSiblingTextShellCache[cacheKey] = false;
             return false;
         }
@@ -971,8 +1007,18 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             sourceCanBeDirectSiblingTextShellCache[cacheKey] = false;
             return false;
         }
-        sourceCanBeDirectSiblingTextShellCache[cacheKey] = sourceHasVisiblePaint(src);
+        sourceCanBeDirectSiblingTextShellCache[cacheKey] = !sourceHasChildSources(shellSourceId)
+                ? sourceHasVisiblePaint(src)
+                : sourceHasVisibleShellSource(shellSourceId);
         return sourceCanBeDirectSiblingTextShellCache[cacheKey];
+    }
+
+    function sourceParentCanHostSiblingTextShell(src) {
+        if (!src || src.parentId === null || src.parentId === undefined) return false;
+        if (String(src.parentKind || "") === "Group") return true;
+        var parent = sourceInfoById[String(src.parentId)];
+        var parentKind = String(parent && (parent.kind || parent.type || parent.itemType) || "");
+        return parentKind === "Group" || parentKind === "page_object";
     }
 
     function parentHasEditableTextDescendantOnPage(parentId, pageIndex) {
@@ -1262,8 +1308,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                     continue;
                 }
 
-                var shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, [siblingId]);
-                var sourceObjectIds = _sortedNumericIds(shellExportIds.concat([siblingId]));
+                var shellSourceIds = collectSubtreeSourceIds(shellSource.id);
+                var shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, [siblingId], true);
+                var sourceObjectIds = _sortedNumericIds(shellSourceIds.concat([siblingId]));
                 var sourceKey = _sourceSetKey(sourceObjectIds);
                 if (generated[sourceKey]) continue;
                 generated[sourceKey] = true;
@@ -1536,7 +1583,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             var parentShellInfo = closedTextOwningShellInfo(parentSource.id);
             if (!parentShellInfo) continue;
             var hasMoreSpecific = hasMoreSpecificClosedTextOwningShell(parentSource.id, parentShellInfo.editableIds);
-            if (!hasMoreSpecific) continue;
+            var directSiblingShellsPartitionText = directSiblingTextShellsPartitionEditableText(
+                    parentSource.id, parentShellInfo.editableIds);
+            if (!hasMoreSpecific && !directSiblingShellsPartitionText) continue;
 
             var children = childIdsByParentId[String(parentSource.id)] || [];
             for (var ci = 0; ci < children.length; ci++) {
@@ -1600,7 +1649,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                     sourceEntry.id, shellInfo.editableIds);
             var descendantShellsPartitionText = descendantClosedTextShellsPartitionEditableText(
                     sourceEntry.id, shellInfo.editableIds);
-            if ((hasMoreSpecificShell || descendantShellsPartitionText)
+            var directSiblingShellsPartitionText = directSiblingTextShellsPartitionEditableText(
+                    sourceEntry.id, shellInfo.editableIds);
+            if ((hasMoreSpecificShell || descendantShellsPartitionText || directSiblingShellsPartitionText)
                     && !closedTextShellDirectVisualBranchesOverlap(sourceEntry.id)
                     && !parentHasResidualShellStructureOutsideChild(sourceEntry.id)) {
                 continue;

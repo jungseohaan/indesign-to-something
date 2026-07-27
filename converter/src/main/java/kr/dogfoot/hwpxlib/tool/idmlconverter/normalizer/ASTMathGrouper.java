@@ -128,10 +128,14 @@ public class ASTMathGrouper {
                     IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(ai);
                     if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
                             && anchor.index() < srcFrames.size()) {
+                        int newIdx = lastSub.inlineFrames().size();
                         lastSub.addInlineFrame(srcFrames.get(anchor.index()));
+                        lastSub.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.FRAME, newIdx);
                     } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
                             && anchor.index() < srcGraphics.size()) {
+                        int newIdx = lastSub.inlineGraphics().size();
                         lastSub.addInlineGraphic(srcGraphics.get(anchor.index()));
+                        lastSub.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, newIdx);
                     }
                 }
             }
@@ -150,6 +154,10 @@ public class ASTMathGrouper {
         for (IDMLCharacterRun run : runs) {
             String text = run == null ? null : run.content();
             if (text == null || text.isEmpty()) {
+                result.add(run);
+                continue;
+            }
+            if (hasInlinePayload(run)) {
                 result.add(run);
                 continue;
             }
@@ -188,6 +196,13 @@ public class ASTMathGrouper {
             }
         }
         return result;
+    }
+
+    private static boolean hasInlinePayload(IDMLCharacterRun run) {
+        return run != null
+                && ((run.inlineAnchors() != null && !run.inlineAnchors().isEmpty())
+                || (run.inlineFrames() != null && !run.inlineFrames().isEmpty())
+                || (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()));
     }
 
     private static List<String> splitChemicalFormulaTextParts(String text) {

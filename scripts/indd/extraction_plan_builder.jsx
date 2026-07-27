@@ -6916,11 +6916,12 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
             var hasEditableTextDescendant = sourceHasEditableTextDescendant(src.id, targetPageIndex);
             if (hasEditableTextDescendant) {
                 collectUnclaimedVectorShellSubtree(src.id, targetPageIndex, claimed, seen, sourceIds, true);
+                sourceIds = _sortedNumericIds(sourceIds);
             } else {
                 collectSamePageSubtree(src.id, targetPageIndex, seen, sourceIds);
+                sourceIds = pageLocalSourceIdsForFallback(
+                        src, targetPageIndex, sourceIds.length > 0 ? sourceIds : [src.id]);
             }
-            sourceIds = pageLocalSourceIdsForFallback(
-                    src, targetPageIndex, sourceIds.length > 0 ? sourceIds : [src.id]);
             if (visibleMaterialLeavesAllClaimed(sourceIds, claimed)) continue;
             var hasPlacedVisualTree = hasEditableTextDescendant ? false : sourceTreeHasPlacedVisual(sourceIds);
             if (!hasPlacedVisualTree
@@ -8084,6 +8085,7 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
         noSourceIds: 0,
         duplicate: 0
     };
+    var rootSeen = {};
 
     for (var si = 0; sourceItems && si < sourceItems.length; si++) {
         var src = sourceItems[si];
@@ -8114,7 +8116,15 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
         if (!src) return false;
         var kind = sourceKind(src);
         if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
-        return src.hasPlacedVisual === true;
+        if (src.hasPlacedVisual === true) return true;
+        if (subtreeHasPlacedVisual(src.id, {})) return true;
+        try {
+            return sourceIndex && sourceIndex.hasPlacedVisualInSubtree
+                    ? sourceIndex.hasPlacedVisualInSubtree(src.id) === true
+                    : false;
+        } catch (eHasPlacedVisualInSubtree) {
+            return false;
+        }
     }
 
     function subtreeHasEditableText(sourceId, visited) {
@@ -8135,6 +8145,59 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
         return false;
     }
 
+    function subtreeHasPlacedVisual(sourceId, visited) {
+        var key = String(sourceId);
+        if (visited[key]) return false;
+        visited[key] = true;
+        var src = sourceById[key];
+        if (!src) return false;
+        var kind = sourceKind(src);
+        if (kind === "Image" || kind === "PDF" || kind === "EPS") return true;
+        if (src.hasPlacedVisual === true) return true;
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            if (subtreeHasPlacedVisual(children[ci], visited)) return true;
+        }
+        return false;
+    }
+
+    function collectSamePageSubtree(sourceId, pageIndex, visited, out) {
+        var key = String(sourceId);
+        if (visited[key]) return;
+        visited[key] = true;
+        var src = sourceById[key];
+        if (!src) return;
+        if (pageIndex !== null && pageIndex !== undefined
+                && src.pageIndex !== null && src.pageIndex !== undefined
+                && Number(src.pageIndex) !== Number(pageIndex)) {
+            return;
+        }
+        out.push(src.id);
+        var children = childIdsByParentId[key] || [];
+        for (var ci = 0; ci < children.length; ci++) {
+            collectSamePageSubtree(children[ci], pageIndex, visited, out);
+        }
+    }
+
+    function mixedPlacedBranchRoot(src, ownerGroup) {
+        if (!src || !ownerGroup) return src;
+        var current = src;
+        var guard = 0;
+        while (current && current.parentId !== null && current.parentId !== undefined
+                && guard < 32) {
+            if (String(current.parentId) === String(ownerGroup.id)) break;
+            var parent = sourceById[String(current.parentId)];
+            if (!parent) break;
+            if (parent.visible === false || parent.hiddenLayer === true || parent.nonprinting === true) break;
+            if (sourceKind(parent) === "TextFrame") break;
+            if (!subtreeHasPlacedVisual(parent.id, {})) break;
+            if (subtreeHasEditableText(parent.id, {})) break;
+            current = parent;
+            guard++;
+        }
+        return current || src;
+    }
+
     function groupHasEditableTextOutsideSubtree(groupId, subtreeRootId) {
         var children = childIdsByParentId[String(groupId)] || [];
         for (var ci = 0; ci < children.length; ci++) {
@@ -8150,18 +8213,34 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
         var guard = 0;
         while (parentId !== null && parentId !== undefined && guard < 32) {
             var parent = sourceById[String(parentId)];
-            if (!parent || sourceKind(parent) !== "Group") break;
+            if (!parent) break;
+            var parentKind = sourceKind(parent);
             if (parent.hiddenLayer === true || parent.visible === false || parent.nonprinting === true) break;
             if (parent.pageIndex !== null && parent.pageIndex !== undefined
                     && src.pageIndex !== null && src.pageIndex !== undefined
                     && Number(parent.pageIndex) !== Number(src.pageIndex)) {
                 break;
             }
-            if (groupHasEditableTextOutsideSubtree(parent.id, src.id)) return parent;
+            if (parentKind === "Group" && groupHasEditableTextOutsideSubtree(parent.id, src.id)) return parent;
             parentId = parent.parentId;
             guard++;
         }
         return null;
+    }
+
+    function hasNonTextPlacedAncestorBeforeOwner(src, ownerGroup) {
+        if (!src || !ownerGroup) return false;
+        var parentId = src.parentId;
+        var guard = 0;
+        while (parentId !== null && parentId !== undefined && guard < 32) {
+            if (String(parentId) === String(ownerGroup.id)) return false;
+            var parent = sourceById[String(parentId)];
+            if (!parent) return false;
+            if (hasPlacedVisualBranch(parent) && !subtreeHasEditableText(parent.id, {})) return true;
+            parentId = parent.parentId;
+            guard++;
+        }
+        return false;
     }
 
     function nonNoneTextWrapSource(src) {
@@ -8194,13 +8273,14 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
         };
     }
 
-    function pageLocalSourceObjectIds(sourceId, pageIndex) {
+    function pageLocalSourceObjectIds(sourceId, pageIndex, fallbackIds) {
         try {
             var ids = sourceIndex && sourceIndex.pageLocalSourceObjectIds
                     ? sourceIndex.pageLocalSourceObjectIds(sourceId, pageIndex)
                     : null;
             if (ids && ids.length > 0) return _sortedNumericIds(ids);
         } catch (ePageLocalMixedPlacedVisual) {}
+        if (fallbackIds && fallbackIds.length > 0) return _sortedNumericIds(fallbackIds);
         return [sourceId];
     }
 
@@ -8211,24 +8291,48 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
             skipped.noPlacedVisual++;
             continue;
         }
+        if (subtreeHasEditableText(itemInfo.id, {})) {
+            skipped.noMixedOwnerGroup++;
+            continue;
+        }
         var ownerGroup = mixedOwnerGroupForPlacedBranch(itemInfo);
         if (!ownerGroup) skipped.noMixedOwnerGroup++;
-        var sourceObjectIds = pageLocalSourceObjectIds(itemInfo.id, itemInfo.pageIndex);
+        var branchRoot = mixedPlacedBranchRoot(itemInfo, ownerGroup);
+        if (!branchRoot) {
+            skipped.noMixedOwnerGroup++;
+            continue;
+        }
+        if (hasNonTextPlacedAncestorBeforeOwner(branchRoot, ownerGroup)) {
+            skipped.duplicate++;
+            continue;
+        }
+        var branchKey = String(branchRoot.id);
+        if (rootSeen[branchKey]) {
+            skipped.duplicate++;
+            continue;
+        }
+        rootSeen[branchKey] = true;
+        var sourceObjectIds = [];
+        collectSamePageSubtree(branchRoot.id, branchRoot.pageIndex, {}, sourceObjectIds);
+        sourceObjectIds = pageLocalSourceObjectIds(
+                branchRoot.id,
+                branchRoot.pageIndex,
+                sourceObjectIds.length > 0 ? sourceObjectIds : [branchRoot.id]);
         if (!sourceObjectIds || sourceObjectIds.length === 0) {
             skipped.noSourceIds++;
             continue;
         }
         var before = candidates ? candidates.length : 0;
         var item = null;
-        try { item = sourceIndex && sourceIndex.domItem ? sourceIndex.domItem(itemInfo.id) : null; } catch (eDomItemMixedPlacedVisual) {}
+        try { item = sourceIndex && sourceIndex.domItem ? sourceIndex.domItem(branchRoot.id) : null; } catch (eDomItemMixedPlacedVisual) {}
         var candidateAttrs = {
-            sourceId: itemInfo.id,
+            sourceId: branchRoot.id,
             sourceObjectIds: sourceObjectIds,
             visualSourceObjectIds: sourceObjectIds,
             exportSourceObjectIds: sourceObjectIds,
-            exportTargetObjectId: itemInfo.id,
-            pageIndex: itemInfo.pageIndex,
-            kind: itemInfo.kind,
+            exportTargetObjectId: branchRoot.id,
+            pageIndex: branchRoot.pageIndex,
+            kind: branchRoot.kind,
             unit: "ITEM",
             mode: "ORIGINAL_VISUAL",
             candidatePurpose: "CONTENT_CANDIDATE",
@@ -8238,12 +8342,12 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
                             : "direct_placed_visual_branch")
                     : null,
             slotRole: "content_visual_slot",
-            bounds: itemInfo.bounds,
-            parentId: itemInfo.parentId,
-            parentKind: itemInfo.parentKind,
-            anchoredPosition: itemInfo.anchoredPosition,
-            storyAnchorPlacement: itemInfo.storyAnchorPlacement,
-            zOrder: itemInfo.zOrder,
+            bounds: branchRoot.bounds,
+            parentId: branchRoot.parentId,
+            parentKind: branchRoot.parentKind,
+            anchoredPosition: branchRoot.anchoredPosition,
+            storyAnchorPlacement: branchRoot.storyAnchorPlacement,
+            zOrder: branchRoot.zOrder,
             textOwner: "none",
             containsEditableText: false,
             mixedOwnerGroupSourceObjectId: ownerGroup ? ownerGroup.id : null,
@@ -8252,7 +8356,7 @@ function _appendMixedBundlePlacedVisualCandidates(sourceItems, sourceIndex, cand
                     ? "mixed_source_bundle_placed_visual_branch"
                     : "direct_source_placed_visual_branch"
         };
-        var textWrapContract = textWrapContractForPlacedBranch(itemInfo, ownerGroup);
+        var textWrapContract = textWrapContractForPlacedBranch(branchRoot, ownerGroup);
         if (textWrapContract) {
             candidateAttrs.textWrapMode = textWrapContract.mode;
             candidateAttrs.textWrapSide = textWrapContract.side;
@@ -8603,24 +8707,62 @@ function _appendCanonicalPagePlaneObjectPlans(doc, sourceItems, objectPlanDiagno
             return false;
         }
         var memberSourceIds = _canonicalPagePlaneExistingPlanSourceIds(plan);
-        var eligible = pageBackgroundEligibleSourceIdsForPage(
-                memberSourceIds,
-                planPageIndex,
-                plan);
-        if (!eligible || eligible.sourceIds.length === 0) {
+        var eligibleSourceIdUnion = [];
+        var eligibleSourceIdsByPage = {};
+        var eligibleRolesByPage = {};
+        for (var msi = 0; msi < memberSourceIds.length; msi++) {
+            var memberSourceId = Number(memberSourceIds[msi]);
+            if (isNaN(memberSourceId)) continue;
+            var memberSource = sourceById[String(memberSourceId)] || null;
+            var targetPages = memberSource
+                    ? pageBackgroundCandidatePagesForSource(memberSource)
+                    : [];
+            if (!targetPages || targetPages.length === 0) {
+                targetPages = [planPageIndex];
+            }
+            var targetSeen = {};
+            targetPages.push(planPageIndex);
+            for (var tpi = 0; tpi < targetPages.length; tpi++) {
+                var targetPageIndex = Number(targetPages[tpi]);
+                if (isNaN(targetPageIndex) || targetPageIndex < 0) continue;
+                var targetKey = String(targetPageIndex);
+                if (targetSeen[targetKey]) continue;
+                targetSeen[targetKey] = true;
+                var role = pageBackgroundEligibilityForSourceOnPage(
+                        memberSource,
+                        targetPageIndex,
+                        plan);
+                if (!role && planIsMasterTextlessGraphicPlan(plan)) {
+                    role = "MASTER_TEXTLESS_GRAPHIC";
+                }
+                if (!role) continue;
+                if (!eligibleSourceIdsByPage[targetKey]) {
+                    eligibleSourceIdsByPage[targetKey] = [];
+                    eligibleRolesByPage[targetKey] = {};
+                }
+                eligibleSourceIdsByPage[targetKey].push(memberSourceId);
+                eligibleRolesByPage[targetKey][String(memberSourceId)] = role;
+                eligibleSourceIdUnion.push(memberSourceId);
+            }
+        }
+        eligibleSourceIdUnion = _sortedNumericIds(eligibleSourceIdUnion);
+        if (eligibleSourceIdUnion.length === 0) {
             plan.canonicalPagePlaneAbsorbEligible = false;
             return false;
         }
         plan.canonicalPagePlaneAbsorbEligible = true;
-        plan.canonicalPagePlaneEligibleSourceObjectIds = eligible.sourceIds.slice(0);
-        var pageKey = String(plan.pageIndex);
-        if (!absorbableExistingPlanSourceIdsByPage[pageKey]) {
-            absorbableExistingPlanSourceIdsByPage[pageKey] = [];
+        plan.canonicalPagePlaneEligibleSourceObjectIds = eligibleSourceIdUnion.slice(0);
+        plan.canonicalPagePlaneEligibleSourceObjectIdsByPage = eligibleSourceIdsByPage;
+        for (var pageKey in eligibleSourceIdsByPage) {
+            if (!eligibleSourceIdsByPage.hasOwnProperty(pageKey)) continue;
+            if (!absorbableExistingPlanSourceIdsByPage[pageKey]) {
+                absorbableExistingPlanSourceIdsByPage[pageKey] = [];
+            }
+            absorbableExistingPlanSourceIdsByPage[pageKey] = _sortedNumericIds(
+                    absorbableExistingPlanSourceIdsByPage[pageKey].concat(
+                            eligibleSourceIdsByPage[pageKey]));
+            rememberPageBackgroundSourceRoles(pageKey, eligibleRolesByPage[pageKey]);
         }
-        absorbableExistingPlanSourceIdsByPage[pageKey] = _sortedNumericIds(
-                absorbableExistingPlanSourceIdsByPage[pageKey].concat(
-                        eligible.sourceIds));
-        rememberPageBackgroundSourceRoles(pageKey, eligible.rolesBySourceId);
         return true;
     }
     function sourceKind(src) {

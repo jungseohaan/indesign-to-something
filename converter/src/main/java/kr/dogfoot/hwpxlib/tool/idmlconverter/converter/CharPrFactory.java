@@ -79,11 +79,13 @@ final class CharPrFactory {
             }
         }
 
+        EffectiveTextStyle effectiveStyle = effectiveTextStyle(textRun);
+
         // 인라인 스타일 오버라이드 (SPEC-031: DSL char rule이 있으면 override 강제)
         boolean hasDslChar = kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry
                 .hasCharRule(textRun.characterStyleRef());
-        if (hasCharacterOverrides(textRun) || hasDslChar) {
-            charPrId = createOverrideCharPr(textRun);
+        if (hasCharacterOverrides(textRun) || hasDslChar || isRealCharacterStyleRef(textRun.characterStyleRef())) {
+            charPrId = createOverrideCharPr(textRun, effectiveStyle);
         } else if (textRun.characterStyleRef() != null) {
             String charRef = HwpxUtil.resolveStyleRef(textRun.characterStyleRef(), ctx.styleRegistry);
             String mapped = ctx.styleRegistry.getCharPrId(charRef);
@@ -94,16 +96,16 @@ final class CharPrFactory {
         // 단, BT수식H 계열이 일반 한국어 문장 run에 묻어 들어오는 경우가 있다.
         // 이때까지 수식 CharPr로 덮어쓰면 8pt 본문이 10pt 수식 스타일로 커진다.
         // 실제 수식 구조가 없는 prose run은 앞단에서 정한 본문 CharPr를 그대로 실행한다.
-        if ((isEquationFontCached(textRun.fontFamily()) || textRun.grepMathFont())
+        if ((isEquationFontCached(effectiveStyle.fontFamily) || textRun.grepMathFont())
                 && shouldUseEquationFontCharPr(textRun)) {
-            charPrId = createEquationFontCharPr(textRun, inheritedCharPrId);
+            charPrId = createEquationFontCharPr(textRun, inheritedCharPrId, effectiveStyle);
         }
 
         // 공백 문자를 별도 런으로 분리하여 장평(ratio) 축소 적용
         // 탭/줄바꿈이 포함된 경우는 기존 로직 유지 (복잡도 방지)
         boolean hasSpecial = text.indexOf('\t') >= 0 || text.indexOf('\n') >= 0 || text.indexOf('\u2028') >= 0;
         if (!hasSpecial && spaceRatio() < 100 && text.indexOf(' ') >= 0) {
-            addTextRunWithSpaceSplit(para, text, charPrId, textRun);
+            addTextRunWithSpaceSplit(para, text, charPrId, textRun, effectiveStyle);
         } else {
             Run run = para.addNewRun();
             run.charPrIDRef(charPrId);
@@ -133,8 +135,9 @@ final class CharPrFactory {
      * 텍스트를 "비공백/공백" 세그먼트로 분할하여 출력.
      * 공백 세그먼트에는 ratio가 축소된 별도 CharPr을 적용.
      */
-    private void addTextRunWithSpaceSplit(Para para, String text, String charPrId, ASTTextRun textRun) {
-        String spaceCharPrId = getOrCreateSpaceCharPr(charPrId, textRun);
+    private void addTextRunWithSpaceSplit(Para para, String text, String charPrId,
+                                          ASTTextRun textRun, EffectiveTextStyle effectiveStyle) {
+        String spaceCharPrId = getOrCreateSpaceCharPr(charPrId, textRun, effectiveStyle);
         int i = 0;
         while (i < text.length()) {
             boolean isSpace = text.charAt(i) == ' ';
@@ -157,8 +160,10 @@ final class CharPrFactory {
      * 공백용 CharPr을 생성 또는 캐시에서 가져온다.
      * 기존 CharPr과 동일하되 ratio만 spaceRatio()로 축소.
      */
-    private String getOrCreateSpaceCharPr(String baseCharPrId, ASTTextRun textRun) {
-        String cacheKey = "SP|" + baseCharPrId + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "");
+    private String getOrCreateSpaceCharPr(String baseCharPrId, ASTTextRun textRun,
+                                          EffectiveTextStyle effectiveStyle) {
+        String cacheKey = "SP|" + baseCharPrId + "|" + effectiveStyle.cacheKey()
+                + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "");
         String cached = ctx.charPrCache.get(cacheKey);
         if (cached != null) return cached;
 
@@ -166,31 +171,27 @@ final class CharPrFactory {
         String newId = ctx.styleRegistry.nextCharPrId();
         CharPr charPr = ctx.hwpxFile.headerXMLFile().refList().charProperties().addNew();
 
-        int height = textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : 1000;
-        String textColor = textRun.textColor() != null ? textRun.textColor() : "#000000";
-        String fontStyleStr = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
-
         LineType3 ulShape = null;
-        if (textRun.underline() && textRun.underlineShape() != null) {
-            ulShape = LineType3.fromString(textRun.underlineShape());
+        if (effectiveStyle.underline && effectiveStyle.underlineShape != null) {
+            ulShape = LineType3.fromString(effectiveStyle.underlineShape);
         }
 
         // horizontalScale=null로 build 후 ratio를 spaceRatio()로 직접 덮어쓴다.
         // fontRatio(한글 글리프 폭 보정)는 공백 폭과 무관하므로 중복 적용 방지.
-        CharPrBuilder.build(charPr, newId, height, textColor,
-                textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
-                textRun.letterSpacing(),
-                effectiveBoldStyle(fontStyleStr, textRun.fontFamily(), textRun.characterStyleRef()),
-                isItalicStyle(fontStyleStr),
+        CharPrBuilder.build(charPr, newId, effectiveStyle.height, effectiveStyle.textColor,
+                effectiveStyle.fontFamily, effectiveStyle.fontStyle, ctx.fontRegistry,
+                effectiveStyle.letterSpacing,
+                effectiveStyle.bold,
+                effectiveStyle.italic,
                 textRun.superscript(), textRun.subscript(),
-                textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
-                textRun.underline()
-                        ? (textRun.underlineColor() != null ? textRun.underlineColor() : textColor)
+                effectiveStyle.underline ? UnderlineType.BOTTOM : UnderlineType.NONE,
+                effectiveStyle.underline
+                        ? (effectiveStyle.underlineColor != null ? effectiveStyle.underlineColor : effectiveStyle.textColor)
                         : "#000000",
                 ulShape,
                 null,  // horizontalScale: build에 맡기지 않고 아래에서 직접 덮어씀
-                textRun.strikeThrough(),
-                textRun.verticalScale(),
+                effectiveStyle.strikeThrough,
+                effectiveStyle.verticalScale,
                 textRun.baselineShift());
         applyShadeColor(charPr, textRun);
         // spaceCondenseRatio를 절대 목표값으로 직접 적용 (fontRatio와 독립)
@@ -249,39 +250,195 @@ final class CharPrFactory {
                 || run.strikeThrough();
     }
 
+    private EffectiveTextStyle effectiveTextStyle(ASTTextRun run) {
+        ASTStyleDef paraStyle = findStyle(ctx.paragraphStyles, currentParaStyleRef);
+        ASTStyleDef charStyle = findStyle(ctx.characterStyles, run.characterStyleRef());
+
+        boolean hasRealCharacterStyle = charStyle != null;
+        String fontFamily = hasRealCharacterStyle
+                ? firstNonBlank(charStyle.fontFamily(), run.fontFamily(), paraStyle != null ? paraStyle.fontFamily() : null)
+                : firstNonBlank(run.fontFamily(), paraStyle != null ? paraStyle.fontFamily() : null);
+        String fontStyle = hasRealCharacterStyle
+                ? firstNonBlank(charStyle.fontStyle(), run.fontStyle(), paraStyle != null ? paraStyle.fontStyle() : null)
+                : firstNonBlank(run.fontStyle(), paraStyle != null ? paraStyle.fontStyle() : null);
+        int height = hasRealCharacterStyle
+                ? firstPositive(charStyle.fontSizeHwpunits(), run.fontSizeHwpunits(),
+                        paraStyle != null ? paraStyle.fontSizeHwpunits() : null, 1000)
+                : firstPositive(run.fontSizeHwpunits(),
+                        paraStyle != null ? paraStyle.fontSizeHwpunits() : null, null, 1000);
+        String textColor = hasRealCharacterStyle
+                ? firstNonBlank(charStyle.textColor(), run.textColor(), paraStyle != null ? paraStyle.textColor() : null, "#000000")
+                : firstNonBlank(run.textColor(), paraStyle != null ? paraStyle.textColor() : null, "#000000");
+        Short letterSpacing = hasRealCharacterStyle
+                ? firstNonNull(charStyle.letterSpacing(), run.letterSpacing(), paraStyle != null ? paraStyle.letterSpacing() : null)
+                : firstNonNull(run.letterSpacing(), paraStyle != null ? paraStyle.letterSpacing() : null);
+        Short horizontalScale = hasRealCharacterStyle
+                ? firstNonNull(charStyle.horizontalScale(), run.horizontalScale(), paraStyle != null ? paraStyle.horizontalScale() : null)
+                : firstNonNull(run.horizontalScale(), paraStyle != null ? paraStyle.horizontalScale() : null);
+
+        boolean underline = run.underline()
+                || (charStyle != null && Boolean.TRUE.equals(charStyle.underline()))
+                || (paraStyle != null && Boolean.TRUE.equals(paraStyle.underline()));
+        String underlineColor = firstNonBlank(run.underlineColor(),
+                charStyle != null ? charStyle.underlineColor() : null,
+                paraStyle != null ? paraStyle.underlineColor() : null);
+        String underlineShape = firstNonBlank(run.underlineShape(),
+                charStyle != null ? charStyle.underlineType() : null,
+                paraStyle != null ? paraStyle.underlineType() : null);
+        boolean strikeThrough = run.strikeThrough()
+                || (charStyle != null && Boolean.TRUE.equals(charStyle.strikeThrough()))
+                || (paraStyle != null && Boolean.TRUE.equals(paraStyle.strikeThrough()));
+
+        String fontStyleLower = fontStyle != null ? fontStyle.toLowerCase() : "";
+        boolean bold = (charStyle != null && Boolean.TRUE.equals(charStyle.bold()))
+                || (paraStyle != null && Boolean.TRUE.equals(paraStyle.bold()))
+                || effectiveBoldStyle(fontStyleLower, fontFamily, run.characterStyleRef());
+        boolean italic = (charStyle != null && Boolean.TRUE.equals(charStyle.italic()))
+                || (paraStyle != null && Boolean.TRUE.equals(paraStyle.italic()))
+                || isItalicStyle(fontStyleLower);
+
+        return new EffectiveTextStyle(fontFamily, fontStyle, height, textColor,
+                letterSpacing, horizontalScale, run.verticalScale(),
+                underline, underlineColor, underlineShape, strikeThrough, bold, italic);
+    }
+
+    private ASTStyleDef findStyle(java.util.List<ASTStyleDef> styles, String styleRef) {
+        if (styles == null || !isRealStyleRef(styleRef)) return null;
+        String resolved = HwpxUtil.resolveStyleRef(styleRef, ctx.styleRegistry);
+        for (ASTStyleDef sd : styles) {
+            if (sd != null && sameStyleId(sd.styleId(), resolved, styleRef)) {
+                return sd;
+            }
+        }
+        return null;
+    }
+
+    private static boolean sameStyleId(String styleId, String resolvedRef, String rawRef) {
+        if (styleId == null) return false;
+        if (styleId.equals(resolvedRef) || styleId.equals(rawRef)) return true;
+        return (resolvedRef != null && styleId.endsWith("/" + resolvedRef))
+                || (rawRef != null && styleId.endsWith("/" + rawRef));
+    }
+
+    private static boolean isRealCharacterStyleRef(String styleRef) {
+        if (!isRealStyleRef(styleRef)) return false;
+        return styleRef.startsWith("CharacterStyle/")
+                || !styleRef.startsWith("ParagraphStyle/");
+    }
+
+    private static boolean isRealStyleRef(String styleRef) {
+        if (styleRef == null || styleRef.isEmpty()) return false;
+        String lower = styleRef.toLowerCase(java.util.Locale.ROOT);
+        return !lower.contains("[no character style]")
+                && !lower.contains("no character style");
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            if (value != null && !value.isEmpty()) return value;
+        }
+        return null;
+    }
+
+    @SafeVarargs
+    private static <T> T firstNonNull(T... values) {
+        if (values == null) return null;
+        for (T value : values) {
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private static int firstPositive(Integer first, Integer second, Integer third, int defaultValue) {
+        if (first != null && first > 0) return first;
+        if (second != null && second > 0) return second;
+        if (third != null && third > 0) return third;
+        return defaultValue;
+    }
+
+    static final class EffectiveTextStyle {
+        final String fontFamily;
+        final String fontStyle;
+        final int height;
+        final String textColor;
+        final Short letterSpacing;
+        final Short horizontalScale;
+        final Short verticalScale;
+        final boolean underline;
+        final String underlineColor;
+        final String underlineShape;
+        final boolean strikeThrough;
+        final boolean bold;
+        final boolean italic;
+
+        EffectiveTextStyle(String fontFamily, String fontStyle, int height, String textColor,
+                           Short letterSpacing, Short horizontalScale, Short verticalScale,
+                           boolean underline, String underlineColor, String underlineShape,
+                           boolean strikeThrough, boolean bold, boolean italic) {
+            this.fontFamily = fontFamily;
+            this.fontStyle = fontStyle;
+            this.height = height;
+            this.textColor = textColor;
+            this.letterSpacing = letterSpacing;
+            this.horizontalScale = horizontalScale;
+            this.verticalScale = verticalScale;
+            this.underline = underline;
+            this.underlineColor = underlineColor;
+            this.underlineShape = underlineShape;
+            this.strikeThrough = strikeThrough;
+            this.bold = bold;
+            this.italic = italic;
+        }
+
+        String cacheKey() {
+            return (fontFamily != null ? fontFamily : "")
+                    + "|" + (fontStyle != null ? fontStyle : "")
+                    + "|" + height
+                    + "|" + (textColor != null ? textColor : "")
+                    + "|" + (letterSpacing != null ? letterSpacing : "")
+                    + "|" + (horizontalScale != null ? horizontalScale : "")
+                    + "|" + (verticalScale != null ? verticalScale : "")
+                    + "|" + underline
+                    + "|" + (underlineColor != null ? underlineColor : "")
+                    + "|" + (underlineShape != null ? underlineShape : "")
+                    + "|" + strikeThrough
+                    + "|" + bold
+                    + "|" + italic;
+        }
+    }
+
     String charPrCacheKey(ASTTextRun textRun) {
+        return charPrCacheKey(textRun, effectiveTextStyle(textRun));
+    }
+
+    String charPrCacheKey(ASTTextRun textRun, EffectiveTextStyle effectiveStyle) {
         return (textRun.characterStyleRef() != null ? textRun.characterStyleRef() : "")
-                + "|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
-                + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
-                + "|" + (textRun.textColor() != null ? textRun.textColor() : "")
+                + "|" + effectiveStyle.cacheKey()
                 + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "")
-                + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
-                + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
-                + "|" + (textRun.horizontalScale() != null ? textRun.horizontalScale() : "")
-                + "|" + (textRun.verticalScale() != null ? textRun.verticalScale() : "")
                 + "|" + (textRun.baselineShift() != null ? textRun.baselineShift() : "")
                 + "|" + textRun.superscript()
                 + "|" + textRun.subscript()
-                + "|" + textRun.underline()
-                + "|" + (textRun.underlineColor() != null ? textRun.underlineColor() : "")
-                + "|" + (textRun.underlineShape() != null ? textRun.underlineShape() : "")
-                + "|" + textRun.strikeThrough()
                 + "|" + textRun.grepMathFont();
     }
 
     String createOverrideCharPr(ASTTextRun textRun) {
-        String cacheKey = charPrCacheKey(textRun);
+        return createOverrideCharPr(textRun, effectiveTextStyle(textRun));
+    }
+
+    String createOverrideCharPr(ASTTextRun textRun, EffectiveTextStyle effectiveStyle) {
+        String cacheKey = charPrCacheKey(textRun, effectiveStyle);
         String cached = ctx.charPrCache.get(cacheKey);
         if (cached != null) return cached;
 
         String newId = ctx.styleRegistry.nextCharPrId();
         CharPr charPr = ctx.hwpxFile.headerXMLFile().refList().charProperties().addNew();
 
-        int height = textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : 1000;
-        String textColor = textRun.textColor() != null ? textRun.textColor() : "#000000";
-        String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
-        String fontFamilyToUse = textRun.fontFamily();
-        Short letterSpacingToUse = textRun.letterSpacing();
+        int height = effectiveStyle.height;
+        String textColor = effectiveStyle.textColor;
+        String fontFamilyToUse = effectiveStyle.fontFamily;
+        String fontStyleToUse = effectiveStyle.fontStyle;
+        Short letterSpacingToUse = effectiveStyle.letterSpacing;
         if (fontFamilyToUse != null && fontFamilyToUse.contains("BT수식H")
                 && isPlainKoreanProse(textRun.text())) {
             fontFamilyToUse = null;
@@ -300,24 +457,24 @@ final class CharPrFactory {
 
         // underline shape: ASTTextRun.underlineShape → LineType3
         LineType3 ulShape = null;
-        if (textRun.underline() && textRun.underlineShape() != null) {
-            ulShape = LineType3.fromString(textRun.underlineShape());
+        if (effectiveStyle.underline && effectiveStyle.underlineShape != null) {
+            ulShape = LineType3.fromString(effectiveStyle.underlineShape);
         }
 
         CharPrBuilder.build(charPr, newId, height, textColor,
-                fontFamilyToUse, textRun.fontStyle(), ctx.fontRegistry,
+                fontFamilyToUse, fontStyleToUse, ctx.fontRegistry,
                 letterSpacingToUse,
-                effectiveBoldStyle(fontStyle, textRun.fontFamily(), textRun.characterStyleRef()),
-                isItalicStyle(fontStyle),
+                effectiveStyle.bold,
+                effectiveStyle.italic,
                 textRun.superscript(), textRun.subscript(),
-                textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
-                textRun.underline()
-                        ? (textRun.underlineColor() != null ? textRun.underlineColor() : textColor)
+                effectiveStyle.underline ? UnderlineType.BOTTOM : UnderlineType.NONE,
+                effectiveStyle.underline
+                        ? (effectiveStyle.underlineColor != null ? effectiveStyle.underlineColor : textColor)
                         : "#000000",
                 ulShape,
-                textRun.horizontalScale(),
-                textRun.strikeThrough(),
-                textRun.verticalScale(),
+                effectiveStyle.horizontalScale,
+                effectiveStyle.strikeThrough,
+                effectiveStyle.verticalScale,
                 textRun.baselineShift());
         applyShadeColor(charPr, textRun);
 
@@ -442,17 +599,27 @@ final class CharPrFactory {
     }
 
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
+        return createEquationFontCharPr(textRun, baseCharPrId, effectiveTextStyle(textRun));
+    }
+
+    String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId,
+                                    EffectiveTextStyle effectiveStyle) {
         String textColor = equationFontTextColor(textRun, baseCharPrId);
+        if ((textRun.textColor() == null || textRun.textColor().isEmpty())
+                && effectiveStyle.textColor != null
+                && !effectiveStyle.textColor.isEmpty()) {
+            textColor = effectiveStyle.textColor;
+        }
         // 키에는 CharPrBuilder.build 가 소비하는 스타일 인자를 전부 넣는다.
         // subscript/superscript 가 빠져 있던 동안, 첨자 런이 만든 CharPr 을 같은
         // 폰트·크기·색의 일반 런이 물려받아 첨자가 이웃 글자로 전이됐다
         // (과학 u1 p47 2H₂+O₂→2H₂O 의 H 가 첨자, 2 가 일반으로 뒤바뀐 사례).
-        String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
-                + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
+        String cacheKey = baseCharPrId + "|EQ|" + (effectiveStyle.fontFamily != null ? effectiveStyle.fontFamily : "")
+                + "|" + effectiveStyle.height
                 + "|" + (textColor != null ? textColor : "")
                 + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "")
-                + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
-                + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
+                + "|" + (effectiveStyle.fontStyle != null ? effectiveStyle.fontStyle : "")
+                + "|" + (effectiveStyle.letterSpacing != null ? effectiveStyle.letterSpacing : "")
                 + "|" + (textRun.characterStyleRef() != null ? textRun.characterStyleRef() : "")
                 + "|" + textRun.subscript() + "|" + textRun.superscript();
         String cached = ctx.eqFontCharPrCache.get(cacheKey);
@@ -461,14 +628,11 @@ final class CharPrFactory {
         String newId = ctx.styleRegistry.nextCharPrId();
         CharPr charPr = ctx.hwpxFile.headerXMLFile().refList().charProperties().addNew();
 
-        int height = textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : 1000;
-        String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
-
-        CharPrBuilder.build(charPr, newId, height, textColor,
-                textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
-                textRun.letterSpacing(),
-                effectiveBoldStyle(fontStyle, textRun.fontFamily(), textRun.characterStyleRef()),
-                isItalicStyle(fontStyle),
+        CharPrBuilder.build(charPr, newId, effectiveStyle.height, textColor,
+                effectiveStyle.fontFamily, effectiveStyle.fontStyle, ctx.fontRegistry,
+                effectiveStyle.letterSpacing,
+                effectiveStyle.bold,
+                effectiveStyle.italic,
                 textRun.superscript(), textRun.subscript(),
                 UnderlineType.NONE, textColor,
                 null, // underlineShape
