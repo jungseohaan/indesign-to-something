@@ -4510,7 +4510,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
         var canonical = null;
         for (var completeOwnerIndex = 0; completeOwnerIndex < owners.length; completeOwnerIndex++) {
             var completeOwner = owners[completeOwnerIndex];
-            if (!_objectPlanIsInlineCompletePngTextOwner(completeOwner)) continue;
+            if (!_objectPlanIsCompletePngTextOwner(completeOwner)) continue;
             if (!canonical
                     || _compareObjectPlanVisibleVisualSourcePriority(completeOwner, canonical) < 0) {
                 canonical = completeOwner;
@@ -4592,7 +4592,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
     // content slot.
     for (var cpi = 0; cpi < plans.length; cpi++) {
         var completePlan = plans[cpi];
-        if (!_objectPlanIsInlineCompletePngTextOwner(completePlan)) continue;
+        if (!_objectPlanIsCompletePngTextOwner(completePlan)) continue;
         var completeSourceIds = completePlan.sourceObjectIds || [];
         if (completeSourceIds.length === 0) continue;
         var completeRootId = completePlan.primarySourceObjectId;
@@ -5315,8 +5315,14 @@ function _objectPlanIsInlineCompletePngTextOwner(plan) {
     if (!plan) return false;
     if (plan.passId !== "pass.inline_objects") return false;
     if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
+    return _objectPlanIsCompletePngTextOwner(plan);
+}
+
+function _objectPlanIsCompletePngTextOwner(plan) {
+    if (!plan) return false;
     if (plan.textAction !== "OWNED_BY_PNG") return false;
-    if (plan.visualAction !== "PLACE_INLINE_PNG") return false;
+    if (plan.visualAction !== "PLACE_INLINE_PNG"
+            && plan.visualAction !== "PLACE_FLOATING_PNG") return false;
     if (plan.materialization !== "COMPLETE_PNG") return false;
     if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return false;
     return true;
@@ -7370,6 +7376,7 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
     var summary = {
         collapsedCount: 0,
         droppedChildPlanCount: 0,
+        droppedSubsumedInlineContentPlanCount: 0,
         suppressedVectorLeafCount: 0,
         createdObjectPlanIds: [],
         droppedChildObjectPlanIds: []
@@ -7662,6 +7669,41 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
         }
     }
 
+    function dropInlineContentPlanSubsumedByMicroPattern(plan, pageIndex, parentId, subtreeIds) {
+        if (!plan || plan.visualAction !== "PLACE_INLINE_PNG") return false;
+        if (plan.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+        if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
+        if (Number(plan.pageIndex) !== Number(pageIndex)) return false;
+        if (hasTextOwnership(plan)) return false;
+        var planSourceIds = plan.sourceObjectIds && plan.sourceObjectIds.length > 0
+                ? plan.sourceObjectIds
+                : (plan.clusterSourceObjectIds && plan.clusterSourceObjectIds.length > 0
+                    ? plan.clusterSourceObjectIds
+                    : []);
+        if (!planSourceIds || planSourceIds.length === 0) return false;
+        if (!_objectPlanSourceSetContainsAll(subtreeIds || [], planSourceIds)) return false;
+        var primaryId = plan.primarySourceObjectId !== null && plan.primarySourceObjectId !== undefined
+                ? plan.primarySourceObjectId
+                : (planSourceIds.length > 0 ? planSourceIds[0] : null);
+        var primarySource = primaryId !== null && primaryId !== undefined
+                ? sourceById[String(primaryId)] || null
+                : null;
+        var sameSourceTree = _objectPlanSourceSetContainsAll(planSourceIds, [parentId])
+                || sourceDescendsFromRootId(primarySource, parentId);
+        if (!sameSourceTree) return false;
+
+        plan.visualAction = "DROP_VISUAL";
+        plan.materialization = "HWPX_TEXT";
+        plan.visualSourceObjectIds = [];
+        plan.exportSourceObjectIds = [];
+        plan.visualSourceSetId = _sourceSetId([]);
+        plan.exportSourceSetId = _sourceSetId([]);
+        plan.executable = false;
+        plan.reason = String(plan.reason || "inline_content_visual")
+                + ":superseded_by_inline_micro_vector_pattern_shell";
+        return true;
+    }
+
     var groups = {};
     var groupOrder = [];
     var droppedTableCellInlineTextCarrierRoots = {};
@@ -7848,6 +7890,18 @@ function _collapseDenseInlineVectorPatternObjectPlans(objectPlans, sourceItems, 
             });
             summary.collapsedCount++;
             summary.createdObjectPlanIds.push(objectPlanId);
+        }
+        if (!pagePositionedGaugePattern) {
+            for (var spi = 0; spi < objectPlans.length; spi++) {
+                var subsumedPlan = objectPlans[spi];
+                if (!subsumedPlan || subsumedPlan.objectPlanId === objectPlanId) continue;
+                if (dropInlineContentPlanSubsumedByMicroPattern(
+                        subsumedPlan, group.pageIndex, parentId, subtreeIds)) {
+                    summary.droppedChildPlanCount++;
+                    summary.droppedSubsumedInlineContentPlanCount++;
+                    summary.droppedChildObjectPlanIds.push(subsumedPlan.objectPlanId || null);
+                }
+            }
         }
         summary.suppressedVectorLeafCount += vectorLeafIds.length;
         for (var ci = 0; ci < group.entries.length; ci++) {
@@ -8230,6 +8284,8 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         inlineFlowSourceObjectIds: inlineFlowSourceObjectIds,
         inlineTextStyleMarkerSource: bundle.inlineTextStyleMarkerSource === true,
         connectorDecorationVisual: bundle.connectorDecorationVisual === true,
+        sourceDeclaredNonReflowableTextCompletePng:
+                bundle.sourceDeclaredNonReflowableTextCompletePng === true,
         primarySourceObjectId: bundle.primarySourceObjectId !== undefined
                 ? bundle.primarySourceObjectId
                 : null,
@@ -8886,7 +8942,34 @@ function _objectPlanTextAction(bundle, sourceById) {
 function _objectPlanBundleOwnsInlinePngText(bundle, sourceById) {
     return _objectPlanBundleOwnsOnlySimpleInlineMarkerText(bundle, sourceById)
             || _objectPlanBundleOwnsInlineCarrierChildBadgeText(bundle, sourceById)
+            || _objectPlanBundleOwnsSourceDeclaredNonReflowableText(bundle)
             || _objectPlanBundleOwnsInlineCompletePngText(bundle);
+}
+
+function _objectPlanBundleOwnsSourceDeclaredNonReflowableText(bundle) {
+    if (!bundle) return false;
+    if (bundle.sourceDeclaredNonReflowableTextCompletePng !== true) return false;
+    if (bundle.passId !== "pass.decoration_groups") return false;
+    if (bundle.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (bundle.textOwner !== "indesign_png" && bundle.completePngTextAllowed !== true) return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if ((!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)
+            && (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0)) {
+        return false;
+    }
+    return true;
+}
+
+function _objectPlanBundleOwnsExplicitCompletePngText(bundle) {
+    if (!bundle) return false;
+    if (bundle.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (bundle.textOwner !== "indesign_png" && bundle.completePngTextAllowed !== true) return false;
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if ((!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)
+            && (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0)) {
+        return false;
+    }
+    return true;
 }
 
 function _objectPlanBundleOwnsInlineCarrierChildBadgeText(bundle, sourceById) {
@@ -9359,6 +9442,7 @@ function _objectPlanMaterialization(bundle, visualAction, sourceById) {
     if (visualAction === "PLACE_TABLE_STYLE") return "HWPX_TABLE_STYLE";
     if (visualAction === "ABSORB_TEXT_STYLE") return "HWPX_TEXT";
     if (visualAction === "DROP_VISUAL") return "HWPX_TEXT";
+    if (_objectPlanBundleOwnsExplicitCompletePngText(bundle)) return "COMPLETE_PNG";
     if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) return "COMPLETE_PNG";
     return bundle.materialization || "EXTRACTED_PNG_VECTOR";
 }
@@ -9503,6 +9587,8 @@ function _objectPlanBoundsMateriallyLarger(outer, inner, eps) {
 function _objectPlanMigrationStatus(bundle, sourceById) {
     if (!bundle) return "NEEDS_BUNDLE_SOURCE_POLICY";
     if (bundle.layoutOnlyInlineSlot === true) return "READY_LAYOUT_ONLY_INLINE_SLOT";
+    if (_objectPlanBundleOwnsExplicitCompletePngText(bundle)) return "READY_COMPLETE_PNG_TEXT_OWNER";
+    if (_objectPlanBundleOwnsSourceDeclaredNonReflowableText(bundle)) return "READY_COMPLETE_PNG_TEXT_OWNER";
     if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) return "READY_INLINE_COMPLETE_PNG_TEXT_OWNER";
     if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return "NEEDS_VISIBLE_SLOT_EXPLICITNESS";
     if (bundle.clusterRelation === "EXACT_SOURCE_CLUSTER") return "READY_EXACT_CLUSTER";
@@ -9711,6 +9797,7 @@ function _objectPlanMigrationStatusIsImportReady(status) {
             || status === "READY_PAGE_BACKGROUND_PLANE"
             || status === "READY_PAGE_TEXTLESS_GRAPHIC_GROUP"
             || status === "READY_TEXTLESS_CONNECTOR_FRAGMENT"
+            || status === "READY_COMPLETE_PNG_TEXT_OWNER"
             || status === "READY_INLINE_COMPLETE_PNG_TEXT_OWNER"
             || status === "READY_TEXT_PATH_PAGE_PLANE_TEXT_OWNER"
             || status === "READY_LAYOUT_ONLY_INLINE_SLOT"

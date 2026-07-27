@@ -16,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Objec
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTable;
@@ -366,6 +367,7 @@ public final class StoryFlowAssembler {
         if (resolvedTable == null) return;
         ResolvedTable.Cell resolvedCell = resolvedTable.cellAt(idmlCell.rowIndex(), idmlCell.columnIndex());
         Set<Integer> anchorIds = resolvedCellInlineAnchorIds(resolvedCell);
+        anchorIds = canonicalTableCellInlineAnchorIds(ctx, anchorIds);
         boolean closedInlineTextShellOwnerCell = hasClosedInlineTextShellOwnerForAnchors(ctx, anchorIds);
         if (resolvedCell == null
                 || (!closedInlineTextShellOwnerCell && resolvedCell.hasTextRuns())
@@ -451,6 +453,7 @@ public final class StoryFlowAssembler {
         if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null || paragraphs == null) {
             return;
         }
+        Set<Integer> canonicalCellAnchors = canonicalTableCellInlineAnchorIds(ctx, idmlCellInlineAnchorIds(idmlCell));
         for (IDMLParagraph idmlParagraph : idmlCell.paragraphs()) {
             ASTParagraph paragraph = null;
             if (idmlParagraph == null || idmlParagraph.characterRuns() == null) continue;
@@ -460,6 +463,7 @@ public final class StoryFlowAssembler {
                 for (String inlineId : inlineIds) {
                     int domId = parseInlineObjectDomId(inlineId);
                     if (domId < 0) continue;
+                    if (!canonicalCellAnchors.isEmpty() && !canonicalCellAnchors.contains(domId)) continue;
                     if (appendedAnchorIds != null && appendedAnchorIds.contains(domId)) continue;
                     List<ASTInlineItem> plannedItems =
                             InlineFrameHandler.loadPlannedCellInlineCarrierItems(ctx, domId);
@@ -487,6 +491,58 @@ public final class StoryFlowAssembler {
                 paragraphs.add(paragraph);
             }
         }
+    }
+
+    private static Set<Integer> idmlCellInlineAnchorIds(IDMLTableCell idmlCell) {
+        Set<Integer> ids = new LinkedHashSet<>();
+        collectIDMLCellInlineAnchorIds(idmlCell, ids);
+        return ids;
+    }
+
+    private static Set<Integer> canonicalTableCellInlineAnchorIds(
+            ResolvedBuildContext ctx,
+            Set<Integer> anchorIds) {
+        if (anchorIds == null || anchorIds.isEmpty()
+                || ctx == null || ctx.resolvedData == null) {
+            return anchorIds != null ? anchorIds : new LinkedHashSet<Integer>();
+        }
+        Set<Integer> canonical = new LinkedHashSet<>();
+        for (Integer anchorId : anchorIds) {
+            if (anchorId == null || anchorId < 0) continue;
+            if (isSubsumedByDirectInlineSlotAncestor(ctx, anchorId, anchorIds)) continue;
+            canonical.add(anchorId);
+        }
+        return canonical;
+    }
+
+    private static boolean isSubsumedByDirectInlineSlotAncestor(
+            ResolvedBuildContext ctx,
+            int anchorId,
+            Set<Integer> cellAnchorIds) {
+        if (ctx == null || ctx.resolvedData == null || anchorId < 0
+                || cellAnchorIds == null || cellAnchorIds.isEmpty()) {
+            return false;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(anchorId));
+        if (item == null) return false;
+        if (item.storyTextInlineSlot()) return false;
+        String parentId = item.parentId();
+        int guard = 0;
+        while (parentId != null && !parentId.isEmpty() && guard++ < 32) {
+            int parentDomId = parseInlineObjectDomId(parentId);
+            ResolvedPageItem parent = ctx.resolvedData.getPageItem(parentId);
+            if (parent == null && parentDomId >= 0) {
+                parent = ctx.resolvedData.getPageItem(String.valueOf(parentDomId));
+            }
+            if (parent == null) return false;
+            if (parentDomId >= 0
+                    && cellAnchorIds.contains(parentDomId)
+                    && parent.storyTextInlineSlot()) {
+                return true;
+            }
+            parentId = parent.parentId();
+        }
+        return false;
     }
 
     private static void appendInlineItemsKeepingObjectsInline(
