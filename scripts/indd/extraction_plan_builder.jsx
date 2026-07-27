@@ -9353,6 +9353,10 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _marker(ctx.outputDir, "03d06_plan_inlineCandidates");
     _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d07_plan_declaredInlineShells");
+    if (typeof _appendSourceDeclaredTextOwningShellGroupCandidates === "function") {
+        _appendSourceDeclaredTextOwningShellGroupCandidates(
+                ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
+    }
     _marker(ctx.outputDir, "03d08_plan_textOwningShellGroups");
     var inlineFlowVisualRootDiagnostics =
             _appendInlineFlowVisualRootCandidates(candidates, sourceItems, candidateSeen, {
