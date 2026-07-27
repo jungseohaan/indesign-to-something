@@ -267,6 +267,11 @@ public class HwpxParagraphBuilder {
                     break;
                 case BREAK:
                     addBreak(para, (ASTBreak) item);
+                    if (astPara.indentToHerePosition() > 0) {
+                        Run indentRun = para.addNewRun();
+                        indentRun.charPrIDRef("0");
+                        indentRun.addNewT().addNewTab();
+                    }
                     break;
                 case EQUATION:
                     ASTEquation mergedTriangleLabel = triangleLabelEquationAt(astPara.items(), i);

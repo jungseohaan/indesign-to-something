@@ -328,6 +328,7 @@ final class InlineItemDispatcher {
         }
         String hwpScript = EquationBuilder.sanitizeHwpScript(eq.hwpScript());
         hwpScript = FormulaStyleResolver.applyChemicalUprightScript(eq, hwpScript);
+        hwpScript = FormulaStyleResolver.applyMathItalicScript(eq, hwpScript);
         eq.hwpScript(hwpScript);
         if (emitTextBoundaryWrappedEquation(para, eq, hwpScript)) {
             return;

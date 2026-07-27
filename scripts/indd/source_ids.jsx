@@ -74,9 +74,13 @@ function _sourceSetSortedIdsForRawKey(ids, rawKey) {
         _sourceSetDefineHidden(ids, "_sourceSetSortedIdsCache", cached);
         return cached;
     }
+    var sorted = [];
+    for (var i = 0; i < ids.length; i++) sorted.push(Number(ids[i]));
+    sorted.sort(function(a, b) { return a - b; });
     var copy = [];
-    for (var i = 0; i < ids.length; i++) copy.push(Number(ids[i]));
-    copy.sort(function(a, b) { return a - b; });
+    for (var j = 0; j < sorted.length; j++) {
+        if (j === 0 || sorted[j] !== sorted[j - 1]) copy.push(sorted[j]);
+    }
     if (_SOURCE_SET_SORTED_CACHE_COUNT > _SOURCE_SET_CACHE_LIMIT) {
         _SOURCE_SET_SORTED_CACHE = {};
         _SOURCE_SET_SORTED_CACHE_COUNT = 0;

@@ -1099,7 +1099,11 @@ function _appendInlineObjectExtractionCandidates(doc, ctx, allItems, sourceItems
     function hasInlineCarrierParent(sourceInfo) {
         if (!sourceInfo || sourceInfo.parentId === null || sourceInfo.parentId === undefined) return false;
         var parent = sourceInfoById[String(sourceInfo.parentId)];
-        if (!parent || !_isInlineFlowItemBySourceInfo(parent)) return false;
+        if (!parent) return false;
+        var parentOwnsFloatingAnchoredBundle =
+                parent.storyTextInlineSlot === true
+                && String(parent.storyAnchorPlacement || "").toUpperCase() === "FLOATING_ANCHORED";
+        if (!_isInlineFlowItemBySourceInfo(parent) && !parentOwnsFloatingAnchoredBundle) return false;
         var parentKind = String(parent.kind || "");
         if (String(sourceInfo.kind || "") === "Group"
                 && directEditableTextChildIds(sourceInfo.id).length > 1) {
@@ -6669,13 +6673,11 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
             var floatingSourceIds = [];
             var floatingSeen = {};
             if (hasEditableFloatingTextDescendant) {
-                collectUnclaimedVectorShellSubtree(
-                        floatingRoot.id,
-                        floatingPageIndex,
-                        claimed,
-                        floatingSeen,
-                        floatingSourceIds,
-                        true);
+                // The FLOATING_ANCHORED root is the source-owned placement carrier.
+                // Keep its complete bundle together so nested inline-looking children
+                // cannot become orphan STORY_FLOW owners without their real anchor.
+                collectSamePageSubtree(
+                        floatingRoot.id, floatingPageIndex, floatingSeen, floatingSourceIds);
             } else {
                 collectSamePageSubtree(floatingRoot.id, floatingPageIndex, floatingSeen, floatingSourceIds);
             }
@@ -6684,7 +6686,8 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                     floatingPageIndex,
                     floatingSourceIds.length > 0 ? floatingSourceIds : [floatingRoot.id]);
             if (!floatingSourceIds || floatingSourceIds.length === 0) continue;
-            if (visibleMaterialLeavesAllClaimed(floatingSourceIds, claimed)) continue;
+            if (!hasEditableFloatingTextDescendant
+                    && visibleMaterialLeavesAllClaimed(floatingSourceIds, claimed)) continue;
 
             var floatingEditableTextFrameIds = hasEditableFloatingTextDescendant
                     ? editableTextFrameIdsForSubtree(floatingRoot.id, floatingPageIndex)
@@ -6751,14 +6754,16 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                 styleSourceObjectIds: [],
                 ownedTextFrameIds: floatingEditableTextFrameIds.slice(0),
                 editableTextFrameIds: floatingEditableTextFrameIds.slice(0),
-                hiddenTextFrameIds: [],
-                requiresTextHidden: false,
+                hiddenTextFrameIds: floatingEditableTextFrameIds.slice(0),
+                requiresTextHidden: floatingEditableTextFrameIds.length > 0,
                 textOwner: floatingEditableTextFrameIds.length > 0 ? "hwpx_tf" : "none",
                 containsEditableText: false,
                 completePngTextAllowed: false,
                 ownershipSlot: floatingOwnershipSlot,
                 materialization: "EXTRACTED_PNG_VECTOR",
-                textAction: "DROP_TEXT",
+                textAction: floatingEditableTextFrameIds.length > 0
+                        ? "OWNED_BY_HWPX_TEXT"
+                        : "DROP_TEXT",
                 visualAction: floatingVisualAction,
                 visualLayer: floatingVisualLayer,
                 placement: "FLOATING",
