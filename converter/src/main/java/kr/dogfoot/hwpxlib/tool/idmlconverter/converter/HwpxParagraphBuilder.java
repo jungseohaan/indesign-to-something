@@ -168,7 +168,19 @@ public class HwpxParagraphBuilder {
 
         // "Indent to Here" 탭 정지점 추가 (lineBreak 후 탭이 이 위치로 이동)
         if (astPara.indentToHerePosition() > 0) {
-            astPara.addTabStop(new ASTTabStop(astPara.indentToHerePosition(), "left", null));
+            boolean hasIndentStop = false;
+            if (astPara.tabStops() != null) {
+                for (ASTTabStop stop : astPara.tabStops()) {
+                    if (stop != null
+                            && Math.abs(stop.position() - astPara.indentToHerePosition()) <= 5) {
+                        hasIndentStop = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasIndentStop) {
+                astPara.addTabStop(new ASTTabStop(astPara.indentToHerePosition(), "left", null));
+            }
         }
 
 
@@ -270,7 +282,14 @@ public class HwpxParagraphBuilder {
                     if (astPara.indentToHerePosition() > 0) {
                         Run indentRun = para.addNewRun();
                         indentRun.charPrIDRef("0");
-                        indentRun.addNewT().addNewTab();
+                        // A bare hp:tab always advances to the first tab stop after the
+                        // current cursor. After a hard line break that can be an unrelated
+                        // source stop near the left edge. Preserve the Indent-to-Here
+                        // target explicitly so continuation equations align to the source
+                        // position regardless of the other paragraph tab stops.
+                        indentRun.addNewT().addNewTab()
+                                .widthAnd((int) Math.min(Integer.MAX_VALUE,
+                                        astPara.indentToHerePosition()));
                     }
                     break;
                 case EQUATION:

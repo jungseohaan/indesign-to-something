@@ -423,7 +423,7 @@ public class FlatToHwpxConverter {
             return pageBreakBeforeSectionParaPrId;
         }
         ParaPr base = null;
-        for (ParaPr pr : ctx.hwpxFile.headerXMLFile().refList().paraProperties().items()) {
+        for (ParaPr pr : ctx.hwpxFile().headerXMLFile().refList().paraProperties().items()) {
             if ("3".equals(pr.id())) {
                 base = pr;
                 break;
@@ -433,7 +433,7 @@ public class FlatToHwpxConverter {
             throw new IllegalStateException("Base section ParaPr id=3 not found");
         }
         String id = ctx.styleRegistry.nextParaPrId();
-        ParaPr paraPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+        ParaPr paraPr = ctx.hwpxFile().headerXMLFile().refList().paraProperties().addNew();
         paraPr.copyFrom(base);
         paraPr.id(id);
         if (paraPr.breakSetting() == null) {

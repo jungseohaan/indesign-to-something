@@ -48,6 +48,14 @@ import java.nio.file.Files;
 public class ConverterCLI {
 
     public static void main(String[] args) {
+        // The converter only needs off-screen Java2D operations. On macOS, launching the
+        // CLI from a background agent/terminal can otherwise make AWT register an AppKit
+        // application and abort the JVM in _RegisterApplication (SIGABRT, exit 134).
+        // Set this before any font or image class initializes AWT.
+        if (System.getProperty("java.awt.headless") == null) {
+            System.setProperty("java.awt.headless", "true");
+        }
+
         // .env 파일 자동 로드 (JAR 디렉토리 → CWD 순)
         kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader env =
                 kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load();

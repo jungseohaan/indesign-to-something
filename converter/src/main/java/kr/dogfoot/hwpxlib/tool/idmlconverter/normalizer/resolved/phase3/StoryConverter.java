@@ -3149,6 +3149,22 @@ public final class StoryConverter {
     private static boolean insertComposedLineBreaks(
             ASTParagraph para, List<ResolvedTextFrame.ComposedLine> lines) {
         if (para == null || para.items() == null || lines == null || lines.size() < 2) return false;
+        // Source hard line breaks are materialized before the composed-line contract runs.
+        // If they already account for every InDesign composed-line boundary, inserting
+        // boundaries again from text offsets is both redundant and unsafe: equations no
+        // longer contribute characters to ParagraphTextHelpers.getParaPlainText(), so the
+        // offset fallback can collapse a long math line to its leading item marker and put
+        // a spurious break immediately after it.
+        int existingLineBreaks = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTBreak
+                    && ((ASTBreak) item).breakType() == ASTBreak.BreakType.LINE) {
+                existingLineBreaks++;
+            }
+        }
+        if (existingLineBreaks >= lines.size() - 1) {
+            return false;
+        }
         // 1순위: composedLine 전체를 AST 텍스트에 순차 정렬해 줄 끝 위치를 잡는다.
         // 한글 골격만으로 위치를 잡으면 줄 끝의 영문(인명 Pythagoras, 연도 B.C.569?)이
         // 다음 줄로 통째로 밀린다(실측: 1단원). AST 에 실제 텍스트로 남은 문자(영문 포함)는
