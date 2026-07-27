@@ -4374,8 +4374,6 @@ public class InlineFrameHandler {
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
         if (tf == null || !tf.isInline()) return null;
-        if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) return null;
-        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
 
         ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
         if (story == null || story.paragraphs() == null || story.paragraphs().size() != 1) return null;
@@ -4415,11 +4413,14 @@ public class InlineFrameHandler {
                             .truncateAtParagraphBreak(false));
             for (ASTTextRun textRun : textRuns) {
                 if (parentFrameUnderline) textRun.underline(true);
+                if (rr.fillColor() != null) {
+                    textRun.grepStyleApplied(true);
+                }
                 items.add(textRun);
             }
         }
 
-        if (!hasNestedAnchor || items.isEmpty()) return null;
+        if (items.isEmpty()) return null;
         return items;
     }
 
@@ -4724,10 +4725,6 @@ public class InlineFrameHandler {
             return null;
         }
         if (!tf.isInline()) return null;
-        if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) return null;
-
-        // 렌더 PDF 프레임으로 이미 배치된 경우 텍스트 런 변환 안 함
-        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
         // IDML Story 우선. ORC anchor의 자식 텍스트는 별도 source object가 소유하므로
         // 여기서 문자열로 합치지 않는다.
         String visText = null;
@@ -4834,7 +4831,10 @@ public class InlineFrameHandler {
                 if (rr.fontSize() != null && rr.fontSize() > 0) {
                     run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
                 }
-                if (rr.fillColor() != null) run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+                if (rr.fillColor() != null) {
+                    run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+                    run.grepStyleApplied(true);
+                }
                 if (rr.underline() != null && rr.underline()) run.underline(true);
                 if (rr.strikeThru() != null && rr.strikeThru()) run.strikeThrough(true);
             }
@@ -5643,7 +5643,8 @@ public class InlineFrameHandler {
         }
         List<ASTInlineItem> closedCarrierItems =
                 loadClosedInlineCarrierFlowItems(ctx, anchoredObjectId);
-        if (findPagePositionedStoryAnchorOwnerPlan(
+        if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)
+                && findPagePositionedStoryAnchorOwnerPlan(
                 ctx,
                 findRenderedGroupByInlineAnchorId(ctx, anchoredObjectId),
                 anchoredObjectId) != null) {
@@ -5658,7 +5659,8 @@ public class InlineFrameHandler {
             if (completePng != null) directCompleteItems.add(completePng);
             return directCompleteItems;
         }
-        boolean hasDirectPlan = hasDirectExecutableInlinePlan(ctx, anchoredObjectId);
+        boolean hasDirectPlan = hasDirectExecutableInlinePlan(ctx, anchoredObjectId)
+                || ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId);
         if (!hasDirectPlan && (closedCarrierItems == null || closedCarrierItems.isEmpty())) return null;
         if (closedCarrierItems != null && !closedCarrierItems.isEmpty()) {
             return closedCarrierItems;

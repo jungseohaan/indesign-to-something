@@ -1149,9 +1149,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
     function _plannedCompositeShellDuplicateSourceIds(item, candidate) {
         if (!item || !candidate) return [];
         if (candidate.visualAction !== "PLACE_TEXT_SHELL"
-                || candidate.materialization !== "EXTRACTED_PNG_VECTOR"
-                || candidate.placement !== "INLINE"
-                || candidate.coordinateSpace !== "STORY_FLOW") {
+                || candidate.materialization !== "EXTRACTED_PNG_VECTOR") {
             return [];
         }
         var exportIds = candidate.exportSourceObjectIds || [];
@@ -1502,10 +1500,11 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                         }
                         var parentStoryId = _parentStoryIdForInlineItem(inItem);
 
+                        var _inlineActualExportTarget = _inlineExportDuplicate || inItem;
                         var _inlineSourceBounds = null;
-                        try { _inlineSourceBounds = arrCopy(inItem.visibleBounds); } catch (eInlineVb) {}
+                        try { _inlineSourceBounds = arrCopy(_inlineActualExportTarget.visibleBounds); } catch (eInlineVb) {}
                         if (!_inlineSourceBounds) {
-                            try { _inlineSourceBounds = arrCopy(inItem.geometricBounds); } catch (eInlineGb) {}
+                            try { _inlineSourceBounds = arrCopy(_inlineActualExportTarget.geometricBounds); } catch (eInlineGb) {}
                         }
 
                         var _inlineHasHiddenText = inlineHiddenTextFrameIds && inlineHiddenTextFrameIds.length > 0;
@@ -1562,7 +1561,8 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
                                 guarded: false,
                                 duplicatedForExport: _inlineExportDuplicate !== null,
                                 textHiddenBeforeExport: _inlineHasHiddenText,
-                                exportTargetType: inItem && inItem.constructor ? inItem.constructor.name : null,
+                                exportTargetType: _inlineActualExportTarget && _inlineActualExportTarget.constructor
+                                        ? _inlineActualExportTarget.constructor.name : null,
                                 sourceBounds: _inlineSourceBounds,
                                 pageRelativeBounds: _inlineRenderedBounds,
                                 renderSourceBounds: inlineCandidate.renderSourceBounds || _inlineRenderedBounds,
