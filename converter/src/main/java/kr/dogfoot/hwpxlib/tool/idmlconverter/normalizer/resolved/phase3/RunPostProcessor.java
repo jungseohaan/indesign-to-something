@@ -132,6 +132,7 @@ class RunPostProcessor {
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
                         new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(
                                 "overline{" + letters + "}", "EH_FONT");
+                applyOverlineOrientation(eq, run);
                 newItems.add(eq);
                 pos = markerEnd + 1;
             }
@@ -250,7 +251,32 @@ class RunPostProcessor {
             headRun.shadeColor(anchorRun.shadeColor());
             newItems.add(headRun);
         }
-        newItems.add(new ASTEquation("overline{" + letters + "}", "EH_FONT"));
+        ASTEquation overlineEq = new ASTEquation("overline{" + letters + "}", "EH_FONT");
+        applyOverlineOrientation(overlineEq, anchorRun);
+        newItems.add(overlineEq);
+    }
+
+    /**
+     * SPEC-085: 선분 수식의 서체 방향을 원본 런 증거로 결정한다. GREP 상부자(직립)
+     * 규칙이 적용된 대문자 선분 이름(OA·AP)은 rm 직립으로, 이탤릭 증거가 있으면
+     * 이탤릭 그대로 둔다.
+     */
+    private static void applyOverlineOrientation(ASTEquation eq, ASTTextRun sourceRun) {
+        if (eq == null || sourceRun == null) return;
+        String fs = sourceRun.fontStyle();
+        boolean italic = fs != null
+                && (fs.toLowerCase(java.util.Locale.ROOT).contains("italic")
+                    || fs.toLowerCase(java.util.Locale.ROOT).contains("oblique"));
+        String ref = sourceRun.characterStyleRef();
+        String style = ref == null ? "" : ref.toLowerCase(java.util.Locale.ROOT)
+                .replace("%3a", ":").replace("%25", "%");
+        if (!italic && (style.contains("이탤릭") || style.contains("italic"))) italic = true;
+        if (italic) {
+            eq.sourceItalic(true);
+        } else if (sourceRun.grepMathFont()
+                || style.contains("상부자") || style.contains("하부자")) {
+            eq.sourceUpright(true);
+        }
     }
 
     /**

@@ -97,6 +97,7 @@ public final class MathStructurePlanner {
         copy.preferredFontFamily(source.preferredFontFamily());
         copy.textColor(source.textColor());
         copy.sourceItalic(source.sourceItalic());
+        copy.sourceUpright(source.sourceUpright());
         copy.sourceObjectId(source.sourceObjectId());
         return copy;
     }

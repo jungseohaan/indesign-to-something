@@ -74,6 +74,11 @@ public final class FormulaStyleResolver {
                 || startsWithCommandToken(trimmed, "it")) {
             return hwpScript;
         }
+        // SPEC-085: 원본이 명시적 직립(GREP 상부자 비이탤릭 규칙)이면 이탤릭 대신
+        // rm 으로 직립을 못박는다 — 기하 점 라벨 P·Q, 선분 OA (수학 u1 p24).
+        if (eq.sourceUpright()) {
+            return "rm " + hwpScript;
+        }
         // Hancom documents `it` as the equation-font command that returns
         // Roman text to math italic. Apply it only when an uppercase Latin
         // variable needs the explicit state; lowercase variables are already

@@ -773,6 +773,7 @@ public class ASTMathGrouper {
                 ASTInlineItem it = para.items().get(i);
                 if (it instanceof ASTEquation) {
                     applyTextDerivedEquationHints((ASTEquation) it, ehRuns);
+                    applySourceScriptOrientation((ASTEquation) it, ehRuns);
                     applyTextDerivedEquationColor((ASTEquation) it, ehRuns, colorToHex);
                 }
             }
@@ -900,15 +901,7 @@ public class ASTMathGrouper {
             // 신호는 (1) 명시 fontStyle=Italic 또는 (2) GREP 적용 문자 스타일 이름에
             // "이탤릭"/"italic"(수학 변수 전용 스타일 "상부자(이탤릭)"). 과학자 이니셜은
             // 비이탤릭 charStyle(BT수식) 이라 강등 대상으로 남는다.
-            for (IDMLCharacterRun mr : mathRuns) {
-                if (mr == null) continue;
-                String fs = mr.fontStyle();
-                String gcs = mr.grepAppliedCharStyle();
-                boolean italic = (fs != null && fs.toLowerCase().contains("italic"))
-                        || (gcs != null && (gcs.contains("이탤릭")
-                                || gcs.toLowerCase().contains("italic")));
-                if (italic) { eqItem.sourceItalic(true); break; }
-            }
+            applySourceScriptOrientation(eqItem, mathRuns);
             para.addItem(eqItem);
         } else {
             // 수식이 아닌 BT 폰트 텍스트 → 일반 텍스트 런으로 폴백
@@ -1410,6 +1403,53 @@ public class ASTMathGrouper {
             }
         }
         return false;
+    }
+
+    /**
+     * SPEC-079/085: 수식의 서체 방향 증거를 원본 런에서 수집한다.
+     * - 이탤릭 증거(fontStyle=Italic 또는 GREP/문자 스타일 이름에 이탤릭)
+     *   → sourceItalic (수학 변수; 고립 단일문자 판단에도 사용)
+     * - 이탤릭 증거가 없고 상부자/하부자(직립) 첨자 스타일이 적용된 라틴 런
+     *   → sourceUpright (GREP 대문자 규칙(backslash-u)으로 직립 조판된 대문자 P·Q·OA — emit 시 rm)
+     */
+    public static void applySourceScriptOrientation(
+            ASTEquation eq, List<IDMLCharacterRun> mathRuns) {
+        if (eq == null || mathRuns == null) return;
+        boolean italic = false;
+        boolean upright = false;
+        for (IDMLCharacterRun mr : mathRuns) {
+            if (mr == null) continue;
+            String fs = mr.fontStyle();
+            String gcs = mr.grepAppliedCharStyle();
+            String acs = mr.appliedCharacterStyle();
+            if ((fs != null && fs.toLowerCase().contains("italic"))
+                    || styleNameHasItalic(gcs) || styleNameHasItalic(acs)) {
+                italic = true;
+                break;
+            }
+            if (!upright && containsAsciiLetter(mr.content())
+                    && (styleNameHasUprightScript(gcs) || styleNameHasUprightScript(acs))) {
+                upright = true;
+            }
+        }
+        if (italic) {
+            eq.sourceItalic(true);
+        } else if (upright) {
+            eq.sourceUpright(true);
+        }
+    }
+
+    private static boolean styleNameHasItalic(String styleRef) {
+        if (styleRef == null) return false;
+        String s = styleRef.toLowerCase().replace("%3a", ":").replace("%25", "%");
+        return s.contains("이탤릭") || s.contains("italic");
+    }
+
+    private static boolean styleNameHasUprightScript(String styleRef) {
+        if (styleRef == null) return false;
+        String s = styleRef.toLowerCase().replace("%3a", ":").replace("%25", "%");
+        if (s.contains("이탤릭") || s.contains("italic")) return false;
+        return s.contains("상부자") || s.contains("하부자");
     }
 
     public static IDMLCharacterRun formulaAnswerBoxRun(IDMLCharacterRun source) {

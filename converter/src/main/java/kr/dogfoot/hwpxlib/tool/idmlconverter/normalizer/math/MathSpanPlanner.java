@@ -31,7 +31,8 @@ public final class MathSpanPlanner {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) continue;
             ASTTextRun run = (ASTTextRun) item;
-            if (isSingleLatinSourceMathRun(run)) {
+            if (isSingleLatinSourceMathRun(run)
+                    && !isUnitLetterAfterNumber(items, i, run)) {
                 plan.add(i, MathSpanPlan.Classification.MATH,
                         REASON_SINGLE_LATIN_SOURCE_MATH_TYPOGRAPHY);
             }
@@ -43,6 +44,28 @@ public final class MathSpanPlanner {
     // 오검(과학자 이니셜 수식화)보다 부수 피해(기하 점 라벨 "점 A"·단독 보기 라벨의
     // 수식화 차단)가 더 컸다. GREP 증거로 수식화된 단일 라틴 문자는 문맥과 무관하게
     // 수식으로 유지한다.
+
+    /**
+     * SPEC-085: GREP 스타일 경계 분할로 "10g"의 단위 문자가 단독 런으로 노출되면
+     * 단일 라틴 수식 승격 대상이 아니다 — 직전 런이 숫자로 끝나는 단위 문맥
+     * (m/g/L/l/t, 실측: 과학 u1 "수산화 바륨 10g")은 텍스트로 남긴다.
+     */
+    private static boolean isUnitLetterAfterNumber(
+            List<ASTInlineItem> items, int index, ASTTextRun run) {
+        String text = run.text();
+        if (text == null || text.length() != 1) return false;
+        char c = text.charAt(0);
+        if (c != 'm' && c != 'g' && c != 'L' && c != 'l' && c != 't') return false;
+        for (int p = index - 1; p >= 0; p--) {
+            ASTInlineItem prev = items.get(p);
+            if (!(prev instanceof ASTTextRun)) return false;
+            String pt = ((ASTTextRun) prev).text();
+            if (pt == null || pt.isEmpty()) continue;
+            char last = pt.charAt(pt.length() - 1);
+            return last >= '0' && last <= '9';
+        }
+        return false;
+    }
 
     public static boolean isSingleLatinSourceMathRun(ASTTextRun run) {
         if (run == null || run.text() == null || !run.text().matches("[A-Za-z]")) {

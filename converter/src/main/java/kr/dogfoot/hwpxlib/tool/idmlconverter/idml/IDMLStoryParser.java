@@ -1720,7 +1720,10 @@ public class IDMLStoryParser {
         if (mathCharStyleRefs.isEmpty()) return;
 
         // 2. 단락 스타일별 수식 GREP 규칙의 Java Pattern 캐시 구축
-        Map<String, List<java.util.regex.Pattern>> paraStyleGrepPatterns = new HashMap<>();
+        // SPEC-085: 규칙별 적용 charStyle 을 함께 보존한다 — 같은 문자가 여러 규칙에
+        // 매칭되면 InDesign 은 나중 규칙이 이긴다 (예: 단일 라틴은 앞 규칙에서
+        // 상부자(이탤릭), 대문자는 뒤 규칙(backslash-u)에서 상부자(직립) — 직립이 최종).
+        Map<String, List<GrepMathRule>> paraStyleGrepPatterns = new HashMap<>();
 
         for (Map.Entry<String, IDMLStyleDef> entry : doc.paraStyles().entrySet()) {
             IDMLStyleDef paraStyle = entry.getValue();
@@ -1728,18 +1731,18 @@ public class IDMLStoryParser {
             List<IDMLStyleDef.GrepStyleRule> inheritedGrep = collectInheritedGrepStyles(doc, paraStyle);
             if (inheritedGrep.isEmpty()) continue;
 
-            List<java.util.regex.Pattern> patterns = new ArrayList<>();
+            List<GrepMathRule> rules = new ArrayList<>();
             for (IDMLStyleDef.GrepStyleRule rule : inheritedGrep) {
                 // GREP 규칙이 수식 문자 스타일을 적용하는지 확인
                 if (!mathCharStyleRefs.contains(rule.appliedCharacterStyle())) continue;
 
                 java.util.regex.Pattern pat = convertIdGrepToJavaPattern(rule.grepExpression());
                 if (pat != null) {
-                    patterns.add(pat);
+                    rules.add(new GrepMathRule(pat, rule.appliedCharacterStyle()));
                 }
             }
-            if (!patterns.isEmpty()) {
-                paraStyleGrepPatterns.put(entry.getKey(), patterns);
+            if (!rules.isEmpty()) {
+                paraStyleGrepPatterns.put(entry.getKey(), rules);
             }
         }
         if (paraStyleGrepPatterns.isEmpty()) return;
@@ -2065,14 +2068,25 @@ public class IDMLStoryParser {
     /**
      * 단락 내 CharacterRun에 GREP 수식 스타일 매칭을 수행한다.
      */
+    /** SPEC-085: 수식 GREP 규칙 — 패턴 + 적용 문자 스타일 참조. */
+    static final class GrepMathRule {
+        final java.util.regex.Pattern pattern;
+        final String appliedCharacterStyle;
+
+        GrepMathRule(java.util.regex.Pattern pattern, String appliedCharacterStyle) {
+            this.pattern = pattern;
+            this.appliedCharacterStyle = appliedCharacterStyle;
+        }
+    }
+
     static void resolveGrepForParagraph(IDMLParagraph para,
-                                        Map<String, List<java.util.regex.Pattern>> paraStyleGrepPatterns,
+                                        Map<String, List<GrepMathRule>> paraStyleGrepPatterns,
                                         int[] counts) {
         String paraStyleRef = para.appliedParagraphStyle();
-        List<java.util.regex.Pattern> patterns = paraStyleRef != null
+        List<GrepMathRule> rules = paraStyleRef != null
                 ? paraStyleGrepPatterns.get(paraStyleRef)
                 : null;
-        if (patterns == null || patterns.isEmpty()) return;
+        if (rules == null || rules.isEmpty()) return;
 
         List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
         List<IDMLCharacterRun> newRuns = new ArrayList<>();
@@ -2090,16 +2104,21 @@ public class IDMLStoryParser {
                 continue;
             }
 
-            // 문자 단위 GREP 매칭 (한국어 포함 여부와 무관하게 동일 처리)
-            boolean[] isMatch = new boolean[text.length()];
+            // 문자 단위 GREP 매칭 (한국어 포함 여부와 무관하게 동일 처리).
+            // SPEC-085: 문자별 "승자 규칙"을 기록한다 — InDesign 은 나열된 GREP 규칙 중
+            // 나중 규칙이 겹침에서 이긴다. 승자별로 서브런을 나눠야 이탤릭/직립 charStyle
+            // 이 뒤섞이지 않고, "P,"(다른 규칙의 쉼표)가 한 수식 런으로 뭉치지 않는다
+            // (수학 u1 p24 "두 점 P, Q" — 쉼표가 수식에 삼켜져 소실되던 원인).
+            int[] winner = new int[text.length()];
+            java.util.Arrays.fill(winner, -1);
             boolean anyMatch = false;
-            boolean allMatch = true;
-            for (java.util.regex.Pattern pat : patterns) {
+            for (int r = 0; r < rules.size(); r++) {
                 try {
-                    java.util.regex.Matcher m = pat.matcher(text);
+                    java.util.regex.Matcher m = rules.get(r).pattern.matcher(text);
                     while (m.find()) {
                         for (int i = m.start(); i < m.end(); i++) {
-                            if (!isMatch[i]) { isMatch[i] = true; anyMatch = true; }
+                            winner[i] = r; // 나중 규칙이 덮어씀
+                            anyMatch = true;
                         }
                     }
                 } catch (Exception e) { /* ignore */ }
@@ -2108,14 +2127,26 @@ public class IDMLStoryParser {
                 newRuns.add(run);
                 continue;
             }
-            for (boolean b : isMatch) { if (!b) { allMatch = false; break; } }
-            if (allMatch) {
+            // SPEC-085: 경계는 규칙 인덱스가 아니라 "적용 charStyle" 동일성으로 판단.
+            // 숫자(규칙A)와 소수점(규칙B)이 같은 이탤릭 스타일을 적용하면 1.4 는 한
+            // 런이어야 한다 — 인덱스 비교로 나누면 소수 수식이 [1][.][4] 로 조각난다.
+            String[] winnerStyle = new String[winner.length];
+            for (int wi = 0; wi < winner.length; wi++) {
+                winnerStyle[wi] = winner[wi] >= 0
+                        ? rules.get(winner[wi]).appliedCharacterStyle : null;
+            }
+            boolean uniform = true;
+            for (String ws : winnerStyle) {
+                if (!java.util.Objects.equals(ws, winnerStyle[0])) { uniform = false; break; }
+            }
+            if (uniform && winner[0] >= 0) {
                 run.grepMathFont(true);
+                run.grepAppliedCharStyle(rules.get(winner[0]).appliedCharacterStyle);
                 counts[0]++;
                 newRuns.add(run);
                 continue;
             }
-            // 매칭/비매칭 경계에서 분리
+            // 매칭/비매칭 및 승자 규칙 경계에서 분리
             modified = true;
             counts[1]++;
             // 인라인 프레임/그래픽의 \uFFFC 앵커 위치별 배분 준비
@@ -2126,11 +2157,21 @@ public class IDMLStoryParser {
             int frameIdx = 0;   // legacy mode
             int segStart = 0;
             for (int i = 1; i <= text.length(); i++) {
-                if (i == text.length() || isMatch[i] != isMatch[segStart]) {
+                if (i == text.length()
+                        || !java.util.Objects.equals(winnerStyle[i], winnerStyle[segStart])) {
                     String segText = text.substring(segStart, i);
                     IDMLCharacterRun subRun = cloneRunWithText(run, segText);
-                    if (isMatch[segStart]) {
+                    // SPEC-085: "10g" 처럼 숫자 바로 뒤의 단일 단위 문자(m/g/L/l/t)는
+                    // GREP 이 단위 간격용 스타일을 입힌 것 — 수식 플래그를 주면 단위가
+                    // 단독 수식화된다 (실측: 과학 u1 "수산화 바륨 10g").
+                    boolean unitAfterDigit = segText.length() == 1
+                            && "mgLlt".indexOf(segText.charAt(0)) >= 0
+                            && segStart > 0
+                            && Character.isDigit(text.charAt(segStart - 1));
+                    if (winner[segStart] >= 0 && !unitAfterDigit) {
                         subRun.grepMathFont(true);
+                        subRun.grepAppliedCharStyle(
+                                rules.get(winner[segStart]).appliedCharacterStyle);
                         counts[0]++;
                     }
                     // 이 세그먼트에 포함된 \uFFFC 개수만큼 인라인 항목 배분
