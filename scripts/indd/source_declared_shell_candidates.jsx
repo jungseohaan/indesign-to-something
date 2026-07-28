@@ -2012,4 +2012,14 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     appendSuppressedParentResidualSiblingShellCandidates();
     markSourceDeclaredShellStep("03d08h_sourceDeclared_residualSiblingShells");
 
+    try {
+        if (ctx && ctx.outputDir && typeof writeProgress === "function") {
+            writeProgress(ctx.outputDir, "source_declared_shells_returning",
+                    candidates ? candidates.length : 0,
+                    sourceItems ? sourceItems.length : 0,
+                    "text-owning shell candidates ready");
+        }
+        markSourceDeclaredShellStep("03d08_return_before");
+    } catch (eSourceDeclaredShellReturnMarker) {}
+
 }

@@ -1773,6 +1773,8 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
 
                     // 프레임에 보이는 각 단락의 실제 텍스트 (단락 분할점 계산용)
                     var frameParaTexts = [];
+                    var frameParaBreakCounts = [];
+                    var frameParaRangeLeadings = [];
                     for (var fpt = 0; fpt < frameParas.length; fpt++) {
                         try {
                             var paraContent = frameParas[fpt].contents;
@@ -1781,11 +1783,32 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
                                 paraContent = paraContent.replace(/\r$/g, "");
                             }
                             frameParaTexts.push(paraContent || "");
+                            var brCount = 0;
+                            var rangeLeadings = [];
+                            try {
+                                var paraRanges = frameParas[fpt].textStyleRanges.everyItem().getElements();
+                                for (var pri = 0; pri < paraRanges.length; pri++) {
+                                    var pc = paraRanges[pri].contents;
+                                    var rangeLeading = null;
+                                    try { rangeLeading = paraRanges[pri].leading; } catch (eRangeLeading) {}
+                                    rangeLeadings.push(typeof rangeLeading === "number" ? rangeLeading : null);
+                                    if (typeof pc === "string") {
+                                        var matches = pc.match(/\r/g);
+                                        if (matches) brCount += matches.length;
+                                    }
+                                }
+                            } catch (eBreakCount) {}
+                            frameParaBreakCounts.push(brCount);
+                            frameParaRangeLeadings.push(rangeLeadings);
                         } catch (e3) {
                             frameParaTexts.push("");
+                            frameParaBreakCounts.push(0);
+                            frameParaRangeLeadings.push([]);
                         }
                     }
                     fData.frameParaTexts = frameParaTexts;
+                    fData.frameParaBreakCounts = frameParaBreakCounts;
+                    fData.frameParaRangeLeadings = frameParaRangeLeadings;
 
                     // 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
                     try {

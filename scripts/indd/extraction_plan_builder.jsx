@@ -9732,8 +9732,13 @@ function _buildExtractionPlan(doc, ctx, allItems) {
     _appendSourceDeclaredInlineShellCandidates(ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
     _marker(ctx.outputDir, "03d07_plan_declaredInlineShells");
     if (typeof _appendSourceDeclaredTextOwningShellGroupCandidates === "function") {
+        _marker(ctx.outputDir, "03d08_call_before");
         _appendSourceDeclaredTextOwningShellGroupCandidates(
                 ctx, sourceItems, allItems, candidates, candidateSeen, planCache);
+        try { writeProgress(ctx.outputDir, "planning_source_declared_shells_returned",
+                candidates.length, sourceItems ? sourceItems.length : 0,
+                "text-owning shell candidates returned"); } catch (ePlanShellReturnProgress) {}
+        _marker(ctx.outputDir, "03d08_call_after");
     }
     _marker(ctx.outputDir, "03d08_plan_textOwningShellGroups");
     var inlineFlowVisualRootDiagnostics =
