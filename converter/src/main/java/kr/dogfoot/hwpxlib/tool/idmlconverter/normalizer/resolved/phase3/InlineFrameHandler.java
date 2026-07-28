@@ -7944,6 +7944,22 @@ public class InlineFrameHandler {
         block.verticalJustification("CenterAlign");
         boolean any = false;
         for (ResolvedTextFrame tf : tfs) {
+            // SPEC-082: 복수 런 스토리(수식 폰트 글리프 포함 가능)는 구조화 변환을
+            // 태워야 EH 근호(√='...') 류가 hp:equation 으로 변환된다. frameVisibleText
+            // 통짜 런은 IDML 글자속성 주입·MathProcessor 를 모두 우회해 글리프가
+            // 평문 누출된다 (p15 "양의 제곱근: 'a"). 단일 런 배지 칩은 기존 경로 유지.
+            ResolvedStory shellStory =
+                    tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+            if (shouldUseResolvedParagraphsForInlineShell(shellStory)) {
+                java.util.List<ASTParagraph> structured =
+                        buildSourceStructuredShellTextParagraphs(ctx, tf);
+                if (structured != null && !structured.isEmpty()) {
+                    for (ASTParagraph p : structured) block.addParagraph(p);
+                    markTextBlockPlaced(ctx, tf);
+                    any = true;
+                    continue;
+                }
+            }
             String cleaned = cleanedLabelText(tf);
             if (cleaned == null) continue;
             ASTParagraph para = new ASTParagraph();
