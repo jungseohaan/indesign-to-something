@@ -6727,13 +6727,16 @@ public class InlineFrameHandler {
     }
 
     private static boolean isRepeatedEmptyInlineTextFramePlaceholderPlan(ObjectPlan plan) {
-        return plan != null
-                && "repeated_empty_inline_text_frame_placeholder".equals(plan.reason);
+        return hasPlanReason(plan, "repeated_empty_inline_text_frame_placeholder");
     }
 
     private static boolean isInlineRuleBelowWhitespacePlaceholderPlan(ObjectPlan plan) {
-        return plan != null
-                && "inline_rule_below_whitespace_placeholder".equals(plan.reason);
+        return hasPlanReason(plan, "inline_rule_below_whitespace_placeholder");
+    }
+
+    private static boolean hasPlanReason(ObjectPlan plan, String reason) {
+        if (plan == null || reason == null || plan.reason == null) return false;
+        return plan.reason.equals(reason) || plan.reason.startsWith(reason + ":");
     }
 
     private static ASTTextRun createUnderlinedSpaceRunForLayoutOnlyInlineRule(

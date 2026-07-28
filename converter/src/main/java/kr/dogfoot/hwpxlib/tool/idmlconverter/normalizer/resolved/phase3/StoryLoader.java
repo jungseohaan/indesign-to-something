@@ -2477,9 +2477,14 @@ public class StoryLoader {
             return plan.sourceObjectIds != null && plan.sourceObjectIds.length > 0
                     && (plan.kind != null && plan.kind.startsWith("layout_only_inline_slot:")
                     || "layout_only_inline_slot".equals(plan.slotRole)
-                    || "inline_rule_below_whitespace_placeholder".equals(plan.reason));
+                    || hasPlanReason(plan, "inline_rule_below_whitespace_placeholder"));
         }
         return false;
+    }
+
+    private static boolean hasPlanReason(ObjectPlan plan, String reason) {
+        if (plan == null || reason == null || plan.reason == null) return false;
+        return plan.reason.equals(reason) || plan.reason.startsWith(reason + ":");
     }
 
     private static boolean isResolvedCellPlannedInlineVisualAnchor(
