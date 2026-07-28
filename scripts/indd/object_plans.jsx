@@ -8651,6 +8651,7 @@ function _objectPlanTextOwnerPriority(plan) {
 
 function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
     bundle = _normalizeObjectPlanBundle(bundle || {}, sourceById);
+    var declaredTextlessShellSlot = _objectPlanBundleDeclaresTextlessShellSlot(bundle);
     var textAction = _objectPlanTextAction(bundle, sourceById);
     var visualAction = _objectPlanVisualAction(bundle, sourceById);
     var placement = _objectPlanPlacement(bundle);
@@ -8677,6 +8678,9 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         visualAction: visualAction,
         textAction: textAction
     });
+    if (declaredTextlessShellSlot) {
+        ownershipSlot = "SHELL_SLOT";
+    }
     if (ownershipSlot === "SHELL_SLOT"
             && visualAction !== "PLACE_TEXT_SHELL"
             && ownedTextFrameIds.length === 0) {
@@ -8783,7 +8787,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         renderSourceBounds: bundle.renderSourceBounds || null,
         cropSourceBounds: bundle.cropSourceBounds || null,
         ownershipSlot: ownershipSlot,
-        policyLayer: bundle.policyLayer || null,
+        policyLayer: declaredTextlessShellSlot ? "DECORATION" : (bundle.policyLayer || null),
         clusterRelation: bundle.clusterRelation || null,
         migrationStatus: migrationStatus,
         migrationBlocker: migrationBlocker.code,
@@ -9381,17 +9385,39 @@ function _objectPlanInlineEditableTextShellVisualIds(bundle, sourceById) {
 function _objectPlanBundleIsDeclaredTextlessShellComposite(bundle) {
     if (!bundle) return false;
     if (bundle.passId !== "pass.decoration_groups") return false;
-    if (bundle.slotRole !== "textless_group_visual_slot"
-            && bundle.compositeRole !== "textless_group_visual_slot") {
+    var slotRole = String(bundle.slotRole || "");
+    var compositeRole = String(bundle.compositeRole || "");
+    var declaredTextlessGroup = slotRole === "textless_group_visual_slot"
+            || compositeRole === "textless_group_visual_slot";
+    var declaredShellSlot = _objectPlanBundleDeclaresTextlessShellSlot(bundle);
+    if (!declaredTextlessGroup && !declaredShellSlot) {
         return false;
     }
-    if (bundle.clusterHasPlacedContent === true) return false;
-    if ((!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0)
+    if (bundle.clusterHasPlacedContent === true && !declaredShellSlot) return false;
+    if (declaredTextlessGroup
+            && (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0)
             && (!bundle.hiddenVisualSourceObjectIds || bundle.hiddenVisualSourceObjectIds.length === 0)) {
         return false;
     }
-    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0) return false;
+    if ((!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length === 0)
+            && (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length === 0)) {
+        return false;
+    }
     return true;
+}
+
+function _objectPlanBundleDeclaresTextlessShellSlot(bundle) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.decoration_groups") return false;
+    if (bundle.candidatePurpose !== "SHELL_CANDIDATE") return false;
+    var slotRole = String(bundle.slotRole || "");
+    var compositeRole = String(bundle.compositeRole || "");
+    return slotRole === "shell_slot_only"
+            || compositeRole === "shell_slot_only"
+            || compositeRole === "unclaimed_visible_vector_source"
+            || compositeRole === "unclaimed_visible_vector_source_set"
+            || compositeRole === "source_required_visible_vector_shell"
+            || compositeRole === "source_required_visible_vector_shell_set";
 }
 
 function _declaredTextlessShellCompositeBundle(bundle) {
@@ -9411,6 +9437,14 @@ function _declaredTextlessShellCompositeBundle(bundle) {
             || normalized.requiredSlotReason === "visible_content_visual_material") {
         normalized.requiredSlotReason = "declared_textless_shell_composite";
     }
+    normalized.materialization = "EXTRACTED_PNG_VECTOR";
+    normalized.visualAction = "PLACE_TEXT_SHELL";
+    normalized.textAction = normalized.ownedTextFrameIds && normalized.ownedTextFrameIds.length > 0
+            ? "OWNED_BY_HWPX_TEXT"
+            : "DROP_TEXT";
+    normalized.textOwner = normalized.ownedTextFrameIds && normalized.ownedTextFrameIds.length > 0
+            ? "hwpx_tf"
+            : "none";
     return normalized;
 }
 
@@ -9901,6 +9935,7 @@ function _objectPlanVisualAction(bundle, sourceById) {
     if (bundle.ownershipSlot === "TABLE_STYLE_SLOT") return "PLACE_TABLE_STYLE";
     if (_objectPlanBundleIsInlineVectorTextStyleMarker(bundle)) return "ABSORB_TEXT_STYLE";
     if (_objectPlanBundleIsTextRangeDecorationShell(bundle)) return "ABSORB_TEXT_STYLE";
+    if (_objectPlanBundleDeclaresTextlessShellSlot(bundle)) return "PLACE_TEXT_SHELL";
     if (_objectPlanBundleIsEmptyTextStyleDecorationContainer(bundle, sourceById)) return "DROP_VISUAL";
     if (_objectPlanBundleIsExecutableInlineEditableTextShell(bundle)) return "PLACE_TEXT_SHELL";
     if (_objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle)) return "DROP_VISUAL";
@@ -10191,6 +10226,11 @@ function _objectPlanMaterialization(bundle, visualAction, sourceById) {
     if (!bundle) return "EXTRACTED_PNG_VECTOR";
     if (visualAction === "PLACE_TABLE_STYLE") return "HWPX_TABLE_STYLE";
     if (visualAction === "ABSORB_TEXT_STYLE") return "HWPX_TEXT";
+    if (visualAction === "PLACE_TEXT_SHELL") {
+        return bundle.materialization && bundle.materialization !== "HWPX_TEXT"
+                ? bundle.materialization
+                : "EXTRACTED_PNG_VECTOR";
+    }
     if (visualAction === "DROP_VISUAL") return "HWPX_TEXT";
     if (_objectPlanBundleOwnsExplicitCompletePngText(bundle)) return "COMPLETE_PNG";
     if (_objectPlanBundleOwnsInlinePngText(bundle, sourceById)) return "COMPLETE_PNG";
@@ -10198,6 +10238,7 @@ function _objectPlanMaterialization(bundle, visualAction, sourceById) {
 }
 
 function _objectPlanVisualLayer(bundle, visualAction, placement, sourceById) {
+    if (_objectPlanBundleDeclaresTextlessShellSlot(bundle)) return "LABEL_BACKDROP";
     if (!bundle || !bundle.policyLayer) return "CONTENT_VISUAL";
     if (bundle.slotRole === "page_background_plane"
             || bundle.compositeRole === "page_background_plane"
