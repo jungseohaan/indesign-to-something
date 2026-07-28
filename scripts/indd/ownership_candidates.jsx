@@ -164,6 +164,7 @@ function _pushExtractionCandidate(candidates, seen, passId, item, attrs) {
         hiddenVisualSourceObjectIds: attrs.hiddenVisualSourceObjectIds || [],
         visualSourceObjectIds: attrs.visualSourceObjectIds || [],
         styleSourceObjectIds: attrs.styleSourceObjectIds || [],
+        ownedTextFrameIds: attrs.ownedTextFrameIds || [],
         editableTextFrameIds: attrs.editableTextFrameIds || [],
         hiddenTextFrameIds: attrs.hiddenTextFrameIds || [],
         requiresTextHidden: attrs.requiresTextHidden === true,
@@ -177,6 +178,8 @@ function _pushExtractionCandidate(candidates, seen, passId, item, attrs) {
         placement: attrs.placement || null,
         coordinateSpace: attrs.coordinateSpace || null,
         ownershipSlot: attrs.ownershipSlot || null,
+        sourceDeclaredNonReflowableTextCompletePng:
+                attrs.sourceDeclaredNonReflowableTextCompletePng === true,
         sourceInlineFlow: attrs.sourceInlineFlow === true,
         storyTextInlineSlot: attrs.storyTextInlineSlot === true,
         tableCellStoryTextInlineSlot: attrs.tableCellStoryTextInlineSlot === true,
@@ -636,7 +639,7 @@ function _sourceHasVisiblePaintMetadataInIndex(sourceId, sourceInfoById) {
 
 function _sourceHasTextFrameShellStyleMetadataInIndex(sourceId, sourceInfoById) {
     var src = sourceInfoById ? sourceInfoById[String(sourceId)] : null;
-    if (!src || String(src.kind || "") !== "TextFrame") return false;
+    if (!src || String(src.kind || src.type || src.itemType || "") !== "TextFrame") return false;
     return _sourceInfoHasVisiblePaintMetadata(src);
 }
 
@@ -647,7 +650,7 @@ function _sourceHasPlacedVisualMetadataInIndex(sourceId, sourceInfoById, childId
     visiting = visiting || {};
     if (visiting[key]) return false;
     visiting[key] = true;
-    var kind = String(src.kind || "");
+    var kind = String(src.kind || src.type || src.itemType || "");
     if (kind === "Image" || kind === "PDF") return true;
     if (src.hasPlacedVisual === true || src.hasPlacedVisualInSubtree === true) return true;
     var children = childIdsByParentId ? (childIdsByParentId[key] || []) : [];
@@ -662,7 +665,7 @@ function _sourceHasPlacedVisualMetadataInIndex(sourceId, sourceInfoById, childId
 function _sourceHasExecutableShellMaterialMetadataInIndex(sourceId, sourceInfoById, childIdsByParentId) {
     var src = sourceInfoById ? sourceInfoById[String(sourceId)] : null;
     if (!src) return false;
-    var kind = String(src.kind || "");
+    var kind = String(src.kind || src.type || src.itemType || "");
     if (kind === "TextFrame") {
         return _sourceHasTextFrameShellStyleMetadataInIndex(sourceId, sourceInfoById);
     }
@@ -696,7 +699,7 @@ function _candidateHasExecutableShellMaterial(candidate, sourceInfoById, childId
 
 function _candidateSourceKindPriority(sourceId, sourceInfoById) {
     var src = sourceInfoById ? sourceInfoById[String(sourceId)] : null;
-    var kind = src ? String(src.kind || "") : "";
+    var kind = src ? String(src.kind || src.type || src.itemType || "") : "";
     if (kind === "Group") return 0;
     if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") return 1;
     if (kind === "GraphicLine") return 2;
@@ -726,7 +729,7 @@ function _candidateEditableTextIds(candidate, sourceInfoById) {
         var id = candidate.sourceObjectIds[i];
         var src = sourceInfoById[String(id)];
         if (!src) continue;
-        if (src.kind !== "TextFrame") continue;
+        if (String(src.kind || src.type || src.itemType || "") !== "TextFrame") continue;
         if (src.textFrameClass !== "editable") continue;
         if (src.hasText !== true) continue;
         _pushUniqueId(out, seen, id);

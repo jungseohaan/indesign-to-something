@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 
@@ -113,7 +114,7 @@ public class HwpxConverterContext {
         TreeMap<Integer, Boolean> rawZOrders = new TreeMap<>();
         if (blocks != null) {
             for (ASTBlock block : blocks) {
-                int raw = rawZOrder(block);
+                int raw = outputZOrderKey(block);
                 rawZOrders.put(raw, Boolean.TRUE);
                 if (block instanceof ASTTextFrameBlock) {
                     Integer wrapperRaw = ((ASTTextFrameBlock) block).nativeWrapperZOrder();
@@ -130,7 +131,7 @@ public class HwpxConverterContext {
         foregroundOutputZOrder = Math.max(1, rank);
         if (blocks != null) {
             for (ASTBlock block : blocks) {
-                outputZOrderByBlock.put(block, outputZOrder(rawZOrder(block)));
+                outputZOrderByBlock.put(block, outputZOrder(outputZOrderKey(block)));
             }
         }
     }
@@ -138,7 +139,7 @@ public class HwpxConverterContext {
     public int outputZOrder(ASTBlock block) {
         if (block == null) return 0;
         Integer encoded = outputZOrderByBlock.get(block);
-        return encoded != null ? encoded : outputZOrder(rawZOrder(block));
+        return encoded != null ? encoded : outputZOrder(outputZOrderKey(block));
     }
 
     public int outputZOrder(int rawZOrder) {
@@ -156,6 +157,17 @@ public class HwpxConverterContext {
         if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
         if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
         return 0;
+    }
+
+    private int outputZOrderKey(ASTBlock block) {
+        if (block instanceof ASTFigure) {
+            ASTFigure fig = (ASTFigure) block;
+            return VisualPlanePolicy.textlessGraphicZOrderName(
+                    fig.visualLayer(),
+                    fig.sourceLayerIndex(),
+                    fig.zOrder());
+        }
+        return rawZOrder(block);
     }
 
     /** 변환 설정 (spacing, orphan 등) */

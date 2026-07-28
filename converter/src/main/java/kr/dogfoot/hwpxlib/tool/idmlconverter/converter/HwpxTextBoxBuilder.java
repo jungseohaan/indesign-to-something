@@ -15,6 +15,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 
 /**
  * ASTTextFrameBlock / ASTInlineObject(INLINE_TEXT_FRAME) → HWPX 글상자(Rectangle+DrawText)
@@ -490,17 +491,18 @@ public class HwpxTextBoxBuilder {
         // HWPX floating tables can ignore the intended z relationship with nearby
         // floating table content, so label text that sits on a shell must not be
         // materialized as another 1x1 table.
-        return (plannedLabelBackdrop(block) || plannedExternalTextShell(block))
+        return plannedExternalTextShell(block)
                 && !containsInlineTable(block.paragraphs());
     }
 
     private boolean plannedExternalTextShell(ASTTextFrameBlock block) {
         if (block == null) return false;
-        if (block.forceNativeFill() || block.plannedVisualTextOverlay()) return false;
         String layer = block.plannedShellVisualLayer();
-        return "LABEL_BACKDROP".equals(layer)
-                || "TEXT_CARD_BACKDROP".equals(layer)
-                || "LABEL_OVERLAY_BACKDROP".equals(layer);
+        return layer != null
+                && !layer.isEmpty()
+                && !"PAGE_BACKGROUND".equals(layer)
+                && VisualPlanePolicy.isBehindTextLayerName(layer)
+                && (block.forceNativeFill() || block.plannedVisualTextOverlay());
     }
 
     private boolean containsInlineTable(java.util.List<ASTParagraph> paragraphs) {

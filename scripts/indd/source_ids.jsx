@@ -179,6 +179,9 @@ function _buildSourceItemIndexes(sourceItems) {
     for (var i = 0; i < sourceItems.length; i++) {
         var src = sourceItems[i];
         if (!src || src.id === null || src.id === undefined) continue;
+        if (!src.kind && (src.type || src.itemType)) {
+            src.kind = String(src.type || src.itemType || "");
+        }
         sourceInfoById[String(src.id)] = src;
         if (src.parentId === null || src.parentId === undefined) continue;
         var parentKey = String(src.parentId);

@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ShellRole;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualPlanePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
@@ -138,10 +139,18 @@ public final class VisualPlacementExecutor {
             ASTBlock block = section.blocks().get(index);
             if (!(block instanceof ASTFigure)) break;
             ASTFigure existing = (ASTFigure) block;
-            if (existing.zOrder() < fig.zOrder()) break;
+            if (figureOutputZOrderKey(existing) < figureOutputZOrderKey(fig)) break;
             index++;
         }
         section.blocks().add(index, fig);
+    }
+
+    private static int figureOutputZOrderKey(ASTFigure fig) {
+        if (fig == null) return 0;
+        return VisualPlanePolicy.textlessGraphicZOrderName(
+                fig.visualLayer(),
+                fig.sourceLayerIndex(),
+                fig.zOrder());
     }
 
     public static final class PlacementResult {
