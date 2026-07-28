@@ -426,6 +426,8 @@ function _plannerBundleFromCandidate(candidate, clusterIndex) {
         inlineTextStyleMarkerSource: _plannerBundleHasInlineTextStyleMarkerSource(
                 candidate, sourceIds, clusterIndex),
         connectorDecorationVisual: connectorDecorationVisual,
+        sourceDeclaredNonReflowableTextCompletePng:
+                declaredCandidate.sourceDeclaredNonReflowableTextCompletePng === true,
         zOrder: zOrder,
         bounds: candidate.bounds || null,
         renderSourceBounds: renderSourceBounds,
@@ -2375,6 +2377,16 @@ function _plannerBundleMaterialization(
         candidate, slot, slotSources, exportSourceObjectIds,
         hiddenVisualSourceObjectIds, clusterIndex) {
     if (!candidate) return "EXTRACTED_PNG_VECTOR";
+    if (candidate.materialization === "COMPLETE_PNG"
+            || candidate.mode === "COMPLETE_PNG"
+            || (slot === "CONTENT_VISUAL_SLOT"
+                && candidate.textOwner === "indesign_png"
+                && candidate.completePngTextAllowed === true
+                && ((candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0)
+                    || (slotSources && slotSources.ownedTextFrameIds
+                        && slotSources.ownedTextFrameIds.length > 0)))) {
+        return "COMPLETE_PNG";
+    }
     if (_plannerBundleNeedsTextlessVisualFragment(
             candidate, slot, slotSources, exportSourceObjectIds, clusterIndex)) {
         return "TEXTLESS_VISUAL_FRAGMENT";

@@ -125,6 +125,9 @@ public final class VisualPlanePolicy {
     }
 
     private static int normalizedSourceZOrder(int sourceZOrder) {
+        if (sourceZOrder > MAX_SOURCE_Z_ORDER) {
+            return Math.max(0, Math.min(sourceZOrder % LAYER_STRIDE, MAX_SOURCE_Z_ORDER));
+        }
         return Math.max(0, Math.min(sourceZOrder, MAX_SOURCE_Z_ORDER));
     }
 }

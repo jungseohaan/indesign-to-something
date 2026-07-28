@@ -402,14 +402,22 @@ public class ASTToHwpxConverter {
 
     private static int zOrderOf(ASTBlock block) {
         if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
-        if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
+        if (block instanceof ASTFigure) return figureOutputZOrderKey((ASTFigure) block);
         if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
         return 0;
     }
 
     private static int textlessGraphicZOrderOf(ASTFigure fig) {
         if (fig == null) return 0;
-        return fig.zOrder();
+        return figureOutputZOrderKey(fig);
+    }
+
+    private static int figureOutputZOrderKey(ASTFigure fig) {
+        if (fig == null) return 0;
+        return VisualPlanePolicy.textlessGraphicZOrderName(
+                fig.visualLayer(),
+                fig.sourceLayerIndex(),
+                fig.zOrder());
     }
 
     private static boolean isBehindTextPlaneFigure(ASTFigure fig) {

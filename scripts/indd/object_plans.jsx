@@ -3798,6 +3798,10 @@ function _inlineVisualGlyphAssemblyObjectPlan(src, id, pageIndex, zOrder) {
 function _floatingVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
     var sourceIds = _internSourceSetIds([id]);
     var sourceSetId = _sourceSetId(sourceIds);
+    var placementBounds = src.pageRelativeBounds
+            || src.pageRelativeGeometricBounds
+            || src.bounds
+            || null;
     return {
         objectPlanId: "objectPlan.floating_visible_textframe_shell." + String(id),
         bundleId: "textFrame.floatingVisibleShell." + String(id),
@@ -3855,9 +3859,9 @@ function _floatingVisibleTextFrameShellObjectPlan(src, id, pageIndex, zOrder) {
         visualLayer: "LABEL_BACKDROP",
         zOrder: zOrder,
         reason: "stage1_floating_visible_text_frame_shell_from_source_inventory",
-        bounds: src.bounds || null,
+        bounds: placementBounds,
         renderSourceBounds: src.bounds || null,
-        cropSourceBounds: src.bounds || null,
+        cropSourceBounds: null,
         ownershipSlot: "SHELL_SLOT",
         policyLayer: "DECORATION",
         clusterRelation: "EXACT_SOURCE_CLUSTER",
@@ -4511,6 +4515,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
         for (var completeOwnerIndex = 0; completeOwnerIndex < owners.length; completeOwnerIndex++) {
             var completeOwner = owners[completeOwnerIndex];
             if (!_objectPlanIsCompletePngTextOwner(completeOwner)) continue;
+            if (!_objectPlanCanCanonicalizeDuplicateVisibleVisualSource(completeOwner)) continue;
             if (!canonical
                     || _compareObjectPlanVisibleVisualSourcePriority(completeOwner, canonical) < 0) {
                 canonical = completeOwner;
@@ -4593,6 +4598,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
     for (var cpi = 0; cpi < plans.length; cpi++) {
         var completePlan = plans[cpi];
         if (!_objectPlanIsCompletePngTextOwner(completePlan)) continue;
+        if (!_objectPlanCanCanonicalizeDuplicateVisibleVisualSource(completePlan)) continue;
         var completeSourceIds = completePlan.sourceObjectIds || [];
         if (completeSourceIds.length === 0) continue;
         var completeRootId = completePlan.primarySourceObjectId;
@@ -4629,6 +4635,28 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _objectPlanCanCanonicalizeDuplicateVisibleVisualSource(plan) {
+    if (!_objectPlanIsCompletePngTextOwner(plan)) return true;
+    return !_objectPlanIsBroadSourceDeclaredCompletePngTextOwner(plan);
+}
+
+function _objectPlanIsBroadSourceDeclaredCompletePngTextOwner(plan) {
+    if (!_objectPlanIsCompletePngTextOwner(plan)) return false;
+    var sourceDeclared = plan.sourceDeclaredNonReflowableTextCompletePng === true
+            || plan.slotRole === "source_declared_non_reflowable_text_complete_png"
+            || plan.compositeRole === "source_declared_non_reflowable_text_complete_png"
+            || String(plan.candidateId || "").indexOf("source_declared_non_reflowable_text_complete_png") >= 0
+            || String(plan.reason || "").indexOf("source_declared_non_reflowable_text_complete_png") >= 0;
+    if (!sourceDeclared) return false;
+
+    var sourceIds = _sortedNumericIds(plan.sourceObjectIds || []);
+    var directVisibleIds = _sortedNumericIds(_sourceIdsUnion(
+            plan.visualSourceObjectIds || [], plan.exportSourceObjectIds || []));
+    if (sourceIds.length === 0 || directVisibleIds.length === 0) return false;
+    if (sourceIds.length <= directVisibleIds.length) return false;
+    return _sourceSetContainsAll(sourceIds, directVisibleIds);
 }
 
 function _resolveAtomicInlineShellFloatingFragments(objectPlans, sourceById) {
@@ -9706,11 +9734,34 @@ function _objectPlanUsesAmbiguousSingleRootSlotOnlyExport(bundle) {
             && String(bundle.exportTargetObjectId) !== String(bundle.exportSourceObjectIds[0])) {
         return false;
     }
+    if (_objectPlanHasExplicitSingleVisualTextShellContract(bundle)) return false;
     if (bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0) return true;
     if (bundle.editableTextFrameIds && bundle.editableTextFrameIds.length > 0) return true;
     if (bundle.styleSourceObjectIds && bundle.styleSourceObjectIds.length > 0) return true;
     if (bundle.clusterHasEditableText === true || bundle.clusterHasTextFrame === true) return true;
     return false;
+}
+
+function _objectPlanHasExplicitSingleVisualTextShellContract(bundle) {
+    if (!bundle) return false;
+    if (bundle.passId !== "pass.decoration_groups") return false;
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (bundle.clusterRelation !== "EXACT_SOURCE_CLUSTER") return false;
+    if (!bundle.visualSourceObjectIds || bundle.visualSourceObjectIds.length !== 1) return false;
+    if (!bundle.exportSourceObjectIds || bundle.exportSourceObjectIds.length !== 1) return false;
+    if (String(bundle.visualSourceObjectIds[0]) !== String(bundle.exportSourceObjectIds[0])) return false;
+    var textIds = bundle.ownedTextFrameIds && bundle.ownedTextFrameIds.length > 0
+            ? bundle.ownedTextFrameIds
+            : (bundle.editableTextFrameIds || []);
+    if (!textIds || textIds.length === 0) return false;
+    if (!_sourceSetContainsAll(bundle.sourceObjectIds || [], bundle.visualSourceObjectIds || [])) {
+        return false;
+    }
+    if (!_sourceSetContainsAll(bundle.sourceObjectIds || [], textIds)) return false;
+    var hiddenTextIds = bundle.hiddenTextFrameIds && bundle.hiddenTextFrameIds.length > 0
+            ? bundle.hiddenTextFrameIds
+            : (bundle.hiddenVisualSourceObjectIds || []);
+    return _sourceSetContainsAll(hiddenTextIds, textIds);
 }
 
 function _objectPlanAllowsRootExportVisibleFragmentContract(bundle) {

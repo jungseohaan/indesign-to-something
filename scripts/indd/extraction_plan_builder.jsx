@@ -6090,28 +6090,6 @@ function _appendUnclaimedVisibleVectorExecutionCandidates(candidates, sourceItem
         return _sortedNumericIds(out);
     }
 
-    function editableTextFrameIdsForSubtree(sourceId, pageIndex, visiting, out, seen) {
-        var src = infoById[String(sourceId)];
-        if (!src) return out || [];
-        visiting = visiting || {};
-        out = out || [];
-        seen = seen || {};
-        var key = String(sourceId);
-        if (visiting[key]) return out;
-        visiting[key] = true;
-        if (String(src.kind || "") === "TextFrame"
-                && src.textFrameClass === "editable"
-                && src.hasText === true
-                && (pageIndex === null || pageIndex === undefined || src.pageIndex === pageIndex)) {
-            _pushUniqueId(out, seen, sourceId);
-        }
-        var children = childIdsByParentId[key] || [];
-        for (var ci = 0; ci < children.length; ci++) {
-            editableTextFrameIdsForSubtree(children[ci], pageIndex, visiting, out, seen);
-        }
-        return _sortedNumericIds(out);
-    }
-
     function sourceLooksLikeVisibleVectorMaterial(src) {
         if (!src) return false;
         if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return false;
@@ -6265,6 +6243,18 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                     || String(src.anchoredPosition || "").toUpperCase() === "INLINEPOSITION");
     }
 
+    function sourcePageMatches(src, pageIndex) {
+        if (!src) return false;
+        if (pageIndex === null || pageIndex === undefined) return true;
+        if (src.pageIndex === null || src.pageIndex === undefined) return true;
+        var sourcePageIndex = Number(src.pageIndex);
+        var targetPageIndex = Number(pageIndex);
+        if (isNaN(sourcePageIndex) || isNaN(targetPageIndex)) {
+            return String(src.pageIndex) === String(pageIndex);
+        }
+        return sourcePageIndex === targetPageIndex;
+    }
+
     function sourceHasEditableTextDescendant(sourceId, pageIndex, visiting) {
         var src = infoById[String(sourceId)];
         if (!src) return false;
@@ -6275,7 +6265,7 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
         if (String(src.kind || "") === "TextFrame"
                 && src.textFrameClass === "editable"
                 && src.hasText === true
-                && (pageIndex === null || pageIndex === undefined || src.pageIndex === pageIndex)) {
+                && sourcePageMatches(src, pageIndex)) {
             return true;
         }
         var children = childIdsByParentId[key] || [];
@@ -6297,7 +6287,7 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
         if (String(src.kind || "") === "TextFrame"
                 && src.textFrameClass === "editable"
                 && src.hasText === true
-                && (pageIndex === null || pageIndex === undefined || src.pageIndex === pageIndex)) {
+                && sourcePageMatches(src, pageIndex)) {
             _pushUniqueId(out, seen, sourceId);
         }
         var children = childIdsByParentId[key] || [];
@@ -6305,6 +6295,60 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
             editableTextFrameIdsForSubtree(children[ci], pageIndex, visiting, out, seen);
         }
         return _sortedNumericIds(out);
+    }
+
+    function normalizedTextKeyForSourceTextFrame(sourceId) {
+        var src = infoById[String(sourceId)];
+        if (!src) return "";
+        var text = "";
+        if (src.frameVisibleText !== null && src.frameVisibleText !== undefined) {
+            text = String(src.frameVisibleText);
+        } else if (src.visibleText !== null && src.visibleText !== undefined) {
+            text = String(src.visibleText);
+        } else if (src.frameParaTexts && src.frameParaTexts.length) {
+            text = String(src.frameParaTexts.join("\n"));
+        } else if (src.text !== null && src.text !== undefined) {
+            text = String(src.text);
+        } else if (src.contents !== null && src.contents !== undefined) {
+            text = String(src.contents);
+        } else if (src.storyText !== null && src.storyText !== undefined) {
+            text = String(src.storyText);
+        }
+        return String(text || "").replace(/[\s\r\n\t\u0003\u0016\u0018\uFFFC]/g, "");
+    }
+
+    function sourceTextFrameHasNonReflowableDecorationSignal(sourceId) {
+        var src = infoById[String(sourceId)];
+        if (!src || String(src.kind || "") !== "TextFrame") return false;
+        var angle = Number(src.rotationAngle || src.absoluteRotationAngle || 0);
+        if (!isNaN(angle) && Math.abs(angle) > 0.1) return true;
+        if (src.overflows === true) return true;
+        return false;
+    }
+
+    function sourceGroupShouldOwnNonReflowableTextAsCompletePng(src, pageIndex) {
+        if (!src || String(src.kind || "") !== "Group") return false;
+        if (sourceIsInlineFlow(src.id)) return false;
+        if (String(src.storyAnchorPlacement || "").toUpperCase() === "INLINE") return false;
+        if (!sourceLooksLikeVisibleVectorMaterial(src)) return false;
+        var editableIds = editableTextFrameIdsForSubtree(src.id, pageIndex);
+        if (!editableIds || editableIds.length < 2) return false;
+
+        var hasNonReflowableText = false;
+        var textKeys = {};
+        var hasDuplicateTextKey = false;
+        for (var ei = 0; ei < editableIds.length; ei++) {
+            var textFrameId = editableIds[ei];
+            if (sourceTextFrameHasNonReflowableDecorationSignal(textFrameId)) {
+                hasNonReflowableText = true;
+            }
+            var textKey = normalizedTextKeyForSourceTextFrame(textFrameId);
+            if (textKey) {
+                if (textKeys[textKey]) hasDuplicateTextKey = true;
+                textKeys[textKey] = true;
+            }
+        }
+        return hasNonReflowableText || hasDuplicateTextKey;
     }
 
     function sourceHasPlacedVisualInSubtree(sourceId, visiting) {
@@ -6674,6 +6718,123 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
     var appended = [];
     var inlineRootSeen = {};
     var floatingAnchoredRootSeen = {};
+
+    function sourceHasQualifiedAncestor(sourceId, qualifiedById) {
+        var src = infoById[String(sourceId)];
+        if (!src) return false;
+        var parentId = src.parentId;
+        var guard = 0;
+        while (parentId !== null && parentId !== undefined && guard < 200) {
+            guard++;
+            if (qualifiedById[String(parentId)] === true) return true;
+            var parent = infoById[String(parentId)];
+            if (!parent) return false;
+            parentId = parent.parentId;
+        }
+        return false;
+    }
+
+    function appendSourceDeclaredCompletePngOwner(src, pageIndex, sourceIds, editableTextFrameIds) {
+        if (!src || !sourceIds || sourceIds.length === 0
+                || !editableTextFrameIds || editableTextFrameIds.length === 0) {
+            return false;
+        }
+        var candidatePassId = "pass.decoration_groups";
+        var candidateId = sourceIds.length > 1
+                ? _candidateCompositeId(candidatePassId, pageIndex, sourceIds,
+                        "source_declared_non_reflowable_text_complete_png")
+                : _candidateId(candidatePassId, src.id, pageIndex);
+        var seenKey = candidatePassId + "|page:" + String(pageIndex)
+                + "|src:" + _sourceSetKey(sourceIds);
+        if (candidateSeen && candidateSeen[seenKey] === true) return false;
+        if (candidateSeen) candidateSeen[seenKey] = true;
+
+        candidates.push({
+            candidateId: candidateId,
+            passId: candidatePassId,
+            sourceObjectIds: sourceIds.slice(0),
+            executionSourceObjectIds: sourceIds.slice(0),
+            primarySourceObjectId: src.id,
+            pageIndex: pageIndex,
+            kind: src.kind || "VectorSource",
+            unit: "GROUP_OR_ITEM",
+            mode: "COMPLETE_PNG",
+            candidatePurpose: "COMPLETE_PNG_TEXT_OWNER",
+            bounds: unionSourceBounds(sourceIds) || src.bounds || null,
+            parentId: src.parentId,
+            parentKind: src.parentKind || null,
+            anchoredPosition: src.anchoredPosition,
+            storyAnchorPlacement: src.storyAnchorPlacement,
+            composite: sourceIds.length > 1,
+            compositeRole: "source_declared_non_reflowable_text_complete_png",
+            slotRole: "source_declared_non_reflowable_text_complete_png",
+            exportSourceObjectIds: sourceIds.slice(0),
+            exportTargetObjectId: src.id,
+            hiddenVisualSourceObjectIds: [],
+            visualSourceObjectIds: sourceIds.slice(0),
+            styleSourceObjectIds: [],
+            ownedTextFrameIds: editableTextFrameIds.slice(0),
+            editableTextFrameIds: editableTextFrameIds.slice(0),
+            hiddenTextFrameIds: [],
+            requiresTextHidden: false,
+            textOwner: "indesign_png",
+            containsEditableText: true,
+            completePngTextAllowed: true,
+            ownershipSlot: "CONTENT_VISUAL_SLOT",
+            materialization: "COMPLETE_PNG",
+            textAction: "OWNED_BY_PNG",
+            visualAction: "PLACE_FLOATING_PNG",
+            visualLayer: "CONTENT_VISUAL",
+            placement: "FLOATING",
+            coordinateSpace: "PAGE",
+            zOrder: src.zOrder !== undefined ? src.zOrder : 0,
+            required: true,
+            requiredSlot: "CONTENT_VISUAL_SLOT",
+            requiredSlotReason: "source_declared_non_reflowable_text_complete_png",
+            reason: "source_declared_non_reflowable_text_complete_png",
+            sourceDeclaredClosedTextShell: true,
+            sourceDeclaredNonReflowableTextCompletePng: true
+        });
+        appended.push({
+            candidateId: candidateId,
+            sourceObjectIds: sourceIds.slice(0),
+            primarySourceObjectId: src.id,
+            pageIndex: pageIndex,
+            requiredSlot: "CONTENT_VISUAL_SLOT",
+            requiredSlotReason: "source_declared_non_reflowable_text_complete_png",
+            reason: "source_declared_non_reflowable_text_complete_png"
+        });
+        mark(sourceIds, claimed);
+        return true;
+    }
+
+    var sourceDeclaredCompleteRoots = [];
+    var sourceDeclaredCompleteQualified = {};
+    for (var qsi = 0; qsi < sourceItems.length; qsi++) {
+        var qsrc = sourceItems[qsi];
+        if (!qsrc || qsrc.id === null || qsrc.id === undefined) continue;
+        if (!sourceLooksLikeVisibleVectorMaterial(qsrc)) continue;
+        var qpages = candidatePagesForSource(qsrc);
+        for (var qpi = 0; qpi < qpages.length; qpi++) {
+            var qpageIndex = Number(qpages[qpi]);
+            if (isNaN(qpageIndex) || qpageIndex < 0) continue;
+            if (!sourceGroupShouldOwnNonReflowableTextAsCompletePng(qsrc, qpageIndex)) continue;
+            sourceDeclaredCompleteQualified[String(qsrc.id)] = true;
+            sourceDeclaredCompleteRoots.push({ source: qsrc, pageIndex: qpageIndex });
+        }
+    }
+    for (var qri = 0; qri < sourceDeclaredCompleteRoots.length; qri++) {
+        var qroot = sourceDeclaredCompleteRoots[qri];
+        var qrootSource = qroot.source;
+        if (sourceHasQualifiedAncestor(qrootSource.id, sourceDeclaredCompleteQualified)) continue;
+        var qsourceIds = [];
+        var qseen = {};
+        collectSamePageSubtree(qrootSource.id, qroot.pageIndex, qseen, qsourceIds);
+        qsourceIds = _sortedNumericIds(qsourceIds);
+        var qeditableIds = editableTextFrameIdsForSubtree(qrootSource.id, qroot.pageIndex);
+        appendSourceDeclaredCompletePngOwner(qrootSource, qroot.pageIndex, qsourceIds, qeditableIds);
+    }
+
     for (var si = 0; si < sourceItems.length; si++) {
         var src = sourceItems[si];
         if (!src || src.id === null || src.id === undefined) continue;
@@ -6914,21 +7075,33 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
             var sourceIds = [];
             var seen = {};
             var hasEditableTextDescendant = sourceHasEditableTextDescendant(src.id, targetPageIndex);
+            var completePngOwnsText = sourceGroupShouldOwnNonReflowableTextAsCompletePng(
+                    src, targetPageIndex);
+            var completePngOwnedTextFrameIds = completePngOwnsText
+                    ? editableTextFrameIdsForSubtree(src.id, targetPageIndex)
+                    : [];
             if (hasEditableTextDescendant) {
-                collectUnclaimedVectorShellSubtree(src.id, targetPageIndex, claimed, seen, sourceIds, true);
+                if (completePngOwnsText) {
+                    collectSamePageSubtree(src.id, targetPageIndex, seen, sourceIds);
+                } else {
+                    collectUnclaimedVectorShellSubtree(src.id, targetPageIndex, claimed, seen, sourceIds, true);
+                }
                 sourceIds = _sortedNumericIds(sourceIds);
             } else {
                 collectSamePageSubtree(src.id, targetPageIndex, seen, sourceIds);
                 sourceIds = pageLocalSourceIdsForFallback(
                         src, targetPageIndex, sourceIds.length > 0 ? sourceIds : [src.id]);
             }
-            if (visibleMaterialLeavesAllClaimed(sourceIds, claimed)) continue;
-            var hasPlacedVisualTree = hasEditableTextDescendant ? false : sourceTreeHasPlacedVisual(sourceIds);
-            if (!hasPlacedVisualTree
+            if (!sourceIds || sourceIds.length === 0) continue;
+            if (!completePngOwnsText && visibleMaterialLeavesAllClaimed(sourceIds, claimed)) continue;
+            var hasPlacedVisualTree = completePngOwnsText
+                    ? false
+                    : (hasEditableTextDescendant ? false : sourceTreeHasPlacedVisual(sourceIds));
+            if (!completePngOwnsText && !hasPlacedVisualTree
                     && sourceSetContainsChildDirectSiblingTextShellSlot(src.id, sourceIds, targetPageIndex)) {
                 continue;
             }
-            var directSiblingTextFrameIds = !hasPlacedVisualTree
+            var directSiblingTextFrameIds = !completePngOwnsText && !hasPlacedVisualTree
                     ? directSiblingTextFrameIdsForShell(src.id, targetPageIndex)
                     : [];
             var directSiblingShellVisualSourceIds = sourceIds;
@@ -6936,39 +7109,55 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                 sourceIds = _sortedNumericIds(_sourceIdsUnion(sourceIds, directSiblingTextFrameIds));
             }
             var sourceKind = String(src.kind || "");
-            var candidatePassId = hasPlacedVisualTree
+            var candidatePassId = completePngOwnsText
+                    ? "pass.decoration_groups"
+                    : hasPlacedVisualTree
                     ? (sourceKind === "Group" ? "pass.image_textless_groups" : "pass.image_placed_frames")
                     : "pass.decoration_groups";
-            var candidateUnit = hasPlacedVisualTree
+            var candidateUnit = completePngOwnsText
+                    ? "GROUP_OR_ITEM"
+                    : hasPlacedVisualTree
                     ? (candidatePassId === "pass.image_textless_groups" ? "GROUP" : "ITEM")
                     : (sourceIds.length > 1 ? "GROUP_OR_ITEM" : "ITEM");
             var candidateId = sourceIds.length > 1
                     ? _candidateCompositeId(candidatePassId, targetPageIndex, sourceIds,
-                            "unclaimed_visible_vector_source")
+                            completePngOwnsText
+                                    ? "source_declared_non_reflowable_text_complete_png"
+                                    : "unclaimed_visible_vector_source")
                     : _candidateId(candidatePassId, src.id, targetPageIndex);
             var seenKey = candidatePassId + "|page:" + String(targetPageIndex)
                     + "|src:" + _sourceSetKey(sourceIds);
             if (candidateSeen) candidateSeen[seenKey] = true;
-            var ownershipSlot = hasPlacedVisualTree ? "CONTENT_VISUAL_SLOT" : "SHELL_SLOT";
-            var visualLayer = hasPlacedVisualTree ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
-            var visualAction = hasPlacedVisualTree ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
-            var candidatePurpose = hasPlacedVisualTree ? "CONTENT_CANDIDATE" : "SHELL_CANDIDATE";
-            var slotRole = hasPlacedVisualTree ? "content_visual_slot" : "shell_slot_only";
-            var candidateMode = candidatePassId === "pass.image_placed_frames"
+            var ownershipSlot = (hasPlacedVisualTree || completePngOwnsText) ? "CONTENT_VISUAL_SLOT" : "SHELL_SLOT";
+            var visualLayer = (hasPlacedVisualTree || completePngOwnsText) ? "CONTENT_VISUAL" : "LABEL_BACKDROP";
+            var visualAction = (hasPlacedVisualTree || completePngOwnsText) ? "PLACE_FLOATING_PNG" : "PLACE_TEXT_SHELL";
+            var candidatePurpose = completePngOwnsText
+                    ? "COMPLETE_PNG_TEXT_OWNER"
+                    : hasPlacedVisualTree ? "CONTENT_CANDIDATE" : "SHELL_CANDIDATE";
+            var slotRole = completePngOwnsText
+                    ? "source_declared_non_reflowable_text_complete_png"
+                    : hasPlacedVisualTree ? "content_visual_slot" : "shell_slot_only";
+            var candidateMode = completePngOwnsText
+                    ? "COMPLETE_PNG"
+                    : candidatePassId === "pass.image_placed_frames"
                     ? "ORIGINAL_VISUAL"
                     : "TEXTLESS_CANDIDATE";
-            var directSiblingShellSlot = !hasPlacedVisualTree
+            var directSiblingShellSlot = !completePngOwnsText && !hasPlacedVisualTree
                     && directSiblingTextFrameIds && directSiblingTextFrameIds.length === 1;
             var exportSourceIds = directSiblingShellSlot
                     ? directSiblingShellVisualSourceIds.slice(0)
                     : sourceIds.slice(0);
             var visualSourceIds = exportSourceIds.slice(0);
-            var compositeRole = hasPlacedVisualTree
+            var compositeRole = completePngOwnsText
+                    ? "source_declared_non_reflowable_text_complete_png"
+                    : hasPlacedVisualTree
                     ? "source_required_content_visual_set"
                     : (directSiblingShellSlot
                             ? "source_required_direct_sibling_text_shell_set"
                             : "source_required_visible_vector_shell_set");
-            var singleRole = hasPlacedVisualTree
+            var singleRole = completePngOwnsText
+                    ? "source_declared_non_reflowable_text_complete_png"
+                    : hasPlacedVisualTree
                     ? "source_required_content_visual"
                     : (directSiblingShellSlot
                             ? "source_required_direct_sibling_text_shell"
@@ -7013,22 +7202,37 @@ function _appendUnclaimedVisibleVectorOwnershipCandidates(candidates, sourceItem
                 containsEditableText: false,
                 completePngTextAllowed: false,
                 ownershipSlot: ownershipSlot,
-                materialization: "EXTRACTED_PNG_VECTOR",
-                textAction: "DROP_TEXT",
-                visualAction: visualAction,
-                visualLayer: visualLayer,
+	                materialization: completePngOwnsText ? "COMPLETE_PNG" : "EXTRACTED_PNG_VECTOR",
+	                textAction: completePngOwnsText ? "OWNED_BY_PNG" : "DROP_TEXT",
+	                visualAction: visualAction,
+	                visualLayer: visualLayer,
                 placement: "FLOATING",
                 coordinateSpace: "PAGE",
                 zOrder: src.zOrder !== undefined ? src.zOrder : 0,
                 required: true,
                 requiredSlot: ownershipSlot,
-                requiredSlotReason: hasPlacedVisualTree
-                        ? "visible_placed_material_tree"
-                        : "visible_vector_material",
-                reason: directSiblingShellSlot
-                        ? "source_required_direct_sibling_text_shell"
-                        : "source_required_visible_vector_shell"
-            };
+	                requiredSlotReason: completePngOwnsText
+	                        ? "source_declared_non_reflowable_text_complete_png"
+	                        : hasPlacedVisualTree
+	                        ? "visible_placed_material_tree"
+	                        : "visible_vector_material",
+	                reason: completePngOwnsText
+	                        ? "source_declared_non_reflowable_text_complete_png"
+	                        : directSiblingShellSlot
+	                        ? "source_required_direct_sibling_text_shell"
+	                        : "source_required_visible_vector_shell"
+	            };
+	            if (completePngOwnsText) {
+	                candidate.ownedTextFrameIds = completePngOwnedTextFrameIds.slice(0);
+	                candidate.editableTextFrameIds = completePngOwnedTextFrameIds.slice(0);
+	                candidate.hiddenTextFrameIds = [];
+	                candidate.requiresTextHidden = false;
+	                candidate.textOwner = "indesign_png";
+	                candidate.containsEditableText = true;
+	                candidate.completePngTextAllowed = true;
+	                candidate.sourceDeclaredClosedTextShell = true;
+	                candidate.sourceDeclaredNonReflowableTextCompletePng = true;
+	            }
             candidate.slotRole = slotRole;
             candidates.push(candidate);
             appended.push({

@@ -695,9 +695,11 @@ public class HwpxImageBuilder {
                 && !"None".equals(figure.textWrapMode());
         TextWrapMethod figWrap = explicitTextWrap
                 ? mapTextWrapMethod(figure.textWrapMode())
-                : (isBehindTextVisualLayer(figure.visualLayer())
+                : (requiresFrontPlaneBackdrop(figure.visualLayer())
+                        ? TextWrapMethod.IN_FRONT_OF_TEXT
+                        : (isBehindTextVisualLayer(figure.visualLayer())
                         ? TextWrapMethod.BEHIND_TEXT
-                        : TextWrapMethod.IN_FRONT_OF_TEXT);
+                        : TextWrapMethod.IN_FRONT_OF_TEXT));
         TextFlowSide figFlowSide = explicitTextWrap
                 ? mapTextFlowSide(figure.textWrapSide())
                 : TextFlowSide.BOTH_SIDES;
@@ -794,6 +796,12 @@ public class HwpxImageBuilder {
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
         return VisualPlanePolicy.isBehindTextLayerName(visualLayer);
+    }
+
+    private static boolean requiresFrontPlaneBackdrop(String visualLayer) {
+        return "LABEL_BACKDROP".equals(visualLayer)
+                || "LABEL_OVERLAY_BACKDROP".equals(visualLayer)
+                || "TEXT_CARD_BACKDROP".equals(visualLayer);
     }
 
     // ── 배경 PNG ──

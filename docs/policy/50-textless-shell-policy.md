@@ -73,6 +73,15 @@ Execution requirements:
   inline objects or for the explicit direct sibling shell slot above. This keeps
   independent markers/backgrounds from being absorbed into a parent shell and
   disappearing from their own ownership slot.
+- If a source-declared closed page/floating decoration group has multiple
+  editable TextFrame children whose source metadata shows non-reflowable
+  decoration behavior, such as rotated TextFrames, overflowing TextFrames, or
+  duplicated shadow/outline text for the same glyph run, Stage 1 materializes
+  that closed group as `COMPLETE_PNG`. In that case the PNG owns the group's
+  `TEXT_SLOT` as `OWNED_BY_PNG`, the extractor must not hide the TextFrames
+  during export, and no separate HWPX TF is emitted for those child TextFrames.
+  Ordinary source-declared shells without those source metadata signals remain
+  textless `PLACE_TEXT_SHELL` plus HWPX text.
 - A broad parent/group candidate must not itself be labeled
   `direct_child_shell_slot`. That role belongs only to the closed local pair of
   one visual shell source and one editable TextFrame source, or to an explicitly
