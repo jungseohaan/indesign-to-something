@@ -10024,6 +10024,7 @@ function _buildExtractionPlan(doc, ctx, allItems) {
         var objectPlanExecutionSyncDiagnostics =
                 _syncObjectPlanDiagnosticsToExecutionCandidates(
                         objectPlanDiagnostics, executionCandidates, {
+                            sourceItems: sourceItems,
                             reason: "post_object_plan_subsumed_execution_suppression"
                         });
         _marker(ctx.outputDir, "03d16g0a1_plan_syncObjectPlansAfterSubsumed");

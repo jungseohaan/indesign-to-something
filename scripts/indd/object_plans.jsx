@@ -332,7 +332,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var validation = _validateObjectPlanDiagnostics(objectPlans, sourceById);
+    var validation = _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems);
     _recordObjectPlanTiming("validateObjectPlans", _timingStartedAt, {
         objectPlanCount: objectPlans.length
     });
@@ -2449,7 +2449,10 @@ function _syncObjectPlanDiagnosticsToExecutionCandidates(objectPlanDiagnostics, 
 
     var previousSummary = objectPlanDiagnostics.summary || {};
     objectPlanDiagnostics.objectPlans = kept;
-    var validation = _validateObjectPlanDiagnostics(kept, null);
+    var validation = _validateObjectPlanDiagnostics(
+            kept,
+            options.sourceItems ? _objectPlanSourceInfoById(options.sourceItems) : null,
+            options.sourceItems || null);
     var sourceSetRefs = _attachObjectPlanSourceSetRefs(kept);
     var summary = _summarizeObjectPlans(kept, validation);
     for (var summaryKey in previousSummary) {
@@ -2532,6 +2535,7 @@ function _slimObjectPlanDiagnosticsForWrite(diagnostics, options) {
             importReadyPlanCount: validation.importReadyPlanCount || 0,
             contractStatusCounts: validation.contractStatusCounts || {},
             issueCodeCounts: validation.issueCodeCounts || {},
+            sourceCoverageSummary: validation.sourceCoverageSummary || {},
             issuesOmitted: validation.issues && validation.issues.length > 0,
             issuePreview: _objectPlanIssuePreview(validation.issues || [], 50)
         },
@@ -4210,6 +4214,7 @@ function _summarizeObjectPlans(objectPlans, validation) {
         issueCount: validation && validation.issues ? validation.issues.length : 0,
         contractStatusCounts: validation ? validation.contractStatusCounts || {} : {},
         issueCodeCounts: validation ? validation.issueCodeCounts || {} : {},
+        sourceCoverageSummary: validation ? validation.sourceCoverageSummary || {} : {},
         migrationBlockerCounts: {}
     };
     for (var i = 0; i < plans.length; i++) {
@@ -10731,7 +10736,7 @@ function _objectPlanMigrationBlockerResult(code, bundle, extraDetail) {
     };
 }
 
-function _validateObjectPlanDiagnostics(objectPlans, sourceById) {
+function _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems) {
     var plans = objectPlans || [];
     var issues = [];
     var issueCodeCounts = {};
@@ -10781,6 +10786,14 @@ function _validateObjectPlanDiagnostics(objectPlans, sourceById) {
             }
         }
     }
+
+    var sourceCoverage = _validateObjectPlanSourceCoverage(
+            plans,
+            sourceItems,
+            sourceById,
+            issues,
+            issueCodeCounts,
+            issuePlanIds);
 
     for (var key in visibleSlotOwners) {
         if (!visibleSlotOwners.hasOwnProperty(key)) continue;
@@ -10838,6 +10851,7 @@ function _validateObjectPlanDiagnostics(objectPlans, sourceById) {
         importReadyPlanCount: importReadyPlanCount,
         contractStatusCounts: contractStatusCounts,
         issueCodeCounts: issueCodeCounts,
+        sourceCoverageSummary: sourceCoverage.summary,
         issues: issues
     };
 }
@@ -10854,6 +10868,46 @@ function _collectObjectPlanVisibleVisualSourceOwners(ownersBySourceId, plan) {
         if (!ownersBySourceId[key]) ownersBySourceId[key] = [];
         ownersBySourceId[key].push(plan);
     }
+}
+
+function _validateObjectPlanSourceCoverage(
+        objectPlans, sourceItems, fallbackSourceById, issues, issueCodeCounts, issuePlanIds) {
+    if (typeof _buildSourceCoverageDiagnostics === "function") {
+        try {
+            var diagnostics = _buildSourceCoverageDiagnostics(
+                    sourceItems || _objectPlanCoverageSourceItemsFromMap(fallbackSourceById),
+                    [],
+                    { objectPlans: objectPlans || [] },
+                    { fullDiagnostics: false });
+            var summary = diagnostics && diagnostics.summary ? diagnostics.summary : null;
+            if (summary && summary.sourceObjectCount && summary.sourceObjectCount > 0) {
+                if (summary.visibleMaterialUnresolvedCount
+                        && summary.visibleMaterialUnresolvedCount > 0) {
+                    _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                            "visible_source_material_unresolved",
+                            [],
+                            {
+                                visibleMaterialUnresolvedCount:
+                                        summary.visibleMaterialUnresolvedCount,
+                                unresolvedCount: summary.unresolvedCount || 0,
+                                reason: "source_coverage_visible_material_without_stage1_owner"
+                            });
+                }
+                return { summary: summary };
+            }
+        } catch (eObjectPlanSourceCoverageDiagnostics) {}
+    }
+
+    return { summary: {} };
+}
+
+function _objectPlanCoverageSourceItemsFromMap(sourceById) {
+    var out = [];
+    for (var key in sourceById) {
+        if (!sourceById.hasOwnProperty(key)) continue;
+        if (sourceById[key]) out.push(sourceById[key]);
+    }
+    return out;
 }
 
 function _validateObjectPlanRequiredFields(plan, issues, issueCodeCounts, issuePlanIds) {
