@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.math.MathPipeline;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
@@ -429,6 +430,9 @@ public class ASTStoryConverter {
             }
         }
 
+        // IDML 직접 경로도 HWPX 출력 전에 동일한 수식 계획을 실행한다.
+        // 출력 builder는 ASTTextRun을 수식으로 재판정하지 않는다.
+        MathPipeline.finalizeParagraph(para, MathPipeline.SpanPolicy.SOURCE_TEXT);
         return para;
     }
 

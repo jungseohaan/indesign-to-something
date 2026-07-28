@@ -104,6 +104,19 @@ public class ASTMathGrouperTest {
     }
 
     @Test
+    public void completeArithmeticTermAndAdjacentSqrtBecomeOneEquation() {
+        ASTParagraph para = new ASTParagraph();
+        ASTMathGrouper.flushEHMathGroup(Arrays.asList(
+                run("3-2", "EH상부자", "CharacterStyle/상부자"),
+                run("'", "EH분수대문자", "CharacterStyle/분수대문자"),
+                run("2", "EH상부자", "CharacterStyle/상부자")),
+                para);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertEquals("3-2sqrt{2}", ((ASTEquation) para.items().get(0)).hwpScript());
+    }
+
+    @Test
     public void ehYakmulPiGlyphRemainsEquationSymbol() {
         ASTParagraph para = new ASTParagraph();
         ASTMathGrouper.flushEHMathGroup(Arrays.asList(

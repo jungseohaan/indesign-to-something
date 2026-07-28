@@ -166,7 +166,11 @@ public class InlineFrameHandler {
         if (denomScript == null) denomScript = EHFontGlyphMap.decodeStrayGlyphText(denominator, null);
 
         String hwpScript = "{" + numScript + "} over {" + denomScript + "}";
-        return new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(hwpScript, "INLINE_FRACTION");
+        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation equation =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(
+                        hwpScript, "INLINE_FRACTION");
+        equation.sourceObjectId(anchoredObjectId);
+        return equation;
     }
 
     private static String collectParagraphEquationText(ResolvedParagraph rp) {
