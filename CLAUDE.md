@@ -6,9 +6,12 @@
 
 IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) 데스크탑 앱 + React 프론트엔드.
 
-## 활성 작업 (2026-07-25 기준)
+## 활성 작업 (2026-07-29 기준)
 
-- **브랜치**: `open-indd` — 영어 u1 시각/텍스트 스윕 머지 완료 (#140~#149)
+- **브랜치**: `open-indd` — 수학 u1 수식/GREP 스윕 진행 중 (#160~#204 머지)
+- **최근 완료 (2026-07-28)**:
+  - [SPEC-084](docs/specs/SPEC-084-abolish-isolated-single-latin-demotion.md) + [SPEC-085](docs/specs/SPEC-085-grep-rule-precedence-upright-comma.md) (#204) — 수학 u1 p24/p14 수식 정리.
+    SPEC-084: 고립 단일 라틴 강등(SPEC-078 audit-A) **폐기** — "점 A" 류 라벨 수식화 차단 피해가 이니셜 오수식화보다 큼(사용자 결정, 강등 재도입 금지). SPEC-085: GREP 규칙 우선순위(나중 규칙 승)·직립 서체 `rm` 방출 + 수식 사이 쉼표 소실("P, Q"→"P Q") 수정 + p14 후속(괄호 소실·빈박스 쉼표 비대·수식 크기 축소). 수학 u1 +26 수식·소실 0
 - **최근 완료 (2026-07-25)**:
   - [SPEC-074](docs/specs/SPEC-074-image-textless-group-render-missing.md) (#147) — Group 배치 이미지 유실(p13 동영상 사진).
     plan 이 참조하는 `pass.image_textless_groups` 렌더 미등록 → pass 등록. 20p 회귀 PASS(+7 이미지)
