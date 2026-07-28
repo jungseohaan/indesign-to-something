@@ -1247,6 +1247,10 @@ public class ASTTableConverter {
                 if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) continue;
                 String domId = domIdFromSourceId(obj.sourceId());
                 if (domId == null) continue;
+                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx =
+                        tableBridgeContext(resolvedData);
+                int parsedDomId = parseDomIdOrNeg(domId);
+                if (isInlineCompletePngTextOwner(ctx, parsedDomId)) continue;
                 TextHiddenShellMatch shell = findTextHiddenShellForInlineObject(resolvedData, domId);
                 if (shell == null || shell.renderedGroup == null) continue;
                 if (!hasPlannedInlineShellFill(obj, shell.plan)) {
@@ -1256,6 +1260,30 @@ public class ASTTableConverter {
                 removeStandaloneShellImage(para, shell.renderedGroup.id());
             }
         }
+    }
+
+    private static boolean isInlineCompletePngTextOwner(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx,
+            int sourceId) {
+        if (ctx == null || sourceId < 0 || ctx.ownershipPlans == null) return false;
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectId(sourceId)) {
+            if (plan == null) continue;
+            if (plan.domId != sourceId) continue;
+            if (plan.textAction
+                    != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction.OWNED_BY_PNG) {
+                continue;
+            }
+            if (plan.visualAction
+                    != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            if (plan.materialization
+                    != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization.COMPLETE_PNG) {
+                continue;
+            }
+            return plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0;
+        }
+        return false;
     }
 
     private static boolean hasPlannedInlineShellFill(ASTInlineObject obj, ObjectPlan plan) {

@@ -50,6 +50,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
 
 /**
@@ -1714,17 +1715,24 @@ public class StoryLoader {
             return paragraphs;
         }
         runs = withExplicitIdmlCharacterAttributes(ctx, idmlParagraph, runs);
+        Queue<String> pendingPngOwnedInlineTexts = new java.util.ArrayDeque<>();
 
         for (int i = 0; i < runs.size(); i++) {
             ResolvedRun run = runs.get(i);
             if (run == null) continue;
             if (run.isInlineAnchor()) {
+                Integer anchoredId = run.anchoredObjectId();
+                if (isInlineTextFrameOwnedByCompletePng(ctx, anchoredId)) {
+                    continue;
+                }
                 appendResolvedInlineAnchorInOrder(ctx, idmlParagraph, runs, i, current);
+                enqueuePngOwnedInlineTexts(ctx, anchoredId, pendingPngOwnedInlineTexts);
                 continue;
             }
             if (!includeTextRuns || run.text() == null) continue;
 
-            String text = run.text();
+            String text = consumePendingPngOwnedInlineText(run.text(), pendingPngOwnedInlineTexts);
+            if (text == null || text.isEmpty()) continue;
             int start = 0;
             while (start <= text.length()) {
                 int breakAt = text.indexOf('\r', start);
@@ -1762,6 +1770,91 @@ public class StoryLoader {
             revertUnbackedResolvedCellColors(ctx, idmlParagraph, p);
         }
         return paragraphs;
+    }
+
+    private static void enqueuePngOwnedInlineTexts(
+            ResolvedBuildContext ctx,
+            Integer anchoredObjectId,
+            Queue<String> out) {
+        if (ctx == null || anchoredObjectId == null || anchoredObjectId <= 0 || out == null) return;
+        for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchoredObjectId, 8)) {
+            if (!isPngOwnedInlineTextPlan(plan)) continue;
+            if (plan.ownedTextFrameIds == null) continue;
+            for (int textFrameId : plan.ownedTextFrameIds) {
+                String text = visibleTextForTextFrame(ctx, textFrameId);
+                if (text == null) continue;
+                text = text.trim();
+                if (!text.isEmpty()) out.add(text);
+            }
+        }
+    }
+
+    private static boolean isPngOwnedInlineTextPlan(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_PNG
+                && plan.placement == Placement.INLINE
+                && plan.hasVisibleVisual()
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0;
+    }
+
+    private static boolean isInlineTextFrameOwnedByCompletePng(
+            ResolvedBuildContext ctx,
+            Integer anchoredObjectId) {
+        if (ctx == null || ctx.ownershipPlans == null
+                || anchoredObjectId == null || anchoredObjectId <= 0) {
+            return false;
+        }
+        int id = anchoredObjectId.intValue();
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (!isPngOwnedInlineTextPlan(plan)) continue;
+            if (plan.domId == id) continue;
+            if (containsDomId(plan.ownedTextFrameIds, id)) return true;
+            if (containsDomId(plan.sourceObjectIds, id)) return true;
+            if (containsDomId(plan.visualSourceObjectIds, id)) return true;
+        }
+        return false;
+    }
+
+    private static String visibleTextForTextFrame(ResolvedBuildContext ctx, int textFrameId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameId <= 0) return null;
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
+        if (tf == null) return null;
+        String visible = tf.frameVisibleText();
+        if (visible != null && !visible.trim().isEmpty()) return visible;
+        ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+        return story != null ? normalizedResolvedStoryText(story) : null;
+    }
+
+    private static String consumePendingPngOwnedInlineText(String text, Queue<String> pending) {
+        if (text == null || text.isEmpty() || pending == null || pending.isEmpty()) return text;
+        String remaining = text;
+        while (!pending.isEmpty()) {
+            String owned = pending.peek();
+            if (owned == null || owned.isEmpty()) {
+                pending.poll();
+                continue;
+            }
+            int leading = leadingWhitespaceLength(remaining);
+            String body = remaining.substring(leading);
+            if (!startsWithOwnedTextToken(body, owned)) break;
+            pending.poll();
+            remaining = remaining.substring(0, leading) + body.substring(owned.length());
+        }
+        return remaining;
+    }
+
+    private static boolean startsWithOwnedTextToken(String body, String owned) {
+        if (body == null || owned == null || !body.startsWith(owned)) return false;
+        if (body.length() == owned.length()) return true;
+        return Character.isWhitespace(body.charAt(owned.length()));
+    }
+
+    private static int leadingWhitespaceLength(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int i = 0;
+        while (i < text.length() && Character.isWhitespace(text.charAt(i))) i++;
+        return i;
     }
 
     /**
@@ -1918,6 +2011,7 @@ public class StoryLoader {
         if (run == null || !run.isInlineAnchor()) return;
         Integer anchoredId = run.anchoredObjectId();
         if (anchoredId == null || anchoredId <= 0) return;
+        if (isInlineTextFrameOwnedByCompletePng(ctx, anchoredId)) return;
         if (!isResolvedCellPlannedInlineAnchor(ctx, anchoredId)) {
             return;
         }
@@ -2231,6 +2325,7 @@ public class StoryLoader {
             if (run.isInlineAnchor()) {
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
+                if (isInlineTextFrameOwnedByCompletePng(ctx, anchoredId)) continue;
                 if (!isResolvedCellPlannedInlineAnchor(ctx, anchoredId)) {
                     continue;
                 }
@@ -2356,6 +2451,7 @@ public class StoryLoader {
     private static boolean isResolvedCellPlannedInlineAnchor(
             ResolvedBuildContext ctx,
             int anchoredId) {
+        if (isInlineTextFrameOwnedByCompletePng(ctx, anchoredId)) return false;
         if (ctx != null && ctx.ownershipPlanPlacesInlineHwpxText(anchoredId)) return true;
         if (isResolvedCellPlannedLayoutOnlyInlineAnchor(ctx, anchoredId)) return true;
         return isResolvedCellPlannedInlineVisualAnchor(ctx, anchoredId);
@@ -2437,6 +2533,27 @@ public class StoryLoader {
                 }
                 int insertAt = leadingWhitespaceItemCount(target);
                 target.items().addAll(insertAt, plannedItems);
+                removePngOwnedInlineTextFromParagraph(ctx, anchoredId, target);
+            }
+        }
+    }
+
+    private static void removePngOwnedInlineTextFromParagraph(
+            ResolvedBuildContext ctx,
+            int anchoredId,
+            ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) return;
+        Queue<String> pending = new java.util.ArrayDeque<>();
+        enqueuePngOwnedInlineTexts(ctx, anchoredId, pending);
+        if (pending.isEmpty()) return;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (pending.isEmpty()) break;
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            String consumed = consumePendingPngOwnedInlineText(text, pending);
+            if (consumed != text && (consumed == null || !consumed.equals(text))) {
+                run.text(consumed);
             }
         }
     }
