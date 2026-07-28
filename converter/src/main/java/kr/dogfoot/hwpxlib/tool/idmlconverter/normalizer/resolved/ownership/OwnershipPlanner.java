@@ -1603,15 +1603,64 @@ public final class OwnershipPlanner {
         if (isVerticalComposedTextFrameSource(tf)) return null;
         SourceWrapEvidence evidence = sourceWrapEvidence(tf);
         if (evidence == null) return null;
+        int[] obstacles = sourceTextWrapObstacleIds(tf, textFrameId);
         return new TextLayoutContract(
                 TextLayoutContract.SOURCE_TEXT_WRAP,
                 "resolved.composedLines",
                 textFrameId,
                 evidence.wrapSide,
-                new int[0],
+                obstacles,
                 new String[0],
                 evidence.lineCount,
                 "source_composed_wrap_indent");
+    }
+
+    /**
+     * A floating editable frame that intersects a planned decoration shell must
+     * carry the shell as a source-backed wrap obstacle.  The planner derives this
+     * from page, bounds and ownership layer; executors do not rediscover it from
+     * pixels or page-specific coordinates.
+     */
+    private int[] sourceTextWrapObstacleIds(ResolvedTextFrame textFrame, int textFrameId) {
+        if (textFrame == null || plans.isEmpty()) return new int[0];
+        double[] textBounds = textFrame.pageRelativeBounds();
+        if (!validBounds(textBounds)) textBounds = textFrame.geometricBounds();
+        if (!validBounds(textBounds)) return new int[0];
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate.pageIndex != textFrame.pageIndex()) continue;
+            if (candidate.placement != Placement.FLOATING
+                    || candidate.visualAction != VisualAction.PLACE_TEXT_SHELL
+                    || candidate.visualLayer == null
+                || !isBackdropVisualLayer(candidate.visualLayer)) continue;
+            if (candidate.domId == textFrameId
+                    || containsInt(candidate.ownedTextFrameIds, textFrameId)) continue;
+            if (!validBounds(candidate.bounds) || !boundsIntersect(textBounds, candidate.bounds)) continue;
+            int[] sources = candidate.visualSourceObjectIds != null
+                    && candidate.visualSourceObjectIds.length > 0
+                    ? candidate.visualSourceObjectIds : candidate.sourceObjectIds;
+            if (sources == null) continue;
+            for (int source : sources) if (source >= 0) ids.add(source);
+        }
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) out[i++] = id;
+        return out;
+    }
+
+    private static boolean boundsIntersect(double[] a, double[] b) {
+        return validBounds(a) && validBounds(b)
+                && a[0] < b[2] && b[0] < a[2]
+                && a[1] < b[3] && b[1] < a[3];
+    }
+
+    private static boolean isBackdropVisualLayer(VisualLayer layer) {
+        return layer == VisualLayer.CONTAINER_BACKDROP
+                || layer == VisualLayer.TEXT_CARD_BACKDROP
+                || layer == VisualLayer.LABEL_CONNECTOR_BACKDROP
+                || layer == VisualLayer.LABEL_BACKDROP
+                || layer == VisualLayer.LABEL_OVERLAY_BACKDROP
+                || layer == VisualLayer.CONTENT_BACKDROP;
     }
 
     private SourceWrapEvidence sourceWrapEvidence(ResolvedTextFrame tf) {

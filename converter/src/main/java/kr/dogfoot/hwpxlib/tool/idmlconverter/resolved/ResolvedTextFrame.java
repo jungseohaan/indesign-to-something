@@ -38,6 +38,8 @@ public class ResolvedTextFrame {
     private double opacity = 100;
     private double cornerRadius;
     private java.util.List<String> frameParaTexts;  // 프레임에 보이는 각 단락의 실제 텍스트
+    private java.util.List<Integer> frameParaBreakCounts; // 원본 ParagraphStyleRange 내부 Br 개수
+    private java.util.List<java.util.List<Double>> frameParaRangeLeadings; // CharacterStyleRange별 Leading
     private String frameVisibleText;  // 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
     private boolean onHiddenLayer;    // InDesign 숨김 레이어에 있는 TF → 변환 불필요
     private boolean nonprinting;      // InDesign 인쇄 안 함/숨김 성격의 TF → 변환 불필요
@@ -128,6 +130,10 @@ public class ResolvedTextFrame {
 
     public java.util.List<String> frameParaTexts() { return frameParaTexts; }
     public void frameParaTexts(java.util.List<String> v) { this.frameParaTexts = v; }
+    public java.util.List<Integer> frameParaBreakCounts() { return frameParaBreakCounts; }
+    public void frameParaBreakCounts(java.util.List<Integer> v) { this.frameParaBreakCounts = v; }
+    public java.util.List<java.util.List<Double>> frameParaRangeLeadings() { return frameParaRangeLeadings; }
+    public void frameParaRangeLeadings(java.util.List<java.util.List<Double>> v) { this.frameParaRangeLeadings = v; }
     public String frameVisibleText() { return frameVisibleText; }
     public void frameVisibleText(String v) { this.frameVisibleText = v; }
 

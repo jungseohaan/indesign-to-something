@@ -1481,6 +1481,10 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
         sourceIndexCursor("readItemInfo.info.after", itemIndex, id, kind);
 
         sourceIndexCursor("readItemInfo.extra.before", itemIndex, id, kind);
+        function extraCursor(label) {
+            sourceIndexCursor("readItemInfo.extra." + label, itemIndex, id, kind);
+        }
+        extraCursor("textWrap.before");
         try {
             var tw = _itemTextWrapInfoForSourceIndex(item);
             if (tw && tw.mode) {
@@ -1492,20 +1496,36 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 info.textWrapRight = tw.right;
             }
         } catch (eTextWrapInfo) {}
+        extraCursor("textWrap.after");
+        extraCursor("name.before");
         try { info.name = item.name; } catch (eName) {}
+        extraCursor("name.after");
+        extraCursor("layer.before");
         try {
             if (item.itemLayer) {
                 info.layerId = item.itemLayer.id;
                 info.layerIndex = item.itemLayer.index;
             }
         } catch (eLayerInfo) {}
+        extraCursor("layer.after");
+        extraCursor("rotation.before");
         try { info.absoluteRotationAngle = item.absoluteRotationAngle; } catch (eRotation) {}
+        extraCursor("rotation.after");
+        extraCursor("opacity.before");
         try { info.opacity = item.transparencySettings.blendingSettings.opacity; } catch (eOpacity) {}
+        extraCursor("opacity.after");
+        extraCursor("hidden.before");
         try { info.hiddenLayer = isOnHiddenLayer(item); } catch (eHidden) {}
+        extraCursor("hidden.after");
+        extraCursor("nonprinting.before");
         try { info.nonprinting = !!item.nonprinting; } catch (eNonprinting) {}
+        extraCursor("nonprinting.after");
         if (kind === "Rectangle" || kind === "Oval" || kind === "Polygon") {
+            extraCursor("placedVisual.before");
             try { info.hasPlacedVisual = _hasPlacedVisual(item); } catch (ePlaced) {}
+            extraCursor("placedVisual.after");
         }
+        extraCursor("fill.before");
         try {
             if (hasVisibleFill(item)) {
                 info.fillColor = item.fillColor.name;
@@ -1514,11 +1534,15 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 info.hasVisibleFill = true;
             }
         } catch (eFill) {}
+        extraCursor("fill.after");
+        extraCursor("strokeWeight.before");
         try {
             if (item.strokeWeight !== undefined && item.strokeWeight !== null) {
                 info.strokeWeight = Number(item.strokeWeight || 0);
             }
         } catch (eStrokeWeightAny) {}
+        extraCursor("strokeWeight.after");
+        extraCursor("stroke.before");
         try {
             if (hasVisibleStroke(item)) {
                 info.strokeColor = item.strokeColor.name;
@@ -1529,9 +1553,12 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
                 info.hasVisibleStroke = true;
             }
         } catch (eStroke) {}
+        extraCursor("stroke.after");
+        extraCursor("corner.before");
         try {
             if (item.cornerRadius > 0) info.cornerRadius = item.cornerRadius;
         } catch (eCorner) {}
+        extraCursor("corner.after");
         sourceIndexCursor("readItemInfo.extra.after", itemIndex, id, kind);
 
         sourceInfoById[key] = info;

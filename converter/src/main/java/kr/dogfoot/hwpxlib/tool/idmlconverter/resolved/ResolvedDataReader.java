@@ -271,6 +271,27 @@ public class ResolvedDataReader {
             }
             tf.frameParaTexts(texts);
         }
+        if (o.has("frameParaBreakCounts") && !o.get("frameParaBreakCounts").isJsonNull()) {
+            JsonArray arr = o.getAsJsonArray("frameParaBreakCounts");
+            java.util.List<Integer> counts = new java.util.ArrayList<>();
+            for (JsonElement e : arr) counts.add(e != null && e.isJsonPrimitive() ? e.getAsInt() : 0);
+            tf.frameParaBreakCounts(counts);
+        }
+        if (o.has("frameParaRangeLeadings") && !o.get("frameParaRangeLeadings").isJsonNull()) {
+            JsonArray outer = o.getAsJsonArray("frameParaRangeLeadings");
+            java.util.List<java.util.List<Double>> values = new java.util.ArrayList<>();
+            for (JsonElement row : outer) {
+                java.util.List<Double> leadings = new java.util.ArrayList<>();
+                if (row != null && row.isJsonArray()) {
+                    for (JsonElement e : row.getAsJsonArray()) {
+                        leadings.add(e != null && e.isJsonPrimitive() && !e.getAsJsonPrimitive().isString()
+                                ? e.getAsDouble() : null);
+                    }
+                }
+                values.add(leadings);
+            }
+            tf.frameParaRangeLeadings(values);
+        }
 
         // frameVisibleText: 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
         if (o.has("frameVisibleText") && !o.get("frameVisibleText").isJsonNull()) {
