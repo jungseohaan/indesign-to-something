@@ -65,7 +65,7 @@ final class CharPrFactory {
             }
         }
 
-        if (isFormulaBoundaryText(text)) {
+        if (isFormulaBoundaryText(text) && !lastVisibleRunIsAnswerBox(para)) {
             String boundaryCharPrId = lastBodyTextCharPrIDRef(para, inheritedCharPrId);
             String inheritedColor = charPrTextColor(boundaryCharPrId);
             if (inheritedColor != null && !inheritedColor.isEmpty() && !isDefaultBlack(inheritedColor)
@@ -675,12 +675,35 @@ final class CharPrFactory {
             if (run == null || run.charPrIDRef() == null || run.charPrIDRef().isEmpty()) {
                 continue;
             }
+            // SPEC-085: 빈 답란 □(박스 크기·색 charPr)는 색 상속원이 아니다 —
+            // □ 사이 쉼표가 20pt 하늘색으로 커지는 원인 (수학 u1 p14).
+            String text = runText(run);
+            if (text != null && !text.trim().isEmpty()
+                    && text.trim().chars().allMatch(c -> c == 0x25A1)) {
+                continue;
+            }
             String color = charPrTextColor(run.charPrIDRef());
             if (color != null && !color.isEmpty() && !isDefaultBlack(color)) {
                 last = run.charPrIDRef();
             }
         }
         return last != null ? last : lastCharPrIDRef(para, fallback);
+    }
+
+    /**
+     * SPEC-085: 직전 가시 런이 빈 답란 □ 이면 경계 텍스트(쉼표 등)가 그 charPr
+     * (박스 크기·색, SPEC-083)를 상속하지 않는다 — □ 사이 쉼표가 20pt 하늘색으로
+     * 커지던 원인 (수학 u1 p14 "제곱근은 □, □이다").
+     */
+    private static boolean lastVisibleRunIsAnswerBox(Para para) {
+        if (para == null || para.runs() == null) return false;
+        String lastVisible = null;
+        for (Run run : para.runs()) {
+            String text = runText(run);
+            if (text == null || text.trim().isEmpty()) continue;
+            lastVisible = text.trim();
+        }
+        return lastVisible != null && lastVisible.chars().allMatch(c -> c == 0x25A1);
     }
 
     private String lastBodyTextCharPrIDRef(Para para, String fallback) {
@@ -696,6 +719,11 @@ final class CharPrFactory {
             }
             String trimmed = text.trim();
             if (isStandaloneUnicodeRomanNumeral(trimmed) || containsAsciiLetterOrDigit(trimmed)) {
+                continue;
+            }
+            // SPEC-085: 빈 답란 □(SPEC-083 박스 크기·색 반영 charPr)는 상속원이 아니다.
+            // 상속하면 □ 사이 쉼표가 20pt 하늘색 박스 스타일로 커진다 (수학 u1 p14).
+            if (trimmed.chars().allMatch(c -> c == 0x25A1)) {
                 continue;
             }
             String color = charPrTextColor(run.charPrIDRef());

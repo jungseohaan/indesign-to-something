@@ -781,7 +781,10 @@ public class ASTMathGrouper {
             // 수식이 아닌 EH 폰트 텍스트 → 일반 텍스트 런으로 폴백
             String groupFill = null;
             for (IDMLCharacterRun r0 : ehRuns) {
-                if (r0 != null && r0.fillColor() != null) { groupFill = r0.fillColor(); break; }
+                if (r0 == null || r0.fillColor() == null) continue;
+                if ("\u25A1".equals(r0.content())) continue; // SPEC-085: □ 박스색 상속 금지
+                groupFill = r0.fillColor();
+                break;
             }
             for (IDMLCharacterRun run : ehRuns) {
                 String text = run.content();
@@ -910,7 +913,12 @@ public class ASTMathGrouper {
             // 이웃 색으로 오염되던 문제).
             String groupFill = null;
             for (IDMLCharacterRun r0 : mathRuns) {
-                if (r0 != null && r0.fillColor() != null) { groupFill = r0.fillColor(); break; }
+                if (r0 == null || r0.fillColor() == null) continue;
+                // SPEC-085: 빈 답란 □ 의 박스색(SPEC-083)은 그룹 상속색이 아니다 —
+                // □ 사이 쉼표가 하늘색으로 물들던 원인 (수학 u1 p14).
+                if ("\u25A1".equals(r0.content())) continue;
+                groupFill = r0.fillColor();
+                break;
             }
             for (IDMLCharacterRun run : mathRuns) {
                 String text = run.content();

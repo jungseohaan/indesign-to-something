@@ -1752,14 +1752,14 @@ public class IDMLStoryParser {
         for (IDMLStory story : doc.stories().values()) {
             // 스토리 단락
             for (IDMLParagraph para : story.paragraphs()) {
-                resolveGrepForParagraph(para, paraStyleGrepPatterns, counts);
+                resolveGrepForParagraph(para, paraStyleGrepPatterns, counts, doc);
             }
             // 테이블 셀 단락
             for (IDMLTable table : story.tables()) {
                 for (IDMLTableRow row : table.rows()) {
                     for (IDMLTableCell cell : row.cells()) {
                         for (IDMLParagraph para : cell.paragraphs()) {
-                            resolveGrepForParagraph(para, paraStyleGrepPatterns, counts);
+                            resolveGrepForParagraph(para, paraStyleGrepPatterns, counts, doc);
                         }
                     }
                 }
@@ -2079,9 +2079,36 @@ public class IDMLStoryParser {
         }
     }
 
+    /**
+     * SPEC-085: 수식 GREP 승자 스타일을 서브런에 실행한다.
+     * - 분수대문자 스타일의 {, } 는 큰 소괄호 글리프 — (, ) 로 정규화해야
+     *   수식 스크립트에 리터럴 중괄호(HWP 불가시 그룹)로 새지 않는다
+     *   (실측: 수학 u1 p14 (1/2)² 의 왼쪽 괄호 소실).
+     * - charStyle 의 fontSize 를 런에 채워 수식 baseUnit 이 본문 크기로
+     *   떨어지지 않게 한다 (실측: p14 확인문제 수식 8.5pt → 원본 10.5pt).
+     */
+    private static void applyGrepMathWinnerStyle(
+            IDMLCharacterRun subRun, GrepMathRule rule, IDMLDocument doc) {
+        subRun.grepMathFont(true);
+        subRun.grepAppliedCharStyle(rule.appliedCharacterStyle);
+        String styleName = rule.appliedCharacterStyle;
+        if (styleName != null && styleName.contains("분수대문자")
+                && subRun.content() != null) {
+            String swapped = subRun.content().replace('{', '(').replace('}', ')');
+            subRun.content(swapped);
+        }
+        if (subRun.fontSize() == null && doc != null) {
+            IDMLStyleDef def = findCharStyle(rule.appliedCharacterStyle, doc);
+            if (def != null && def.fontSize() != null && def.fontSize() > 0) {
+                subRun.fontSize(def.fontSize());
+            }
+        }
+    }
+
     static void resolveGrepForParagraph(IDMLParagraph para,
                                         Map<String, List<GrepMathRule>> paraStyleGrepPatterns,
-                                        int[] counts) {
+                                        int[] counts,
+                                        IDMLDocument doc) {
         String paraStyleRef = para.appliedParagraphStyle();
         List<GrepMathRule> rules = paraStyleRef != null
                 ? paraStyleGrepPatterns.get(paraStyleRef)
@@ -2140,8 +2167,7 @@ public class IDMLStoryParser {
                 if (!java.util.Objects.equals(ws, winnerStyle[0])) { uniform = false; break; }
             }
             if (uniform && winner[0] >= 0) {
-                run.grepMathFont(true);
-                run.grepAppliedCharStyle(rules.get(winner[0]).appliedCharacterStyle);
+                applyGrepMathWinnerStyle(run, rules.get(winner[0]), doc);
                 counts[0]++;
                 newRuns.add(run);
                 continue;
@@ -2169,9 +2195,7 @@ public class IDMLStoryParser {
                             && segStart > 0
                             && Character.isDigit(text.charAt(segStart - 1));
                     if (winner[segStart] >= 0 && !unitAfterDigit) {
-                        subRun.grepMathFont(true);
-                        subRun.grepAppliedCharStyle(
-                                rules.get(winner[segStart]).appliedCharacterStyle);
+                        applyGrepMathWinnerStyle(subRun, rules.get(winner[segStart]), doc);
                         counts[0]++;
                     }
                     // 이 세그먼트에 포함된 \uFFFC 개수만큼 인라인 항목 배분
