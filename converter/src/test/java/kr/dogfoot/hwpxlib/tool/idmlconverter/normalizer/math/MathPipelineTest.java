@@ -30,14 +30,15 @@ public class MathPipelineTest {
     }
 
     @Test
-    public void convertedPolicyDemotesPlainInitialButPreservesTriangleLabel() {
+    public void convertedPolicyKeepsPlainInitialAndPreservesTriangleLabel() {
+        // SPEC-084: 고립 단일 라틴 강등 폐기 — 단독 대문자 수식도 수식으로 유지
         ASTParagraph plain = new ASTParagraph();
         plain.addItem(new ASTEquation("A", "EH_FONT"));
 
         MathPipeline.finalizeParagraph(
                 plain, MathPipeline.SpanPolicy.CONVERTED_ITEMS);
 
-        Assert.assertTrue(plain.items().get(0) instanceof ASTTextRun);
+        Assert.assertTrue(plain.items().get(0) instanceof ASTEquation);
 
         ASTParagraph triangle = new ASTParagraph();
         triangle.addItem(text("△"));

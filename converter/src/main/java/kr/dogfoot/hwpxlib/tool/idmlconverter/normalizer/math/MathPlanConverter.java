@@ -31,19 +31,9 @@ public final class MathPlanConverter {
                 equation.textColor(source.textColor());
                 equation.sourceItalic(true);
                 items.set(span.itemIndex(), equation);
-            } else if (span.classification() == MathSpanPlan.Classification.TEXT
-                    && item instanceof ASTEquation) {
-                ASTEquation source = (ASTEquation) item;
-                String letter = MathSpanPlanner.singleLatinLetterOfScript(source.hwpScript());
-                if (letter == null) continue;
-                ASTTextRun text = new ASTTextRun();
-                text.text(letter);
-                text.fontStyle("Italic");
-                text.textColor(source.textColor());
-                text.fontSizeHwpunits(source.preferredBaseUnit());
-                text.fontFamily(source.preferredFontFamily());
-                items.set(span.itemIndex(), text);
             }
+            // SPEC-084: TEXT 강등(고립 단일 라틴 수식 → 이탤릭 텍스트)은 폐기 —
+            // 강등 plan 을 만드는 planner 가 제거되어 TEXT 분기는 더 이상 오지 않는다.
         }
     }
 
