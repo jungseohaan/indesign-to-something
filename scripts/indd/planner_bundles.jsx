@@ -1180,10 +1180,39 @@ function _plannerBundleAllowsClosedShellPlacedContentOwnership(candidate) {
     if (!candidate) return false;
     if (candidate.passId !== "pass.decoration_groups") return false;
     if (candidate.candidatePurpose !== "SHELL_CANDIDATE") return false;
-    if (candidate.compositeRole !== "textless_group_visual_slot"
-            && candidate.slotRole !== "textless_group_visual_slot") return false;
-    if (candidate.textOwner && candidate.textOwner !== "hwpx_tf") return false;
-    return candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 1;
+    if (candidate.textOwner && candidate.textOwner !== "hwpx_tf"
+            && candidate.textOwner !== "none") return false;
+    if (candidate.completePngTextAllowed === true || candidate.textOwner === "indesign_png") return false;
+
+    var slotRole = String(candidate.slotRole || "");
+    var compositeRole = String(candidate.compositeRole || "");
+    var role = compositeRole || slotRole;
+    var declaresClosedTextShell =
+            slotRole === "textless_group_visual_slot"
+            || compositeRole === "textless_group_visual_slot"
+            || compositeRole === "source_declared_closed_text_shell"
+            || slotRole === "direct_child_shell_slot"
+            || compositeRole === "direct_child_shell_slot"
+            || compositeRole === "native_parent_text_shell_slot"
+            || compositeRole === "page_sibling_text_shell_slot"
+            || compositeRole === "descendant_sibling_text_shell_slot"
+            || role === "story_anchored_shell_slot"
+            || role === "source_required_story_anchored_shell"
+            || role === "source_required_story_anchored_shell_set"
+            || role === "source_required_direct_sibling_text_shell"
+            || role === "source_required_direct_sibling_text_shell_set";
+    if (!declaresClosedTextShell) return false;
+
+    var hasTextSlotEvidence =
+            candidate.textOwner === "hwpx_tf"
+            || (candidate.ownedTextFrameIds && candidate.ownedTextFrameIds.length > 0)
+            || (candidate.editableTextFrameIds && candidate.editableTextFrameIds.length > 0)
+            || (candidate.hiddenTextFrameIds && candidate.hiddenTextFrameIds.length > 0);
+    if (!hasTextSlotEvidence) return false;
+
+    return (candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0)
+            || (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0)
+            || (candidate.sourceObjectIds && candidate.sourceObjectIds.length > 0);
 }
 
 function _plannerBundleKeepsClosedBackgroundPlacedContent(candidate) {
