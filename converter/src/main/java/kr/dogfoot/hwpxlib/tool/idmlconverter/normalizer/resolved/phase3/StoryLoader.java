@@ -415,8 +415,12 @@ public class StoryLoader {
                 boolean _orcOnly = _runTxt != null && !_runTxt.isEmpty()
                         && _runTxt.replace("￼", "").isEmpty();
                 boolean formulaClusterRun = ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+                // SPEC-083: 빈 답란 박스는 ±1 인접이 아니어도 문단에 수식 증거가 있으면
+                // □ 로 통일 흡수 (ASTStoryConverter 와 같은 게이트, 수학 u1 p15).
+                boolean answerBoxCluster = formulaClusterRun
+                        || (_orcOnly && ASTMathGrouper.paragraphHasFormulaEvidence(runs));
 
-                if (_orcOnly && formulaClusterRun
+                if (_orcOnly && answerBoxCluster
                         && MathProcessor.isFormulaAnswerPlaceholderRun(ctx, run)) {
                     MathProcessor.flushMathGroups(ctx, null, npMathGroup, ehMathGroup, para);
                     mathGroup.add(ASTMathGrouper.formulaAnswerBoxRun(run));

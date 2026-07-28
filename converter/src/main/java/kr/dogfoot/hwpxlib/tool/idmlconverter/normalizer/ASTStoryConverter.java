@@ -224,13 +224,18 @@ public class ASTStoryConverter {
             boolean orcOnly = runText != null && !runText.isEmpty()
                     && runText.replace("\uFFFC", "").isEmpty();
             boolean formulaClusterRun = ASTMathGrouper.isFormulaEquationClusterRun(run, runs, idx);
+            // SPEC-083: 빈 답란 박스는 ±1 인접이 아니어도 문단에 수식 증거가 있으면
+            // □ 로 통일 흡수 — 인접 문자 우연(쉼표 유무)으로 같은 문장의 빈칸이
+            // □/pic 으로 갈리지 않게 한다 (수학 u1 p15).
+            boolean answerBoxCluster = formulaClusterRun
+                    || (orcOnly && ASTMathGrouper.paragraphHasFormulaEvidence(runs));
 
             // 앵커가 실체 시각물(콘텐츠 인라인 PNG plan)을 가지면 □ 답란 상자로 삼키지
             // 않는다 — 삼키면 인라인 그래픽이 소비되어 PNG 가 영영 실행되지 않는다
             // (실측: 과학 u1 p19 표 셀 "암모니아 = [연필+밑줄]" 이 "= □" 로 깨짐).
             // Stage 1 plan 이 있는 문서에서만 판정한다 (StoryLoader 와 같은 가드).
             boolean answerBoxPlaceholder = true;
-            if (orcOnly && formulaClusterRun && resolvedData != null) {
+            if (orcOnly && answerBoxCluster && resolvedData != null) {
                 kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext
                         placeholderCtx = ASTRunConverter.inlineBridgeContext(resolvedData);
                 if (placeholderCtx.ownershipPlans != null && !placeholderCtx.ownershipPlans.isEmpty()) {
@@ -240,7 +245,7 @@ public class ASTStoryConverter {
                 }
             }
 
-            if (orcOnly && formulaClusterRun && answerBoxPlaceholder) {
+            if (orcOnly && answerBoxCluster && answerBoxPlaceholder) {
                 if (!npMathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
                     ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);

@@ -1388,6 +1388,29 @@ public class ASTMathGrouper {
         return containsAsciiLetter(normalized) && hasFormulaNeighbor(runs, index);
     }
 
+    /**
+     * SPEC-083: 문단 런 중 수식 증거(BT/EH/NP/GREP 수식 런, orcOnly 제외)가
+     * 하나라도 있으면 true. 빈 답란 박스(orcOnly 앵커)가 수식 바로 옆이
+     * 아니어도(쉼표·조사가 낀 나열) 같은 문단의 다른 빈칸과 동일하게 □ 로
+     * 흡수되도록 하는 문단 단위 게이트 — ±1 인접(hasFormulaNeighbor)만 보면
+     * "2의 양의 제곱근은 □, 음의 제곱근은 [pic]" 처럼 인접 문자 우연으로
+     * 같은 문장의 빈칸이 갈린다 (수학 u1 p15).
+     */
+    public static boolean paragraphHasFormulaEvidence(List<IDMLCharacterRun> runs) {
+        if (runs == null) return false;
+        for (IDMLCharacterRun run : runs) {
+            if (run == null) continue;
+            String text = run.content();
+            boolean orcOnly = text != null && !text.isEmpty()
+                    && text.replace("￼", "").isEmpty();
+            if (orcOnly) continue;
+            if (run.isBTFont() || run.grepMathFont() || run.isEHFont() || run.isNPFont()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static IDMLCharacterRun formulaAnswerBoxRun(IDMLCharacterRun source) {
         IDMLCharacterRun run = new IDMLCharacterRun();
         if (source != null) {
