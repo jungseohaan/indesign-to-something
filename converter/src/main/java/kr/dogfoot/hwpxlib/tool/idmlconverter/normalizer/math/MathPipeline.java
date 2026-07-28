@@ -31,10 +31,9 @@ public final class MathPipeline {
     public static void finalizeParagraph(
             ASTParagraph paragraph, SpanPolicy spanPolicy) {
         if (paragraph == null) return;
-        if (spanPolicy == SpanPolicy.CONVERTED_ITEMS) {
-            MathPlanConverter.materialize(
-                    paragraph, MathSpanPlanner.planConvertedItems(paragraph));
-        } else {
+        if (spanPolicy != SpanPolicy.CONVERTED_ITEMS) {
+            // SPEC-084: CONVERTED_ITEMS 의 고립 단일 라틴 강등은 폐기 —
+            // 변환 결과 수식은 span 단계 없이 구조 병합·검증만 거친다.
             MathPlanConverter.materialize(paragraph, MathSpanPlanner.plan(paragraph));
         }
         MathPlanConverter.materialize(

@@ -280,12 +280,18 @@ class MathProcessor {
      */
     private static void normalizeExistingEquationParagraph(
             ResolvedBuildContext ctx, ASTParagraph para, boolean hasEHRun) {
+
         List<ASTInlineItem> items = para.items();
         materializeEquationStitchPlans(items, planCrossingDelimiterRepairs(items));
+
         materializeEquationStitchPlans(items, planGrepSplitFormulaEquations(items));
+
         materializeEquationStitchPlans(
                 items, planTextSeparatedFormulaEquationFragments(items));
+
         collapseMixedFormulaEquationClusters(ctx, para);
+
+
         if (hasEHRun) {
             // 수식과 EH TextRun이 공존하더라도 의미 있는 원문 텍스트는 보존한다.
             // 제거 대상은 근호/분수선처럼 수식 구조를 그리던 장식 글리프뿐이다.
@@ -392,7 +398,24 @@ class MathProcessor {
         if (text == null || text.isEmpty()) return true;
         String decoded = EHFontGlyphMap.decodeStrayGlyphText(text, ff);
         if (decoded == null || decoded.trim().isEmpty()) return true;
+        // SPEC-085: "영숫자 없음 = 장식"(isFractionBarDecoration)은 과잉 일반화다.
+        // GREP 이 쉼표·구두점에도 수식 charStyle 을 입히는 문서(수학 u1 "두 점 P, Q")
+        // 에서 가시 구두점 런이 장식으로 오판돼 통째로 삭제됐다. 가시 ASCII
+        // 구두점이 하나라도 있으면 본문 텍스트로 보존한다.
+        if (containsVisibleAsciiPunctuation(decoded)) return false;
         return EHFontGlyphMap.isFractionBarDecoration(text);
+    }
+
+    private static boolean containsVisibleAsciiPunctuation(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == ',' || c == '.' || c == ':' || c == ';' || c == '?' || c == '!'
+                    || c == '(' || c == ')' || c == '%') {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

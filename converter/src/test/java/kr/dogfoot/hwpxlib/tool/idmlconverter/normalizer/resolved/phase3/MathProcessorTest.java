@@ -569,7 +569,9 @@ public class MathProcessorTest {
     }
 
     @Test
-    public void isolatedUppercaseInitialRemainsTextAfterPlanAndConversion() {
+    public void isolatedUppercaseInitialRemainsEquationAfterPlanAndConversion() {
+        // SPEC-084: 고립 단일 라틴 강등 폐기 — 이탤릭 증거 단일 대문자는 수식으로
+        // 승격되고 되돌리지 않는다 (기하 점 라벨 "점 A"; 이니셜 수식화는 감수)
         ASTParagraph para = new ASTParagraph();
         ASTTextRun initial = text("A", "[Yoon가변] 윤명조100_OTF");
         initial.fontStyle("Italic");
@@ -578,8 +580,8 @@ public class MathProcessorTest {
         MathProcessor.convertMathRunsInParagraph(null, para);
 
         Assert.assertEquals(1, para.items().size());
-        Assert.assertTrue(para.items().get(0) instanceof ASTTextRun);
-        Assert.assertEquals("A", ((ASTTextRun) para.items().get(0)).text());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        Assert.assertEquals("A", ((ASTEquation) para.items().get(0)).hwpScript());
     }
 
     @Test
