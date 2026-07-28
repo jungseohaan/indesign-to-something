@@ -216,7 +216,8 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var visibleVisualSourceResolution = _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans);
+    var visibleVisualSourceResolution =
+            _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans, sourceById);
     _recordObjectPlanTiming("resolveDuplicateVisibleVisualSources", _timingStartedAt, {
         objectPlanCount: objectPlans.length
     });
@@ -331,7 +332,7 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var validation = _validateObjectPlanDiagnostics(objectPlans, sourceById);
+    var validation = _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems);
     _recordObjectPlanTiming("validateObjectPlans", _timingStartedAt, {
         objectPlanCount: objectPlans.length
     });
@@ -2429,6 +2430,8 @@ function _syncObjectPlanDiagnosticsToExecutionCandidates(objectPlanDiagnostics, 
         var keep = _shouldKeepObjectPlanAfterExecutionCandidateSync(
                 plan, activeObjectPlanIds, activeCandidateIds);
         if (keep) {
+            _markObjectPlanSupersededAfterExecutionCandidateSync(
+                    plan, activeObjectPlanIds);
             kept.push(plan);
             if (visible) retainedVisiblePlanCount++;
         } else {
@@ -2448,7 +2451,10 @@ function _syncObjectPlanDiagnosticsToExecutionCandidates(objectPlanDiagnostics, 
 
     var previousSummary = objectPlanDiagnostics.summary || {};
     objectPlanDiagnostics.objectPlans = kept;
-    var validation = _validateObjectPlanDiagnostics(kept, null);
+    var validation = _validateObjectPlanDiagnostics(
+            kept,
+            options.sourceItems ? _objectPlanSourceInfoById(options.sourceItems) : null,
+            options.sourceItems || null);
     var sourceSetRefs = _attachObjectPlanSourceSetRefs(kept);
     var summary = _summarizeObjectPlans(kept, validation);
     for (var summaryKey in previousSummary) {
@@ -2492,6 +2498,26 @@ function _shouldKeepObjectPlanAfterExecutionCandidateSync(plan, activeObjectPlan
     return false;
 }
 
+function _markObjectPlanSupersededAfterExecutionCandidateSync(
+        plan, activeObjectPlanIds) {
+    if (!_objectPlanIsSupersededAfterExecutionCandidateSync(
+            plan, activeObjectPlanIds)) return;
+    plan.executable = false;
+    plan.migrationBlocker = "SUPERSEDED_BY_EXECUTION_CANDIDATE_SYNC";
+    plan.migrationStatus = "SUPERSEDED_BY_EXECUTION_CANDIDATE_SYNC";
+    plan.reason = (plan.reason || "object_plan")
+            + ":superseded_by_execution_candidate_sync";
+}
+
+function _objectPlanIsSupersededAfterExecutionCandidateSync(
+        plan, activeObjectPlanIds) {
+    if (!plan || !plan.objectPlanId || !plan.candidateId) return false;
+    if (_objectPlanMapKeyCount(activeObjectPlanIds) === 0) return false;
+    if (activeObjectPlanIds[String(plan.objectPlanId)] === true) return false;
+    if (plan.textAction === "OWNED_BY_PNG") return true;
+    return plan.textAction === "DROP_TEXT" && plan.visualAction === "DROP_VISUAL";
+}
+
 function _objectPlanIsCompletePngTextOwner(plan) {
     if (!plan) return false;
     if (plan.textAction !== "OWNED_BY_PNG") return false;
@@ -2531,6 +2557,7 @@ function _slimObjectPlanDiagnosticsForWrite(diagnostics, options) {
             importReadyPlanCount: validation.importReadyPlanCount || 0,
             contractStatusCounts: validation.contractStatusCounts || {},
             issueCodeCounts: validation.issueCodeCounts || {},
+            sourceCoverageSummary: validation.sourceCoverageSummary || {},
             issuesOmitted: validation.issues && validation.issues.length > 0,
             issuePreview: _objectPlanIssuePreview(validation.issues || [], 50)
         },
@@ -4209,6 +4236,7 @@ function _summarizeObjectPlans(objectPlans, validation) {
         issueCount: validation && validation.issues ? validation.issues.length : 0,
         contractStatusCounts: validation ? validation.contractStatusCounts || {} : {},
         issueCodeCounts: validation ? validation.issueCodeCounts || {} : {},
+        sourceCoverageSummary: validation ? validation.sourceCoverageSummary || {} : {},
         migrationBlockerCounts: {}
     };
     for (var i = 0; i < plans.length; i++) {
@@ -4722,7 +4750,7 @@ function _objectPlanIsClosedInlineFlowRootPlan(plan) {
             || plan.compositeRole === "inline_flow_visual_root";
 }
 
-function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
+function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans, sourceById) {
     var plans = objectPlans || [];
     var ownersByPageSource = {};
     for (var i = 0; i < plans.length; i++) {
@@ -4747,6 +4775,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
         if (!owners || owners.length < 2) continue;
         duplicateSourceCount++;
         var canonical = null;
+        var sourceId = _objectPlanDuplicateVisibleSourceId(sourceKey);
         for (var completeOwnerIndex = 0; completeOwnerIndex < owners.length; completeOwnerIndex++) {
             var completeOwner = owners[completeOwnerIndex];
             if (!_objectPlanIsCompletePngTextOwner(completeOwner)) continue;
@@ -4755,6 +4784,10 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
                     || _compareObjectPlanVisibleVisualSourcePriority(completeOwner, canonical) < 0) {
                 canonical = completeOwner;
             }
+        }
+        if (!canonical) {
+            canonical = _objectPlanPlacedMediaContentVisualOwnerForDuplicate(
+                    owners, sourceId, sourceById);
         }
         if (!canonical) {
             for (var inlineOwnerIndex = 0; inlineOwnerIndex < owners.length; inlineOwnerIndex++) {
@@ -4872,6 +4905,71 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _objectPlanDuplicateVisibleSourceId(sourceKey) {
+    var parts = String(sourceKey || "").split("|");
+    if (parts.length === 0) return null;
+    var value = Number(parts[parts.length - 1]);
+    return isNaN(value) ? null : value;
+}
+
+function _objectPlanPlacedMediaContentVisualOwnerForDuplicate(owners, sourceId, sourceById) {
+    var hasShellCompetitor = false;
+    var best = null;
+    for (var i = 0; owners && i < owners.length; i++) {
+        var owner = owners[i];
+        if (_objectPlanIsShellVisualOwnerForDuplicate(owner)) {
+            hasShellCompetitor = true;
+        }
+        if (!_objectPlanIsPlacedMediaContentVisualOwnerForDuplicate(owner, sourceId, sourceById)) {
+            continue;
+        }
+        if (!best || _compareObjectPlanVisibleVisualSourcePriority(owner, best) < 0) {
+            best = owner;
+        }
+    }
+    return hasShellCompetitor ? best : null;
+}
+
+function _objectPlanIsShellVisualOwnerForDuplicate(plan) {
+    if (!plan) return false;
+    return plan.ownershipSlot === "SHELL_SLOT"
+            || plan.visualAction === "PLACE_TEXT_SHELL";
+}
+
+function _objectPlanIsPlacedMediaContentVisualOwnerForDuplicate(plan, sourceId, sourceById) {
+    if (!plan || !sourceById) return false;
+    if (plan.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (plan.visualAction !== "PLACE_FLOATING_PNG"
+            && plan.visualAction !== "PLACE_INLINE_PNG") {
+        return false;
+    }
+    if (plan.passId !== "pass.image_placed_frames"
+            && plan.slotRole !== "content_visual_slot"
+            && plan.candidatePurpose !== "CONTENT_CANDIDATE") {
+        return false;
+    }
+    var ids = _sourceIdsUnion(plan.sourceObjectIds || [], plan.visualSourceObjectIds || []);
+    ids = _sourceIdsUnion(ids, plan.exportSourceObjectIds || []);
+    if (sourceId !== null && sourceId !== undefined
+            && !_sourceSetContainsAll(ids, [sourceId])) {
+        return false;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        var src = sourceById[String(ids[i])] || null;
+        if (_objectPlanSourceIsPlacedMedia(src)) return true;
+    }
+    return false;
+}
+
+function _objectPlanSourceIsPlacedMedia(src) {
+    if (!src) return false;
+    var kind = _objectPlanSourceKind(src);
+    return kind === "Image"
+            || kind === "PDF"
+            || kind === "EPS"
+            || src.hasPlacedVisual === true;
 }
 
 function _dropBroadTextShellsBakingDirectTextFrameShellSlots(objectPlans, sourceById) {
@@ -10660,7 +10758,7 @@ function _objectPlanMigrationBlockerResult(code, bundle, extraDetail) {
     };
 }
 
-function _validateObjectPlanDiagnostics(objectPlans, sourceById) {
+function _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems) {
     var plans = objectPlans || [];
     var issues = [];
     var issueCodeCounts = {};
@@ -10676,15 +10774,15 @@ function _validateObjectPlanDiagnostics(objectPlans, sourceById) {
         var plan = plans[i];
         if (!plan) continue;
         _validateObjectPlanRequiredFields(plan, issues, issueCodeCounts, issuePlanIds);
-        _validateObjectPlanTextVisualSeparation(plan, issues, issueCodeCounts, issuePlanIds);
-        _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, issuePlanIds);
-        _validateInlineCompletePngTextOwnerContract(
-                plan, issues, issueCodeCounts, issuePlanIds, sourceById);
 
         if (!_objectPlanMigrationStatusIsImportReady(plan.migrationStatus)
                 || plan.executable === false) {
             continue;
         }
+        _validateObjectPlanTextVisualSeparation(plan, issues, issueCodeCounts, issuePlanIds);
+        _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, issuePlanIds);
+        _validateInlineCompletePngTextOwnerContract(
+                plan, issues, issueCodeCounts, issuePlanIds, sourceById);
         if (_objectPlanHasVisibleVisual(plan)) {
             var slotKey = _objectPlanVisibleSlotKey(plan);
             if (slotKey) {
@@ -10710,6 +10808,14 @@ function _validateObjectPlanDiagnostics(objectPlans, sourceById) {
             }
         }
     }
+
+    var sourceCoverage = _validateObjectPlanSourceCoverage(
+            plans,
+            sourceItems,
+            sourceById,
+            issues,
+            issueCodeCounts,
+            issuePlanIds);
 
     for (var key in visibleSlotOwners) {
         if (!visibleSlotOwners.hasOwnProperty(key)) continue;
@@ -10767,6 +10873,7 @@ function _validateObjectPlanDiagnostics(objectPlans, sourceById) {
         importReadyPlanCount: importReadyPlanCount,
         contractStatusCounts: contractStatusCounts,
         issueCodeCounts: issueCodeCounts,
+        sourceCoverageSummary: sourceCoverage.summary,
         issues: issues
     };
 }
@@ -10783,6 +10890,46 @@ function _collectObjectPlanVisibleVisualSourceOwners(ownersBySourceId, plan) {
         if (!ownersBySourceId[key]) ownersBySourceId[key] = [];
         ownersBySourceId[key].push(plan);
     }
+}
+
+function _validateObjectPlanSourceCoverage(
+        objectPlans, sourceItems, fallbackSourceById, issues, issueCodeCounts, issuePlanIds) {
+    if (typeof _buildSourceCoverageDiagnostics === "function") {
+        try {
+            var diagnostics = _buildSourceCoverageDiagnostics(
+                    sourceItems || _objectPlanCoverageSourceItemsFromMap(fallbackSourceById),
+                    [],
+                    { objectPlans: objectPlans || [] },
+                    { fullDiagnostics: false });
+            var summary = diagnostics && diagnostics.summary ? diagnostics.summary : null;
+            if (summary && summary.sourceObjectCount && summary.sourceObjectCount > 0) {
+                if (summary.visibleMaterialUnresolvedCount
+                        && summary.visibleMaterialUnresolvedCount > 0) {
+                    _pushObjectPlanIssue(issues, issueCodeCounts, issuePlanIds,
+                            "visible_source_material_unresolved",
+                            [],
+                            {
+                                visibleMaterialUnresolvedCount:
+                                        summary.visibleMaterialUnresolvedCount,
+                                unresolvedCount: summary.unresolvedCount || 0,
+                                reason: "source_coverage_visible_material_without_stage1_owner"
+                            });
+                }
+                return { summary: summary };
+            }
+        } catch (eObjectPlanSourceCoverageDiagnostics) {}
+    }
+
+    return { summary: {} };
+}
+
+function _objectPlanCoverageSourceItemsFromMap(sourceById) {
+    var out = [];
+    for (var key in sourceById) {
+        if (!sourceById.hasOwnProperty(key)) continue;
+        if (sourceById[key]) out.push(sourceById[key]);
+    }
+    return out;
 }
 
 function _validateObjectPlanRequiredFields(plan, issues, issueCodeCounts, issuePlanIds) {
