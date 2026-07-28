@@ -216,7 +216,8 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
-    var visibleVisualSourceResolution = _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans);
+    var visibleVisualSourceResolution =
+            _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans, sourceById);
     _recordObjectPlanTiming("resolveDuplicateVisibleVisualSources", _timingStartedAt, {
         objectPlanCount: objectPlans.length
     });
@@ -4722,7 +4723,7 @@ function _objectPlanIsClosedInlineFlowRootPlan(plan) {
             || plan.compositeRole === "inline_flow_visual_root";
 }
 
-function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
+function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans, sourceById) {
     var plans = objectPlans || [];
     var ownersByPageSource = {};
     for (var i = 0; i < plans.length; i++) {
@@ -4747,6 +4748,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
         if (!owners || owners.length < 2) continue;
         duplicateSourceCount++;
         var canonical = null;
+        var sourceId = _objectPlanDuplicateVisibleSourceId(sourceKey);
         for (var completeOwnerIndex = 0; completeOwnerIndex < owners.length; completeOwnerIndex++) {
             var completeOwner = owners[completeOwnerIndex];
             if (!_objectPlanIsCompletePngTextOwner(completeOwner)) continue;
@@ -4755,6 +4757,10 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
                     || _compareObjectPlanVisibleVisualSourcePriority(completeOwner, canonical) < 0) {
                 canonical = completeOwner;
             }
+        }
+        if (!canonical) {
+            canonical = _objectPlanPlacedMediaContentVisualOwnerForDuplicate(
+                    owners, sourceId, sourceById);
         }
         if (!canonical) {
             for (var inlineOwnerIndex = 0; inlineOwnerIndex < owners.length; inlineOwnerIndex++) {
@@ -4872,6 +4878,71 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _objectPlanDuplicateVisibleSourceId(sourceKey) {
+    var parts = String(sourceKey || "").split("|");
+    if (parts.length === 0) return null;
+    var value = Number(parts[parts.length - 1]);
+    return isNaN(value) ? null : value;
+}
+
+function _objectPlanPlacedMediaContentVisualOwnerForDuplicate(owners, sourceId, sourceById) {
+    var hasShellCompetitor = false;
+    var best = null;
+    for (var i = 0; owners && i < owners.length; i++) {
+        var owner = owners[i];
+        if (_objectPlanIsShellVisualOwnerForDuplicate(owner)) {
+            hasShellCompetitor = true;
+        }
+        if (!_objectPlanIsPlacedMediaContentVisualOwnerForDuplicate(owner, sourceId, sourceById)) {
+            continue;
+        }
+        if (!best || _compareObjectPlanVisibleVisualSourcePriority(owner, best) < 0) {
+            best = owner;
+        }
+    }
+    return hasShellCompetitor ? best : null;
+}
+
+function _objectPlanIsShellVisualOwnerForDuplicate(plan) {
+    if (!plan) return false;
+    return plan.ownershipSlot === "SHELL_SLOT"
+            || plan.visualAction === "PLACE_TEXT_SHELL";
+}
+
+function _objectPlanIsPlacedMediaContentVisualOwnerForDuplicate(plan, sourceId, sourceById) {
+    if (!plan || !sourceById) return false;
+    if (plan.ownershipSlot !== "CONTENT_VISUAL_SLOT") return false;
+    if (plan.visualAction !== "PLACE_FLOATING_PNG"
+            && plan.visualAction !== "PLACE_INLINE_PNG") {
+        return false;
+    }
+    if (plan.passId !== "pass.image_placed_frames"
+            && plan.slotRole !== "content_visual_slot"
+            && plan.candidatePurpose !== "CONTENT_CANDIDATE") {
+        return false;
+    }
+    var ids = _sourceIdsUnion(plan.sourceObjectIds || [], plan.visualSourceObjectIds || []);
+    ids = _sourceIdsUnion(ids, plan.exportSourceObjectIds || []);
+    if (sourceId !== null && sourceId !== undefined
+            && !_sourceSetContainsAll(ids, [sourceId])) {
+        return false;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        var src = sourceById[String(ids[i])] || null;
+        if (_objectPlanSourceIsPlacedMedia(src)) return true;
+    }
+    return false;
+}
+
+function _objectPlanSourceIsPlacedMedia(src) {
+    if (!src) return false;
+    var kind = _objectPlanSourceKind(src);
+    return kind === "Image"
+            || kind === "PDF"
+            || kind === "EPS"
+            || src.hasPlacedVisual === true;
 }
 
 function _dropBroadTextShellsBakingDirectTextFrameShellSlots(objectPlans, sourceById) {

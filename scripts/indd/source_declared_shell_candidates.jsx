@@ -318,6 +318,43 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         return collectSubtreeSourceIdsCache[cacheKey];
     }
 
+    function sourceIsPlacedMediaKind(kind) {
+        kind = String(kind || "");
+        return kind === "Image" || kind === "PDF" || kind === "EPS";
+    }
+
+    function collectTextShellProvenanceSourceIds(sourceId) {
+        var ids = [];
+        var seenIds = {};
+        function visit(id) {
+            var src = sourceInfoById[String(id)];
+            if (!src) return;
+            var kind = sourceKind(id);
+            if (sourceIsPlacedMediaKind(kind)) return;
+            _pushUniqueId(ids, seenIds, id);
+            var children = childIdsByParentId[String(id)] || [];
+            for (var ci = 0; ci < children.length; ci++) {
+                var childId = children[ci];
+                var child = sourceInfoById[String(childId)];
+                if (!child) continue;
+                var childKind = sourceKind(childId);
+                if (sourceIsPlacedMediaKind(childKind)) continue;
+                if (sourceHasPlacedVisualSource(childId)) {
+                    if (isShellStructureSourceKind(childKind)
+                            && (sourceHasVisiblePaint(child)
+                                || sourceHasVisibleFillSource(child)
+                                || sourceTreeHasVisibleStroke(childId))) {
+                        _pushUniqueId(ids, seenIds, childId);
+                    }
+                    continue;
+                }
+                visit(childId);
+            }
+        }
+        visit(sourceId);
+        return _sortedNumericIds(ids);
+    }
+
     function sourceHasTextFrameShellStyleInSourceIndex(sourceId) {
         return _sourceHasTextFrameShellStyleMetadataInIndex(sourceId, sourceInfoById);
     }
@@ -376,7 +413,7 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
     }
 
     function collectSingleTextSiblingShellVisualSourceIds(shellSourceId, editableTextIds) {
-        var fallback = collectSubtreeSourceIds(shellSourceId);
+        var fallback = collectTextShellProvenanceSourceIds(shellSourceId);
         if (!editableTextIds || editableTextIds.length !== 1) return fallback;
 
         var shellSource = sourceInfoById[String(shellSourceId)];
@@ -393,6 +430,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
 
         var ids = [];
         var seen = {};
+        for (var fi = 0; fi < fallback.length; fi++) {
+            _pushUniqueId(ids, seen, fallback[fi]);
+        }
         var siblings = childIdsByParentId[String(shellSource.parentId)] || [];
         for (var si = 0; si < siblings.length; si++) {
             var siblingId = siblings[si];
@@ -410,13 +450,22 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                 continue;
             }
 
-            var subtreeIds = collectSubtreeSourceIds(siblingId);
+            var subtreeIds = sourceHasPlacedVisualSource(siblingId)
+                    ? collectTextShellProvenanceSourceIds(siblingId)
+                    : collectSubtreeSourceIds(siblingId);
             for (var ti = 0; ti < subtreeIds.length; ti++) {
                 _pushUniqueId(ids, seen, subtreeIds[ti]);
             }
         }
         ids = _sortedNumericIds(ids);
         return ids.length > 0 ? ids : fallback;
+    }
+
+    function shellVisualSourceBounds(exportSourceIds, shellSourceIds, fallbackBounds) {
+        return boundsUnionOfSourceIds(exportSourceIds)
+                || boundsUnionOfSourceIds(shellSourceIds)
+                || fallbackBounds
+                || null;
     }
 
     function sourceHasPlacedVisualSource(sourceId) {
@@ -863,6 +912,9 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             candidate.visualLayer = attrs.visualLayer || candidate.visualLayer || null;
             candidate.primarySourceObjectId = attrs.primarySourceObjectId;
             candidate.bounds = attrs.bounds || candidate.bounds;
+            candidate.sourceBounds = attrs.sourceBounds || candidate.sourceBounds || null;
+            candidate.renderSourceBounds = attrs.renderSourceBounds || candidate.renderSourceBounds || null;
+            candidate.cropSourceBounds = attrs.cropSourceBounds || candidate.cropSourceBounds || null;
             candidate.parentId = attrs.parentId;
             candidate.parentKind = attrs.parentKind;
             candidate.zOrder = attrs.zOrder;
@@ -1425,6 +1477,8 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                 if (!shellExportIds || shellExportIds.length === 0) {
                     shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, [siblingId], true);
                 }
+                var shellBounds = shellVisualSourceBounds(
+                        shellExportIds, shellSourceIds, shellSource.bounds);
                 var sourceObjectIds = _sortedNumericIds(shellSourceIds.concat([siblingId]));
                 var sourceKey = _sourceSetKey(sourceObjectIds);
                 if (generated[sourceKey]) continue;
@@ -1438,7 +1492,10 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                     mode: "TEXTLESS_CANDIDATE",
                     candidatePurpose: "SHELL_CANDIDATE",
                     primarySourceObjectId: shellSource.id,
-                    bounds: shellSource.bounds,
+                    bounds: shellBounds,
+                    sourceBounds: shellBounds,
+                    renderSourceBounds: shellBounds,
+                    cropSourceBounds: shellBounds,
                     parentId: shellSource.parentId,
                     parentKind: shellSource.parentKind,
                     composite: true,
@@ -1526,6 +1583,8 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             if (!shellExportIds || shellExportIds.length === 0) {
                 shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, editableIds);
             }
+            var shellBounds = shellVisualSourceBounds(
+                    shellExportIds, shellSourceIds, shellSource.bounds);
             var sourceObjectIds = _sortedNumericIds(shellSourceIds.concat(editableIds));
             var sourceKey = _sourceSetKey(sourceObjectIds);
             if (generated[sourceKey]) continue;
@@ -1541,7 +1600,10 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                 mode: "TEXTLESS_CANDIDATE",
                 candidatePurpose: "SHELL_CANDIDATE",
                 primarySourceObjectId: shellSource.id,
-                bounds: shellSource.bounds,
+                bounds: shellBounds,
+                sourceBounds: shellBounds,
+                renderSourceBounds: shellBounds,
+                cropSourceBounds: shellBounds,
                 parentId: shellSource.parentId,
                 parentKind: shellSource.parentKind,
                 composite: true,
