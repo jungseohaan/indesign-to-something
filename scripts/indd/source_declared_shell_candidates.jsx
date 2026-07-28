@@ -375,6 +375,50 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         return exportIds;
     }
 
+    function collectSingleTextSiblingShellVisualSourceIds(shellSourceId, editableTextIds) {
+        var fallback = collectSubtreeSourceIds(shellSourceId);
+        if (!editableTextIds || editableTextIds.length !== 1) return fallback;
+
+        var shellSource = sourceInfoById[String(shellSourceId)];
+        if (!shellSource || shellSource.parentId === null || shellSource.parentId === undefined) {
+            return fallback;
+        }
+        var textFrameId = editableTextIds[0];
+        var textFrame = sourceInfoById[String(textFrameId)];
+        if (!textFrame || textFrame.pageIndex !== shellSource.pageIndex) return fallback;
+
+        var parentTextIds = editableTextDescendantsUnderParent(
+                shellSource.parentId, shellSource.pageIndex);
+        if (!sourceSetsEqual(parentTextIds, editableTextIds)) return fallback;
+
+        var ids = [];
+        var seen = {};
+        var siblings = childIdsByParentId[String(shellSource.parentId)] || [];
+        for (var si = 0; si < siblings.length; si++) {
+            var siblingId = siblings[si];
+            if (String(siblingId) === String(textFrameId)) continue;
+            var sibling = sourceInfoById[String(siblingId)];
+            if (!sibling || sibling.pageIndex !== shellSource.pageIndex) continue;
+            var kind = sourceKind(siblingId);
+            if (!isShellStructureSourceKind(kind) || kind === "GraphicLine") continue;
+            if (sourceHasInlineAnchorAncestor(siblingId)) continue;
+            if (sourceHasEditableTextDescendant(siblingId)) continue;
+            if (!sourceHasVisibleShellSource(siblingId)
+                    && !sourceHasVisiblePaint(sibling)
+                    && !sourceHasVisibleFillSource(sibling)
+                    && !sourceHasPlacedVisualSource(siblingId)) {
+                continue;
+            }
+
+            var subtreeIds = collectSubtreeSourceIds(siblingId);
+            for (var ti = 0; ti < subtreeIds.length; ti++) {
+                _pushUniqueId(ids, seen, subtreeIds[ti]);
+            }
+        }
+        ids = _sortedNumericIds(ids);
+        return ids.length > 0 ? ids : fallback;
+    }
+
     function sourceHasPlacedVisualSource(sourceId) {
         var cacheKey = String(sourceId);
         if (sourceHasPlacedVisualSourceCache.hasOwnProperty(cacheKey)) {
@@ -541,7 +585,8 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             closedTextOwningShellInfoCache[cacheKey] = false;
             return null;
         }
-        if (sourceHasPlacedVisualSource(sourceId) && editableIds.length !== 1
+        var hasPlacedShellMaterial = sourceHasPlacedVisualSource(sourceId);
+        if (hasPlacedShellMaterial && editableIds.length !== 1
                 && allowPlacedVisualForCompleteTextPng !== true) {
             closedTextOwningShellInfoCache[cacheKey] = false;
             return null;
@@ -557,7 +602,11 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
         }
 
         var sourceIds = collectSubtreeSourceIds(sourceId);
-        var exportIds = collectExportSourceIds(sourceIds, editableIds, false, sourceId);
+        var exportIds = collectExportSourceIds(
+                sourceIds,
+                editableIds,
+                false,
+                hasPlacedShellMaterial && editableIds.length === 1 ? null : sourceId);
         if (!exportIds || exportIds.length === 0) {
             closedTextOwningShellInfoCache[cacheKey] = false;
             return null;
@@ -1370,8 +1419,12 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
                     continue;
                 }
 
-                var shellSourceIds = collectSubtreeSourceIds(shellSource.id);
-                var shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, [siblingId], true);
+                var shellSourceIds = collectSingleTextSiblingShellVisualSourceIds(
+                        shellSource.id, [siblingId]);
+                var shellExportIds = collectExportSourceIds(shellSourceIds, [siblingId], false, null);
+                if (!shellExportIds || shellExportIds.length === 0) {
+                    shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, [siblingId], true);
+                }
                 var sourceObjectIds = _sortedNumericIds(shellSourceIds.concat([siblingId]));
                 var sourceKey = _sourceSetKey(sourceObjectIds);
                 if (generated[sourceKey]) continue;
@@ -1468,8 +1521,12 @@ function _appendSourceDeclaredTextOwningShellGroupCandidates(ctx, sourceItems, a
             if (!sourceCanBeNativeParentTextShell(shellSource.id)) continue;
 
             var editableIds = directEditableTextChildren(shellSource.id);
-            var shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, editableIds);
-            var sourceObjectIds = _sortedNumericIds(shellExportIds.concat(editableIds));
+            var shellSourceIds = collectSingleTextSiblingShellVisualSourceIds(shellSource.id, editableIds);
+            var shellExportIds = collectExportSourceIds(shellSourceIds, editableIds, false, null);
+            if (!shellExportIds || shellExportIds.length === 0) {
+                shellExportIds = collectTextShellVisualExportSourceIds(shellSource.id, editableIds);
+            }
+            var sourceObjectIds = _sortedNumericIds(shellSourceIds.concat(editableIds));
             var sourceKey = _sourceSetKey(sourceObjectIds);
             if (generated[sourceKey]) continue;
             generated[sourceKey] = true;

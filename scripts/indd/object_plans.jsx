@@ -9413,11 +9413,24 @@ function _objectPlanBundleDeclaresTextlessShellSlot(bundle) {
     var slotRole = String(bundle.slotRole || "");
     var compositeRole = String(bundle.compositeRole || "");
     return slotRole === "shell_slot_only"
+            || slotRole === "textless_group_visual_slot"
+            || slotRole === "direct_child_shell_slot"
+            || slotRole === "story_anchored_shell_slot"
             || compositeRole === "shell_slot_only"
+            || compositeRole === "textless_group_visual_slot"
+            || compositeRole === "source_declared_closed_text_shell"
+            || compositeRole === "direct_child_shell_slot"
+            || compositeRole === "native_parent_text_shell_slot"
+            || compositeRole === "page_sibling_text_shell_slot"
+            || compositeRole === "descendant_sibling_text_shell_slot"
             || compositeRole === "unclaimed_visible_vector_source"
             || compositeRole === "unclaimed_visible_vector_source_set"
             || compositeRole === "source_required_visible_vector_shell"
-            || compositeRole === "source_required_visible_vector_shell_set";
+            || compositeRole === "source_required_visible_vector_shell_set"
+            || compositeRole === "source_required_direct_sibling_text_shell"
+            || compositeRole === "source_required_direct_sibling_text_shell_set"
+            || compositeRole === "source_required_story_anchored_shell"
+            || compositeRole === "source_required_story_anchored_shell_set";
 }
 
 function _declaredTextlessShellCompositeBundle(bundle) {
