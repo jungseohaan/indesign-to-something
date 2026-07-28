@@ -221,6 +221,13 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         objectPlanCount: objectPlans.length
     });
     _timingStartedAt = _objectPlanNowMs();
+    var broadTextShellResolution =
+            _dropBroadTextShellsBakingDirectTextFrameShellSlots(objectPlans, sourceById);
+    _recordObjectPlanTiming("dropBroadTextShellsBakingDirectTextFrameShellSlots", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        droppedPlanCount: broadTextShellResolution.summary.droppedPlanCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var atomicShellFloatingFragmentResolution =
             _resolveAtomicInlineShellFloatingFragments(objectPlans, sourceById);
     _recordObjectPlanTiming("resolveAtomicInlineShellFloatingFragments", _timingStartedAt, {
@@ -4865,6 +4872,122 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _dropBroadTextShellsBakingDirectTextFrameShellSlots(objectPlans, sourceById) {
+    var summary = {
+        candidateDirectShellCount: 0,
+        droppedPlanCount: 0,
+        droppedObjectPlanIds: [],
+        coveredTextFrameSourceIds: []
+    };
+    var plans = objectPlans || [];
+    var directShellTextFrameIdsByPage = {};
+    var coveredTextFrameIds = {};
+    for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        if (!_objectPlanIsDirectTextFrameShellSlot(plan, sourceById)) continue;
+        summary.candidateDirectShellCount++;
+        var pageKey = String(plan.pageIndex);
+        if (!directShellTextFrameIdsByPage[pageKey]) directShellTextFrameIdsByPage[pageKey] = {};
+        var ids = plan.visualSourceObjectIds || plan.sourceObjectIds || [];
+        for (var vi = 0; vi < ids.length; vi++) {
+            var id = Number(ids[vi]);
+            if (isNaN(id)) continue;
+            directShellTextFrameIdsByPage[pageKey][String(id)] = id;
+        }
+    }
+    for (var pi = 0; pi < plans.length; pi++) {
+        var candidate = plans[pi];
+        if (!_objectPlanIsBroadRenderedTextShellCarrier(candidate)) continue;
+        var directMap = directShellTextFrameIdsByPage[String(candidate.pageIndex)];
+        if (!directMap) continue;
+        var overlappedTextFrameIds = [];
+        var sourceMembership = _objectPlanSourceSetMembership(candidate.sourceObjectIds || []);
+        var hiddenMembership = _objectPlanSourceSetMembership(candidate.hiddenVisualSourceObjectIds || []);
+        for (var key in directMap) {
+            if (!directMap.hasOwnProperty(key)) continue;
+            if (!sourceMembership[key]) continue;
+            if ((candidate.visualSourceObjectIds || []).length > 0
+                    && _objectPlanSourceSetMembership(candidate.visualSourceObjectIds || [])[key]) {
+                continue;
+            }
+            if ((candidate.exportSourceObjectIds || []).length > 0
+                    && _objectPlanSourceSetMembership(candidate.exportSourceObjectIds || [])[key]) {
+                continue;
+            }
+            if (!hiddenMembership[key]
+                    && !_objectPlanSourceSetContainsAll(candidate.ownedTextFrameIds || [], [directMap[key]])) {
+                continue;
+            }
+            _objectPlanPushUniqueId(overlappedTextFrameIds, {}, directMap[key]);
+        }
+        if (overlappedTextFrameIds.length === 0) continue;
+
+        candidate.hiddenVisualSourceObjectIds = _sourceIdsUnion(
+                candidate.hiddenVisualSourceObjectIds || [], overlappedTextFrameIds);
+        candidate.visualSourceObjectIds = [];
+        candidate.exportSourceObjectIds = [];
+        candidate.ownedTextFrameIds = [];
+        candidate.textAction = "DROP_TEXT";
+        candidate.visualAction = "DROP_VISUAL";
+        candidate.materialization = "HWPX_TEXT";
+        candidate.visibleVisualOwnershipResolution =
+                "DROPPED_BROAD_TEXT_SHELL_BAKES_DIRECT_TEXTFRAME_SHELL_SLOT";
+        candidate.visibleVisualOwnershipResolutionReason =
+                "broad_text_shell_render_contains_child_text_frame_shell_slot_owned_by_direct_plan";
+        candidate.reason = String(candidate.reason || "")
+                + ":broad_text_shell_bakes_direct_textframe_shell_slot_dropped";
+        summary.droppedPlanCount++;
+        summary.droppedObjectPlanIds.push(
+                candidate.objectPlanId || candidate.bundleId || candidate.candidateId
+                        || ("plan.index." + pi));
+        for (var oi = 0; oi < overlappedTextFrameIds.length; oi++) {
+            coveredTextFrameIds[String(overlappedTextFrameIds[oi])] = overlappedTextFrameIds[oi];
+        }
+    }
+    for (var coveredKey in coveredTextFrameIds) {
+        if (coveredTextFrameIds.hasOwnProperty(coveredKey)) {
+            summary.coveredTextFrameSourceIds.push(coveredTextFrameIds[coveredKey]);
+        }
+    }
+    summary.coveredTextFrameSourceIds = _sortedNumericIds(summary.coveredTextFrameSourceIds);
+    return { summary: summary };
+}
+
+function _objectPlanIsDirectTextFrameShellSlot(plan, sourceById) {
+    if (!plan) return false;
+    if (!_objectPlanHasVisibleVisual(plan)) return false;
+    if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+    if (plan.textAction !== "DROP_TEXT") return false;
+    if (plan.materialization !== "EXTRACTED_PNG_VECTOR") return false;
+    if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) return false;
+    var ids = plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0
+            ? plan.visualSourceObjectIds
+            : plan.sourceObjectIds;
+    if (!ids || ids.length === 0) return false;
+    for (var i = 0; i < ids.length; i++) {
+        var source = sourceById ? (sourceById[String(ids[i])] || sourceById[ids[i]]) : null;
+        if (_objectPlanSourceKind(source) !== "TextFrame" && String(plan.kind || "") !== "TextFrame") {
+            return false;
+        }
+    }
+    var slot = String(plan.slotRole || plan.compositeRole || plan.reason || "");
+    if (slot.indexOf("text_frame_shell") >= 0 || slot.indexOf("textframe_shell") >= 0) {
+        return true;
+    }
+    return _objectPlanSourceSetsEqual(plan.styleSourceObjectIds || [], ids);
+}
+
+function _objectPlanIsBroadRenderedTextShellCarrier(plan) {
+    if (!plan) return false;
+    if (!_objectPlanHasVisibleVisual(plan)) return false;
+    if (plan.visualAction !== "PLACE_TEXT_SHELL") return false;
+    if (plan.materialization !== "EXTRACTED_PNG_VECTOR") return false;
+    if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return false;
+    if (!plan.sourceObjectIds || plan.sourceObjectIds.length <= 1) return false;
+    if (plan.sourceRootObjectIds && plan.sourceRootObjectIds.length > 0) return true;
+    return (plan.sourceObjectIds || []).length > (plan.visualSourceObjectIds || []).length;
 }
 
 function _objectPlanIsClosedShortMarkerLeafCompletePng(plan) {
