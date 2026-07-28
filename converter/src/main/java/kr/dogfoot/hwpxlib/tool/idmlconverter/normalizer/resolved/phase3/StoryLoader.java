@@ -1171,6 +1171,7 @@ public class StoryLoader {
         }
         if (resolvedCell != null
                 && resolvedCell.hasTextRuns()
+                && !resolvedCellHasInlineAnchors(resolvedCell)
                 && !hasIdmlCellMathEvidence(idmlCell)) {
             List<ASTParagraph> resolvedCellParagraphs =
                     astParagraphsFromResolvedCell(ctx, idmlTable, idmlCell);
@@ -2296,7 +2297,9 @@ public class StoryLoader {
     }
 
     private static boolean resolvedCellHasInlineAnchors(ResolvedTable.Cell cell) {
-        if (cell == null || cell.paragraphs() == null) return false;
+        if (cell == null) return false;
+        if (cell.inlineAnchorIds() != null && !cell.inlineAnchorIds().isEmpty()) return true;
+        if (cell.paragraphs() == null) return false;
         for (ResolvedParagraph paragraph : cell.paragraphs()) {
             if (paragraph == null || paragraph.runs() == null) continue;
             for (ResolvedRun run : paragraph.runs()) {
@@ -2531,11 +2534,120 @@ public class StoryLoader {
                         ((ASTInlineObject) item).keepInline(true);
                     }
                 }
-                int insertAt = leadingWhitespaceItemCount(target);
-                target.items().addAll(insertAt, plannedItems);
+                insertResolvedCellPlannedInlineAnchorAtSourcePosition(
+                        ctx, target, plannedItems, previousText, anchoredId);
                 removePngOwnedInlineTextFromParagraph(ctx, anchoredId, target);
             }
         }
+    }
+
+    private static boolean insertResolvedCellPlannedInlineAnchorAtSourcePosition(
+            ResolvedBuildContext ctx,
+            ASTParagraph target,
+            List<ASTInlineItem> plannedItems,
+            String previousText,
+            int anchoredId) {
+        if (target == null || target.items() == null || plannedItems == null || plannedItems.isEmpty()) {
+            return false;
+        }
+        if (previousText == null || previousText.isEmpty()) return false;
+        boolean consumePlaceholderWhitespace =
+                isResolvedCellPlannedLayoutOnlyInlineAnchor(ctx, anchoredId);
+        List<ASTInlineItem> items = target.items();
+        for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+            ASTInlineItem item = items.get(itemIndex);
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.isEmpty()) continue;
+            int previousEnd = text.indexOf(previousText);
+            if (previousEnd < 0) continue;
+            previousEnd += previousText.length();
+            String before = text.substring(0, previousEnd);
+            String after = text.substring(previousEnd);
+            if (consumePlaceholderWhitespace) {
+                after = stripLeadingInlinePlaceholderWhitespace(after);
+            }
+
+            List<ASTInlineItem> replacement = new ArrayList<>();
+            if (!before.isEmpty()) replacement.add(copyTextRun(run, before));
+            replacement.addAll(plannedItems);
+            if (!after.isEmpty()) replacement.add(copyTextRun(run, after));
+            items.remove(itemIndex);
+            items.addAll(itemIndex, replacement);
+            return true;
+        }
+        int sourceOffset = paragraphText(target).indexOf(previousText);
+        if (sourceOffset < 0) return false;
+        int insertAt = insertionIndexForTextOffset(target, sourceOffset + previousText.length());
+        if (insertAt < 0) return false;
+        target.items().addAll(insertAt, plannedItems);
+        if (consumePlaceholderWhitespace) {
+            stripLeadingInlinePlaceholderWhitespaceAt(target, insertAt + plannedItems.size());
+        }
+        return true;
+    }
+
+    private static String stripLeadingInlinePlaceholderWhitespace(String text) {
+        if (text == null || text.isEmpty()) return text;
+        int index = 0;
+        while (index < text.length()) {
+            char ch = text.charAt(index);
+            if (ch == ' ' || ch == '\t' || ch == '\u00A0' || ch == '\u2007' || ch == '\u202F') {
+                index++;
+                continue;
+            }
+            break;
+        }
+        return index <= 0 ? text : text.substring(index);
+    }
+
+    private static void stripLeadingInlinePlaceholderWhitespaceAt(ASTParagraph para, int itemIndex) {
+        if (para == null || para.items() == null) return;
+        int index = itemIndex;
+        while (index < para.items().size()) {
+            ASTInlineItem item = para.items().get(index);
+            if (!(item instanceof ASTTextRun)) return;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.isEmpty()) {
+                index++;
+                continue;
+            }
+            String stripped = stripLeadingInlinePlaceholderWhitespace(text);
+            if (stripped.length() == text.length()) return;
+            if (stripped.isEmpty()) {
+                para.items().remove(index);
+            } else {
+                run.text(stripped);
+            }
+            return;
+        }
+    }
+
+    private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
+        ASTTextRun copy = new ASTTextRun();
+        copy.characterStyleRef(source.characterStyleRef());
+        copy.text(text);
+        copy.fontFamily(source.fontFamily());
+        copy.fontStyle(source.fontStyle());
+        copy.fontSizeHwpunits(source.fontSizeHwpunits());
+        copy.textColor(source.textColor());
+        copy.shadeColor(source.shadeColor());
+        copy.letterSpacing(source.letterSpacing());
+        copy.subscript(source.subscript());
+        copy.droppedResolvedScriptPosition(source.droppedResolvedScriptPosition());
+        copy.superscript(source.superscript());
+        copy.grepMathFont(source.grepMathFont());
+        copy.underline(source.underline());
+        copy.underlineColor(source.underlineColor());
+        copy.underlineShape(source.underlineShape());
+        copy.strikeThrough(source.strikeThrough());
+        copy.horizontalScale(source.horizontalScale());
+        copy.verticalScale(source.verticalScale());
+        copy.baselineShift(source.baselineShift());
+        copy.grepStyleApplied(source.grepStyleApplied());
+        return copy;
     }
 
     private static void removePngOwnedInlineTextFromParagraph(

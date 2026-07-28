@@ -1573,11 +1573,15 @@ public class InlineFrameHandler {
                     obj.forceImageFill(true);
                 }
                 applyInlineShellTextMargins(ctx, obj, shellPlan, anchorItem, childTfs);
+                boolean addedOwnedInlineTables =
+                        appendPlannedInlineShellOwnedTables(ctx, obj, shellPlan, childTfs);
                 for (ResolvedTextFrame childTf : childTfs) {
                     if (isOrcCarrierTextFrame(childTf)) {
                         continue;
                     }
-                    buildBadgeParagraph(ctx, childTf, obj, useNativeSourceShell);
+                    if (!addedOwnedInlineTables) {
+                        buildBadgeParagraph(ctx, childTf, obj, useNativeSourceShell);
+                    }
                     markInlineShellChildTextPlaced(ctx, childTf);
                 }
             }
@@ -4608,6 +4612,35 @@ public class InlineFrameHandler {
         }
     }
 
+    private static boolean appendPlannedInlineShellOwnedTables(
+            ResolvedBuildContext ctx,
+            ASTInlineObject obj,
+            ObjectPlan shellPlan,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (ctx == null || ctx.loadIDMLStory == null || obj == null
+                || shellPlan == null || shellPlan.ownedTextFrameIds == null
+                || childTfs == null || childTfs.isEmpty()) {
+            return false;
+        }
+        boolean added = false;
+        for (ResolvedTextFrame tf : childTfs) {
+            if (tf == null || !tf.isInline() || tf.storyId() == null) continue;
+            int tfDomId = parseIntOrDefault(tf.id(), -1);
+            if (tfDomId < 0 || !containsInt(shellPlan.ownedTextFrameIds, tfDomId)) continue;
+            IDMLStory story = ctx.loadIDMLStory.apply(tf.storyId());
+            if (story == null || !story.hasTables()) continue;
+            if (TableFrameOwnershipPolicy.shouldPlaceInlineTableAsPageLevel(ctx, tf, story)) continue;
+            for (IDMLTable idmlTable : story.tables()) {
+                ASTTable table = TableBuilder.buildPreparedAstTable(ctx, idmlTable, 0, 0, 0);
+                if (table == null) continue;
+                replaceInlineTableCellTextWithResolvedStory(ctx, tf, table);
+                obj.addInlineTable(table);
+                added = true;
+            }
+        }
+        return added;
+    }
+
     private static void replaceInlineTableCellTextWithResolvedStory(
             ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTable table) {
         if (ctx == null || ctx.resolvedData == null || tf == null || tf.storyId() == null || table == null) return;
@@ -5790,6 +5823,10 @@ public class InlineFrameHandler {
             return items;
         }
         if (dropOnlyInlinePlan != null) {
+            if (isInlineRuleBelowWhitespacePlaceholderPlan(dropOnlyInlinePlan)) {
+                items.add(createUnderlinedSpaceRunForLayoutOnlyInlineRule(ctx, anchoredObjectId));
+                return items;
+            }
             List<ASTInlineItem> childTextItems =
                     loadLayoutOnlyInlineSlotChildTextItems(ctx, anchoredObjectId);
             if (childTextItems != null && !childTextItems.isEmpty()) {
@@ -6691,8 +6728,32 @@ public class InlineFrameHandler {
 
     private static boolean isRepeatedEmptyInlineTextFramePlaceholderPlan(ObjectPlan plan) {
         return plan != null
-                && ("repeated_empty_inline_text_frame_placeholder".equals(plan.reason)
-                || "inline_rule_below_whitespace_placeholder".equals(plan.reason));
+                && "repeated_empty_inline_text_frame_placeholder".equals(plan.reason);
+    }
+
+    private static boolean isInlineRuleBelowWhitespacePlaceholderPlan(ObjectPlan plan) {
+        return plan != null
+                && "inline_rule_below_whitespace_placeholder".equals(plan.reason);
+    }
+
+    private static ASTTextRun createUnderlinedSpaceRunForLayoutOnlyInlineRule(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        ObjectPlan plan = findDirectDropOnlyInlinePlanForAnchor(ctx, anchoredObjectId);
+        double widthPt = 20.0;
+        if (plan != null && plan.bounds != null && plan.bounds.length >= 4) {
+            double[] boundsPt = renderedBoundsPoints(ctx, plan.bounds);
+            if (boundsPt != null && boundsPt.length >= 4) {
+                widthPt = Math.max(0.0, Math.abs(boundsPt[3] - boundsPt[1]));
+            }
+        }
+        int spaces = Math.max(2, (int) Math.round(widthPt / 3.0));
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < spaces; i++) sb.append('\u00A0');
+        ASTTextRun run = new ASTTextRun();
+        run.text(sb.toString());
+        run.underline(true);
+        return run;
     }
 
     private static ASTInlineObject createLayoutOnlyInlineSpacer(

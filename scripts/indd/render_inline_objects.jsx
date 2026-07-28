@@ -1213,8 +1213,7 @@ function exportInlineObjects(doc, outputDir, startPage, endPage,
     function _duplicateNestedCompletePngForExport(item, candidate, doc) {
         if (!item || !candidate || !doc) return null;
         if (candidate.materialization !== "COMPLETE_PNG"
-                || candidate.placement !== "INLINE"
-                || candidate.coordinateSpace !== "STORY_FLOW") {
+                || candidate.textAction !== "OWNED_BY_PNG") {
             return null;
         }
         var copies = [];

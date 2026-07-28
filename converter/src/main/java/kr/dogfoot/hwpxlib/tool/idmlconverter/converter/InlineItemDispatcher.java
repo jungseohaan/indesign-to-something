@@ -127,7 +127,7 @@ final class InlineItemDispatcher {
     private static boolean isTableOnlyInlineTextFrame(ASTInlineObject obj) {
         boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
-        return hasInlineTables && !hasParagraphs;
+        return hasInlineTables && !hasParagraphs && !hasDrawableShell(obj);
     }
 
     private boolean isNonFlowHorizontalLine(ASTInlineObject obj) {

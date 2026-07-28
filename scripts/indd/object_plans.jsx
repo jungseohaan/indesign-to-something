@@ -161,6 +161,14 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles, sourceIte
         createdPlanCount: floatingVisibleTextFrameShellInventory.summary.createdPlanCount
     });
     _timingStartedAt = _objectPlanNowMs();
+    var closedShortMarkerLeafCompletePngInventory =
+            _appendClosedShortMarkerLeafCompletePngObjectPlans(
+                    objectPlans, sourceItems, sourceById, childrenByParentId);
+    _recordObjectPlanTiming("appendClosedShortMarkerLeafCompletePngPlans", _timingStartedAt, {
+        objectPlanCount: objectPlans.length,
+        createdPlanCount: closedShortMarkerLeafCompletePngInventory.summary.createdPlanCount
+    });
+    _timingStartedAt = _objectPlanNowMs();
     var repeatedEmptyInlineTextFramePlaceholders =
             _resolveRepeatedEmptyInlineTextFramePlaceholders(objectPlans);
     _recordObjectPlanTiming("resolveRepeatedEmptyInlineTextFramePlaceholders", _timingStartedAt, {
@@ -1669,6 +1677,226 @@ function _appendFloatingVisibleTextFrameShellObjectPlans(objectPlans, sourceItem
         summary.createdObjectPlanIds.push(plan.objectPlanId);
     }
     return { summary: summary };
+}
+
+function _appendClosedShortMarkerLeafCompletePngObjectPlans(objectPlans, sourceItems, sourceById, childrenByParentId) {
+    var summary = { createdPlanCount: 0 };
+    if (!objectPlans || !sourceItems || !sourceById || !childrenByParentId) {
+        return { summary: summary };
+    }
+    var existingRootOwners = _closedShortMarkerExistingLeafCompletePngRootOwners(objectPlans);
+    var createdRootOwners = {};
+    for (var i = 0; i < sourceItems.length; i++) {
+        var group = sourceItems[i];
+        if (!group || _objectPlanSourceKind(group) !== "Group") continue;
+        var groupId = Number(group.id);
+        if (isNaN(groupId)) continue;
+        if (existingRootOwners[String(groupId)]) continue;
+        if (createdRootOwners[String(groupId)]) continue;
+        if (group.visible === false || group.hiddenLayer === true || group.nonprinting === true) continue;
+        var childIds = childrenByParentId[String(groupId)] || [];
+        var classified = _classifyClosedShortMarkerGroupChildren(childIds, sourceById);
+        if (!classified) continue;
+        var plan = _closedShortMarkerLeafCompletePngObjectPlan(
+                group, groupId, classified, sourceById);
+        objectPlans.push(plan);
+        createdRootOwners[String(groupId)] = true;
+        summary.createdPlanCount++;
+    }
+    return { summary: summary };
+}
+
+function _closedShortMarkerExistingLeafCompletePngRootOwners(objectPlans) {
+    var out = {};
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!_objectPlanIsClosedShortMarkerLeafCompletePng(plan)) continue;
+        var roots = plan.sourceRootObjectIds && plan.sourceRootObjectIds.length > 0
+                ? plan.sourceRootObjectIds
+                : (plan.primarySourceObjectId !== null && plan.primarySourceObjectId !== undefined
+                        ? [plan.primarySourceObjectId]
+                        : []);
+        for (var r = 0; r < roots.length; r++) {
+            if (roots[r] === null || roots[r] === undefined) continue;
+            out[String(roots[r])] = true;
+        }
+    }
+    return out;
+}
+
+function _closedShortMarkerExistingCompletePngRootOwners(objectPlans) {
+    var out = {};
+    for (var i = 0; objectPlans && i < objectPlans.length; i++) {
+        var plan = objectPlans[i];
+        if (!plan) continue;
+        if (plan.materialization !== "COMPLETE_PNG") continue;
+        if (plan.textAction !== "OWNED_BY_PNG") continue;
+        if (plan.visualAction !== "PLACE_INLINE_PNG"
+                && plan.visualAction !== "PLACE_FLOATING_PNG") continue;
+        if (plan.visualAction === "DROP_VISUAL") continue;
+        var roots = plan.sourceRootObjectIds && plan.sourceRootObjectIds.length > 0
+                ? plan.sourceRootObjectIds
+                : (plan.primarySourceObjectId !== null && plan.primarySourceObjectId !== undefined
+                        ? [plan.primarySourceObjectId]
+                        : []);
+        for (var r = 0; r < roots.length; r++) {
+            if (roots[r] === null || roots[r] === undefined) continue;
+            out[String(roots[r])] = true;
+        }
+    }
+    return out;
+}
+
+function _classifyClosedShortMarkerGroupChildren(childIds, sourceById) {
+    if (!childIds || childIds.length < 2) return null;
+    var visualIds = [];
+    var markerTextFrameIds = [];
+    var emptyTextFrameIds = [];
+    for (var i = 0; i < childIds.length; i++) {
+        var child = childIds[i];
+        var id = child && child.id !== undefined && child.id !== null
+                ? Number(child.id)
+                : Number(child);
+        if (isNaN(id)) return null;
+        var src = child && child.id !== undefined && child.id !== null
+                ? child
+                : sourceById[String(id)];
+        if (!src) return null;
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) return null;
+        var kind = _objectPlanSourceKind(src);
+        if (kind === "TextFrame") {
+            var length = _objectPlanTextFrameCharCount(src);
+            if (length === 0) {
+                emptyTextFrameIds.push(id);
+                continue;
+            }
+            if (_objectPlanTextFrameIsShortMarker(src)) {
+                markerTextFrameIds.push(id);
+                continue;
+            }
+            return null;
+        }
+        if (_objectPlanSourceKindIsTextOnly(kind)) return null;
+        if (src.hasVisibleFill === true
+                || src.hasVisibleStroke === true
+                || src.hasPlacedVisual === true
+                || src.hasCandidateVectorPaint === true) {
+            visualIds.push(id);
+            continue;
+        }
+        return null;
+    }
+    if (visualIds.length !== 1 || markerTextFrameIds.length !== 1) return null;
+    return {
+        visualIds: _sortedNumericIds(visualIds),
+        markerTextFrameIds: _sortedNumericIds(markerTextFrameIds),
+        emptyTextFrameIds: _sortedNumericIds(emptyTextFrameIds)
+    };
+}
+
+function _objectPlanTextFrameIsShortMarker(src) {
+    if (!src || _objectPlanSourceKind(src) !== "TextFrame") return false;
+    if (src.simpleMarkerLabelContents === true) return true;
+    var length = _objectPlanTextFrameCharCount(src);
+    return length !== null && length > 0 && length <= 2;
+}
+
+function _closedShortMarkerLeafCompletePngObjectPlan(group, groupId, classified, sourceById) {
+    var exportIds = _sourceIdsUnion(
+            classified.visualIds || [],
+            classified.markerTextFrameIds || []);
+    var sourceIds = _sourceIdsUnion(
+            [groupId],
+            _sourceIdsUnion(exportIds, classified.emptyTextFrameIds || []));
+    var sourceSetId = _sourceSetId(sourceIds);
+    var exportSetId = _sourceSetId(exportIds);
+    var hiddenSetId = _sourceSetId(classified.emptyTextFrameIds || []);
+    var placement = _objectPlanSourceInlineFlow(group) ? "INLINE" : "FLOATING";
+    var coordinateSpace = placement === "INLINE" ? "STORY_FLOW" : "PAGE";
+    var passId = placement === "INLINE" ? "pass.inline_objects" : "pass.decoration_groups";
+    var visualAction = placement === "INLINE" ? "PLACE_INLINE_PNG" : "PLACE_FLOATING_PNG";
+    var pageIndex = group.pageIndex !== undefined && group.pageIndex !== null
+            ? group.pageIndex
+            : -1;
+    var zOrder = group.zOrder !== undefined && group.zOrder !== null ? group.zOrder : 0;
+    var bounds = _objectPlanUnionSourceBounds(exportIds, sourceById, true)
+            || group.pageRelativeBounds || group.bounds || null;
+    var renderBounds = _objectPlanUnionSourceBounds(exportIds, sourceById, false)
+            || group.bounds || group.pageRelativeBounds || null;
+    return {
+        objectPlanId: "objectPlan.closed_short_marker_leaf_complete_png." + String(groupId),
+        bundleId: "closedShortMarkerLeaf." + String(groupId),
+        candidateId: _candidateId(passId, groupId, pageIndex)
+                + ".closed_short_marker_leaf_complete_png",
+        passId: passId,
+        pageIndex: pageIndex,
+        kind: "Group",
+        unit: placement === "INLINE" ? "INLINE_OBJECT" : "PAGE_OBJECT",
+        mode: "TEXTLESS_CANDIDATE",
+        candidatePurpose: placement === "INLINE" ? "INLINE_CANDIDATE" : "SHELL_CANDIDATE",
+        compositeRole: "closed_short_marker_leaf_complete_png",
+        slotRole: "closed_short_marker_leaf_complete_png",
+        layoutOnlyInlineSlot: false,
+        sourceInlineFlow: placement === "INLINE",
+        inlineCompositeLayoutDescendant: false,
+        connectorDecorationVisual: false,
+        primarySourceObjectId: groupId,
+        sourceSetId: sourceSetId,
+        sourceRootSetId: _sourceSetId([groupId]),
+        clusterSourceSetId: sourceSetId,
+        visualSourceSetId: exportSetId,
+        exportSourceSetId: exportSetId,
+        hiddenSourceSetId: hiddenSetId,
+        ownedByNativeShellSourceObjectIds: [],
+        sourceObjectIds: sourceIds,
+        sourceRootObjectIds: [groupId],
+        clusterSourceObjectIds: sourceIds,
+        clusterKindCounts: { Group: 1 },
+        omittedClusterSourceObjectIds: [],
+        omittedClusterKindCounts: {},
+        clusterHasEditableText: true,
+        clusterHasTextFrame: true,
+        clusterHasPlacedContent: false,
+        clusterHasVisualSource: true,
+        visualSourceObjectIds: exportIds,
+        styleSourceObjectIds: [],
+        ownedTextFrameIds: classified.markerTextFrameIds || [],
+        editableTextFrameIds: classified.markerTextFrameIds || [],
+        hiddenTextFrameIds: classified.emptyTextFrameIds || [],
+        exportSourceObjectIds: exportIds,
+        exportTargetObjectId: classified.visualIds && classified.visualIds.length > 0
+                ? classified.visualIds[0]
+                : groupId,
+        atomicExportTargetObjectId: classified.visualIds && classified.visualIds.length > 0
+                ? classified.visualIds[0]
+                : groupId,
+        atomicExportTargetObjectIds: exportIds,
+        hiddenVisualSourceObjectIds: classified.emptyTextFrameIds || [],
+        excludedInlineSourceObjectIds: [],
+        materialization: "COMPLETE_PNG",
+        textAction: "OWNED_BY_PNG",
+        visualAction: visualAction,
+        placement: placement,
+        coordinateSpace: coordinateSpace,
+        visualLayer: "CONTENT_VISUAL",
+        zOrder: zOrder,
+        reason: "closed_short_marker_leaf_complete_png",
+        bounds: bounds,
+        renderSourceBounds: renderBounds,
+        cropSourceBounds: renderBounds,
+        ownershipSlot: "CONTENT_VISUAL_SLOT",
+        policyLayer: "CONTENT",
+        clusterRelation: "EXACT_SOURCE_CLUSTER",
+        migrationStatus: "READY_EXACT_CLUSTER",
+        migrationBlocker: "NONE",
+        migrationBlockerDetail: {},
+        contractStatus: "READY_FOR_STAGE1_IMPORT",
+        executable: true,
+        required: true,
+        completePngTextAllowed: true,
+        inlineSourceTreeClosed: placement === "INLINE",
+        inlineFlowSourceObjectIds: placement === "INLINE" ? sourceIds : []
+    };
 }
 
 function _appendSourceBundleTextRangeShellObjectPlans(objectPlans, sourceItems, sourceById, childrenByParentId) {
@@ -4551,6 +4779,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
         var candidate = plans[pi];
         if (!_objectPlanHasVisibleVisual(candidate)) continue;
         if (candidate.visualAction === "PLACE_TABLE_STYLE") continue;
+        if (_objectPlanIsClosedShortMarkerLeafCompletePng(candidate)) continue;
         if (!candidate.visualSourceObjectIds || candidate.visualSourceObjectIds.length === 0) continue;
         var retainedVisualIds = [];
         var removedVisualIds = [];
@@ -4605,6 +4834,7 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
         for (var api = 0; api < plans.length; api++) {
             var ancestorPlan = plans[api];
             if (!ancestorPlan || ancestorPlan === completePlan) continue;
+            if (_objectPlanIsClosedShortMarkerLeafCompletePng(ancestorPlan)) continue;
             if (String(ancestorPlan.pageIndex) !== String(completePlan.pageIndex)) continue;
             if (!_sourceSetContainsAll(ancestorPlan.sourceObjectIds || [], [completeRootId])) continue;
             var previousVisualIds = ancestorPlan.visualSourceObjectIds || [];
@@ -4635,6 +4865,13 @@ function _resolveObjectPlanDuplicateVisibleVisualSources(objectPlans) {
             mutatedObjectPlanIds: mutatedPlanIds
         }
     };
+}
+
+function _objectPlanIsClosedShortMarkerLeafCompletePng(plan) {
+    if (!_objectPlanIsCompletePngTextOwner(plan)) return false;
+    return plan.slotRole === "closed_short_marker_leaf_complete_png"
+            || plan.compositeRole === "closed_short_marker_leaf_complete_png"
+            || String(plan.reason || "").indexOf("closed_short_marker_leaf_complete_png") >= 0;
 }
 
 function _objectPlanCanCanonicalizeDuplicateVisibleVisualSource(plan) {
@@ -4881,7 +5118,7 @@ function _resolveObjectPlanNestedInlineTextShellOwners(objectPlans, sourceById) 
 
     for (var s = 0; s < plans.length; s++) {
         var shell = plans[s];
-        if (!_objectPlanIsAnchoredTableStyleShell(shell, anchoredTableTextFrameIds)) continue;
+        if (!_objectPlanIsAnchoredTableStyleShell(shell, anchoredTableTextFrameIds, sourceById)) continue;
         anchoredTableStyleShellCount++;
         shell.hiddenVisualSourceObjectIds = _sourceIdsUnion(
                 shell.hiddenVisualSourceObjectIds || [],
@@ -5188,14 +5425,46 @@ function _objectPlanResidualInlineShellStyleSourceIds(plan, sourceById) {
     return _sortedNumericIds(out);
 }
 
-function _objectPlanIsAnchoredTableStyleShell(plan, anchoredTableTextFrameIds) {
+function _objectPlanIsAnchoredTableStyleShell(plan, anchoredTableTextFrameIds, sourceById) {
     if (!plan || plan.visualAction !== "PLACE_TEXT_SHELL") return false;
     if (!anchoredTableTextFrameIds) return false;
     if (plan.placement !== "INLINE" || plan.coordinateSpace !== "STORY_FLOW") return false;
     if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) return false;
     for (var i = 0; i < plan.ownedTextFrameIds.length; i++) {
-        if (anchoredTableTextFrameIds[String(plan.ownedTextFrameIds[i])]) return true;
+        if (anchoredTableTextFrameIds[String(plan.ownedTextFrameIds[i])]) {
+            return !_objectPlanAnchoredTableStyleShellHasUnrepresentableVisualSource(plan, sourceById);
+        }
     }
+    return false;
+}
+
+function _objectPlanAnchoredTableStyleShellHasUnrepresentableVisualSource(plan, sourceById) {
+    if (!plan || !sourceById) return true;
+    var ownedTextIds = _sourceIdSet(plan.ownedTextFrameIds || []);
+    var ids = _sourceIdsUnion(
+            plan.visualSourceObjectIds || [],
+            _sourceIdsUnion(plan.exportSourceObjectIds || [], plan.sourceObjectIds || []));
+    for (var i = 0; i < ids.length; i++) {
+        var id = Number(ids[i]);
+        if (isNaN(id) || ownedTextIds[String(id)]) continue;
+        var src = sourceById[String(id)] || null;
+        if (!src) return true;
+        if (!_objectPlanSourceCanMaterializeAsTableStyle(src)) return true;
+    }
+    return false;
+}
+
+function _objectPlanSourceCanMaterializeAsTableStyle(src) {
+    if (!src) return false;
+    var kind = _objectPlanSourceKind(src);
+    if (_objectPlanSourceKindIsTextOnly(kind)) return true;
+    if (kind === "Group") {
+        return src.hasVisibleFill !== true
+                && src.hasVisibleStroke !== true
+                && src.hasCandidateVectorPaint !== true
+                && src.hasPlacedVisual !== true;
+    }
+    if (kind === "Rectangle" || kind === "GraphicLine" || kind === "Line") return true;
     return false;
 }
 
@@ -5435,6 +5704,10 @@ function _objectPlanVisibleVisualSourcePriority(plan) {
             && plan.textAction === "OWNED_BY_PNG"
             && plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) {
         score += 1000;
+    }
+    if (plan.slotRole === "closed_short_marker_leaf_complete_png"
+            || plan.compositeRole === "closed_short_marker_leaf_complete_png") {
+        score += 2000;
     }
     if (_objectPlanIsInlineVisibleTextFrameShellVisualOwner(plan)) {
         score += _objectPlanInlineVisibleTextFrameShellPriority(plan);
@@ -8235,6 +8508,13 @@ function _objectPlanTextOwnerPriority(plan) {
     if (plan.visualAction === "DROP_VISUAL") score += 20;
     if (plan.visualAction === "PLACE_TEXT_SHELL") score += 40;
     if (plan.ownershipSlot === "SHELL_SLOT") score += 20;
+    if (plan.textAction === "OWNED_BY_HWPX_TEXT"
+            && plan.visualAction === "PLACE_TEXT_SHELL"
+            && plan.ownershipSlot === "SHELL_SLOT"
+            && (plan.closedShortMarkerTextShellOwner === true
+                || String(plan.reason || "").indexOf("closed_short_marker_text_shell_owner") >= 0)) {
+        score += 160;
+    }
     if (plan.slotRole === "direct_child_shell_slot") score += 120;
     if (plan.compositeRole === "direct_child_shell_slot") score += 100;
     if (plan.compositeRole === "native_parent_text_shell_slot") score += 80;
@@ -8370,6 +8650,7 @@ function _objectPlanFromPlannerBundle(bundle, index, sourceById) {
         materialization: materialization,
         textAction: textAction,
         visualAction: visualAction,
+        closedShortMarkerTextShellOwner: bundle.closedShortMarkerTextShellOwner === true,
         placement: placement,
         coordinateSpace: coordinateSpace,
         visualLayer: _objectPlanVisualLayer(bundle, visualAction, placement, sourceById),
@@ -8402,6 +8683,12 @@ function _normalizeObjectPlanBundle(bundle, sourceById) {
     // 글자가 밀리거나 찌그러진다. 그룹째 통짜 PNG 로 굽는 편이 원본에 충실하다.
     if (_objectPlanBundleIsGraphicShortTextButtonGroup(bundle, sourceById)) {
         return _graphicShortTextButtonGroupCompletePngBundle(bundle, sourceById);
+    }
+    if (_objectPlanBundleIsClosedShortMarkerShellGroup(bundle, sourceById)) {
+        return _closedShortMarkerShellGroupCompletePngBundle(bundle, sourceById);
+    }
+    if (_objectPlanBundleIsClosedShortMarkerLeafCompletePng(bundle, sourceById)) {
+        return _closedShortMarkerLeafCompletePngBundle(bundle, sourceById);
     }
     if (_objectPlanBundleIsInlineEditableTextShellComposite(bundle, sourceById)) {
         return _inlineEditableTextShellCompositeBundle(bundle, sourceById);
@@ -8461,10 +8748,13 @@ function _graphicShortTextButtonGroupCompletePngBundle(bundle, sourceById) {
     normalized.completePngTextAllowed = true;
     normalized.materialization = "COMPLETE_PNG";
     normalized.textAction = "OWNED_BY_PNG";
-    normalized.visualAction = "PLACE_INLINE_PNG";
-    normalized.inlineSourceTreeClosed = true;
-    normalized.inlineFlowSourceObjectIds = sourceIds;
-    normalized.inlineAnchorSourceObjectId = rootIds.length > 0 ? rootIds[0] : normalized.inlineAnchorSourceObjectId;
+    var placement = _objectPlanPlacement(bundle);
+    normalized.visualAction = placement === "INLINE" ? "PLACE_INLINE_PNG" : "PLACE_FLOATING_PNG";
+    normalized.inlineSourceTreeClosed = placement === "INLINE";
+    normalized.inlineFlowSourceObjectIds = placement === "INLINE" ? sourceIds : [];
+    normalized.inlineAnchorSourceObjectId = placement === "INLINE" && rootIds.length > 0
+            ? rootIds[0]
+            : normalized.inlineAnchorSourceObjectId;
     normalized.exportTargetObjectId = rootIds.length > 0 ? rootIds[0] : normalized.exportTargetObjectId;
     normalized.atomicExportTargetObjectId = rootIds.length > 0 ? rootIds[0] : normalized.atomicExportTargetObjectId;
     normalized.atomicExportTargetObjectIds = rootIds;
@@ -8480,6 +8770,193 @@ function _graphicShortTextButtonGroupCompletePngBundle(bundle, sourceById) {
     normalized.reason = String(normalized.reason || "")
             + ":graphic_short_text_button_group_complete_png";
     return normalized;
+}
+
+function _closedShortMarkerShellGroupCompletePngBundle(bundle, sourceById) {
+    var normalized = _graphicShortTextButtonGroupCompletePngBundle(bundle, sourceById);
+    normalized.requiredSlotReason = "closed_short_marker_shell_group_complete_png";
+    normalized.slotRole = "closed_short_marker_shell_group_complete_png";
+    normalized.compositeRole = "closed_short_marker_shell_group_complete_png";
+    normalized.graphicShortTextButtonGroupCompletePng = false;
+    normalized.closedShortMarkerShellGroupCompletePng = true;
+    normalized.reason = String(normalized.reason || "")
+            + ":closed_short_marker_shell_group_complete_png";
+    return normalized;
+}
+
+function _closedShortMarkerLeafCompletePngBundle(bundle, sourceById) {
+    var normalized = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) normalized[key] = bundle[key];
+    }
+    var markerTextFrameIds = _objectPlanSimpleMarkerTextFrameIds(
+            bundle.ownedTextFrameIds || [], sourceById);
+    var emptyTextFrameIds = _objectPlanEmptyTextFrameIds(
+            bundle.ownedTextFrameIds || [], sourceById);
+    var shellVisualSourceIds = _objectPlanPaintedNonTextVisualSourceIds(
+            _sourceIdsUnion(bundle.visualSourceObjectIds || [], bundle.exportSourceObjectIds || []),
+            sourceById);
+    if (shellVisualSourceIds.length === 0) {
+        shellVisualSourceIds = _objectPlanPaintedNonTextVisualSourceIds(
+                bundle.sourceObjectIds || [],
+                sourceById);
+    }
+    var exportIds = _sourceIdsUnion(shellVisualSourceIds, markerTextFrameIds);
+    var placementBounds = exportIds.length > 0
+            ? _objectPlanUnionSourceBounds(exportIds, sourceById, true)
+            : null;
+    var renderBounds = exportIds.length > 0
+            ? _objectPlanUnionSourceBounds(exportIds, sourceById, false)
+            : null;
+    var placement = _objectPlanPlacement(bundle);
+
+    normalized.visualSourceObjectIds = exportIds;
+    normalized.exportSourceObjectIds = exportIds;
+    normalized.ownedTextFrameIds = markerTextFrameIds;
+    normalized.editableTextFrameIds = markerTextFrameIds;
+    normalized.hiddenTextFrameIds = emptyTextFrameIds;
+    normalized.hiddenVisualSourceObjectIds = emptyTextFrameIds;
+    normalized.ownershipSlot = "CONTENT_VISUAL_SLOT";
+    normalized.policyLayer = "CONTENT";
+    normalized.visualLayer = "CONTENT_VISUAL";
+    normalized.requiredSlot = "CONTENT_VISUAL_SLOT";
+    normalized.requiredSlotReason = "closed_short_marker_leaf_complete_png";
+    normalized.slotRole = "closed_short_marker_leaf_complete_png";
+    normalized.compositeRole = "closed_short_marker_leaf_complete_png";
+    normalized.materialization = "COMPLETE_PNG";
+    normalized.textAction = "OWNED_BY_PNG";
+    normalized.visualAction = placement === "INLINE" ? "PLACE_INLINE_PNG" : "PLACE_FLOATING_PNG";
+    normalized.textOwner = "indesign_png";
+    normalized.completePngTextAllowed = true;
+    normalized.closedShortMarkerLeafCompletePng = true;
+    normalized.inlineSourceTreeClosed = placement === "INLINE";
+    normalized.inlineFlowSourceObjectIds = placement === "INLINE"
+            ? _sourceIdsUnion(bundle.inlineFlowSourceObjectIds || [], exportIds)
+            : [];
+    normalized.exportTargetObjectId = shellVisualSourceIds.length > 0
+            ? shellVisualSourceIds[0]
+            : (exportIds.length > 0 ? exportIds[0] : normalized.exportTargetObjectId);
+    normalized.atomicExportTargetObjectId = normalized.exportTargetObjectId;
+    normalized.atomicExportTargetObjectIds = exportIds;
+    normalized.bounds = placementBounds || normalized.bounds;
+    normalized.renderSourceBounds = renderBounds || normalized.renderSourceBounds;
+    normalized.cropSourceBounds = renderBounds || normalized.cropSourceBounds;
+    normalized.sourceSetId = _sourceSetId(normalized.sourceObjectIds || []);
+    normalized.visualSourceSetId = _sourceSetId(exportIds);
+    normalized.exportSourceSetId = _sourceSetId(exportIds);
+    normalized.hiddenSourceSetId = _sourceSetId(emptyTextFrameIds);
+    normalized.executable = true;
+    normalized.required = true;
+    normalized.reason = String(normalized.reason || "")
+            + ":closed_short_marker_leaf_complete_png";
+    return normalized;
+}
+
+function _closedShortMarkerTextShellOwnerBundle(bundle, sourceById) {
+    var normalized = {};
+    for (var key in bundle) {
+        if (bundle.hasOwnProperty(key)) normalized[key] = bundle[key];
+    }
+    var markerTextFrameIds = _objectPlanSimpleMarkerTextFrameIds(
+            bundle.ownedTextFrameIds || [], sourceById);
+    var textlessIds = _objectPlanEmptyTextFrameIds(
+            bundle.ownedTextFrameIds || [], sourceById);
+    var originalOwnedTextFrameIds = _sourceIdsUnion(markerTextFrameIds, textlessIds);
+    var hiddenTextFrameIds = _sourceIdsUnion(
+            bundle.hiddenTextFrameIds || [],
+            originalOwnedTextFrameIds);
+    var hiddenVisualSourceObjectIds = _sourceIdsUnion(
+            bundle.hiddenVisualSourceObjectIds || [],
+            originalOwnedTextFrameIds);
+    var shellVisualSourceIds = _objectPlanPaintedNonTextVisualSourceIds(
+            _sourceIdsUnion(bundle.visualSourceObjectIds || [], bundle.exportSourceObjectIds || []),
+            sourceById);
+    if (shellVisualSourceIds.length === 0) {
+        shellVisualSourceIds = _objectPlanPaintedNonTextVisualSourceIds(
+                bundle.sourceObjectIds || [],
+                sourceById);
+    }
+    var placementBounds = shellVisualSourceIds.length > 0
+            ? _objectPlanUnionSourceBounds(shellVisualSourceIds, sourceById, true)
+            : null;
+    var renderBounds = shellVisualSourceIds.length > 0
+            ? _objectPlanUnionSourceBounds(shellVisualSourceIds, sourceById, false)
+            : null;
+
+    normalized.ownedTextFrameIds = markerTextFrameIds;
+    normalized.editableTextFrameIds = markerTextFrameIds;
+    if (shellVisualSourceIds.length > 0) {
+        normalized.visualSourceObjectIds = shellVisualSourceIds;
+        normalized.exportSourceObjectIds = shellVisualSourceIds;
+        normalized.exportTargetObjectId = shellVisualSourceIds[0];
+        normalized.atomicExportTargetObjectId = shellVisualSourceIds[0];
+        normalized.atomicExportTargetObjectIds = shellVisualSourceIds;
+        normalized.bounds = placementBounds || normalized.bounds;
+        normalized.renderSourceBounds = renderBounds || normalized.renderSourceBounds;
+    }
+    normalized.hiddenTextFrameIds = hiddenTextFrameIds;
+    normalized.hiddenVisualSourceObjectIds = hiddenVisualSourceObjectIds;
+    normalized.ownershipSlot = "SHELL_SLOT";
+    normalized.policyLayer = "DECORATION";
+    normalized.visualLayer = "LABEL_BACKDROP";
+    normalized.materialization = "EXTRACTED_PNG_VECTOR";
+    normalized.textAction = "OWNED_BY_HWPX_TEXT";
+    normalized.visualAction = "PLACE_TEXT_SHELL";
+    normalized.textOwner = "hwpx_tf";
+    normalized.completePngTextAllowed = false;
+    normalized.closedShortMarkerTextShellOwner = true;
+    normalized.requiredSlot = "SHELL_SLOT";
+    normalized.requiredSlotReason = "closed_short_marker_text_shell_owner";
+    normalized.reason = String(normalized.reason || "")
+            + ":closed_short_marker_text_shell_owner";
+    return normalized;
+}
+
+function _objectPlanPaintedNonTextVisualSourceIds(sourceIds, sourceById) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+        var id = Number(sourceIds[i]);
+        if (isNaN(id) || seen[String(id)]) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        if (!src) continue;
+        var kind = _objectPlanSourceKind(src);
+        if (_objectPlanSourceKindIsTextOnly(kind)) continue;
+        if (kind === "Group"
+                && src.hasVisibleFill !== true
+                && src.hasVisibleStroke !== true
+                && src.hasPlacedVisual !== true
+                && src.hasCandidateVectorPaint !== true) {
+            continue;
+        }
+        if (src.visible === false || src.hiddenLayer === true || src.nonprinting === true) continue;
+        seen[String(id)] = true;
+        out.push(id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanUnionSourceBounds(sourceIds, sourceById, preferPageRelative) {
+    var union = null;
+    for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+        var src = sourceById ? sourceById[String(sourceIds[i])] : null;
+        if (!src) continue;
+        var b = preferPageRelative && src.pageRelativeBounds && src.pageRelativeBounds.length >= 4
+                ? src.pageRelativeBounds
+                : (src.bounds || src.pageRelativeBounds || src.geometricBounds || null);
+        if (!b || b.length < 4) continue;
+        var next = [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
+        if (isNaN(next[0]) || isNaN(next[1]) || isNaN(next[2]) || isNaN(next[3])) continue;
+        if (!union) {
+            union = next;
+        } else {
+            union[0] = Math.min(union[0], next[0]);
+            union[1] = Math.min(union[1], next[1]);
+            union[2] = Math.max(union[2], next[2]);
+            union[3] = Math.max(union[3], next[3]);
+        }
+    }
+    return union;
 }
 
 /**
@@ -8517,6 +8994,128 @@ function _objectPlanBundleIsGraphicShortTextButtonGroup(bundle, sourceById) {
     }
     if (longTextCount >= 3) return false;   // 긴 TF 3개 이상 → 편집표로 보고 제외
     return shortTextCount >= 2 && hasGraphic;
+}
+
+function _objectPlanBundleIsClosedShortMarkerShellGroup(bundle, sourceById) {
+    if (!bundle || !sourceById) return false;
+    if (bundle.passId !== "pass.decoration_groups"
+            && bundle.passId !== "pass.inline_objects") {
+        return false;
+    }
+    if (bundle.slotRole !== "direct_child_shell_slot"
+            && bundle.compositeRole !== "direct_child_shell_slot") {
+        return false;
+    }
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (!_objectPlanOwnedTextFramesAreSimpleMarkers(bundle.ownedTextFrameIds, sourceById)) return false;
+    var rootIds = _objectPlanInlineEditableTextShellRootIds(bundle);
+    var expandedIds = _objectPlanInlineRootExpandedSourceIds(rootIds, sourceById);
+    var sourceIds = _sourceIdsUnion(bundle.sourceObjectIds || [], expandedIds);
+    var ownedTextFrameIds = _sourceIdsUnion(
+            bundle.ownedTextFrameIds || [],
+            _objectPlanTextFrameSourceIds(sourceIds, sourceById));
+    if (!_objectPlanOwnedTextFramesAreSimpleMarkers(ownedTextFrameIds, sourceById)) return false;
+    var visualIds = _objectPlanNonTextVisualSourceIds(sourceIds, ownedTextFrameIds, sourceById);
+    if (!visualIds || visualIds.length === 0) return false;
+    return _objectPlanClosedGroupContainsOnlyOwnedMarkersAndVisuals(sourceIds, ownedTextFrameIds, sourceById);
+}
+
+function _objectPlanOwnedTextFramesAreSimpleMarkers(textFrameIds, sourceById) {
+    if (!textFrameIds || textFrameIds.length === 0) return false;
+    for (var i = 0; i < textFrameIds.length; i++) {
+        var src = sourceById ? sourceById[String(textFrameIds[i])] : null;
+        if (!src || _objectPlanSourceKind(src) !== "TextFrame") return false;
+        if (src.simpleMarkerLabelContents !== true) return false;
+    }
+    return true;
+}
+
+function _objectPlanBundleIsClosedShortMarkerTextShellOwner(bundle, sourceById) {
+    if (!bundle || !sourceById) return false;
+    if (bundle.passId !== "pass.decoration_groups"
+            && bundle.passId !== "pass.inline_objects") {
+        return false;
+    }
+    if (bundle.ownershipSlot !== "SHELL_SLOT") return false;
+    if (bundle.visualAction && bundle.visualAction !== "PLACE_TEXT_SHELL") return false;
+    if (bundle.slotRole !== "direct_child_shell_slot"
+            && bundle.compositeRole !== "direct_child_shell_slot") {
+        return false;
+    }
+    if (!bundle.ownedTextFrameIds || bundle.ownedTextFrameIds.length === 0) return false;
+    if (!_objectPlanOwnedTextFramesAreOnlyEmptyOrSimpleMarkers(
+            bundle.ownedTextFrameIds, sourceById)) {
+        return false;
+    }
+    var markerIds = _objectPlanSimpleMarkerTextFrameIds(bundle.ownedTextFrameIds, sourceById);
+    if (!markerIds || markerIds.length === 0) return false;
+    var visualIds = _objectPlanNonTextVisualSourceIds(
+            bundle.visualSourceObjectIds || bundle.sourceObjectIds || [],
+            bundle.ownedTextFrameIds || [],
+            sourceById);
+    return visualIds && visualIds.length > 0;
+}
+
+function _objectPlanBundleIsClosedShortMarkerLeafCompletePng(bundle, sourceById) {
+    return _objectPlanBundleIsClosedShortMarkerTextShellOwner(bundle, sourceById);
+}
+
+function _objectPlanOwnedTextFramesAreOnlyEmptyOrSimpleMarkers(textFrameIds, sourceById) {
+    if (!textFrameIds || textFrameIds.length === 0) return false;
+    var hasMarker = false;
+    for (var i = 0; i < textFrameIds.length; i++) {
+        var src = sourceById ? sourceById[String(textFrameIds[i])] : null;
+        if (!src || _objectPlanSourceKind(src) !== "TextFrame") return false;
+        if (src.simpleMarkerLabelContents === true) {
+            hasMarker = true;
+            continue;
+        }
+        if (_objectPlanTextFrameCharCount(src) !== 0) return false;
+    }
+    return hasMarker;
+}
+
+function _objectPlanSimpleMarkerTextFrameIds(textFrameIds, sourceById) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; textFrameIds && i < textFrameIds.length; i++) {
+        var id = Number(textFrameIds[i]);
+        if (isNaN(id) || seen[String(id)]) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        if (!src || _objectPlanSourceKind(src) !== "TextFrame") continue;
+        if (src.simpleMarkerLabelContents !== true) continue;
+        seen[String(id)] = true;
+        out.push(id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanEmptyTextFrameIds(textFrameIds, sourceById) {
+    var out = [];
+    var seen = {};
+    for (var i = 0; textFrameIds && i < textFrameIds.length; i++) {
+        var id = Number(textFrameIds[i]);
+        if (isNaN(id) || seen[String(id)]) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        if (!src || _objectPlanSourceKind(src) !== "TextFrame") continue;
+        if (_objectPlanTextFrameCharCount(src) !== 0) continue;
+        seen[String(id)] = true;
+        out.push(id);
+    }
+    return _sortedNumericIds(out);
+}
+
+function _objectPlanClosedGroupContainsOnlyOwnedMarkersAndVisuals(sourceIds, ownedTextFrameIds, sourceById) {
+    var owned = _sourceIdSet(ownedTextFrameIds || []);
+    for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+        var id = Number(sourceIds[i]);
+        if (isNaN(id)) continue;
+        var src = sourceById ? sourceById[String(id)] : null;
+        if (!src) return false;
+        if (_objectPlanSourceKind(src) !== "TextFrame") continue;
+        if (!owned[String(id)]) return false;
+    }
+    return true;
 }
 
 /** 텍스트프레임 소스의 글자 수(공백·마커 제외). 미상이면 null. */
@@ -10226,6 +10825,10 @@ function _objectPlanCompletePngAtomRootIsSourceDeclared(atomRoot, ownedIds, visu
     if (!root) return false;
     if (root.storyTextInlineSlot === true) return true;
     if (String(root.storyAnchorPlacement || "").toUpperCase() === "INLINE") return true;
+    if (_objectPlanClosedShortMarkerAtomRootIsSourceDeclared(
+            root, ownedIds, visualIds, sourceById)) {
+        return true;
+    }
     var visualSet = _sourceIdSet(visualIds || []);
     for (var oi = 0; oi < ownedIds.length; oi++) {
         var owned = sourceById[String(ownedIds[oi])] || null;
@@ -10234,6 +10837,35 @@ function _objectPlanCompletePngAtomRootIsSourceDeclared(atomRoot, ownedIds, visu
         if (parentId !== null && parentId !== undefined && visualSet[String(parentId)]) return true;
     }
     return false;
+}
+
+function _objectPlanClosedShortMarkerAtomRootIsSourceDeclared(root, ownedIds, visualIds, sourceById) {
+    if (!root || !sourceById) return false;
+    if (_objectPlanSourceKind(root) !== "Group") return false;
+    if (!ownedIds || ownedIds.length !== 1) return false;
+    if (!visualIds || visualIds.length < 1) return false;
+    var rootId = String(root.id);
+    var ownedSet = _sourceIdSet(ownedIds || []);
+    for (var oi = 0; oi < ownedIds.length; oi++) {
+        var owned = sourceById[String(ownedIds[oi])] || null;
+        if (!_objectPlanTextFrameIsShortMarker(owned)) return false;
+        if (String(owned.parentId) !== rootId) return false;
+    }
+    var nonTextVisualCount = 0;
+    for (var vi = 0; vi < visualIds.length; vi++) {
+        if (ownedSet[String(visualIds[vi])]) continue;
+        var visual = sourceById[String(visualIds[vi])] || null;
+        if (!visual || String(visual.parentId) !== rootId) return false;
+        if (_objectPlanSourceKindIsTextOnly(_objectPlanSourceKind(visual))) return false;
+        if (visual.hasVisibleFill !== true
+                && visual.hasVisibleStroke !== true
+                && visual.hasPlacedVisual !== true
+                && visual.hasCandidateVectorPaint !== true) {
+            return false;
+        }
+        nonTextVisualCount++;
+    }
+    return nonTextVisualCount > 0;
 }
 
 function _objectPlanMapValues(map) {
