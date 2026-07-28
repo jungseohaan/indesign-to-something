@@ -2408,6 +2408,9 @@ function _buildSourceCoverageDiagnostics(sourceItems, candidates, objectPlanDiag
             }
         }
         addClaims(plan.hiddenVisualSourceObjectIds, "HIDDEN_BY_OWNER", owner);
+        addClaims(plan.hiddenCompletePngTextOwnerSourceObjectIds, "HIDDEN_BY_OWNER", owner);
+        addClaims(plan.hiddenForeignVisualOwnerSourceObjectIds, "HIDDEN_BY_OWNER", owner);
+        addClaims(plan.hiddenTableStyleSourceObjectIds, "HIDDEN_BY_OWNER", owner);
     }
 
     for (var c = 0; candidates && c < candidates.length; c++) {

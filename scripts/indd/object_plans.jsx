@@ -2430,6 +2430,8 @@ function _syncObjectPlanDiagnosticsToExecutionCandidates(objectPlanDiagnostics, 
         var keep = _shouldKeepObjectPlanAfterExecutionCandidateSync(
                 plan, activeObjectPlanIds, activeCandidateIds);
         if (keep) {
+            _markObjectPlanSupersededAfterExecutionCandidateSync(
+                    plan, activeObjectPlanIds);
             kept.push(plan);
             if (visible) retainedVisiblePlanCount++;
         } else {
@@ -2494,6 +2496,26 @@ function _shouldKeepObjectPlanAfterExecutionCandidateSync(plan, activeObjectPlan
     if (plan.candidateId && activeCandidateIds[String(plan.candidateId)]) return true;
     if (!plan.objectPlanId && !plan.candidateId) return true;
     return false;
+}
+
+function _markObjectPlanSupersededAfterExecutionCandidateSync(
+        plan, activeObjectPlanIds) {
+    if (!_objectPlanIsSupersededAfterExecutionCandidateSync(
+            plan, activeObjectPlanIds)) return;
+    plan.executable = false;
+    plan.migrationBlocker = "SUPERSEDED_BY_EXECUTION_CANDIDATE_SYNC";
+    plan.migrationStatus = "SUPERSEDED_BY_EXECUTION_CANDIDATE_SYNC";
+    plan.reason = (plan.reason || "object_plan")
+            + ":superseded_by_execution_candidate_sync";
+}
+
+function _objectPlanIsSupersededAfterExecutionCandidateSync(
+        plan, activeObjectPlanIds) {
+    if (!plan || !plan.objectPlanId || !plan.candidateId) return false;
+    if (_objectPlanMapKeyCount(activeObjectPlanIds) === 0) return false;
+    if (activeObjectPlanIds[String(plan.objectPlanId)] === true) return false;
+    if (plan.textAction === "OWNED_BY_PNG") return true;
+    return plan.textAction === "DROP_TEXT" && plan.visualAction === "DROP_VISUAL";
 }
 
 function _objectPlanIsCompletePngTextOwner(plan) {
@@ -10752,15 +10774,15 @@ function _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems) {
         var plan = plans[i];
         if (!plan) continue;
         _validateObjectPlanRequiredFields(plan, issues, issueCodeCounts, issuePlanIds);
-        _validateObjectPlanTextVisualSeparation(plan, issues, issueCodeCounts, issuePlanIds);
-        _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, issuePlanIds);
-        _validateInlineCompletePngTextOwnerContract(
-                plan, issues, issueCodeCounts, issuePlanIds, sourceById);
 
         if (!_objectPlanMigrationStatusIsImportReady(plan.migrationStatus)
                 || plan.executable === false) {
             continue;
         }
+        _validateObjectPlanTextVisualSeparation(plan, issues, issueCodeCounts, issuePlanIds);
+        _validateObjectPlanCoordinateContract(plan, issues, issueCodeCounts, issuePlanIds);
+        _validateInlineCompletePngTextOwnerContract(
+                plan, issues, issueCodeCounts, issuePlanIds, sourceById);
         if (_objectPlanHasVisibleVisual(plan)) {
             var slotKey = _objectPlanVisibleSlotKey(plan);
             if (slotKey) {
