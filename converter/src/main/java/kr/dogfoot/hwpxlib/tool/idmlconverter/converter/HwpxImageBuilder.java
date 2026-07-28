@@ -270,7 +270,7 @@ public class HwpxImageBuilder {
         Picture pic = run.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
         int zOrder = obj.plannedZOrder() != Integer.MIN_VALUE
-                ? obj.plannedZOrder()
+                ? ctx.outputInlineObjectZOrder(obj.plannedZOrder())
                 : ctx.foregroundOutputZOrder();
         TextWrapMethod wrapMethod = isBehindTextVisualLayer(obj.plannedVisualLayer())
                 ? TextWrapMethod.BEHIND_TEXT

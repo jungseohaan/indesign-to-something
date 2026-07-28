@@ -1809,10 +1809,15 @@ public class InlineFrameHandler {
         // 같은 공간에서 직접 차분한다. 기존 page-local 정규화는 pt/mm 를 섞어
         // 셀보다 큰 유령 여백(62mm cellMargin)을 만든다 (SPEC-057, p47 라벨).
         double unitScale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double[] tfGeometric = childTf.geometricBounds();
         double[] shellPageBounds;
         double[] tb;
         boolean boundsInPoints = false;
-        double[] tfGeometric = childTf.geometricBounds();
+        if (boundsShareCoordinateScale(shellBounds, tfGeometric)) {
+            shellPageBounds = shellBounds;
+            tb = tfGeometric;
+            boundsInPoints = true;
+        } else {
         double[] shellBoundsPt = new double[] {
                 shellBounds[0] * unitScale, shellBounds[1] * unitScale,
                 shellBounds[2] * unitScale, shellBounds[3] * unitScale
@@ -1825,6 +1830,7 @@ public class InlineFrameHandler {
             shellPageBounds = normalizeShellBoundsToTextFramePageLocal(ctx, pageIndex, shellBounds, childTf);
             if (!validBounds(shellPageBounds)) shellPageBounds = shellBounds;
             tb = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, childTf, shellPageBounds);
+        }
         }
         if (!validBounds(tb) || !validBounds(shellPageBounds)) return false;
 
@@ -2295,13 +2301,24 @@ public class InlineFrameHandler {
         if (obj == null || childTfs == null || childTfs.size() != 1) return;
         ResolvedTextFrame childTf = childTfs.get(0);
         if (childTf == null) return;
-        double[] groupBounds = inlineShellMarginReferenceBoundsInTextFramePageLocal(
-                ctx, shellPlan, anchorItem, childTf);
-        double[] textBounds = normalizeTextFrameContentBoundsToShellPage(
-                ctx,
-                shellPlan != null ? shellPlan.pageIndex : childTf.pageIndex(),
-                childTf,
-                groupBounds);
+        double[] groupBounds;
+        double[] textBounds;
+        boolean boundsInPoints = false;
+        double[] directGroupBounds = inlineShellMarginReferenceBounds(ctx, shellPlan, anchorItem, childTf);
+        double[] tfGeometric = childTf.geometricBounds();
+        if (boundsShareCoordinateScale(directGroupBounds, tfGeometric)) {
+            groupBounds = directGroupBounds;
+            textBounds = tfGeometric;
+            boundsInPoints = true;
+        } else {
+            groupBounds = inlineShellMarginReferenceBoundsInTextFramePageLocal(
+                    ctx, shellPlan, anchorItem, childTf);
+            textBounds = normalizeTextFrameContentBoundsToShellPage(
+                    ctx,
+                    shellPlan != null ? shellPlan.pageIndex : childTf.pageIndex(),
+                    childTf,
+                    groupBounds);
+        }
         if (groupBounds == null || textBounds == null || groupBounds.length < 4 || textBounds.length < 4) {
             return;
         }
@@ -2334,7 +2351,7 @@ public class InlineFrameHandler {
         double bottom = Math.max(0, groupBounds[2] - textBounds[2]);
         if (left + top + right + bottom < 0.1) return;
 
-        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double scale = boundsInPoints ? 1.0 : (ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0);
         obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left * scale));
         obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top * scale));
         obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right * scale));
@@ -2662,6 +2679,30 @@ public class InlineFrameHandler {
                 && outer[1] <= inner[1] + tolerance
                 && outer[2] >= inner[2] - tolerance
                 && outer[3] >= inner[3] - tolerance;
+    }
+
+    private static boolean boundsShareCoordinateScale(double[] a, double[] b) {
+        if (!validBounds(a) || !validBounds(b)) return false;
+        double aw = Math.abs(a[3] - a[1]);
+        double ah = Math.abs(a[2] - a[0]);
+        double bw = Math.abs(b[3] - b[1]);
+        double bh = Math.abs(b[2] - b[0]);
+        if (aw <= 0.0 || ah <= 0.0 || bw <= 0.0 || bh <= 0.0) return false;
+        if (containsBounds(a, b) || containsBounds(b, a)) return true;
+        double acx = (a[1] + a[3]) / 2.0;
+        double acy = (a[0] + a[2]) / 2.0;
+        double bcx = (b[1] + b[3]) / 2.0;
+        double bcy = (b[0] + b[2]) / 2.0;
+        double dx = Math.abs(acx - bcx);
+        double dy = Math.abs(acy - bcy);
+        double maxW = Math.max(aw, bw);
+        double maxH = Math.max(ah, bh);
+        double sizeRatioW = Math.max(aw, bw) / Math.max(0.000001, Math.min(aw, bw));
+        double sizeRatioH = Math.max(ah, bh) / Math.max(0.000001, Math.min(ah, bh));
+        return dx <= Math.max(1.5, maxW * 0.75)
+                && dy <= Math.max(1.5, maxH * 0.75)
+                && sizeRatioW <= 2.0
+                && sizeRatioH <= 2.0;
     }
 
     private static double boundsArea(double[] bounds) {

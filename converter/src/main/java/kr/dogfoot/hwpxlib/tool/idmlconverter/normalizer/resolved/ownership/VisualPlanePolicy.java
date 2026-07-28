@@ -73,6 +73,11 @@ public final class VisualPlanePolicy {
                 + normalizedSourceZOrder(sourceZOrder);
     }
 
+    public static int textStructureZOrder(int sourceZOrder) {
+        return planeBandForPolicyPlane(2)
+                + normalizedSourceZOrder(sourceZOrder);
+    }
+
     public static boolean isBackgroundZOrder(int zOrder) {
         return zOrder >= planeBandForPolicyPlane(0)
                 && zOrder < planeBandForPolicyPlane(1);

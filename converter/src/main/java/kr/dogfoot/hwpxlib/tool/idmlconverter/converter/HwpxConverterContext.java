@@ -148,6 +148,13 @@ public class HwpxConverterContext {
         return Math.max(0, rawZOrder);
     }
 
+    public int outputInlineObjectZOrder(int plannedZOrder) {
+        if (plannedZOrder == Integer.MIN_VALUE) {
+            return foregroundOutputZOrder();
+        }
+        return VisualPlanePolicy.sourceZOrderComponent(plannedZOrder);
+    }
+
     public int foregroundOutputZOrder() {
         return foregroundOutputZOrder;
     }
@@ -166,6 +173,9 @@ public class HwpxConverterContext {
                     fig.visualLayer(),
                     fig.sourceLayerIndex(),
                     fig.zOrder());
+        }
+        if (block instanceof ASTTextFrameBlock || block instanceof ASTTable) {
+            return VisualPlanePolicy.textStructureZOrder(rawZOrder(block));
         }
         return rawZOrder(block);
     }

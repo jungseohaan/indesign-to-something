@@ -314,7 +314,7 @@ final class InlineFrameBuilder {
         if (obj == null || obj.plannedZOrder() == Integer.MIN_VALUE) {
             return 0;
         }
-        return obj.plannedZOrder();
+        return ctx.outputInlineObjectZOrder(obj.plannedZOrder());
     }
 
     private void addInlineExtractedShellTextFrame(Para para, ASTInlineObject obj, long w, long h,
