@@ -401,9 +401,13 @@ public class ASTToHwpxConverter {
     }
 
     private static int zOrderOf(ASTBlock block) {
-        if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
+        if (block instanceof ASTTextFrameBlock) {
+            return VisualPlanePolicy.textStructureZOrder(((ASTTextFrameBlock) block).zOrder());
+        }
         if (block instanceof ASTFigure) return figureOutputZOrderKey((ASTFigure) block);
-        if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
+        if (block instanceof ASTTable) {
+            return VisualPlanePolicy.textStructureZOrder(((ASTTable) block).zOrder());
+        }
         return 0;
     }
 

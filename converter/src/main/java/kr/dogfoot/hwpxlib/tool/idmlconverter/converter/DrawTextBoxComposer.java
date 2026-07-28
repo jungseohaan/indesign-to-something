@@ -147,6 +147,7 @@ final class DrawTextBoxComposer {
     }
 
     private SubList createDrawText(Rectangle rect, Spec spec) {
+        normalizeDrawTextMargins(spec);
         rect.createDrawText();
         DrawText dt = rect.drawText();
         dt.lastWidthAnd(spec.width).nameAnd("").editableAnd(false);
@@ -170,6 +171,28 @@ final class DrawTextBoxComposer {
                 .hasTextRefAnd(false)
                 .hasNumRefAnd(false);
         return subList;
+    }
+
+    private static void normalizeDrawTextMargins(Spec spec) {
+        if (spec == null) return;
+        spec.marginLeft = normalizeDrawTextMargin(spec.marginLeft, spec.width);
+        spec.marginRight = normalizeDrawTextMargin(spec.marginRight, spec.width);
+        spec.marginTop = normalizeDrawTextMargin(spec.marginTop, spec.height);
+        spec.marginBottom = normalizeDrawTextMargin(spec.marginBottom, spec.height);
+        if (spec.width > 0 && spec.marginLeft + spec.marginRight >= spec.width) {
+            spec.marginLeft = 0;
+            spec.marginRight = 0;
+        }
+        if (spec.height > 0 && spec.marginTop + spec.marginBottom >= spec.height) {
+            spec.marginTop = 0;
+            spec.marginBottom = 0;
+        }
+    }
+
+    private static long normalizeDrawTextMargin(long margin, long extent) {
+        if (margin <= 0) return 0;
+        if (extent <= 0) return margin;
+        return margin >= extent ? 0 : margin;
     }
 
     private void addContent(SubList subList, Spec spec) {
