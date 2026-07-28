@@ -2542,12 +2542,18 @@ public class StoryLoader {
         return false;
     }
 
-    private static boolean paragraphAlreadyContainsInlineObject(ASTParagraph para, int domId) {
+    static boolean paragraphAlreadyContainsInlineObject(ASTParagraph para, int domId) {
         if (para == null || para.items() == null || domId <= 0) return false;
         for (ASTInlineItem item : para.items()) {
-            if (!(item instanceof ASTInlineObject)) continue;
-            Integer existing = sourceIdToDomId(((ASTInlineObject) item).sourceId());
-            if (existing != null && existing == domId) return true;
+            if (item instanceof ASTInlineObject) {
+                Integer existing = sourceIdToDomId(((ASTInlineObject) item).sourceId());
+                if (existing != null && existing == domId) return true;
+            } else if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
+                Integer existing =
+                        ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) item)
+                                .sourceObjectId();
+                if (existing != null && existing == domId) return true;
+            }
         }
         return false;
     }
@@ -3823,7 +3829,10 @@ public class StoryLoader {
             return false;
         }
         String text = run.content();
-        if (text == null || !text.trim().matches("[+\\-]?(?:\\d+(?:\\.\\d+)?|[A-Za-z])[+\\-*/=<>]+")) {
+        if (text == null || !text.trim().matches(
+                "[+\\-]?(?:\\d+(?:\\.\\d+)?|[A-Za-z])"
+                        + "(?:[+\\-*/=<>]+(?:\\d+(?:\\.\\d+)?|[A-Za-z]))?"
+                        + "[+\\-*/=<>]*")) {
             return false;
         }
         IDMLCharacterRun next = nextVisibleRunWithoutCrossingWhitespace(runs, idx + 1);

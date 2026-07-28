@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.math.MathPipeline;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
@@ -43,7 +44,9 @@ class MathProcessor {
     static void convertMathRunsInParagraph(ResolvedBuildContext ctx, ASTParagraph para) {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
-        splitEmbeddedSourceLineBreaks(items);
+        materializeItemReplacementPlans(
+                items, planEmbeddedSourceLineBreaks(items));
+        MathPipeline.materializeSourceSpans(para);
 
         // 화학식은 문자속성 첨자 텍스트가 아니라 ASTEquation("CHEM_FORMULA")으로
         // 변환한다. 원본 run의 font size/color는 collectFormulaEquationCluster 에서
@@ -59,27 +62,18 @@ class MathProcessor {
             }
         }
         if (hasEquation) {
-            repairCrossingFormulaDelimiters(para);
-            stitchGrepSplitFormulaEquations(para);
-            stitchTextSeparatedFormulaEquationFragments(para);
-            collapseMixedFormulaEquationClusters(ctx, para);
-            if (hasEHRun) {
-                // 수식과 EH TextRun이 공존하더라도 의미 있는 원문 텍스트는 보존한다.
-                // 제거 대상은 근호/분수선처럼 수식 구조를 그리던 장식 글리프뿐이다.
-                items.removeIf(it -> it instanceof ASTTextRun
-                        && isDiscardableEHStructureResidue((ASTTextRun) it));
-            }
-            convertSubscriptChemicalSegments(para);
-            reassembleFragmentedChemicalFormula(para);
-            stitchChemicalFormulaFragments(para);
-            reassembleFragmentedChemicalReaction(para);
-            demoteIsolatedSingleLetterMathEquation(para);
+            normalizeExistingEquationParagraph(ctx, para, hasEHRun);
             return;
         }
 
-        splitEHKoreanMixedTextRuns(items);
+        materializeItemReplacementPlans(
+                items, planEHKoreanMixedTextRuns(items));
+        materializePositionStylePlans(
+                items, planPositionStyles(items));
+        materializeTextColorPlans(
+                items, planFormulaBoundaryTextColors(items));
 
-        promoteEquationFontReactionRanges(ctx, items);
+        materializeFormulaRangePlans(items, planEquationFontReactionRanges(ctx, items));
 
         List<ASTInlineItem> newItems = new ArrayList<>();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
@@ -101,10 +95,6 @@ class MathProcessor {
             }
 
             ASTTextRun tr = (ASTTextRun) item;
-            // SPEC-080: 위첨자 밑수 가드용 앞 텍스트 런.
-            String prevPosText = (i > 0 && items.get(i - 1) instanceof ASTTextRun)
-                    ? ((ASTTextRun) items.get(i - 1)).text() : null;
-            applyPositionFromCharacterStyle(tr, prevPosText);
             String ff = tr.fontFamily();
             String currentType = mathTypeOf(tr);
 
@@ -166,7 +156,6 @@ class MathProcessor {
                 mathGroup.clear();
                 mathGroupSrc.clear();
                 mathType = null;
-                inheritFormulaBoundaryTextColor(items, i, tr);
                 newItems.add(item);
                 continue;
             }
@@ -250,19 +239,98 @@ class MathProcessor {
         }
         flushResolvedMathGroupWithBackfill(ctx, mathGroup, mathGroupSrc, mathType, newItems, para);
 
-        if (newItems.size() != items.size() || !newItems.equals(items)) {
-            items.clear();
-            items.addAll(newItems);
-        }
-        collapseMixedFormulaEquationClusters(ctx, para);
-        convertSubscriptChemicalSegments(para);
-        reassembleFragmentedChemicalFormula(para);
-        stitchChemicalFormulaFragments(para);
-        reassembleFragmentedChemicalReaction(para);
-        demoteIsolatedSingleLetterMathEquation(para);
+        materializeConvertedItemsPlan(
+                items, planConvertedItemsReplacement(items, newItems));
+        finalizeConvertedParagraph(ctx, para);
     }
 
-    private static void splitEmbeddedSourceLineBreaks(List<ASTInlineItem> items) {
+    static final class ConvertedItemsPlan {
+        final List<ASTInlineItem> convertedItems;
+        final String reason;
+
+        ConvertedItemsPlan(List<ASTInlineItem> convertedItems, String reason) {
+            this.convertedItems = new ArrayList<>(convertedItems);
+            this.reason = reason;
+        }
+    }
+
+    static ConvertedItemsPlan planConvertedItemsReplacement(
+            List<ASTInlineItem> sourceItems, List<ASTInlineItem> convertedItems) {
+        if (sourceItems == null || convertedItems == null
+                || (sourceItems.size() == convertedItems.size()
+                && sourceItems.equals(convertedItems))) {
+            return null;
+        }
+        return new ConvertedItemsPlan(
+                convertedItems, "MATH_RUN_CONVERSION_RESULT");
+    }
+
+    static void materializeConvertedItemsPlan(
+            List<ASTInlineItem> items, ConvertedItemsPlan plan) {
+        if (items == null || plan == null) return;
+        items.clear();
+        items.addAll(plan.convertedItems);
+    }
+
+    /**
+     * 이미 ASTEquation이 포함된 IDML 경로의 순서형 계획/실행 배치.
+     *
+     * <p>각 계획은 직전 단계가 materialize된 새 AST 스냅샷을 대상으로 생성한다.
+     * 이 순서를 한 번에 계획하면 앞 단계의 병합으로 뒤 단계 인덱스가 무효화된다.</p>
+     */
+    private static void normalizeExistingEquationParagraph(
+            ResolvedBuildContext ctx, ASTParagraph para, boolean hasEHRun) {
+        List<ASTInlineItem> items = para.items();
+        materializeEquationStitchPlans(items, planCrossingDelimiterRepairs(items));
+        materializeEquationStitchPlans(items, planGrepSplitFormulaEquations(items));
+        materializeEquationStitchPlans(
+                items, planTextSeparatedFormulaEquationFragments(items));
+        collapseMixedFormulaEquationClusters(ctx, para);
+        if (hasEHRun) {
+            // 수식과 EH TextRun이 공존하더라도 의미 있는 원문 텍스트는 보존한다.
+            // 제거 대상은 근호/분수선처럼 수식 구조를 그리던 장식 글리프뿐이다.
+            materializeItemReplacementPlans(
+                    items, planDiscardableEHStructureResidues(items));
+        }
+        finalizeConvertedParagraphAfterClusterCollapse(para);
+    }
+
+    /**
+     * 새로 변환된 수식 단락의 공통 후처리 배치.
+     */
+    private static void finalizeConvertedParagraph(
+            ResolvedBuildContext ctx, ASTParagraph para) {
+        collapseMixedFormulaEquationClusters(ctx, para);
+        finalizeConvertedParagraphAfterClusterCollapse(para);
+    }
+
+    private static void finalizeConvertedParagraphAfterClusterCollapse(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        materializeSubscriptChemicalPlans(items, planSubscriptChemicalSegments(items));
+        materializeFormulaRangePlans(items, planFragmentedChemicalFormulas(items));
+        materializeChemicalStitchPlans(items, planChemicalFormulaStitches(items));
+        materializeFormulaRangePlans(items, planFragmentedChemicalReactions(items));
+        MathPipeline.finalizeParagraph(
+                para, MathPipeline.SpanPolicy.CONVERTED_ITEMS);
+    }
+
+    static final class ItemReplacementPlan {
+        final int itemIndex;
+        final List<ASTInlineItem> replacements;
+        final String reason;
+
+        ItemReplacementPlan(
+                int itemIndex, List<ASTInlineItem> replacements, String reason) {
+            this.itemIndex = itemIndex;
+            this.replacements = new ArrayList<>(replacements);
+            this.reason = reason;
+        }
+    }
+
+    static List<ItemReplacementPlan> planEmbeddedSourceLineBreaks(
+            List<ASTInlineItem> items) {
+        List<ItemReplacementPlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
         for (int i = 0; i < items.size(); i++) {
             if (!(items.get(i) instanceof ASTTextRun)) continue;
             ASTTextRun run = (ASTTextRun) items.get(i);
@@ -283,10 +351,37 @@ class MathProcessor {
                 }
                 start = p + 1;
             }
-            items.remove(i);
-            items.addAll(i, replacement);
-            i += replacement.size() - 1;
+            plans.add(new ItemReplacementPlan(
+                    i, replacement, "EMBEDDED_SOURCE_LINE_BREAK"));
         }
+        return plans;
+    }
+
+    static void materializeItemReplacementPlans(
+            List<ASTInlineItem> items, List<ItemReplacementPlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (int i = plans.size() - 1; i >= 0; i--) {
+            ItemReplacementPlan plan = plans.get(i);
+            if (plan.itemIndex < 0 || plan.itemIndex >= items.size()) continue;
+            items.remove(plan.itemIndex);
+            items.addAll(plan.itemIndex, plan.replacements);
+        }
+    }
+
+    static List<ItemReplacementPlan> planDiscardableEHStructureResidues(
+            List<ASTInlineItem> items) {
+        List<ItemReplacementPlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (item instanceof ASTTextRun
+                    && isDiscardableEHStructureResidue((ASTTextRun) item)) {
+                plans.add(new ItemReplacementPlan(
+                        i, new ArrayList<ASTInlineItem>(),
+                        "DISCARDABLE_EH_STRUCTURE_RESIDUE"));
+            }
+        }
+        return plans;
     }
 
     private static boolean isDiscardableEHStructureResidue(ASTTextRun run) {
@@ -310,7 +405,10 @@ class MathProcessor {
      * 라틴 머리(radicand)는 EH 수식으로 남기고, 첫 한국어부터는 EH 폰트를 지운
      * 일반 텍스트 런으로 분리한다.
      */
-    private static void splitEHKoreanMixedTextRuns(List<ASTInlineItem> items) {
+    static List<ItemReplacementPlan> planEHKoreanMixedTextRuns(
+            List<ASTInlineItem> items) {
+        List<ItemReplacementPlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
         for (int i = 0; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) continue;
@@ -321,21 +419,29 @@ class MathProcessor {
             if (text == null) continue;
             int k = firstKoreanIndex(text);
             if (k < 0) continue;
+            List<ASTInlineItem> replacements = new ArrayList<>();
             if (k == 0) {
-                tr.fontFamily(null);
-                tr.fontStyle(null);
+                ASTTextRun plain = tr.copyWithText(text);
+                plain.fontFamily(null);
+                plain.fontStyle(null);
+                replacements.add(plain);
+                plans.add(new ItemReplacementPlan(
+                        i, replacements, "EH_KOREAN_TEXT_RUN"));
                 continue;
             }
+            ASTTextRun head = tr.copyWithText(text.substring(0, k));
             ASTTextRun tail = new ASTTextRun();
             tail.text(text.substring(k));
             tail.fontSizeHwpunits(tr.fontSizeHwpunits());
             tail.textColor(tr.textColor());
             tail.shadeColor(tr.shadeColor());
             tail.letterSpacing(tr.letterSpacing());
-            tr.text(text.substring(0, k));
-            items.add(i + 1, tail);
-            i++; // tail 은 EH 폰트가 없으므로 재검사 불필요
+            replacements.add(head);
+            replacements.add(tail);
+            plans.add(new ItemReplacementPlan(
+                    i, replacements, "EH_KOREAN_MIXED_TEXT_RUN"));
         }
+        return plans;
     }
 
     private static int firstKoreanIndex(String text) {
@@ -359,23 +465,32 @@ class MathProcessor {
      * ASTEquation 들을 짝이 맞을 때까지 스크립트를 이어 붙여 하나로 합친다. 조각 각각은
      * 불균형이지만 합치면 균형이 복구된다. 균형이 이미 맞는 정상 수식은 건드리지 않는다.</p>
      */
-    private static void stitchGrepSplitFormulaEquations(ASTParagraph para) {
-        List<ASTInlineItem> items = para.items();
-        if (items == null || items.size() < 2) return;
+    static final class EquationStitchPlan {
+        final int startInclusive;
+        final int endExclusive;
+        final String mergedScript;
+        final String reason;
 
-        List<ASTInlineItem> out = new ArrayList<>();
-        boolean changed = false;
+        EquationStitchPlan(int startInclusive, int endExclusive, String mergedScript, String reason) {
+            this.startInclusive = startInclusive;
+            this.endExclusive = endExclusive;
+            this.mergedScript = mergedScript;
+            this.reason = reason;
+        }
+    }
+
+    static List<EquationStitchPlan> planGrepSplitFormulaEquations(List<ASTInlineItem> items) {
+        List<EquationStitchPlan> plans = new ArrayList<>();
+        if (items == null || items.size() < 2) return plans;
         int i = 0;
         while (i < items.size()) {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTEquation)) {
-                out.add(item);
                 i++;
                 continue;
             }
             ASTEquation lead = (ASTEquation) item;
             if ("CHEM_FORMULA".equals(lead.sourceType()) || lead.hwpScript() == null || lead.hwpScript().isEmpty()) {
-                out.add(item);
                 i++;
                 continue;
             }
@@ -383,11 +498,10 @@ class MathProcessor {
             // 떨어져 나가면 근호를 "sqrt{ }"(빈 radicand)로 남긴다. 바로 뒤(공백만 사이)
             // 조각이 그 radicand 이므로 빈 중괄호 안에 주입한다.
             // 예: "sqrt{25} TIMES sqrt{ }" + "(-7)^{2}" → "sqrt{25} TIMES sqrt{(-7)^{2}}".
-            int emptyRadEnd = tryStitchEmptyRadicand(lead, items, i);
-            if (emptyRadEnd > i) {
-                out.add(lead);
-                i = emptyRadEnd;
-                changed = true;
+            EquationStitchPlan emptyRadicand = planEmptyRadicandStitch(lead, items, i);
+            if (emptyRadicand != null) {
+                plans.add(emptyRadicand);
+                i = emptyRadicand.endExclusive;
                 continue;
             }
             // GREP 이 한 수식을 스타일 경계로 쪼개면 선두 조각의 괄호/중괄호 짝이
@@ -399,7 +513,6 @@ class MathProcessor {
             // 복구는 조각이 명백히 미완결이라는 확실한 증거라서 안전하다.
             StringBuilder merged = new StringBuilder(lead.hwpScript());
             if (isBraceBalanced(merged.toString()) && isParenBalanced(merged.toString())) {
-                out.add(item);
                 i++;
                 continue;
             }
@@ -428,18 +541,35 @@ class MathProcessor {
                 // 이미 빌드된 수식 스크립트끼리 이어 붙인 것이므로 normalizeFormulaScript 를
                 // 다시 돌리면 안 된다 — RIGHT→rarrow 치환이 소괄호 키워드 "right)" 를 화살표로
                 // 깨뜨린다. 중복 공백만 정리한다.
-                lead.hwpScript(mergedScript.replaceAll("\\s+", " ").trim());
-                out.add(lead);
+                plans.add(new EquationStitchPlan(
+                        i,
+                        consumedEnd,
+                        mergedScript.replaceAll("\\s+", " ").trim(),
+                        "grep-split-unbalanced-delimiters"));
                 i = consumedEnd;   // 흡수한 조각·중간 공백을 모두 건너뛴다
-                changed = true;
             } else {
-                out.add(item);
                 i++;
             }
         }
-        if (changed) {
-            items.clear();
-            items.addAll(out);
+        return plans;
+    }
+
+    static void materializeEquationStitchPlans(
+            List<ASTInlineItem> items, List<EquationStitchPlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (int i = plans.size() - 1; i >= 0; i--) {
+            EquationStitchPlan plan = plans.get(i);
+            if (plan.startInclusive < 0
+                    || plan.endExclusive > items.size()
+                    || plan.startInclusive >= plan.endExclusive
+                    || !(items.get(plan.startInclusive) instanceof ASTEquation)) {
+                continue;
+            }
+            ASTEquation lead = (ASTEquation) items.get(plan.startInclusive);
+            lead.hwpScript(plan.mergedScript);
+            for (int k = plan.endExclusive - 1; k > plan.startInclusive; k--) {
+                items.remove(k);
+            }
         }
     }
 
@@ -452,12 +582,13 @@ class MathProcessor {
      * (키 큰 hook + radicand 소실), 그 radicand 는 다음 ASTEquation 으로 떨어져 나가
      * 있다. 빈 근호는 괄호 짝이 맞아 balance-stitch 가 못 잡으므로 별도 처리한다.</p>
      */
-    private static int tryStitchEmptyRadicand(ASTEquation lead, List<ASTInlineItem> items, int start) {
+    private static EquationStitchPlan planEmptyRadicandStitch(
+            ASTEquation lead, List<ASTInlineItem> items, int start) {
         String script = lead.hwpScript();
-        if (script == null) return start;
+        if (script == null) return null;
         // 끝이 빈 근호인지: "sqrt{ }" 또는 "sqrt{}" (뒤 공백 허용)
         java.util.regex.Matcher m = EMPTY_RADICAND_TAIL.matcher(script);
-        if (!m.find()) return start;
+        if (!m.find()) return null;
         int braceOpen = m.start(1);   // '{' 위치
         // 뒤따르는 첫 수식 조각(공백 런만 건너뜀)을 radicand 로 삼는다.
         int j = start + 1;
@@ -466,19 +597,22 @@ class MathProcessor {
             if (nxt instanceof ASTTextRun && isWhitespaceOnlyRun((ASTTextRun) nxt)) { j++; continue; }
             break;
         }
-        if (j >= items.size() || !(items.get(j) instanceof ASTEquation)) return start;
+        if (j >= items.size() || !(items.get(j) instanceof ASTEquation)) return null;
         ASTEquation rad = (ASTEquation) items.get(j);
         if ("CHEM_FORMULA".equals(rad.sourceType()) || rad.hwpScript() == null || rad.hwpScript().isEmpty()) {
-            return start;
+            return null;
         }
         String radScript = rad.hwpScript().trim();
         // radicand 조각 자체는 괄호·중괄호 짝이 맞아야 안전하게 주입 가능
         // (예: "(-7)^{2}"). 안 맞으면 다른 조각화이므로 balance-stitch 에 맡긴다.
-        if (!isBraceBalanced(radScript) || !isParenBalanced(radScript)) return start;
+        if (!isBraceBalanced(radScript) || !isParenBalanced(radScript)) return null;
         // "sqrt{ " + radicand + "}" — 빈 중괄호 사이에 주입
         String injected = script.substring(0, braceOpen + 1) + radScript + "}";
-        lead.hwpScript(injected.replaceAll("\\s+", " ").trim());
-        return j + 1;
+        return new EquationStitchPlan(
+                start,
+                j + 1,
+                injected.replaceAll("\\s+", " ").trim(),
+                "empty-radicand-followed-by-balanced-equation");
     }
 
     /** 스크립트 끝의 빈 근호 "sqrt{ }" / "sqrt{}" 를 잡는다. 그룹1은 '{'. */
@@ -495,18 +629,15 @@ class MathProcessor {
      * {@code overline{AB}=overline{CD}} 계열은 기준선에서도 별개 조각일 수 있어 여기서
      * 병합하지 않는다.</p>
      */
-    private static void stitchTextSeparatedFormulaEquationFragments(ASTParagraph para) {
-        List<ASTInlineItem> items = para.items();
-        if (items == null || items.size() < 3) return;
-
-        List<ASTInlineItem> out = new ArrayList<>();
-        boolean changed = false;
+    static List<EquationStitchPlan> planTextSeparatedFormulaEquationFragments(
+            List<ASTInlineItem> items) {
+        List<EquationStitchPlan> plans = new ArrayList<>();
+        if (items == null || items.size() < 3) return plans;
         int i = 0;
         while (i < items.size()) {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTEquation)
                     || !isTextSeparatedStitchableEquation((ASTEquation) item)) {
-                out.add(item);
                 i++;
                 continue;
             }
@@ -568,20 +699,17 @@ class MathProcessor {
             }
 
             if (consumedEquation && consumedAny) {
-                lead.hwpScript(normalizeTextSeparatedFormulaScript(merged.toString()));
-                out.add(lead);
+                plans.add(new EquationStitchPlan(
+                        i,
+                        j,
+                        normalizeTextSeparatedFormulaScript(merged.toString()),
+                        "text-connector-between-stitchable-equations"));
                 i = j;
-                changed = true;
             } else {
-                out.add(item);
                 i++;
             }
         }
-
-        if (changed) {
-            items.clear();
-            items.addAll(out);
-        }
+        return plans;
     }
 
     private static boolean isTextSeparatedStitchableEquation(ASTEquation eq) {
@@ -676,47 +804,104 @@ class MathProcessor {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
 
-        splitBoundaryWrappedFormulaEquations(items);
+        materializeBoundarySplitPlans(items, planBoundaryWrappedFormulaEquations(items));
+        materializeClusterCollapsePlans(items, planMixedFormulaEquationClusters(ctx, items));
+    }
 
-        List<ASTInlineItem> out = new ArrayList<>();
-        boolean changed = false;
+    static final class ClusterCollapsePlan {
+        final int startInclusive;
+        final int endExclusive;
+        final ASTEquation equation;
+        final String reason;
+
+        ClusterCollapsePlan(
+                int startInclusive, int endExclusive, ASTEquation equation, String reason) {
+            this.startInclusive = startInclusive;
+            this.endExclusive = endExclusive;
+            this.equation = equation;
+            this.reason = reason;
+        }
+    }
+
+    static List<ClusterCollapsePlan> planMixedFormulaEquationClusters(
+            ResolvedBuildContext ctx, List<ASTInlineItem> items) {
+        List<ClusterCollapsePlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
         for (int i = 0; i < items.size(); i++) {
             int duplicatePrefixEnd = duplicatePlaceholderPrefixBeforeBoxEquation(ctx, items, i);
             if (duplicatePrefixEnd > i) {
-                out.add(items.get(duplicatePrefixEnd));
+                plans.add(new ClusterCollapsePlan(
+                        i,
+                        duplicatePrefixEnd + 1,
+                        (ASTEquation) items.get(duplicatePrefixEnd),
+                        "duplicate-placeholder-prefix-already-owned-by-equation"));
                 i = duplicatePrefixEnd;
-                changed = true;
                 continue;
             }
             FormulaCluster cluster = collectMixedFormulaEquationCluster(ctx, items, i);
             if (cluster != null) {
-                removeTrailingFormulaPlaceholdersAlreadyInEquation(ctx, out, cluster.equation);
-                out.add(cluster.equation);
+                int planStart = i;
+                int remainingBoxes = countFormulaBoxes(cluster.equation.hwpScript());
+                while (remainingBoxes > 0
+                        && planStart > 0
+                        && items.get(planStart - 1) instanceof ASTInlineObject
+                        && isFormulaAnswerPlaceholder(
+                        ctx, (ASTInlineObject) items.get(planStart - 1))) {
+                    planStart--;
+                    remainingBoxes--;
+                }
+                plans.add(new ClusterCollapsePlan(
+                        planStart,
+                        cluster.endExclusive,
+                        cluster.equation,
+                        "mixed-formula-text-equation-placeholder-cluster"));
                 i = cluster.endExclusive - 1;
-                changed = true;
-            } else {
-                out.add(items.get(i));
             }
         }
-        if (changed) {
-            items.clear();
-            items.addAll(out);
+        return plans;
+    }
+
+    static void materializeClusterCollapsePlans(
+            List<ASTInlineItem> items, List<ClusterCollapsePlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (int p = plans.size() - 1; p >= 0; p--) {
+            ClusterCollapsePlan plan = plans.get(p);
+            if (plan.startInclusive < 0
+                    || plan.endExclusive > items.size()
+                    || plan.startInclusive >= plan.endExclusive) {
+                continue;
+            }
+            for (int i = plan.endExclusive - 1; i >= plan.startInclusive; i--) {
+                items.remove(i);
+            }
+            items.add(plan.startInclusive, plan.equation);
         }
     }
 
-    private static void splitBoundaryWrappedFormulaEquations(List<ASTInlineItem> items) {
-        if (items == null || items.isEmpty()) return;
-        List<ASTInlineItem> out = new ArrayList<>();
-        boolean changed = false;
-        for (ASTInlineItem item : items) {
+    static final class BoundarySplitPlan {
+        final int itemIndex;
+        final List<ASTInlineItem> replacements;
+        final String reason;
+
+        BoundarySplitPlan(int itemIndex, List<ASTInlineItem> replacements, String reason) {
+            this.itemIndex = itemIndex;
+            this.replacements = new ArrayList<>(replacements);
+            this.reason = reason;
+        }
+    }
+
+    static List<BoundarySplitPlan> planBoundaryWrappedFormulaEquations(
+            List<ASTInlineItem> items) {
+        List<BoundarySplitPlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
+        for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+            ASTInlineItem item = items.get(itemIndex);
             if (!(item instanceof ASTEquation)) {
-                out.add(item);
                 continue;
             }
             ASTEquation eq = (ASTEquation) item;
             String script = normalizeExistingFormulaEquationScript(eq.hwpScript());
             if (script == null || script.isEmpty()) {
-                out.add(item);
                 continue;
             }
             int start = 0;
@@ -724,42 +909,50 @@ class MathProcessor {
             int end = script.length();
             while (end > start && isEquationBoundaryChar(script.charAt(end - 1))) end--;
             if (start == 0 && end == script.length()) {
-                out.add(item);
                 continue;
             }
             String core = script.substring(start, end);
             if (core.isEmpty() || !isFormulaEquationScript(core)) {
-                out.add(item);
                 continue;
             }
             // sqrt{...}·분수 {A} over {B} 의 구문 중괄호를 경계로 오인해 벗기면 짝이 깨져
             // 닫는 }가 리터럴 텍스트로 새고 수식이 열린 채 렌더된다(실측: 수학 1단원 근호
             // 선택지 -sqrt{121} → -sqrt{121 + "}"). core 의 { } 균형이 맞을 때만 벗긴다.
             if (!isBraceBalanced(core)) {
-                out.add(item);
                 continue;
             }
             // 소괄호도 마찬가지 — (-16)×…÷(-6/7) 의 바깥 ( ) 나 left( … right) 의 소괄호를
             // 경계로 벗기면 짝이 깨져 닫는 )·right 가 리터럴로 새거나 left( 가 미완결된다
             // (실측: 1단원 p30 "(-16)×3/4÷(-6/7)" → "-16)…right"). ( ) 균형이 맞을 때만 벗긴다.
             if (!isParenBalanced(core)) {
-                out.add(item);
                 continue;
             }
+            List<ASTInlineItem> replacements = new ArrayList<>();
             if (start > 0) {
-                out.add(textRunFromEquationBoundary(eq, script.substring(0, start)));
+                replacements.add(textRunFromEquationBoundary(eq, script.substring(0, start)));
             }
             ASTEquation coreEq = new ASTEquation(core, eq.sourceType());
             copyEquationHints(eq, coreEq);
-            out.add(coreEq);
+            replacements.add(coreEq);
             if (end < script.length()) {
-                out.add(textRunFromEquationBoundary(eq, script.substring(end)));
+                replacements.add(textRunFromEquationBoundary(eq, script.substring(end)));
             }
-            changed = true;
+            plans.add(new BoundarySplitPlan(
+                    itemIndex,
+                    replacements,
+                    "formula-core-wrapped-by-text-boundary-characters"));
         }
-        if (changed) {
-            items.clear();
-            items.addAll(out);
+        return plans;
+    }
+
+    static void materializeBoundarySplitPlans(
+            List<ASTInlineItem> items, List<BoundarySplitPlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (int p = plans.size() - 1; p >= 0; p--) {
+            BoundarySplitPlan plan = plans.get(p);
+            if (plan.itemIndex < 0 || plan.itemIndex >= items.size()) continue;
+            items.remove(plan.itemIndex);
+            items.addAll(plan.itemIndex, plan.replacements);
         }
     }
 
@@ -809,6 +1002,7 @@ class MathProcessor {
         target.textColor(source.textColor());
         target.preferredBaseUnit(source.preferredBaseUnit());
         target.preferredFontFamily(source.preferredFontFamily());
+        target.sourceObjectId(source.sourceObjectId());
     }
 
     private static int duplicatePlaceholderPrefixBeforeBoxEquation(
@@ -829,23 +1023,6 @@ class MathProcessor {
         }
         ASTEquation equation = (ASTEquation) items.get(i);
         return countFormulaBoxes(equation.hwpScript()) >= placeholders ? i : -1;
-    }
-
-    private static void removeTrailingFormulaPlaceholdersAlreadyInEquation(
-            ResolvedBuildContext ctx,
-            List<ASTInlineItem> out,
-            ASTEquation equation) {
-        if (ctx == null || out == null || out.isEmpty() || equation == null) return;
-        int remainingBoxes = countFormulaBoxes(equation.hwpScript());
-        while (remainingBoxes > 0 && !out.isEmpty()) {
-            ASTInlineItem last = out.get(out.size() - 1);
-            if (!(last instanceof ASTInlineObject)
-                    || !isFormulaAnswerPlaceholder(ctx, (ASTInlineObject) last)) {
-                return;
-            }
-            out.remove(out.size() - 1);
-            remainingBoxes--;
-        }
     }
 
     private static int countFormulaBoxes(String script) {
@@ -883,11 +1060,11 @@ class MathProcessor {
         for (int i = start; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
             if (item instanceof ASTTextRun) {
-                ASTTextRun tr = (ASTTextRun) item;
+                ASTTextRun sourceRun = (ASTTextRun) item;
                 // SPEC-080: 위첨자 밑수 가드용 앞 텍스트 런.
                 String prevText = (i > 0 && items.get(i - 1) instanceof ASTTextRun)
                         ? ((ASTTextRun) items.get(i - 1)).text() : null;
-                applyPositionFromCharacterStyle(tr, prevText);
+                ASTTextRun tr = positionedPlanningView(sourceRun, prevText);
                 String text = tr.text();
                 if (text == null || text.isEmpty() || !isFormulaClusterText(text)) break;
                 if (isFormulaBoundaryText(text)) {
@@ -1035,13 +1212,47 @@ class MathProcessor {
         return clusterColor;
     }
 
-    private static void inheritFormulaBoundaryTextColor(List<ASTInlineItem> items, int index, ASTTextRun boundaryRun) {
-        if (boundaryRun == null) return;
-        String color = boundaryRun.textColor();
-        if (color != null && !color.isEmpty() && !isDefaultBlack(color)) return;
-        String inherited = nearbyBodyTextColor(items, index, index + 1);
-        if (inherited != null && !inherited.isEmpty()) {
-            boundaryRun.textColor(inherited);
+    static final class TextColorPlan {
+        final int itemIndex;
+        final String color;
+        final String reason;
+
+        TextColorPlan(int itemIndex, String color, String reason) {
+            this.itemIndex = itemIndex;
+            this.color = color;
+            this.reason = reason;
+        }
+    }
+
+    static List<TextColorPlan> planFormulaBoundaryTextColors(
+            List<ASTInlineItem> items) {
+        List<TextColorPlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun boundaryRun = (ASTTextRun) item;
+            if (!isFormulaBoundaryText(boundaryRun.text())) continue;
+            String color = boundaryRun.textColor();
+            if (color != null && !color.isEmpty() && !isDefaultBlack(color)) continue;
+            String inherited = nearbyBodyTextColor(items, i, i + 1);
+            if (inherited != null && !inherited.isEmpty()) {
+                plans.add(new TextColorPlan(
+                        i, inherited, "FORMULA_BOUNDARY_NEARBY_BODY_COLOR"));
+            }
+        }
+        return plans;
+    }
+
+    static void materializeTextColorPlans(
+            List<ASTInlineItem> items, List<TextColorPlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (TextColorPlan plan : plans) {
+            if (plan.itemIndex < 0 || plan.itemIndex >= items.size()
+                    || !(items.get(plan.itemIndex) instanceof ASTTextRun)) {
+                continue;
+            }
+            ((ASTTextRun) items.get(plan.itemIndex)).textColor(plan.color);
         }
     }
 
@@ -1164,13 +1375,24 @@ class MathProcessor {
         return out.toString();
     }
 
-    private static void repairCrossingFormulaDelimiters(ASTParagraph para) {
-        if (para == null || para.items() == null) return;
-        for (ASTInlineItem item : para.items()) {
+    static List<EquationStitchPlan> planCrossingDelimiterRepairs(
+            List<ASTInlineItem> items) {
+        List<EquationStitchPlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTEquation)) continue;
             ASTEquation equation = (ASTEquation) item;
-            equation.hwpScript(repairCrossingFormulaDelimiters(equation.hwpScript()));
+            String original = equation.hwpScript();
+            String repaired = repairCrossingFormulaDelimiters(original);
+            if (original == null ? repaired == null : original.equals(repaired)) continue;
+            plans.add(new EquationStitchPlan(
+                    i,
+                    i + 1,
+                    repaired,
+                    "crossing-formula-delimiter-order"));
         }
+        return plans;
     }
 
     private static boolean needsFormulaSpaceBefore(StringBuilder script, String next) {
@@ -1546,8 +1768,31 @@ class MathProcessor {
      * 기존 클러스터+좌변 흡수 경로(SPEC-059)가 그대로 처리한다. 화살표 없는 토큰별
      * TF(p16-17 "2H2"/"+O2" 개별 프레임)도 자연 배제된다.</p>
      */
-    private static void promoteEquationFontReactionRanges(ResolvedBuildContext ctx, List<ASTInlineItem> items) {
-        if (items == null || items.size() < 3) return;
+    static final class FormulaRangePlan {
+        final int startInclusive;
+        final int endExclusive;
+        final ASTEquation equation;
+        final String reason;
+
+        FormulaRangePlan(
+                int startInclusive,
+                int endExclusive,
+                ASTEquation equation,
+                String reason) {
+            this.startInclusive = startInclusive;
+            this.endExclusive = endExclusive;
+            this.equation = equation;
+            this.reason = reason;
+        }
+    }
+
+    /**
+     * 수식 전용 폰트 반응식의 source 범위를 판정하되 AST를 변경하지 않는다.
+     */
+    static List<FormulaRangePlan> planEquationFontReactionRanges(
+            ResolvedBuildContext ctx, List<ASTInlineItem> items) {
+        List<FormulaRangePlan> plans = new ArrayList<>();
+        if (items == null || items.size() < 3) return plans;
         for (int start = 0; start < items.size(); start++) {
             if (!(items.get(start) instanceof ASTTextRun)) continue;
 
@@ -1564,8 +1809,7 @@ class MathProcessor {
                 }
                 if (!(item instanceof ASTTextRun)) break;
 
-                ASTTextRun tr = (ASTTextRun) item;
-                applyPositionFromCharacterStyle(tr);
+                ASTTextRun tr = positionedPlanningView((ASTTextRun) item);
                 String text = tr.text();
                 if (text == null || text.isEmpty()) break;
                 if (isWhitespaceOnlyRun(tr)) {
@@ -1628,7 +1872,7 @@ class MathProcessor {
                     previousVisible = '\u25A1';
                     continue;
                 }
-                ASTTextRun tr = (ASTTextRun) item;
+                ASTTextRun tr = positionedPlanningView((ASTTextRun) item);
                 String text = tr.text();
                 if (text == null || isWhitespaceOnlyRun(tr)) continue;
                 ScriptAppendResult result = appendFormulaScript(script, text, tr, previousVisible);
@@ -1656,16 +1900,51 @@ class MathProcessor {
                 continue;
             }
 
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
-                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(hwpScript, "CHEM_FORMULA");
+            ASTEquation eq = new ASTEquation(hwpScript, "CHEM_FORMULA");
             color = resolvedFormulaTextColor(items, s, e, color);
             if (color != null) eq.textColor(color);
             applyBodyTextEquationHints(eq, preferredBaseUnit, preferredFontFamily);
-            for (int k = e - 1; k >= s; k--) {
+            plans.add(new FormulaRangePlan(
+                    s,
+                    e,
+                    eq,
+                    "equation-font-reaction-with-arrow-and-bilateral-font-evidence"));
+            start = Math.max(start, end - 1);
+        }
+        return plans;
+    }
+
+    private static ASTTextRun positionedPlanningView(ASTTextRun source) {
+        return positionedPlanningView(source, null);
+    }
+
+    private static ASTTextRun positionedPlanningView(ASTTextRun source, String previousText) {
+        ASTTextRun copy = source.copyWithText(source.text());
+        PositionStylePlan plan = planPositionStyle(copy, previousText, 0);
+        if (plan != null) {
+            copy.superscript(plan.superscript);
+            copy.subscript(plan.subscript);
+        }
+        return copy;
+    }
+
+    /**
+     * 확정된 반응식 범위 계획만 역순으로 실행한다.
+     */
+    static void materializeFormulaRangePlans(
+            List<ASTInlineItem> items, List<FormulaRangePlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (int i = plans.size() - 1; i >= 0; i--) {
+            FormulaRangePlan plan = plans.get(i);
+            if (plan.startInclusive < 0
+                    || plan.endExclusive > items.size()
+                    || plan.startInclusive >= plan.endExclusive) {
+                continue;
+            }
+            for (int k = plan.endExclusive - 1; k >= plan.startInclusive; k--) {
                 items.remove(k);
             }
-            items.add(s, eq);
-            start = s;
+            items.add(plan.startInclusive, plan.equation);
         }
     }
 
@@ -1786,7 +2065,6 @@ class MathProcessor {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) break;
             ASTTextRun tr = (ASTTextRun) item;
-            applyPositionFromCharacterStyle(tr);
             String text = tr.text();
             if (text == null || text.isEmpty()) break;
             if (!isFormulaClusterText(text)) break;
@@ -1910,7 +2188,6 @@ class MathProcessor {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) break;
             ASTTextRun tr = (ASTTextRun) item;
-            applyPositionFromCharacterStyle(tr);
             String t = tr.text();
             if (t == null || t.isEmpty()) break;
             if (!isFormulaClusterText(t)) break;
@@ -2235,9 +2512,40 @@ class MathProcessor {
      *   <li>수식 폰트(BT/EH/NP) 런은 기존 수식 파이프라인 소관 — 건드리지 않음</li>
      * </ul>
      */
-    static void convertSubscriptChemicalSegments(ASTParagraph para) {
-        List<ASTInlineItem> items = para.items();
-        if (items == null || items.size() < 2) return;
+    static final class SubscriptChemicalPlan {
+        final int baseIndex;
+        final int absorbedEndInclusive;
+        final int tailPartialIndex;
+        final String baseRemainder;
+        final String tailPartialRemainder;
+        final ASTEquation equation;
+        final ASTTextRun trailingWhitespace;
+        final String reason;
+
+        SubscriptChemicalPlan(
+                int baseIndex,
+                int absorbedEndInclusive,
+                int tailPartialIndex,
+                String baseRemainder,
+                String tailPartialRemainder,
+                ASTEquation equation,
+                ASTTextRun trailingWhitespace,
+                String reason) {
+            this.baseIndex = baseIndex;
+            this.absorbedEndInclusive = absorbedEndInclusive;
+            this.tailPartialIndex = tailPartialIndex;
+            this.baseRemainder = baseRemainder;
+            this.tailPartialRemainder = tailPartialRemainder;
+            this.equation = equation;
+            this.trailingWhitespace = trailingWhitespace;
+            this.reason = reason;
+        }
+    }
+
+    static List<SubscriptChemicalPlan> planSubscriptChemicalSegments(
+            List<ASTInlineItem> items) {
+        List<SubscriptChemicalPlan> plans = new ArrayList<>();
+        if (items == null || items.size() < 2) return plans;
         for (int i = 1; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) continue;
@@ -2350,27 +2658,63 @@ class MathProcessor {
                 eq.textColor(base.textColor());
             }
 
-            // items 반영: [base(rest)] [EQ] [tailPartial(rest)] — 흡수분 제거.
-            if (tailPartialRun != null) tailPartialRun.text(tailPartialRest);
-            int removeTo = (tailPartialRun != null) ? end - 1 : end;
-            for (int k = removeTo; k >= baseIdx + 1; k--) items.remove(k);
-            int eqIdx;
-            if (rest.isEmpty()) {
-                items.set(baseIdx, eq);
-                eqIdx = baseIdx;
-            } else {
-                base.text(rest);
-                items.add(baseIdx + 1, eq);
-                eqIdx = baseIdx + 1;
-            }
+            ASTTextRun trailingWhitespace = null;
             if (!subTrailing.isEmpty()) {
-                ASTTextRun ws = base.copyWithText(subTrailing);
-                ws.subscript(false);
-                ws.superscript(false);
-                ws.droppedResolvedScriptPosition(null);
-                items.add(eqIdx + 1, ws);
+                trailingWhitespace = base.copyWithText(subTrailing);
+                trailingWhitespace.subscript(false);
+                trailingWhitespace.superscript(false);
+                trailingWhitespace.droppedResolvedScriptPosition(null);
             }
-            i = eqIdx;
+            plans.add(new SubscriptChemicalPlan(
+                    baseIdx,
+                    end,
+                    tailPartialRun == null ? -1 : items.indexOf(tailPartialRun),
+                    rest,
+                    tailPartialRest,
+                    eq,
+                    trailingWhitespace,
+                    "body-text-element-followed-by-subscript-evidence"));
+            i = end;
+        }
+        return plans;
+    }
+
+    static void materializeSubscriptChemicalPlans(
+            List<ASTInlineItem> items, List<SubscriptChemicalPlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (int p = plans.size() - 1; p >= 0; p--) {
+            SubscriptChemicalPlan plan = plans.get(p);
+            if (plan.baseIndex < 0
+                    || plan.baseIndex >= items.size()
+                    || !(items.get(plan.baseIndex) instanceof ASTTextRun)) {
+                continue;
+            }
+            ASTTextRun base = (ASTTextRun) items.get(plan.baseIndex);
+            if (plan.tailPartialIndex >= 0
+                    && plan.tailPartialIndex < items.size()
+                    && items.get(plan.tailPartialIndex) instanceof ASTTextRun) {
+                ((ASTTextRun) items.get(plan.tailPartialIndex))
+                        .text(plan.tailPartialRemainder);
+            }
+            int removeTo = plan.tailPartialIndex >= 0
+                    ? plan.absorbedEndInclusive - 1
+                    : plan.absorbedEndInclusive;
+            removeTo = Math.min(removeTo, items.size() - 1);
+            for (int index = removeTo; index >= plan.baseIndex + 1; index--) {
+                items.remove(index);
+            }
+            int equationIndex;
+            if (plan.baseRemainder.isEmpty()) {
+                items.set(plan.baseIndex, plan.equation);
+                equationIndex = plan.baseIndex;
+            } else {
+                base.text(plan.baseRemainder);
+                items.add(plan.baseIndex + 1, plan.equation);
+                equationIndex = plan.baseIndex + 1;
+            }
+            if (plan.trailingWhitespace != null) {
+                items.add(equationIndex + 1, plan.trailingWhitespace);
+            }
         }
     }
 
@@ -2498,9 +2842,36 @@ class MathProcessor {
      * 재추론한다. 흡수는 원소기호/화살표 근거가 있는 지점까지만 커밋한다
      * (화학식 뒤 무관한 숫자·괄호를 삼키지 않도록).
      */
-    static void stitchChemicalFormulaFragments(ASTParagraph para) {
-        List<ASTInlineItem> items = para.items();
-        if (items == null || items.isEmpty()) return;
+    static final class ChemicalStitchPlan {
+        final int equationIndex;
+        final int tailEndInclusive;
+        final List<Integer> precedingRemoveIndices;
+        final int partialTextIndex;
+        final String partialTextRemainder;
+        final String mergedScript;
+        final String reason;
+
+        ChemicalStitchPlan(
+                int equationIndex,
+                int tailEndInclusive,
+                List<Integer> precedingRemoveIndices,
+                int partialTextIndex,
+                String partialTextRemainder,
+                String mergedScript,
+                String reason) {
+            this.equationIndex = equationIndex;
+            this.tailEndInclusive = tailEndInclusive;
+            this.precedingRemoveIndices = new ArrayList<>(precedingRemoveIndices);
+            this.partialTextIndex = partialTextIndex;
+            this.partialTextRemainder = partialTextRemainder;
+            this.mergedScript = mergedScript;
+            this.reason = reason;
+        }
+    }
+
+    static List<ChemicalStitchPlan> planChemicalFormulaStitches(List<ASTInlineItem> items) {
+        List<ChemicalStitchPlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
         for (int i = 0; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
@@ -2618,19 +2989,46 @@ class MathProcessor {
                 continue;
             }
 
-            // 후행 제거를 먼저 (i 이후 인덱스는 선행 제거의 영향을 받지 않도록)
-            for (int t = 0; t < tailCount; t++) {
-                items.remove(i + 1);
+            plans.add(new ChemicalStitchPlan(
+                    i,
+                    commitEnd >= 0 ? commitEnd : i,
+                    prevRemoveIdx,
+                    prevPartialRun == null ? -1 : items.indexOf(prevPartialRun),
+                    prevPartialRest,
+                    rebuilt,
+                    "chemical-equation-with-adjacent-source-fragments"));
+            if (commitEnd > i) i = commitEnd;
+        }
+        return plans;
+    }
+
+    static void materializeChemicalStitchPlans(
+            List<ASTInlineItem> items, List<ChemicalStitchPlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (int p = plans.size() - 1; p >= 0; p--) {
+            ChemicalStitchPlan plan = plans.get(p);
+            if (plan.equationIndex < 0
+                    || plan.equationIndex >= items.size()
+                    || !(items.get(plan.equationIndex) instanceof ASTEquation)) {
+                continue;
             }
-            if (prevPartialRun != null && prevPartialRest != null) {
-                prevPartialRun.text(prevPartialRest);
+            ASTEquation equation = (ASTEquation) items.get(plan.equationIndex);
+            equation.hwpScript(plan.mergedScript);
+
+            int tailEnd = Math.min(plan.tailEndInclusive, items.size() - 1);
+            for (int index = tailEnd; index > plan.equationIndex; index--) {
+                items.remove(index);
             }
-            java.util.Collections.sort(prevRemoveIdx, java.util.Collections.reverseOrder());
-            for (int idx : prevRemoveIdx) {
-                items.remove(idx);
-                i--;
+            if (plan.partialTextIndex >= 0
+                    && plan.partialTextIndex < items.size()
+                    && items.get(plan.partialTextIndex) instanceof ASTTextRun) {
+                ((ASTTextRun) items.get(plan.partialTextIndex)).text(plan.partialTextRemainder);
             }
-            eq.hwpScript(rebuilt);
+            List<Integer> removals = new ArrayList<>(plan.precedingRemoveIndices);
+            java.util.Collections.sort(removals, java.util.Collections.reverseOrder());
+            for (int index : removals) {
+                if (index >= 0 && index < items.size()) items.remove(index);
+            }
         }
     }
 
@@ -2662,9 +3060,9 @@ class MathProcessor {
      * <p>과병합 방지: (1) 시퀀스는 단독원소 수식으로 시작, (2) 라틴 문자는 전부 원소기호,
      * (3) 알려진 원소 1개 이상, (4) 한글/비화학 텍스트를 만나면 즉시 종료.
      */
-    static void reassembleFragmentedChemicalFormula(ASTParagraph para) {
-        List<ASTInlineItem> items = para.items();
-        if (items == null || items.size() < 2) return;
+    static List<FormulaRangePlan> planFragmentedChemicalFormulas(List<ASTInlineItem> items) {
+        List<FormulaRangePlan> plans = new ArrayList<>();
+        if (items == null || items.size() < 2) return plans;
         for (int i = 0; i < items.size(); i++) {
             if (!isBareChemicalElementEquation(items.get(i))) continue;
             int end = i;
@@ -2698,15 +3096,18 @@ class MathProcessor {
                     || !ChemicalFormulaPolicy.lettersAreKnownElements(rawStr)) continue;
             String script = finalizeChemicalScript(rawStr);
             if (script == null || script.isEmpty()) continue;
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation merged =
-                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(script, "CHEM_FORMULA");
+            ASTEquation merged = new ASTEquation(script, "CHEM_FORMULA");
             if (color != null) merged.textColor(color);
             if (baseUnit != null) merged.preferredBaseUnit(baseUnit);
             if (font != null) merged.preferredFontFamily(font);
-            for (int k = end; k >= i; k--) items.remove(k);
-            items.add(i, merged);
-            // i 는 방금 삽입한 merged — 다음 반복에서 i+1 로 진행
+            plans.add(new FormulaRangePlan(
+                    i,
+                    end + 1,
+                    merged,
+                    "fragmented-bare-elements-and-numeric-subscripts"));
+            i = end;
         }
+        return plans;
     }
 
     private static boolean isBareChemicalElementEquation(ASTInlineItem it) {
@@ -2760,66 +3161,6 @@ class MathProcessor {
     }
 
     /**
-     * SPEC-078(audit-A): 고립된 단일 라틴 문자 수식을 이탤릭 텍스트로 강등한다.
-     *
-     * <p>GREP 규칙(단일 라틴 문자 매칭)이 문단의 모든 단일 라틴 문자에 수식(BT수식) charStyle 을
-     * 입히면(예 수식서체관련-태광 = BT수식H-편한글씨), 화학자 연표의 이름 이니셜
-     * (A 아보가드로·J 돌턴·L 게이뤼삭 등)까지 단일문자 수식이 된다. 주변에 수식 근거(인접
-     * 수식)가 없는 단독 단일 문자는 수식이 아니라 이탤릭 텍스트로 되돌린다.
-     */
-    static void demoteIsolatedSingleLetterMathEquation(ASTParagraph para) {
-        List<ASTInlineItem> items = para.items();
-        if (items == null || items.isEmpty()) return;
-        for (int i = 0; i < items.size(); i++) {
-            if (!(items.get(i) instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation)) continue;
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
-                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) items.get(i);
-            String letter = singleLatinLetterOfScript(eq.hwpScript());
-            if (letter == null) continue;
-            // SPEC-079: 이탤릭 소문자는 수학 변수(x·a·b·n)로 보고 고립돼도 강등 금지.
-            // 대문자는 이탤릭이어도 강등 유지 — 항목 기호(A. B. C. R.)·과학자 이니셜이
-            // 같은 GREP 이탤릭 스타일을 받아, 대문자까지 살리면 보기 번호가 수식이 된다.
-            if (eq.sourceItalic()
-                    && letter.length() == 1 && Character.isLowerCase(letter.charAt(0))) {
-                continue;
-            }
-            if (adjacentItemIsEquation(items, i, -1) || adjacentItemIsEquation(items, i, 1)) continue;
-            ASTTextRun tr = new ASTTextRun();
-            tr.text(letter);
-            tr.fontStyle("Italic");
-            if (eq.textColor() != null) tr.textColor(eq.textColor());
-            if (eq.preferredBaseUnit() != null) tr.fontSizeHwpunits(eq.preferredBaseUnit());
-            items.set(i, tr);
-        }
-    }
-
-    /** 스크립트가 (rm 접두사 제외) 단일 라틴 문자면 그 문자를, 아니면 null. */
-    private static String singleLatinLetterOfScript(String script) {
-        if (script == null) return null;
-        String s = script.trim();
-        if (s.startsWith("rm ")) s = s.substring(3).trim();
-        if (s.length() != 1) return null;
-        char c = s.charAt(0);
-        return ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) ? String.valueOf(c) : null;
-    }
-
-    /** idx 에서 dir(+1/-1) 방향으로 공백 텍스트런을 건너뛴 첫 비공백 항목이 수식인가. */
-    private static boolean adjacentItemIsEquation(List<ASTInlineItem> items, int idx, int dir) {
-        for (int j = idx + dir; j >= 0 && j < items.size(); j += dir) {
-            ASTInlineItem it = items.get(j);
-            if (it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) return true;
-            if (it instanceof ASTTextRun) {
-                String t = ((ASTTextRun) it).text();
-                if (t != null && !t.trim().isEmpty()) return false; // 비공백 텍스트 → 수식 근거 아님
-                // 공백 런은 건너뜀
-            } else {
-                return false;
-            }
-        }
-        return false;
-    }
-
-    /**
      * SPEC-078(B): 화살표 근거가 있는 반응식이 인접 조각(텍스트 좌변·별도 수식·orphan 첨자)으로
      * 갈라진 것을 하나의 반응식 수식으로 재조립한다.
      *
@@ -2831,9 +3172,9 @@ class MathProcessor {
      * 즉시 종료, (3) <b>화살표(rarrow/→) 근거가 있어야만</b> 병합(완성된 단일 반응식은 조각 1개라
      * 미대상), (4) 병합 결과가 화학식으로 유효해야 함.
      */
-    static void reassembleFragmentedChemicalReaction(ASTParagraph para) {
-        List<ASTInlineItem> items = para.items();
-        if (items == null || items.size() < 2) return;
+    static List<FormulaRangePlan> planFragmentedChemicalReactions(List<ASTInlineItem> items) {
+        List<FormulaRangePlan> plans = new ArrayList<>();
+        if (items == null || items.size() < 2) return plans;
         for (int i = 0; i < items.size(); i++) {
             if (reactionFragmentRaw(items.get(i)) == null) continue;
             int end = i;
@@ -2864,14 +3205,18 @@ class MathProcessor {
             if (!ChemicalFormulaPolicy.containsElementText(rawStr)) continue;
             String script = finalizeChemicalScript(rawStr);
             if (script == null || script.isEmpty()) continue;
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation merged =
-                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(script, "CHEM_FORMULA");
+            ASTEquation merged = new ASTEquation(script, "CHEM_FORMULA");
             if (color != null) merged.textColor(color);
             if (size != null) merged.preferredBaseUnit(size);
             if (font != null) merged.preferredFontFamily(font);
-            for (int k = end; k >= i; k--) items.remove(k);
-            items.add(i, merged);
+            plans.add(new FormulaRangePlan(
+                    i,
+                    end + 1,
+                    merged,
+                    "fragmented-chemical-reaction-with-arrow-evidence"));
+            i = end;
         }
+        return plans;
     }
 
     /** 반응식 조각의 raw 문자열. 화학조각 텍스트 or 화학 수식이면 raw, 아니면 null(=시퀀스 종료). */
@@ -3142,12 +3487,52 @@ class MathProcessor {
         return EHFontGlyphMap.isEHFontStyle(tr.characterStyleRef());
     }
 
-    private static void applyPositionFromCharacterStyle(ASTTextRun tr) {
-        applyPositionFromCharacterStyle(tr, null);
+    static final class PositionStylePlan {
+        final int itemIndex;
+        final boolean superscript;
+        final boolean subscript;
+        final String reason;
+
+        PositionStylePlan(
+                int itemIndex, boolean superscript, boolean subscript, String reason) {
+            this.itemIndex = itemIndex;
+            this.superscript = superscript;
+            this.subscript = subscript;
+            this.reason = reason;
+        }
     }
 
-    private static void applyPositionFromCharacterStyle(ASTTextRun tr, String prevText) {
-        if (tr == null || tr.characterStyleRef() == null) return;
+    static List<PositionStylePlan> planPositionStyles(List<ASTInlineItem> items) {
+        List<PositionStylePlan> plans = new ArrayList<>();
+        if (items == null || items.isEmpty()) return plans;
+        for (int i = 0; i < items.size(); i++) {
+            if (!(items.get(i) instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) items.get(i);
+            String previousText = i > 0 && items.get(i - 1) instanceof ASTTextRun
+                    ? ((ASTTextRun) items.get(i - 1)).text() : null;
+            PositionStylePlan plan = planPositionStyle(run, previousText, i);
+            if (plan != null) plans.add(plan);
+        }
+        return plans;
+    }
+
+    static void materializePositionStylePlans(
+            List<ASTInlineItem> items, List<PositionStylePlan> plans) {
+        if (items == null || plans == null || plans.isEmpty()) return;
+        for (PositionStylePlan plan : plans) {
+            if (plan.itemIndex < 0 || plan.itemIndex >= items.size()
+                    || !(items.get(plan.itemIndex) instanceof ASTTextRun)) {
+                continue;
+            }
+            ASTTextRun run = (ASTTextRun) items.get(plan.itemIndex);
+            run.superscript(plan.superscript);
+            run.subscript(plan.subscript);
+        }
+    }
+
+    private static PositionStylePlan planPositionStyle(
+            ASTTextRun tr, String prevText, int itemIndex) {
+        if (tr == null || tr.characterStyleRef() == null) return null;
         // SPEC-080: 함수 진입 시점의 위첨자는 상류 applyPositionStyle 이 position 근거로
         // 세운 진짜 첨자다. 이 함수는 그 외에 charStyle 이름("상부자")만으로도 위첨자화하는데,
         // 그 이름-폴백만 밑수 가드 대상으로 삼기 위해 진입 상태를 기록해 둔다.
@@ -3159,14 +3544,14 @@ class MathProcessor {
         // 위치가 아니라는 조판 표기다. 스타일 이름의 "상부자/하부자"만 보고 첨자화하면
         // 본문 라틴 주석이 첨자로 깨진다(실측: 1단원 "상부자(정체)" 스타일의
         // Pythagoras·B.C.569?~475? 가 위첨자화). "정체"면 첨자로 만들지 않는다.
-        if (style.contains("정체") || style.contains("정자")) return;
+        if (style.contains("정체") || style.contains("정자")) return null;
         boolean sup = style.contains("superscript") || style.contains("상부자") || style.contains("위첨자");
         boolean sub = style.contains("subscript") || style.contains("하부자") || style.contains("아래첨자");
-        if (!sup && !sub) return;
+        if (!sup && !sub) return null;
         // SPEC-053: IDML/resolved 가 position 을 명시적으로 NORMAL(첨자 아님)로 보고했으면
         // charStyle 폰트명이 "상부자"여도 첨자화하지 않는다. 상부자 폰트로 조판한 도형
         // 라벨(원 O, □ABCD)이 위첨자로 깨지던 문제(실측: u5 p174).
-        if (tr.explicitNormalPosition()) return;
+        if (tr.explicitNormalPosition()) return null;
         // SPEC-053: charStyle 이름의 "상부자/하부자"만으론 첨자화하지 않는다. 이 이름은
         // "EH상부자 폰트로 조판"을 뜻할 뿐 반드시 위/아래첨자 위치는 아니다. 도형 라벨
         // (원 O, □ABCD)이나 한글 캡션(확산하기)까지 폰트명만 보고 위첨자화하면 깨진다
@@ -3174,21 +3559,20 @@ class MathProcessor {
         // 숫자·1~2 라틴 글자의 짧은 토큰이다. 그 외(한글·3+ 라틴·기호)는 첨자로 보지
         // 않는다. 실제 SUPERSCRIPT/SUBSCRIPT position 은 상류 applyPositionStyle 이 이미
         // 처리했으므로 이 이름-폴백 축소가 진짜 첨자를 놓치지 않는다.
-        if (!isPlausibleScriptToken(tr.text())) return;
+        if (!isPlausibleScriptToken(tr.text())) return null;
         // SPEC-080: `상부자(이탤릭)` GREP 가 `\d+` 로 본문 숫자까지 이름-폴백 위첨자화한다
         // ("제곱하여 4가 되는 수" 의 4·25). 위첨자(지수)는 밑수 뒤에만 온다 — position 이
         // 아니라 스타일 이름만으로 온 위첨자는, 앞 런이 밑수(숫자·라틴 변수·닫는 괄호)로
         // 끝날 때만 허용한다. 아래첨자(화학식 하부자)는 이 가드 대상 아님.
         // 이름-폴백(position 근거 없음) 위첨자만 밑수 가드 대상.
         boolean supByNameOnly = sup && !superscriptByPosition;
-        if (supByNameOnly && !precededByExponentBase(prevText)) return;
+        if (supByNameOnly && !precededByExponentBase(prevText)) return null;
         if (sup) {
-            tr.superscript(true);
-            tr.subscript(false);
-        } else {
-            tr.subscript(true);
-            tr.superscript(false);
+            return new PositionStylePlan(
+                    itemIndex, true, false, "CHARACTER_STYLE_SUPERSCRIPT");
         }
+        return new PositionStylePlan(
+                itemIndex, false, true, "CHARACTER_STYLE_SUBSCRIPT");
     }
 
     /** 위첨자(지수) 앞의 밑수인가 — 숫자·라틴 문자·닫는 괄호 }·)·]로 끝나면 참. */
@@ -3260,7 +3644,9 @@ class MathProcessor {
         }
         backfillFlushedTextRunStyles(tempPara.items(), sources);
         backfillChemicalEquationStyleHints(tempPara.items(), sources);
-        splitBoundaryWrappedFormulaEquations(tempPara.items());
+        materializeBoundarySplitPlans(
+                tempPara.items(),
+                planBoundaryWrappedFormulaEquations(tempPara.items()));
         out.addAll(tempPara.items());
     }
 

@@ -753,10 +753,10 @@ public class ASTMathGrouper {
         }
         String hwpScript = atomicHwpScript;
         if (isStandaloneSqrtSymbolScript(hwpScript, ehRuns)) {
-            ASTEquation eq = new ASTEquation("sqrt{ }", "EH_FONT");
-            applyTextDerivedEquationHints(eq, ehRuns);
-            applyTextDerivedEquationColor(eq, ehRuns, colorToHex);
-            para.addItem(eq);
+            // radicand가 없는 source 근호는 완성된 수식 구조가 아니다. 빈 sqrt
+            // equation으로 만들면 출력 단계에서 빈 수식으로 남으므로, source glyph의
+            // 가시 의미만 일반 텍스트로 보존한다.
+            para.addItem(textRunFromMathSource("√", ehRuns, colorToHex));
             return;
         }
         if (hwpScript != null && shouldEmitConvertedEquation(hwpScript, ehRuns)) {

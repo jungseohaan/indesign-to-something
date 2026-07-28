@@ -17,6 +17,21 @@ import java.util.List;
 
 public class StoryLoaderTest {
     @Test
+    public void inlineEquationCarriesSourceOwnershipIdentityForDuplicateGuard() {
+        ASTParagraph paragraph = new ASTParagraph();
+        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation equation =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(
+                        "{5} over {2-sqrt{3}}", "INLINE_FRACTION");
+        equation.sourceObjectId(331203);
+        paragraph.addItem(equation);
+
+        Assert.assertTrue(
+                StoryLoader.paragraphAlreadyContainsInlineObject(paragraph, 331203));
+        Assert.assertFalse(
+                StoryLoader.paragraphAlreadyContainsInlineObject(paragraph, 331227));
+    }
+
+    @Test
     public void grepMathDigitAfterInlineAnswerBoundaryRemainsEquationOwned() {
         IDMLCharacterRun before = new IDMLCharacterRun();
         before.content("\uFFFC\u2003");
@@ -157,6 +172,22 @@ public class StoryLoaderTest {
         Assert.assertTrue(StoryLoader.isGrepMathPrefixBeforeEHStructure(
                 prefix, Arrays.asList(prefix, hook), 0));
         Assert.assertTrue(prefix.isEHFont());
+    }
+
+    @Test
+    public void completeGrepArithmeticTermImmediatelyBeforeSqrtRemainsMathOwned() {
+        IDMLCharacterRun prefix = new IDMLCharacterRun();
+        prefix.content("3-2");
+        prefix.grepMathFont(true);
+        prefix.grepAppliedCharStyle("CharacterStyle/태광10:상부자(이탤릭) 10");
+        prefix.fontFamily("EH상부자");
+
+        IDMLCharacterRun hook = new IDMLCharacterRun();
+        hook.content("'");
+        hook.fontFamily("EH분수대문자");
+
+        Assert.assertTrue(StoryLoader.isGrepMathPrefixBeforeEHStructure(
+                prefix, Arrays.asList(prefix, hook), 0));
     }
 
     @Test
