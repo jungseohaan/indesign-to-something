@@ -39,9 +39,20 @@ orcOnly 앵커 런의 □ 흡수 조건을
 
 ## 수정 파일
 
-1. `normalizer/ASTMathGrouper.java` — `paragraphHasFormulaEvidence` 신설
+1. `normalizer/ASTMathGrouper.java` — `paragraphHasFormulaEvidence` 신설 +
+   `formulaAnswerBoxRun` 이 원본 박스 크기·색 반영
 2. `normalizer/ASTStoryConverter.java` — □ 흡수 게이트 완화
 3. `normalizer/resolved/phase3/StoryLoader.java` — 동일 게이트 완화
+
+## □ 크기·색 반영 (사용자 지시: 하드코딩 배율 대신 원본 반영)
+
+- 크기: 박스 벡터의 `heightPoints / 0.7` (U+25A1 사각형 ≈ 0.7em) —
+  p15 박스 5mm(14.17pt) → 글자 20.24pt, 렌더 사각형이 박스 높이를 근사.
+  폭 기반은 가로로 긴 답란에서 줄이 부풀어 배제 (treatAsChar 트랩)
+- 색: 박스 stroke("Color/C=40 M=8 Y=0 K=0" → #8EC2DF 하늘색) 우선,
+  없으면 fill (Paper 흰색은 제외 — 안 보임)
+- **주의: resolved.json 의 pageItem bounds 는 원단위(mm)** — pt 로 오독하면
+  박스가 5×7pt 로 보인다. IDML `heightPoints` 가 pt 정본 (SPEC-057 트랩)
 
 ## 검증
 

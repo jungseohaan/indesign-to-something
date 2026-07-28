@@ -16,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import java.util.ArrayList;
@@ -1428,7 +1429,45 @@ public class ASTMathGrouper {
         if (run.fontFamily() == null) {
             run.fontFamily("BT수식M");
         }
+        // SPEC-083: \u25A1 가 원본 답란 박스의 크기·색을 반영하도록 한다 (하드코딩
+        // 배율 아님). 크기는 박스 높이 기반 — 폭 기반이면 가로로 긴 답란에서 글자가
+        // 과대해져 줄이 부푼다(treatAsChar 세로 이동 불가 트랩). U+25A1 글리프의
+        // 사각형은 em 의 약 0.7 이므로 fontSize = height/0.7 로 박스 높이를 근사.
+        // 색은 박스 테두리(stroke) → 채움(fill) 순으로 물려받는다.
+        IDMLCharacterRun.InlineGraphic box = firstAnswerBoxGraphic(source);
+        if (box != null) {
+            double h = box.heightPoints();
+            if (h > 0) {
+                run.fontSize(h / 0.7);
+            }
+            String colorRef = answerBoxColorRef(box);
+            if (colorRef != null) {
+                run.fillColor(colorRef);
+            }
+        }
         return run;
+    }
+
+    /** 삼켜지는 앵커 런의 첫 도형(벡터) 인라인 그래픽. */
+    private static IDMLCharacterRun.InlineGraphic firstAnswerBoxGraphic(IDMLCharacterRun source) {
+        if (source == null || source.inlineGraphics() == null) return null;
+        for (IDMLCharacterRun.InlineGraphic g : source.inlineGraphics()) {
+            if (g != null && g.vectorShape() != null) return g;
+        }
+        return null;
+    }
+
+    /** 답란 박스의 색 참조("Color/…") — 테두리 우선, 없으면 채움. */
+    private static String answerBoxColorRef(IDMLCharacterRun.InlineGraphic box) {
+        IDMLVectorShape shape = box.vectorShape();
+        if (shape == null) return null;
+        if (shape.hasStroke()) return shape.strokeColor();
+        if (shape.hasFill()) {
+            String fill = shape.fillColor();
+            // Paper(흰 채움)는 글자색으로 쓰면 안 보인다 — 테두리 없는 흰 박스는 기본색 유지
+            if (fill != null && !fill.contains("Paper")) return fill;
+        }
+        return null;
     }
 
     private static boolean hasFormulaNeighbor(List<IDMLCharacterRun> runs, int index) {
