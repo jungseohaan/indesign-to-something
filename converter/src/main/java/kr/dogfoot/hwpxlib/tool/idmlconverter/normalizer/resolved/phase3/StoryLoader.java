@@ -823,6 +823,7 @@ public class StoryLoader {
 
             // overline 마커(\uE000...\uE001)가 포함된 TextRun을 ASTEquation으로 분리
             RunPostProcessor.splitOverlineRuns(para);
+            RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
 
             // 이탤릭 EH상부자 런 → 인라인 수식(ASTEquation)으로 변환
             // 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리
@@ -1230,6 +1231,7 @@ public class StoryLoader {
             // though the identical source range becomes ASTEquation outside a
             // table.  The container must not change text/math ownership.
             RunPostProcessor.splitOverlineRuns(para);
+            RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
             RunPostProcessor.convertItalicRunsToEquations(para);
             RunPostProcessor.convertGrepFractionTextRuns(para);
             RunPostProcessor.resolveInheritedEquationSizes(para);
@@ -1565,6 +1567,7 @@ public class StoryLoader {
                     ctx, idmlParagraph, resolvedParagraph, resolvedRuns, includeResolvedText)) {
                 MathProcessor.convertMathRunsInParagraph(ctx, para);
                 RunPostProcessor.splitOverlineRuns(para);
+                RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
                 RunPostProcessor.convertItalicRunsToEquations(para);
 
             // 본문 텍스트로 샌 GREP 분수(;2!;·;;Á7°;;)를 인라인 수식으로 변환 (SPEC-081 후속)

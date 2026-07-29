@@ -4108,6 +4108,7 @@ public class InlineFrameHandler {
         if (paragraph == null) return;
         MathProcessor.convertMathRunsInParagraph(ctx, paragraph);
         RunPostProcessor.splitOverlineRuns(paragraph);
+        RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(paragraph);
     }
 
     private static boolean shouldUseResolvedParagraphsForInlineShell(ResolvedStory story) {

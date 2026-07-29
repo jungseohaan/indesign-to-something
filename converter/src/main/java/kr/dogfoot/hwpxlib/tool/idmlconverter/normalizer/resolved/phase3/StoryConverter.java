@@ -4816,6 +4816,7 @@ public final class StoryConverter {
         for (ASTParagraph para : paragraphs) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             RunPostProcessor.splitOverlineRuns(para);
+            RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
             // 본문 텍스트로 샌 GREP 분수(;2!;·;1Á8;)를 인라인 수식으로 (SPEC-081 후속)
             RunPostProcessor.convertGrepFractionTextRuns(para);
         }
