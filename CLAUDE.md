@@ -9,6 +9,8 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
 ## 활성 작업 (2026-07-29 기준)
 
 - **브랜치**: `open-indd` — 수학 u1 수식/GREP 스윕 진행 중 (#160~#204 머지)
+- **최근 완료 (2026-07-29)**:
+  - SPEC-085 후속 2 (#210) — 수학 u3 p108 `rm y=ax²` 직립 오방출. `sourceUpright` 이름 휴리스틱("상부자" 포함=직립)이 실제 BoldItalic 인 `상부자13pt(B)` 를 오판 → 승자 GREP charStyle 정의의 **실측 FontStyle 을 런에 주입**(`grepCharStyleFontStyle`)하고 판정에서 이름보다 우선. u1/u5 전후 diff 0, u3 오적용 7건만 해제, 육안 확인 완료
 - **최근 완료 (2026-07-28)**:
   - [SPEC-084](docs/specs/SPEC-084-abolish-isolated-single-latin-demotion.md) + [SPEC-085](docs/specs/SPEC-085-grep-rule-precedence-upright-comma.md) (#204) — 수학 u1 p24/p14 수식 정리.
     SPEC-084: 고립 단일 라틴 강등(SPEC-078 audit-A) **폐기** — "점 A" 류 라벨 수식화 차단 피해가 이니셜 오수식화보다 큼(사용자 결정, 강등 재도입 금지). SPEC-085: GREP 규칙 우선순위(나중 규칙 승)·직립 서체 `rm` 방출 + 수식 사이 쉼표 소실("P, Q"→"P Q") 수정 + p14 후속(괄호 소실·빈박스 쉼표 비대·수식 크기 축소). 수학 u1 +26 수식·소실 0
