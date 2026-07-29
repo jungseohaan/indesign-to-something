@@ -82,7 +82,79 @@ public class EquationBuilder {
         result = normalizeStrayEHGlyphs(result);
         result = decodeResidualGrepFraction(result);
         result = ejectUnitFromRadicand(result);
-        return ensureSqrtBoundary(result);
+        result = ensureSqrtBoundary(result);
+        return enlargeBracketsContainingFraction(result);
+    }
+
+    /**
+     * 괄호 안에 over(분수)나 sqrt(루트)가 포함되면 left/right 신축 괄호로 확대한다.
+     *
+     * <p>원래 EH 방출기(EHHwpScriptEmitter)에만 있던 보정이라, GREP 분수 복원 등
+     * EH 밖 경로로 조립된 수식은 리터럴 괄호로 남아 분수 높이만큼 늘어나지 않았다
+     * (수학 u1 p14 "(½)²=¼" — 같은 문장의 "(−½)²"는 EH 경로라 left/right 확대).
+     * 모든 방출 경로가 거치는 sanitize 관문의 마지막 단계로 공통 적용한다.
+     * 이미 left(/LEFT ( 가 붙은 괄호는 건너뛰므로 멱등이다.
+     */
+    public static String enlargeBracketsContainingFraction(String s) {
+        // 소괄호: ( ... ) → left( ... right) (over 또는 sqrt 포함 시)
+        s = enlargePair(s, "(", ")", "left(", " right)");
+        // 중괄호: lbrace ... rbrace → left lbrace ... right rbrace
+        s = enlargePair(s, "lbrace ", " rbrace", "left lbrace ", " right rbrace");
+        return s;
+    }
+
+    private static String enlargePair(String s, String open, String close, String leftOpen, String rightClose) {
+        int searchFrom = 0;
+        StringBuilder sb = new StringBuilder();
+        while (searchFrom < s.length()) {
+            int openPos = s.indexOf(open, searchFrom);
+            if (openPos < 0) {
+                sb.append(s.substring(searchFrom));
+                break;
+            }
+            // 이미 left( / LEFT ( 인지 확인 (중복 적용 방지, 공백·대소문자 허용)
+            if (precededByLeftKeyword(s, openPos)) {
+                sb.append(s.substring(searchFrom, openPos + open.length()));
+                searchFrom = openPos + open.length();
+                continue;
+            }
+            // 매칭 닫기 괄호 찾기 (중첩 고려)
+            int depth = 1;
+            int closePos = -1;
+            int i = openPos + open.length();
+            while (i < s.length() && depth > 0) {
+                if (s.startsWith(open, i)) {
+                    depth++;
+                    i += open.length();
+                } else if (s.startsWith(close, i)) {
+                    depth--;
+                    if (depth == 0) { closePos = i; break; }
+                    i += close.length();
+                } else {
+                    i++;
+                }
+            }
+            if (closePos < 0) {
+                sb.append(s.substring(searchFrom));
+                break;
+            }
+            String inner = s.substring(openPos + open.length(), closePos);
+            // over 또는 sqrt가 포함되면 left/right로 확대
+            if (inner.contains(" over ") || inner.contains("sqrt{")) {
+                sb.append(s.substring(searchFrom, openPos));
+                sb.append(leftOpen).append(inner).append(rightClose);
+            } else {
+                sb.append(s.substring(searchFrom, closePos + close.length()));
+            }
+            searchFrom = closePos + close.length();
+        }
+        return sb.toString();
+    }
+
+    private static boolean precededByLeftKeyword(String s, int openPos) {
+        int p = openPos;
+        while (p > 0 && s.charAt(p - 1) == ' ') p--;
+        return p >= 4 && s.regionMatches(true, p - 4, "left", 0, 4);
     }
 
     /**
