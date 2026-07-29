@@ -2097,10 +2097,16 @@ public class IDMLStoryParser {
             String swapped = subRun.content().replace('{', '(').replace('}', ')');
             subRun.content(swapped);
         }
-        if (subRun.fontSize() == null && doc != null) {
+        if (doc != null) {
             IDMLStyleDef def = findCharStyle(rule.appliedCharacterStyle, doc);
-            if (def != null && def.fontSize() != null && def.fontSize() > 0) {
-                subRun.fontSize(def.fontSize());
+            if (def != null) {
+                if (subRun.fontSize() == null && def.fontSize() != null && def.fontSize() > 0) {
+                    subRun.fontSize(def.fontSize());
+                }
+                // SPEC-085 후속: 이름 휴리스틱("상부자"=직립)이 실제 서체와 어긋나는
+                // 스타일(상부자13pt(B)=BoldItalic, 수학 u3 p108 y=ax²)이 있어
+                // 정의의 실제 FontStyle 을 방향 판정 증거로 함께 싣는다
+                subRun.grepCharStyleFontStyle(def.fontStyle());
             }
         }
     }
@@ -2440,6 +2446,7 @@ public class IDMLStoryParser {
         clone.grepMathFont(source.grepMathFont());
         clone.grepFillColor(source.grepFillColor());
         clone.grepAppliedCharStyle(source.grepAppliedCharStyle());
+        clone.grepCharStyleFontStyle(source.grepCharStyleFontStyle());
         clone.content(newText);
         return clone;
     }

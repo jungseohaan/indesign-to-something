@@ -35,6 +35,7 @@ public class IDMLCharacterRun {
     private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
     private String grepFillColor;  // GREP 스타일에서 동적 적용된 FillColor (IDML 색상 참조명)
     private String grepAppliedCharStyle;  // GREP 스타일에서 동적 적용된 문자 스타일 참조 ID
+    private String grepCharStyleFontStyle; // 승자 GREP 문자 스타일 정의의 실제 FontStyle (Italic/BoldItalic 등)
     private Boolean underline;     // 밑줄 (IDML Underline="true")
     private String underlineType;  // 밑줄 타입 (IDML UnderlineType: "StrokeStyle/$ID/Wavy" 등)
     private Double underlineTint;  // 밑줄 틴트 % (IDML UnderlineTint)
@@ -95,6 +96,7 @@ public class IDMLCharacterRun {
         c.grepMathFont = this.grepMathFont;
         c.grepFillColor = this.grepFillColor;
         c.grepAppliedCharStyle = this.grepAppliedCharStyle;
+        c.grepCharStyleFontStyle = this.grepCharStyleFontStyle;
         c.baselineShift = this.baselineShift;
         c.horizontalScale = this.horizontalScale;
         c.verticalScale = this.verticalScale;
@@ -373,6 +375,8 @@ public class IDMLCharacterRun {
 
     public String grepAppliedCharStyle() { return grepAppliedCharStyle; }
     public void grepAppliedCharStyle(String v) { this.grepAppliedCharStyle = v; }
+    public String grepCharStyleFontStyle() { return grepCharStyleFontStyle; }
+    public void grepCharStyleFontStyle(String v) { this.grepCharStyleFontStyle = v; }
 
     public Boolean underline() { return underline; }
     public void underline(Boolean v) { this.underline = v; }
