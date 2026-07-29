@@ -1003,6 +1003,26 @@ function snapshotEditableTextFramePaintState(allItems, editableFrameIds) {
     return snapshots;
 }
 
+// SPEC-086: 최종 안전망 복원은 대부분의 값이 이미 원상태다(각 렌더 패스가 자체 복원).
+// 텍스트 속성 쓰기는 재조판 무효화를 유발해 읽기보다 훨씬 비싸므로, 현재 값과 다를
+// 때만 되쓴다 (u1/u2 기준 09d4→09d5 구간이 프레임 수에 비례해 17~30초).
+function _restorePaintPropIfChanged(target, prop, value) {
+    if (value === undefined) return;
+    try {
+        var current;
+        try { current = target[prop]; } catch (eRead) { target[prop] = value; return; }
+        if (current === value) return;
+        // Swatch/Color 류는 접근마다 새 래퍼가 와서 참조 비교 불가 — id 로 비교
+        try {
+            if (current && value && current.id !== undefined && value.id !== undefined
+                    && current.id === value.id) {
+                return;
+            }
+        } catch (eIdCompare) {}
+        target[prop] = value;
+    } catch (eWrite) {}
+}
+
 function restoreEditableTextFramePaintState(snapshots) {
     if (!snapshots) return;
     for (var i = snapshots.length - 1; i >= 0; i--) {
@@ -1010,34 +1030,34 @@ function restoreEditableTextFramePaintState(snapshots) {
             var entry = snapshots[i];
             var tf = entry.tf;
             if (entry.visible !== undefined) {
-                try { tf.visible = entry.visible; } catch (eVisible) {}
+                try { if (tf.visible !== entry.visible) tf.visible = entry.visible; } catch (eVisible) {}
             }
             if (entry.contentOpacity !== undefined) {
                 try {
-                    tf.contentTransparencySettings.blendingSettings.opacity =
-                            entry.contentOpacity;
+                    var cb = tf.contentTransparencySettings.blendingSettings;
+                    if (cb.opacity !== entry.contentOpacity) cb.opacity = entry.contentOpacity;
                 } catch (eContentOpacity) {}
             }
             if (entry.frameOpacity !== undefined) {
                 try {
-                    tf.transparencySettings.blendingSettings.opacity =
-                            entry.frameOpacity;
+                    var fb = tf.transparencySettings.blendingSettings;
+                    if (fb.opacity !== entry.frameOpacity) fb.opacity = entry.frameOpacity;
                 } catch (eFrameOpacity) {}
             }
             var targets = entry.targets || [];
             for (var r = targets.length - 1; r >= 0; r--) {
                 var state = targets[r];
                 var target = state.target;
-                try { if (state.fillColor !== undefined) target.fillColor = state.fillColor; } catch (eFill) {}
-                try { if (state.fillTint !== undefined) target.fillTint = state.fillTint; } catch (eFillTint) {}
-                try { if (state.strokeColor !== undefined) target.strokeColor = state.strokeColor; } catch (eStroke) {}
-                try { if (state.strokeTint !== undefined) target.strokeTint = state.strokeTint; } catch (eStrokeTint) {}
-                try { if (state.underline !== undefined) target.underline = state.underline; } catch (eUnderline) {}
-                try { if (state.underlineColor !== undefined) target.underlineColor = state.underlineColor; } catch (eUnderlineColor) {}
-                try { if (state.underlineTint !== undefined) target.underlineTint = state.underlineTint; } catch (eUnderlineTint) {}
-                try { if (state.strikeThru !== undefined) target.strikeThru = state.strikeThru; } catch (eStrike) {}
-                try { if (state.strikeThroughColor !== undefined) target.strikeThroughColor = state.strikeThroughColor; } catch (eStrikeColor) {}
-                try { if (state.strikeThroughTint !== undefined) target.strikeThroughTint = state.strikeThroughTint; } catch (eStrikeTint) {}
+                _restorePaintPropIfChanged(target, "fillColor", state.fillColor);
+                _restorePaintPropIfChanged(target, "fillTint", state.fillTint);
+                _restorePaintPropIfChanged(target, "strokeColor", state.strokeColor);
+                _restorePaintPropIfChanged(target, "strokeTint", state.strokeTint);
+                _restorePaintPropIfChanged(target, "underline", state.underline);
+                _restorePaintPropIfChanged(target, "underlineColor", state.underlineColor);
+                _restorePaintPropIfChanged(target, "underlineTint", state.underlineTint);
+                _restorePaintPropIfChanged(target, "strikeThru", state.strikeThru);
+                _restorePaintPropIfChanged(target, "strikeThroughColor", state.strikeThroughColor);
+                _restorePaintPropIfChanged(target, "strikeThroughTint", state.strikeThroughTint);
             }
         } catch (eRestoreSnapshot) {}
     }

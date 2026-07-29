@@ -853,6 +853,9 @@ function _buildSourceIndexFromAllItems(doc, ctx, allItems) {
     var stats = {
         itemCount: allItems ? allItems.length : 0,
         kindCounts: {},
+        // 캐시 생산자는 spread_chunks 모드의 _prepareSpreadChunkSourceInfoCache 뿐.
+        // 일반 풀 추출은 생산자가 없어 0 히트가 정상 — 프로파일링 오독 방지용 플래그 (SPEC-086)
+        sourceInfoCacheEligible: !!cachedSourceInfoById,
         sourceInfoCacheHits: 0,
         sourceInfoCacheMisses: 0,
         readItemInfoErrors: [],

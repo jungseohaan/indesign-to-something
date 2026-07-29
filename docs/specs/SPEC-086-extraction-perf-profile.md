@@ -26,13 +26,29 @@
   히트하지 않음. 캐시 키 또는 조회 경로 확인 필요
 - 스토리 941개/문단 1,441/런 4,658 — 문단 루프 32.1초 (문단당 ~22ms)
 
-## 최적화 후보 (impact 순)
+## 조사 결과 (2026-07-29 저녁)
 
-1. **미계측 85초 공백 규명** — 09d와 10 사이에 타이밍 태그가 없다. 구 추출도
-   69초로 재현되는 상수 비용. 태그를 삽입해 정체(렌더 프레임 수집? GC? 대기?)를
-   밝히는 것이 최우선 (배보다 큰 배꼽일 수 있음)
-2. **sourceInfoCache 무효** — 4,974 miss/0 hit. 히트만 돼도 readItems 67초
-   일부 절감 가능. 캐시 키 불일치 여부 조사
+### sourceInfoCache 0히트 — 버그 아님 (유령 지표)
+
+역대 추출 5건 전부 0히트의 원인: 이 캐시(`ctx.spreadChunkSourceInfoById`)의
+**생산자는 spread_chunks 모드의 `_prepareSpreadChunkSourceInfoCache` 뿐**이고
+(호출처 단 1곳, `_runSpreadChunkExtraction`), 데스크탑 앱의 일반 풀 추출
+(`spread_based: false`)은 이 경로를 타지 않는다. 일반 모드에서 아이템은 정확히
+1회씩 읽히므로(misses ≈ itemCount) 캐시가 무용한 게 정상. `sourceInfoCacheEligible`
+플래그를 stats 에 추가해 오독을 차단했다. **추출 간(cross-extraction) 소스 정보
+재사용은 별도 설계 과제** — page_hash 불변 페이지의 readItemInfo 결과를 영속화하면
+readItems ~86초 절감 가능 (전체의 ~9%).
+
+### 미계측 85초 공백 — 용의자 특정 + 계측 태그 삽입
+
+`09d_extractionResults` → `10_collectResolved` 사이 코드는 4단계:
+`_stampExportUnitsOnRenderedItems` → `_buildExtractionResults`(5,000 아이템 JS)
+→ extraction-results.json(4.1MB)+export-units.json(1.1MB) 쓰기 →
+**`restoreEditableTextFramePaintState`** (편집 TF ~900개 × 타깃별 최대 10개
+속성 DOM 쓰기 = 수만 회 왕복 — 최유력). `09d1~09d5` 태그를 삽입했으니 다음
+풀 추출에서 분해 확인.
+
+## 최적화 후보 (impact 순)
 3. **objectPlans/plannerBundles 성장 관리** — 오늘 +1,000줄로 37→56초.
    [[objectplans-perf-regression-1c3ec362]] 교훈(루프 속 DOM 접근·호출부 메모이즈)
    재점검. 특히 subsumed 이후 sync/suppress 재실행 계열(~30초)은 패스 통합 여지
@@ -53,3 +69,18 @@
 
 - [ ] 1번: 타이밍 태그 삽입 후 재추출로 공백 정체 규명
 - [ ] 2번: 캐시 키 조사 및 히트율 확인
+
+## 계측 확정 + 1차 수정 (2026-07-29 밤, u3 38p A/B)
+
+09d→10 공백 분해 실측(계측 태그): **페인트 복원 17.8초(46%) + JSON 쓰기
+12.7초(33%) + 결과 조립 6.5초(17%) + 스탬핑 1.8초**. 공백은 낭비가 아니라
+대부분 구조적 실비용 — 렌더 패스가 셸 PNG 를 굽는 동안 편집 TF 텍스트 페인트를
+끝까지 숨겨두므로 최종 복원 쓰기 대부분이 진짜 필요한 쓰기다.
+
+1차 수정: `restoreEditableTextFramePaintState` 를 compare-write 로(불변 값
+되쓰기 생략, Swatch 는 id 비교) → **17.8→13.7초(-23%)**, u1/u2급 문서당
+~8~10초 절감 추정. 산출물 동등성 검증(수식 962 동일·표 363 동일).
+
+잔여 후보: (a) 숨김을 range별 fillColor 대신 frame 단위 contentOpacity 로
+통일하면 복원이 프레임당 1쓰기 — 렌더 정확성 검증 필요, (b) 추출 간 소스 정보
+재사용(readItems ~86초), (c) 계획 단계 313초.
