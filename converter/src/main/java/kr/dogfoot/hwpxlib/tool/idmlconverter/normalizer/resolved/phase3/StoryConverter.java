@@ -1547,13 +1547,13 @@ public final class StoryConverter {
         if (source == null || target == null) return;
         target.paragraphStyleRef(source.appliedParagraphStyle());
         target.alignment(source.justification());
-        if (source.firstLineIndent() != null && source.firstLineIndent() != 0) {
+        if (source.firstLineIndent() != null) {
             target.firstLineIndent(CoordinateConverter.pointsToHwpunits(source.firstLineIndent()));
         }
-        if (source.leftIndent() != null && source.leftIndent() != 0) {
+        if (source.leftIndent() != null) {
             target.leftMargin(CoordinateConverter.pointsToHwpunits(source.leftIndent()));
         }
-        if (source.rightIndent() != null && source.rightIndent() != 0) {
+        if (source.rightIndent() != null) {
             target.rightMargin(CoordinateConverter.pointsToHwpunits(source.rightIndent()));
         }
         if (source.spaceBefore() != null && source.spaceBefore() > 0) {
@@ -4584,10 +4584,10 @@ public final class StoryConverter {
             if (neutralHangingIndent) {
                 para.leftMargin(0L);
                 para.firstLineIndent(0L);
-            } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
+            } else if (rp.leftIndent() != null) {
                 para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
             }
-            if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
+            if (!neutralHangingIndent && rp.firstLineIndent() != null) {
                 para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
             }
             if (rp.hasTabStops()) {

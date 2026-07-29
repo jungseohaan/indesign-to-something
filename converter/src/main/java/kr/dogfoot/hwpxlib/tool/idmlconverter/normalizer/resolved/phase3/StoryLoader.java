@@ -2862,13 +2862,13 @@ public class StoryLoader {
         if (resolvedParagraph.spaceAfter() != null && resolvedParagraph.spaceAfter() > 0) {
             para.spaceAfter(CoordinateConverter.pointsToHwpunits(resolvedParagraph.spaceAfter()));
         }
-        if (resolvedParagraph.leftIndent() != null && resolvedParagraph.leftIndent() != 0) {
+        if (resolvedParagraph.leftIndent() != null) {
             para.leftMargin(CoordinateConverter.pointsToHwpunits(resolvedParagraph.leftIndent()));
         }
-        if (resolvedParagraph.rightIndent() != null && resolvedParagraph.rightIndent() != 0) {
+        if (resolvedParagraph.rightIndent() != null) {
             para.rightMargin(CoordinateConverter.pointsToHwpunits(resolvedParagraph.rightIndent()));
         }
-        if (resolvedParagraph.firstLineIndent() != null && resolvedParagraph.firstLineIndent() != 0) {
+        if (resolvedParagraph.firstLineIndent() != null) {
             para.firstLineIndent(CoordinateConverter.pointsToHwpunits(resolvedParagraph.firstLineIndent()));
         }
         if (resolvedParagraph.hasTabStops()) {

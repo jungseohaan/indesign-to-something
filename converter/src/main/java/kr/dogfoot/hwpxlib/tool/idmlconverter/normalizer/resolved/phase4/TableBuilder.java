@@ -235,6 +235,11 @@ public final class TableBuilder {
                 if (ctx.isAnchoredTableSource(idmlTable.selfId())) continue;
                 if (isNestedTableInSameStory(idmlStory, idmlTable)) continue;
                 if (!markerTableFlow.owns(idmlStory, idmlTable)) continue;
+                if (editableTextFrame
+                        && !tableAnchorOnlyFrame
+                        && StoryFlowAssembler.tableContainsInlineTextShellOwner(ctx, idmlTable)) {
+                    continue;
+                }
                 // 같은 Table이 TF 연결 체인에서 중복 배치되는 것을 방지
                 if (!processedTableIds.add(idmlTable.selfId())) continue;
 
@@ -3284,12 +3289,12 @@ public final class TableBuilder {
                 for (int i = 0; i < paragraphs.size(); i++) {
                     ASTInlineObject nested = firstNestedTextFrame(paragraphs.get(i));
                     if (nested == null || nested.paragraphs() == null || nested.paragraphs().isEmpty()) continue;
+                    if (isPlannedInlineTextShellObject(ctx, nested)) continue;
                     List<ASTParagraph> authoritative = authoritativeParagraphsForNestedTextFrame(ctx, nested);
                     if (authoritative != null && !authoritative.isEmpty()) {
                         nested.paragraphs().clear();
                         nested.paragraphs().addAll(authoritative);
                     }
-                    if (isPlannedInlineTextShellObject(ctx, nested)) continue;
                     if (hasDrawableNestedTextFrameShell(nested)) continue;
                     List<ASTParagraph> sourceParagraphs =
                             authoritative != null && !authoritative.isEmpty() ? authoritative : nested.paragraphs();

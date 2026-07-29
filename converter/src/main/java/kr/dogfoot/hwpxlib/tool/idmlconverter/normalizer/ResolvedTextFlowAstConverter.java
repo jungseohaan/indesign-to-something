@@ -215,13 +215,13 @@ public final class ResolvedTextFlowAstConverter {
         if (resolvedPara.spaceAfter() != null && resolvedPara.spaceAfter() > 0) {
             para.spaceAfter(CoordinateConverter.pointsToHwpunits(resolvedPara.spaceAfter()));
         }
-        if (resolvedPara.leftIndent() != null && resolvedPara.leftIndent() != 0) {
+        if (resolvedPara.leftIndent() != null) {
             para.leftMargin(CoordinateConverter.pointsToHwpunits(resolvedPara.leftIndent()));
         }
-        if (resolvedPara.rightIndent() != null && resolvedPara.rightIndent() != 0) {
+        if (resolvedPara.rightIndent() != null) {
             para.rightMargin(CoordinateConverter.pointsToHwpunits(resolvedPara.rightIndent()));
         }
-        if (resolvedPara.firstLineIndent() != null && resolvedPara.firstLineIndent() != 0) {
+        if (resolvedPara.firstLineIndent() != null) {
             para.firstLineIndent(CoordinateConverter.pointsToHwpunits(resolvedPara.firstLineIndent()));
         }
         if (options.copyTabStops && resolvedPara.hasTabStops()) {
