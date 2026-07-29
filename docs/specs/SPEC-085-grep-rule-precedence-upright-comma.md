@@ -99,3 +99,25 @@
 4. 부수 가드: 스타일 경계 분할로 단독 노출된 단위 문자("10g"의 g) 수식화
    차단 (파서+span 이중), 소수점 규칙 분리로 인한 `1.4` 조각 회귀는
    charStyle 동일성 경계로 해소
+
+## 후속 2 (수학 u3 p108, 이탤릭 수식의 rm 오방출)
+
+u3 p108 소제목 "이차함수 y=ax² 의 그래프에는…"의 수식이 `rm y=ax^{2}` 로
+직립 방출됐다 (사용자 보고). 원인: `sourceUpright` 판정
+(`applySourceScriptOrientation`)이 **스타일 이름 휴리스틱**("상부자" 포함 &
+"이탤릭" 미포함 → 직립)에 의존하는데, u3 의 GREP charStyle `상부자13pt(B)` 는
+이름에 이탤릭 표기가 없지만 **실제 FontStyle 은 BoldItalic**(EH상부자)이라
+직립으로 오판됐다. u1 은 "상부자(이탤릭)" vs "상부자(직립, Plain)" 이름 관례가
+지켜져 문제가 없었던 것.
+
+수정: `applyGrepMathWinnerStyle` 이 승자 charStyle 정의의 실제 FontStyle 을
+런에 주입(`grepCharStyleFontStyle`, fontSize 주입과 동일 위치)하고,
+`applySourceScriptOrientation` 이 이름 휴리스틱보다 이 실측 FontStyle 의
+이탤릭 여부를 우선 증거로 쓴다.
+
+검증: 수학 u1(1002수식·rm48)/u5(534수식·rm344) 수정 전후 diff 0 —
+P·Q·O·overline 직립 유지. u3 는 968수식 중 오적용 7건만 정확히 rm 해제
+(`y=x²`, `y=ax²`×2, `y=ax²+q`, `y=a(x-p)²`, `y=a(x-p)²+q`, `y=ax²+bx+c`),
+잔여 rm 41건은 라벨(A/B/C/D)·단위(cm²)·답란(□) 류로 정당. 테스트 만성
+기준선(55F/44E) 동일. 잔여 관찰: `rm y=`·`rm y=-` 파편 수식은 별개 경로로
+이번 수정 전후 동일 — 필요시 후속.

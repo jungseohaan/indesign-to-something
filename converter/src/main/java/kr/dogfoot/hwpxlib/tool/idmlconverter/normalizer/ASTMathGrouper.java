@@ -1428,9 +1428,13 @@ public class ASTMathGrouper {
         for (IDMLCharacterRun mr : mathRuns) {
             if (mr == null) continue;
             String fs = mr.fontStyle();
+            String gfs = mr.grepCharStyleFontStyle();
             String gcs = mr.grepAppliedCharStyle();
             String acs = mr.appliedCharacterStyle();
+            // 승자 GREP 문자 스타일 정의의 실제 FontStyle 이 이름 휴리스틱보다 우선 —
+            // "상부자13pt(B)"(이름에 이탤릭 표기 없음)가 실제로는 BoldItalic 인 케이스
             if ((fs != null && fs.toLowerCase().contains("italic"))
+                    || (gfs != null && gfs.toLowerCase().contains("italic"))
                     || styleNameHasItalic(gcs) || styleNameHasItalic(acs)) {
                 italic = true;
                 break;
