@@ -18,6 +18,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import java.util.*;
 
@@ -1076,6 +1077,14 @@ public class ASTStoryConverter {
         if (resolvedStory.paragraphs().size() > inlineStory.paragraphs().size()) {
             return true;
         }
+        String resolvedText = resolvedStoryText(resolvedStory);
+        String idmlText = idmlStoryText(inlineStory);
+        if (hasLayoutSpace(resolvedText)
+                && !resolvedText.equals(idmlText)
+                && normalizeComparableTextIgnoringLayoutSpaces(resolvedText)
+                        .equals(normalizeComparableTextIgnoringLayoutSpaces(idmlText))) {
+            return true;
+        }
         for (IDMLParagraph para : inlineStory.paragraphs()) {
             if (para == null || para.characterRuns() == null) continue;
             for (IDMLCharacterRun run : para.characterRuns()) {
@@ -1086,6 +1095,64 @@ public class ASTStoryConverter {
             }
         }
         return false;
+    }
+
+    private static boolean hasLayoutSpace(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\u00A0'
+                    || ch == '\u2002'
+                    || ch == '\u2003'
+                    || ch == '\u2004'
+                    || ch == '\u2005'
+                    || ch == '\u2006'
+                    || ch == '\u2007'
+                    || ch == '\u2008'
+                    || ch == '\u2009'
+                    || ch == '\u200A') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String idmlStoryText(IDMLStory story) {
+        StringBuilder sb = new StringBuilder();
+        if (story == null || story.paragraphs() == null) return "";
+        for (IDMLParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null || run.content() == null) continue;
+                sb.append(run.content());
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String normalizeComparableTextIgnoringLayoutSpaces(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (isLayoutSpace(ch) || Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
+    private static boolean isLayoutSpace(char ch) {
+        return ch == '\u00A0'
+                || ch == '\u2002'
+                || ch == '\u2003'
+                || ch == '\u2004'
+                || ch == '\u2005'
+                || ch == '\u2006'
+                || ch == '\u2007'
+                || ch == '\u2008'
+                || ch == '\u2009'
+                || ch == '\u200A';
     }
 
     private static boolean hasEmbeddedParagraphBreak(String text) {
@@ -1156,7 +1223,15 @@ public class ASTStoryConverter {
         if (resolvedData == null || idmlSelfId == null) return null;
         String id = decimalDomId(idmlSelfId);
         if (id == null) return null;
-        return resolvedData.getTextFrame(id);
+        ResolvedTextFrame direct = resolvedData.getTextFrame(id);
+        if (direct != null) return direct;
+        ResolvedPageItem item = resolvedData.getPageItem(id);
+        if (item == null || item.childIds() == null) return null;
+        for (int childId : item.childIds()) {
+            ResolvedTextFrame child = resolvedData.getTextFrame(String.valueOf(childId));
+            if (child != null) return child;
+        }
+        return null;
     }
 
     private static String decimalDomId(String idmlSelfId) {

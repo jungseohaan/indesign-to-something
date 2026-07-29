@@ -15,6 +15,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConve
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.BlankAnchorSpacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
@@ -4003,11 +4004,47 @@ public class InlineFrameHandler {
                 ResolvedTextFlowAstConverter.options()
                         .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
                         .textTransformer(InlineFrameHandler::normalizeShellTextFlowText)
+                        .inlineAnchorTextResolver((run, paragraph, runIndex) ->
+                                inlineShellBlankSpacerText(ctx, paragraph, runIndex, run))
                         .defaultAlignment("CENTER")
                         .copyTabStops(true)
                         .truncateAtParagraphBreak(false)
                         .skipBlankRuns(true)
                         .skipEmptyParagraphs(true)));
+    }
+
+    private static String inlineShellBlankSpacerText(
+            ResolvedBuildContext ctx,
+            ResolvedParagraph paragraph,
+            int runIndex,
+            ResolvedRun anchorRun) {
+        if (ctx == null || ctx.resolvedData == null
+                || anchorRun == null || anchorRun.anchoredObjectId() == null) {
+            return null;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(anchorRun.anchoredObjectId()));
+        String spacer = BlankAnchorSpacer.spacerTextForPageItem(item);
+        if (spacer == null) return null;
+
+        List<ResolvedRun> runs = paragraph != null ? paragraph.runs() : null;
+        ResolvedRun prev = adjacentShellTextRun(runs, runIndex, -1);
+        ResolvedRun next = adjacentShellTextRun(runs, runIndex, 1);
+        if ((prev != null && BlankAnchorSpacer.isEquationFontRun(prev.fontFamily()))
+                || (next != null && BlankAnchorSpacer.isEquationFontRun(next.fontFamily()))) {
+            return null;
+        }
+        return spacer;
+    }
+
+    private static ResolvedRun adjacentShellTextRun(List<ResolvedRun> runs, int index, int direction) {
+        if (runs == null || direction == 0) return null;
+        for (int i = index + direction; i >= 0 && i < runs.size(); i += direction) {
+            ResolvedRun run = runs.get(i);
+            if (run == null || run.isInlineAnchor()) continue;
+            if (run.text() == null || run.text().isEmpty()) continue;
+            return run;
+        }
+        return null;
     }
 
     private static String normalizeShellTextFlowText(String text) {
