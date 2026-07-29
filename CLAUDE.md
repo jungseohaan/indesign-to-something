@@ -10,6 +10,7 @@ IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) �
 
 - **브랜치**: `open-indd` — 수학 u1 수식/GREP 스윕 진행 중 (#160~#204 머지)
 - **최근 완료 (2026-07-29)**:
+  - SPEC-085 후속 3 (#214) — 수학 u1 p14 `(½)²` 괄호가 분수 높이로 안 늘어남. `left( right)` 신축 확대가 EH 방출기 전용이라 GREP 분수 복원 경로 수식이 누락 → 확대 구현을 **sanitize 공통 관문**(`EquationBuilder.sanitizeHwpScript` 마지막 단계)으로 이동, `LEFT ( ` 공백형 가드 보강(멱등). u1 35건·u3 1건 전부 의도 패턴, u5 diff 0
   - SPEC-085 후속 2 (#210) — 수학 u3 p108 `rm y=ax²` 직립 오방출. `sourceUpright` 이름 휴리스틱("상부자" 포함=직립)이 실제 BoldItalic 인 `상부자13pt(B)` 를 오판 → 승자 GREP charStyle 정의의 **실측 FontStyle 을 런에 주입**(`grepCharStyleFontStyle`)하고 판정에서 이름보다 우선. u1/u5 전후 diff 0, u3 오적용 7건만 해제, 육안 확인 완료
 - **최근 완료 (2026-07-28)**:
   - [SPEC-084](docs/specs/SPEC-084-abolish-isolated-single-latin-demotion.md) + [SPEC-085](docs/specs/SPEC-085-grep-rule-precedence-upright-comma.md) (#204) — 수학 u1 p24/p14 수식 정리.
