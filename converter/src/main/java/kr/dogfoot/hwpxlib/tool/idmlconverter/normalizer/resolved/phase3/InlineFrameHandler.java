@@ -15,7 +15,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConve
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.BlankAnchorSpacer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.BlankAnchorSpacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
