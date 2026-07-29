@@ -1689,6 +1689,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     try {
         _marker(ctx.outputDir, "09d_extractionResults");
         _stampExportUnitsOnRenderedItems(ctx, renderedFloatingItems);
+        _marker(ctx.outputDir, "09d1_stampExportUnits_done");
         var textlessDiagnostics = [];
         try {
             textlessDiagnostics = textlessDiagnostics.concat(
@@ -1700,8 +1701,10 @@ function _runRenderPhases(doc, ctx, allItems) {
                 renderedImageFrames, renderedGraphicFrames, renderedVectorFrames,
                 renderedMasterGraphics, tfShellFrames,
                 textlessDiagnostics);
+        _marker(ctx.outputDir, "09d2_buildExtractionResults_done");
         writeJson(ctx.outputDir + "/extraction-results.json", extractionResults);
         writeJson(ctx.outputDir + "/export-units.json", extractionResults.exportUnits);
+        _marker(ctx.outputDir, "09d3_writeExtractionResults_done");
         if (extractionResults.validation && extractionResults.validation.status !== "OK") {
             _pushExtractionValidationWarning(
                     ctx,
@@ -1757,9 +1760,11 @@ function _runRenderPhases(doc, ctx, allItems) {
     // Render/export phases hide HWPX-owned TF paint while producing shell PNGs.
     // Restore from the source snapshot before resolved/preview so temporary
     // extraction state cannot leak into later stages.
+    _marker(ctx.outputDir, "09d4_restorePaintState_start");
     try {
         restoreEditableTextFramePaintState(editableTextPaintSnapshot);
     } catch (eTextPaintRestoreBeforeResolved) {}
+    _marker(ctx.outputDir, "09d5_restorePaintState_done");
     _marker(ctx.outputDir, "10_collectResolved");
     writeProgress(ctx.outputDir, "resolved", 0, ctx.rangePageCount);
     var resolvedOptions = {
