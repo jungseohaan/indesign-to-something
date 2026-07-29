@@ -85,10 +85,10 @@ public final class ParagraphPropertyResolver {
             if (neutralHangingIndent) {
                 para.leftMargin(0L);
                 para.firstLineIndent(0L);
-            } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
+            } else if (rp.leftIndent() != null) {
                 para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
             }
-            if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
+            if (!neutralHangingIndent && rp.firstLineIndent() != null) {
                 para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
             }
             // 탭 스톱
@@ -161,10 +161,10 @@ public final class ParagraphPropertyResolver {
         if (neutralHangingIndent) {
             para.leftMargin(0L);
             para.firstLineIndent(0L);
-        } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
+        } else if (rp.leftIndent() != null) {
             para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
         }
-        if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
+        if (!neutralHangingIndent && rp.firstLineIndent() != null) {
             para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
         }
         if (rp.hasTabStops()) {

@@ -49,7 +49,8 @@ public final class StoryFlowAssembler {
             ResolvedBuildContext ctx,
             IDMLTable idmlTable,
             IDMLTableCell idmlCell) {
-        if (cellContainsClosedInlineTextShellOwner(ctx, idmlTable, idmlCell)
+        if (cellContainsInlineTextShellOwner(ctx, idmlTable, idmlCell)
+                || cellReferencesInlineTextShellOwnedStory(ctx, idmlCell)
                 || isResolvedInlineAnchorOnlyCell(ctx, idmlTable, idmlCell)) {
             List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
             if (inlineShellFlow != null && !inlineShellFlow.isEmpty()) {
@@ -82,6 +83,22 @@ public final class StoryFlowAssembler {
         }
         List<ASTParagraph> inlineShellFlow = buildOwnedInlineShellFlow(ctx, idmlTable, idmlCell);
         return inlineShellFlow != null ? inlineShellFlow : new ArrayList<ASTParagraph>();
+    }
+
+    public static boolean tableContainsInlineTextShellOwner(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable) {
+        if (ctx == null || idmlTable == null || idmlTable.rows() == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : idmlTable.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (IDMLTableCell cell : row.cells()) {
+                if (cellContainsInlineTextShellOwner(ctx, idmlTable, cell)
+                        || cellReferencesInlineTextShellOwnedStory(ctx, cell)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean isResolvedInlineAnchorOnlyCell(
@@ -117,6 +134,42 @@ public final class StoryFlowAssembler {
             for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchorId, 8)) {
                 if (isClosedInlineTextShellOwnerPlan(ctx, plan)) return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean cellContainsInlineTextShellOwner(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null) return false;
+        Set<Integer> anchorIds = new LinkedHashSet<>();
+        collectResolvedCellInlineAnchorIds(ctx, idmlTable, idmlCell, anchorIds);
+        collectIDMLCellInlineAnchorIds(idmlCell, anchorIds);
+        if (anchorIds.isEmpty()) return false;
+        for (Integer anchorId : anchorIds) {
+            if (anchorId == null || anchorId < 0) continue;
+            if (hasInlineTextShellVisualOwnerPlanForTextFrame(ctx, anchorId)
+                    && hasInlineHwpxTextOwnerPlanForTextFrame(ctx, anchorId)) {
+                return true;
+            }
+            for (ObjectPlan plan : ctx.ownershipPlansForObjectTree(anchorId, 8)) {
+                if (isInlineTextShellOwnerPlan(ctx, plan)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean cellReferencesInlineTextShellOwnedStory(
+            ResolvedBuildContext ctx,
+            IDMLTableCell idmlCell) {
+        if (ctx == null || idmlCell == null
+                || idmlCell.textFrameStoryRefs() == null
+                || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return false;
+        }
+        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            if (isStoryOwnedByInlineTextShellPlan(ctx, storyRef)) return true;
         }
         return false;
     }
@@ -186,6 +239,13 @@ public final class StoryFlowAssembler {
             ObjectPlan plan) {
         if (ctx == null || plan == null) return false;
         if (!plan.inlineSourceTreeClosed) return false;
+        return isInlineTextShellOwnerPlan(ctx, plan);
+    }
+
+    private static boolean isInlineTextShellOwnerPlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan) {
+        if (ctx == null || plan == null) return false;
         if (plan.placement != Placement.INLINE) return false;
         if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         return plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0;
@@ -389,6 +449,16 @@ public final class StoryFlowAssembler {
                     && InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, anchorId)) {
                 plannedItems = InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, anchorId, null, null);
             }
+            if ((plannedItems == null || plannedItems.isEmpty())
+                    && ctx.isTextFrameOwnedByTextShellPlan(anchorId)
+                    && ctx.ownershipPlanPlacesInlineHwpxText(anchorId)) {
+                ASTInlineObject shell =
+                        InlineFrameHandler.loadPlannedInlineTextShellForOwnedTextFrame(ctx, anchorId);
+                if (shell != null) {
+                    plannedItems = new ArrayList<ASTInlineItem>();
+                    plannedItems.add(shell);
+                }
+            }
             if (plannedItems != null && !plannedItems.isEmpty()) {
                 InlineFrameHandler.applyClosedInlineCarrierTextAlignment(ctx, anchorId, paragraph);
                 int added = appendInlineItemsKeepingObjectsInline(paragraph, plannedItems, ctx, consumedOwnershipKeys);
@@ -470,6 +540,16 @@ public final class StoryFlowAssembler {
                     if ((plannedItems == null || plannedItems.isEmpty())
                             && InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)) {
                         plannedItems = InlineFrameHandler.loadPlannedInlineAnchorItems(ctx, domId, null, null);
+                    }
+                    if ((plannedItems == null || plannedItems.isEmpty())
+                            && ctx.isTextFrameOwnedByTextShellPlan(domId)
+                            && ctx.ownershipPlanPlacesInlineHwpxText(domId)) {
+                        ASTInlineObject shell =
+                                InlineFrameHandler.loadPlannedInlineTextShellForOwnedTextFrame(ctx, domId);
+                        if (shell != null) {
+                            plannedItems = new ArrayList<ASTInlineItem>();
+                            plannedItems.add(shell);
+                        }
                     }
                     if (plannedItems != null && !plannedItems.isEmpty()) {
                         if (paragraph == null) {
@@ -945,8 +1025,8 @@ public final class StoryFlowAssembler {
             if (tf == null || tf.id() == null) continue;
             try {
                 int domId = Integer.parseInt(tf.id());
-                if (ctx.isTextFrameOwnedByTextShellPlan(domId)
-                        && ctx.ownershipPlanPlacesInlineHwpxText(domId)) {
+                if (hasInlineTextShellVisualOwnerPlanForTextFrame(ctx, domId)
+                        && hasInlineHwpxTextOwnerPlanForTextFrame(ctx, domId)) {
                     return true;
                 }
             } catch (NumberFormatException ignored) {
@@ -973,6 +1053,36 @@ public final class StoryFlowAssembler {
             }
         }
         return false;
+    }
+
+    private static boolean hasInlineTextShellVisualOwnerPlanForTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || textFrameDomId < 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlansForOwnedTextFrame(textFrameDomId)) {
+            if (isInlineTextShellOwnerPlan(ctx, plan)
+                    && containsInt(plan.ownedTextFrameIds, textFrameDomId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasInlineHwpxTextOwnerPlanForTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || textFrameDomId < 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlansForOwnedTextFrame(textFrameDomId)) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.textAction != kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction.OWNED_BY_HWPX_TEXT) {
+                continue;
+            }
+            if (containsInt(plan.ownedTextFrameIds, textFrameDomId)) {
+                return true;
+            }
+        }
+        return ctx.ownershipPlanPlacesInlineHwpxText(textFrameDomId);
     }
 
     private static int parseDomId(ResolvedTextFrame tf) {

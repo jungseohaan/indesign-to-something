@@ -13,9 +13,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.BlankAnchorSpacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.BlankAnchorSpacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.CoordinateSpace;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
@@ -1594,11 +1594,87 @@ public class InlineFrameHandler {
                                 ? "placed planned inline textless shell as INLINE_TEXT_FRAME native source shape; editable text is owned by HWPX"
                                 : "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
             }
+            flattenNestedInlineTextObjectsForDrawText(obj);
             ctx.markObjectPlanMaterialized(shellPlan);
             return obj;
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * INLINE_TEXT_FRAME is emitted as HWPX drawText. Text-only nested frames can
+     * be flattened into the parent drawText, but a nested frame with its own
+     * planned shell still owns a visible SHELL_SLOT and must remain an inline
+     * object so the visual channel is executed.
+     */
+    private static void flattenNestedInlineTextObjectsForDrawText(ASTInlineObject obj) {
+        if (obj == null || obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return;
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return;
+        for (ASTParagraph paragraph : obj.paragraphs()) {
+            if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            List<ASTInlineItem> flattened = null;
+            List<ASTInlineItem> items = paragraph.items();
+            for (int i = 0; i < items.size(); i++) {
+                ASTInlineItem item = items.get(i);
+                List<ASTInlineItem> replacement = flattenInlineObjectToTextItems(item);
+                if (flattened != null) {
+                    if (replacement != null && !replacement.isEmpty()) {
+                        flattened.addAll(replacement);
+                    } else {
+                        flattened.add(item);
+                    }
+                } else if (replacement != null && !replacement.isEmpty()) {
+                    flattened = new ArrayList<>(items.size() + replacement.size());
+                    for (ASTInlineItem previous : items.subList(0, i)) {
+                        flattened.add(previous);
+                    }
+                    flattened.addAll(replacement);
+                }
+            }
+            if (flattened != null) {
+                items.clear();
+                items.addAll(flattened);
+            }
+        }
+    }
+
+    private static List<ASTInlineItem> flattenInlineObjectToTextItems(ASTInlineItem item) {
+        if (!(item instanceof ASTInlineObject)) return null;
+        ASTInlineObject nested = (ASTInlineObject) item;
+        if (hasDrawableNestedShell(nested)) return null;
+        if (nested.paragraphs() == null || nested.paragraphs().isEmpty()) return null;
+        List<ASTInlineItem> flattened = new ArrayList<>();
+        for (ASTParagraph nestedParagraph : nested.paragraphs()) {
+            if (nestedParagraph == null || nestedParagraph.items() == null) continue;
+            for (ASTInlineItem nestedItem : nestedParagraph.items()) {
+                if (nestedItem instanceof ASTTextRun) {
+                    ASTTextRun run = (ASTTextRun) nestedItem;
+                    if (run.text() != null && !run.text().isEmpty()) {
+                        flattened.add(run.copyWithText(run.text()));
+                    }
+                } else if (nestedItem instanceof ASTEquation || nestedItem instanceof ASTBreak) {
+                    flattened.add(nestedItem);
+                } else {
+                    List<ASTInlineItem> recursive = flattenInlineObjectToTextItems(nestedItem);
+                    if (recursive != null && !recursive.isEmpty()) {
+                        flattened.addAll(recursive);
+                    }
+                }
+            }
+        }
+        return flattened.isEmpty() ? null : flattened;
+    }
+
+    private static boolean hasDrawableNestedShell(ASTInlineObject obj) {
+        if (obj == null) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return true;
+        if (obj.nativeGraphicsAllowed()) return true;
+        String fill = obj.fillColor();
+        if (fill != null && fill.startsWith("#")) return true;
+        String stroke = obj.strokeColor();
+        if (stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0) return true;
+        return obj.shellShapeType() != null;
     }
 
     private static ASTInlineObject buildTransparentInlineShellImageObject(
@@ -1976,6 +2052,7 @@ public class InlineFrameHandler {
             java.util.List<ResolvedTextFrame> childTfs) {
         if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (plan.placement != Placement.INLINE) return false;
+        if (plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) return false;
         if (childTfs == null || childTfs.size() != 1) return false;
         ResolvedTextFrame tf = childTfs.get(0);
         if (tf == null) return false;
