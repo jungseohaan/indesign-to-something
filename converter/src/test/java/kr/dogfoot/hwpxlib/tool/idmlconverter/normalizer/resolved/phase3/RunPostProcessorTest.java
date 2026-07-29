@@ -82,6 +82,15 @@ public class RunPostProcessorTest {
         return run;
     }
 
+    private static ASTTextRun underlinedRun(String text) {
+        ASTTextRun run = bodyRun(text);
+        run.underline(true);
+        run.underlineColor("#000000");
+        run.underlineShape("SOLID");
+        run.characterStyleRef("CharacterStyle/밑줄");
+        return run;
+    }
+
     private static void assertEquation(ASTParagraph para, int index, String script) {
         Assert.assertTrue(para.items().get(index) instanceof ASTEquation);
         ASTEquation equation = (ASTEquation) para.items().get(index);
@@ -249,6 +258,58 @@ public class RunPostProcessorTest {
         RunPostProcessor.resolveInheritedEquationSizes(para);
 
         Assert.assertEquals(Integer.valueOf(1050), variable.preferredBaseUnit());
+    }
+
+    @Test
+    public void leadingUnderlinedIndentAfterItemMarkerIsRemovedWhenItemHasCorrectionTarget() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(bodyRun("⑴"));
+        para.addItem(bodyRun(" "));
+        ASTTextRun leadingIndent = underlinedRun("\u00A0\u00A0\u00A0");
+        para.addItem(leadingIndent);
+        para.addItem(bodyRun("The more you water the plant, the "));
+        ASTTextRun target = underlinedRun("tall");
+        para.addItem(target);
+        para.addItem(bodyRun(" it grows. "));
+        ASTTextRun answerBlank = underlinedRun("\u00A0\u00A0\u00A0");
+        para.addItem(answerBlank);
+
+        RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
+
+        Assert.assertEquals("The more you water the plant, the ",
+                ((ASTTextRun) para.items().get(2)).text());
+        Assert.assertFalse(para.items().contains(leadingIndent));
+        Assert.assertTrue(target.underline());
+        Assert.assertTrue(answerBlank.underline());
+    }
+
+    @Test
+    public void leadingUnderlinedAnswerBlankWithoutCorrectionTargetIsPreserved() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(bodyRun("⑴"));
+        para.addItem(bodyRun(" "));
+        ASTTextRun answerBlank = underlinedRun("\u00A0\u00A0\u00A0");
+        para.addItem(answerBlank);
+        para.addItem(bodyRun("is on the table."));
+
+        RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
+
+        Assert.assertTrue(answerBlank.underline());
+        Assert.assertEquals("CharacterStyle/밑줄", answerBlank.characterStyleRef());
+    }
+
+    @Test
+    public void colonPromptLeadingBlankIsPreserved() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(bodyRun("A: "));
+        ASTTextRun answerBlank = underlinedRun("\u00A0\u00A0\u00A0");
+        para.addItem(answerBlank);
+        para.addItem(bodyRun("without soil?"));
+
+        RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
+
+        Assert.assertTrue(answerBlank.underline());
+        Assert.assertEquals("CharacterStyle/밑줄", answerBlank.characterStyleRef());
     }
 
     @Test

@@ -143,6 +143,143 @@ class RunPostProcessor {
     }
 
     /**
+     * 문항 번호 바로 뒤의 underlined NBSP 들여쓰기 런을 제거한다.
+     *
+     * <p>정오표/고쳐쓰기형 문항은 보통 "⑴ [문장 안 밑줄 단어] ... [답안 밑줄]" 구조다.
+     * 소스 스타일 경계가 넓게 잡히면 문항 번호와 문장 사이의 들여쓰기 공백까지 밑줄
+     * 문자스타일을 상속한다. 이 공백은 텍스트 내용이 아니라 배치용 간격이므로 HWPX
+     * 밑줄로 물질화하면 선이 하나 더 생기고, 밑줄만 제거해도 긴 공백이 남는다.
+     *
+     * <p>반대로 문항 첫머리의 실제 빈칸("⑴ ____ is ...")은 보존해야 하므로, 같은 문항
+     * 안에 underlined lexical target 과 그 뒤의 underlined answer blank 가 모두 있을 때만
+     * 선행 공백 밑줄을 제거한다.
+     */
+    static void suppressLeadingUnderlineIndentAfterListMarker(ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().isEmpty()) return;
+        List<ASTInlineItem> items = para.items();
+        for (int i = 0; i < items.size(); i++) {
+            if (!isListItemMarker(items.get(i))) continue;
+
+            int cursor = i + 1;
+            while (cursor < items.size() && isPlainWhitespaceTextRun(items.get(cursor))) {
+                cursor++;
+            }
+
+            int firstUnderlinedBlank = cursor;
+            while (cursor < items.size() && isUnderlinedWhitespaceTextRun(items.get(cursor))) {
+                cursor++;
+            }
+            if (firstUnderlinedBlank == cursor) continue;
+
+            int firstContent = cursor;
+            while (firstContent < items.size() && isWhitespaceTextRun(items.get(firstContent))) {
+                firstContent++;
+            }
+            if (firstContent >= items.size() || !startsWithLexicalText(items.get(firstContent))) {
+                continue;
+            }
+            if (!hasUnderlinedCorrectionEvidence(items, firstContent)) {
+                continue;
+            }
+
+            for (int j = cursor - 1; j >= firstUnderlinedBlank; j--) {
+                items.remove(j);
+            }
+            i = firstUnderlinedBlank - 1;
+        }
+    }
+
+    private static boolean isListItemMarker(ASTInlineItem item) {
+        if (!(item instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) item).text();
+        if (text == null) return false;
+        String t = text.trim();
+        if (t.isEmpty()) return false;
+        if (t.matches("[①-⑳⑴-⒇]")) return true;
+        return t.matches("\\(\\d{1,2}\\)") || t.matches("\\d{1,2}[.)]");
+    }
+
+    private static boolean isPlainWhitespaceTextRun(ASTInlineItem item) {
+        return item instanceof ASTTextRun
+                && isWhitespaceOnly(((ASTTextRun) item).text())
+                && !hasUnderlineIntent((ASTTextRun) item);
+    }
+
+    private static boolean isUnderlinedWhitespaceTextRun(ASTInlineItem item) {
+        return item instanceof ASTTextRun
+                && isWhitespaceOnly(((ASTTextRun) item).text())
+                && hasUnderlineIntent((ASTTextRun) item);
+    }
+
+    private static boolean isWhitespaceTextRun(ASTInlineItem item) {
+        return item instanceof ASTTextRun
+                && isWhitespaceOnly(((ASTTextRun) item).text());
+    }
+
+    private static boolean isWhitespaceOnly(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            if (!isLayoutWhitespace(text.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    private static boolean isLayoutWhitespace(char c) {
+        return Character.isWhitespace(c)
+                || Character.isSpaceChar(c)
+                || c == '\u00A0'
+                || c == '\u2007'
+                || c == '\u202F'
+                || c == '\u200B';
+    }
+
+    private static boolean startsWithLexicalText(ASTInlineItem item) {
+        if (!(item instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) item).text();
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isLayoutWhitespace(c)) continue;
+            return Character.isLetterOrDigit(c);
+        }
+        return false;
+    }
+
+    private static boolean hasUnderlinedCorrectionEvidence(List<ASTInlineItem> items, int start) {
+        boolean seenUnderlinedLexicalTarget = false;
+        for (int i = start; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (i > start && isListItemMarker(item)) break;
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            if (!hasUnderlineIntent(run)) continue;
+            if (containsLetterOrDigit(run.text())) {
+                seenUnderlinedLexicalTarget = true;
+            } else if (seenUnderlinedLexicalTarget && isWhitespaceOnly(run.text())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsLetterOrDigit(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.isLetterOrDigit(text.charAt(i))) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasUnderlineIntent(ASTTextRun run) {
+        if (run == null) return false;
+        if (run.underline()) return true;
+        String style = run.characterStyleRef();
+        if (style == null) return false;
+        String lower = style.toLowerCase(java.util.Locale.ROOT);
+        return style.contains("밑줄") || lower.contains("underline");
+    }
+
+    /**
      * A triangle marker is explicit source math structure.  Normalize the immediately following
      * uppercase label as one equation even if an earlier generic parser split it into text A and
      * equation BC.  This is structure-based and applies to every source-authored △ABC label.

@@ -3539,13 +3539,27 @@ public final class TableBuilder {
             ResolvedBuildContext ctx,
             ASTInlineObject nested) {
         if (ctx == null || ctx.resolvedData == null || nested == null || nested.sourceId() == null) return null;
-        String domId = toDecimalStoryId(nested.sourceId());
-        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+        ResolvedTextFrame tf = resolvedTextFrameForNestedSource(ctx, nested.sourceId());
         if (tf == null || tf.storyId() == null) return null;
         ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
         if (!hasAuthoritativeResolvedStructure(story)) return null;
         List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story);
         return paragraphs == null || paragraphs.isEmpty() ? null : paragraphs;
+    }
+
+    private static ResolvedTextFrame resolvedTextFrameForNestedSource(ResolvedBuildContext ctx, String sourceId) {
+        if (ctx == null || ctx.resolvedData == null || sourceId == null) return null;
+        String domId = toDecimalStoryId(sourceId);
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+        if (tf != null) return tf;
+
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(domId);
+        if (item == null || item.childIds() == null) return null;
+        for (int childId : item.childIds()) {
+            ResolvedTextFrame child = ctx.resolvedData.getTextFrame(String.valueOf(childId));
+            if (child != null) return child;
+        }
+        return null;
     }
 
     private static ASTInlineObject firstNestedTextFrame(ASTParagraph paragraph) {

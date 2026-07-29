@@ -1528,7 +1528,7 @@ public class ResolvedData {
             applyScale(scale);
         } finally {
             // 좌표가 pt 로 확정된 뒤에만 폭 판정이 유효하므로 여기서 수행한다.
-            replaceBlankSpacerAnchorRuns();
+            materializeBlankSpacerAnchorRuns();
         }
     }
 
@@ -1539,7 +1539,8 @@ public class ResolvedData {
      * 치환해야 IDML-resolved 텍스트 동일성 게이트(셸 구조 보존 경로 등)가 유지된다.
      * BlankAnchorSpacer 참조 (과학 u1 p46 "( )" 사례).
      */
-    private void replaceBlankSpacerAnchorRuns() {
+    public int materializeBlankSpacerAnchorRuns() {
+        int materialized = 0;
         for (ResolvedStory story : storyMap.values()) {
             if (story == null || story.paragraphs() == null) continue;
             for (ResolvedParagraph para : story.paragraphs()) {
@@ -1564,9 +1565,11 @@ public class ResolvedData {
                     run.type(null);
                     run.anchoredObjectId(null);
                     run.text(spacer);
+                    materialized++;
                 }
             }
         }
+        return materialized;
     }
 
     private void applyScale(double s) {

@@ -20,9 +20,14 @@ import java.util.function.Function;
 public final class ResolvedTextFlowAstConverter {
     private ResolvedTextFlowAstConverter() {}
 
+    public interface InlineAnchorTextResolver {
+        String resolve(ResolvedRun run, ResolvedParagraph paragraph, int runIndex);
+    }
+
     public static final class Options {
         private Function<String, String> colorResolver;
         private Function<String, String> textTransformer;
+        private InlineAnchorTextResolver inlineAnchorTextResolver;
         private String defaultAlignment;
         private TextStyleApplicator.ResolvedStyleOptions styleOptions;
         private boolean copyTabStops;
@@ -38,6 +43,11 @@ public final class ResolvedTextFlowAstConverter {
 
         public Options textTransformer(Function<String, String> value) {
             this.textTransformer = value;
+            return this;
+        }
+
+        public Options inlineAnchorTextResolver(InlineAnchorTextResolver value) {
+            this.inlineAnchorTextResolver = value;
             return this;
         }
 
@@ -233,8 +243,21 @@ public final class ResolvedTextFlowAstConverter {
     private static void addRuns(ASTParagraph para, ResolvedParagraph resolvedPara, Options options) {
         if (resolvedPara.runs() == null) return;
         addGeneratedPrefixRun(para, resolvedPara, options);
-        for (ResolvedRun resolvedRun : resolvedPara.runs()) {
-            if (resolvedRun == null || resolvedRun.isInlineAnchor() || resolvedRun.text() == null) continue;
+        List<ResolvedRun> runs = resolvedPara.runs();
+        for (int runIndex = 0; runIndex < runs.size(); runIndex++) {
+            ResolvedRun resolvedRun = runs.get(runIndex);
+            if (resolvedRun == null) continue;
+            if (resolvedRun.isInlineAnchor()) {
+                if (options.inlineAnchorTextResolver == null) continue;
+                String anchorText = options.inlineAnchorTextResolver.resolve(resolvedRun, resolvedPara, runIndex);
+                if (anchorText == null || (options.skipBlankRuns && anchorText.trim().isEmpty())) continue;
+                ResolvedRun styleRun = inlineAnchorStyleRun(runs, runIndex, resolvedRun);
+                for (ASTTextRun run : convertPreparedRunText(anchorText, styleRun, para, options)) {
+                    para.addItem(run);
+                }
+                continue;
+            }
+            if (resolvedRun.text() == null) continue;
             String text = resolvedRun.text();
             boolean stopAfterRun = false;
             if (options.truncateAtParagraphBreak) {
@@ -257,6 +280,52 @@ public final class ResolvedTextFlowAstConverter {
             }
             if (stopAfterRun) break;
         }
+    }
+
+    private static ResolvedRun inlineAnchorStyleRun(List<ResolvedRun> runs, int runIndex, ResolvedRun anchorRun) {
+        ResolvedRun fallback = adjacentTextRun(runs, runIndex, -1);
+        if (fallback == null) fallback = adjacentTextRun(runs, runIndex, 1);
+        ResolvedRun out = new ResolvedRun();
+        ResolvedRun primary = anchorRun != null ? anchorRun : fallback;
+        if (primary != null) {
+            out.fontFamily(primary.fontFamily());
+            out.fontSize(primary.fontSize());
+            out.fontStyle(primary.fontStyle());
+            out.fillColor(primary.fillColor());
+            out.charStyle(primary.charStyle());
+            out.tracking(primary.tracking());
+            out.horizontalScale(primary.horizontalScale());
+            out.verticalScale(primary.verticalScale());
+            out.baselineShift(primary.baselineShift());
+            out.position(primary.position());
+            out.underline(primary.underline());
+            out.strikeThru(primary.strikeThru());
+        }
+        if (fallback != null) {
+            if (out.fontFamily() == null) out.fontFamily(fallback.fontFamily());
+            if (out.fontSize() == null) out.fontSize(fallback.fontSize());
+            if (out.fontStyle() == null) out.fontStyle(fallback.fontStyle());
+            if (out.fillColor() == null) out.fillColor(fallback.fillColor());
+            if (out.charStyle() == null) out.charStyle(fallback.charStyle());
+            if (out.tracking() == null) out.tracking(fallback.tracking());
+            if (out.horizontalScale() == null) out.horizontalScale(fallback.horizontalScale());
+            if (out.verticalScale() == null) out.verticalScale(fallback.verticalScale());
+            if (out.baselineShift() == null) out.baselineShift(fallback.baselineShift());
+            if (out.position() == null) out.position(fallback.position());
+        }
+        out.text(anchorRun != null && anchorRun.text() != null ? anchorRun.text() : "");
+        return out;
+    }
+
+    private static ResolvedRun adjacentTextRun(List<ResolvedRun> runs, int index, int direction) {
+        if (runs == null || direction == 0) return null;
+        for (int i = index + direction; i >= 0 && i < runs.size(); i += direction) {
+            ResolvedRun run = runs.get(i);
+            if (run == null || run.isInlineAnchor()) continue;
+            if (run.text() == null || run.text().isEmpty()) continue;
+            return run;
+        }
+        return null;
     }
 
     private static void addGeneratedPrefixRun(

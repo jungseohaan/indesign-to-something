@@ -20,6 +20,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.BlankAnchorSpacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedTextFlowAstConverter;
@@ -4632,6 +4633,9 @@ public final class StoryConverter {
                     if (isInlineAnchorRun(run)) {
                         Integer anchoredId = run.anchoredObjectId();
                         if (anchoredId != null) {
+                            if (appendBlankSpacerAnchorRun(ctx, para, runs, runIndex, run)) {
+                                continue;
+                            }
                             if (isDoviraSubunitMarker(rp, runs, runIndex)
                                     && DoviraSubunitMarkerPolicy.isDuplicateMarkerStory(ctx.resolvedData, story.id())) {
                                 continue;
@@ -4735,6 +4739,92 @@ public final class StoryConverter {
         return paragraphs;
     }
 
+    private static boolean appendBlankSpacerAnchorRun(
+            ResolvedBuildContext ctx,
+            ASTParagraph para,
+            List<ResolvedRun> runs,
+            int runIndex,
+            ResolvedRun anchorRun) {
+        if (ctx == null || ctx.resolvedData == null || para == null
+                || anchorRun == null || anchorRun.anchoredObjectId() == null) {
+            return false;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(anchorRun.anchoredObjectId()));
+        String spacer = BlankAnchorSpacer.spacerTextForPageItem(item);
+        if (spacer == null) return false;
+
+        ResolvedRun prev = adjacentTextRun(runs, runIndex, -1);
+        ResolvedRun next = adjacentTextRun(runs, runIndex, 1);
+        if ((prev != null && BlankAnchorSpacer.isEquationFontRun(prev.fontFamily()))
+                || (next != null && BlankAnchorSpacer.isEquationFontRun(next.fontFamily()))) {
+            return false;
+        }
+
+        ResolvedRun styleRun = spacerStyleRun(anchorRun, prev != null ? prev : next);
+        TextStyleApplicator.ResolvedStyleOptions styleOptions =
+                new TextStyleApplicator.ResolvedStyleOptions();
+        styleOptions.proportionalScaleAsFontSize = true;
+        styleOptions.applyVerticalScale = false;
+        List<ASTTextRun> textRuns = ResolvedTextFlowAstConverter.convertRunText(
+                spacer,
+                styleRun,
+                para,
+                ResolvedTextFlowAstConverter.options()
+                        .colorResolver(color -> RunBuilder.resolveColorToHex(ctx, color))
+                        .styleOptions(styleOptions)
+                        .truncateAtParagraphBreak(false));
+        for (ASTTextRun textRun : textRuns) {
+            para.addItem(textRun);
+        }
+        return true;
+    }
+
+    private static ResolvedRun adjacentTextRun(List<ResolvedRun> runs, int index, int direction) {
+        if (runs == null || direction == 0) return null;
+        for (int i = index + direction; i >= 0 && i < runs.size(); i += direction) {
+            ResolvedRun run = runs.get(i);
+            if (run == null || isInlineAnchorRun(run)) continue;
+            if (run.text() == null || run.text().isEmpty()) continue;
+            return run;
+        }
+        return null;
+    }
+
+    private static ResolvedRun spacerStyleRun(ResolvedRun anchorRun, ResolvedRun fallback) {
+        ResolvedRun out = new ResolvedRun();
+        ResolvedRun primary = anchorRun != null ? anchorRun : fallback;
+        if (primary != null) {
+            out.fontFamily(primary.fontFamily());
+            out.fontSize(primary.fontSize());
+            out.fontStyle(primary.fontStyle());
+            out.fillColor(primary.fillColor());
+            out.charStyle(primary.charStyle());
+            out.tracking(primary.tracking());
+            out.horizontalScale(primary.horizontalScale());
+            out.verticalScale(primary.verticalScale());
+            out.baselineShift(primary.baselineShift());
+            out.position(primary.position());
+            out.underline(primary.underline());
+            out.strikeThru(primary.strikeThru());
+        }
+        if (fallback != null) {
+            if (out.fontFamily() == null) out.fontFamily(fallback.fontFamily());
+            if (out.fontSize() == null) out.fontSize(fallback.fontSize());
+            if (out.fontStyle() == null) out.fontStyle(fallback.fontStyle());
+            if (out.fillColor() == null) out.fillColor(fallback.fillColor());
+            if (out.charStyle() == null) out.charStyle(fallback.charStyle());
+            if (out.tracking() == null) out.tracking(fallback.tracking());
+            if (out.horizontalScale() == null) out.horizontalScale(fallback.horizontalScale());
+            if (out.verticalScale() == null) out.verticalScale(fallback.verticalScale());
+            if (out.baselineShift() == null) out.baselineShift(fallback.baselineShift());
+            if (out.position() == null) out.position(fallback.position());
+            if (out.underline() == null) out.underline(fallback.underline());
+            if (out.strikeThru() == null) out.strikeThru(fallback.strikeThru());
+        }
+        out.text("");
+        return out;
+    }
+
     private static List<ASTParagraph> convertTextOnlyStoryParagraphsFromTextFlowIfSafe(
             ResolvedBuildContext ctx,
             String storyId) {
@@ -4816,6 +4906,7 @@ public final class StoryConverter {
         for (ASTParagraph para : paragraphs) {
             MathProcessor.convertMathRunsInParagraph(ctx, para);
             RunPostProcessor.splitOverlineRuns(para);
+            RunPostProcessor.suppressLeadingUnderlineIndentAfterListMarker(para);
             // 본문 텍스트로 샌 GREP 분수(;2!;·;1Á8;)를 인라인 수식으로 (SPEC-081 후속)
             RunPostProcessor.convertGrepFractionTextRuns(para);
         }
