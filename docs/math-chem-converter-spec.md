@@ -1,5 +1,8 @@
 # 수식/화학식 변환기 재구현 SPEC
 
+> **상태**: Active / Canonical
+> **최종 갱신**: 2026-07-30 (`open-indd`, PR #220 반영)
+>
 > **목적**: InDesign(IDML) 교과서 조판의 "폰트 해킹" 수식·화학식을 한/글(HWP) 수식
 > 스크립트(`hp:equation`)로 변환하는 현행 Java 구현을, **다른 언어로 동일 기능을
 > 재구현**할 수 있도록 언어 중립적으로 기술한다. 함수명은 참조용이며 계약·알고리즘이
@@ -28,7 +31,7 @@
 | **EH계열** (EH수식/상부자/하부자/분수대문자/분수소문자/약물/루트/선모음) | 비상 수학 | 라틴-1 확장(0x80–0xFF) 글리프 + GREP `;…;` 분수 | 렉서→파서(AST)→이미터 3단계 |
 | **BT계열** (BT수식M, BT화살표) | 수학·과학 | ASCII 마커 문법 (`_x` `^x` `&` `rt…&` `zrt`) | 문자열 다단계 치환 |
 | **NP계열** (NP_*) | 수학 | **폰트 variant 이름 자체**가 구조(NP_RUT=근호, NP_BUN=분수…) | 런 순회 상태머신 |
-| GREP 수식 (폰트 무관) | 공통 | 문단스타일의 GREP 규칙이 문자패턴에 수식 charStyle 적용 | 스타일 해석 후 위 경로로 합류 |
+| GREP 수식 | 공통 | 문단스타일의 GREP 규칙이 문자패턴에 BT/EH/NP 수식 charStyle 적용 | 승자 스타일·source 증거를 보존한 뒤 해당 폰트 경로로 합류 |
 
 ### 1.3 출력: HWP 수식 스크립트
 
@@ -57,7 +60,7 @@ IDML 스토리 런 (문자 + charStyle/fontFamily + 인라인그래픽)
   │  ③ 그룹 → 글리프 변환기 (EH: Lex→Parse→Emit / BT / NP)  …… 2장
   │  ④ 화학식 판정·클러스터 수집 → CHEM_FORMULA equation     …… 4장
   ▼
-후처리 패스 (재조립·승격·강등: 파편 화학식, 계수 흡수, 단일문자 강등) …… 5장
+후처리 패스 (재조립·승격: 파편 화학식, 계수 흡수, GREP span 승격) …… 5장
   │  ⑤ 3단계 수식 파이프라인 (Span→Structure→Validate)      …… 3.5절
   ▼
 sanitizeHwpScript (단일 정규화 관문)                        …… 2.7절
@@ -437,7 +440,8 @@ isPlainAlphanumericRun(run):        # GREP 오검출 방지 게이트
 ```
 런별:
   (a) GREP 리셋: grepMathFont 인데 isPlainAlphanumericRun 이고
-      단일 라틴 변수도 아니고 폰트에 "BT수식" 없으면 → grepMathFont 해제
+      단일 라틴 변수도 아니며 실제 폰트가 BT/EH/NP 어느 계열도 아니면
+      → grepMathFont 해제. NP_IE/NP_BE 등 source 수식 폰트 증거는 해제 금지
   (b) EH 폰트 + 한국어 전용 텍스트 → 폰트·charStyle 전부 제거
       (한국어가 EH 그룹에 빨리면 미매핑 스킵으로 통째 유실 — "a가 √a 보다…")
   (c) EH 리셋(resolved 경로): 문단에 수학 기호가 없고 단일 라틴 변수도 아니거나,
@@ -483,12 +487,17 @@ orcOnly AND answerBoxCluster AND answerBoxPlaceholder 이면:
 
 ```
 Stage 1a — SpanPlanner (span 분류; 불변 plan, AST 미변경):
-  plan():  단일 라틴 문자 런 승격 — [A-Za-z] 정확히 1자 + (상부자·이탤릭 charStyle
-           OR grepMathFont OR italic fontStyle) → MATH.
-           EH/BT/NP 폰트 런은 제외 (그루퍼가 인접 구조를 해석해야 함)
-  planConvertedItems(): 고립 단일 라틴 equation 강등 — 스크립트가 단일 라틴자이고
-           (이탤릭+소문자 = 진짜 변수 → 유지), 좌우 인접에 equation 없으면
-           → TEXT (이탤릭 텍스트런). 과학자 이니셜 A/J/L 강등 (SPEC-078/079)
+  plan():
+    1) source GREP 증거가 있는 순수 ASCII 영숫자 토큰 [A-Za-z0-9]+ → MATH.
+       범위는 0–9, a–z, A–Z 전체이며 x/y/P/Q 같은 문자 목록 예외를 두지 않는다.
+    2) 하나의 BT/EH/NP/GREP 런 안에 저장된 대수식:
+       허용문자=[A-Za-z0-9 공백 +-=], 라틴 변수와 '='가 모두 있고
+       FormulaClassifier가 방정식 문법으로 인정하면 → MATH.
+    3) 일반 단일 라틴 문자 [A-Za-z] + (상부자·이탤릭 charStyle,
+       grepMathFont, italic/oblique fontStyle) → MATH.
+       단, 숫자 직후 단위 문자(m/g/L/l/t)는 제외한다.
+  converted-items 강등은 없음. source GREP 증거로 승격된 고립 A–Z/a–z도
+  문맥과 무관하게 equation으로 유지한다 (SPEC-084).
 
 Stage 1b — StructurePlanner (인접 구조 병합):
   단위+지수: "…cm" 텍스트런 + "^{2}" 단독 equation → "rm cm^{2}" 병합
@@ -496,7 +505,7 @@ Stage 1b — StructurePlanner (인접 구조 병합):
   삼각형 라벨: "…△" + 대문자 라벨 + 대문자 equation → 병합
 
 Stage 2 — PlanConverter: plan 을 역순으로 물질화 (인덱스 안정성).
-  MATH→equation 승격 시 크기/폰트/색 복사 + sourceItalic 표시.
+  MATH→equation 승격 시 크기/폰트/색 복사 + sourceItalic/sourceUpright 표시.
 
 Stage 3 — Validator: 계약 검사만, AST 무수정.
   위반: 빈 스크립트 / 스크립트 내 제어문자(\t \n \r U+2028) / sourceType 누락
@@ -511,18 +520,27 @@ InDesign 문단스타일의 GREP 규칙이 문자 패턴에 수식 문자스타�
 파일에는 폰트 정보가 없으므로 파서가 재현해야 한다:
 
 ```
-1. "수식 charStyle" 식별: charStyle 의 fontFamily 가 BT/EH 수식 폰트인 것
+1. "수식 charStyle" 식별: charStyle 의 fontFamily 가 BT/EH/NP 수식 폰트인 것.
+   NP_IE/NP_BE/NP_BIE 등도 반드시 포함한다.
 2. 문단스타일별 GREP 패턴 수집 — BasedOn 부모 체인 상속 (자식 우선, 같은
    표현식이면 부모 규칙 스킵; 루트 스타일에서 중단, 순환 방지)
 3. InDesign GREP → 표준 정규식 변환:
    ~a → U+FFFC, ~/ → U+2007, ~m → U+2003, \u → \p{Lu}, \l → \p{Ll}
    (변환 불가 문법은 그 규칙 무시)
-4. 문단 텍스트에 문자 단위 매칭 → 전체 매칭이면 런에 grepMathFont 플래그,
-   부분 매칭이면 경계에서 서브런 분할 (U+FFFC 앵커를 위치별로 배분)
+4. 문단 텍스트에 문자 단위로 모든 규칙을 적용하고, **나중 규칙을 승자**로 기록.
+   적용 charStyle이 바뀌는 경계에서 서브런을 분할한다. 전체 매칭이면 원래 런에,
+   부분 매칭이면 분할 런에 `grepMathFont`, `grepAppliedCharStyle`,
+   승자 style의 FontStyle/fontSize 증거를 싣는다. U+FFFC 앵커는 위치별로 배분한다.
+5. NP 그룹 변환이 equation을 만들지 못해 TEXT_RUN으로 fallback하더라도
+   `fontFamily`, `characterStyleRef`, `grepMathFont`, tracking, horizontalScale을
+   복사한다. 이 증거가 유실되면 후속 SpanPlanner가 단일 A/B/P/Q와 숫자를
+   승격할 수 없다.
 ```
 
-grepMathFont 플래그 런은 하류 그룹핑에서 BT 계열로 취급된다. 비수식 GREP
-(색 등)은 별도 채널로 적용.
+grepMathFont 플래그는 "BT로 변환하라"가 아니라 **source가 수식 typography를
+명시했다는 증거**다. 하류에서는 실제 BT/EH/NP 폰트 역할을 우선하고, 폰트별
+그루퍼가 TEXT_RUN으로 fallback한 경우 SpanPlanner가 이 증거로 최종 승격한다.
+비수식 GREP(색 등)은 별도 채널로 적용한다.
 
 ---
 
@@ -706,7 +724,7 @@ HWPX 방출 시 해석:
 
 ---
 
-## 5. 후처리 패스 (재조립·승격·강등)
+## 5. 후처리 패스 (재조립·승격)
 
 문단 flush 가 끝난 뒤, 파편난 수식/화학식을 봉합하는 다단 패스. 모두
 **plan(불변 계획 생성, 최종 스크립트 선검증) → materialize(역순 실행)** 패턴.
@@ -720,7 +738,7 @@ HWPX 방출 시 해석:
 5. 파편 화학식 재조립             (SPEC-078)
 6. 화학식 stitch                  (SPEC-055)
 7. 파편 반응식 재조립             (SPEC-078B)
-8. 3단계 파이프라인 finalize      (단일 라틴 승격/강등 + 구조 병합 + 검증)
+8. 3단계 파이프라인 finalize      (GREP/대수식 span 승격 + 구조 병합 + 검증)
 ```
 
 ### 5.1 GREP 분할 수식 봉합 (SPEC-067)
@@ -785,12 +803,30 @@ flush 폴백 텍스트가 소스 런과 1:1 평문 동일하면 **원본 런을 
 백필. **주의**: 그룹 어댑터에 직접 스타일을 실으면 그룹핑 하류 경로가 바뀌어
 첨자 회귀 (실패 기록 있음) — 산출물에만 백필할 것.
 
-### 5.9 단일 라틴 승격/강등 (3단계 파이프라인 Stage 1)
+### 5.9 GREP 영숫자·단일 라틴 승격 (3단계 파이프라인 Stage 1)
 
-- **승격**: 이탤릭/GREP 증거가 있는 단일 라틴 텍스트 런 → 수식 ("x의 값"의 x)
-- **강등**: 인접에 수식이 없는 고립 단일 라틴 equation → 이탤릭 텍스트
-  (GREP `[단일 라틴]→수식` 규칙이 과학자 이니셜 A/J/L/I 까지 수식화하는 것 복원).
-  단 이탤릭+소문자는 진짜 변수로 보고 유지 (SPEC-079)
+- **GREP 영숫자 승격**: source `grepMathFont=true`인 `[A-Za-z0-9]+` 런은 수식.
+  따라서 숫자, 소문자, 대문자 A–Z 전체가 적용 대상이다.
+- **단일 라틴 승격**: 이탤릭/GREP 증거가 있는 단일 라틴 텍스트 런 → 수식
+  (`x`, `y`, 점 `A`, 사건 `P`, `Q`).
+- **고립 단일 라틴 강등 금지**: equation이 된 A/J/L/I 등을 주변 문맥만으로
+  텍스트로 되돌리지 않는다. SPEC-084가 SPEC-078/079의 강등 규칙을 폐기했다.
+- **NP fallback 증거 보존**: NP 단일 글자 변환이 일단 TEXT_RUN으로 fallback해도
+  source metadata를 보존하고 같은 Stage 1에서 equation으로 승격한다.
+
+### 5.10 GREP 증거가 있는 혼합 대수식 클러스터
+
+GREP 스타일 경계 때문에 하나의 방정식이 `[일반 숫자][NP 변수/연산자][일반 숫자]`
+처럼 갈라질 수 있다. 예: `[2][x+y=][9]`.
+
+- 허용 조각: 공백, ASCII 영문자, 숫자, `+`, `-`, `=`
+- 필수 증거: 조각 중 하나 이상이 `grepMathFont` 또는 BT/EH/NP 폰트
+- 필수 문법: 라틴 변수 ≥1, 등호 ≥1, `FormulaClassifier.containsEquationSyntax=true`
+- 일반 영문 산문(`Model`)은 source 수식 증거가 없으면 흡수하지 않는다.
+- resolved 경로의 `MathProcessor`는 font별 flush 전에 범위를 plan해
+  `2x+y=9` 하나의 equation으로 물질화한다.
+- IDML 직접 경로에서 generic GREP가 이미 `2x+y=9` 한 런으로 합친 경우는
+  `MathSpanPlanner`의 단일-run 대수식 규칙이 동일하게 처리한다.
 
 ---
 
@@ -854,7 +890,9 @@ flush 폴백 텍스트가 소스 런과 1:1 평문 동일하면 **원본 런을 
 | 과학 u1 p19 "암모니아 = [연필+밑줄]" | 실체 시각물 앵커는 □ 로 삼키지 않음 |
 | 1단원 p32 "√□" | 빈 답란이 radicand — box{~} 를 EH 그룹에 |
 | "제곱하여 4가 되는 수"의 4·25 | GREP 상부자(이탤릭) 숫자 직접 수식 방출 (SPEC-080) |
-| 인접 수식 없는 이니셜 A/J/L | 고립 단일 라틴 강등 (이탤릭 소문자 변수는 유지) |
+| 인접 수식 없는 A/J/L, 점 A, 사건 P/Q | source GREP 증거가 있으면 고립 여부와 무관하게 수식 유지 (SPEC-084) |
+| `[2][x+y=][9]` GREP 혼합 런 | source 수식 증거 + 변수 + 등호를 게이트로 `2x+y=9` 단일 equation |
+| NP_BE 단일 A/B가 TEXT fallback | fallback에 font/charStyle/grep 증거를 보존해 SpanPlanner가 승격 |
 | "3cm" + "^{2}" | 단위+지수 구조 병합 → rm cm^{2} |
 
 ### 6.5 화학식
