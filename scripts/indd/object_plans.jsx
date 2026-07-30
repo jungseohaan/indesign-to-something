@@ -2451,10 +2451,22 @@ function _syncObjectPlanDiagnosticsToExecutionCandidates(objectPlanDiagnostics, 
 
     var previousSummary = objectPlanDiagnostics.summary || {};
     objectPlanDiagnostics.objectPlans = kept;
+    // The execution bridge only prunes already-planned rows. Full source
+    // coverage is rebuilt immediately after this sync from the final execution
+    // candidates, so recomputing the recursive coverage graph here duplicates
+    // the most expensive validation pass. Keep all per-plan/slot invariants,
+    // and carry the prior coverage summary until the final coverage build.
     var validation = _validateObjectPlanDiagnostics(
             kept,
             options.sourceItems ? _objectPlanSourceInfoById(options.sourceItems) : null,
-            options.sourceItems || null);
+            options.sourceItems || null,
+            {
+                skipSourceCoverage: options.skipSourceCoverage === true,
+                priorSourceCoverageSummary: objectPlanDiagnostics.validation
+                        && objectPlanDiagnostics.validation.sourceCoverageSummary
+                        ? objectPlanDiagnostics.validation.sourceCoverageSummary
+                        : {}
+            });
     var sourceSetRefs = _attachObjectPlanSourceSetRefs(kept);
     var summary = _summarizeObjectPlans(kept, validation);
     for (var summaryKey in previousSummary) {
@@ -10758,7 +10770,8 @@ function _objectPlanMigrationBlockerResult(code, bundle, extraDetail) {
     };
 }
 
-function _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems) {
+function _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems, options) {
+    options = options || {};
     var plans = objectPlans || [];
     var issues = [];
     var issueCodeCounts = {};
@@ -10809,13 +10822,15 @@ function _validateObjectPlanDiagnostics(objectPlans, sourceById, sourceItems) {
         }
     }
 
-    var sourceCoverage = _validateObjectPlanSourceCoverage(
-            plans,
-            sourceItems,
-            sourceById,
-            issues,
-            issueCodeCounts,
-            issuePlanIds);
+    var sourceCoverage = options.skipSourceCoverage === true
+            ? { summary: options.priorSourceCoverageSummary || {} }
+            : _validateObjectPlanSourceCoverage(
+                    plans,
+                    sourceItems,
+                    sourceById,
+                    issues,
+                    issueCodeCounts,
+                    issuePlanIds);
 
     for (var key in visibleSlotOwners) {
         if (!visibleSlotOwners.hasOwnProperty(key)) continue;

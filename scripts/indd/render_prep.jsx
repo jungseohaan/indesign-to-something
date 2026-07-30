@@ -948,22 +948,6 @@ function snapshotEditableTextFramePaintState(allItems, editableFrameIds) {
     var snapshots = [];
     if (!allItems || !editableFrameIds) return snapshots;
 
-    function snapshotTarget(target) {
-        var state = { target: target };
-        var captured = false;
-        try { state.fillColor = target.fillColor; captured = true; } catch (eFill) {}
-        try { state.fillTint = target.fillTint; captured = true; } catch (eFillTint) {}
-        try { state.strokeColor = target.strokeColor; captured = true; } catch (eStroke) {}
-        try { state.strokeTint = target.strokeTint; captured = true; } catch (eStrokeTint) {}
-        try { state.underline = target.underline; captured = true; } catch (eUnderline) {}
-        try { state.underlineColor = target.underlineColor; captured = true; } catch (eUnderlineColor) {}
-        try { state.underlineTint = target.underlineTint; captured = true; } catch (eUnderlineTint) {}
-        try { state.strikeThru = target.strikeThru; captured = true; } catch (eStrike) {}
-        try { state.strikeThroughColor = target.strikeThroughColor; captured = true; } catch (eStrikeColor) {}
-        try { state.strikeThroughTint = target.strikeThroughTint; captured = true; } catch (eStrikeTint) {}
-        return captured ? state : null;
-    }
-
     for (var i = 0; i < allItems.length; i++) {
         try {
             var tf = allItems[i];
@@ -983,19 +967,6 @@ function snapshotEditableTextFramePaintState(allItems, editableFrameIds) {
                 entry.frameOpacity =
                         tf.transparencySettings.blendingSettings.opacity;
             } catch (eFrameOpacity) {}
-            try {
-                if (tf.texts && tf.texts.length > 0) {
-                    var textState = snapshotTarget(tf.texts[0]);
-                    if (textState) entry.targets.push(textState);
-                }
-            } catch (eTextTarget) {}
-            try {
-                var ranges = tf.textStyleRanges.everyItem().getElements();
-                for (var ri = 0; ri < ranges.length; ri++) {
-                    var rangeState = snapshotTarget(ranges[ri]);
-                    if (rangeState) entry.targets.push(rangeState);
-                }
-            } catch (eRanges) {}
 
             snapshots.push(entry);
         } catch (eSnapshot) {}
@@ -1003,9 +974,12 @@ function snapshotEditableTextFramePaintState(allItems, editableFrameIds) {
     return snapshots;
 }
 
-// SPEC-086: 최종 안전망 복원은 대부분의 값이 이미 원상태다(각 렌더 패스가 자체 복원).
-// 텍스트 속성 쓰기는 재조판 무효화를 유발해 읽기보다 훨씬 비싸므로, 현재 값과 다를
-// 때만 되쓴다 (u1/u2 기준 09d4→09d5 구간이 프레임 수에 비례해 17~30초).
+// SPEC-086: 각 렌더 패스는 자신이 바꾼 text paint target을 같은 패스의 finally에서
+// 복원한다. 이 장기 snapshot은 패스 밖에서 바뀔 수 있는 frame-level state만 지키는
+// 최종 안전망이다. 모든 textStyleRange의 10개 paint 속성을 다시 읽는 것은 resolved
+// 수집 직전에 InDesign 재조판을 유발하며, u2에서 복원만 93초가 걸렸다.
+// target 단위 복원을 여기에 다시 추가하지 말고, paint를 바꾸는 렌더 패스의 saved
+// state/restore 쌍에 포함한다.
 function _restorePaintPropIfChanged(target, prop, value) {
     if (value === undefined) return;
     try {

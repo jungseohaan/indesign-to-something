@@ -84,3 +84,27 @@ readItems ~86초 절감 가능 (전체의 ~9%).
 잔여 후보: (a) 숨김을 range별 fillColor 대신 frame 단위 contentOpacity 로
 통일하면 복원이 프레임당 1쓰기 — 렌더 정확성 검증 필요, (b) 추출 간 소스 정보
 재사용(readItems ~86초), (c) 계획 단계 313초.
+
+## 2단원 후속 최적화 실측 (2026-07-29, extract-v65)
+
+수학 u2 48p(5,808 source items, TextFrame 1,104개)에서 네 후보를 조사했다.
+
+1. 장기 paint snapshot은 각 렌더 패스가 자체 복원하는 textStyleRange paint를
+   다시 저장하지 않고 frame-level visible/contentOpacity/frameOpacity만 안전망으로
+   유지했다. `04b_collectEditableFrameIds` 36.3초→0.9~5.1초,
+   `09d4→09d5` 93.3초→0.3~0.5초. 48쪽·수식 1,159·이미지 1,052·경고 0인
+   cold 산출물 요약이 기준과 동일했다.
+2. post-subsumed ObjectPlan sync에서 곧바로 다시 수행되는 recursive source coverage
+   계산을 생략하고 최종 execution candidate coverage build 한 곳에서 수행한다.
+   sync 20.5초→7.9~9.6초. slot/text/placement invariant 검증은 유지한다.
+3. `collectTextFrames`가 Java에서 읽지 않는 frame-local
+   `paragraphStyles`/`characterStyles` 진단을 만들기 위해 매 frame마다
+   `parentStory.textStyleRanges`를 재물질화하던 경로를 제거했다. canonical 스타일
+   입력은 IDML과 resolved top-level style definitions이다. 단, 전체 resolved DOM
+   시간은 InDesign 재조판 상태에 따라 편차가 커 별도 단독 A/B가 더 필요하다.
+4. sourceInfo 영속 캐시는 **채택하지 않음**. 같은 INDD를 다시 열어도 일부
+   master/derived DOM item id가 바뀐다(실측 예: 425313→425315,
+   426415→426414). source id keyed cache는 5,716 hit를 내면서도 rendered
+   source 850→849, ownership warning 71→72를 만들었다. 문서 path/size/mtime와
+   extractor version만으로는 안전하지 않다. IDML의 안정 source identity와
+   재생성 DOM instance를 연결하는 모델 없이는 cross-extraction cache를 금지한다.
