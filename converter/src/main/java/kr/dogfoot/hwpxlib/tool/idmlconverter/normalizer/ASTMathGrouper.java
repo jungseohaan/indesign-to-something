@@ -486,8 +486,17 @@ public class ASTMathGrouper {
                 if (text != null && !text.isEmpty()) {
                     ASTTextRun textRun = new ASTTextRun();
                     textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
+                    textRun.fontFamily(run.fontFamily());
                     if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
                     if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
+                    textRun.characterStyleRef(run.appliedCharacterStyle());
+                    textRun.grepMathFont(run.grepMathFont());
+                    if (run.tracking() != null) {
+                        textRun.letterSpacing((short) run.tracking().intValue());
+                    }
+                    if (run.horizontalScale() != null) {
+                        textRun.horizontalScale((short) run.horizontalScale().intValue());
+                    }
                     para.addItem(textRun);
                 }
             }

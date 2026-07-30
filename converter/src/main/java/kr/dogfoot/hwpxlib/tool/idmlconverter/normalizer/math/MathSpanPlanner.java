@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.formula.FormulaClassifier;
 
 import java.util.List;
 import java.util.Locale;
@@ -18,6 +19,8 @@ import java.util.Locale;
 public final class MathSpanPlanner {
     public static final String REASON_SINGLE_LATIN_SOURCE_MATH_TYPOGRAPHY =
             "single-latin-source-math-typography";
+    public static final String REASON_ALGEBRA_SOURCE_MATH_TYPOGRAPHY =
+            "algebra-source-math-typography";
 
     private MathSpanPlanner() {
     }
@@ -31,13 +34,60 @@ public final class MathSpanPlanner {
             ASTInlineItem item = items.get(i);
             if (!(item instanceof ASTTextRun)) continue;
             ASTTextRun run = (ASTTextRun) item;
-            if (isSingleLatinSourceMathRun(run)
+            if (isAlgebraSourceMathRun(run)) {
+                plan.add(i, MathSpanPlan.Classification.MATH,
+                        REASON_ALGEBRA_SOURCE_MATH_TYPOGRAPHY);
+            } else if (isPlainGrepMathToken(run)) {
+                plan.add(i, MathSpanPlan.Classification.MATH,
+                        REASON_SINGLE_LATIN_SOURCE_MATH_TYPOGRAPHY);
+            } else if (isSingleLatinSourceMathRun(run)
                     && !isUnitLetterAfterNumber(items, i, run)) {
                 plan.add(i, MathSpanPlan.Classification.MATH,
                         REASON_SINGLE_LATIN_SOURCE_MATH_TYPOGRAPHY);
             }
         }
         return plan;
+    }
+
+    private static boolean isPlainGrepMathToken(ASTTextRun run) {
+        return run != null
+                && run.grepMathFont()
+                && run.text() != null
+                && run.text().matches("[A-Za-z0-9]+");
+    }
+
+    /**
+     * GREP 해석 뒤 하나의 NP/EH/BT 런으로 합쳐진 대수식도 source typography를
+     * 수식 증거로 삼는다. 문자열 모양만으로는 승격하지 않는다.
+     */
+    private static boolean isAlgebraSourceMathRun(ASTTextRun run) {
+        if (run == null || run.text() == null) return false;
+        String text = run.text();
+        boolean hasVariable = false;
+        boolean hasEquals = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                hasVariable = true;
+            } else if (c == '=') {
+                hasEquals = true;
+            } else if (Character.isDigit(c) || Character.isWhitespace(c)
+                    || c == '+' || c == '-') {
+                continue;
+            } else {
+                return false;
+            }
+        }
+        if (!hasVariable || !hasEquals
+                || !FormulaClassifier.containsEquationSyntax(text)) {
+            return false;
+        }
+        String fontFamily = run.fontFamily();
+        return run.grepMathFont()
+                || (fontFamily != null
+                && (EHFontGlyphMap.isEHFontFamily(fontFamily)
+                || BTFontGlyphMap.isBTFontFamily(fontFamily)
+                || NPFontGlyphMap.isNPFont(fontFamily)));
     }
 
     // SPEC-084: 고립 단일 라틴 강등(planConvertedItems)은 폐기됐다. 강등이 보호하던
@@ -74,7 +124,8 @@ public final class MathSpanPlanner {
         // BT/EH/NP 전용 폰트 런은 ASTMathGrouper가 인접 run과 함께 구조를 해석한다.
         // 여기서 단일 항목으로 선점하면 반응식/분수/근호 클러스터가 조각난다.
         String fontFamily = run.fontFamily();
-        if (fontFamily != null && (EHFontGlyphMap.isEHFontFamily(fontFamily)
+        if (!run.grepMathFont()
+                && fontFamily != null && (EHFontGlyphMap.isEHFontFamily(fontFamily)
                 || BTFontGlyphMap.isBTFontFamily(fontFamily)
                 || NPFontGlyphMap.isNPFont(fontFamily))) {
             return false;

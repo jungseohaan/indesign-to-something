@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -30,5 +31,21 @@ public class ASTPageProcessorTest {
 
         Assert.assertEquals(2, paragraphs.size());
         Assert.assertSame(table, paragraphs.get(1).inlineTable());
+    }
+
+    @Test
+    public void teacherExplanationFrameIsDeferredAfterBody() {
+        IDMLTextFrame frame = new IDMLTextFrame();
+        frame.appliedObjectStyle("ObjectStyle/@교사용해설프레임");
+
+        Assert.assertTrue(ASTPageProcessor.shouldDeferInlineFrame(frame));
+    }
+
+    @Test
+    public void ordinaryInlineFrameKeepsSourceAnchorOrder() {
+        IDMLTextFrame frame = new IDMLTextFrame();
+        frame.appliedObjectStyle("ObjectStyle/@답박스");
+
+        Assert.assertFalse(ASTPageProcessor.shouldDeferInlineFrame(frame));
     }
 }

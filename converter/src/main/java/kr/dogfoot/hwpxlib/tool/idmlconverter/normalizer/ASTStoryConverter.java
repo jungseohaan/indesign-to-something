@@ -203,7 +203,11 @@ public class ASTStoryConverter {
                 boolean singleLatinVar = ct != null && ct.trim().length() == 1
                         && Character.isLetter(ct.trim().charAt(0));
                 String ff = run.fontFamily();
-                if (!singleLatinVar && ff != null && !ff.contains("BT수식")) {
+                boolean sourceMathFont = ff != null
+                        && (ff.contains("BT수식")
+                        || EHFontGlyphMap.isEHFontFamily(ff)
+                        || NPFontGlyphMap.isNPFont(ff));
+                if (!singleLatinVar && ff != null && !sourceMathFont) {
                     run.grepMathFont(false);
                 }
             }

@@ -92,6 +92,79 @@ public class MathProcessorTest {
     }
 
     @Test
+    public void grepStyledAlgebraFragmentsBecomeOneEquation() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(text("2", "Yoon Gothic"));
+        ASTTextRun grepMath = text("x+y=", "NP_IE");
+        grepMath.grepMathFont(true);
+        grepMath.textColor("#00A0DF");
+        grepMath.fontSizeHwpunits(1050);
+        para.addItem(grepMath);
+        para.addItem(text("9", "Yoon Gothic"));
+        para.addItem(text("를 만족시키는 경우의 수", "Yoon Gothic"));
+
+        MathProcessor.convertMathRunsInParagraph(null, para);
+
+        Assert.assertEquals(2, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        ASTEquation equation = (ASTEquation) para.items().get(0);
+        Assert.assertEquals("2x+y=9", equation.hwpScript());
+        Assert.assertEquals("#00A0DF", equation.textColor());
+        Assert.assertEquals(Integer.valueOf(1050), equation.preferredBaseUnit());
+        Assert.assertEquals("를 만족시키는 경우의 수",
+                ((ASTTextRun) para.items().get(1)).text());
+    }
+
+    @Test
+    public void grepStyledAlgebraAlreadyMergedIntoOneRunBecomesEquation() {
+        ASTParagraph para = new ASTParagraph();
+        ASTTextRun grepMath = text("2x+y=9", "NP_IE");
+        grepMath.textColor("#00A0DF");
+        grepMath.fontSizeHwpunits(1050);
+        para.addItem(grepMath);
+        para.addItem(text("를 만족시키는 경우의 수", "Yoon Gothic"));
+
+        MathProcessor.convertMathRunsInParagraph(null, para);
+
+        Assert.assertEquals(2, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTEquation);
+        ASTEquation equation = (ASTEquation) para.items().get(0);
+        Assert.assertEquals("2x+y=9", equation.hwpScript());
+        Assert.assertEquals("#00A0DF", equation.textColor());
+        Assert.assertEquals(Integer.valueOf(1050), equation.preferredBaseUnit());
+    }
+
+    @Test
+    public void algebraLikeTextWithoutSourceMathEvidenceRemainsText() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(text("Model", "Helvetica"));
+        para.addItem(text("X=9", "Helvetica"));
+
+        MathProcessor.convertMathRunsInParagraph(null, para);
+
+        Assert.assertEquals(2, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTTextRun);
+        Assert.assertTrue(para.items().get(1) instanceof ASTTextRun);
+    }
+
+    @Test
+    public void precedingLatinProseIsNotAbsorbedIntoGrepEquation() {
+        ASTParagraph para = new ASTParagraph();
+        para.addItem(text("Model", "Helvetica"));
+        ASTTextRun grepMath = text("x=9", "NP_IE");
+        grepMath.grepMathFont(true);
+        para.addItem(grepMath);
+
+        MathProcessor.convertMathRunsInParagraph(null, para);
+
+        Assert.assertEquals(2, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTTextRun);
+        Assert.assertEquals("Model", ((ASTTextRun) para.items().get(0)).text());
+        Assert.assertTrue(para.items().get(1) instanceof ASTEquation);
+        Assert.assertEquals("x=9", ((ASTEquation) para.items().get(1)).hwpScript());
+    }
+
+    @Test
     public void inlineFractionEquationIsNotCollapsedWithBodyGlyphFormulaRuns() {
         ASTParagraph para = new ASTParagraph();
         para.addItem(text("상대 습도(", "Sandoll 고딕NeoRound"));

@@ -47,6 +47,8 @@ class MathProcessor {
         materializeItemReplacementPlans(
                 items, planEmbeddedSourceLineBreaks(items));
         MathPipeline.materializeSourceSpans(para);
+        materializeFormulaRangePlans(
+                items, planGrepAlgebraEquationRanges(items));
 
         // 화학식은 문자속성 첨자 텍스트가 아니라 ASTEquation("CHEM_FORMULA")으로
         // 변환한다. 원본 run의 font size/color는 collectFormulaEquationCluster 에서
@@ -504,7 +506,7 @@ class MathProcessor {
 
     static List<EquationStitchPlan> planGrepSplitFormulaEquations(List<ASTInlineItem> items) {
         List<EquationStitchPlan> plans = new ArrayList<>();
-        if (items == null || items.size() < 2) return plans;
+        if (items == null || items.isEmpty()) return plans;
         int i = 0;
         while (i < items.size()) {
             ASTInlineItem item = items.get(i);
@@ -1807,6 +1809,116 @@ class MathProcessor {
             this.equation = equation;
             this.reason = reason;
         }
+    }
+
+    /**
+     * Paragraph GREP styles commonly split one algebra equation into alternating runs:
+     * plain digits and NP/EH-styled variables/operators.  Plan those source-authored spans
+     * as one equation before the font-specific grouper can flush each fragment separately.
+     *
+     * <p>The gate deliberately requires source GREP/math-font evidence, an equals sign, and
+     * at least one latin variable.  Content alone is not enough, so ordinary prose, scores,
+     * dates, and identifiers remain editable text.</p>
+     */
+    static List<FormulaRangePlan> planGrepAlgebraEquationRanges(
+            List<ASTInlineItem> items) {
+        List<FormulaRangePlan> plans = new ArrayList<>();
+        if (items == null || items.size() < 2) return plans;
+
+        int start = 0;
+        while (start < items.size()) {
+            if (!(items.get(start) instanceof ASTTextRun)
+                    || !isGrepAlgebraFragment((ASTTextRun) items.get(start))) {
+                start++;
+                continue;
+            }
+            ASTTextRun firstRun = (ASTTextRun) items.get(start);
+            if (!isFormulaFontEvidence(firstRun)
+                    && hasLongLatinWord(firstRun.text(), 3)) {
+                start++;
+                continue;
+            }
+
+            StringBuilder script = new StringBuilder();
+            boolean hasFormulaEvidence = false;
+            boolean hasVariable = false;
+            boolean hasEquals = false;
+            String evidenceColor = null;
+            Integer preferredBaseUnit = null;
+            String preferredFontFamily = null;
+            int end = start;
+
+            while (end < items.size() && items.get(end) instanceof ASTTextRun) {
+                ASTTextRun run = (ASTTextRun) items.get(end);
+                if (!isGrepAlgebraFragment(run)) break;
+                String text = run.text();
+                script.append(text);
+                hasVariable |= containsAsciiLetter(text);
+                hasEquals |= text.indexOf('=') >= 0;
+                if (isFormulaFontEvidence(run)) {
+                    hasFormulaEvidence = true;
+                    if (evidenceColor == null) evidenceColor = run.textColor();
+                    if (preferredBaseUnit == null
+                            && run.fontSizeHwpunits() != null
+                            && run.fontSizeHwpunits() > 0) {
+                        preferredBaseUnit = run.fontSizeHwpunits();
+                    }
+                    if (preferredFontFamily == null
+                            && run.fontFamily() != null
+                            && !run.fontFamily().isEmpty()) {
+                        preferredFontFamily = run.fontFamily();
+                    }
+                }
+                end++;
+            }
+
+            String hwpScript = normalizeFormulaScript(script.toString());
+            if (hasFormulaEvidence
+                    && hasVariable
+                    && hasEquals
+                    && FormulaClassifier.containsEquationSyntax(hwpScript)) {
+                ASTEquation equation = new ASTEquation(hwpScript, "EH_FONT");
+                if (evidenceColor != null) equation.textColor(evidenceColor);
+                if (preferredBaseUnit != null) equation.preferredBaseUnit(preferredBaseUnit);
+                if (preferredFontFamily != null) {
+                    equation.preferredFontFamily(preferredFontFamily);
+                }
+                plans.add(new FormulaRangePlan(
+                        start,
+                        end,
+                        equation,
+                        "grep-algebra-equation-cluster"));
+                start = end;
+            } else {
+                start++;
+            }
+        }
+        return plans;
+    }
+
+    private static boolean isGrepAlgebraFragment(ASTTextRun run) {
+        if (run == null) return false;
+        String text = run.text();
+        if (text == null || text.isEmpty() || isFormulaBoundaryText(text)) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (isFormulaSpace(c)
+                    || isAsciiLetter(c)
+                    || Character.isDigit(c)
+                    || c == '+' || c == '-' || c == '=') {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean containsAsciiLetter(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            if (isAsciiLetter(text.charAt(i))) return true;
+        }
+        return false;
     }
 
     /**

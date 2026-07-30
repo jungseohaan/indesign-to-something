@@ -178,6 +178,26 @@ public class ASTMathGrouperTest {
         Assert.assertFalse(preEH("1/2/3", "Û`"));
     }
 
+    @Test
+    public void npFallbackPreservesSourceMathEvidence() {
+        ASTParagraph para = new ASTParagraph();
+        IDMLCharacterRun source = run(
+                "A", "NP_BE", "CharacterStyle/np서체%3aNP_BE");
+        source.grepMathFont(true);
+        source.tracking(-25.0);
+        source.horizontalScale(98.0);
+
+        ASTMathGrouper.flushNPMathGroup(Arrays.asList(source), para);
+
+        Assert.assertEquals(1, para.items().size());
+        Assert.assertTrue(para.items().get(0) instanceof ASTTextRun);
+        ASTTextRun fallback = (ASTTextRun) para.items().get(0);
+        Assert.assertEquals("NP_BE", fallback.fontFamily());
+        Assert.assertEquals("CharacterStyle/np서체%3aNP_BE",
+                fallback.characterStyleRef());
+        Assert.assertTrue(fallback.grepMathFont());
+    }
+
     private static boolean preEH(String base, String exponent) {
         List<IDMLCharacterRun> runs = Arrays.asList(
                 run(base, null, "CharacterStyle/$ID/[No character style]"),
