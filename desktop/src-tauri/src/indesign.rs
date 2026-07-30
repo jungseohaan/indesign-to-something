@@ -109,7 +109,7 @@ pub fn find_indesign_app() -> Result<String, String> {
 /// InDesign 앱 경로에서 앱 이름을 추출한다.
 /// macOS: ".../Adobe InDesign 2025.app" → "Adobe InDesign 2025"
 /// Windows: "...Adobe InDesign 2025\InDesign.exe" → 부모 디렉토리명에서 추출
-fn app_name_from_path(app_path: &str) -> String {
+pub(crate) fn app_name_from_path(app_path: &str) -> String {
     let p = Path::new(app_path);
     // Windows: 실행파일 이름이 "InDesign.exe"이면 부모 폴더 이름을 사용
     if p.file_name().map(|n| n == "InDesign.exe").unwrap_or(false) {
@@ -354,6 +354,120 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
             }
         }
     }
+}
+
+/// Start a real extraction from a fresh InDesign process.
+///
+/// Full-document extraction leaves expensive composition/export state in the
+/// InDesign process even after the source document is closed. A second unit in
+/// the same process can become several times slower and eventually fail with
+/// Apple Event -609. Never terminate an interactive session with open
+/// documents: the extractor must not decide whether user work can be discarded.
+pub async fn restart_indesign_before_extraction(
+    app_name: &str,
+    output_dir: &Path,
+) -> Result<(), String> {
+    // Dev hot-reload can terminate the Tauri process while its osascript child
+    // keeps driving InDesign. Do not send a safety probe into that active Apple
+    // Event transaction: it queues behind the extractor and can block for minutes.
+    let active_extractor = tokio::process::Command::new("pgrep")
+        .args(["-f", "osascript .*/indd-extract-.*/_extract\\.applescript"])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if active_extractor {
+        return Err(
+            "이전 InDesign 추출 스크립트가 아직 실행 중입니다. 이전 추출이 끝난 뒤 다시 시도하세요."
+                .to_string(),
+        );
+    }
+
+    let running = tokio::process::Command::new("pgrep")
+        .args(["-x", app_name])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !running {
+        ensure_indesign_running(app_name, output_dir).await;
+        return Ok(());
+    }
+
+    let safety_probe = format!(
+        "using terms from application \"{n}\"\n\
+         tell application \"{n}\"\n\
+             set _openCount to count of documents\n\
+             return _openCount\n\
+         end tell\n\
+         end using terms from",
+        n = app_name
+    );
+    let safety_probe_file = output_dir.join("_restart_safety_probe.applescript");
+    std::fs::write(&safety_probe_file, safety_probe)
+        .map_err(|e| format!("InDesign 재시작 안전 확인 스크립트 생성 실패: {}", e))?;
+    let mut probe_child = tokio::process::Command::new("osascript");
+    probe_child.arg(&safety_probe_file).kill_on_drop(true);
+    let probe_output = tokio::time::timeout(
+        Duration::from_secs(10),
+        probe_child.output(),
+    )
+    .await
+    .map_err(|_| {
+        "InDesign이 10초 안에 응답하지 않았습니다. 진행 중인 추출이나 대화상자를 확인하세요."
+            .to_string()
+    })?
+    .map_err(|e| format!("InDesign 열린 문서 확인 실패: {}", e))?;
+    if !probe_output.status.success() {
+        return Err(format!(
+            "InDesign 재시작 전 열린 문서를 확인할 수 없습니다: {}",
+            String::from_utf8_lossy(&probe_output.stderr).trim()
+        ));
+    }
+    let open_count = String::from_utf8_lossy(&probe_output.stdout)
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| "InDesign 열린 문서 수 응답을 해석할 수 없습니다.".to_string())?;
+    if open_count > 0 {
+        return Err(format!(
+            "InDesign에 열린 문서가 {}개 있어 자동 재시작하지 않았습니다. 문서를 저장하고 닫은 뒤 다시 시도하세요.",
+            open_count
+        ));
+    }
+
+    let quit_script = format!("tell application \"{}\" to quit", app_name);
+    let quit_file = output_dir.join("_restart_quit.applescript");
+    std::fs::write(&quit_file, quit_script)
+        .map_err(|e| format!("InDesign 종료 스크립트 생성 실패: {}", e))?;
+    let quit_output = tokio::process::Command::new("osascript")
+        .arg(&quit_file)
+        .output()
+        .await
+        .map_err(|e| format!("InDesign 정상 종료 요청 실패: {}", e))?;
+    if !quit_output.status.success() {
+        return Err(format!(
+            "InDesign 정상 종료 요청이 실패했습니다: {}",
+            String::from_utf8_lossy(&quit_output.stderr).trim()
+        ));
+    }
+
+    for _ in 0..30u8 {
+        let still_running = tokio::process::Command::new("pgrep")
+            .args(["-x", app_name])
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !still_running {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            ensure_indesign_running(app_name, output_dir).await;
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    Err("InDesign이 30초 안에 정상 종료되지 않아 추출을 중단했습니다. 강제 종료는 수행하지 않았습니다.".to_string())
 }
 
 fn is_recoverable_osascript_connection_error(stderr: &str) -> bool {
@@ -1082,6 +1196,12 @@ pub async fn run_extraction(
                 break;
             }
         }
+    }
+    if !done_path.exists() {
+        return Err(format!(
+            "InDesign 추출이 완료 신호 없이 종료되었습니다.{}",
+            indesign_failure_context(output_dir, &progress_path)
+        ));
     }
     if done_path.exists() {
         loop {

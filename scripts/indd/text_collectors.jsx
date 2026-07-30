@@ -1864,33 +1864,12 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
             try { fData.onHiddenLayer = isOnHiddenLayer(tf); } catch (e) { fData.onHiddenLayer = false; }
             try { fData.visible = (tf.visible !== false); } catch (e) { fData.visible = true; }
             try { fData.hiddenByParent = isHiddenByVisibility(tf); } catch (e) { fData.hiddenByParent = false; }
-            try {
-                var charStyles = [];
-                var paraStyles = [];
-                var seenCs = {}, seenPs = {};
-                // frameParas는 위에서 이미 로드됨 → story 단락 재로드 불필요
-                var parasSrc = (typeof frameParas !== "undefined" && frameParas) ? frameParas : [];
-                for (var psi = 0; psi < parasSrc.length && psi < 20; psi++) {
-                    try {
-                        var ps = parasSrc[psi].appliedParagraphStyle;
-                        if (ps && ps.name && !seenPs[ps.name]) { seenPs[ps.name] = true; paraStyles.push(ps.name); }
-                    } catch (e1) {}
-                }
-                // characters 전체 로드(O(문자수)) 대신 textStyleRanges(O(스타일범위수))로 대체
-                var firstStory = tf.parentStory;
-                if (firstStory) {
-                    var tsrs = firstStory.textStyleRanges.everyItem().getElements();
-                    var sampled = Math.min(tsrs.length, 30);
-                    for (var csi = 0; csi < sampled; csi++) {
-                        try {
-                            var cs = tsrs[csi].appliedCharacterStyle;
-                            if (cs && cs.name && !seenCs[cs.name]) { seenCs[cs.name] = true; charStyles.push(cs.name); }
-                        } catch (e1) {}
-                    }
-                }
-                fData.paragraphStyles = paraStyles;
-                fData.characterStyles = charStyles;
-            } catch (e) {}
+            // Frame-local paragraphStyles/characterStyles 진단 배열은 Java
+            // ResolvedDataReader가 소비하지 않는다. 특히 각 TextFrame마다
+            // parentStory.textStyleRanges를 다시 materialize하면 같은 story
+            // DOM을 반복 순회한다. 스타일의 canonical 입력은 IDML 및
+            // resolved top-level style definitions이므로 이 미사용 수집을
+            // normal path에서 만들지 않는다.
 
             // NEW: page-relative bounds (페이지 bounds 차감)
             // parentPage is often null for TextFrames nested in Groups. Resolve

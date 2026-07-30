@@ -1585,7 +1585,10 @@ public class ASTPageProcessor {
      */
     static boolean shouldDeferInlineFrame(IDMLTextFrame inlineTf) {
         String style = inlineTf.appliedObjectStyle();
-        if (style != null && style.contains("교사용프레임")) {
+        // 교사용 해설/정답 프레임은 source anchor가 문단 앞에 있더라도 조판상
+        // 본문 뒤에 놓이는 보조 콘텐츠다. 중간 역할어(해설/정답 등)가 들어간
+        // object style도 같은 source metadata 정책으로 처리한다.
+        if (style != null && style.contains("교사용") && style.contains("프레임")) {
             return true;
         }
         return false;

@@ -138,6 +138,22 @@ pub async fn extract_indd(
     let result = if let Some(r) = partial_result {
         r
     } else {
+        let indesign_app_name = crate::indesign::app_name_from_path(&indesign_app_path);
+        crate::indesign::emit_progress_pub(
+            &app,
+            "launching",
+            "본 추출을 위해 InDesign을 재시작하는 중...",
+        );
+        crate::indesign::restart_indesign_before_extraction(
+            &indesign_app_name,
+            &output_dir,
+        )
+        .await
+        .map_err(|e| {
+            let _ = std::fs::remove_dir_all(&output_dir);
+            e
+        })?;
+
         // 분할 추출 모드: chunk_size > 0 이고 debug page range 없으면 legacy 청크 추출.
         // spread_chunks는 JSX 내부에서 같은 InDesign 세션으로 chunk-local Stage 0~4를 실행한다.
         let cs = chunk_size.unwrap_or(0);
@@ -388,6 +404,19 @@ async fn try_partial_extraction(
     let skip_json = serde_json::to_string(&unchanged).ok()?;
 
     // 6. 변경된 페이지만 포함한 부분 추출 실행
+    let indesign_app_name = crate::indesign::app_name_from_path(indesign_app_path);
+    crate::indesign::emit_progress_pub(
+        app,
+        "launching",
+        "부분 본 추출을 위해 InDesign을 재시작하는 중...",
+    );
+    if let Err(e) =
+        crate::indesign::restart_indesign_before_extraction(&indesign_app_name, output_dir).await
+    {
+        eprintln!("[B.2] 부분 본 추출 전 InDesign 재시작 실패: {}", e);
+        return None;
+    }
+
     let result = crate::indesign::run_extraction_with_skip(
         app,
         indd_path,

@@ -2,6 +2,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.idml;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 
 import org.w3c.dom.*;
@@ -1778,7 +1779,9 @@ public class IDMLStoryParser {
         if (charStyle == null) return false;
         String font = charStyle.fontFamily();
         if (font == null) return false;
-        return BTFontGlyphMap.isBTFontFamily(font) || EHFontGlyphMap.isEHFontFamily(font);
+        return BTFontGlyphMap.isBTFontFamily(font)
+                || EHFontGlyphMap.isEHFontFamily(font)
+                || NPFontGlyphMap.isNPFont(font);
     }
 
     /**

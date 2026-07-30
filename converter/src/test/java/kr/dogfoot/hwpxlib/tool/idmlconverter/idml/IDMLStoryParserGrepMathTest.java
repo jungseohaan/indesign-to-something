@@ -53,6 +53,26 @@ public class IDMLStoryParserGrepMathTest {
         Assert.assertFalse(para.characterRuns().get(0).grepMathFont());
     }
 
+    @Test
+    public void preservesNpGrepMathEvidenceForDigitsAndVariables() {
+        IDMLDocument doc = new IDMLDocument();
+        doc.putCharacterStyle("CharacterStyle/np-ie",
+                charStyle("CharacterStyle/np-ie", "NP_IE"));
+        doc.putParagraphStyle("ParagraphStyle/math", paraStyle("ParagraphStyle/math",
+                "CharacterStyle/np-ie", "[\\d\\l\\u]"));
+
+        IDMLStory story = new IDMLStory();
+        story.addParagraph(paragraph("ParagraphStyle/math", "2x, P와 Q"));
+        doc.putStory("story", story);
+
+        IDMLStoryParser.resolveGrepMathStyles(doc);
+
+        IDMLParagraph para = story.paragraphs().get(0);
+        Assert.assertTrue(para.characterRuns().stream()
+                .filter(run -> run.content().matches(".*[0-9A-Za-z].*"))
+                .allMatch(IDMLCharacterRun::grepMathFont));
+    }
+
     private static IDMLStyleDef charStyle(String selfRef, String fontFamily) {
         IDMLStyleDef style = new IDMLStyleDef();
         style.selfRef(selfRef);

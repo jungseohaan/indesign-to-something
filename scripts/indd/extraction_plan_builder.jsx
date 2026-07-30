@@ -10025,7 +10025,11 @@ function _buildExtractionPlan(doc, ctx, allItems) {
                 _syncObjectPlanDiagnosticsToExecutionCandidates(
                         objectPlanDiagnostics, executionCandidates, {
                             sourceItems: sourceItems,
-                            reason: "post_object_plan_subsumed_execution_suppression"
+                            reason: "post_object_plan_subsumed_execution_suppression",
+                            // The final source coverage graph is built below from
+                            // these same execution candidates. Do not build the
+                            // recursive graph twice during this bridge sync.
+                            skipSourceCoverage: true
                         });
         _marker(ctx.outputDir, "03d16g0a1_plan_syncObjectPlansAfterSubsumed");
         if (ctx.writePlannerDiagnostics === true) {
